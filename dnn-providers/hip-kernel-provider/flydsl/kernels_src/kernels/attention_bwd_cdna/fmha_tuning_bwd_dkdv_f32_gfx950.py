@@ -6,16 +6,16 @@
 
 The fp32 twin of `fmha_tuning_bwd_dkdv_gfx950` (same exported names and signatures, `dtype_str="fp32"`), for the native-f32-MFMA family of
 `fmha_f32_common_gfx950`. What the 16-bit policy resolves from a measured table of `(num_waves, waves_per_eu, dkv_shards, mfma_rows, block_q)`
-this one resolves from `SCHEDULE_TABLE`, the final schedule table of `RP/parity/gaps/fp32/sp-n.md` (SP-N rule after the SA timing, 2026-10-23):
+this one resolves from `SCHEDULE_TABLE`, the schedule table below (per-wave vs D-split assigned by occupancy, then by the measured per-wave / D-split time ratio):
 
   - the **geometry** is the Spec pin `block_q` in {16, 32} (the (BLOCK_M, BLOCK_N) = (block_q, 16) tile of the family); unpinned it is 32;
   - the **schedule** of a (tile, geometry) is `per-wave` ('pw': a wave owns 16 KV rows x the full head dim) or `D-split` ('ds': the workgroup owns
     16 KV rows, wave w owns head-dim slice w and the S / dP partials are exchanged through LDS), the one the table assigns;
   - the **wave count** is that schedule's representative variant (highest occupancy, then fewest VGPR+AGPR, then 4 waves over 2).
 
-Neither the schedule nor the wave count is a Spec key (`parity/gaps/fp32/interfaces.md`); a Spec fixes the geometry and the table does the rest.
+Neither the schedule nor the wave count is a Spec key; a Spec fixes the geometry and the table does the rest.
 `mfma_rows` (16), `num_stream_buffers` (1), `dkv_shards` (1) and `head_dim_granule` (16 = one panel) have one legal value; `block_kv` is the KV rows
-of a workgroup (16 for a D-split, 16 x waves for per-wave) and `waves_per_eu` is 0 (no hint: SP-N's occupancy + 1 probes reached nothing higher).
+of a workgroup (16 for a D-split, 16 x waves for per-wave) and `waves_per_eu` is 0 (no hint: probes at occupancy + 1 reached nothing higher).
 
 This module records the policy; which (tile, schedule, feature) combinations the kernel computes is the kernel module's scope check
 (`fmha_bwd_dkdv_f32_gfx950`).
@@ -46,10 +46,10 @@ DEFAULT_BLOCK_Q = 32
 
 @dataclass(frozen=True)
 class ScheduleEntry:
-    """One (tile, geometry) row of the final schedule table of sp-n.md.
+    """One (tile, geometry) row of the schedule table.
 
-    `final`: the dK/dV schedule the SA rule assigns ('pw' | 'ds'); `pw_waves` / `ds_waves`: wave count of that schedule's representative variant
-    (None: no variant qualifies, t512 per-wave); `dq_waves`: the dQ representative (F.Q).
+    `final`: the dK/dV schedule the table assigns ('pw' | 'ds'); `pw_waves` / `ds_waves`: wave count of that schedule's representative variant
+    (None: no variant qualifies, t512 per-wave); `dq_waves`: the dQ representative.
     """
 
     tile: int
@@ -66,7 +66,7 @@ class ScheduleEntry:
 
     @property
     def rep(self):
-        """Name of the assigned dK/dV representative in sp-n.md: `t<tile>_<geometry>_<schedule>_w<waves>`."""
+        """Name of the assigned dK/dV representative: `t<tile>_<geometry>_<schedule>_w<waves>`."""
         return f"t{self.tile}_{self.block_q}x16_{self.final}_w{self.waves}"
 
 
@@ -76,14 +76,14 @@ def _row(tile, block_q, final, pw_waves, ds_waves, dq_waves):
     )
 
 
-# (tile, block_q) -> entry. Columns: final schedule, per-wave rep waves, D-split rep waves, dQ rep waves. Comment: SP-N occupancy rule | SA pw/ds geomean.
+# (tile, block_q) -> entry. Columns: final schedule, per-wave rep waves, D-split rep waves, dQ rep waves. Comment: the schedule the occupancy rule gives | the measured pw/ds geomean time ratio (above 1: D-split is faster, and the table assigns it).
 SCHEDULE_TABLE = dict(
     [
         _row(32, 32, "ds", 2, 2, 2),  # pw | 1.523
         _row(32, 16, "pw", 2, 4, 4),  # ds | 0.765
         _row(
             64, 32, "pw", 4, 4, 2
-        ),  # pw | 0.997 (inside the 3.04 % control floor: the SP-N assignment stands)
+        ),  # pw | 0.997 (inside the 3.04 % noise floor of the control: the occupancy rule's assignment stands)
         _row(64, 16, "pw", 4, 4, 4),  # ds | 0.913
         _row(96, 32, "ds", 2, 4, 4),  # pw | 1.097
         _row(96, 16, "pw", 4, 4, 4),  # ds | 0.763
@@ -145,7 +145,9 @@ class BwdDkDvKnobs:
     block_dmodel: int | None = None
     block_dmodel_v: int | None = None
     padded_head: bool | None = None
-    hdim_qk_floor: int | None = None
+    hdim_qk_floor: int | None = (
+        None  # the head-dim extent the build promises for both the QK and the VO side (a head dim above it; 0 = no promise)
+    )
 
     num_waves: int | None = None
     block_kv: int | None = None
@@ -224,11 +226,22 @@ class BwdDkDvKnobs:
         padded_head = self.padded_head
         if padded_head is None:
             padded_head = meta.head_dim != block_dmodel or head_dim_v != block_dmodel_v
+        # the floor of a pinned tile is 0 unless the Spec names one; the one floor covers the QK and the VO side, and a build promises both head dims above it
+        hdim_qk_floor = 0 if self.hdim_qk_floor is None else self.hdim_qk_floor
+        if not 0 <= hdim_qk_floor < block_dmodel:
+            raise ValueError(
+                f"hdim_qk_floor {hdim_qk_floor} must be in [0, block_dmodel={block_dmodel})"
+            )
+        if meta.head_dim <= hdim_qk_floor or head_dim_v <= hdim_qk_floor:
+            raise ValueError(
+                f"head_dim {meta.head_dim} / head_dim_v {head_dim_v} must lie above this build's hdim_qk_floor {hdim_qk_floor}"
+            )
         return replace(
             self,
             block_dmodel=block_dmodel,
             block_dmodel_v=block_dmodel_v,
             padded_head=bool(padded_head),
+            hdim_qk_floor=int(hdim_qk_floor),
         )
 
     def _with_schedule(self):

@@ -4,10 +4,10 @@
 
 """The dK/dV tile body at **16 KV rows per wave**, on `v_mfma_f32_16x16x32`.
 
-B3.5. A second family alongside the 32-row one in `fmha_bwd_dkdv_gfx950.py`,
-not a replacement: the tuning table picks per rung. A separate module for the
-reason `fmha_wide_gfx950.py` is one -- the operand algebra differs at a dozen
-sites, so an `if` at each would be a fork with extra steps. Everything that is
+A second family alongside the 32-row one in `fmha_bwd_dkdv_gfx950.py`,
+not a replacement: the tuning table picks per rung. A separate module because
+the operand algebra differs at a dozen sites, so an `if` at each would be a
+fork with extra steps. Everything that is
 not operand algebra stays shared: the context, the DMA staging, the
 descriptors, the ABI and the tuning.
 
@@ -15,7 +15,7 @@ descriptors, the ABI and the tuning.
 
 A dK/dV wave holds two accumulators and its resident K and V. At 32 rows that
 is `1.5 * d` VGPRs before a transient -- 768 at head_dim 512 against a file of
-512 -- so B3 bought the space with `DKV_SHARDS`, which divides `BLOCK_KV` and
+512 -- so the 32-row family buys the space with `DKV_SHARDS`, which divides `BLOCK_KV` and
 therefore multiplies the Q/dO re-read traffic *and* recomputes S and dP per
 shard. At 16 rows it is `0.75 * d`: 384 at head_dim 512, **unsharded**.
 
@@ -43,8 +43,9 @@ which is exactly those two factors. `16x16x32` keeps 16 rows at full rate, and
 it keeps the operand eight elements wide, so `_bf16_trunc_pack_v8` and the
 128-bit LDS reads survive unchanged.
 
-`tooling/probe_tr16_lanemap_gfx950.py` confirms the transpose read serves this
-shape's A operand end to end, at five head dims and both staging granules.
+The transpose read serves this shape's A operand end to end at both staging
+granules, provided a staged tile has at least four lines (`SMEM_N_RPT >= 4`),
+which `BwdDkDvKnobs` enforces and `init16` asserts.
 
 --- The one thing that does not line up, and the free fix -------------------
 
@@ -76,10 +77,9 @@ It also leaves a lane's four accumulator rows **contiguous** (`8*(lane//16) +
 - **The store needs no cross-lane shuffle.** A lane holds four *contiguous* d
   of one KV row -- one 8-byte store -- where the 32-row path assembles 128 bits
   through `permlane32_swap` first.
-- One staged tile per tensor, read two ways, as in the 32-row family. The probe
-  settled that the transpose serves a 16-row operand from the *same* bytes the
-  row-major read uses, so the addendum's four-LDS-tile contingency is not
-  needed.
+- One staged tile per tensor, read two ways, as in the 32-row family: the
+  transpose serves a 16-row operand from the *same* bytes the row-major read
+  uses, so no second LDS copy of the tile is needed.
 """
 
 from kernels.attention_bwd_cdna.fmha_common_gfx1201 import MaskedAxis
@@ -130,7 +130,8 @@ def pack_split(ctx, x):
     """`gqa_pack`: flat row `x` of the packed q axis -> `(head g, q row, valid)`.
 
     The packed axis lays the GQA group's heads end to end, `x = g * Sq + q`, and one tile walk covers it. `g = x // Sq` is a
-    multiply-high by `pack_magic = (2^31 - 1) // Sq + 1` (exact while `x * Sq < 2^31`, which every packable shape satisfies) so no
+    multiply-high by `pack_magic = (2^31 - 1) // Sq + 1`, exact only while `x * Sq < 2^31` for every row the walk addresses, pad included
+    (`check_launch_limits` in the tuning module refuses a launch beyond it), so no
     per-element divide is emitted. `valid` is `x < Sq * G`: rows past it are the tile's pad and every address built from them is
     redirected out of its descriptor, so they stage and read as zero exactly as a row past `seqlen_q` does in the unpacked path.
     """
@@ -205,6 +206,9 @@ class M16StreamReader(dualwave.DualwaveKernelContext):
         """Per-lane bases, computed once. All loop-invariant across q tiles."""
         traits = self.traits
         lane = self.lane
+        assert (
+            traits.SMEM_N_RPT >= 4
+        ), f"the 16-row transposed read addresses four staged lines per q group; SMEM_N_RPT is {traits.SMEM_N_RPT}"
         self.masked_steps = tuple(_masked_ks_steps(traits, hdim_floor))
         # Row-major, per score sub-block: the permuted q row (see the module
         # docstring), plus eight contiguous d at `8 * (lane // 16)`. `tok_off`
@@ -435,7 +439,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
     def probabilities(self, v_s, neg_lse2, bias2=None):
         """`P = exp2(qk_scale * S + bias*log2e - log2(e) * LSE)`.
 
-        Q is not pre-scaled; B2 measured that folding the scale into Q and
+        Q is not pre-scaled: folding the scale into Q and
         rounding to bf16 puts the error in the exponent, taking the error ratio
         from 1.29 at `sm_scale = 0.05` to 10.9 at 1.0.
 
@@ -452,7 +456,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         if const_expr(bias2 is not None):
             scaled = [_fadd(scaled[r], bias2[r], fm) for r in range_constexpr(ACC16)]
         # The `v_exp_f32` wait state. `exp2_wait_state` says why it is needed
-        # and why the `dualwave._s_nop(1)` that used to stand here did not
+        # and why `dualwave._s_nop(1)` would not
         # supply it -- the short version is that `s_nop` takes no operands, so
         # nothing stopped the scheduler from hoisting a `v_cvt_pk_bf16_f32`
         # above it and back into the slot right after an `exp2`.
@@ -499,7 +503,7 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
         map rather than on that one's: element `i` of score sub-block `sub`
         holds `q = tile_base + (sub//2)*32 + (sub%2)*4 + 8*(lane//16) + i`,
         which is the same expression `load_row_values` addresses with. One
-        table per family, no transcription -- B3.5's discipline, and masks are
+        table per family, no transcription -- and masks are
         exactly the code that tempts a second copy.
 
         The mask goes on `P`, so `dS = P * (dP - delta)` and `dV += P . dO`
@@ -508,8 +512,9 @@ class M16SoftmaxHelper(dualwave.DualwaveKernelContext):
 
         **No transpose read is inside this region** -- the q-contracted GEMMs
         run in their own loop after the softmax. CDNA4 section 11.4 requires
-        EXEC all 1s across `ds_read_b64_tr_b16`, and
-        `tooling/check_exec_hazard_gfx950.py` is what keeps that true.
+        EXEC all 1s across `ds_read_b64_tr_b16`; that holds by construction, as
+        no transpose read sits inside a divergent region, and nothing in this
+        tree scans the object for it.
         """
         traits = self.traits
         ctx = self.ctx_ref
@@ -695,7 +700,7 @@ class M16TileBody(dualwave.DualwaveKernelContext):
         hdim_qk,
         hdim_vo,
         keep_fn=None,
-        bias_fn=None
+        bias_fn=None,
     ):
         super().__init__(ctx)
         self.stream = stream
@@ -758,7 +763,7 @@ class M16TileBody(dualwave.DualwaveKernelContext):
                     self._reader_for(do_base, do_scope, sub, self.hdim_vo), v_v
                 )
                 neg_lse2 = self.load_neg_lse2(tile_base, sub)
-                # B7. Folded into the exponent, so it lands before `P` exists.
+                # Folded into the exponent, so it lands before `P` exists.
                 bias2 = None
                 if const_expr(traits.BIAS_TYPE):
                     bias2 = self.bias_fn(ctx, self.softmax.q_rows(tile_idx, sub))
@@ -766,7 +771,7 @@ class M16TileBody(dualwave.DualwaveKernelContext):
                 if const_expr(traits.CAUSAL):
                     p_list = self.softmax.mask_if_clipped(p_list, tile_idx, sub)
                 delta = self.load_delta(tile_idx, tile_base, sub, do_base, do_scope)
-                # After the row sum, before the accumulation (P6's ordering).
+                # After the row sum, before the accumulation (the ordering the 32-row family uses).
                 keep = None
                 if const_expr(traits.ENABLE_DROPOUT):
                     keep = self.keep_fn(ctx, self.softmax.q_rows(tile_idx, sub))

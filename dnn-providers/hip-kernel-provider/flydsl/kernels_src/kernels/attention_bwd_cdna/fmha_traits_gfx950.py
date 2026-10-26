@@ -14,15 +14,16 @@ exactly one. This is that constructor with them opened up.
 
 Every derivation here is a transcription of the production one, and
 `assert_matches_production` checks that claim the only way that means anything:
-by building both for a range of head_dims and comparing **every field**. That
-test is what makes this file safe to put on the live path -- family A goes
-through it today, so the existing bitwise-against-production test covers it.
+by building both for a range of head_dims and comparing **every field**. It
+is not called from within the tree; run it by hand after touching a derivation.
 
 **What that check cannot tell you** is whether a *parameterization* is right,
 only whether it reproduces family A. Several constants have more than one
-plausible formula that coincide at granule 64, and the ones below are flagged
-`UNVERIFIED`. They are the first suspects if a new family produces plausible
-but wrong numbers, and none of them is exercised until one is built.
+plausible formula that coincide at granule 64 (`K_LDS_TO_REG_N_STRIP_STRIDE`,
+the `V_LDS_TO_REG_*` offsets, the `*_PER_BAND` counts). They are the first
+suspects if a new family produces plausible but wrong numbers; each family
+that ships is built and measured, and a geometry no family builds has not
+been exercised.
 """
 
 from dataclasses import dataclass, fields
@@ -73,7 +74,9 @@ class ParityDualwaveTraits(dualwave.DualwaveSwpTraits):
     D_STAGES: int = 1
     QK_SHARDS: int = 1
     VO_SHARDS: int = 1
-    STAGE_DIM: int = 0  # head_dim // D_STAGES; 0 means "unset", fixed up below
+    STAGE_DIM: int = (
+        0  # head_dim // D_STAGES; `make_traits` always sets it, 0 only on a hand-built instance
+    )
     K_STEPS_PER_STAGE: int = 0
     D_CHUNKS_PER_STAGE: int = 0
     D_CHUNKS_PER_STAGE_SHARD: int = 0
@@ -212,6 +215,18 @@ def make_traits(
 
     block_size = num_waves * WARP_SIZE
     rows_per_wave = block_m // q_tiles
+    if block_n != 64 and rows_per_wave != 16:
+        # `K_LDS_TO_REG_N_STRIP_STRIDE` below is the constant 256, which is the
+        # layout offset of 32 tokens only at BLOCK_N 64. The 32-row bodies read
+        # it for the K lo/hi pair, so any other BLOCK_N would address the wrong
+        # K rows and return finite output with no error. The 16-row family
+        # (`rows_per_wave == 16`) builds at BLOCK_N 32 and does not read it: its
+        # LDS reads use `fmha_mfma16_gfx950`'s token addressing instead.
+        raise ValueError(
+            f"BLOCK_N {block_n} with {rows_per_wave} rows per wave: the 32-row K read assumes "
+            f"BLOCK_N 64 (K_LDS_TO_REG_N_STRIP_STRIDE is the constant 256). Use BLOCK_N 64, or the "
+            f"16-row family"
+        )
     if rows_per_wave > MFMA_M:
         # **The comment above is an invariant, and this enforces it.** A wave
         # holds at most the MFMA's M extent in rows, so `BLOCK_M` is really
@@ -316,6 +331,10 @@ def make_traits(
 
     # K LDS->VGPR. `n_strip_stride` is the offset from a lane's lo pack to its
     # hi pack: half a wave of lanes further on, each holding VEC_KV elements.
+    # That is 32 tokens on, which in the layout below is
+    # `(32 // SMEM_N_RPT) * granule` elements -- 256 at BLOCK_N 64 for both
+    # granules, and a different number at any other BLOCK_N. The constant is
+    # therefore valid only there, which `make_traits` enforces above.
     k_lds_to_reg_n_strip_stride = (WARP_SIZE // 2) * VEC_KV
     k_lds_to_reg_kstep_inner_stride = K_STEP_QK
     k_lds_to_reg_kstep_outer_stride = smem_n_rpt * smem_k_line_stride
@@ -484,9 +503,9 @@ def make_traits(
 def assert_matches_production(head_dims=(64, 128), **kwargs):
     """Every field must equal the production constructor's, at family A's geometry.
 
-    The only check that makes "this is a transcription" mean anything. Called
-    from the test suite across the built rungs and a spread of modes, because a
-    single head_dim would not catch a term that happens to vanish there.
+    The only check that makes "this is a transcription" mean anything. Run it
+    across the built rungs and a spread of modes, because a single head_dim
+    would not catch a term that happens to vanish there.
     """
     for head_dim in head_dims:
         mine = make_traits(

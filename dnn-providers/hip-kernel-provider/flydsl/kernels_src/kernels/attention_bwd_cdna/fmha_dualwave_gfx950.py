@@ -117,10 +117,11 @@ def traits_cache_key(traits):
     hand-picked subset of its own fields, so an axis it does not name is
     invisible to the cache: two builds differing only on one of them hash to
     the same entry, and the second silently receives the *first one's binary*.
-    At the vendored commit it omits 46 of the 93 fields, among them
+    It names 20 attributes; `ParityDualwaveTraits` has 94 fields, so 74 are
+    invisible to it, among them
 
-    - every axis AOTriton added -- `BIAS_TYPE` (P5), `ENABLE_DROPOUT` (P6),
-      `WINDOW` (P3), `LPT_TILE_ORDER` (P7);
+    - every axis AOTriton added -- `BIAS_TYPE`, `ENABLE_DROPOUT`, `WINDOW`,
+      `LPT_TILE_ORDER`;
     - `DUALWAVE_SWP_RESCALE_THRESHOLD`, and the `D_STAGES`/`QK_SHARDS`/
       `VO_SHARDS` splits.
 
@@ -136,16 +137,13 @@ def traits_cache_key(traits):
     -- and its comment describes exactly this failure ("two families of the
     same shape would collide in the JIT disk cache"). A subset is the wrong
     shape for the job, though: it has to be extended by hand every time an axis
-    is added, silently returns wrong binaries when someone forgets, and nothing
-    tests it. The traits are a frozen dataclass of hashable scalars that fully
+    is added, and silently returns wrong binaries when someone forgets. The traits are a frozen dataclass of hashable scalars that fully
     determine the build, so naming all of them cannot go stale.
 
     Only the *JIT* path is affected. The AOT build gives each functional its own
-    invocation and does not share this cache: every `BIAS_TYPE`,
-    `ENABLE_DROPOUT` and `CAUSAL_TYPE` pair in the shipped `flyc_attn_fwd.zip`
-    is a distinct binary (0 of 72, 0 of 108 and 0 of 72 groups collided). What
-    this breaks is in-process work -- `devtools/` sweeps, the JIT tests beside
-    them, and anything varying these axes in one session.
+    invocation and does not share this cache. What this breaks is in-process
+    work: a sweep, a JIT test, or anything else varying these axes in one
+    session.
 
     Field *names* as well as values: a rename or a reordering then changes the
     key, and reading a stale entry across one is the same bug in a slower form.
@@ -247,7 +245,8 @@ def wire_view(ptr):
     `.shape` on a real `fx.Tensor` operand used to return the caller's true
     BHSD extents; here it returns the placeholder, which is a wrong answer
     rather than an error. No kernel does -- see the note above on why none needs
-    to -- and `test_no_shape_reads_off_wire_views` is what keeps it that way.
+    to -- but nothing in this tree enforces that: a new kernel body must not
+    read `.shape` or `.size` off a wire view.
     """
     return fx.make_view(ptr, fx.make_layout(fx.Int32(1), fx.Int32(1)))
 
@@ -259,9 +258,9 @@ def wire_view(ptr):
 # granule 64 they are the *same* arithmetic and a default build is unchanged --
 # the bit-identity gate is what holds that claim.
 #
-# `_k_read_base` and `_ks_offset` are validated offline by
-# `tooling/lds_model.py`, which reproduces family A exactly and confirms the
-# granule-32 K read covers the tile once. The V pair below has no such model;
+# `_k_read_base` and `_ks_offset` were checked against an offline model of the
+# K read that reproduces family A exactly and confirms the granule-32 K read
+# covers the tile once. The V pair below has no such model;
 # it is measured instead.
 
 
@@ -406,15 +405,11 @@ def exp2_wait_state(values):
 
 # --- the DS transpose reads, vendored ---------------------------------------
 #
-# `flash_attn_utils` at the pinned FlyDSL kernel commit (`FLYDSL_KERNELS_COMMIT`) emits
-# `ds_read_b64_tr_b16` as inline asm and takes no alias-scope arguments. The
-# gfx950 feature branch replaced that with the ROCDL op (FlyDSL `0a9c5906`),
-# and that commit is on no tag and not on `upstream/main` -- so no value of the
-# pin can reach it. Rather than depend on a live FlyDSL checkout to be
-# numerically correct, the five emitters live here until the delta lands
-# upstream. RETIRE THEM when `0a9c5906` merges into FlyDSL's `upstream/main`
-# and `FLYDSL_KERNELS_COMMIT` is bumped to a tag containing it: delete the
-# five, and put the `dualwave.` prefix back on the six call sites.
+# The vendored `flash_attn_utils` emits `ds_read_b64_tr_b16` as inline asm and
+# takes no alias-scope arguments. The ROCDL op does, and unlike inline asm the
+# compiler tracks it for waitcnt insertion, so the five emitters live here. They
+# can be deleted, with the `dualwave.` prefix put back on the six call sites,
+# once the vendored kernel tree emits the ROCDL op itself.
 
 
 def _lds_ptr_ty():
@@ -646,7 +641,7 @@ def _slab_span_elems(rows, stride_seq, hdim):
     included, and nothing else is contiguous on any axis -- a caller may put a
     guard page between two rows, two heads or two batches. The D grant is why
     this rounds; the absence of any other grant is why nothing else does.
-    `flash_attn_func_gfx950`'s module docstring states the contract in full.
+    The caller-side statement of the contract is on `_check_8x_d_contract`.
 
     **Bounding at `hdim` stops in the middle of a real column, which is the bug
     this shape fixes.** gfx950 range-checks a multi-dword buffer op per dword
@@ -677,8 +672,8 @@ def _slab_span_elems(rows, stride_seq, hdim):
     put the sentinel back inside the buffer and make every suppressed tail store
     live. But the ordering already holds, and holds for the right reason: the
     contract grants `ceil8(hdim)` contiguous elements per row, so row `s + 1`
-    cannot begin nearer than that and `stride_seq >= ceil8(hdim)` is guaranteed,
-    which is exactly `span <= rows * stride_seq`. A `minui` on top of that is
+    cannot begin nearer than that and `stride_seq >= ceil8(hdim)` is guaranteed
+    for any caller that honours it, which is exactly `span <= rows * stride_seq`. A `minui` on top of that is
     unreachable on every legal input and actively wrong on the rest -- where
     `stride_seq < ceil8(hdim)` it silently reinstates the clipping bug above,
     trading a diagnosable fault for wrong numbers.
@@ -693,7 +688,10 @@ def _slab_span_elems(rows, stride_seq, hdim):
     to the next row and never the extent of one**; neither it nor any other
     stride belongs in a row width. Refusing a layout that cannot hold
     `ceil8(hdim)` belongs in `_check_8x_d_contract`, where it can say so out
-    loud and costs no registers.
+    loud and costs no registers. Nothing in the traced kernel enforces it:
+    a launch that bypasses the Python launcher's host check (the AOT path) with
+    `stride_seq < ceil8(hdim)` puts the store-suppression sentinel inside the
+    buffer, so that launcher must enforce `stride_seq >= ceil8(hdim)` per tensor.
 
     The `rows > 0` select is not a clamp of that kind and stays: at `rows == 0`
     -- a varlen empty sequence -- the subtraction wraps, and an index that wraps
@@ -918,7 +916,6 @@ class ParityGemmHelper(dualwave.DualwaveGemmHelper):
         # hazard class (VALU->MFMA SrcA/B, MFMA->VALU, MFMA->MFMA by operand
         # position, VALU->DPP) found no difference between a broken and a
         # working build, so the exact instruction pair is still unidentified.
-        # See `sdpa_lore_gfx950.md`.
         #
         # Costs nothing: +1.6% at head_dim 64 and +0.8% at 128, both inside
         # run-to-run noise, and it buys head_dim 96 at 932 TF against 579 for
@@ -1063,8 +1060,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
     ):
         super().__init__(traits, **kwargs)
         # 9 strides in launch order: Q, K, V, each (batch, head, seq).
-        # Numerically named per `sdpa-feature-gap.md`'s porting instruction --
-        # the `z/h/m/k` suffixes it warns about have caused real bugs.
+        # Numerically named: the `z/h/m/k` suffixes the upstream names carry
+        # have caused real bugs.
         (
             self.stride_q_batch,
             self.stride_q_head,
@@ -1652,9 +1649,8 @@ class ParityQLoader(dualwave.DualwaveQLoader):
     enough** for any finite pad -- `QK^T = sum_d Q[d] * K[d]`, so a zero in Q
     annihilates whatever K holds at the same column. K is left unmasked
     deliberately: Q is loaded once in the prologue, K once per KV tile, so this
-    is the one of the two that is free. See `sdpa-close-gap-gfx950.md` for the
-    residual case (a pad holding NaN or Inf, where `0 * NaN` is NaN) and the
-    test that pins it.
+    is the one of the two that is free. The residual case is a pad holding NaN
+    or Inf, where `0 * NaN` is NaN.
 
     Whole 8-element chunks are still *loaded* past the extent, and are allowed
     to be: the D-axis pitch is contractually a multiple of 8 elements, so the
@@ -1969,8 +1965,8 @@ class ParitySoftmaxHelper(dualwave.DualwaveSoftmaxHelper):
     """Softmax whose running max can never be `-inf`.
 
     The production `reduce_max` seeds the reduction with `-inf` and the kernel
-    floors the result to `-3.0e38` only under `CAUSAL`. That is the pattern
-    `sdpa-feature-gap.md` flags:
+    floors the result to `-3.0e38` only under `CAUSAL`. That is the pattern the
+    Triton reference avoids:
 
         m_i = tl.full([BLOCK_M], -3.40282e+38)   # do NOT use -inf
 
@@ -2371,8 +2367,7 @@ class ParityStoreHelper(dualwave.DualwaveStoreHelper):
 
         A Q block whose every row attends nothing never enters the kernel body
         -- `active` is `causal_end_raw > 0` -- so this method is the *only*
-        writer for it. At the pinned FlyDSL (`FLYDSL_KERNELS_COMMIT`) it
-        writes O and stops, which leaves LSE holding whatever the caller
+        writer for it. The vendored version writes O and stops, which leaves LSE holding whatever the caller
         allocated. That is a wrong answer for any caller who will run a
         backward, and an unreadable one for a test harness: AOTriton's fills L
         with NaN, so the rows come back NaN and read as a store that faulted.

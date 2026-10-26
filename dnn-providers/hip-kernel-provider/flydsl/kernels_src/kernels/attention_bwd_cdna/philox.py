@@ -33,9 +33,8 @@ the caller's offset arithmetic (``n // rng.randoms_per_offset``). The free
 functions ``philox_u32`` / ``philox_4x`` remain for callers that already have
 a width in hand.
 
-Matches Triton's ``triton.language.random`` bit for bit -- see
-``test_philox.py``, which checks against both a CPU reference and Triton
-itself. Callers compare dropout against seeded ``torch`` runs, so the stream is
+Matches Triton's ``triton.language.random`` bit for bit: a CPU
+reference and Triton's ``tl.random`` agree with it. Callers compare dropout against seeded ``torch`` runs, so the stream is
 part of the contract, not an implementation detail.
 
 Two widths
@@ -51,7 +50,7 @@ whatever contract a caller builds on top:
 Which is faster is a property of the target's integer ALU, so it is a
 parameter here and a per-arch default in the caller. On gfx1201 the 32-bit
 variant needs one ``v_mul_hi_u32`` per high product while the 64-bit one needs
-a multi-instruction sequence; see ``kernels/microbench/philox_bench.py``.
+a multi-instruction sequence; measured on gfx1201 (table below).
 
 Both widths take a **64-bit seed and a 64-bit offset**. That does not require
 64-bit arithmetic: at width 32 the seed fills the two key words and the offset
@@ -107,7 +106,7 @@ DEFAULT_ROUNDS = 10
 # re-sweep is invisible. Version it and record why, rather than re-measuring
 # and overwriting.
 #
-# gfx1201, measured by `kernels/microbench/philox_bench.py`:
+# gfx1201, measured with a microbenchmark of one call per thread:
 #
 #   width  u32/call   G randoms/s   VGPRs (one call)
 #   32     4          284.5         8
@@ -128,6 +127,8 @@ _WIDTH_BY_ARCH = {
     "gfx1201": 32,
 }
 _FALLBACK_WIDTH = 32
+# gfx950 has no row: the gfx950 backward kernels draw the dropout mask with the 32-bit variant through `_FALLBACK_WIDTH`. That stream is
+# the forward's, so a gfx950 row or a change of the fallback to 64 would change every mask; the merged builder refuses it.
 
 
 def default_width(arch: str | None = None) -> PhiloxWidth:
@@ -208,7 +209,7 @@ def _mul_hi(a: Word, b: Word, width: PhiloxWidth) -> Word:
     `arith.mului_extended` yields both halves in one op, which lowers to
     `v_mul_hi_u32` on gfx1201 rather than a shift of a widened product. At width
     64 the backend expands it; that expansion is exactly what makes the 64-bit
-    variant expensive, and is the thing the microbenchmark prices.
+    variant expensive.
     """
     op = arith.MulUIExtendedOp(fx.as_ir_value(a), fx.as_ir_value(b))
     return _ty(width)(op.high)
@@ -304,12 +305,13 @@ def dropout_threshold(p: float) -> int:
     """The i32 threshold for a drop probability `p`.
 
     A uniform u32 reinterpreted as i32 is uniform on `[-2**31, 2**31)`, so
-    comparing against `(p - 0.5) * 2**32` keeps a `1 - p` fraction and needs no
+    comparing against `(p - 0.5) * 0xFFFFFFFF` (truncated and clamped to the i32
+    range) keeps a `1 - p` fraction and needs no
     float conversion per element -- one compare instead of a convert and a
     float compare, on a path that runs once per score.
 
-    `p = 0` gives `-2**31` (keep everything) and `p -> 1` gives `+2**31`
-    (keep nothing). AOTriton computes the same value as
+    `p = 0` gives `-2**31 + 1` (the code truncates `-0.5 * 0xFFFFFFFF`, so the single value 0x80000000 is dropped: `keep = v > thr`) and `p = 1` gives `2**31 - 1`
+    (keep nothing: no i32 exceeds it). AOTriton computes the same value as
     `((dropout_p - 0.5) * 0xFFFFFFFF).to(tl.int32)`.
     """
     if not 0.0 <= p <= 1.0:
@@ -411,9 +413,8 @@ class Philox:
         Philox and callers who cannot arrange that should say so explicitly.
 
         `first_offset` is an **absolute** offset. This function never advances
-        a counter across calls -- see `sdpa-dropout-plan.md` §4.2 for why an
-        incremental version agrees with the blocked one right up until it
-        wraps.
+        a counter across calls -- an incremental version
+        agrees with the blocked one right up until its counter wraps.
         """
         rn = self.randoms_per_offset
         if count % rn:
@@ -456,8 +457,7 @@ class Philox:
         A plane is one `(batch, head)` pair. Built in 64 bits throughout:
         `plane * n_rows * row_stride` reaches 2**32 at B*H = 256 with 8K
         sequences, and a 32-bit wrap there does not fault -- it aliases two
-        heads onto one stream, which every statistical test still passes
-        (`sdpa-dropout-plan.md` §3.2).
+        heads onto one stream, which every statistical test still passes.
         """
         rn = self.randoms_per_offset
         row_stride = fx.Int64((fx.Int32(n_cols) + fx.Int32(rn - 1)) // fx.Int32(rn))

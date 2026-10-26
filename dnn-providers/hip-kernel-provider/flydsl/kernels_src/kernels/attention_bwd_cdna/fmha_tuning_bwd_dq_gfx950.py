@@ -122,7 +122,7 @@ def register_demand(traits, *, store_db=False, a_tiles_live=1):
     the compiler's judgement enters: the body reads three A tiles per KV block
     and consumes each immediately, so the scheduler decides how many are alive
     at once. `1` reproduces the measured VGPR count to within 4-30 registers at
-    every rung that does not spill (see `test_register_model_matches_measured`),
+    every rung that does not spill (measured against the built kernels),
     so the scheduler is in fact sinking two of the three.
 
     What the model does **not** include is addressing, the DMA descriptors and
@@ -361,8 +361,9 @@ class BwdDqKnobs(Gfx950Knobs):
     # head and batch stride a multiple of 8 elements and the pointer 16-byte
     # aligned (what PyTorch's padded attn_bias already is), and
     # `stride_seq_q >= ceil8(seqlen_k)` so the last row's final chunk lies inside
-    # the allocation (`fmha_bwd_dq_gfx950.bias_chunk_contract_ok`); `_args`
-    # enforces it.
+    # the allocation; a row stride of 0 (a row-broadcast `.expand()`) is
+    # accepted only when `seqlen_k % 8 == 0`
+    # (`fmha_bwd_dq_gfx950.bias_chunk_contract_ok`); `_args` enforces it.
     bias_stage: str | None = None
 
     # 32 or 16. The MFMA's N extent, which is the query rows one wave owns --
@@ -375,8 +376,7 @@ class BwdDqKnobs(Gfx950Knobs):
     # issue per wave, and `_ParityKvStaging` is the generalisation that lifts
     # it (`ISSUES_PER_WAVE = SMEM_N_RPT // NUM_WAVES`, 4 at two waves and
     # granule 64). What makes these entries legitimate is that every one of
-    # them is *run* by `test_wave_geometries_agree`, which requires them to
-    # agree with the default build to the error-ratio gate.
+    # them was run and agrees with the default build to the error-ratio gate.
     #
     # Two waves is here because B1 measured it as the best point at head_dim
     # 128 (788 TF against 403 at four waves and `waves_per_eu=2`), and a
@@ -398,6 +398,7 @@ class BwdDqKnobs(Gfx950Knobs):
         the field, but the failure would come from a stack frame two files away
         from the cause. The step sequence below is the parent's, verbatim.
         """
+        self._checked_mfma_rows()
         return (
             _BWD_DQ_FALLBACK.merge(self)
             ._checked_modes()
@@ -405,6 +406,13 @@ class BwdDqKnobs(Gfx950Knobs):
             ._with_wave_geometry()
             ._checked_against_traits(meta)
         )
+
+    def _checked_mfma_rows(self):
+        """`mfma_rows` is `None` (the table decides), 16 or 32; anything else would be coerced to the 32-row family."""
+        if self.mfma_rows not in (None, 16, 32) or isinstance(self.mfma_rows, bool):
+            raise ValueError(
+                f"mfma_rows must be None, 16 or 32, got {self.mfma_rows!r}"
+            )
 
     def _with_d_axis_splits(self):
         """Both D-axis cuts stay at 1. **This is load-bearing, not tidiness.**
@@ -492,8 +500,7 @@ class BwdDqKnobs(Gfx950Knobs):
         fall rather than tuned.
 
         **384 and 512 are flat across the entire grid**, which is the finding:
-        they are not occupancy-limited and no wave count reaches them. See the
-        B3 outcome in `sdpa-bwd-plan-gfx950.md`.
+        they are not occupancy-limited and no wave count reaches them.
         """
         me = self._with_d_axis_splits()
         # Decided before the pin check, and separately from it: the wave count
@@ -578,6 +585,7 @@ class BwdDqKnobs(Gfx950Knobs):
         below it. The divergences are named: the rung check, `store_db`, and
         the modes B2 does not implement.
         """
+        self._checked_mfma_rows()
         if self.block_dmodel not in BWD_DQ_LADDER:
             raise NotImplementedError(
                 f"the backward dQ kernel is built for head_dim tiles {BWD_DQ_LADDER}, not "
@@ -609,8 +617,7 @@ class BwdDqKnobs(Gfx950Knobs):
         for name, value in (("paged", self.paged),):
             if value:
                 raise NotImplementedError(
-                    f"{name}=True is not implemented by the backward dQ kernel yet; B6 adds dropout "
-                    "and is the last feature phase. See sdpa-bwd-plan-gfx950.md."
+                    f"{name}=True is not implemented by the backward dQ kernel"
                 )
         if meta.window and not meta.causal:
             # `make_traits` says the same thing, and this repeats it only so the
@@ -623,7 +630,7 @@ class BwdDqKnobs(Gfx950Knobs):
             )
         if self.num_kv_splits != 1:
             raise NotImplementedError(
-                "split-K is out of scope for every backward kernel; see plan section 9"
+                "split-K is out of scope for every backward kernel"
             )
         for name, value in (
             ("d_stages", self.d_stages),

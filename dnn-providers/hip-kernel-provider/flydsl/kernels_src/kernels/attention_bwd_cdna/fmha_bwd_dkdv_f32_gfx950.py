@@ -2,15 +2,17 @@
 # Copyright (c) 2025 FlyDSL Project Contributors
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""dK / dV of the fp32 backward for gfx950 (F.D): tiles 32 .. 256 and t512 (every class, padded head dims), each (tile, geometry) on the schedule of the table.
+"""dK / dV of the fp32 backward for gfx950: tiles 32 .. 256 and t512 (every class, padded head dims), each (tile, geometry) on the schedule of the table.
 
 The fp32 twin of `fmha_bwd_dkdv_gfx950` on the native-f32-MFMA core (`fmha_f32_common_gfx950`, `fmha_f32_dsplit_gfx950`): same argument names and
-order (`parity/gaps/fp32/interfaces.md`), same grid (KV head, KV block, sequence), same math, with 4-byte elements and `v_mfma_f32_16x16x4_f32`.
+order, same grid (KV head, KV block, sequence), same math, with 4-byte elements and `v_mfma_f32_16x16x4_f32`.
 
 --- Schedule ---------------------------------------------------------------------
 
 `SCHEDULE_TABLE` (`fmha_tuning_bwd_dkdv_f32_gfx950`) assigns every (tile, geometry) its schedule and wave count; this module builds the tiles of
 `BUILT_TILES`.
+
+The two layers: the D-split (t512 below; also the other tiles whose table row says 'ds') and the per-wave (t64 below; the rows that say 'pw').
 
 t512 (D-split, both geometries: block_q 32 `t512_32x16_ds_w4`, block_q 16 `t512_16x16_ds_w4`): a workgroup of 4 waves owns 16 KV rows, wave w owns
 head-dim slice w (8 panels of 16 columns) of K, V, dK, dV, and stages only its slice of every q tile. S and dP contract the head dim, so each wave's accumulators are *partial* sums; `DSplitDkDv.exchange` adds the four partials in
@@ -37,7 +39,7 @@ and both accumulations use unchanged.
 
 Rows of the last tile past `seqlen_q` are staged as copies of the last valid row (`stage_row_off` clamps); P and dS of those rows are forced to 0, which adds exactly
 +0.0 to every accumulator. KV rows of the last block past `seqlen_k` read the last valid row and are not stored. LSE' and Delta are read through the shared
-`lse_row_addressing` decode, the one F.P's prep writes with.
+`lse_row_addressing` decode, the one the fp32 prep kernel writes with.
 
 --- Scope ------------------------------------------------------------------------
 
@@ -48,12 +50,12 @@ keep and the survivor scale, dV takes keep P and the scale once at the end), var
 and dK / dV stores are masked element-wise, the staged tiles are bounded buffer DMAs masked on the A-operand read; whole panels under `hdim_qk_floor` skip the mask). Everything else is refused by name in `_check_scope`. dB is stored by the dQ kernel, not here.
 
 Objects that carry a feature pin their kernarg strides and the loop-invariant parts of their bases as opaque scalars in the prologue (`pin_sgpr`): left as kernarg products they keep the
-`s_load_dwordx16` tuples live across the tile walk and the backend's lane spill of them trips the R-MIR gate (ROCm/FlyDSL#1087). The plain exact objects are built without it.
+`s_load_dwordx16` tuples live across the tile walk and the backend's lane spill of them trips the lane-spill check on the compiled object (ROCm/FlyDSL#1087). The plain exact objects are built without it.
 
 --- Resources --------------------------------------------------------------------
 
-LDS is the layer's (`lds_bytes`): t512 155,648 B at block_q 32 and 77,824 B at block_q 16; t64 17,408 B at block_q 32 and 8,704 B at block_q 16. The compile hint `unroll-max-count = 1` is the SP-N skeleton's
-(`jobs/fp32-skel`): one loop body per object, so the resource row is the loop's and not an LLVM unroll of it. No fast-math hints: the exchange order is the
+LDS is the layer's (`lds_bytes`): t512 155,648 B at block_q 32 and 77,824 B at block_q 16; t64 17,408 B at block_q 32 and 8,704 B at block_q 16. The compile hint `unroll-max-count = 1` gives
+one loop body per object, so the resource row is the loop's and not an LLVM unroll of it. No fast-math hints: the exchange order is the
 documented wave order and `+inf` LSE' must survive to `exp2`.
 """
 
@@ -67,8 +69,12 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     DeviceOps,
     Lane,
     Philox,
+    check_head_dim_floor,
+    check_slab_span,
+    launch_ints,
     slab_span,
 )  # noqa: E402
+from kernels.attention_bwd_cdna import philox  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_perwave_gfx950 import PerWaveDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_f32_gfx950 import (
@@ -88,6 +94,7 @@ __all__ = [
     "KERNEL_NAME",
     "build_fmha_bwd_dkdv_f32_gfx950_module",
     "build_fmha_bwd_dkdv_f32_gfx950_module_primary",
+    "check_launch_limits",
 ]
 
 KERNEL_NAME = "fmha_bwd_dkdv_f32_gfx950_kernel"
@@ -117,6 +124,27 @@ def _check_scope(meta, knobs, runtime_axes):
         )
 
 
+def check_launch_limits(knobs, **launch):
+    """Refuse launch values this object cannot compute, by name. `launch` holds plain-int launch arguments by their `launch_fmha_bwd_dkdv_f32_gfx950` names; a
+    value that is absent is not checked. Only padded objects have limits: the real head dims `hdim_qk` / `hdim_vo` must lie above the object's `hdim_qk_floor` (one floor
+    covers the QK and the VO side), and the Q and dO slabs (`max_seqlen_q` rows at their row strides) must stay below `SLAB_SPAN_LIMIT` elements.
+    """
+    if not knobs.padded_head:
+        return
+    floor = int(knobs.hdim_qk_floor or 0)
+    for name in ("hdim_qk", "hdim_vo"):
+        if name in launch:
+            check_head_dim_floor(name, launch[name], floor)
+    for tensor, stride, hdim in (
+        ("Q", "stride_q_seq", "hdim_qk"),
+        ("DO", "stride_do_seq", "hdim_vo"),
+    ):
+        if all(k in launch for k in ("max_seqlen_q", stride, hdim)):
+            check_slab_span(
+                tensor, launch["max_seqlen_q"], launch[stride], launch[hdim]
+            )
+
+
 def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
     """Build the fp32 dK/dV kernel for a resolved (meta, knobs) pair."""
     runtime_axes = frozenset(runtime_axes)
@@ -125,6 +153,10 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             "knobs must be resolved: call `bwd_dkdv_knobs(arch, ...).resolve(meta)` first"
         )
     _check_scope(meta, knobs, runtime_axes)
+    if meta.dropout and philox.default_width("gfx950") != 32:
+        raise ValueError(
+            "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
+        )
     fam = knobs.family()
     PW = fam.sched == "pw"
     layer = PerWaveDkDv(fam) if PW else DSplitDkDv(fam)
@@ -778,12 +810,16 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
         )
 
     def _launch(*args, **kwargs):
+        check_launch_limits(
+            knobs, **launch_ints(launch_fmha_bwd_dkdv_f32_gfx950, args, kwargs)
+        )
         return flyc.compile(launch_fmha_bwd_dkdv_f32_gfx950, *args, **kwargs)
 
     _launch.traits = fam
     _launch.knobs = knobs
     _launch.cache_tag = _cache_tag
     _launch.lds_bytes = layer.lds_bytes
+    _launch.check_launch_limits = lambda **launch: check_launch_limits(knobs, **launch)
     return _launch
 
 

@@ -79,9 +79,10 @@ __all__ = [
 #    512    4       64     64     2       2       91     0    133 KB     479
 #
 # Three families. **A** (granule 64, 8 waves) serves 64 and 128; **B/S**
-# (4 waves) serve the rest up to 256, with granule 32 where the width is not a
-# multiple of 64; **W** stages the D axis (`D_STAGES`) and shards it
-# (`VO_SHARDS`) for 384 and 512, on the separate body in `fmha_wide_gfx950.py`.
+# (4 waves) serve the rest up to 256, B (granule 64) at 192 and 256 and S
+# (granule 32) at every width that is not a multiple of 64; **W** stages the D axis (`D_STAGES`) and shards it
+# (`VO_SHARDS`) for 384 and 512; the forward body that does this is not in
+# this tree.
 #
 # The break at 384 is not a tuning preference, it is LDS: two KV tiles in
 # flight need `2 * BLOCK_N * head_dim * ~8.3 B`, which is 199.5 KB at 384 and
@@ -93,8 +94,7 @@ __all__ = [
 # see, so no `s_waitcnt lgkmcnt` was inserted before uses. Below 128 nothing read
 # the destination before the kernel's own cluster-boundary wait; at 192 the
 # allocator starts using AGPRs and places `v_accvgpr_write` copies ahead of that
-# wait. Moving to the ROCDL op fixed it -- see the P2 section of
-# `sdpa-close-gap-gfx950.md`.
+# wait. The ROCDL op, which the compiler does track, does not have the problem.
 #
 # So the register file was not the binding constraint at 192/256 after all.
 # It becomes one at 384 and 512, where a wave's Q (128 VGPR) and O (256 VGPR,
@@ -102,33 +102,9 @@ __all__ = [
 # what `VO_SHARDS` answers. See `_with_wave_geometry` for the wave-count
 # measurement, which is worth 1.6x on its own.
 #
-# **32 is a planned rung too, below the built ones**, and it is deliberately
-# not in `LADDER_PLANNED`: that list is consulted only after `LADDER` misses,
-# so putting 32 there would never be reached -- while putting it in `LADDER`
-# would route head_dim <= 32 to a tile that does not exist yet and break a path
-# that works today, slowly. It arrives when family S is built; until then
-# head_dim <= 32 rounds up to 64 and pays for it (see `_with_wave_geometry`).
-# **96 is deliberately absent, and it is a bug rather than a decision.** It is
-# the one granule-32 width that computes the wrong answer, and it does so in
-# both kernel bodies, so head_dim 65..128 keeps rounding to the 128 tile as it
-# always has. What is established about it:
-#
-#   - Staging is not the cause. `tooling/probe_kv_staging.py` at head_dim 96,
-#     granule 32 reports 0/6144 wrong for K, V and Q, on both LDS buffers.
-#   - It is not the masking. Enabling `padded_head` at an *exact* width makes a
-#     no-op mask, and that output is bit-identical to the unpadded one at 32,
-#     64, 128, 160 and 224 -- and differs only at 96, where it happens to be
-#     correct.
-#   - It is not a scheduling hazard. `waves_per_eu`, `setprio`, `stagger` and
-#     `lazy_rescale` all leave it broken with the *identical* error, and the
-#     error is deterministic across runs.
-#   - It is not the ladder neighbours: every other multiple of 32 from 32 to
-#     256 is correct at granule 32, including 192, whose shape is exactly twice
-#     96's. 32, 160 and 224 hold across five shapes in both masking modes.
-#
-# The error is sparse (~9% of elements), scattered in both row and column, and
-# appears with a single KV tile, so it is inside one tile's QK/softmax/PV
-# rather than an accumulation across them.
+# The 32 and 96 rungs are built as granule-32 (family S) tiles. `LADDER_PLANNED`
+# is consulted only after `LADDER` misses, and holds the widths that are
+# designed but not yet built (none today).
 LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)
 LADDER_PLANNED = ()
 
@@ -194,7 +170,7 @@ def rung_below(block_dmodel):
     `tile_width_for` rounds *up* to the first rung that fits, so a build it
     chose serves exactly the half-open range `(rung_below(R), R]`. That lower
     bound is what lets the kernel skip masking the D columns it knows are real
-    -- see `HDIM_QK_FLOOR` in `flash_attn_func_gfx950.py`.
+    (the `hdim_qk_floor` knob).
 
     It is a property of the ladder rather than of any one build, so it lives
     next to `LADDER`: adding a rung silently tightens every wider build's
@@ -208,7 +184,7 @@ def tile_width_for(head_dim):
     """The compiled tile width serving `head_dim`, or raise saying why not.
 
     Rounds *up* to the next rung. head_dim 40 compiles as a 64-wide build with
-    `hdim_qk=40`; head_dim 129 would need the 192 rung, which is P2.
+    `hdim_qk=40`; head_dim 129 is served by the 160 rung.
     """
     if head_dim <= 0:
         raise ValueError(f"head_dim must be positive, got {head_dim}")
@@ -306,9 +282,9 @@ class FmhaKnobs:
     # wall-clock* than head_dim 64 (185 us against 155). Shortening QK would cut
     # 8 of the 16 MFMAs per tile and leave that untouched.
     #
-    # The fix that would matter is a tile that does not pad: `PV_MFMA_N` is 32
-    # and `K_STEP_QK` is 16, so rungs at multiples of 32 are legal in principle
-    # and need only granule-32 staging (family S).
+    # What removes that cost is a tile that does not pad: head_dim 32 runs in
+    # the 32 tile (`tile_width_for(32)`, `LADDER`), which stages at granule 32
+    # (family S, `_with_wave_geometry`).
 
     # Whether the strides fold to literals. False is the parity ABI; True
     # exists so the fast path can be shown to emit unchanged code.
@@ -596,7 +572,7 @@ class Gfx950Knobs(FmhaKnobs):
         """Decide the wave geometry and staging granule from the tile width.
 
         **The selection lives here, not in the traits constructor**, which is
-        the concrete reason R1 came before P2: the families differ only in
+        the concrete reason: the families differ only in
         these four numbers plus what they imply, and a constructor that
         hardcodes them cannot host more than one.
 
@@ -605,24 +581,15 @@ class Gfx950Knobs(FmhaKnobs):
 
         | family | tile width | waves | BLOCK_M | BLOCK_N | granule |
         |---|---|---|---|---|---|
-        | S | <= 32 | 8 | 256 | 128 | 32 |
-        | A | <= 128 | 8 | 256 | 64 | 64 |
-        | B | > 128 | 4 | 128 | 128 | 64 |
+        | S | not a multiple of 64 | 4 | 128 | 64 | 32 |
+        | A | multiple of 64, <= 128 | 8 | 256 | 64 | 64 |
+        | B | multiple of 64, 129..256 | 4 | 128 | 64 | 64 |
 
         **A** is measured saturated at head_dim 128 -- 248 of 256 VGPRs, zero
         spills -- so **B** halves the wave count to double the per-lane
-        register file. **S** exists because padding a small head into A's
-        64-wide tile is expensive, not cheap: at B=4 H=8 N=4096 non-causal,
-        head_dim 16/32/48 each take *longer* than head_dim 64 (203/205/215 us
-        against 172), doing the full 64-wide MFMA plus the padded-head masking
-        on top -- 169 real TFLOPS at head_dim 16 against 801 at 64.
-
-        S keeps A's wave count, BLOCK_M and one-issue-per-wave DMA structure;
-        only the granule and BLOCK_N move. BLOCK_N must go to 128 to keep the
-        DMA full, since halving the granule doubles the tokens one issue
-        covers -- and independently, gfx1201's tuning table reached BLOCK_N 128
-        for small head_dim by measurement, on the grounds that a wider KV tile
-        amortises the per-tile softmax cost.
+        register file. **S** takes the widths whose tile is not a multiple of
+        64 (32, 96, 160, 224): its D axis is staged in granule-32 DMA issues,
+        and it runs the wide-tile wave count at every such width.
 
         Reads `self.block_dmodel`, so it runs after `_with_widths`. That
         ordering is the whole reason the width is no longer an argument: an
@@ -777,22 +744,21 @@ class Gfx950Knobs(FmhaKnobs):
         Failing here rather than at those sites keeps the diagnosis at the
         level of the decision. A geometry that builds and runs but addresses
         the wrong LDS produces plausible numbers, which is the failure mode
-        this whole guard exists to avoid -- P2 measured exactly that at
-        head_dim 192.
+        this whole guard exists to avoid -- head_dim 192 produced exactly
+        that.
         """
         if self.qk_shards > 1:
             raise NotImplementedError(
                 f"qk_shards {self.qk_shards} is described by the traits but not yet implemented in the "
                 "kernel body: it needs the wave index split into (q_tile, shard), Q/O restricted to the "
-                "wave's D slice, and an explicit-partial S reduction through LDS. See P8.2."
+                "wave's D slice, and an explicit-partial S reduction through LDS."
             )
         geom = (self.num_waves, self.block_m, self.block_n, self.head_dim_granule)
         if geom not in self._SUPPORTED_GEOMETRIES:
             raise NotImplementedError(
                 f"geometry (waves, BLOCK_M, BLOCK_N, granule) = {geom} is describable but not yet "
                 f"addressable: the DMA and LDS-read helpers assume SMEM_N_RPT == NUM_WAVES and a "
-                f"64-element granule. Supported: {self._SUPPORTED_GEOMETRIES}. "
-                "See P2 in sdpa-close-gap-gfx950.md."
+                f"64-element granule. Supported: {self._SUPPORTED_GEOMETRIES}."
             )
         return self
 

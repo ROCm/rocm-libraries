@@ -6,16 +6,16 @@
 
 The fp32 twin of `fmha_tuning_bwd_dq_gfx950` (same exported names and signatures, `dtype_str="fp32"`), for the native-f32-MFMA family of
 `fmha_f32_common_gfx950`. Where the 16-bit policy resolves a wave geometry from a measured table, this one resolves it from `DQ_TABLE`, the dQ
-column of the final schedule table of `RP/parity/gaps/fp32/sp-n.md`:
+column of the fp32 schedule table (shared with the dK/dV policy, `fmha_tuning_bwd_dkdv_f32_gfx950`):
 
   - the **geometry** is the Spec pin `block_m` in {16, 32} (the (BLOCK_M, BLOCK_N) = (block_m, 16) tile of the family); unpinned it is 32;
   - the **schedule** is the D-split dQ layer at every tile (`DSplitDq`): the workgroup owns `block_m` q rows, wave w owns head-dim slice w of Q,
     dO and dQ, K / V are staged 16 rows at a time, and the S / dP partials are exchanged through LDS;
   - the **wave count** is the dQ representative of the (tile, geometry) (highest occupancy, then fewest VGPR+AGPR, then 4 waves over 2).
 
-Neither the wave count nor the schedule is a Spec key (`parity/gaps/fp32/interfaces.md`); a Spec fixes the geometry and the table does the rest.
-`block_n` (16), `head_dim_granule` (the slice unit: 16, or 32 for the 32x32x2 accumulation tile at `block_m` 32) and `waves_per_eu` (0: no hint, SP-N's
-occupancy + 1 probes reached nothing higher) have one value per entry.
+Neither the wave count nor the schedule is a Spec key; a Spec fixes the geometry and the table does the rest.
+`block_n` (16), `head_dim_granule` (the slice unit: 16, or 32 for the 32x32x2 accumulation tile at `block_m` 32) and `waves_per_eu` (0: no hint, probes at
+occupancy + 1 reached nothing higher) have one value per entry.
 
 This module records the policy; which (tile, feature) combinations the kernel computes is the kernel module's scope check (`fmha_bwd_dq_f32_gfx950`).
 """
@@ -45,7 +45,7 @@ DEFAULT_BLOCK_M = 32
 
 @dataclass(frozen=True)
 class DqEntry:
-    """One (tile, geometry) row of the dQ column of sp-n.md: the wave count of the dQ representative."""
+    """One (tile, geometry) row of the dQ column of the table: the wave count of the dQ representative."""
 
     tile: int
     block_m: int
@@ -53,7 +53,7 @@ class DqEntry:
 
     @property
     def rep(self):
-        """Name of the representative in sp-n.md: `t<tile>_<geometry>_ds_w<waves>`."""
+        """Name of the representative: `t<tile>_<geometry>_ds_w<waves>`."""
         return f"t{self.tile}_{self.block_m}x16_ds_w{self.waves}"
 
 

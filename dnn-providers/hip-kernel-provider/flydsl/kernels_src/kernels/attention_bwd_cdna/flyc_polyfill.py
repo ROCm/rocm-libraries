@@ -1,21 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""``six``-style polyfill for FlyDSL helpers that are branch-local, not upstream.
+"""``six``-style polyfill for six small FlyDSL helpers.
 
-The vendored gfx1201 kernel is written against
-``xinyazhang/sdpa-gfx1201-feature``, and that branch adds six small functions
-to ``kernels/common/`` that a stock ``flydsl`` does not yet have --
-``git diff $(git merge-base HEAD upstream/main) HEAD -- kernels/common/`` is
-+121 lines across ``kernels/common/utils.py`` and the new
-``kernels/common/mma/wmma_ops.py``.
-
-This module is **authored**, not vendored: each function below prefers the
-stock package's own definition when one exists, and only falls back to a
-local copy of the branch body otherwise. So this module empties itself out,
-function by function, as each helper lands upstream -- it is a bridge, not a
-permanent home. Each entry below names the branch file it came from and the
-upstream merge that should delete it.
+The kernels in this tree use ``ssel``, ``smin``, ``smax``, ``sdiv_rd_pow2``,
+``vector_elem_type`` and ``wmma_f32_16x16x16``, which the pinned FlyDSL
+(0.3.4) does not provide. This module is **authored**, not vendored. Each
+function is written as ``try: from flydsl.kernels.common...`` followed by a
+local body in the ``except ImportError`` arm, so a FlyDSL that did ship the
+helper under that path would be used in preference to the local copy. None of
+those paths exists in FlyDSL 0.3.4 (``flydsl.kernels`` is not a package), so
+today the local bodies are the only code that runs. If a later FlyDSL provides
+a helper at a different path, change the probe path or drop the local body.
 
 *Polyfill*, not *shim* or *compat*: this repository's ``shim`` already means
 something specific (the generated C++ dispatch layer), so reusing the word
@@ -171,23 +167,20 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # ``DualwaveSwpTraits`` -- a verbatim copy, and the check that keeps it one
 #
-# Unlike the six helpers above, this class *is* upstream (it has been
-# byte-identical on ``upstream/main`` and the gfx950 branch alike). It is
-# copied anyway because of *where* it lives: ``kernels/attention/
-# flash_attn_utils.py``, whose module scope imports ``flydsl.compiler``. The
+# Unlike the six helpers above, this class comes from the vendored
+# ``kernels/attention_cdna/flash_attn_utils.py``. It is copied anyway because
+# of *where* it lives: that module's scope imports ``flydsl.compiler``. The
 # generator reaches this class -- ``fmha_traits_gfx950.ParityDualwaveTraits``
 # subclasses it, and ``fmha_tuning_*_gfx950.resolve()`` constructs one to
 # validate a configuration -- and the generator must never import flydsl.
 #
-# So the retiring condition here is not "when the symbol lands upstream"; it
-# already has. It is **when ``fmha_traits_gfx950`` no longer needs a
-# flydsl-bearing module for its base class** -- when ``DualwaveSwpTraits``
+# The copy can go when ``fmha_traits_gfx950`` no longer needs a
+# flydsl-bearing module for its base class -- when ``DualwaveSwpTraits``
 # moves to a module importing no flydsl, or when the generator stops
 # constructing traits.
 #
-# Copied verbatim from FlyDSL ``70b2dbc5``,
-# ``kernels/attention/flash_attn_utils.py`` lines 1476-1582 (107 lines,
-# sha256 6750ff4e...). Do not reformat, rename or reorder it: the safety
+# Copied verbatim from the vendored ``DualwaveSwpTraits``. Do not reformat,
+# rename or reorder it: the safety
 # argument below is that it is an exact copy, and
 # ``assert_dualwave_swp_traits_equivalent`` is what proves that claim at
 # build time rather than asserting it in a comment.
@@ -308,9 +301,9 @@ def assert_dualwave_swp_traits_equivalent(upstream, local=DualwaveSwpTraits) -> 
     """Fail loudly if the copy above has drifted from ``upstream``'s class.
 
     Compares ``dataclasses.fields()`` -- **names, types and order**. For a
-    78-field dataclass whose every field is supplied by keyword at every
-    construction (``fmha_traits_gfx950.make_traits`` passes all 78, including
-    the only two that carry defaults), that comparison is *total*, not a
+    79-field dataclass whose every field is supplied by keyword at every
+    construction (``fmha_traits_gfx950.make_traits`` passes every one,
+    including the two that carry defaults), that comparison is *total*, not a
     sample: any upstream add, remove, rename, reorder or retype lands here.
 
     Defaults are deliberately **not** compared. Both defaulted fields are
@@ -322,16 +315,14 @@ def assert_dualwave_swp_traits_equivalent(upstream, local=DualwaveSwpTraits) -> 
 
     **The caller is ``gfx950_standalone``, and deliberately not this module's
     own scope.** The obvious spelling -- a module-scope
-    ``try: from kernels.attention.flash_attn_utils import DualwaveSwpTraits``
+    ``try: from kernels.attention_cdna.flash_attn_utils import DualwaveSwpTraits``
     here, matching the six helpers above -- would run this comparison during
     a **gfx1201** build too, because the gfx1201 kernels alias this module
-    wholesale as ``common_utils``/``wmma_ops``. gfx1201 builds against the
-    ``third_party/flydsl-kernel.txt`` pin, and this class is *not* stable
-    across older tags: at ``v0.3.0`` it is 105 fields-and-lines, against 107
-    at the merge-base, ``upstream/main`` and the gfx950 branch alike. So that
-    spelling would let a gfx950 concern fail a gfx1201 build over a class
-    gfx1201 never touches. Calling from ``gfx950_standalone`` runs the check
-    on exactly the builds that use the class, and no others.
+    wholesale as ``common_utils``/``wmma_ops``, and the class is not stable
+    across FlyDSL versions. That spelling would let a gfx950 concern fail a
+    gfx1201 build over a class gfx1201 never touches. Calling from
+    ``gfx950_standalone`` runs the check on exactly the builds that use the
+    class, and no others.
     """
     if upstream is local:
         return
@@ -358,6 +349,6 @@ def assert_dualwave_swp_traits_equivalent(upstream, local=DualwaveSwpTraits) -> 
         f"{upstream.__module__}.{upstream.__qualname__} "
         f"({len(want)} fields copied, {len(got)} upstream).\n"
         + "\n".join(detail or ["  (no per-field difference isolated)"])
-        + "\n\nRe-copy the class verbatim from FlyDSL "
-        "kernels/attention/flash_attn_utils.py."
+        + "\n\nRe-copy the class verbatim from the vendored "
+        "kernels/attention_cdna/flash_attn_utils.py."
     )

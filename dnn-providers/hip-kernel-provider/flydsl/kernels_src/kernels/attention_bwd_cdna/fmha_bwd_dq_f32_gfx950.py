@@ -2,10 +2,9 @@
 # Copyright (c) 2025 FlyDSL Project Contributors
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""dQ (and dB) of the fp32 backward for gfx950 (F.Q): the D-split dQ kernel at tiles 32 .. 256 and 512 (32, 64, 96, 128, 160, 192, 224, 256, 512), both geometries, every class.
+"""dQ (and dB) of the fp32 backward for gfx950: the D-split dQ kernel at tiles 32 .. 256 and 512 (32, 64, 96, 128, 160, 192, 224, 256, 512), both geometries, every class.
 
-The fp32 twin of `fmha_bwd_dq_gfx950` on the native-f32-MFMA core (`fmha_f32_common_gfx950`, `fmha_f32_dsplit_gfx950`): same argument names and order
-(`parity/gaps/fp32/interfaces.md`), same grid (query head, q block, sequence), same math, with 4-byte elements and the fp32 MFMAs.
+The fp32 twin of `fmha_bwd_dq_gfx950` on the native-f32-MFMA core (`fmha_f32_common_gfx950`, `fmha_f32_dsplit_gfx950`): same argument names and order, same grid (query head, q block, sequence), same math, with 4-byte elements and the fp32 MFMAs.
 
 --- Schedule ---------------------------------------------------------------------
 
@@ -31,7 +30,7 @@ accumulation (`dQ^T += K^T dS^T`, A = the staged K chunk read as b32 columns) co
 
 Rows of the workgroup past `seqlen_q` read the last valid q row (`row_stats`, `load_resident`) and are not stored; KV rows of the last stage past `seqlen_k`
 are staged as copies of the last valid row (`stage_row_off` clamps) and their P and dS are forced to 0, which adds exactly +0.0 to every accumulator. LSE' and Delta
-are read through the shared `lse_row_addressing` decode, the one F.P's prep writes with.
+are read through the shared `lse_row_addressing` decode, the one the fp32 prep kernel writes with.
 
 --- Scope ------------------------------------------------------------------------
 
@@ -49,7 +48,7 @@ runtime axes) by name.
 
 LDS is the layer's (`DSplitDq.lds_bytes`). Above tile `HOIST_ABOVE` (128) the SGPR pressure of the padded builds (the head-dim limits, two slab spans, the dB / bias / dropout addressing) is lowered
 by two changes: the K / V buffer resources are built once before the loop (`DeviceOps.buf_rsrc`, `stage_kv(k_rsrc, v_rsrc)`) and dQ's slab base is derived after the loop instead of being carried through it. Without them
-the padded no-dropout builds of tiles 160 .. 224 get a scratch frame (a dead private segment, no scratch access); the objects of tiles <= 128 are pinned and keep the original code. The compile hint `unroll-max-count = 1` is the SP-N skeleton's (`jobs/fp32-skel`): one loop body per object, so the
+the padded no-dropout builds of tiles 160 .. 224 get a scratch frame (a dead private segment, no scratch access); tiles <= 128 keep the K / V resources and dQ's slab base inside the loop. The compile hint `unroll-max-count = 1` gives one loop body per object, so the
 resource row is the loop's and not an LLVM unroll of it. No fast-math hints: the exchange order is the documented wave order and `+inf` LSE' must survive to `exp2`.
 
 --- dBias reduction --------------------------------------------------------------
@@ -74,9 +73,13 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     DeviceOps,
     Lane,
     Philox,
+    check_head_dim_floor,
+    check_slab_span,
     gaddr,
+    launch_ints,
     slab_span,
 )  # noqa: E402
+from kernels.attention_bwd_cdna import philox  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDq  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_f32_gfx950 import (
     FmhaInputMetadata,
@@ -95,6 +98,7 @@ __all__ = [
     "KERNEL_NAME",
     "build_fmha_bwd_dq_f32_gfx950_module",
     "build_fmha_bwd_dq_f32_gfx950_module_primary",
+    "check_launch_limits",
 ]
 
 KERNEL_NAME = "fmha_bwd_dq_f32_gfx950_kernel"
@@ -134,6 +138,39 @@ def _check_scope(meta, knobs, runtime_axes):
         )
     if knobs.store_db and not meta.bias:
         raise NotImplementedError("store_db needs a bias build")
+    if knobs.store_db and meta.causal:
+        raise NotImplementedError(
+            "causal + store_db: the causal loop walks only the reachable KV stages, so the dB elements of the skipped stages would stay unwritten"
+        )
+
+
+def _vo_floor(meta, knobs):
+    """The floor of the dO / V mask: the build's floor when the V head dim lies above it (the dO / V side promises its extent only then), else 0."""
+    floor = int(knobs.hdim_qk_floor)
+    return floor if (meta.head_dim_v or knobs.block_dmodel) > floor else 0
+
+
+def check_launch_limits(meta, knobs, **launch):
+    """Refuse launch values this object cannot compute, by name. `launch` holds plain-int launch arguments by their `launch_fmha_bwd_dq_f32_gfx950` names; a
+    value that is absent is not checked. Only padded objects have limits: `hdim_qk` must lie above the object's `hdim_qk_floor` and `hdim_vo` above its dO / V floor, and the K
+    and V slabs (`max_seqlen_k` rows at their row strides) must stay below `SLAB_SPAN_LIMIT` elements.
+    """
+    if not knobs.padded_head:
+        return
+    for name, floor in (
+        ("hdim_qk", int(knobs.hdim_qk_floor)),
+        ("hdim_vo", _vo_floor(meta, knobs)),
+    ):
+        if name in launch:
+            check_head_dim_floor(name, launch[name], floor)
+    for tensor, stride, hdim in (
+        ("K", "stride_k_seq", "hdim_qk"),
+        ("V", "stride_v_seq", "hdim_vo"),
+    ):
+        if all(k in launch for k in ("max_seqlen_k", stride, hdim)):
+            check_slab_span(
+                tensor, launch["max_seqlen_k"], launch[stride], launch[hdim]
+            )
 
 
 def build_fmha_bwd_dq_f32_gfx950_module_primary(
@@ -146,6 +183,10 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             "knobs must be resolved: call `bwd_dq_knobs(arch, ...).resolve(meta)` first"
         )
     _check_scope(meta, knobs, runtime_axes)
+    if meta.dropout and philox.default_width("gfx950") != 32:
+        raise ValueError(
+            "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
+        )
     fam = knobs.family()
     layer = DSplitDq(fam)
     W, RB, BQ, DSU = fam.waves, fam.rb, fam.bq, fam.dsu
@@ -169,9 +210,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         if dbias_reduce
         else None
     )
-    VO_FLOOR = (
-        FLOOR if (meta.head_dim_v or TILE) > FLOOR else 0
-    )  # the dO / V side promises its extent only when the V head dim lies above the floor
+    VO_FLOOR = _vo_floor(meta, knobs)
     NACC = (
         DSU if BQ == 16 else DSU // 2
     )  # accumulators per lane: one V4 per 16-column panel (block_m 16) or one V16 per 32-column unit (block_m 32)
@@ -715,6 +754,9 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             )
 
     def _launch(*args, **kwargs):
+        check_launch_limits(
+            meta, knobs, **launch_ints(launch_fmha_bwd_dq_f32_gfx950, args, kwargs)
+        )
         return flyc.compile(launch_fmha_bwd_dq_f32_gfx950, *args, **kwargs)
 
     _launch.traits = fam
@@ -722,6 +764,9 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
     _launch.cache_tag = _cache_tag
     _launch.lds_bytes = layer.lds_bytes
     _launch.jit = launch_fmha_bwd_dq_f32_gfx950
+    _launch.check_launch_limits = lambda **launch: check_launch_limits(
+        meta, knobs, **launch
+    )
     return _launch
 
 
