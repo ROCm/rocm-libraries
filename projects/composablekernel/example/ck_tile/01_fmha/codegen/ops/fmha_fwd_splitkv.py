@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -38,10 +38,6 @@ from codegen.ops.fmha_fwd import (
 FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVS",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS",
-    # Split-kv flavour of the qr_tdm single-V / double-K path. Distinct from
-    # the prefill BlockFmhaPipelineQRKSVSTdm that fmha_fwd.py maps to -- same
-    # policy, separate pipeline body carrying only that one path. Do not point
-    # this at the prefill class.
     "qr_tdm": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm",
 }
 
@@ -579,12 +575,7 @@ class FmhaFwdSplitKVApiPool:
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
                     max_bm0 = max((t.bm0 for t in pool_by_hdim), default=0)
                     inners = str()
-                    # Try qr_tdm before qr: both match on decode shapes and
-                    # dispatch returns on the first hit. sorted() is stable, so
-                    # each group keeps its tile order.
-                    for i_trait, trait in enumerate(
-                        sorted(pool_by_hdim, key=lambda t: t.pipeline_tag != "qr_tdm")
-                    ):
+                    for i_trait, trait in enumerate(pool_by_hdim):
                         inners += FMHA_FWD_SPLITKV_API_INNER_DISPATCH.format(
                             F_if=if_(i_trait),
                             F_arch=arch,
@@ -919,8 +910,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
         pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
         # qr_tdm asserts away bias / logits soft cap / dropout / quantization.
-        # Keep the generated set minimal: no bias, no soft cap, no paged kv,
-        # no sink.
+        # Keep the generated set minimal: no bias, no soft cap, no sink.
         if dtype in ["fp16", "bf16"] and hdim == 128:
             Pipeline = FmhaFwdSplitKVPipeline
             for mask in get_mask_map(mask_impl).keys():
@@ -935,23 +925,10 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 #                      bm0, bn0, bk0, bn1, bk1,
                 "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "64" : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                # D128 carries two tiles, told apart by occupancy (see the
-                # pairing rule in FmhaFwdSplitKVApiPool):
-                #   occupancy -1          -> qr / qr_nwarp_sshuffle
-                #   occupancy set, bm0 64 -> qr_tdm. Same shape as the qr tile
-                #                            above; occupancy 2 is what
-                #                            BlockFmhaPipelineQRKSVSTdm's own
-                #                            kBlockPerCu computes for D128 /
-                #                            NO_BIAS / kM0 64, so naming it here
-                #                            changes nothing but makes the tile
-                #                            distinguishable from qr's.
-                #
-                # Two other qr_tdm tiles were measured and dropped: occupancy 3
-                # (same shape) was within noise everywhere, and bn0 32 was 4-5x
-                # slower because progressive K reload requires
+                # qr_tdm shares this tile. A bn0 32 variant was measured and
+                # dropped: 4-5x slower, because progressive K reload requires
                 # Gemm0::NIterPerWarp == 4, i.e. bn0 == 64.
-                "128": [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                        FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   2)],
+                "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
             }  # fmt: skip
         elif dtype in ["fp8", "bf8"]:
@@ -997,45 +974,19 @@ def get_fwd_splitkv_blobs(
             if not isinstance(tiles, list):
                 tiles = [tiles]
             hdim = int(hdim_str)
-            for tile, pipeline in itertools.product(
-                tiles, factory.get_pipelines(dtype, hdim, mask_impl)
-            ):
+            pipelines = factory.get_pipelines(dtype, hdim, mask_impl)
+            # qr_tdm and qr are mutually exclusive: every trait combination
+            # qr_tdm covers is dropped from qr, so no dispatch predicate is
+            # satisfied by both and emission order carries no meaning. qr keeps
+            # everything qr_tdm leaves out -- bias, logits soft cap, sink,
+            # col-major V, unpadded variants, and every head dim qr_tdm is not
+            # generated for.
+            shadowed = [replace(p, tag="qr") for p in pipelines if p.tag == "qr_tdm"]
+            for tile, pipeline in itertools.product(tiles, pipelines):
+                if pipeline in shadowed:
+                    continue
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
-                    continue
-                # qr_tdm owns the tile carrying an explicit occupancy; every
-                # other tile keeps occupancy == -1. Its shape is identical to
-                # the qr tile, so the occupancy is the only thing separating
-                # them.
-                if (tile.F_occupancy != -1) != (pipeline.tag == "qr_tdm"):
-                    continue
-                # Drop the qr instances qr_tdm shadows. Both tiles are bm0 64, so
-                # seqtune gives both the unconditional fallback and every other
-                # dispatch predicate matches too -- qr would never be reached for
-                # this exact trait combination, it would just cost build time and
-                # binary size. qr stays for everything qr_tdm does not cover:
-                # bias, logits soft cap, paged kv, sink, group mode, col-major V,
-                # unpadded variants, and every head dim other than 128.
-                if (
-                    pipeline.tag == "qr"
-                    and mode == "batch"
-                    and hdim == 128
-                    and dtype in ["fp16", "bf16"]
-                    and (
-                        pipeline.F_vlayout,
-                        pipeline.F_spad,
-                        pipeline.F_skpad,
-                        pipeline.F_dpad,
-                        pipeline.F_dvpad,
-                        pipeline.F_logits,
-                        pipeline.F_bias,
-                        pipeline.F_lse,
-                        pipeline.F_squant,
-                        pipeline.F_pagedkv,
-                        pipeline.F_sink,
-                    )
-                    == ("row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f")
-                ):
                     continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
