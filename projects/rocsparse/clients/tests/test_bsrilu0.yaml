@@ -147,6 +147,21 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos3, nos7, qc2534, mplate]
 
+# block_dim 1 is the 1x1 boundary of the block_dim <= 8 kernel.
+- name: bsrilu0
+  category: quick
+  function: bsrilu0
+  precision: *single_only_precisions
+  M: [32]
+  N: [32]
+  block_dim: [1]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
 # Pre_checkin
 - name: bsrilu0_bad_arg
   category: pre_checkin
