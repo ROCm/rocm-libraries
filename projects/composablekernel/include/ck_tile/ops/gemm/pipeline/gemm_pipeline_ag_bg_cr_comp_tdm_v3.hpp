@@ -379,6 +379,102 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             // waits only afterwards. The wait then covers both hazards the two full barriers of
             // the plain loop served: stage s may be refilled, and the other stage may be read.
             const bool is_issuer = is_a_issuer0 || is_b_issuer0 || is_a_issuer1 || is_b_issuer1;
+
+#ifndef CK_TDM_V3_SPLIT_A
+#define CK_TDM_V3_SPLIT_A 1
+#endif
+#if CK_TDM_V3_SPLIT_A
+            // Fragment order for the arriving stage: the whole B sub-tile stays resident and A is
+            // read one M iteration (MWarp x warp-M rows) at a time, right before its WMMAs. Each
+            // A slice reuses the registers of the previous one, so at the arrive (after the last
+            // slice's reads) only B, one A slice and the accumulators are live, and the last
+            // slice's WMMAs overlap the barrier.
+            using BG = BlockGemm;
+            using WG = typename BG::WarpGemm;
+            static_assert(!BG::UseDefaultScheduler && !BG::PackMNIter && !is_a_load_tr_v &&
+                              !is_b_load_tr_v && BG::KPerSubTile == 1,
+                          "CK_TDM_V3_SPLIT_A supports the plain (non-packed, non-transposed) layout");
+            constexpr index_t kMSlice = BG::MWarp * WG::kM;
+            constexpr index_t kKSub   = KPerBlock / sub_tile_num;
+            constexpr auto a_slice_distr = make_static_tile_distribution(
+                detail::make_embed_tile_distribution_encoding(
+                    tile_distribution_encoding<sequence<BG::NWarp>,
+                                               tuple<sequence<1, BG::MWarp>, sequence<1>>,
+                                               tuple<sequence<1, 0>>,
+                                               tuple<sequence<1, 0>>,
+                                               sequence<1, 2>,
+                                               sequence<0, 0>>{},
+                    typename WG::AWarpDstrEncoding{}));
+            using ASliceTile = decltype(make_static_distributed_tensor<ADataType>(a_slice_distr));
+            using AWarpDstr  = typename WG::AWarpDstr;
+            using BWarpDstr  = typename WG::BWarpDstr;
+            using CWarpDstr  = typename WG::CWarpDstr;
+            constexpr auto a_warp_y_len = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto b_warp_y_len = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto c_warp_y_len = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto a_warp_y_0 = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+            constexpr auto b_warp_y_0 = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+            constexpr auto c_warp_y_0 = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+            auto stage_gemm_split_a = [&](auto s) {
+                static_for<0, sub_tile_num, 1>{}([&](auto i) {
+                    auto b_win = make_tile_window(b_lds_block_views[s],
+                                                  make_tuple(number<NPerBlock>{}, number<kKSub>{}),
+                                                  {0, i.value * kKSub},
+                                                  b_lds_load_tile_distr);
+                    load_tile(b_block_tile, b_win);
+                    static_for<0, BG::MIterPerWarp, 1>{}([&](auto m) {
+                        auto a_win =
+                            make_tile_window(a_lds_block_views[s],
+                                             make_tuple(number<kMSlice>{}, number<kKSub>{}),
+                                             {m.value * kMSlice, i.value * kKSub},
+                                             a_slice_distr);
+                        ASliceTile a_slice;
+                        load_tile(a_slice, a_win);
+                        if constexpr(i.value == sub_tile_num - 1 && m.value == BG::MIterPerWarp - 1)
+                        {
+                            // Pin the signal here: the WMMAs below are register-only and the
+                            // scheduler would otherwise hoist them above it.
+                            __builtin_amdgcn_sched_barrier(0);
+                            s_wait_dscnt<0>();
+                            if(is_issuer)
+                            {
+                                s_wait_tensorcnt<0>();
+                            }
+                            __builtin_amdgcn_s_barrier_signal(-1);
+                            __builtin_amdgcn_sched_barrier(0);
+                        }
+                        typename WG::AWarpTensor a_warp;
+                        a_warp.get_thread_buffer() = a_slice.get_y_sliced_thread_data(
+                            merge_sequences(sequence<0, 0>{}, a_warp_y_0),
+                            merge_sequences(sequence<1, 1>{}, a_warp_y_len));
+                        static_for<0, BG::NIterPerWarp, 1>{}([&](auto n) {
+                            typename WG::BWarpTensor b_warp;
+                            b_warp.get_thread_buffer() = b_block_tile.get_y_sliced_thread_data(
+                                merge_sequences(sequence<n.value, 0>{}, b_warp_y_0),
+                                merge_sequences(sequence<1, 1>{}, b_warp_y_len));
+                            using c_idx = std::conditional_t<BG::TransposeC,
+                                                             sequence<n.value, m.value>,
+                                                             sequence<m.value, n.value>>;
+                            typename WG::CWarpTensor c_warp;
+                            c_warp.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
+                                merge_sequences(c_idx{}, c_warp_y_0),
+                                merge_sequences(sequence<1, 1>{}, c_warp_y_len));
+                            if constexpr(n.value != 0)
+                                WG{}.template operator()<ReuseA<true>, ReuseB<false>>(
+                                    c_warp, a_warp, b_warp);
+                            else
+                                WG{}.template operator()<ReuseA<false>, ReuseB<false>>(
+                                    c_warp, a_warp, b_warp);
+                            c_block_tile.set_y_sliced_thread_data(
+                                merge_sequences(c_idx{}, c_warp_y_0),
+                                merge_sequences(sequence<1, 1>{}, c_warp_y_len),
+                                c_warp.get_thread_buffer());
+                        });
+                    });
+                });
+            };
+#endif
             auto stage_gemm_arrive = [&](auto s) {
                 static_for<0, sub_tile_num, 1>{}([&](auto i) {
                     constexpr auto mode = sub_tile_num == 1               ? WindowSlideMode::Stay
@@ -472,7 +568,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             }
                         }
 #if CK_TDM_V3_SPLIT_BARRIER
+#if CK_TDM_V3_SPLIT_A
+                        stage_gemm_split_a(I0{});
+#else
                         stage_gemm_arrive(I0{});
+#endif
                         stage_wait();
 #else
                         stage_gemm(I0{});
@@ -539,7 +639,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     // pong
                     {
 #if CK_TDM_V3_SPLIT_BARRIER
+#if CK_TDM_V3_SPLIT_A
+                        stage_gemm_split_a(I1{});
+#else
                         stage_gemm_arrive(I1{});
+#endif
                         stage_wait();
 #else
                         stage_gemm(I1{});
@@ -577,7 +681,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             if constexpr(TailNum == TailNumber::Two)
             {
 #if CK_TDM_V3_SPLIT_BARRIER
+#if CK_TDM_V3_SPLIT_A
+                stage_gemm_split_a(I0{});
+#else
                 stage_gemm_arrive(I0{});
+#endif
                 stage_wait();
 #else
                 stage_gemm(I0{});
