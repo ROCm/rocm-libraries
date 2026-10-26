@@ -6,7 +6,7 @@
 
 Architecture: gfx942
 GemmType: BSS_NT
-Source: rocm-libraries a292e397cf, 2026-10-22
+Source: rocm-libraries 501708505c, 2026-10-22
 MatrixInstructions:
   - [4, 4, 4, 16, 1, 1, 1, 4, 1]  # MT16x64  DepthU 32,64,128
   - [4, 4, 4, 16, 1, 1, 2, 4, 1]  # MT16x128  DepthU 32,64

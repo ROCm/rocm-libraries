@@ -6,7 +6,7 @@
 
 Architecture: gfx950
 GemmType: CCC_NT
-Source: rocm-libraries 5c58d88c12, 2026-10-26
+Source: rocm-libraries 501708505c, 2026-10-26
 MatrixInstructions:
   - [16, 16, 4, 1, 1, 1, 1, 4, 1]  # MT64x16  DepthU 16,32,64,128
   - [16, 16, 4, 1, 1, 1, 2, 4, 1]  # MT64x32  DepthU 16,32,64,128

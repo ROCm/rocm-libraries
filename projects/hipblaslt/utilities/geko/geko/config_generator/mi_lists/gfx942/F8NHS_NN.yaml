@@ -6,7 +6,7 @@
 
 Architecture: gfx942
 GemmType: F8NHS_NN
-Source: rocm-libraries a292e397cf, 2026-10-22
+Source: rocm-libraries 501708505c, 2026-10-22
 MatrixInstructions:
   - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16  DepthU 32,64,128,256,512
   - [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT64x32  DepthU 32,64,128,256,512
