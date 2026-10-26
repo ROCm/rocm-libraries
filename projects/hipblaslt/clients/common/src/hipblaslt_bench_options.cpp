@@ -5,7 +5,6 @@
  *
  *******************************************************************************/
 #include "hipblaslt_bench_options.hpp"
-#include "hipblaslt_arguments.hpp"
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
@@ -108,14 +107,4 @@ namespace hipblaslt_bench_options
         return 2;
     }
 
-    void apply_strict_verification(Arguments& arg)
-    {
-        if(verify_strict())
-        {
-            arg.norm_check     = 1;
-            arg.allclose_check = 1;
-            // Let the benchmark collect every failure before choosing its exit code.
-            arg.norm_check_assert = false;
-        }
-    }
 }
