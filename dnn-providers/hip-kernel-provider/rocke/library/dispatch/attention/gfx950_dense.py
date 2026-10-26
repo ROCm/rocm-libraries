@@ -289,13 +289,16 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     The persistent body pays off once the default tile yields at least one
     work item per persistent CTA and the causal diagonal is fixed (the moving
     bottom-right diagonal runs only on the grid body). Wide DMA additionally
-    needs a plain causal D128 problem whose lengths are tile multiples. Each
-    later entry is a fallback for when an earlier body refuses the request.
+    needs a causal D128 problem whose lengths are tile multiples. For plain
+    causal (no lookahead) it is also taken below that work count: its default
+    tile halves there (:func:`_default_block_m`), which keeps every persistent
+    CTA busy. Each later entry is a fallback for when an earlier body refuses
+    the request.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     try:
-        causal, _right_bound, moving_bottom_right = _dense_band(req)
+        causal, right_bound, moving_bottom_right = _dense_band(req)
     except ValueError:
         return ()
     geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
@@ -303,8 +306,8 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
     persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
-    wide = (
-        persistent
+    wide_ok = (
+        not moving_bottom_right
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
         and not int(req.sliding_window)
@@ -313,11 +316,14 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
         and sk % bn == 0
     )
     by_id = {v.variant_id: v.candidate_name for v in GFX950_DENSE_VARIANTS}
-    order = (
-        ("persist_widedma", "persist", "grid")
-        if wide
-        else ("persist", "grid") if persistent else ("grid",)
-    )
+    if persistent:
+        order = (
+            ("persist_widedma", "persist", "grid") if wide_ok else ("persist", "grid")
+        )
+    elif wide_ok and not right_bound:
+        order = ("persist_widedma", "grid")
+    else:
+        order = ("grid",)
     return tuple(by_id[v] for v in order)
 
 
