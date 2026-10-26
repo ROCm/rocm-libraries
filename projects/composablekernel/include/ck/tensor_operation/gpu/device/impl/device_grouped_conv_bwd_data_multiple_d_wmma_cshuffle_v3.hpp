@@ -719,7 +719,17 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
-            stride_overflow          = stride_overflow_in;
+            stride_overflow             = stride_overflow_in;
+            bool image_covered_dilation = true;
+            bool image_covered_strides  = true;
+            for(index_t d = 0; d < NDimSpatial; d++)
+            {
+                // If dilation and stride is not equal we will have some empty places
+                image_covered_dilation &=
+                    conv_filter_dilations[d] == 1 || conv_filter_strides[d] == 1;
+                // If stride is larger than windows size then we will have some empty places
+                image_covered_strides &= conv_filter_strides[d] <= b_g_k_c_xs_lengths[d + I3];
+            }
             bool if_d_is_output_mem  = false;
             const void* out_mem_void = static_cast<const void*>(p_e);
             static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -729,70 +739,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                 }
             });
 
-            bool completely_overwrites_e = false;
-            if constexpr(NumDTensor == 0 && is_same_v<ADataType, BDataType> &&
-                         is_same_v<ADataType, EDataType> &&
-                         (is_same_v<ADataType, half_t> || is_same_v<ADataType, bhalf_t>) &&
-                         ConvBackwardDataSpecialization ==
-                             ConvolutionBackwardDataSpecialization::Filter1x1Stride1Pad0 &&
-                         (is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::GNDHWC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::NDHWGC>))
-            {
-                completely_overwrites_e = k_batch_ == 1 &&
-                                          a_g_n_k_wos_lengths[0] == b_g_k_c_xs_lengths[0] &&
-                                          a_g_n_k_wos_lengths[0] == e_g_n_c_wis_lengths[0] &&
-                                          a_g_n_k_wos_lengths[1] == e_g_n_c_wis_lengths[1] &&
-                                          a_g_n_k_wos_lengths[2] == b_g_k_c_xs_lengths[1] &&
-                                          b_g_k_c_xs_lengths[2] == e_g_n_c_wis_lengths[2];
+            bwd_needs_zero_out = k_batch_ > 1 || !image_covered_dilation || !image_covered_strides;
 
-                for(index_t i = 0; i < NDimSpatial + 3; ++i)
-                {
-                    completely_overwrites_e &= a_g_n_k_wos_lengths[i] > 0 &&
-                                               b_g_k_c_xs_lengths[i] > 0 &&
-                                               e_g_n_c_wis_lengths[i] > 0;
-                }
-
-                for(index_t d = 0; d < NDimSpatial; ++d)
-                {
-                    completely_overwrites_e &=
-                        a_g_n_k_wos_lengths[d + 3] == e_g_n_c_wis_lengths[d + 3] &&
-                        b_g_k_c_xs_lengths[d + 3] == 1 && conv_filter_strides[d] == 1 &&
-                        input_left_pads[d] == 0 && input_right_pads[d] == 0;
-                }
-
-                if(completely_overwrites_e)
-                {
-                    // The 1x1 transform freezes the filter coordinates and merges
-                    // (N, output spatial) into M, with every C in GEMM N. Require
-                    // packed E strides so group/batch offsets cover distinct elements.
-                    completely_overwrites_e    = e_g_n_c_wis_strides[2] == 1;
-                    long_index_t packed_stride = e_g_n_c_wis_lengths[2];
-                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
-                                 is_same_v<ELayout, tensor_layout::convolution::NDHWGC>)
-                    {
-                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
-                        packed_stride *= e_g_n_c_wis_lengths[0];
-                    }
-                    for(index_t d = NDimSpatial; d > 0; --d)
-                    {
-                        completely_overwrites_e &= e_g_n_c_wis_strides[d + 2] == packed_stride;
-                        packed_stride *= e_g_n_c_wis_lengths[d + 2];
-                    }
-                    completely_overwrites_e &= e_g_n_c_wis_strides[1] == packed_stride;
-                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
-                                 is_same_v<ELayout, tensor_layout::convolution::GNDHWC>)
-                    {
-                        packed_stride *= e_g_n_c_wis_lengths[1];
-                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
-                    }
-                }
-            }
-
-            // An aliased D must not be zeroed before its value is read by the epilogue.
-            // Otherwise only the proved split-1, no-D case can omit initialization.
-            bwd_needs_zero_out = !if_d_is_output_mem && !completely_overwrites_e;
+            // Temporary workaround untill prove/fix above conditions.
+            bwd_needs_zero_out = !if_d_is_output_mem;
             e_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
                     e_g_n_c_wis_lengths_.begin(), NDimSpatial + I3, 1, std::multiplies<>()) *

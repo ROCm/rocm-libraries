@@ -49,93 +49,6 @@ void DebugPrintCKArgPtrs(
 #undef DEBUG_PRINT_VEC
 
 #endif // NDEBUG
-// Use actual invocation descriptors and byte ranges, not equality of NCHW and NHWC
-// descriptors: singleton spatial dimensions only make their reachable offsets equal.
-inline bool MatchesPackedOperand(const TensorDescriptor& actual, const TensorDescriptor& expected)
-{
-    return actual.IsPacked() && actual.GetType() == expected.GetType() &&
-           actual.GetLayout_str() == expected.GetLayout_str() &&
-           actual.GetLengths() == expected.GetLengths() &&
-           actual.GetStrides() == expected.GetStrides();
-}
-
-inline bool
-DisjointByteRanges(ConstData_t left, size_t left_bytes, ConstData_t right, size_t right_bytes)
-{
-    const auto a   = reinterpret_cast<std::uintptr_t>(left);
-    const auto b   = reinterpret_cast<std::uintptr_t>(right);
-    const auto max = std::numeric_limits<std::uintptr_t>::max();
-    return a != 0 && b != 0 && left_bytes != 0 && right_bytes != 0 && left_bytes <= max - a &&
-           right_bytes <= max - b && (a + left_bytes <= b || b + right_bytes <= a);
-}
-
-inline bool CanBorrowNCHWOperands(const ConvTensors& tensors,
-                                  const TensorDescriptor& x_desc,
-                                  const TensorDescriptor& w_desc,
-                                  const TensorDescriptor& y_desc,
-                                  Data_t workspace,
-                                  size_t workspace_bytes)
-{
-    if(!MatchesPackedOperand(tensors.xDesc, x_desc) ||
-       !MatchesPackedOperand(tensors.wDesc, w_desc) || !MatchesPackedOperand(tensors.yDesc, y_desc))
-        return false;
-
-    const auto x_bytes                 = GetPackedSize(x_desc);
-    const auto w_bytes                 = GetPackedSize(w_desc);
-    const auto y_bytes                 = GetPackedSize(y_desc);
-    constexpr std::uintptr_t alignment = 16;
-    if(reinterpret_cast<std::uintptr_t>(tensors.x) % alignment != 0 ||
-       reinterpret_cast<std::uintptr_t>(tensors.w) % alignment != 0 ||
-       reinterpret_cast<std::uintptr_t>(tensors.y) % alignment != 0 ||
-       reinterpret_cast<std::uintptr_t>(workspace) % alignment != 0)
-        return false;
-
-    return DisjointByteRanges(tensors.x, x_bytes, tensors.w, w_bytes) &&
-           DisjointByteRanges(tensors.x, x_bytes, tensors.y, y_bytes) &&
-           DisjointByteRanges(tensors.w, w_bytes, tensors.y, y_bytes) &&
-           DisjointByteRanges(tensors.x, x_bytes, workspace, workspace_bytes) &&
-           DisjointByteRanges(tensors.w, w_bytes, workspace, workspace_bytes) &&
-           DisjointByteRanges(tensors.y, y_bytes, workspace, workspace_bytes);
-}
-
-inline bool IsNativeOutputCKKernel(const std::string& kernel_id)
-{
-    return kernel_id.rfind("NativeOutput:", 0) == 0;
-}
-
-inline bool IsNativeOutputForwardApplicable(const miopen::conv::ProblemDescription& problem)
-{
-    if(!problem.IsDirectionForward() || (!problem.Is2d() && !problem.Is3d()) ||
-       !problem.IsLayoutDefault() || problem.HasNonPackedTensors() ||
-       (!problem.IsFp16() && !problem.IsBfp16() && !problem.IsFp32()) ||
-       problem.GetConv().mode != miopenConvolution || problem.GetGroupCount() == 0 ||
-       problem.GetAlphaBetaCase() != DEFAULT || problem.GetAlpha().GetAsDouble() != 1.0 ||
-       problem.GetBeta().GetAsDouble() != 0.0 ||
-       problem.GetConv().trans_output_pads.size() != problem.GetSpatialDims() ||
-       std::any_of(problem.GetConv().trans_output_pads.begin(),
-                   problem.GetConv().trans_output_pads.end(),
-                   [](int pad) { return pad != 0; }))
-        return false;
-
-    bool non_pointwise         = false;
-    const auto& filter_lengths = problem.GetWeights().GetLengths();
-    for(size_t i = 2; i < filter_lengths.size(); ++i)
-        non_pointwise |= filter_lengths[i] > 1;
-    if(!non_pointwise || !problem.AllTensorsDimsFitIntoInt())
-        return false;
-
-    // These candidates index tensors with int32 coordinates, including flat extents.
-    for(const auto* desc : {&problem.GetIn(), &problem.GetWeights(), &problem.GetOut()})
-    {
-        if(desc->GetElementSpace() > static_cast<size_t>(std::numeric_limits<int>::max()))
-            return false;
-        for(const auto length : desc->GetLengths())
-            if(length == 0)
-                return false;
-    }
-    return true;
-}
-
 } // namespace internal
 
 namespace conv {
@@ -861,12 +774,10 @@ template <bool NeedsSplitK, typename DeviceOpType, typename CKArgsType, typename
 std::unique_ptr<ck::tensor_operation::device::BaseArgument>
 MakeNCHWCKArgPtr(const CKArgsType& ck_args,
                  const std::shared_ptr<DeviceOpType>& sh_conv_ptr,
-                 const std::array<Data_t, 3>& operand_ptrs,
+                 const std::array<internal::TransposeInstanceTagged*, 3>& tr_ptrs,
                  const CastType& data_ctx,
                  const std::optional<int>& split_k)
 {
-    const auto buffer = [&](size_t index) { return operand_ptrs[index]; };
-
     std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr;
 
     if constexpr(std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
@@ -904,10 +815,10 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
 
         argument_ptr = ck_args.MakeArgPtr(
             sh_conv_ptr,
-            buffer(0),
-            buffer(1),
+            tr_ptrs[0]->GetBufferPtr(),
+            tr_ptrs[1]->GetBufferPtr(),
             bias_buf,
-            buffer(2),
+            tr_ptrs[2]->GetBufferPtr(),
             conv_param.alpha,
             conv_param.beta,
             GetOutElementOp<typename CKArgsType::OutputDataType,
@@ -920,9 +831,9 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
             if(split_k.has_value())
             {
                 argument_ptr = ck_args.MakeArgPtr(sh_conv_ptr,
-                                                  buffer(0),
-                                                  buffer(1),
-                                                  buffer(2),
+                                                  tr_ptrs[0]->GetBufferPtr(),
+                                                  tr_ptrs[1]->GetBufferPtr(),
+                                                  tr_ptrs[2]->GetBufferPtr(),
                                                   data_ctx.alpha.GetAsFloat(),
                                                   data_ctx.beta.GetAsFloat(),
                                                   split_k.value());
@@ -935,9 +846,9 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
         else
         {
             argument_ptr = ck_args.MakeArgPtr(sh_conv_ptr,
-                                              buffer(0),
-                                              buffer(1),
-                                              buffer(2),
+                                              tr_ptrs[0]->GetBufferPtr(),
+                                              tr_ptrs[1]->GetBufferPtr(),
+                                              tr_ptrs[2]->GetBufferPtr(),
                                               data_ctx.alpha.GetAsFloat(),
                                               data_ctx.beta.GetAsFloat());
         }
@@ -1044,8 +955,7 @@ template <bool ZeroOutputs,
           typename CastType,
           typename Input1TposeOp,
           typename Input2TposeOp,
-          typename OutputTposeOp,
-          bool PlainFwdSetOutput      = false>
+          typename OutputTposeOp>
 ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const miopen::conv::ProblemDescription& problem,
                                     const std::string& kernel_id,
@@ -1054,8 +964,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
-    static_assert(!PlainFwdSetOutput ||
-                  (!ZeroOutputs && std::is_same_v<CastType, miopen::conv::DataInvokeParams>));
 
     ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1106,73 +1014,37 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    // Identity is a per-operand property. Keep the all-buffer descriptor,
-    // alignment, alias and workspace proof at invocation, even when only one
-    // of these tagged transposes can be borrowed.
-    const bool borrowable_shape =
-        (problem.Is2d() || problem.Is3d()) && problem.IsLayoutDefault() &&
-        problem.GetConv().mode == miopenConvolution &&
-        problem.GetConv().trans_output_pads.size() == problem.GetSpatialDims() &&
-        std::all_of(problem.GetConv().trans_output_pads.begin(),
-                    problem.GetConv().trans_output_pads.end(),
-                    [](int pad) { return pad == 0; }) &&
-        (problem.IsBfp16() || problem.IsFp16() ||
-         (problem.IsFp32() && problem.Is3d() &&
-          (problem.IsDirectionForward() ||
-           problem.GetDirection() == miopen::conv::Direction::BackwardData) &&
-          ctx.GetStream().GetDeviceName() == "gfx1250")) &&
-        !problem.HasNonPackedTensors() && problem.GetAlphaBetaCase() == DEFAULT &&
-        problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f;
-
-    // The 3D output-copy optimization is restricted to gfx1250; other devices
-    // retain staging even when the selected CK invoker defines E.
-    const bool selected_output_complete =
-        (!problem.IsDirectionForward() || PlainFwdSetOutput) &&
-        (problem.GetDirection() != miopen::conv::Direction::BackwardWeights ||
-         ctx.GetStream().GetDeviceName() == "gfx1250") &&
-        (!problem.Is3d() || ctx.GetStream().GetDeviceName() == "gfx1250") &&
-        SelectedNCHWCKOutputIsFullyDefined(problem, id_string, split_k);
-
-    result.invoker_factory = [kernel_id_                = kernel_id,
-                              split_k_                  = split_k,
-                              ck_args_                  = std::move(ck_args),
-                              sh_conv_ptr_              = std::shared_ptr{std::move(*ptr_iter)},
-                              input1_tr_inst_           = std::move(_input1_tr_inst),
-                              input2_tr_inst_           = std::move(_input2_tr_inst),
-                              output_tr_inst_           = std::move(_output_tr_inst),
-                              output_init_tr_inst_      = std::move(_output_init_tr_inst),
-                              borrowable_shape_         = borrowable_shape,
-                              selected_output_complete_ = selected_output_complete,
-                              x_desc_ =
-                                  problem.IsDirectionForward() ? problem.GetIn() : problem.GetOut(),
-                              w_desc_ = problem.GetWeights(),
-                              y_desc_ =
-                                  problem.IsDirectionForward() ? problem.GetOut() : problem.GetIn(),
-                              ck_buff_des_ = _ck_buff_des,
-                              workspace_size_ =
-                                  result.workspace_sz](const std::vector<Kernel>& kernels) mutable {
+    result.invoker_factory = [kernel_id_           = kernel_id,
+                              split_k_             = split_k,
+                              ck_args_             = std::move(ck_args),
+                              sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
+                              input1_tr_inst_      = std::move(_input1_tr_inst),
+                              input2_tr_inst_      = std::move(_input2_tr_inst),
+                              output_tr_inst_      = std::move(_output_tr_inst),
+                              output_init_tr_inst_ = std::move(_output_init_tr_inst),
+                              ck_buff_des_ =
+                                  _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
         return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
-                ck_args2                  = std::move(ck_args_),
-                sh_conv_ptr2              = std::move(sh_conv_ptr_),
-                input1_tr_inst2           = std::move(input1_tr_inst_),
-                input2_tr_inst2           = std::move(input2_tr_inst_),
-                output_tr_inst2           = std::move(output_tr_inst_),
-                output_init_tr_inst2      = std::move(output_init_tr_inst_),
-                borrowable_shape2         = borrowable_shape_,
-                selected_output_complete2 = selected_output_complete_,
-                x_desc2                   = std::move(x_desc_),
-                w_desc2                   = std::move(w_desc_),
-                y_desc2                   = std::move(y_desc_),
-                ck_buff_des2              = ck_buff_des_,
-                workspace_size2           = workspace_size_](
-                   const Handle& handle, const AnyInvokeParams& primitive_parameters) mutable {
+                ck_args2             = std::move(ck_args_),
+                sh_conv_ptr2         = std::move(sh_conv_ptr_),
+                input1_tr_inst2      = std::move(input1_tr_inst_),
+                input2_tr_inst2      = std::move(input2_tr_inst_),
+                output_tr_inst2      = std::move(output_tr_inst_),
+                output_init_tr_inst2 = std::move(output_init_tr_inst_),
+                ck_buff_des2         = ck_buff_des_](const Handle& handle,
+                                             const AnyInvokeParams& primitive_parameters) mutable {
             handle.ResetKernelTime();
 
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
             Data_t workspace_ptr = GetWorkspacePointer<CastType>(data_ctx);
             ValidateWorkspacePointer<CastType>(workspace_ptr);
+
+            input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            input2_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            output_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
 
             // if FusionInvokeParams extract tensors from the params
             // conversion operator applied here to convert to ConvTensors
@@ -1189,86 +1061,33 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
             float elapsed = 0.0f;
 
-            bool safe_to_borrow = false;
-            if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> ||
-                         std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
-            {
-                safe_to_borrow =
-                    borrowable_shape2 && data_ctx.alpha.GetAsFloat() == 1.0f &&
-                    data_ctx.beta.GetAsFloat() == 0.0f &&
-                    data_ctx.workSpaceSize >= workspace_size2 &&
-                    internal::CanBorrowNCHWOperands(
-                        conv_tensors, x_desc2, w_desc2, y_desc2, workspace_ptr, workspace_size2);
-            }
-            else
-            {
-                // Fusion has no DataInvokeParams scalar/workspace contract and
-                // deliberately never borrows NCHW operands.
-                static_cast<void>(borrowable_shape2);
-                static_cast<void>(workspace_size2);
-            }
+            // ConvertFrom automatically keeps kernel time and accumulates
+            input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
 
-            // The selected invoker, not beta=0 or a successful GEMM launch,
-            // must define all of E. This removes only the old-output copy;
-            // CK's own clears and the staged output conversion remain intact.
-            const bool skip_output_init = selected_output_complete2 && safe_to_borrow;
+            if constexpr(ZeroOutputs)
+            {
+                /// Note: Need to clear buffer memory for output since all values may not be set.
+                output_tr_inst2.ZeroOutBuffer(handle);
+                if(handle.IsProfilingEnabled())
+                    elapsed += handle.GetKernelTime();
+            }
 
             std::array<internal::TransposeInstanceTagged*, 3> tr_ptrs = {
                 &input1_tr_inst2, &input2_tr_inst2, &output_tr_inst2};
 
-            // CKArgs expects Input, Weights, Output regardless of direction.
-            std::sort(tr_ptrs.begin(), tr_ptrs.end(), [](const auto* left, const auto* right) {
+            // sort by tag in order: Input, Weights, Output
+            std::sort(tr_ptrs.begin(), tr_ptrs.end(), [](const auto& left, const auto& right) {
                 return left->GetConvOperandTagAsInt() < right->GetConvOperandTagAsInt();
             });
-
-            std::array<Data_t, 3> operand_ptrs{};
-            for(size_t i = 0; i < tr_ptrs.size(); ++i)
-            {
-                if(safe_to_borrow && tr_ptrs[i]->IsSkippable() &&
-                   (tr_ptrs[i] != &output_tr_inst2 || output_init_tr_inst2.IsSkippable()))
-                    operand_ptrs[i] = tr_ptrs[i]->GetTensorPtr(conv_tensors);
-                else
-                {
-                    tr_ptrs[i]->AssignBuffer(handle, workspace_ptr);
-                    operand_ptrs[i] = tr_ptrs[i]->GetBufferPtr();
-                }
-            }
-
-            const bool borrowed_input1 = safe_to_borrow && input1_tr_inst2.IsSkippable();
-            const bool borrowed_input2 = safe_to_borrow && input2_tr_inst2.IsSkippable();
-            const bool borrowed_output = safe_to_borrow && output_tr_inst2.IsSkippable() &&
-                                         output_init_tr_inst2.IsSkippable();
-            if(!borrowed_output)
-                output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
-
-            // ConvertFrom automatically keeps kernel time and accumulates.
-            if(!borrowed_input1)
-                input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-            if(!borrowed_input2)
-                input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-            if(!borrowed_output && !skip_output_init)
-                output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-
-            elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
-            if constexpr(ZeroOutputs)
-            {
-                // Preserve required initialization for incomplete CK outputs.
-                if(borrowed_output)
-                    ZeroOutTensor(handle,
-                                  output_tr_inst2.GetTensorDesc(conv_tensors),
-                                  output_tr_inst2.GetTensorPtr(conv_tensors));
-                else
-                    output_tr_inst2.ZeroOutBuffer(handle);
-                if(handle.IsProfilingEnabled())
-                    elapsed += handle.GetKernelTime();
-            }
 
             std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
                 MakeNCHWCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
                                  std::decay_t<decltype(*sh_conv_ptr2)>,
                                  CKArgsType,
-                                 CastType>(
-                    ck_args2, sh_conv_ptr2, operand_ptrs, data_ctx, split_k2);
+                                 CastType>(ck_args2, sh_conv_ptr2, tr_ptrs, data_ctx, split_k2);
 
             shared<Data_t> buf_handle{};
             if(ck_buff_des2.has_value() && ck_buff_des2->ck_size && workspace_ptr)
@@ -1300,8 +1119,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             }
 
             // ConvertTo automatically keeps kernel time and accumulates
-            if(!borrowed_output)
-                output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
+            output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
 #else
@@ -1449,6 +1267,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                      std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
                                      CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
+
                 auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
 
                 // Zero out the buffer for output data since it won't always write all output
@@ -1491,119 +1310,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     }
 }
 
-template <int ND, typename DeviceOpType, typename CKArgsType>
-ConvSolution InitInvokerFactoryFwdNativeOutput(const ExecutionContext& ctx,
-                                               const miopen::conv::ProblemDescription& problem,
-                                               const std::string& kernel_id)
-{
-    static_assert(ND == 2 || ND == 3);
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if(ctx.GetStream().GetDeviceName() != "gfx1250" ||
-       !internal::IsNativeOutputForwardApplicable(problem) ||
-       !internal::IsNativeOutputCKKernel(kernel_id))
-        return ConvSolution{miopenStatusInvalidValue};
-
-    auto conv_ptrs = DeviceOpType::GetInstances();
-    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
-    if(ptr_iter == conv_ptrs.end())
-        return ConvSolution{miopenStatusInvalidValue};
-
-    auto ck_args = CKArgsType{problem};
-    if(!ck_args.IsSupportedBy(*ptr_iter))
-        return ConvSolution{miopenStatusInvalidValue};
-    ConvSolution result;
-
-    using Input        = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Input>;
-    using Weight       = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Weights>;
-    auto input_solver  = Input{}.MakeTransposeSolver(ctx, problem, ck_args);
-    auto weight_solver = Weight{}.MakeTransposeSolver(ctx, problem, ck_args);
-    MultiBufferWorkspaceTraits workspace_traits(
-        {input_solver.GetOutputTensorSize(), weight_solver.GetOutputTensorSize()});
-    result.workspace_sz        = workspace_traits.GetSize();
-    result.construction_params = {input_solver.GetKernelInfo(), weight_solver.GetKernelInfo()};
-
-    auto input_transpose = internal::TransposeInstanceTagged{
-        input_solver, 0, workspace_traits, 0, internal::ConvOperandTag::Input};
-    auto weight_transpose = internal::TransposeInstanceTagged{
-        weight_solver, 1, workspace_traits, 1, internal::ConvOperandTag::Weights};
-    result.invoker_factory = [ck_args_          = std::move(ck_args),
-                              conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
-                              input_transpose_  = std::move(input_transpose),
-                              weight_transpose_ = std::move(weight_transpose),
-                              x_desc_           = problem.GetIn(),
-                              w_desc_           = problem.GetWeights(),
-                              y_desc_           = problem.GetOut(),
-                              kernel_id_        = kernel_id,
-                              workspace_size_ =
-                                  result.workspace_sz](const std::vector<Kernel>& kernels) mutable {
-        return [ck_args2          = std::move(ck_args_),
-                conv_ptr2         = std::move(conv_ptr_),
-                input_transpose2  = std::move(input_transpose_),
-                weight_transpose2 = std::move(weight_transpose_),
-                x_desc2           = std::move(x_desc_),
-                w_desc2           = std::move(w_desc_),
-                y_desc2           = std::move(y_desc_),
-                kernel_id2        = std::move(kernel_id_),
-                workspace_size2   = workspace_size_,
-                kernels](const Handle& handle, const AnyInvokeParams& parameters) mutable {
-            const auto& data   = parameters.CastTo<miopen::conv::DataInvokeParams>();
-            const auto tensors = GetTensors(data);
-            MIOPEN_THROW_IF(
-                handle.GetDeviceName() != "gfx1250" || data.alpha.GetAsDouble() != 1.0 ||
-                    data.beta.GetAsDouble() != 0.0 || data.workSpaceSize < workspace_size2 ||
-                    !internal::CanBorrowNCHWOperands(
-                        tensors, x_desc2, w_desc2, y_desc2, data.workSpace, workspace_size2),
-                "Invalid native-output forward operands, scalars, or workspace");
-
-            // Validate before either conversion can modify shared invocation buffers.
-            input_transpose2.AssignBuffer(handle, data.workSpace);
-            weight_transpose2.AssignBuffer(handle, data.workSpace);
-            auto argument = ck_args2.MakeArgPtr(conv_ptr2,
-                                                input_transpose2.GetBufferPtr(),
-                                                weight_transpose2.GetBufferPtr(),
-                                                data.tensors.out,
-                                                1.0f,
-                                                0.0f);
-            MIOPEN_THROW_IF(!conv_ptr2->IsSupportedArgument(argument.get()) ||
-                                conv_ptr2->GetWorkSpaceSize(argument.get()) != 0,
-                            "Unsupported native-output forward CK argument");
-
-            handle.ResetKernelTime();
-            input_transpose2.ConvertFrom(handle, kernels, tensors);
-            weight_transpose2.ConvertFrom(handle, kernels, tensors);
-            const float conversion_time =
-                handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
-            auto invoker = conv_ptr2->MakeInvokerPointer();
-            {
-                WorkAroundHipEventProfiler profiler(handle);
-                MIOPEN_LOG_I2("kernel_name = " << kernel_id2);
-                invoker->Run(argument.get(), {handle.GetStream(), false});
-            }
-            if(handle.IsProfilingEnabled())
-            {
-                const float elapsed = conversion_time + handle.GetKernelTime();
-                if(IsLoggingKernel())
-                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
-                handle.ResetKernelTime();
-                handle.AccumKernelTime(elapsed);
-            }
-        };
-    };
-    return result;
-#else
-    (void)ctx;
-    (void)problem;
-    (void)kernel_id;
-    return {};
-#endif
-}
-
-template <int ND,
-          bool ZeroOutputs,
-          typename DeviceOpType,
-          typename CKArgsType,
-          typename CastType,
-          bool PlainFwdSetOutput = false>
+template <int ND, bool ZeroOutputs, typename DeviceOpType, typename CKArgsType, typename CastType>
 ConvSolution InitInvokerFactoryFwdNCHW(const ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem,
                                        const std::string& kernel_id)
@@ -1614,14 +1321,8 @@ ConvSolution InitInvokerFactoryFwdNCHW(const ExecutionContext& ctx,
     using Input1 = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Input>;
     using Input2 = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Weights>;
     using Output = internal::CKTransposeOutputOp<ND, internal::ConvOperandTag::Output>;
-    return InitInvokerFactoryNCHW<ZeroOutputs,
-                                  DeviceOpType,
-                                  CKArgsType,
-                                  CastType,
-                                  Input1,
-                                  Input2,
-                                  Output,
-                                  PlainFwdSetOutput>(
+
+    return InitInvokerFactoryNCHW<ZeroOutputs, DeviceOpType, CKArgsType, CastType>(
         ctx, problem, kernel_id, Input1{}, Input2{}, Output{});
 }
 

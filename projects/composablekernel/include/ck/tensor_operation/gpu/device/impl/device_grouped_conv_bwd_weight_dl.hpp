@@ -928,10 +928,10 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
         const index_t Conv_C_;
 
         std::array<ck::index_t, NDimSpatial + 3> filter_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
+        const std::array<ck::index_t, NDimSpatial> conv_filter_dilations_;
+        const std::array<ck::index_t, NDimSpatial> input_left_pads_;
+        const std::array<ck::index_t, NDimSpatial> input_right_pads_;
         bool stride_overflow;
     };
 

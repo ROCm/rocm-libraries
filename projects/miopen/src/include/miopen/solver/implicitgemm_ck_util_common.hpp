@@ -42,11 +42,6 @@
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
-#include <algorithm>
-#include <optional>
-#include <string>
-#include <string_view>
-
 namespace miopen {
 
 namespace conv {
@@ -247,7 +242,6 @@ class TransposeInstance
     size_t kern_idx   = std::numeric_limits<size_t>::max();
     size_t buf_offset = 0;
     shared<Data_t> buf_handle{};
-    bool skippable = false;
 
 public:
     template <typename TransSolnType>
@@ -258,12 +252,9 @@ public:
         : tensor_sz(trans_sol.GetOutputTensorSize()),
           kern_args(trans_sol.GetKernelArg()),
           kern_idx(k_idx),
-          buf_offset(wt.GetOffset(wspace_index)),
-          skippable(trans_sol.IsSkippable())
+          buf_offset(wt.GetOffset(wspace_index))
     {
     }
-
-    bool IsSkippable() const noexcept { return skippable; }
 
     void AssignBuffer(const Handle& handle, Data_t workSpace)
     {
@@ -341,18 +332,6 @@ public:
     {
         using IntType = std::underlying_type_t<ConvOperandTag>;
         return static_cast<IntType>(GetConvOperandTag());
-    }
-    Data_t GetTensorPtr(const ConvTensors& tensors) const { return pickTensorPtr(tensors); }
-
-    const TensorDescriptor& GetTensorDesc(const ConvTensors& tensors) const
-    {
-        switch(conv_op_tag_)
-        {
-        case ConvOperandTag::Input: return tensors.xDesc;
-        case ConvOperandTag::Weights: return tensors.wDesc;
-        case ConvOperandTag::Output: return tensors.yDesc;
-        }
-        MIOPEN_THROW(miopenStatusInternalError, "Unknown CK convolution operand tag");
     }
 
     void ConvertFrom(const Handle& handle,
@@ -481,90 +460,6 @@ inline void DebugPrintConvTensors(const ConvTensors& conv_tensors)
 inline size_t GetPackedSize(const TensorDescriptor& td)
 {
     return td.GetElementSize() * GetTypeSize(td.GetType());
-}
-
-// Only selected CK families whose complete invocation defines the packed E tensor
-// independently of its previous contents may omit the NCHW old-output transpose.
-// Keep this list tied to the CK implementations, not to dtype, spatial-size or
-// beta-zero heuristics. The caller also checks invocation scalars and disjoint
-// descriptors/pointers; unsupported or newly introduced families default to false.
-inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescription& problem,
-                                               const std::string& selected_id,
-                                               std::optional<int> split_k)
-{
-    if((!problem.Is2d() && !problem.Is3d()) || !problem.IsLayoutDefault() ||
-       problem.GetConv().mode != miopenConvolution ||
-       problem.GetConv().trans_output_pads.size() != problem.GetSpatialDims() ||
-       std::any_of(problem.GetConv().trans_output_pads.begin(),
-                   problem.GetConv().trans_output_pads.end(),
-                   [](int pad) { return pad != 0; }) ||
-       (!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.Is3d())) ||
-       problem.HasNonPackedTensors() || problem.GetGroupCount() == 0 ||
-       problem.GetAlphaBetaCase() != DEFAULT)
-        return false;
-
-    for(const auto* desc : {&problem.GetIn(), &problem.GetWeights(), &problem.GetOut()})
-        for(const auto length : desc->GetLengths())
-            if(length == 0)
-                return false;
-
-    const auto starts_with = [&](const char* prefix) { return selected_id.rfind(prefix, 0) == 0; };
-    const auto ends_with   = [&](const char* suffix) {
-        const std::string_view end{suffix};
-        return selected_id.size() >= end.size() &&
-               selected_id.compare(selected_id.size() - end.size(), end.size(), end) == 0;
-    };
-    if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
-    {
-        // Packed WMMA-v3 split 1 defines every dW through Set or its retained clear.
-        // Auto/atomic splits, two-stage and fused/unknown families remain staged.
-        return problem.Is2d() && split_k && *split_k == 1 && ends_with(">") &&
-               starts_with("DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<");
-    }
-    if(problem.Is3d())
-    {
-        if(problem.IsDirectionForward())
-        {
-            // No-D unmerged XDL-v3 writes every logical E with a Set epilogue.
-            // Exact prefixes exclude DirectLoad, Large_Tensor and MergedGroups.
-            return !split_k && ends_with(">") &&
-                   (starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<") ||
-                    starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<"));
-        }
-        // The registered 3D default XDL-v1 backward-data instances have no D tensor.
-        // Their bare IDs use CK's implicit split-1 argument and clear the full
-        // packed E before the residue GEMMs. Weight-gradient, explicit splits,
-        // fused instances and backward-data v3 have no selected 3D proof here.
-        return problem.GetDirection() == miopen::conv::Direction::BackwardData && !split_k &&
-               starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<") &&
-               (selected_id.find(", Default,") != std::string::npos ||
-                selected_id.find(", Filter1x1Stride1Pad0,") != std::string::npos) &&
-               ends_with(">");
-    }
-
-    if(problem.IsDirectionForward())
-    {
-        // Ordinary unmerged packed FWD runs a Set epilogue over every logical
-        // M/N coordinate, including partial tiles. Exclude both merge modes.
-        return !split_k &&
-               ((starts_with("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") &&
-                 ends_with(", 1>")) ||
-                ((starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<") ||
-                  starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<")) &&
-                 ends_with(", 1>")));
-    }
-    if(problem.GetDirection() == miopen::conv::Direction::BackwardData)
-    {
-        // No-D XDL v1/v3 always clear full packed E before the residue GEMMs;
-        // no-D WMMA v3 either does the same or proves a split-1 pointwise Set.
-        // A positive filter guarantees at least one nonempty residue/slice.
-        return split_k && *split_k > 0 &&
-               (starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<") ||
-                starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<") ||
-                starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted<") ||
-                starts_with("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<"));
-    }
-    return false;
 }
 
 inline size_t GetCKAlphaBetaWorkspace(const miopen::conv::ProblemDescription& problem)
