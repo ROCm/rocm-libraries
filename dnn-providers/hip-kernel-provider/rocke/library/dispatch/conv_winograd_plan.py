@@ -40,6 +40,7 @@ from kernels.common.conv_winograd_select import WinogradPlan
 __all__ = [
     "ConvWinogradSpec",
     "WinogradKernel",
+    "winograd_flavor_reason",
     "winograd_launch_plan",
     "winograd_steps",
 ]
@@ -47,10 +48,14 @@ __all__ = [
 
 @dataclass(frozen=True)
 class WinogradKernel:
-    """The kernel of one plan step: ``build(arch) -> KernelDef``."""
+    """The kernel of one plan step: ``build(arch) -> KernelDef``.
+
+    ``llvm_flavors`` lists the LLVM flavors the kernel lowers at; ``None``
+    means every flavor."""
 
     name: str
     build: Callable[[str], object]
+    llvm_flavors: Optional[Tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +171,7 @@ def _transform_kernargs(signature, sizes: dict, offsets: dict) -> tuple:
     return tuple(out)
 
 
-def _step(name, build, grid, block, signature, kernargs):
+def _step(name, build, grid, block, signature, kernargs, llvm_flavors=None):
     from .grouped_convolution import ConvLaunchStep
 
     bufs = [k[1] for k in kernargs if k[0] == "buf"]
@@ -176,7 +181,7 @@ def _step(name, build, grid, block, signature, kernargs):
         block=(int(block), 1, 1),
         signature=tuple(signature),
         buffers=(bufs[0], bufs[1] if len(bufs) > 2 else None, bufs[-1]),
-        kernel=WinogradKernel(name, build),
+        kernel=WinogradKernel(name, build, llvm_flavors),
         kernargs=tuple(kernargs),
     )
 
@@ -184,6 +189,7 @@ def _step(name, build, grid, block, signature, kernargs):
 def _k3_step(spec, prob, v_off=0, m_off=0):
     """The batched-GEMM step over every batch of ``prob`` (splits 1)."""
     from kernels.common.conv_winograd_gemm_wmma import (
+        LLVM_FLAVORS,
         build_winograd_gemm_wmma,
         winograd_gemm_problem_reason,
         winograd_gemm_reason,
@@ -213,6 +219,7 @@ def _k3_step(spec, prob, v_off=0, m_off=0):
         spec.threads_per_block,
         sig,
         kernargs,
+        llvm_flavors=LLVM_FLAVORS,
     )
 
 
@@ -414,6 +421,23 @@ def winograd_steps(problem: ConvProblem, dtype: str, plan: WinogradPlan) -> tupl
         raise ValueError(f"no launch plan for Winograd kind {plan.kind!r}")
     steps, workspaces = fn(problem, dtype, plan)
     return steps, tuple(sorted(workspaces.items()))
+
+
+def winograd_flavor_reason(
+    problem: ConvProblem, dtype: str, plan: WinogradPlan, llvm_flavor: str
+) -> Optional[str]:
+    """Why a kernel of ``plan`` does not lower at ``llvm_flavor``, or ``None``.
+
+    Raises ``ValueError`` like :func:`winograd_steps`."""
+    steps, _ = winograd_steps(problem, dtype, plan)
+    for step in steps:
+        flavors = step.kernel.llvm_flavors
+        if flavors is not None and llvm_flavor not in flavors:
+            return (
+                f"{step.kernel.name} needs LLVM flavor {' or '.join(flavors)}, "
+                f"the request asks for {llvm_flavor}"
+            )
+    return None
 
 
 def winograd_launch_plan(

@@ -1113,7 +1113,10 @@ predicts no time.
 **Dispatch.** The grouped-convolution dispatcher registers one opt-in forward
 candidate, `conv_winograd_fwd` (`algorithm="winograd"`, gfx1250): pinning the
 algorithm selects the selector's plan, and the sweep entry points list every
-safe plan. `algorithm="auto"` never picks it. `launch_plan_for` returns the
+safe plan. `algorithm="auto"` never picks it. Plans are admitted only at an
+LLVM flavor all their kernels lower at (`ConvGroupedRequest.llvm_flavor`): the
+K3 GEMM lowers at `llvm23` only, so at `llvm20` / `llvm22` the unfused plans
+are refused and only the fused 1-D plans remain. `launch_plan_for` returns the
 plan's `ConvLaunchPlan`: one step per kernel (each built for the problem,
 kernargs named per step) over the buffers `x`, `w`, `y` and the workspaces
 `U`, `V`, `M` (and `e`).

@@ -115,6 +115,7 @@ from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from .conv_winograd_plan import (
     ConvWinogradSpec,
+    winograd_flavor_reason,
     winograd_launch_plan,
     winograd_steps,
 )
@@ -1196,10 +1197,14 @@ def _winograd_model(arch: str) -> WinogradCostModel:
 
 def _winograd_spec(req: ConvGroupedRequest, plan) -> ConvWinogradSpec:
     """The spec of ``plan`` on ``req``; raises ``ValueError`` when a kernel of
-    the plan cannot run the problem."""
+    the plan cannot run the problem or does not lower at the request's LLVM
+    flavor (the K3 GEMM lowers at llvm23 only)."""
     problem = _conv_problem(req)
     dtype = req.dtype.lower()
     steps, _ = winograd_steps(problem, dtype, plan)
+    why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
+    if why is not None:
+        raise ValueError(f"{_WINOGRAD_NAME}:{plan.label}: {why}")
     return ConvWinogradSpec(
         name=f"{_WINOGRAD_NAME}:{plan.label}",
         plan=plan,

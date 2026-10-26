@@ -25,6 +25,7 @@ from kernels.common import conv_winograd_gen as WG
 from kernels.common.conv_winograd_fused_1d_wmma import FusedWino1DSpec
 from kernels.common.conv_winograd_gemm_wmma import WinogradGemmProblem
 from kernels.common.conv_winograd_select import WinogradPlan
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 _ARCH = "gfx1250"
 _PTRS = {
@@ -42,6 +43,9 @@ def _req(**kw):
     fields = dict(N=2, C=64, K=64, Hi=16, Wi=16, Y=3, X=3, pad_h=1, pad_w=1)
     fields.update(kw)
     fields.setdefault("arch", _ARCH)
+    if fields["arch"] == _ARCH:
+        # The K3 GEMM of the unfused plans lowers at llvm23 only.
+        fields.setdefault("llvm_flavor", "llvm23")
     return gc.ConvGroupedRequest(**fields)
 
 
@@ -170,9 +174,7 @@ def test_6x4_merged_plan():
 
 
 def test_batch_split_plan():
-    p = gc.ConvGroupedRequest(
-        N=4, C=64, K=64, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1, arch=_ARCH
-    )
+    p = _req(N=4, Hi=8, Wi=8)
     base = gc._winograd_spec(
         p,
         WinogradPlan(kind="unfused2d", tile=(2, 2), k3="128x128x128_w2x2_f4x4_s2_tdm"),
@@ -219,6 +221,36 @@ def test_1x11_plans():
     # bf16 I/O: the fused kernel is fp16 only.
     bf = gc.conv_grouped_sweep_space(dataclasses.replace(req, dtype="bf16"))
     assert bf and {s.plan.kind for s in bf} == {"unfused_gen"}
+
+
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22"])
+def test_unfused_plans_need_llvm23(flavor):
+    """The K3 GEMM lowers at llvm23 only: a request for another flavor admits
+    no plan that runs it, and says why."""
+    req = _pin(_req(llvm_flavor=flavor))
+    ok, why = gc._WINOGRAD_CANDIDATE.admits(req)
+    assert not ok and "llvm23" in why and flavor in why, why
+    with pytest.raises(ValueError, match="needs LLVM flavor llvm23"):
+        gc.dispatch_conv_grouped(req)
+    assert not gc.conv_grouped_sweep_space(req)
+    assert not gc.dispatch_conv_grouped_all(_req(llvm_flavor=flavor))
+    # 1-D: only the fused plan (no K3) is left, and it lowers at the flavor.
+    req1 = _pin(_req(llvm_flavor=flavor, Hi=1, Wi=300, Y=1, X=11, pad_h=0, pad_w=5))
+    assert {s.plan.kind for s in gc.conv_grouped_sweep_space(req1)} == {"fused1d"}
+    res = gc.dispatch_conv_grouped(req1)
+    assert res.spec.plan.kind == "fused1d"
+    for step in gc.launch_plan_for(req1, res.spec).steps:
+        assert step.kernel.llvm_flavors is None
+        lower_kernel_to_llvm(step.kernel.build(_ARCH), llvm_flavor=flavor, arch=_ARCH)
+    # The K3 kernel the flavor check refers to does refuse to lower there.
+    k3 = next(
+        st
+        for st in gc.launch_plan_for(None, _unfused2d_spec(_req(), (4, 4))).steps
+        if st.kernel.name == "K3"
+    )
+    assert k3.kernel.llvm_flavors == ("llvm23",)
+    with pytest.raises(ValueError, match="requires LLVM flavor llvm23"):
+        lower_kernel_to_llvm(k3.kernel.build(_ARCH), llvm_flavor=flavor, arch=_ARCH)
 
 
 @pytest.mark.parametrize(

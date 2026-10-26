@@ -99,8 +99,12 @@ def _run(req, spec):
 
 def _request(**kw):
     from dispatch.grouped_convolution import ConvGroupedRequest
+    from kernels.conv.kernel_identity import current_llvm_flavor
 
-    return ConvGroupedRequest(arch=GPU_ARCH, algorithm="winograd", **kw)
+    # The flavor compile_kernel lowers at (the K3 GEMM needs llvm23).
+    return ConvGroupedRequest(
+        arch=GPU_ARCH, algorithm="winograd", llvm_flavor=current_llvm_flavor(), **kw
+    )
 
 
 def test_dispatch_winograd_3x3_fp16():

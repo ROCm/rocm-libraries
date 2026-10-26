@@ -88,6 +88,9 @@ _OOB = 0x7FFFFF00  # buffer offset that loads 0 / drops the store
 REDUCE_BLOCK = 256
 EPILOGUES = ("tdm", "direct")
 LDS_PADS = ("tdm", "clip")
+# LLVM flavors the GEMM lowers at: every configuration stages its operands
+# with ``tensor_load_to_lds``, which only the llvm23 flavor lowers.
+LLVM_FLAVORS = ("llvm23",)
 
 
 def _io_type(dtype: str):
