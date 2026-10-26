@@ -15,7 +15,8 @@ using namespace roc::hostnumerics;
 namespace roc::hostnumerics::python_bindings {
 void registerPermutationBindings(nb::module_& module);
 void registerShapeBindings(nb::module_& module);
-void registerIndexSelectionBindings(nb::module_& module);
+void registerIndexRangeBindings(nb::module_& module);
+void registerLayoutBindings(nb::module_& module);
 }  // namespace roc::hostnumerics::python_bindings
 
 NB_MODULE(_hostnumerics, module) {
@@ -71,5 +72,6 @@ NB_MODULE(_hostnumerics, module) {
     module.def("scalar_type_info", &scalarTypeInfo, "type"_a);
     python_bindings::registerPermutationBindings(module);
     python_bindings::registerShapeBindings(module);
-    python_bindings::registerIndexSelectionBindings(module);
+    python_bindings::registerIndexRangeBindings(module);
+    python_bindings::registerLayoutBindings(module);
 }

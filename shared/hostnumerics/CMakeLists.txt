@@ -35,7 +35,7 @@ target_sources(hostnumerics-core
             include/roc/hostnumerics/integer_conversion.hpp
             include/roc/hostnumerics/permutation.hpp
             include/roc/hostnumerics/shape.hpp
-            include/roc/hostnumerics/index_selection.hpp
+            include/roc/hostnumerics/index_range.hpp
             include/roc/hostnumerics/detail/prime.hpp
             include/roc/hostnumerics/expected.hpp
             include/roc/hostnumerics/layout.hpp

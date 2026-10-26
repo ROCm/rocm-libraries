@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from ._hostnumerics import (
-    IndexSelection,
     IndexRange,
-    LastDimensionFastest,
     prime_index_range,
     Layout,
     ScalarCategory,
@@ -23,9 +21,7 @@ __all__ = [
     "scalar_type_info",
     "Permutation",
     "Shape",
-    "IndexSelection",
     "IndexRange",
-    "LastDimensionFastest",
     "prime_index_range",
     "Layout",
 ]
