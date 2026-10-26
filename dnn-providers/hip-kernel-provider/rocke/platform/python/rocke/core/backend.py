@@ -490,6 +490,9 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("sia_merge_sync", False),
     ("rilv_vec_epilogue", False),
     ("rve_store_nt", False),
+    # 16-byte swapped-accumulator epilogue (MN B only)
+    ("sab_vec16", False),
+    ("sab_store_nt", False),
     # DTL issue economy
     ("dtl_rsrc_word3", 0),
     ("dtl_soff0", False),
@@ -537,6 +540,31 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("k_stagger_tiles", 0),
     ("k_stagger_map", 0),
     ("dtl_clamp_k", False),
+    # coverage / correctness knobs
+    ("pad_row_clamp", False),
+    ("pad_k_fast", False),
+    ("split_k_aligned", False),
+    ("dtl_k_tail", 0),
+    # register-staged global prefetch body (gfx942)
+    ("vgpr_prefetch", 0),
+    ("vgpr_prefetch_depth", 1),
+    ("vp_unroll", 0),
+    ("vp_late_reads", 0),
+    # native NN / TN / TT (MN-contiguous operands), the
+    # scheduler-strategy knob and the guarded padded rows of the VGPR loader
+    ("mn_pad", 32),
+    ("mn_chunk", 0),
+    ("mn_vec", 8),
+    ("sched_strategy", ""),
+    ("kc_row_guard", False),
+    # in-launch split-K reduction
+    ("split_k_serial", False),
+    # MN-contiguous operands in the vgpr_prefetch body
+    ("vp_mn_kv", 0),
+    ("vp_mn_order", 0),
+    ("vp_mn_worder", 0),
+    ("vp_mn_pipe", 0),
+    ("vp_mn_wrap", 0),
 )
 
 
@@ -563,6 +591,11 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     tr = spec.trait
     d = spec.data
     _refuse_python_only_levers(tr)
+    if str(d.layout).upper() != "RCR":
+        raise NotImplementedError(
+            f"DataSpec layout {d.layout!r} (MN-contiguous operands): implemented by "
+            "the Python engine only (no C++ mirror yet); lower it with backend='python'"
+        )
     return dict(
         name=spec.name,
         # tile geometry

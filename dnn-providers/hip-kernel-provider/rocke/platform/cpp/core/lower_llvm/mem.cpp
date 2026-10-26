@@ -1152,6 +1152,58 @@ static void op_tile_buffer_load_f16(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = bitcast i16 %s to half", ll_res(op), tmp);
 }
 
+/* Python _op_tile_buffer_load: dtype-generic scalar buffer load. 2-byte
+ * types (f16, bf16) use the i16 intrinsic, 4-byte types (f32, i32) the i32
+ * one; the raw value is bitcast to the element type. */
+static void op_tile_buffer_load(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const char* elem = ll_attr_str(op, "elem_type", "");
+    const char* llvm_elem;
+    const char* tmp;
+    if(strcmp(elem, "f16") == 0)
+        llvm_elem = "half";
+    else if(strcmp(elem, "bf16") == 0)
+        llvm_elem = "bfloat";
+    else if(strcmp(elem, "f32") == 0)
+        llvm_elem = "float";
+    else if(strcmp(elem, "i32") == 0)
+        llvm_elem = "i32";
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "%s", elem);
+        return;
+    }
+    if(strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0)
+    {
+        rocke_ll_need(L, "raw.ptr.buffer.load.i16");
+        tmp = rocke_ll_fresh(L, "blu16");
+        rocke_ll_emitf(L,
+                       "  %s = call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
+                       "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       tmp,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+        rocke_ll_emitf(L, "  %s = bitcast i16 %s to %s", ll_res(op), tmp, llvm_elem);
+    }
+    else
+    {
+        rocke_ll_need(L, "raw.ptr.buffer.load.i32");
+        tmp = rocke_ll_fresh(L, "bli32");
+        rocke_ll_emitf(L,
+                       "  %s = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                       "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       tmp,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+        rocke_ll_emitf(L, "  %s = bitcast i32 %s to %s", ll_res(op), tmp, llvm_elem);
+    }
+}
+
 /* Python _op_tile_buffer_load_f16_d16: a direct half-return D16 buffer load. */
 static void op_tile_buffer_load_f16_d16(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -1992,6 +2044,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, op_tile_buffer_load_f16_d16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD, op_tile_buffer_load);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_BF16, op_tile_buffer_load_bf16);

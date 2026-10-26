@@ -88,6 +88,21 @@ def _tensor_gett_requests(arch: str):
                 ),
                 arch=arch,
             )
+    # a canonical-D contraction big enough for the K-contiguous route (the
+    # GEMM dispatcher's RCR pick there is a vector-epilogue body)
+    ext2 = {"K0": 16, "K1": 12, "K2": 8, "M0": 32, "M1": 16, "M2": 16}
+    ext2.update({"N0": 16, "N1": 16, "N2": 16})
+    for dtype in ("fp16", "bf16"):
+        yield TensorGettRequest(
+            problem=TensorGettSpec.make(
+                ["K2", "M2", "K1", "M1", "K0", "M0"],
+                ["K2", "N2", "K1", "N1", "K0", "N0"],
+                ["N2", "N1", "N0", "M2", "M1", "M0"],
+                ext2,
+                dtype=dtype,
+            ),
+            arch=arch,
+        )
 
 
 _FAMILIES = (

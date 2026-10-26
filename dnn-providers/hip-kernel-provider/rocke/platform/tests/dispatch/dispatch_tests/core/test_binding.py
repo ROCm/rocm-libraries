@@ -105,7 +105,12 @@ class TestGemmBinding(unittest.TestCase):
     )
 
     def _request(self, dtype):
-        return GemmRequest(M=64, N=128, K=256, arch="gfx950", dtype=dtype)
+        # the UniversalGemm RCR ABI (A, B, C, M, N, K): pin the universal
+        # bodies (gemm_skinny takes this shape in auto mode; its binding is
+        # tested in dispatch_tests/gemm/test_skinny_dispatch.py)
+        return GemmRequest(
+            M=64, N=128, K=256, arch="gfx950", dtype=dtype, algorithm="universal_gemm"
+        )
 
     def test_geometry_comes_from_the_dispatcher_not_recomputed(self):
         # The whole point of binding on the candidate: one definition of the

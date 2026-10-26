@@ -27,11 +27,15 @@ f64 and complex-f64 GEMM / tensor contraction:
 [`gett_f64_plan.py`](../../python/rocke/instances/common/gett_f64_plan.py); doc
 `instances/gett_f64.md`. gfx90a / gfx942 / gfx950.
 
-f16 / bf16 tensor contraction (native GETT, one launch, no permute pass):
+f16 / bf16 tensor contraction (native GETT, no permute pass):
 [`tensor/gett.py`](../../python/rocke/instances/common/tensor/gett.py) (`TensorGettSpec`,
 `GettKnobs`, `GettHooks`) and its host planner
 [`tensor/gett_plan.py`](../../python/rocke/instances/common/tensor/gett_plan.py);
-dispatcher family `dispatch/families/tensor_gett.py`. gfx950; Python engine only.
+dispatcher family `dispatch/families/tensor_gett.py` (`plan_tensor_gett`: the GETT on
+the GEMM dispatcher's own bodies -- the both-MN-contiguous CRR pick reading the
+operands in place, or the RCR pick on K-contiguous copies made by the
+[`tensor/pack.py`](../../python/rocke/instances/common/tensor/pack.py) kernel -- by a
+cost model). gfx950; Python engine only.
 
 Fused operand prologues for the universal GEMM (f32 operands with bf16 split
 emulation, unary opA / opB, interleaved complex-f32 B):
@@ -72,17 +76,15 @@ ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-G
 
 Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
-Bake-off results (per `runbook_compliance.md`):
+Bake-off shapes (per `runbook_compliance.md`):
 
 ```text
 Implicit-GEMM conv (N=8 H=W=56 C=K=64 Y=X=3):
- 111 TFLOPS -> 280 TFLOPS by applying 5 runbook levers in series.
+ optimized by applying 5 runbook levers in series.
 
-Direct grouped 16c (N=32 H=W=200 R=S=3 pad=1):
- ~92 TFLOPS -> ~214 TFLOPS.
+Direct grouped 16c (N=32 H=W=200 R=S=3 pad=1).
 
-Direct grouped 4c (same shape, cpg=kpg=4):
- ~44 TFLOPS -> ~48 TFLOPS.
+Direct grouped 4c (same shape, cpg=kpg=4).
 ```
 
 ## Attention Family

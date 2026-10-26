@@ -1102,6 +1102,48 @@ static rocke_status_t _op_tile_buffer_load_f16(rocke_h_lowerer_t* lw, const rock
     return lw->status;
 }
 
+/* Python _op_tile_buffer_load: dtype-generic scalar buffer load. 2-byte
+ * types (f16, bf16) -> __builtin_amdgcn_raw_buffer_load_b16, 4-byte types
+ * (f32, i32) -> __builtin_amdgcn_raw_buffer_load_b32. */
+static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *tmp, *elem, *hip_t;
+    int two_byte;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    elem = mem_attr_str(op, "elem_type", "");
+    hip_t = rocke_h_require_hip_scalar(lw, elem);
+    if(!hip_t)
+    {
+        return lw->status;
+    }
+    two_byte = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
+    rocke_h_emitf(lw,
+                  two_byte ? "unsigned short %s = (unsigned short)"
+                             "__builtin_amdgcn_raw_buffer_load_b16(%s, %s, %s, 0);"
+                           : "unsigned int %s = (unsigned int)"
+                             "__builtin_amdgcn_raw_buffer_load_b32(%s, %s, %s, 0);",
+                  tmp,
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    rocke_h_emitf(
+        lw, "%s %s; __builtin_memcpy(&%s, &%s, %d);", hip_t, res, res, tmp, two_byte ? 2 : 4);
+    return lw->status;
+}
+
 /* Python _op_tile_buffer_load_vN_f16 */
 static rocke_status_t _op_tile_buffer_load_vN_f16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -1731,6 +1773,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_RSRC, _op_tile_buffer_rsrc},
            /* buffer load/store */
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},
+           {ROCKE_OP_TILE_BUFFER_LOAD, _op_tile_buffer_load},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, _op_tile_buffer_load_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},

@@ -14,8 +14,8 @@ from rocke.helpers.split_k import (
 )
 
 
-def _bf16(M, N, K, arch="gfx950"):
-    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16")
+def _bf16(M, N, K, arch="gfx950", **kw):
+    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16", **kw)
 
 
 class TestSelectSplitK(unittest.TestCase):
@@ -104,7 +104,8 @@ class TestSelectSplitK(unittest.TestCase):
 
 class TestDispatchWiring(unittest.TestCase):
     def test_decode_dispatch_sets_split_k_and_z_grid(self):
-        r = dispatch_gemm_bf16(_bf16(2, 4096, 4096))
+        # the universal decode body (gemm_skinny takes decode shapes in auto mode)
+        r = dispatch_gemm_bf16(_bf16(2, 4096, 4096, algorithm="universal_gemm"))
         self.assertEqual(r.candidate.spec_id, "cdna_decode_16x64")
         self.assertGreater(r.spec.trait.split_k, 1)
         # grid Z dim == split_k

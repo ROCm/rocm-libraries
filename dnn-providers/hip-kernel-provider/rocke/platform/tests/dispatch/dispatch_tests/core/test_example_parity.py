@@ -21,7 +21,9 @@ Both are CPU-only. Building is IR construction; no comgr, no device.
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import canonical_equal
@@ -57,6 +59,10 @@ GEMM_SQUARE_MNK = (8192, 8192, 8192)
 # ragged-N canonical contraction row of the hipTensor cases (the padded ring)
 GEMM_SMALL_SQUARE_MNK = (2048, 2048, 2048)
 GEMM_RAGGED_MNK = (15360, 13440, 1536)
+# a few-tile long-K shape the learned selector serves with a
+# gemm_skinny configuration outside the registered plans (another split-K /
+# warp_k), i.e. the opt-in ``*_cdna_selected_skinny`` candidates
+GEMM_FEWTILE_LONGK_MNK = (448, 128, 14912)
 NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
 
 
@@ -67,6 +73,7 @@ def _gemm_reqs(arch, spec_id, dtype):
         GEMM_SQUARE_MNK,
         GEMM_SMALL_SQUARE_MNK,
         GEMM_RAGGED_MNK,
+        GEMM_FEWTILE_LONGK_MNK,
     ):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 
@@ -106,6 +113,13 @@ class TestEveryRegisteredKernelBuilds(unittest.TestCase):
                             yield candidate, arch, dtype, request
 
     def test_every_candidate_builds_on_every_arch_it_declares(self):
+        # with the learned GEMM selector on for every arch that ships a model,
+        # so its opt-in ``*_cdna_selected`` candidates are reached (and built)
+        # too (the root conftest pins the rule layer elsewhere)
+        with mock.patch.dict(os.environ, {"ROCKE_GEMM_SELECTOR": "1"}):
+            self._every_candidate_builds()
+
+    def _every_candidate_builds(self):
         built = 0
         reached = set()
         for candidate, arch, dtype, request in self._combinations():
@@ -267,11 +281,15 @@ class TestExampleParity(unittest.TestCase):
         )
         self.assertFalse(canonical_equal(by_hand, dispatched.build()))
         # Name the divergence, so a change in either direction is visible.
+        # (the small DTL ring with pads, ring_small_any, takes this
+        # sub-half-wave shape instead of the cshuffle default; ring_any,
+        # retiled for the wave count, is ordered ahead of it)
         spec = dispatched.spec
+        self.assertEqual(dispatched.candidate.spec_id, "cdna_dtl_ring_any_first")
         self.assertEqual(spec.trait.pipeline, "compv4")
-        self.assertEqual(spec.trait.epilogue, "cshuffle")
-        self.assertEqual(
-            (spec.tile.tile_m, spec.tile.tile_n), (4 * atom.m * 2, 4 * atom.n * 2)
+        self.assertTrue(spec.trait.direct_to_lds)
+        self.assertLessEqual(
+            spec.tile.tile_m * spec.tile.tile_n, 4 * atom.m * 2 * 4 * atom.n * 2
         )
 
 

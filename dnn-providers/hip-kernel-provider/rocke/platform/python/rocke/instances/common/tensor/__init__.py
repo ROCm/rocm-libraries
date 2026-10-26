@@ -17,7 +17,13 @@ from .gett import (  # noqa: F401
     TensorGettSpec,
     build_tensor_gett,
     is_valid_spec,
+    kc_body_errors,
+    kc_body_trait,
+    kc_operand_modes,
     launch_operands,
+    mn_body_errors,
+    mn_body_trait,
+    tensor_gett_block,
     tensor_gett_grid,
     tensor_gett_signature,
 )

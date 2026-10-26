@@ -249,6 +249,7 @@ constexpr PinnedOpcode kPinned[] = {
     {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, 215, "memref.global_flag_wait_eq", false},
     {ROCKE_OP_VECTOR_UNDEF, 216, "vector.undef", false},
     {ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, 217, "tile.buffer_load_f16_d16", false},
+    {ROCKE_OP_TILE_BUFFER_LOAD, 228, "tile.buffer_load", false},
 };
 
 /* Each pinned opcode keeps its value, its name and its purity. */

@@ -52,6 +52,34 @@ def pytest_runtest_makereport(item, call):
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
 
 
+@pytest.fixture(autouse=True)
+def _gemm_selector_layer(request, monkeypatch):
+    """Pin the RCR GEMM dispatcher to its rule layer unless a module opts in.
+
+    ``dispatch_gemm_fp16`` / ``_bf16`` consult the learned selector
+    (``rocke.dispatch.gemm.selector``, ``ROCKE_GEMM_SELECTOR``) after the
+    registry's rules. Most dispatch and instance tests assert the RULE layer's
+    decisions, so they run with the selector off; the selector's own
+    tests set ``GEMM_SELECTOR_TESTS = True`` at module level and get the
+    shipped default (a string value, e.g. ``"1"``, is exported as
+    ``ROCKE_GEMM_SELECTOR``). ``ROCKE_GEMM_SELECTOR_TESTS=1`` in the environment keeps
+    the selector on everywhere (to see which rule assertions it would change).
+    """
+    import os
+
+    if os.environ.get("ROCKE_GEMM_SELECTOR_TESTS") == "1":
+        yield
+        return
+    mode = getattr(request.module, "GEMM_SELECTOR_TESTS", False)
+    if mode is True:
+        monkeypatch.delenv("ROCKE_GEMM_SELECTOR", raising=False)
+    elif isinstance(mode, str):  # e.g. "1": on for every arch with a model
+        monkeypatch.setenv("ROCKE_GEMM_SELECTOR", mode)
+    else:
+        monkeypatch.setenv("ROCKE_GEMM_SELECTOR", "0")
+    yield
+
+
 # The IR parity harness' attention families are the one sanctioned platform ->
 # library reach, so `kernels`/`builders` must resolve here as well. Probed
 # against both layouts this tree runs in: staged under tests/library/ in an

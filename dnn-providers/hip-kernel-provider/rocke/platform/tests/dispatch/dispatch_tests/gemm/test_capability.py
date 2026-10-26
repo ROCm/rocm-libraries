@@ -18,6 +18,11 @@ from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
 
 _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 
+# Declared coverage is checked with the learned selector on for every arch
+# that ships a model (root conftest): the opt-in ``*_cdna_selected`` candidate
+# serves requests only while the selector is on.
+GEMM_SELECTOR_TESTS = "1"
+
 # Wide enough that every registered tile divides some entry, and skinny enough
 # to reach the decode candidate.
 _DIMS = (1, 2, 16, 32, 64, 128, 256, 512, 1024, 4096)

@@ -16,6 +16,8 @@ from rocke.dispatch import (
     registered_gemm_fp16_combos,
 )
 from rocke.dispatch.gemm import build_kernel
+from rocke.instances.common.gemm_skinny import SkinnyGemmSpec
+from rocke.instances.common.gemm_skinny import is_valid_spec as skinny_is_valid_spec
 from rocke.dispatch.gemm.common import (
     DTL_PINGPONG_ARCHES,
     DTL_PINGPONG_GEOMETRY_ARCHES,
@@ -70,8 +72,25 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         # 1024^2 = 64 tiles of 128x128 (a quarter wave) at a small K: below the
         # small-tile ring's half-wave floor and the big-tile threshold rule, so
         # the 128x128 cshuffle default is selected.
+        # (ring_small_any takes these sub-half-wave shapes in auto mode; the
+        # cshuffle default is the decision with it off)
+        from unittest import mock
+
+        from rocke.dispatch.gemm import skinny as _SK
+
+        from rocke.dispatch.gemm import common as _GC
+
         req = GemmRequest(M=1024, N=1024, K=256, arch="gfx950")
-        result = dispatch_gemm_fp16(req)
+        # (ring_any is ordered ahead of it there)
+        self.assertEqual(
+            dispatch_gemm_fp16(req).kernel_id.spec_id, "cdna_dtl_ring_any_first"
+        )
+        with mock.patch.object(_GC, "MERGE_RING_ANY_FIRST", False):
+            self.assertEqual(
+                dispatch_gemm_fp16(req).kernel_id.spec_id, "cdna_ring_small_any"
+            )
+        with mock.patch.object(_SK, "RING_ANY", False):
+            result = dispatch_gemm_fp16(req)
         self.assertEqual(result.kernel_id.spec_id, "cdna_cshuffle_default")
         self.assertEqual(result.grid, (8, 8, 1))
         self.assertEqual(result.block, (256, 1, 1))
@@ -306,7 +325,19 @@ class TestGemmFp16Dispatch(unittest.TestCase):
 
         import rocke.dispatch.gemm.common as C
 
+        import rocke.dispatch.gemm.skinny as _SK
+
         req = GemmRequest(M=1024, N=1024, K=4096, arch="gfx950")
+        # (ring_small_any takes it in auto mode, with ring_any ordered
+        # ahead of it; the small ring's own split-K
+        # gating is checked with RING_ANY off)
+        self.assertIn(
+            dispatch_gemm_fp16(req).kernel_id.spec_id,
+            ("cdna_ring_small_any", "cdna_dtl_ring_any_first"),
+        )
+        _ring_any_off = mock.patch.object(_SK, "RING_ANY", False)
+        _ring_any_off.start()
+        self.addCleanup(_ring_any_off.stop)
         self.assertEqual(
             dispatch_gemm_fp16(req).kernel_id.spec_id, "cdna_cshuffle_default"
         )
@@ -726,7 +757,18 @@ class TestGemmFp16Dispatch(unittest.TestCase):
     def test_dtl_pingpong_gfx942(self):
         # gfx942 geometry (256x256x32, 16x16x16, 1-dword DTL) with its own
         # calibrated cost model: a large square takes it, a 64-tile square
-        # (not admitted on gfx942 for f16) keeps the default.
+        # (not admitted on gfx942 for f16) keeps the default. With the
+        # register-staged (vgpr_prefetch) candidate on (the default) gfx942
+        # dispatches that one instead (test_gemm_g5_vgpr_prefetch.py); this
+        # pins the ping-pong rules underneath it.
+        from unittest import mock
+
+        from rocke.dispatch.gemm import common as _common
+
+        with mock.patch.object(_common, "G5_VGPR", False):
+            self._check_dtl_pingpong_gfx942()
+
+    def _check_dtl_pingpong_gfx942(self):
         self.assertIn("gfx942", DTL_PINGPONG_ARCHES)
         self.assertIn("gfx942", DTL_PINGPONG_GEOMETRY_ARCHES)
         req = GemmRequest(M=8192, N=8192, K=8192, arch="gfx942")
@@ -774,10 +816,15 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         # 2**31 elements are addressable, one more 128-row tile is not.
         ok_req = GemmRequest(M=131072, N=256, K=16384, arch="gfx950")
         self.assertFalse(dispatch_gemm_fp16(ok_req).spec.trait.direct_to_lds)
-        bad_req = GemmRequest(M=131200, N=256, K=16384, arch="gfx950")
+        bad_req = GemmRequest(
+            M=131200, N=256, K=16384, arch="gfx950", algorithm="universal_gemm"
+        )
         with self.assertRaises(Exception) as cm:
             dispatch_gemm_fp16(bad_req)
         self.assertIn("i32 element offsets", str(cm.exception))
+        # auto mode: the gemm_skinny fallback (64-bit per-tile bases) serves it
+        r = dispatch_gemm_fp16(GemmRequest(M=131200, N=256, K=16384, arch="gfx950"))
+        self.assertIn("skinny", r.candidate.name)
 
     def test_dispatch_wave32_arch(self):
         req = GemmRequest(M=128, N=64, K=64, arch="gfx1151")
@@ -801,8 +848,14 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         # rejects them before the residual predicate is consulted.
         with self.assertRaisesRegex(ValueError, r"dtype 'bf16' not in \('fp16',\)"):
             dispatch_gemm_fp16(GemmRequest(M=1, N=1, K=1, arch="gfx950", dtype="bf16"))
-        with self.assertRaisesRegex(ValueError, r"layout 'RRR' not in \('RCR',\)"):
+        # (native NN / TN / TT: RRR / CRR / CCR are supported with the matching
+        # trans flags; any other layout string is not)
+        with self.assertRaisesRegex(
+            ValueError, "layout RRR expects trans_a=False, trans_b=False"
+        ):
             dispatch_gemm_fp16(GemmRequest(M=1, N=1, K=1, arch="gfx950", layout="RRR"))
+        with self.assertRaisesRegex(ValueError, "layout 'CCC' not in"):
+            dispatch_gemm_fp16(GemmRequest(M=1, N=1, K=1, arch="gfx950", layout="CCC"))
         with self.assertRaisesRegex(ValueError, "algorithm"):
             dispatch_gemm_fp16(
                 GemmRequest(M=1, N=1, K=1, arch="gfx950", algorithm="direct_gemm")
@@ -822,13 +875,49 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                     spec_id="cdna_cshuffle_default",
                 )
             )
+        # no unpadded UniversalGemm body admits M=130; the no-refusal path
+        # serves it with bounded padded bodies only: ring_any / the padded
+        # fallback (pad_row_clamp or dtl_tight_rsrc), gemm_skinny and its
+        # padded small ring, the universal fallback (kc_row_guard)
+        from unittest import mock
+
+        from rocke.dispatch.gemm import common as _gc
+
+        req = GemmRequest(M=130, N=128, K=32, arch="gfx950")
         self.assertEqual(
-            gemm_fp16_sweep_space(GemmRequest(M=130, N=128, K=32, arch="gfx950")),
+            tuple(
+                s
+                for s in gemm_fp16_sweep_space(
+                    GemmRequest(
+                        M=130, N=128, K=32, arch="gfx950", algorithm="universal_gemm"
+                    )
+                )
+                if not s.trait.pad_m
+            ),
             (),
         )
+        space = gemm_fp16_sweep_space(req)
+        self.assertTrue(space)
+        for s in space:
+            if isinstance(s, SkinnyGemmSpec):
+                continue
+            self.assertTrue(s.trait.pad_m)
+            self.assertTrue(
+                s.trait.pad_row_clamp or s.trait.dtl_tight_rsrc or s.trait.kc_row_guard
+            )
+        names = {s.name for s in space}
+        with mock.patch.object(_gc, "G1_PAD_FALLBACK", False), mock.patch.object(
+            _gc, "G1_RING_ANY", False
+        ):
+            off = {s.name for s in gemm_fp16_sweep_space(req)}
+        self.assertNotIn("universal_gemm_fp16_cdna_pad", off)
+        self.assertNotIn("universal_gemm_fp16_cdna_dtl_ring_any", off)
+        self.assertLessEqual(off, names)
 
     def test_config_support_uses_arch_mma_and_tile_knobs(self):
-        result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))
+        result = dispatch_gemm_fp16(
+            GemmRequest(M=128, N=128, K=32, arch="gfx950", algorithm="universal_gemm")
+        )
         query = support_query_from_universal_spec(result.spec, arch="gfx950")
         ok, why = gemm_config_supported(query)
         self.assertTrue(ok, why)
@@ -846,7 +935,9 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertIn("unsupported", why)
 
     def test_request_shape_granularity_is_separate_from_config_support(self):
-        result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))
+        result = dispatch_gemm_fp16(
+            GemmRequest(M=128, N=128, K=32, arch="gfx950", algorithm="universal_gemm")
+        )
         ok, why = request_shape_supported(
             GemmRequest(M=130, N=128, K=32, arch="gfx950"), result.spec
         )
@@ -899,13 +990,23 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertEqual(result.candidate.name, "universal_gemm_fp16_cdna_mem")
 
     def test_sweep_space_is_bounded_and_valid(self):
+        from rocke.dispatch.gemm import common as _common
+
         for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
             req = GemmRequest(M=512, N=512, K=512, arch=arch)
             specs = gemm_fp16_sweep_space(req)
             self.assertGreaterEqual(len(specs), 1)
-            self.assertLessEqual(len(specs), 4)
+            # every admitting candidate's space: up to 4 universal variants per
+            # registered rule body, + the register-staged cost-model plans
+            # (gfx942), + the ring_any retiles (gfx950, up to 6), + the
+            # gemm_skinny region / fallback specs, + the padded fallbacks
+            g5 = _common.G5_VGPR_SWEEP if arch in _common.G5_VGPR_ARCHES else 0
+            self.assertLessEqual(len(specs), 4 + g5 + 6 + 2 + 2)
             for spec in specs:
-                ok, why = is_valid_spec(spec, arch=arch)
+                if isinstance(spec, SkinnyGemmSpec):
+                    ok, why = skinny_is_valid_spec(spec, arch)
+                else:
+                    ok, why = is_valid_spec(spec, arch=arch)
                 self.assertTrue(ok, f"{arch}: {why}")
 
     def test_dispatch_all_enumerates_every_eligible_variant(self):
@@ -918,7 +1019,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertEqual(len(results), len(registered_gemm_fp16_combos(req)))
 
     def test_selected_kernel_lowers_to_llvm(self):
-        req = GemmRequest(M=128, N=128, K=64, arch="gfx950")
+        req = GemmRequest(M=128, N=128, K=64, arch="gfx950", algorithm="universal_gemm")
         result = dispatch_gemm_fp16(req)
         kernel = build_kernel(result)
         llvm = lower_kernel_to_llvm(kernel, arch=req.arch)

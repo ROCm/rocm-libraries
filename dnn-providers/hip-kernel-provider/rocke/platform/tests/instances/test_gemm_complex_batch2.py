@@ -134,3 +134,53 @@ def test_batch2_params():
     ]
     sp1 = replace(_spec("cx_b1"), batched=True)
     assert "L2" not in [p.name for p in build_universal_gemm(sp1, "gfx950").params]
+
+
+# ------------------------------------------------------------------ launch contract (>= 2 GiB complex rows)
+
+
+def _cx_launch_error(M, Nc, Kc, **kw):
+    from rocke.instances.common.gemm_universal import launch_shape_error
+
+    sp = attach_prologue(_spec("cx_l", **kw), _cx())
+    # kernel extents: N = 2 Nc real rows of B', K = 4 Kc 16-bit halves
+    return launch_shape_error(sp, M, 2 * Nc, 4 * Kc)
+
+
+@pytest.mark.parametrize(
+    "M,Nc,Kc,why",
+    [
+        # A (2.4 GB) and the complex B (2.26 GB) past the DMA buffer range
+        (24576, 23040, 12288, "DTL buffer range"),
+        # D = M x 2Nc f32 has more elements than the i32 offsets address
+        (46080, 46080, 1536, "elements"),
+        (46080, 46080, 2304, "elements"),
+    ],
+)
+def test_cplx_launch_contract_refuses_oversized_problems(M, Nc, Kc, why):
+    err = _cx_launch_error(M, Nc, Kc)
+    assert err is not None and why in err, err
+
+
+def test_cplx_launch_contract_counts_complex_b_rows():
+    # B' has 2 Nc kernel rows but Nc complex rows in memory: 16384 x 16000
+    # interleaved complex f32 is 2.1 GB (inside the range); counting the 2 Nc
+    # kernel rows would double it and refuse
+    assert _cx_launch_error(8192, 16384, 16000) is None
+
+
+def test_cplx_launch_contract_needs_whole_complex_rows():
+    from rocke.instances.common.gemm_universal import launch_shape_error
+
+    sp = attach_prologue(
+        _spec("cx_s", pad_m=True, pad_n=True, dtl_tight_rsrc=True), _cx()
+    )
+    assert launch_shape_error(sp, 1000, 2046, 4096) is None
+    assert "even" in launch_shape_error(sp, 1000, 2047, 4096)
+
+
+def test_prologue_needs_k_contiguous_operands():
+    sp = _spec("cx_nn")
+    sp = replace(sp, data=replace(sp.data, layout="RRR"))
+    with pytest.raises(ValueError, match="RCR"):
+        build_universal_gemm(attach_prologue(sp, _cx()), "gfx950")

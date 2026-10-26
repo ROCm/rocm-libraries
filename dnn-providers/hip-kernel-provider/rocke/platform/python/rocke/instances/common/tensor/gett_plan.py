@@ -128,9 +128,21 @@ class GettPlan:
     vec_d8: bool = (
         False  # 8 consecutive GEMM rows are 8 contiguous, 8-aligned D elements (16-byte stores)
     )
+    #: (mode, real extent, padded extent) of the one K mode padded to make the
+    #: K tile separable (an in-tile digit; padded rows read zeros), or None.
+    #: ``K`` and the K digits use the padded extent.
+    k_pad: Optional[Tuple[str, int, int]] = None
+    #: K-contiguous packed operands (``kc``): the GEMM reads A as [M, K] and B
+    #: as [N, K] row-major copies (rows in ``ops[*].rows_order``, K in
+    #: ``k_order`` reversed = outer first); no K split, no operand runs.
+    kc: bool = False
+    #: 8 consecutive GEMM columns are 8 contiguous, 8-aligned D elements (the
+    #: row-interleave vector epilogue: 8 columns per lane)
+    vec_dc8: bool = False
 
     def describe(self) -> str:
-        return (
+        kp = "" if self.k_pad is None else f" kpad={self.k_pad}"
+        return kp + (
             f"M{self.M} N{self.N} K{self.K} T{self.tile_k} swap={int(self.swapped)} "
             f"vecA={self.ops['A'].vec} vecB={self.ops['B'].vec} vecD={self.vec_d} "
             f"kord={self.k_order} rowsA={self.ops['A'].rows_order} rowsB={self.ops['B'].rows_order} "
@@ -153,6 +165,38 @@ class GettPlan:
             off += (kt % r) * mult * st[m]
             kt //= r
         return off
+
+
+def k_split_padded(order_inner_first: Sequence[str], ext: Dict[str, int], T: int):
+    """``k_split`` with ONE K mode padded up to the smallest extent that makes
+    the tile separable, the padded mode being entirely in-tile (its digit is
+    local, so the padded rows are a per-lane mask). Returns ``(local, tile,
+    (mode, real, padded))`` with the least padded K, or None."""
+    best = None
+    for j, m in enumerate(order_inner_first):
+        rem = T
+        for x in order_inner_first[:j]:
+            e = ext[x]
+            if e > rem or rem % e:
+                rem = 0
+                break
+            rem //= e
+        if not rem or ext[m] >= rem:
+            continue
+        d = next(v for v in range(ext[m] + 1, rem + 1) if rem % v == 0)
+        e2 = dict(ext)
+        e2[m] = d
+        sp = k_split(order_inner_first, e2, T)
+        if sp is None or not any(mm == m and r == d for r, mm, _ in sp[0]):
+            continue
+        cost = 1
+        for x in order_inner_first:
+            cost *= e2[x]
+        if best is None or cost < best[0]:
+            best = (cost, sp, (m, ext[m], d))
+    if best is None:
+        return None
+    return best[1][0], best[1][1], best[2]
 
 
 def _vec(
@@ -184,9 +228,17 @@ def plan_gett(
     strides_d: Optional[Dict[str, int]] = None,
     tile_k: Optional[int] = None,
     tile_mn: int = 256,
+    kc: bool = False,
+    d_fast_role: str = "A",
 ) -> GettPlan:
     """Mode lists are ROW-major (last mode fastest), i.e. a hipTensor
-    column-major descriptor's mode list reversed."""
+    column-major descriptor's mode list reversed.
+
+    ``kc``: plan for K-contiguous packed operand copies (no K split, no MN run
+    requirement). ``d_fast_role``: the GEMM operand (``"A"``: rows, ``"B"``:
+    columns) that owns D's fastest mode."""
+    if d_fast_role not in ("A", "B"):
+        raise ValueError(f"d_fast_role {d_fast_role!r} not in ('A', 'B')")
     modes_a, modes_b, modes_d = list(modes_a), list(modes_b), list(modes_d)
     sa = strides_a or packed_strides(modes_a, ext)
     sb = strides_b or packed_strides(modes_b, ext)
@@ -204,7 +256,7 @@ def plan_gett(
             "not a plain bilinear contraction (batch / Hadamard modes unsupported)"
         )
     d_fast = min(modes_d, key=lambda x: sd[x])
-    swapped = d_fast in n_modes
+    swapped = (d_fast in n_modes) == (d_fast_role == "A")
     roles = (
         {"A": ("B", modes_b, sb, n_modes), "B": ("A", modes_a, sa, m_modes)}
         if swapped
@@ -214,7 +266,11 @@ def plan_gett(
     # largest tile, then small A strides innermost
     tks = [tile_k] if tile_k else [64, 32]
     best = None
-    for T in tks:
+    if kc:
+        # packed K-contiguous copies: any shared K order (A's memory order)
+        order = sorted(k_modes, key=lambda x: sa[x])
+        best = (tks[0], order, ([], []))
+    for T in tks if best is None else ():
         cands = []
         for perm in itertools.permutations(k_modes):
             sp = k_split(perm, ext, T)
@@ -226,6 +282,26 @@ def plan_gett(
             cands.sort(key=lambda c: c[0])
             best = (T,) + cands[0][1:]
             break
+    k_pad = None
+    if best is None and not kc:
+        # no exact split: pad one in-tile K mode (padded rows read zeros)
+        for T in tks:
+            cands = []
+            for perm in itertools.permutations(k_modes):
+                sp = k_split_padded(perm, ext, T)
+                if sp is None:
+                    continue
+                kv = 1
+                for m in k_modes:
+                    kv *= ext[m] if m != sp[2][0] else sp[2][2]
+                key = (kv,) + tuple(min(sa[m], sb[m]) for m in perm)
+                cands.append((key, list(perm), sp))
+            if cands:
+                cands.sort(key=lambda c: c[0])
+                key, perm, sp = cands[0]
+                best = (T, perm, (sp[0], sp[1]))
+                k_pad = sp[2]
+                break
     if best is None:
         raise ValueError(
             f"K modes {[(m, ext[m]) for m in k_modes]} not separable for tiles {tks}"
@@ -239,11 +315,14 @@ def plan_gett(
         for x in free:
             rows *= ext[x]
         v = _vec(dig, [st[m] for m in k_modes])
-        if v < 2:
+        if kc:
+            v = 0  # read from the packed K-contiguous copy
+        elif v < 2:
             raise ValueError(
                 f"operand {nm} is not MN-contiguous (vec {v}); GETT needs the K-outer path"
             )
-        v = 8 if v >= 8 else 2  # DTL widths: 16-byte or 4-byte per lane
+        if not kc:
+            v = 8 if v >= 8 else 2  # DTL widths: 16-byte or 4-byte per lane
         nbytes = 2 * (1 + sum((ext[m] - 1) * st[m] for m in modes))
         ops[role] = OpGeom(nm, rows_order, rows, dig, v, st, nbytes)
     d_row = merge_digits(ops["A"].rows_order, ext, sd)
@@ -264,9 +343,15 @@ def plan_gett(
         and all(s % 8 == 0 for (_e, s) in d_row[1:])
         and all(s % 8 == 0 for (_e, s) in d_col)
     )
+    vdc8 = (
+        d_col[0][1] == 1
+        and d_col[0][0] % 8 == 0
+        and all(s % 8 == 0 for (_e, s) in d_col[1:])
+        and all(s % 8 == 0 for (_e, s) in d_row)
+    )
     K = 1
     for m in k_modes:
-        K *= ext[m]
+        K *= ext[m] if k_pad is None or m != k_pad[0] else k_pad[2]
     return GettPlan(
         modes_a,
         modes_b,
@@ -286,4 +371,7 @@ def plan_gett(
         vd,
         sd,
         vd8,
+        k_pad,
+        kc,
+        vdc8,
     )

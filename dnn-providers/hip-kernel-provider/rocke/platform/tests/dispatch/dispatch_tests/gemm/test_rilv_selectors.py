@@ -6,7 +6,9 @@
   alternative bodies without monkeypatching, default to the tuned IR body and
   reject unknown values.
 * ``is_valid_spec`` rejects the bodies without a fused-epilogue hook when a
-  ``helpers.fuse`` epilogue is attached, instead of the builder raising.
+  ``helpers.fuse`` epilogue is attached, instead of the builder raising; the
+  row-interleave vector epilogue takes one, and ``fused_epilogue_spec`` maps a
+  dispatched body to the nearest one that does.
 * The non-DTL dispatcher LDS budget keeps the CK-mirrored per-pipeline cap.
 """
 
@@ -77,15 +79,43 @@ class TestFusedEpilogueGate(unittest.TestCase):
         with _env():
             spec = dispatch_gemm_fp16(_REQ).spec
         self.assertTrue(is_valid_spec(spec, arch="gfx950")[0])
-        ok, why = is_valid_spec(self._with_fused(replace(spec)), arch="gfx950")
-        self.assertFalse(ok)
-        self.assertIn("fused epilogue", why)
+        for lever in (
+            dict(persistent_ctas=256),
+            dict(split_k=2),
+            dict(streamk=True),
+        ):
+            with self.subTest(**lever):
+                s = replace(spec, trait=replace(spec.trait, **lever))
+                ok, why = is_valid_spec(self._with_fused(s), arch="gfx950")
+                self.assertFalse(ok)
+                self.assertIn("fused epilogue", why)
+
+    def test_row_interleave_vector_epilogue_takes_a_fused_epilogue(self):
+        with _env():
+            spec = dispatch_gemm_fp16(_REQ).spec
+        self.assertTrue(spec.trait.rilv_vec_epilogue)
+        body = C.fused_epilogue_spec(spec)
+        self.assertFalse(body.trait.persistent_ctas)
+        self.assertTrue(body.trait.rilv_vec_epilogue)
+        self.assertTrue(
+            is_valid_spec(self._with_fused(replace(body)), arch="gfx950")[0]
+        )
+
+    def test_fused_epilogue_spec_reroutes_or_refuses(self):
+        with _env():
+            spec = dispatch_gemm_fp16(_REQ).spec
+        pers = replace(spec, trait=replace(spec.trait, persistent_ctas=256))
+        self.assertEqual(C.fused_epilogue_spec(pers).trait.persistent_ctas, 0)
+        self.assertIsNone(
+            C.fused_epilogue_spec(replace(spec, trait=replace(spec.trait, split_k=2)))
+        )
 
     def test_plain_body_keeps_fused_epilogue(self):
         spec = dispatch_gemm_fp16(
             GemmRequest(M=1024, N=1024, K=256, arch="gfx950")
         ).spec
         self.assertFalse(spec.trait.rilv_vec_epilogue)
+        self.assertIs(C.fused_epilogue_spec(spec), spec)
         self.assertTrue(
             is_valid_spec(self._with_fused(replace(spec)), arch="gfx950")[0]
         )
@@ -93,9 +123,20 @@ class TestFusedEpilogueGate(unittest.TestCase):
 
 class TestNonDtlLdsCap(unittest.TestCase):
     def test_ck_pipeline_cap_still_bounds_non_dtl_bodies(self):
-        spec = dispatch_gemm_fp16(
-            GemmRequest(M=1024, N=1024, K=256, arch="gfx950")
-        ).spec
+        # a VGPR-staged (non-DTL) compv4 body
+        from rocke.instances.common.gemm_universal import (
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+            mono_data_spec,
+        )
+
+        spec = UniversalGemmSpec(
+            name="non_dtl",
+            tile=TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 16),
+            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+            data=mono_data_spec("fp16"),
+        )
         self.assertFalse(spec.trait.direct_to_lds)
         q = support_query_from_universal_spec(spec, arch="gfx950")
         self.assertTrue(gemm_config_supported(q)[0])

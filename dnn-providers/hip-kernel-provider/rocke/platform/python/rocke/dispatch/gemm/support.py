@@ -13,8 +13,10 @@ from ...instances.common.gemm_universal import (
     DTL_BUFFER_NUM_RECORDS,
     UniversalGemmSpec,
     is_valid_spec,
+    launch_shape_error,
     universal_lds_bytes,
 )
+from ...instances.common.gemm_mn_operand import GEMM_LAYOUTS
 from .common import GemmRequest, normalize_dtype
 
 
@@ -59,6 +61,9 @@ class GemmSupportQuery:
     interwave_setprio: bool = False
     # alias-scoped DTL ring stages (LDS = stages x AB; 0 = the ping-pong)
     dtl_stages: int = 0
+    # register-staged prefetch depth (0 = off); such bodies are bounded by
+    # their real LDS allocation only
+    vgpr_prefetch: int = 0
 
 
 def support_query_from_universal_spec(
@@ -96,6 +101,7 @@ def support_query_from_universal_spec(
         lds_k_pad=tr.lds_k_pad,
         interwave_setprio=tr.interwave_setprio,
         dtl_stages=tr.dtl_stages,
+        vgpr_prefetch=int(getattr(tr, "vgpr_prefetch", 0) or 0),
     )
 
 
@@ -131,8 +137,8 @@ def _dtype_bytes(dtype: str) -> int:
 # (``dispatcher/codegen/arch_filter.py`` ``LDS_CAPACITY_LIMITS``): one A + B
 # tile against a fixed per-pipeline budget. It still bounds the non-DTL bodies
 # (on top of the real allocation checked below), so their sweep space is the
-# one the CK-mirrored rule admits; the direct-to-LDS bodies are bounded by the
-# target's real capacity only (a 256x256 DTL tile needs more than these caps).
+# one the CK-mirrored rule admits; the direct-to-LDS and register-staged
+# (``vgpr_prefetch``) bodies are bounded by the target's real capacity only (a 256x256 DTL tile needs more than these caps).
 _LDS_CAPACITY_LIMITS = {"compv4": 32768, "preshufflev2": 32768, "default": 65536}
 
 
@@ -185,7 +191,7 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
     except KeyError as e:
         return False, str(e)
 
-    if q.layout.upper() != "RCR":
+    if q.layout.upper() not in GEMM_LAYOUTS:
         return False, f"unsupported GEMM layout {q.layout!r}"
     if q.dtype_a != q.dtype_b or q.dtype_a != q.dtype_c:
         return False, (
@@ -276,7 +282,7 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
     # per-WG capacity; non-DTL bodies also keep the CK-mirrored per-pipeline
     # estimate (see _LDS_CAPACITY_LIMITS).
     lds_cap = target.lds_capacity_bytes
-    if not q.direct_to_lds:
+    if not q.direct_to_lds and not q.vgpr_prefetch:
         ck_cap = min(
             _LDS_CAPACITY_LIMITS.get(q.pipeline, _LDS_CAPACITY_LIMITS["default"]),
             lds_cap,
@@ -377,6 +383,29 @@ def request_shape_supported(
                 f"{name}={dim} is not divisible by tile_{name.lower()}={tile} "
                 f"and pad_{name.lower()} is disabled",
             )
+    # the body's own launch rules (ragged-row bounds, the DTL K tail, split-K
+    # slices, grid limits): one source with ``check_launch_shape``
+    err = launch_shape_error(spec, int(req.M), int(req.N), int(req.K))
+    if err is not None:
+        return False, err
+    # the VGPR-staged loader reads the padded rows of a
+    # K-contiguous RCR operand past the operand unless kc_row_guard is set
+    # (non-RCR layouts always guard); pad_row_clamp and
+    # vgpr_prefetch (tight buffer range) bound those rows too
+    if (
+        not tr.direct_to_lds
+        and spec.data.layout.upper() == "RCR"
+        and not tr.kc_row_guard
+        and not getattr(tr, "pad_row_clamp", False)
+        and not getattr(tr, "vgpr_prefetch", 0)
+    ):
+        for name, dim, tile in (("M", req.M, t.tile_m), ("N", req.N, t.tile_n)):
+            if dim % tile:
+                return False, (
+                    f"{name}={dim} is not divisible by tile_{name.lower()}={tile}: the "
+                    "unguarded VGPR-staged loader would read past the operand "
+                    "(kc_row_guard)"
+                )
     return operand_range_supported(
         req, spec, elem_bytes=_dtype_bytes(spec.data.dtype_a)
     )

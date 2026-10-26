@@ -4,7 +4,7 @@ description: >
   Comprehensive guide to optimizing GEMM (General Matrix Multiply) kernels in
   CK DSL on AMD CDNA GPUs. Covers tiling strategy, pipeline types (mem, compv4),
   LDS swizzle strategies, software pipelining, MFMA instruction atoms,
-  epilogue strategies (default, cshuffle), TFLOPS/bandwidth calculation,
+  epilogue strategies (default, cshuffle), throughput/bandwidth calculation,
   register pressure management, and bottleneck identification.
   Based on CK DSL's gemm_instance framework.
   Usage: /gemm-optimization-rocke
@@ -14,7 +14,7 @@ allowed-tools: Read Edit Bash Grep Glob Agent
 # GEMM Optimization Guide (CK DSL)
 
 Comprehensive guide to writing and optimizing high-performance GEMM kernels in
-CK DSL on AMD CDNA GPUs (MI300X gfx942, MI350 gfx950).
+CK DSL on AMD CDNA GPUs (gfx942, gfx950).
 
 Based on the CK DSL `instances/gemm.py` framework.
 
@@ -370,11 +370,11 @@ spec = GemmSpec(
 
 ### 7.2 Architecture Differences
 
-**gfx942 (MI300X)**:
+**gfx942**:
 - Async copy granularity: 4 bytes (dword)
 - Requires multiple DMA ops for large transfers
 
-**gfx950 (MI350/MI355X)**:
+**gfx950**:
 - Async copy granularity: 16 bytes (dwordx4)
 - More efficient bulk transfers
 
@@ -556,16 +556,14 @@ with `dtl_soff0`, `dtl_addr_spread`, `hb_dtl_delay`, `kloop_unroll`, `hb_skew`,
 
 ## 9. Performance Metrics
 
-### 9.1 TFLOPS Calculation
+### 9.1 Throughput Calculation
 
 ```python
 flops = 2 * M * N * K                    # Each FMA = 2 FLOPs
 tflops = flops / (latency_us / 1e6) / 1e12
 
-# Theoretical peak (gfx942 MI300X, single GCD):
-#   FP16/BF16: ~653 TFLOPS (mfma_f32_16x16x16)
-#   FP8:       ~1306 TFLOPS (mfma_f32_16x16x32)
-#   INT8:      ~1306 TOPS
+# Compare against the theoretical peak of the target (gfx942 / gfx950) for the
+# MFMA instruction in use (FP8 / INT8 peaks exceed FP16 / BF16).
 ```
 
 ### 9.2 Bandwidth Calculation
@@ -577,7 +575,7 @@ bytes_moved = (M * K * elem_bytes)     # A matrix
 
 tbps = bytes_moved / 1e12 / (latency_us / 1e6)
 
-# HBM bandwidth (gfx942 MI300X): ~5.2 TB/s theoretical
+# Compare against the theoretical HBM bandwidth of the target.
 ```
 
 ### 9.3 Roofline Analysis
@@ -617,27 +615,27 @@ spec = GemmSpec(
 **Step 2: Enable double-buffering**
 ```python
 spec.pipeline = 'compv4'
-# Expect +10-20% performance if memory-bound
+# Expect a gain if memory-bound
 ```
 
 **Step 3: Add async copy (if tile ≥ 128)**
 ```python
 spec.use_async_copy = True
-# Expect +5-10% if VGPR-limited
+# Expect a gain if VGPR-limited
 ```
 
 **Step 4: Optimize LDS swizzle**
 ```python
 # On gfx950 with abundant LDS:
 spec.lds_k_pad = 8
-# Expect +5-15% from reduced bank conflicts
+# Expect a gain from reduced bank conflicts
 ```
 
 **Step 5: Tune epilogue**
 ```python
 if tile_n >= 128 and LDS_budget_allows:
     spec.epilogue = 'cshuffle'
-# Expect +5-10% if output-bandwidth-bound
+# Expect a gain if output-bandwidth-bound
 ```
 
 ### 10.2 Profiling Checkpoints
@@ -667,7 +665,7 @@ rocprofv3 --stats --kernel-trace -- python my_gemm.py
 
 | Symptom | Likely Cause | Action |
 |---------|--------------|--------|
-| TFLOPS < 50% peak | Multiple issues | Start with Step 10.1 baseline |
+| Throughput < 50% of peak | Multiple issues | Start with Step 10.1 baseline |
 | High `s_waitcnt vmcnt` stalls | Global load exposed | Enable double-buffer or async copy |
 | High `s_waitcnt lgkmcnt` stalls | LDS latency | Check bank conflicts, add swizzle |
 | High `s_barrier` stalls | Workgroup sync overhead | Reduce barriers, check pipeline |
@@ -810,6 +808,36 @@ spec = GemmSpec(
 
 ---
 
+### 14.4 Non-RCR Layouts (NN / TN / TT) Without A Transpose Pass
+
+`DataSpec.layout` `RRR` / `CRR` / `CCR` read an MN-contiguous operand in place
+(`instances/common/gemm_mn_operand.py`): on the gfx950 DTL ring the operand's LDS
+stage is a K-outer 1 KiB block layout read with `ds_read_b64_tr_b16` (bank-conflict
+free, one lane address plus immediates); elsewhere the VGPR-staged loader writes it
+transposed into the K-contiguous tile. The dispatcher derives the native form from
+the RCR candidate (`dispatch/gemm/common.py::native_layout_alternatives`). Lessons
+(case study: `examples/gfx950/gemm_perf_square_warpspec/NATIVE_LAYOUT_CASE_STUDY.md`):
+
+- Building a 128-bit MFMA operand from two 64-bit LDS reads raises VGPR pressure in
+  unrolled interleave loops; use `TraitSpec.sched_strategy="iterative-minreg"` and
+  check the loop ISA for `v_accvgpr_read/write` shuffles and scratch.
+- 16-byte LDS-DMA loads need 16-byte-aligned global rows.
+- Zero-fill padded K-contiguous rows on the VGPR-staged loader (`kc_row_guard`).
+- Choose among the native forms per request, not by a fixed order: the native form
+  of the best RCR candidate is often far faster than the native form of the rule
+  layer's priority pick. The learned selector ranks them with layout features
+  (`gemm_native_<arch>` models, `ROCKE_GEMM_SELECTOR_NATIVE`); `dispatch/gemm/plan.py`
+  adds the plan-level transpose pre-pass choice from the same model's predictions.
+- Swizzle a transpose read's MN quads to move data between lanes for free: the
+  per-lane address of `ds_read_b64_tr_b16` chooses which 4-element MN quad lands in
+  which fragment lanes, so a permutation of the quads (same address set, same banks)
+  can place an epilogue's partner values in lanes L and L + 32 for one
+  `v_permlane32_swap` (`TraitSpec.sab_vec16`). Verify such data-flow changes with a
+  lane-level model of the emitter plus an on-GPU f64 check.
+- Before widening a C epilogue, compare its store-stall share with the RCR body's in
+  WaveScope: on the native NN / TN bodies wider stores did not pay, because the
+  swapped-accumulator layout's store instructions cover many short row segments.
+
 ## 15. Quick Reference
 
 ### 15.1 Pipeline Selection Decision Tree
@@ -837,14 +865,14 @@ Else:
 ```python
 tile=128×128×16, warp=2×2, warp_tile=64×64×16
 pipeline='compv4', epilogue='default'
-→ ~450-500 TFLOPS on 4096×4096×4096
+→ A solid general-purpose starting point (e.g. 4096×4096×4096)
 ```
 
 **High-throughput FP8 (gfx950)**:
 ```python
 tile=128×128×32, warp=2×2, warp_tile=64×64×32
 pipeline='compv4', use_async_copy=True, lds_k_pad=8, epilogue='cshuffle'
-→ ~900-1000 TFLOPS on 4096×4096×4096
+→ Targets large compute-bound FP8 shapes (e.g. 4096×4096×4096)
 ```
 
 **Small-batch optimized (M=64)**:
@@ -882,21 +910,21 @@ spec = GemmSpec(
 
 kernel = build_gemm(spec)
 artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx942")
-# Benchmark: ~350 TFLOPS (53% of 653 TFLOPS peak)
+# Benchmark: record the baseline throughput
 ```
 
 ### Step 2: Add Double-Buffer
 
 ```python
 spec.pipeline = 'compv4'
-# Benchmark: ~420 TFLOPS (+20%)
+# Benchmark: compare against the baseline
 ```
 
 ### Step 3: Enable Async Copy
 
 ```python
 spec.use_async_copy = True
-# Benchmark: ~460 TFLOPS (+10%)
+# Benchmark: compare against the previous step
 ```
 
 ### Step 4: Optimize for gfx950
@@ -905,19 +933,16 @@ spec.use_async_copy = True
 spec.lds_k_pad = 8  # Padding swizzle
 spec.epilogue = 'cshuffle'
 artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
-# Benchmark: ~520 TFLOPS (+13%)
+# Benchmark: compare against the previous step
 ```
-
-**Final performance**: 520 TFLOPS = 80% of theoretical peak (good result)
 
 **Analysis**:
 ```
 flops = 2 × 4096³ = 137.4 GFLOP
-latency = 137.4 GFLOP / 520 TFLOPS = 0.264 ms
-
 bytes = (4096² × 2 × 2) + (4096² × 2) = 100.7 MB
-bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
-→ Strongly compute-bound, excellent MFMA utilization
+arithmetic intensity = flops / bytes (far above the roofline ridge point)
+→ Strongly compute-bound: judge the result as a fraction of the MFMA peak,
+  not of HBM bandwidth
 ```
 
 ---

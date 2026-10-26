@@ -896,7 +896,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
 
     /* math.exp / math.log */
     "math.exp",
-    "math.log"};
+    "math.log",
+
+    /* tile.* dtype-generic scalar buffer load */
+    "tile.buffer_load"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1185,7 +1188,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
 
     /* math.exp / math.log */
     /* math.exp                   */ true,
-    /* math.log                   */ true};
+    /* math.log                   */ true,
+
+    /* tile.* dtype-generic scalar buffer load (reads memory) */
+    /* tile.buffer_load           */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

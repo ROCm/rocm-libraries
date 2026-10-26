@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import asdict, dataclass, replace
 from typing import Optional
@@ -16,7 +17,56 @@ from ...instances.common.gemm_universal import (
     TraitSpec,
     UniversalGemmSpec,
 )
+from ...instances.common.gemm_mn_operand import GEMM_LAYOUTS
 from ..core import OperatorRequest, normalize_selector
+
+# native NN / TN / TT: a non-RCR request whose RCR body uses
+# K-contiguous-only levers (the LDS row interleave family) runs on the B3
+# persistent ring; False leaves such requests to the caller's transpose pass.
+NATIVE_LAYOUT_B3_FALLBACK = True
+# the B3 fallback's grid: persistent on every CU (the RCR B3 form) or one
+# workgroup per output tile (0, the default: the persistent form is slower
+# with an M-contiguous A)
+NATIVE_LAYOUT_B3_PERSISTENT = False
+# scheduler strategy of the native LDS-row-interleave (beat) forms ("": the
+# backend default; see TraitSpec.sched_strategy)
+NATIVE_LAYOUT_RILV_SCHED = "iterative-minreg"
+# the persistent (non-interleave) ring with an N-contiguous B: keep the
+# persistent grid (True) or prefer one workgroup per output tile (False)
+NATIVE_LAYOUT_PERSISTENT_B_MN = False
+# the non-persistent interleave (beat) body with an N-contiguous B: prefer the
+# cshuffle epilogue form (no_rve_csh) over the default-epilogue form (no_rve)
+NATIVE_LAYOUT_NN_CSHUFFLE = True
+# leading-dimension granularity (elements) an MN-contiguous operand needs for
+# the DTL ring: its 16-byte LDS-DMA rows must start 16-byte aligned (gfx950
+# returned wrong elements for 2-byte-aligned rows, e.g. 3001x2003x1024 TN /
+# TT); others take the VGPR-staged fallback body. Not a tuning knob.
+NATIVE_LAYOUT_DTL_LD_ALIGN = 8
+# offer the 16-byte swapped-accumulator epilogue form
+# ("no_rve_sv16": mfma_swap_ab + TraitSpec.sab_vec16) of the interleave (beat)
+# bodies with an N-contiguous B. It sits after the other forms in
+# NATIVE_LAYOUT_ORDER, so the rule pick is unchanged; the native selector ranks
+# it. False: not generated.
+NATIVE_LAYOUT_SAB_VEC16 = True
+# ... and the same 16-byte epilogue on every other DTL-ring form with an
+# N-contiguous B ("<form>_sv16": the B3 / flipped / 128 / same rings, a cshuffle
+# epilogue becoming the direct one). Off: slower than the base form on the B3
+# ring and at parity on the same / flip rings -- the swapped MFMA operand
+# order costs the main loop more than the wider stores save.
+NATIVE_LAYOUT_SAB_VEC16_RINGS = False
+# streaming (non-temporal) C stores on the sv16 forms (TraitSpec.sab_store_nt).
+# Off: slower than plain stores on the beat and B3 forms.
+NATIVE_LAYOUT_SV16_NT = False
+# native_layout_spec returns the first form that launches for the request's
+# shape (False: the first valid form)
+NATIVE_LAYOUT_LAUNCHABLE_FIRST = True
+# preference order of the native forms per layout (native_layout_alternatives):
+# the RCR body itself, the beat body without its vector epilogue, the B3 ring
+NATIVE_LAYOUT_ORDER = {
+    "RRR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
+    "CRR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
+    "CCR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
+}
 
 
 @dataclass(frozen=True)
@@ -94,11 +144,450 @@ def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
         errors.append(
             f"unsupported dtype {req.dtype!r}; this family supports {dtype} only"
         )
-    if req.layout.upper() != "RCR":
-        errors.append(f"unsupported layout {req.layout!r}; RCR only")
-    if req.trans_a or not req.trans_b:
-        errors.append("RCR expects A row-major and B logically transposed")
+    lay = req.layout.upper()
+    if lay not in GEMM_LAYOUTS:
+        errors.append(f"unsupported layout {req.layout!r}; one of {GEMM_LAYOUTS}")
+    elif (bool(req.trans_a), bool(req.trans_b)) != (lay[0] == "C", lay[1] == "C"):
+        # RCR: A row-major, B logically transposed; RRR (NN): B row-major
+        # [K, N]; CRR (TN): A stored [K, M] too; CCR (TT): A [K, M], B [N, K]
+        errors.append(
+            f"layout {lay} expects trans_a={lay[0] == 'C'}, trans_b={lay[1] == 'C'}"
+        )
     return errors
+
+
+def native_layout_alternatives(
+    req: "GemmRequest", spec: UniversalGemmSpec
+) -> tuple[list[tuple[str, UniversalGemmSpec]], str]:
+    """Every native form of a non-RCR ``req`` derived from the RCR candidate's
+    ``spec`` (native NN / TN / TT: the MN-contiguous operands are read in place,
+    no transpose pass; see ``instances.common.gemm_mn_operand``), in
+    preference order, each validity-checked:
+
+    * ``same``: the RCR body with the request's layout;
+    * ``no_rve``: the LDS-row-interleave (beat) body without its 16-byte vector
+      epilogue (that epilogue needs B's interleaved column order, which an
+      N-contiguous B read by transpose loads cannot provide);
+    * ``b3``: the B3 ring (256x256x32, 3-stage fragment-prefetch interleave),
+      one workgroup per tile unless :data:`NATIVE_LAYOUT_B3_PERSISTENT`.
+
+    Returns ``(alternatives, reason the list is empty)``."""
+    from ...instances.common.gemm_mn_operand import mn_layout_letters
+    from ...instances.common.gemm_universal import is_valid_spec
+
+    from ...instances.common.gemm_mn_operand import MN_OPERAND_ARCHS, uses_mn_dtl
+
+    lay = req.layout.upper()
+    if lay == "RCR":
+        return [("same", spec)], "ok"
+    if (
+        R2_VP_MN
+        and int(getattr(spec.trait, "vgpr_prefetch", 0))
+        and req.arch in R2_VP_MN_ARCHES
+    ):
+        # the register-staged (vgpr_prefetch) body reads the MN-contiguous
+        # operand itself (micro-block register transpose, TraitSpec.vp_mn_kv)
+        f = r2_vp_mn_form(req, spec)
+        if f is None:
+            return [], f"layout {lay}: no vp_mn micro-block fits the g5 body"
+        return [("vp_mn", f)], "ok"
+    a_mn, b_mn = mn_layout_letters(lay)
+    data = replace(spec.data, layout=lay)
+    tr = spec.trait
+    _al = max(8, int(NATIVE_LAYOUT_DTL_LD_ALIGN))
+    ld8 = not ((a_mn and int(req.M) % _al) or (b_mn and int(req.N) % _al))
+    if not uses_mn_dtl(spec) or not ld8 or req.arch not in MN_OPERAND_ARCHS:
+        # the VGPR-staged transposing loader: the body itself when it has no
+        # DTL ring, else the generic cshuffle body (an MN leading dimension
+        # that is not a multiple of 8, or a target without transpose reads)
+        base = spec if not uses_mn_dtl(spec) else native_generic_spec(req, spec)
+        if base is None:
+            return [], f"layout {lay}: no VGPR-staged body for this request"
+        v = native_mn_vec(req, base)
+        if v is None:
+            return (
+                [],
+                f"layout {lay}: no MN load width fits the tile / leading dimension",
+            )
+        g = replace(base, data=data, trait=replace(base.trait, mn_vec=v))
+        ok, why = is_valid_spec(g, arch=req.arch)
+        return ([("generic", g)], "ok") if ok else ([], f"generic: {why}")
+    if tr.lds_row_interleave and NATIVE_LAYOUT_RILV_SCHED and not tr.sched_strategy:
+        # the unrolled interleave main loop with transpose-read fragments
+        # needs the register-minimising scheduler (TraitSpec.sched_strategy)
+        tr = replace(tr, sched_strategy=NATIVE_LAYOUT_RILV_SCHED)
+    cands = [("same", replace(spec, data=data, trait=tr))]
+    if (
+        tr.persistent_ctas
+        and b_mn
+        and not tr.lds_row_interleave
+        and not NATIVE_LAYOUT_PERSISTENT_B_MN
+    ):
+        # an N-contiguous B on the persistent ring: one workgroup per tile
+        # first (the persistent tile walk is slower for native layouts)
+        cands.insert(
+            0, ("grid", replace(spec, data=data, trait=replace(tr, persistent_ctas=0)))
+        )
+    if tr.lds_row_interleave and tr.rilv_vec_epilogue and b_mn:
+        nr = replace(tr, rilv_vec_epilogue=False, rve_store_nt=False, rve_pad=0)
+        cands.append(("no_rve", replace(spec, data=data, trait=nr)))
+        # the LDS-staged cshuffle epilogue (wide row stores; one workgroup per
+        # tile: the persistent loop requires the default epilogue)
+        cands.append(
+            (
+                "no_rve_csh",
+                replace(
+                    spec,
+                    data=data,
+                    trait=replace(
+                        nr, epilogue="cshuffle", persistent_ctas=0, pad_fast_tile=False
+                    ),
+                ),
+            )
+        )
+        if not nr.pad_n and not nr.sia_sched:
+            # the accumulator as C^T (mfma_swap_ab): 4 consecutive N per lane
+            # -> 8-byte row stores from the natural N-contiguous B fragments
+            cands.append(
+                (
+                    "no_rve_sab",
+                    replace(spec, data=data, trait=replace(nr, mfma_swap_ab=True)),
+                )
+            )
+            if NATIVE_LAYOUT_SAB_VEC16:
+                # the same with 16-byte stores (permuted B quads +
+                # v_permlane32_swap; TraitSpec.sab_vec16)
+                cands.append(
+                    (
+                        "no_rve_sv16",
+                        replace(
+                            spec,
+                            data=data,
+                            trait=replace(nr, mfma_swap_ab=True, sab_vec16=True),
+                        ),
+                    )
+                )
+    from ...instances.common.gemm_mn_operand import spec_mn_layouts
+
+    try:
+        _cf = all(
+            lay_.conflict_free
+            for lay_ in spec_mn_layouts(cands[0][1])
+            if lay_ is not None
+        )
+    except ValueError:
+        _cf = False
+    if (tr.lds_row_interleave or not _cf) and NATIVE_LAYOUT_B3_FALLBACK:
+        tile, trait = agpr_ilv_big_grid_tile_trait(req.arch)
+        if not NATIVE_LAYOUT_B3_PERSISTENT:
+            trait = replace(trait, persistent_ctas=0)
+        M, N = int(req.M), int(req.N)
+        if M % tile.tile_m or N % tile.tile_n:
+            trait = replace(
+                trait,
+                pad_m=bool(M % tile.tile_m),
+                pad_n=bool(N % tile.tile_n),
+                dtl_tight_rsrc=True,
+            )
+        cands.append(
+            (
+                "b3",
+                UniversalGemmSpec(
+                    name=spec.name,
+                    tile=tile,
+                    trait=trait,
+                    data=data,
+                    wave_size=spec.wave_size,
+                ),
+            )
+        )
+    if not _cf and not tr.lds_row_interleave:
+        # the body's MN tile has no conflict-free transpose layout (e.g. a
+        # 192-wide side): the same body with its tile flipped (the 128 side
+        # on the MN operand), the B3 ring and the 128x128x64 ring
+        t0 = spec.tile
+        ft = replace(
+            t0,
+            tile_m=t0.tile_n,
+            tile_n=t0.tile_m,
+            warp_m=t0.warp_n,
+            warp_n=t0.warp_m,
+        )
+        M_, N_ = int(req.M), int(req.N)
+        pm, pn = bool(M_ % ft.tile_m), bool(N_ % ft.tile_n)
+        ftr = replace(tr, pad_m=pm, pad_n=pn)
+        if pm or pn:
+            ftr = replace(
+                ftr,
+                dtl_tight_rsrc=True,
+                pad_fast_tile=True,
+                dtl_soff0=False,
+                epilogue="default",
+            )
+        fspec = replace(spec, tile=ft, trait=ftr, data=data)
+        try:
+            if all(
+                lay_.conflict_free
+                for lay_ in spec_mn_layouts(fspec)
+                if lay_ is not None
+            ):
+                cands.append(("flip", fspec))
+        except ValueError:
+            pass
+        rt, rtr = (
+            TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            _ring_pad_trait(),
+        )
+        cands.append(
+            (
+                "r128",
+                UniversalGemmSpec(
+                    name=spec.name,
+                    tile=rt,
+                    trait=rtr,
+                    data=data,
+                    wave_size=spec.wave_size,
+                ),
+            )
+        )
+    if NATIVE_LAYOUT_SAB_VEC16 and NATIVE_LAYOUT_SAB_VEC16_RINGS and b_mn:
+        for nm, c in list(cands):
+            ctr = c.trait
+            if (
+                ctr.lds_row_interleave
+                or ctr.mfma_swap_ab
+                or ctr.pad_n
+                or ctr.split_k > 1
+                or not uses_mn_dtl(c)
+            ):
+                continue
+            # a cshuffle (LDS-staged) epilogue becomes the direct 16-byte one
+            cands.append(
+                (
+                    nm + "_sv16",
+                    replace(
+                        c,
+                        trait=replace(
+                            ctr,
+                            epilogue="default",
+                            mfma_swap_ab=True,
+                            sab_vec16=True,
+                            pad_fast_tile=False,
+                        ),
+                    ),
+                )
+            )
+    if NATIVE_LAYOUT_SV16_NT:
+        cands = [
+            (nm, replace(c, trait=replace(c.trait, sab_store_nt=True)))
+            if c.trait.sab_vec16
+            else (nm, c)
+            for nm, c in cands
+        ]
+    order = NATIVE_LAYOUT_ORDER.get(lay, ())
+    cands.sort(key=lambda c: order.index(c[0]) if c[0] in order else len(order))
+    if (
+        NATIVE_LAYOUT_NN_CSHUFFLE
+        and b_mn
+        and tr.lds_row_interleave
+        and not tr.persistent_ctas
+        and not tr.pad_n
+    ):
+        # the one-workgroup-per-tile interleave body with an N-contiguous B:
+        # the LDS-staged cshuffle epilogue ahead of the scattered default one
+        cands.sort(key=lambda c: c[0] != "no_rve_csh")
+    if not _cf:
+        # conflict-free forms first: the flipped tile, then by grid fill the
+        # B3 ring (at least one wave of its 256x256 tiles) or the 128 ring
+        big = -(-int(req.M) // 256) * -(-int(req.N) // 256) >= arch_num_cus(req.arch)
+        rank = {"flip": 0, "b3": 1 if big else 2, "r128": 2 if big else 1}
+        cands.sort(key=lambda c: rank.get(c[0], 3))
+    out, whys = [], []
+    for nm, c in cands:
+        # every form gets the per-request adaptation of g1_adapt_spec (the K tail
+        # of the B3 / flipped / 128 rings built here; identity on exact tiles)
+        c = g1_adapt_spec(req, c)
+        ok, why = is_valid_spec(c, arch=req.arch)
+        if ok:
+            out.append((nm, c))
+        else:
+            whys.append(f"{nm}: {why}")
+    return out, "; ".join(whys)
+
+
+def native_mn_vec(req: "GemmRequest", spec: UniversalGemmSpec) -> Optional[int]:
+    """Widest MN load (8 / 4 / 2 / 1 elements) of the VGPR-staged MN operand
+    loader that divides each MN-contiguous operand's leading dimension and
+    gives every thread whole loads of its tile."""
+    from ...instances.common.gemm_mn_operand import mn_layout_letters
+
+    a_mn, b_mn = mn_layout_letters(req.layout)
+    t = spec.tile
+    for v in (8, 4, 2, 1):
+        ok = True
+        for is_mn, ld, tile_mn in (
+            (a_mn, int(req.M), t.tile_m),
+            (b_mn, int(req.N), t.tile_n),
+        ):
+            if is_mn and (
+                ld % v or tile_mn % v or (tile_mn * t.tile_k // v) % spec.block_size
+            ):
+                ok = False
+        if ok:
+            return v
+    return None
+
+
+# the universal padded fallback candidate (lowest priority,
+# every layout): the generic cshuffle body (VGPR-staged loads) padded where the
+# shape is ragged, with guarded K-contiguous rows (TraitSpec.kc_row_guard) and
+# the transposing MN loader for NN / TN / TT. Serves every request no faster
+# candidate admits. False: no fallback (those requests are refused).
+UNIVERSAL_FALLBACK = True
+UNIVERSAL_FALLBACK_ARCHES = ("gfx942", "gfx950")
+
+
+def universal_fallback_tile_trait(
+    arch: str, M: int, N: int, K: int
+) -> Optional[tuple[TileSpec, TraitSpec]]:
+    """Tile / trait of the universal padded fallback body on ``arch``."""
+    if arch == "gfx942":
+        tile = TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=16,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=8,
+        )
+    elif arch == "gfx950":
+        tile = TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+    else:
+        return None
+    M, N, K = int(M), int(N), int(K)
+    trait = TraitSpec(
+        pipeline="compv4",
+        scheduler="intrawave",
+        epilogue="cshuffle",
+        pad_m=bool(M % tile.tile_m),
+        pad_n=bool(N % tile.tile_n),
+        pad_k=bool(K % tile.tile_k),
+        kc_row_guard=True,
+    )
+    return tile, trait
+
+
+def native_generic_spec(
+    req: "GemmRequest", spec: UniversalGemmSpec
+) -> Optional[UniversalGemmSpec]:
+    """The universal padded fallback body (:func:`universal_fallback_tile_trait`)
+    for ``req``: the native-layout fallback of a DTL candidate that cannot read
+    an MN-contiguous operand through its DTL ring."""
+    tt = universal_fallback_tile_trait(req.arch, req.M, req.N, req.K)
+    if tt is None:
+        return None
+    return UniversalGemmSpec(
+        name=spec.name,
+        tile=tt[0],
+        trait=tt[1],
+        data=spec.data,
+        wave_size=spec.wave_size,
+    )
+
+
+# ring_any and ring_small_any (the DTL rings past their own admission rules)
+# also serve NN / TN / TT natively, as the registered ring candidates do.
+# False: RCR only.
+MERGE_NATIVE_RING_ANY = True
+
+
+def native_any_admit(admit):
+    """``admit`` for a candidate registered in every layout whose non-RCR
+    service is the knob :data:`MERGE_NATIVE_RING_ANY`."""
+
+    def _admit(req, spec):
+        if str(getattr(req, "layout", "RCR")).upper() != "RCR" and not (
+            MERGE_NATIVE_RING_ANY
+        ):
+            return False, "MERGE_NATIVE_RING_ANY is off (RCR only)"
+        return admit(req, spec)
+
+    return _admit
+
+
+# ring_any ahead of ring_small_any where both admit (ring_any is the faster
+# body there; see the registries). False: the registry priority order.
+MERGE_RING_ANY_FIRST = True
+
+
+def ring_any_first_admit(admit, small_any):
+    """``admit`` (the ring_any rule) restricted to the requests the
+    ring_small_any candidate (``small_any()``, looked up at call time) also
+    admits, under :data:`MERGE_RING_ANY_FIRST`."""
+
+    def _admit(req, spec):
+        if not MERGE_RING_ANY_FIRST:
+            return False, "MERGE_RING_ANY_FIRST is off"
+        ok, why = admit(req, spec)
+        if not ok:
+            return ok, why
+        c = small_any()
+        if c is None:
+            return False, "no ring_small_any candidate registered"
+        # (unpinned: a probe pinned to this candidate's own spec_id must still
+        # see whether ring_small_any would take the request in auto mode)
+        probe = req
+        if hasattr(req, "spec_id") and hasattr(req, "algorithm"):
+            probe = replace(req, spec_id="auto", algorithm="auto")
+        ok2, why2 = c.admits(probe)
+        if not ok2:
+            return False, f"ring_small_any does not admit it ({why2})"
+        return True, "ok (ring_any ahead of ring_small_any)"
+
+    return _admit
+
+
+def native_layout_spec(
+    req: "GemmRequest", spec: UniversalGemmSpec
+) -> tuple[Optional[UniversalGemmSpec], str]:
+    """The preferred native form of a non-RCR ``req`` (the first of
+    :func:`native_layout_alternatives`), or ``(None, reason)`` when the layout
+    cannot be served natively (the caller transposes)."""
+    alts, why = native_layout_alternatives(req, spec)
+    if not alts:
+        return None, why
+    if NATIVE_LAYOUT_LAUNCHABLE_FIRST and req.layout.upper() != "RCR":
+        # the first form the launch rules accept for this shape
+        # (a later form may launch where the preferred one cannot, e.g. a K tail)
+        from ...instances.common.gemm_universal import launch_shape_error
+
+        for _nm, s in alts:
+            if launch_shape_error(s, int(req.M), int(req.N), int(req.K)) is None:
+                return s, "ok"
+    return alts[0][1], "ok"
 
 
 def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
@@ -125,7 +614,14 @@ def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpe
         tile_k=t.tile_k,
     )
     if decision.split_k <= 1:
-        return spec
+        # a pad_k body splits any K with whole-tile slices
+        return g1_aligned_split_k(req, spec)
+    if G1_SPLIT_K_ALIGNED and spec.trait.pad_k and not spec.trait.direct_to_lds:
+        # a far shallower exact factor than the slice-depth target (e.g. 2 of
+        # 52 for K = 26816): the whole-tile slices of the target degree
+        alt = g1_aligned_split_k(req, spec)
+        if alt.trait.split_k >= 2 * decision.split_k:
+            return alt
     return replace(spec, trait=replace(spec.trait, split_k=decision.split_k))
 
 
@@ -528,12 +1024,27 @@ RILV_SIA_DTYPES = ("bf16",)
 RILV_SIA_ACQ_GAP = 12
 
 
+def _beat_k_bad(K: int) -> bool:
+    """K the beat bodies cannot take: not whole 64-element tiles, unless the
+    peeled K tail (``G1_BEAT_K_TAIL``; K % 8 == 0) serves it."""
+    K = int(K)
+    if K % 64 == 0:
+        return False
+    return not (
+        G1_BEAT_K_TAIL
+        and G1_ADAPT
+        and G1_DTL_K_TAIL
+        and K % G1_DTL_K_TAIL_ALIGN == 0
+        and -(-K // 64) >= G1_DTL_K_TAIL_MIN_TILES
+    )
+
+
 def rilv_admits(req: GemmRequest) -> bool:
     """gfx950 problem the row-interleave body serves (aligned, enough tiles)."""
     if req.arch not in RILV_ARCHES:
         return False
     M, N, K = int(req.M), int(req.N), int(req.K)
-    if M % 256 or N % 256 or K % 64 or K < RILV_MIN_K:
+    if M % 256 or N % 256 or _beat_k_bad(K) or K < RILV_MIN_K:
         return False
     return (M // 256) * (N // 256) >= RILV_MIN_TILES
 
@@ -936,7 +1447,7 @@ def rilv_shortk_admits(req: GemmRequest) -> bool:
     if normalize_dtype(req.dtype) not in RILV_SHORTK_DTYPES:
         return False
     M, N, K = int(req.M), int(req.N), int(req.K)
-    if M % 256 or N % 256 or K % 64 or not RILV_SHORTK_MIN_K <= K < RILV_MIN_K:
+    if M % 256 or N % 256 or _beat_k_bad(K) or not RILV_SHORTK_MIN_K <= K < RILV_MIN_K:
         return False
     if (M // 256) * (N // 256) < RILV_MIN_TILES:
         return False
@@ -999,7 +1510,7 @@ def rilv_pad_admits(req: GemmRequest) -> bool:
     if req.arch not in RILV_ARCHES:
         return False
     M, N, K = int(req.M), int(req.N), int(req.K)
-    if not (M % 256 or N % 256) or N % 8 or K % 64 or K < RILV_MIN_K:
+    if not (M % 256 or N % 256) or N % 8 or _beat_k_bad(K) or K < RILV_MIN_K:
         return False
     if max(M, N) * K * 2 >= 2**31 or M * N * 2 >= 2**32:
         return False
@@ -1545,6 +2056,24 @@ def dtl_ring_pad_admit(req: GemmRequest, spec: UniversalGemmSpec) -> tuple[bool,
     return True, "ok"
 
 
+def fused_epilogue_spec(spec: UniversalGemmSpec) -> Optional[UniversalGemmSpec]:
+    """The body to attach a ``helpers.fuse`` epilogue to, for a dispatched
+    ``spec``: ``spec`` itself when its epilogue has the fused hook, else the same
+    tile / main loop without the levers whose epilogue has none (the persistent
+    tile loop becomes one workgroup per tile; ``mfma_swap_ab`` stores the
+    accumulator directly). ``None`` when the body writes f32 partial sums
+    (split-K / stream-K): re-dispatch without split-K there.
+
+    The returned spec carries no epilogue; attach it, then check
+    ``is_valid_spec`` (the caller's epilogue decides the rest)."""
+    tr = spec.trait
+    if tr.split_k > 1 or tr.streamk:
+        return None
+    if not (tr.persistent_ctas or tr.mfma_swap_ab):
+        return spec
+    return replace(spec, trait=replace(tr, persistent_ctas=0, mfma_swap_ab=False))
+
+
 def persistent_grid(spec: UniversalGemmSpec, M: int, N: int) -> tuple[int, int, int]:
     """Launch grid of a ``persistent_ctas = P`` body: ``min(P, tiles)``
     workgroups on x. The kernel's flat workgroup id is ``y * tiles_n + x``, so
@@ -1826,3 +2355,1328 @@ def dtl_pingpong_admit(req: GemmRequest, spec: UniversalGemmSpec) -> tuple[bool,
             f"{t_d:.0f} (relative units) for {req.M}x{req.N}x{req.K} on {req.arch}"
         )
     return True, "ok"
+
+
+# ---------------------------------------------------------------------------
+# coverage and correctness (every RCR shape gets a correct
+# kernel). Knobs (module attributes; False restores the previous dispatch):
+#   * G1_ADAPT: every candidate's spec is adapted to the request's ragged
+#     dimensions (``g1_adapt_spec``): global-load pad bodies get
+#     ``pad_row_clamp`` (no reads past A / B) and ``pad_k_fast`` (unmasked whole
+#     K tiles); DTL ring bodies take K % tile_k != 0 (K % 8 == 0) with
+#     ``dtl_k_tail`` instead of being refused.
+#   * G1_SPLIT_K_ALIGNED: split-K (decode regime) on pad_k bodies for any K
+#     (``split_k_aligned``), at the slice-depth degree of ``select_split_k``.
+#   * G1_PAD_FALLBACK: the lowest-priority padded candidate admits every shape.
+#   * G1_F16_DECODE: the 16-row decode candidate for f16 as for bf16.
+# ---------------------------------------------------------------------------
+G1_ADAPT = True
+G1_DTL_K_TAIL = True
+G1_PAD_ROW_CLAMP = True
+G1_PAD_K_FAST = True
+G1_SPLIT_K_ALIGNED = True
+G1_PAD_FALLBACK = True
+G1_F16_DECODE = True
+# the DTL ring bodies (small ring / pad ring) past their tuned admission
+# rules, ahead of the global-load fallback (ragged / small / decode-regime
+# shapes the rings refuse)
+G1_RING_ANY = True
+# few output tiles and a long K: the split-K padded fallback beats one ring
+# pass (a rule fitted on gfx950 shapes of the region the rings used to refuse):
+# below this many 128x128 tiles with K at or above this, the ring yields
+G1_RING_ANY_SPLIT_RULE = (32, 4096)
+G1_DTL_K_TAIL_ALIGN = 8
+# 2: peeled tail tile after the unchanged K loop; 1: per-DMA-issue select (the
+# ping-pong bodies, which have no peeled form)
+G1_DTL_K_TAIL_MODE = 2
+# a body that needs the K tail drops iglp_opt (compile cliff: iglp bodies with
+# either K-tail mode exceed the comgr compile-time budget). False: keep
+# iglp_opt and take K-tail mode 1.
+G1_K_TAIL_DROP_IGLP = True
+# the beat bodies (aligned M / N classes) also take K % 64 != 0 with the K tail
+G1_BEAT_K_TAIL = True
+# the K tail only where it wastes little: at least this many K tiles (a 2-tile
+# K = 96 on tile_k 64 keeps the faster exact-tile pick)
+G1_DTL_K_TAIL_MIN_TILES = 4
+# levers that wrap K at a whole-tile span (not with a K tail)
+_G1_K_WRAP_LEVERS = (
+    ("k_stagger", 0),
+    ("k_stagger_tiles", 0),
+    ("k_stagger_rc", 0),
+    ("stagger_u", 0),
+    ("dtl_clamp_k", False),
+)
+
+
+def g1_adapt_spec(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
+    """``spec`` made safe and fast for ``req``'s ragged dimensions.
+
+    Returns ``spec`` unchanged for shapes the body already tiles exactly (so
+    every aligned dispatch stays byte-identical) and when ``G1_ADAPT`` is off.
+    """
+    if not G1_ADAPT:
+        return spec
+    t, tr = spec.tile, spec.trait
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    upd = {}
+    if tr.direct_to_lds:
+        if (
+            G1_DTL_K_TAIL
+            and K % t.tile_k
+            and K % G1_DTL_K_TAIL_ALIGN == 0
+            and -(-K // t.tile_k) >= G1_DTL_K_TAIL_MIN_TILES
+            and int(tr.dtl_stages) >= 2
+            and int(tr.pingpong) != 7
+            and not tr.asm_loop
+            and not tr.streamk
+            and int(tr.split_k) == 1
+            and not spec.batched
+        ):
+            # (iglp_opt bodies: the peeled tile doubles the scheduled region and
+            # comgr compile time runs past minutes; ping-pong: no peeled form)
+            iglp = tr.iglp_opt is not None
+            if iglp and G1_K_TAIL_DROP_IGLP:
+                # mode 1 with iglp_opt 1 also exceeds the compile-time budget
+                # (e.g. a 256x256x64 beat body at K = 392, which the selector
+                # can dispatch): the K-tail form of an iglp body is the same
+                # body without the scheduling hint
+                upd["iglp_opt"] = None
+                iglp = False
+            pp_or_iglp = int(tr.pingpong) or iglp
+            mode = 1 if pp_or_iglp else int(G1_DTL_K_TAIL_MODE)
+            upd.update(pad_k=True, dtl_k_tail=mode)
+            if spec.data.layout.upper() != "RCR":
+                # an MN-contiguous operand's K-tail rows read
+                # zeros through its exact-bounds resource (launch rule)
+                # (dtl_soff0 is the untight form of the same hoisted base)
+                upd.update(
+                    dtl_tight_rsrc=True, dtl_tight_ragged_only=False, dtl_soff0=False
+                )
+            for f, off in _G1_K_WRAP_LEVERS:
+                if hasattr(tr, f) and getattr(tr, f) != off:
+                    upd[f] = off
+    elif not int(getattr(tr, "vgpr_prefetch", 0)):
+        # (the register-staged bodies bound their rows with the buffer
+        # range and mask the K tail themselves)
+        rag = (tr.pad_m and M % t.tile_m) or (tr.pad_n and N % t.tile_n)
+        if G1_PAD_ROW_CLAMP and rag and not tr.preshuffle_b:
+            upd["pad_row_clamp"] = True
+        if G1_PAD_K_FAST and tr.pad_k and K % t.tile_k:
+            upd["pad_k_fast"] = True
+    if not upd:
+        return spec
+    return replace(spec, trait=replace(tr, **upd))
+
+
+def g1_aligned_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
+    """Split-K for a decode-regime pad_k body whose K has no whole-tile factor:
+    the slice-depth degree with whole-tile slices (``split_k_aligned``)."""
+    tr = spec.trait
+    t = spec.tile
+    if not (G1_SPLIT_K_ALIGNED and tr.pad_k) or tr.direct_to_lds or tr.split_k > 1:
+        return spec
+    from ...helpers.split_k import TARGET_SLICE_K, _parse_env_override
+
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    mode, forced = _parse_env_override(os.environ)
+    if mode == "off":
+        return spec
+    base = -(-M // t.tile_m) * -(-N // t.tile_n)
+    if mode != "force" and base >= arch_num_cus(req.arch) // 2:
+        return spec
+    want = forced if mode == "force" else round(K / TARGET_SLICE_K)
+    sk = max(1, min(int(want), -(-K // t.tile_k)))
+    if sk <= 1:
+        return spec
+    upd = dict(split_k=sk, split_k_aligned=True)
+    if K % t.tile_k and G1_PAD_K_FAST:
+        upd["pad_k_fast"] = True
+    return replace(spec, trait=replace(tr, **upd))
+
+
+def g1_decode_tile_trait(arch: str, dtype: str) -> tuple[TileSpec, TraitSpec]:
+    """The 16-row decode body (bf16; f16 with G1_F16_DECODE):
+    16 x 64 tile, 1 x 4 waves of 16x16 atoms, padded M / N / K."""
+    deep = arch == "gfx950"
+    wk = 32 if deep else 16
+    return (
+        TileSpec(
+            tile_m=16,
+            tile_n=64,
+            tile_k=32,
+            warp_m=1,
+            warp_n=4,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=wk,
+        ),
+        TraitSpec(
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="default",
+            pad_m=True,
+            pad_n=True,
+            pad_k=True,
+        ),
+    )
+
+
+G1_PAD_FALLBACK_ARCHES = ("gfx942", "gfx950")
+# skinny side at or below this many rows takes a 16-row tile (decode-like)
+G1_PAD_SKINNY = 32
+
+
+def g1_pad_tile_trait(req: GemmRequest) -> tuple[TileSpec, TraitSpec]:
+    """Fallback body for any RCR shape: the global-load compv4 body padded only
+    on the ragged dimensions (rows clamped, whole K tiles unmasked).
+
+    * min(M, N) <= G1_PAD_SKINNY: a 16 x 64 (M skinny) / 64 x 16 (N skinny)
+      tile of 16x16 atoms;
+    * else the 128 x 128 x 32 tile of the cshuffle default (32x32 atoms).
+    """
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    deep = req.arch == "gfx950"
+    if M <= G1_PAD_SKINNY or N <= G1_PAD_SKINNY:
+        wk = 32 if deep else 16
+        if M <= N:
+            tile = TileSpec(16, 64, 32, 1, 4, 1, 16, 16, wk)
+        else:
+            tile = TileSpec(64, 16, 32, 4, 1, 1, 16, 16, wk)
+    else:
+        tile = (
+            TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 16)
+            if deep
+            else TileSpec(128, 128, 16, 2, 2, 1, 32, 32, 8)
+        )
+    trait = TraitSpec(
+        pipeline="compv4",
+        scheduler="intrawave",
+        epilogue="default",
+        pad_m=M % tile.tile_m != 0,
+        pad_n=N % tile.tile_n != 0,
+        pad_k=K % tile.tile_k != 0,
+    )
+    return tile, trait
+
+
+def g1_pad_fallback_admit(
+    req: GemmRequest, spec: UniversalGemmSpec
+) -> tuple[bool, str]:
+    if not G1_PAD_FALLBACK:
+        return False, "G1_PAD_FALLBACK is off"
+    return True, "ok (padded fallback)"
+
+
+def g1_gemm_signature(spec: Optional[UniversalGemmSpec], dtype: str) -> list:
+    """The RCR GEMM args signature of ``spec``: split-K bodies take the f32
+    workspace ``Cf32`` (atomic-add target) in C's slot."""
+    from ...helpers.manifest import gemm_args_signature
+
+    sig = gemm_args_signature(dtype=dtype)
+    if (
+        spec is not None
+        and int(spec.trait.split_k) > 1
+        and int(getattr(spec.trait, "split_k_serial", 0))
+    ):
+        # split_k_serial: C, then the f32 partial slots W and
+        # the i32 counters Cnt (split_k_serial_workspace)
+        out = []
+        for a in sig:
+            out.append(a)
+            if a["name"] == "C":
+                out.append({"name": "W", "type": "ptr<f32, global>", "size_bytes": 8})
+                out.append({"name": "Cnt", "type": "ptr<i32, global>", "size_bytes": 8})
+        return out
+    if spec is not None and int(spec.trait.split_k) > 1:
+        sig = [
+            (
+                {"name": "Cf32", "type": "ptr<f32, global>", "size_bytes": 8}
+                if a["name"] == "C"
+                else a
+            )
+            for a in sig
+        ]
+    return sig
+
+
+def g1_sweep_filter(req: GemmRequest, specs) -> tuple:
+    """The sweep variants of a candidate adapted to ``req``'s ragged
+    dimensions (``g1_adapt_spec``), keeping only those the body can launch: a
+    variant generator that rebuilds the trait would otherwise hand back a
+    spec without the K tail / row clamp its admitted base needed."""
+    from ...instances.common.gemm_universal import is_valid_spec, launch_shape_error
+
+    out = []
+    for s in specs:
+        s = g1_adapt_spec(req, s)
+        if launch_shape_error(s, int(req.M), int(req.N), int(req.K)) is not None:
+            continue
+        if not is_valid_spec(s, arch=req.arch)[0]:
+            continue
+        out.append(s)
+    return tuple(out)
+
+
+def g1_ring_any_admit(req: GemmRequest, spec: UniversalGemmSpec) -> tuple[bool, str]:
+    """The ring bodies for any shape they can launch: the
+    validity and launch rules are the candidate's support check; this only
+    gates the knob and the K alignment the DMA needs."""
+    if not G1_RING_ANY:
+        return False, "G1_RING_ANY is off"
+    if int(req.K) % G1_DTL_K_TAIL_ALIGN:
+        return False, f"K={req.K} is not a multiple of {G1_DTL_K_TAIL_ALIGN} (DMA rows)"
+    if G1_RING_ANY_SPLIT_RULE:
+        tmax, kmin = G1_RING_ANY_SPLIT_RULE
+        t128 = _tiles(req.M, req.N, 128, 128)
+        if t128 < tmax and int(req.K) >= kmin:
+            return False, (
+                f"{t128} 128x128 tiles < {tmax} with K={req.K} >= {kmin}: the split-K "
+                "fallback is faster than one ring pass"
+            )
+    return True, "ok (ring, any shape)"
+
+
+def g1_ring_any_uses_pad_ring(req: GemmRequest) -> bool:
+    """Pad ring (256x256) when its tiles fill the device with a full last
+    wave, else the small ring."""
+    return wave_fill(
+        req.M, req.N, 256, 256, req.arch
+    ) >= DTL_RING_SMALL_MAX_FILL and _tiles(req.M, req.N, 256, 256) >= arch_num_cus(
+        req.arch
+    )
+
+
+# ``dtl_ring_any`` output tile: the wave-quantised cost ceil(tiles / CUs) *
+# tile area / relative per-FLOP efficiency (fitted on gfx950 ring-any tuning
+# data; see the table below); () keeps
+# the small ring's own tile.
+G1_RING_ANY_TILES = ((128, 128, 1.0), (128, 64, 0.6), (64, 128, 0.6), (64, 64, 0.4))
+
+
+def g1_ring_any_retile(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
+    """The ring-any spec on the tile of least wave-quantised cost (a valid
+    warp layout kept or re-chosen); ``spec`` itself when no option is valid
+    or the knob is off."""
+    from ...instances.common.gemm_universal import is_valid_spec
+
+    if not G1_RING_ANY_TILES:
+        return spec
+    M, N = int(req.M), int(req.N)
+    cus = arch_num_cus(req.arch)
+    t = spec.tile
+    best = None
+    for tm, tn, eff in G1_RING_ANY_TILES:
+        tiles = -(-M // tm) * -(-N // tn)
+        cost = -(-tiles // cus) * tm * tn / eff
+        if best is not None and cost >= best[0]:
+            continue
+        cand = None
+        for wm, wn in ((t.warp_m, t.warp_n), (2, 4), (2, 2), (4, 2), (1, 4), (4, 1)):
+            if (tm, tn, wm, wn) == (t.tile_m, t.tile_n, t.warp_m, t.warp_n):
+                cand = spec
+                break
+            try:
+                s2 = replace(
+                    spec,
+                    tile=replace(t, tile_m=tm, tile_n=tn, warp_m=wm, warp_n=wn),
+                    block_size=0,
+                )
+            except Exception:  # noqa: BLE001 - an impossible warp layout
+                continue
+            if is_valid_spec(s2, arch=req.arch)[0]:
+                cand = s2
+                break
+        if cand is not None:
+            best = (cost, cand)
+    return spec if best is None else best[1]
+
+
+# ---------------------------------------------------------------------------
+# gfx942: register-staged prefetch bodies.
+#
+# gfx942's direct-to-LDS moves one dword per lane (a quarter of gfx950's), so
+# every DTL body there issues four times the load instructions per byte. The
+# ``vgpr_prefetch`` bodies load with ``buffer_load_dwordx4`` into VGPRs one or
+# more K tiles ahead and write LDS from the registers (hipBLASLt's gfx942
+# path). The candidate picks one geometry per request with a wave-
+# quantization cost: ceil(tiles / CUs) * tile area / relative efficiency
+# (fitted per geometry on gfx942 with a full-output f64 check of every timed
+# kernel).
+# ---------------------------------------------------------------------------
+
+G5_VGPR = True
+G5_VGPR_ARCHES = ("gfx942",)
+# registry priority of the candidate. 2 puts it ahead of
+# gemm_skinny (3; its region table is gfx950-fitted) on gfx942, where both
+# admit min(M, N) >= G5_VGPR_MIN_MN; gemm_skinny keeps the smaller shapes.
+G5_VGPR_PRIORITY = 2
+# vgpr_prefetch depth of the dispatched bodies
+G5_VGPR_DEPTH = 1
+# name -> (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n,
+#          warp_tile_k, acc_agpr, vgpr_prefetch mode, lds_swizzle_r,
+#          relative per-tile efficiency). Mode 4 = one LDS buffer (tile_k 64 /
+#          128 fit the 64 KiB LDS), mode 3 = the double buffer (tile_k 32, the
+#          K % 64 == 32 fallback). The efficiencies are the fitted
+#          ``eff`` of t ~ ceil(tiles / CUs) * tile_m * tile_n * (K + G5_VGPR_K0)
+#          / eff over interleaved gfx942 timings (every timed kernel
+#          f64-checked).
+G5_VGPR_GEOS = {
+    "256x256x64": (256, 256, 64, 2, 2, 16, 16, 16, True, 4, 0, (18.0, 0.0490)),
+    "256x256x64w8": (256, 256, 64, 2, 4, 16, 16, 16, True, 4, 0, (13.5, 0.0415)),
+    "256x224x64": (256, 224, 64, 2, 2, 16, 16, 16, True, 4, 0, (14.3, 0.0393)),
+    "224x256x64": (224, 256, 64, 2, 2, 16, 16, 16, True, 4, 0, (17.3, 0.0397)),
+    "256x192x64": (256, 192, 64, 2, 2, 16, 16, 16, True, 4, 0, (7.5, 0.0392)),
+    "192x256x64": (192, 256, 64, 2, 2, 16, 16, 16, True, 4, 0, (10.1, 0.0392)),
+    "192x256x64w8": (192, 256, 64, 2, 4, 16, 16, 16, False, 4, 0, (10.3, 0.0331)),
+    "128x128x128": (128, 128, 128, 2, 2, 16, 16, 16, False, 4, 1, (4.78, 0.0151)),
+    "128x128x64": (128, 128, 64, 2, 2, 16, 16, 16, False, 4, 0, (4.11, 0.0170)),
+    "256x64x64": (256, 64, 64, 4, 1, 16, 16, 16, False, 4, 0, (1.18, 0.0168)),
+    "64x256x64": (64, 256, 64, 1, 4, 16, 16, 16, False, 4, 0, (0.09, 0.0179)),
+    "128x64x128": (128, 64, 128, 2, 2, 16, 16, 16, False, 4, 0, (3.50, 0.00904)),
+    "64x128x128": (64, 128, 128, 2, 2, 16, 16, 16, False, 4, 0, (1.92, 0.00971)),
+    "64x64x128": (64, 64, 128, 2, 2, 16, 16, 16, False, 4, 0, (2.42, 0.00587)),
+    "128x32x128": (128, 32, 128, 4, 1, 16, 16, 16, False, 4, 0, (2.57, 0.00682)),
+    "32x128x128": (32, 128, 128, 1, 4, 16, 16, 16, False, 4, 0, (2.24, 0.00681)),
+    "256x256x32": (256, 256, 32, 2, 2, 16, 16, 16, True, 3, 1, (16.6, 0.0565)),
+    "128x128x32": (128, 128, 32, 2, 4, 16, 16, 16, False, 3, 1, (0.95, 0.0227)),
+    # 256x128 / 128x256 (4 waves, mode 4; ~320 VGPRs, no
+    # spills); planned only with R2_EXTRA_GEOS_ON (calibration pending)
+    "256x128x64": (256, 128, 64, 2, 2, 16, 16, 16, False, 4, 0, (9.0, 0.0245)),
+    "128x256x64": (128, 256, 64, 2, 2, 16, 16, 16, False, 4, 0, (9.0, 0.0245)),
+    "256x128x64w41": (256, 128, 64, 4, 1, 16, 16, 16, False, 4, 0, (9.0, 0.0245)),
+    "128x256x64w14": (128, 256, 64, 1, 4, 16, 16, 16, False, 4, 0, (9.0, 0.0245)),
+    # hipBLASLt-like non-power-of-2 tiles (2x2 waves, mode 4;
+    # no spills on RCR); placeholder models until calibrated
+    "320x192x64": (320, 192, 64, 2, 2, 16, 16, 16, True, 4, 0, (16.88, 0.0459)),
+    "192x320x64": (192, 320, 64, 2, 2, 16, 16, 16, True, 4, 0, (16.88, 0.0459)),
+    "256x160x64": (256, 160, 64, 2, 2, 16, 16, 16, True, 4, 0, (11.25, 0.0306)),
+    "160x256x64": (160, 256, 64, 2, 2, 16, 16, 16, True, 4, 0, (11.25, 0.0306)),
+    "160x192x64": (160, 192, 64, 2, 2, 16, 16, 16, False, 4, 0, (8.44, 0.0230)),
+    "192x160x64": (192, 160, 64, 2, 2, 16, 16, 16, False, 4, 0, (8.44, 0.0230)),
+    "128x160x64": (128, 160, 64, 2, 2, 16, 16, 16, False, 4, 0, (5.62, 0.0153)),
+    "160x128x64": (160, 128, 64, 2, 2, 16, 16, 16, False, 4, 0, (5.62, 0.0153)),
+    "128x96x64": (128, 96, 64, 2, 2, 16, 16, 16, False, 4, 0, (3.38, 0.0092)),
+    "96x128x64": (96, 128, 64, 2, 2, 16, 16, 16, False, 4, 0, (3.38, 0.0092)),
+    "96x96x64": (96, 96, 64, 2, 2, 16, 16, 16, False, 4, 0, (2.53, 0.0069)),
+    "320x128x64": (320, 128, 64, 2, 2, 16, 16, 16, True, 4, 0, (11.25, 0.0306)),
+    "128x320x64": (128, 320, 64, 2, 2, 16, 16, 16, True, 4, 0, (11.25, 0.0306)),
+    "192x192x64": (192, 192, 64, 2, 2, 16, 16, 16, True, 4, 0, (10.12, 0.0276)),
+    "64x96x128": (64, 96, 128, 2, 2, 16, 16, 16, False, 4, 0, (2.50, 0.0046)),
+    "96x64x128": (96, 64, 128, 2, 2, 16, 16, 16, False, 4, 0, (2.50, 0.0046)),
+    "96x96x128": (96, 96, 128, 2, 2, 16, 16, 16, False, 4, 0, (2.53, 0.0069)),
+    "128x96x128": (128, 96, 128, 2, 2, 16, 16, 16, False, 4, 0, (3.38, 0.0092)),
+    "96x128x128": (96, 128, 128, 2, 2, 16, 16, 16, False, 4, 0, (3.38, 0.0092)),
+}
+# geometries the planner skips unless R2_EXTRA_GEOS_ON
+R2_EXTRA_GEOS = (
+    "256x128x64",
+    "128x256x64",
+    "256x128x64w41",
+    "128x256x64w14",
+    "320x192x64",
+    "192x320x64",
+    "256x160x64",
+    "160x256x64",
+    "160x192x64",
+    "192x160x64",
+    "128x160x64",
+    "160x128x64",
+    "128x96x64",
+    "96x128x64",
+    "96x96x64",
+    "320x128x64",
+    "128x320x64",
+    "192x192x64",
+    "64x96x128",
+    "96x64x128",
+    "96x96x128",
+    "128x96x128",
+    "96x128x128",
+)
+R2_EXTRA_GEOS_ON = False
+# the last field: the per-tile time model (a fixed term and b per K element,
+# both in microseconds): one wave of tiles takes a + b * slice_K, fitted per
+# geometry on gfx942 interleaved timings with every timed kernel f64-checked
+# smallest M / N the candidate takes (skinny / decode shapes go elsewhere)
+G5_VGPR_MIN_MN = 16
+# split-K for grids that leave most CUs idle (``select_split_k`` with the
+# arch's CU count as the CTA target); the slices are whole tiles
+G5_VGPR_SPLIT_K = True
+G5_VGPR_SPLITS = (2, 4, 8, 16)
+# sweep space of the candidate: the N cheapest plans of the cost model
+G5_VGPR_SWEEP = 6
+# split-K extra cost in microseconds: (fixed: zero-fill + f32 -> 16-bit pass
+# + launches, per byte of f32 partial traffic)
+G5_VGPR_SPLIT_COST = (4.0, 2.5e-6)
+# smallest per-wave fixed time (microseconds; the fitted intercepts of the
+# wide-tile bodies fall below it where only short K was fitted) and the
+# operand-traffic ceiling (bytes per microsecond; the fitted envelope of the
+# L2 / MALL-fed streaming rate on gfx942)
+G5_VGPR_A_MIN = 2.5
+G5_VGPR_TRAFFIC_BW = 9.0e6
+# K % tile_k != 0 (K % 8 == 0): the body masks the tail tile's columns past K
+# (``pad_k`` on the vgpr_prefetch body; no split-K then)
+G5_VGPR_K_TAIL = True
+# pad_fast_tile on the padded bodies (off: it doubles the epilogue, and the
+# 256-accumulator bodies then exceed the comgr compile budget)
+G5_VGPR_PAD_FAST_TILE = False
+
+
+def _g5_tile_trait(geo: str, pad_m: bool, pad_n: bool) -> tuple[TileSpec, TraitSpec]:
+    tm, tn, tk, wm, wn, wtm, wtn, wtk, agpr, mode, swr, _eff = G5_VGPR_GEOS[geo]
+    tile = TileSpec(
+        tile_m=tm,
+        tile_n=tn,
+        tile_k=tk,
+        warp_m=wm,
+        warp_n=wn,
+        warp_k=1,
+        warp_tile_m=wtm,
+        warp_tile_n=wtn,
+        warp_tile_k=wtk,
+    )
+    trait = TraitSpec(
+        pipeline="compv4",
+        scheduler="intrawave",
+        epilogue="default",
+        ab_double_buffer=mode != 4,
+        chiplet_swizzle=True,
+        chiplet_wgm=8,
+        chiplet_chunk_size=64,
+        lds_swizzle=True,
+        lds_swizzle_r=swr,
+        acc_agpr=agpr,
+        vgpr_prefetch=mode,
+        vgpr_prefetch_depth=G5_VGPR_DEPTH,
+        pad_m=pad_m,
+        pad_n=pad_n,
+        pad_fast_tile=G5_VGPR_PAD_FAST_TILE and (pad_m or pad_n),
+    )
+    return tile, trait
+
+
+def g5_vgpr_cost(
+    M: int, N: int, K: int, arch: str, geo: str, split_k: int = 1
+) -> float:
+    """Modelled time (microseconds) of ``geo`` with ``split_k`` K slices for
+    ``M x N x K``: waves of tiles x (a + b * slice K), plus the split-K cost
+    (``G5_VGPR_SPLIT_COST``)."""
+    tm, tn, tk, (a, b) = (G5_VGPR_GEOS[geo][i] for i in (0, 1, 2, -1))
+    cus = arch_num_cus(arch)
+    tiles = -(-M // tm) * -(-N // tn)
+    ks = -(-K // (tk * split_k)) * tk
+    cost = -(-(tiles * split_k) // cus) * (max(a, G5_VGPR_A_MIN) + b * ks)
+    # operand traffic floor: every tile streams (tile_m + tile_n) x K elements
+    cost = max(cost, tiles * split_k * (tm + tn) * ks * 2 / G5_VGPR_TRAFFIC_BW)
+    if split_k > 1:
+        fixed, per_byte = G5_VGPR_SPLIT_COST
+        cost += fixed + per_byte * M * N * 4 * split_k
+    return cost
+
+
+def g5_vgpr_plan(M: int, N: int, K: int, arch: str) -> Optional[tuple[str, int]]:
+    """(geometry, split_k) of least modelled cost (None: no geometry applies)."""
+    best, best_cost = None, None
+    for name, g in G5_VGPR_GEOS.items():
+        tk = g[2]
+        if name in R2_EXTRA_GEOS and not R2_EXTRA_GEOS_ON:
+            continue
+        if K % tk and (not G5_VGPR_K_TAIL or K % 8):
+            continue
+        splits = [1]
+        if G5_VGPR_SPLIT_K and not K % tk:
+            splits += [s for s in G5_VGPR_SPLITS if K % (s * tk) == 0]
+        for s in splits:
+            cost = g5_vgpr_cost(M, N, K, arch, name, s)
+            if best_cost is None or cost < best_cost:
+                best, best_cost = (name, s), cost
+    return best
+
+
+def g5_vgpr_plans(M: int, N: int, K: int, arch: str, any_k_tail: bool = False) -> list:
+    """Every applicable (cost, geometry, split_k), cheapest first
+    (``any_k_tail``: the K tail for any K, the native TN form whose
+    operands are both MN-contiguous)."""
+    out = []
+    for name, g in G5_VGPR_GEOS.items():
+        tk = g[2]
+        if name in R2_EXTRA_GEOS and not R2_EXTRA_GEOS_ON:
+            continue
+        if K % tk and (not G5_VGPR_K_TAIL or (K % 8 and not any_k_tail)):
+            continue
+        splits = [1]
+        if G5_VGPR_SPLIT_K and not K % tk:
+            splits += [s for s in G5_VGPR_SPLITS if K % (s * tk) == 0]
+        for s in splits:
+            out.append((g5_vgpr_cost(M, N, K, arch, name, s), name, s))
+    return sorted(out)
+
+
+def g5_vgpr_sweep_tile_traits(req: GemmRequest) -> list:
+    """The ``G5_VGPR_SWEEP`` cheapest (tile, trait) of the cost model (the
+    candidate's sweep space: a registry sweep / the dispatcher sweep measures
+    them next to the pick)."""
+    if (
+        not G5_VGPR
+        or req.arch not in G5_VGPR_ARCHES
+        or min(req.M, req.N) < G5_VGPR_MIN_MN
+    ):
+        return []
+    if _g5p_on(req):
+        from .g5_plan import plan_tile_trait
+
+        return [
+            plan_tile_trait(p, req.M, req.N, req.K)
+            for _t, p in _g5p_ranked(req)
+            if p.geo != "skinny"
+        ][:G5_VGPR_SWEEP]
+    out = []
+    if _r2_lay(req) != "RCR":
+        # the cheapest plans that have a native form
+        if not (R2_VP_MN and req.arch in R2_VP_MN_ARCHES):
+            return []
+        for _c, geo, s in r2_vp_mn_plans(req)[:G5_VGPR_SWEEP]:
+            out.append(_g5_plan_tile_trait(req, geo, s))
+        return out
+    for _c, geo, s in g5_vgpr_plans(req.M, req.N, req.K, req.arch)[:G5_VGPR_SWEEP]:
+        tm, tn, tk = G5_VGPR_GEOS[geo][0], G5_VGPR_GEOS[geo][1], G5_VGPR_GEOS[geo][2]
+        tile, trait = _g5_tile_trait(geo, bool(req.M % tm), bool(req.N % tn))
+        if req.K % tk:
+            trait = replace(trait, pad_k=True)
+        elif s > 1:
+            trait = replace(trait, split_k=s, pad_fast_tile=False)
+        out.append((tile, trait))
+    return out
+
+
+def g5_vgpr_geometry(M: int, N: int, K: int, arch: str) -> Optional[str]:
+    """The geometry of :func:`g5_vgpr_plan` (None: no geometry applies)."""
+    plan = g5_vgpr_plan(M, N, K, arch)
+    return plan[0] if plan else None
+
+
+# NN / TN / TT through the native form of the gfx942 register-staged plan
+# model's RCR pick (g5_plan's full geometry menu) instead of the cheapest
+# fitted plan of the smaller geometry menu (r2_vp_mn_plans), for the layouts
+# listed (data layouts; () = off). On for RRR and CCR, where the plan model's
+# pick is the faster one; TN (CRR) keeps the fitted plan.
+# MERGE2_NATIVE_G5P_TOP = how many of the plan model's ranked plans are tried
+# for a launchable native form.
+MERGE2_NATIVE_G5P: Tuple[str, ...] = ("RRR", "CCR")
+MERGE2_NATIVE_G5P_TOP = 4
+
+
+def merge2_g5p_native_tile_trait(
+    req: GemmRequest,
+) -> Optional[tuple[TileSpec, TraitSpec]]:
+    """The RCR (tile, trait) of the best-ranked plan-model plan of ``req``'s
+    RCR view whose native form launches for ``req`` (None: none / model off)."""
+    rreq = replace(req, layout="RCR", trans_a=False, trans_b=True)
+    if not _g5p_on(rreq):
+        return None
+    from ...instances.common.gemm_universal import DataSpec
+    from .g5_plan import plan_tile_trait
+
+    dt = str(getattr(req, "dtype", "fp16"))
+    dt = dt if dt in ("fp16", "bf16") else "fp16"
+    plans = [p for _t, p in _g5p_ranked(rreq) if p.geo != "skinny"]
+    for p in plans[: max(1, int(MERGE2_NATIVE_G5P_TOP))]:
+        tile, trait = plan_tile_trait(p, int(req.M), int(req.N), int(req.K))
+        if int(getattr(trait, "split_k_serial", 0)):
+            continue  # the native forms are validated with the atomic split only
+        spec = UniversalGemmSpec(
+            name="merge2_probe",
+            tile=tile,
+            trait=trait,
+            data=DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt, layout="RCR"),
+            wave_size=64,
+        )
+        if r2_vp_mn_form(req, spec) is not None:
+            return tile, trait
+    return None
+
+
+def g5_vgpr_tile_trait(req: GemmRequest) -> Optional[tuple[TileSpec, TraitSpec]]:
+    """The register-staged body for ``req`` (None when not applicable)."""
+    if not G5_VGPR or req.arch not in G5_VGPR_ARCHES:
+        return None
+    if min(req.M, req.N) < G5_VGPR_MIN_MN:
+        return None
+    if _r2_lay(req) != "RCR":
+        # the cheapest plan with a native NN / TN / TT form
+        if not (R2_VP_MN and req.arch in R2_VP_MN_ARCHES):
+            return None
+        if _r2_lay(req) in tuple(MERGE2_NATIVE_G5P):
+            tt = merge2_g5p_native_tile_trait(req)
+            if tt is not None:
+                return tt
+        plans = r2_vp_mn_plans(req)
+        if not plans:
+            return None
+        return _g5_plan_tile_trait(req, plans[0][1], plans[0][2])
+    if _g5p_on(req):
+        from .g5_plan import plan_tile_trait
+
+        g5 = [p for _t, p in _g5p_ranked(req) if p.geo != "skinny"]
+        return plan_tile_trait(g5[0], req.M, req.N, req.K) if g5 else None
+    plan = g5_vgpr_plan(req.M, req.N, req.K, req.arch)
+    if plan is None:
+        return None
+    geo, split_k = plan
+    tm, tn, tk = G5_VGPR_GEOS[geo][0], G5_VGPR_GEOS[geo][1], G5_VGPR_GEOS[geo][2]
+    tile, trait = _g5_tile_trait(geo, bool(req.M % tm), bool(req.N % tn))
+    if req.K % tk:
+        trait = replace(trait, pad_k=True)
+    elif split_k > 1:
+        trait = replace(trait, split_k=split_k, pad_fast_tile=False)
+    return tile, trait
+
+
+# the region rule (gemm_skinny ahead of the register-staged body for small min(M, N),
+# skinny.SKINNY_OVER_VGPR) and the learned gfx942 plan model (which ranks the gemm_skinny
+# plan among the register-staged plans, g5_plan.G5P_SKINNY_ARB) both arbitrate the two on
+# gfx942 RCR. Default: the model decides when it is on; True = the region rule applies too.
+MERGE2_SKINNY_OVER_VGPR_WITH_MODEL = False
+
+
+def g5_vgpr_admit(req: GemmRequest, spec: UniversalGemmSpec) -> tuple[bool, str]:
+    from ...instances.common.gemm_universal import launch_shape_error
+
+    if g5_vgpr_tile_trait(req) is None:
+        return False, (
+            f"g5 register-staged body: not applicable to {req.M}x{req.N}x{req.K} "
+            f"on {req.arch} (G5_VGPR={G5_VGPR}, min(M, N) >= {G5_VGPR_MIN_MN}, "
+            "K a multiple of a geometry's tile_k)"
+        )
+    if _r2_lay(req) != "RCR":
+        # the launch rules of the native form
+        if r2_vp_mn_form(req, spec) is None:
+            return False, f"layout {_r2_lay(req)}: no launchable vp_mn form"
+        from .skinny import skinny_native_over_vgpr
+
+        if skinny_native_over_vgpr(req):
+            return False, "gemm_skinny serves it (skinny.SKINNY_OVER_VGPR_NATIVE)"
+        return True, "ok"
+    err = launch_shape_error(spec, req.M, req.N, req.K)
+    if err:
+        return False, err
+    if _g5p_on(req):
+        from . import g5_plan as _gp
+
+        r = _g5p_ranked(req)
+        if _gp.G5P_SKINNY_ARB and r and r[0][1].geo == "skinny":
+            g5t = next((t for t, p in r if p.geo != "skinny"), None)
+            if g5t is None or math.log(g5t / r[0][0]) > _gp.G5P_SKINNY_MARGIN:
+                return False, (
+                    "g5 register-staged body steps aside: the gfx942 plan model "
+                    "predicts the gemm_skinny plan faster"
+                )
+    if not _g5p_on(req) or MERGE2_SKINNY_OVER_VGPR_WITH_MODEL:
+        # the region rule (skinny.SKINNY_OVER_VGPR); with the gfx942 plan model on,
+        # the model arbitrates (above) unless MERGE2_SKINNY_OVER_VGPR_WITH_MODEL
+        from .skinny import skinny_takes_over_vgpr
+
+        if skinny_takes_over_vgpr(req):
+            return False, "gemm_skinny serves it (skinny.SKINNY_OVER_VGPR)"
+    return True, "ok"
+
+
+# gfx942 NT: the register-staged plan of the geometry menu and the
+# learned plan model (``g5_plan``); cached per request and knob state
+_G5P_CACHE: dict = {}
+
+
+def _g5p_on(req: GemmRequest) -> bool:
+    from . import g5_plan as _gp
+
+    return (
+        _gp.G5P_ON
+        and req.arch in _gp.G5P_ARCHES
+        and str(getattr(req, "layout", "RCR")).upper() == "RCR"
+        and bool(_gp.load_menu(req.arch))
+    )
+
+
+def _g5p_ranked(req: GemmRequest) -> list:
+    """(predicted time, G5Plan) of the register-staged plans for ``req`` cheapest first, with
+    the gemm_skinny plan ranked among them when that candidate admits the
+    request (``G5P_SKINNY_ARB``)."""
+    from . import g5_plan as _gp
+
+    knobs = (
+        _gp.G5P_SPLITS, _gp.G5P_SERIAL_MODES, _gp.G5P_SPLIT_MAX_WAVES,
+        _gp.G5P_PRESELECT, _gp.G5P_MODEL, _gp.G5P_SKINNY_ARB,
+        tuple(sorted(_gp.G5P_SPLIT_COST.items())), _gp.G5P_TRAFFIC_BW,
+        _gp.G5P_VP_UNROLL_MAX_ACC, _gp.G5P_VP_UNROLL_SCALE,
+    )  # fmt: skip
+    key = (int(req.M), int(req.N), int(req.K), str(req.dtype), req.arch, knobs)
+    if key in _G5P_CACHE:
+        return _G5P_CACHE[key]
+    extra = []
+    if _gp.G5P_SKINNY_ARB and _gp.G5P_MODEL:
+        from .skinny import SKINNY_DISPATCH, skinny_admit_region, skinny_plan
+
+        try:
+            if SKINNY_DISPATCH and skinny_admit_region(req)[0]:
+                extra.append(_gp.G5Plan("skinny", skinny=skinny_plan(req)))
+        except Exception:  # noqa: BLE001 - no skinny plan: g5 decides alone
+            extra = []
+    out = _gp.rank_plans(req.M, req.N, req.K, str(req.dtype), req.arch, extra)
+    if len(_G5P_CACHE) > 4096:
+        _G5P_CACHE.clear()
+    _G5P_CACHE[key] = out
+    return out
+
+
+# ---------------------------------------------------------------------------
+# gfx942: native NN / TN / TT in the register-staged body
+# ---------------------------------------------------------------------------
+# The register-staged candidate (universal_gemm_*_cdna_vgpr) serves the non-RCR layouts
+# itself: an MN-contiguous operand is read as micro-blocks of vp_mn_kv K rows
+# x mn_vec M / N elements and transposed in registers into the K-contiguous
+# LDS tile (TraitSpec.vp_mn_kv; gfx942 has no ds_read_b64_tr_b16). False: the
+# candidate stays RCR-only (non-RCR requests take the other candidates'
+# native forms).
+R2_VP_MN = True
+R2_VP_MN_ARCHES = ("gfx942",)
+# (vp_mn_kv, mn_vec) micro-blocks, preferred first (the first one the tile,
+# the thread count and the leading dimension admit)
+R2_VP_MN_MICRO = (
+    (8, 8),
+    (8, 4),
+    (4, 8),
+    (4, 4),
+    (8, 2),
+    (2, 8),
+    (4, 2),
+    (2, 4),
+    (2, 2),
+)
+# micro-block counts that are not a multiple of the thread count
+# (TraitSpec.vp_mn_wrap: surplus threads repeat micro-blocks) after every
+# whole-round micro-block (True) or never (False)
+R2_VP_MN_WRAP = True
+# trait settings of the native forms (the faster settings on gfx942)
+R2_VP_MN_TRAIT = {"vp_mn_pipe": 1}
+# scheduler per layout (both operands MN-contiguous: the default scheduler
+# shuffles the AGPR accumulators in the K loop; iterative-minreg does not)
+R2_VP_MN_SCHED = {"CRR": "iterative-minreg"}
+# modelled time of a native form over its RCR body: per layout, and per
+# micro-block size (elements)
+R2_VP_MN_COST = {"RRR": 1.04, "CCR": 1.02, "CRR": 1.06}
+R2_VP_MN_MICRO_COST = {64: 1.0, 32: 1.02, 16: 1.06, 8: 1.12, 4: 1.25}
+R2_VP_MN_WRAP_COST = 0.5  # x the fraction of repeated micro-blocks
+# TN (both operands MN-contiguous): K rows load one by one, so the K tail
+# needs no K alignment (K % 8 != 0 too); False: K % 8 == 0 as for RCR
+R2_VP_MN_TN_ANY_K = True
+# per (layout, register-staged geometry): the fastest micro-block (vp_mn_kv,
+# mn_vec; vp_mn_wrap where needed) and its time relative to the RCR body
+# (geomean over a shape set per layout on gfx942, every micro-block of every
+# geometry timed next to the RCR body in one process). A form with
+# this micro-block gets this factor instead of the generic one above; the
+# table's micro-block is tried first.
+R2_VP_MN_TABLE = {
+    "RRR": {
+        "256x192x64": (8, 8, 1.193),
+        "256x224x64": (4, 8, 1.081),
+        "256x256x32": (4, 8, 1.133),
+        "256x256x64": (4, 8, 1.058),
+        "256x256x64w8": (4, 8, 1.248),
+        "256x64x64": (4, 4, 1.179),
+        "224x256x64": (4, 8, 1.055),
+        "192x256x64": (4, 8, 1.073),
+        "192x256x64w8": (4, 8, 1.047),
+        "128x128x128": (8, 8, 1.136),
+        "128x128x32": (4, 4, 1.749),
+        "128x128x64": (4, 8, 1.134),
+        "128x32x128": (4, 4, 1.335),
+        "128x64x128": (4, 8, 1.157),
+        "64x128x128": (8, 8, 1.238),
+        "64x256x64": (4, 8, 1.252),
+        "64x64x128": (4, 8, 1.245),
+        "32x128x128": (8, 8, 1.348),
+    },
+    "CRR": {
+        "256x192x64": (4, 8, 1.286),
+        "256x224x64": (4, 8, 1.2),
+        "256x256x32": (4, 8, 1.134),
+        "256x256x64": (8, 8, 1.099),
+        "256x256x64w8": (4, 8, 1.147),
+        "256x64x64": (4, 8, 1.506),
+        "224x256x64": (4, 8, 1.28),
+        "192x256x64": (4, 8, 1.315),
+        "192x256x64w8": (4, 8, 1.191),
+        "128x128x128": (8, 8, 1.287),
+        "128x128x32": (4, 4, 2.92),
+        "128x128x64": (4, 8, 1.269),
+        "128x32x128": (4, 8, 1.829),
+        "128x64x128": (4, 8, 1.495),
+        "64x128x128": (4, 8, 1.472),
+        "64x256x64": (4, 8, 1.499),
+        "64x64x128": (4, 8, 1.563),
+        "32x128x128": (4, 8, 1.789),
+    },
+    "CCR": {
+        "256x192x64": (4, 8, 1.078),
+        "256x224x64": (4, 8, 1.066),
+        "256x256x32": (4, 8, 1.128),
+        "256x256x64": (4, 8, 1.049),
+        "256x256x64w8": (4, 8, 1.25),
+        "256x64x64": (4, 8, 1.284),
+        "224x256x64": (4, 8, 1.077),
+        "192x256x64": (8, 8, 1.153),
+        "192x256x64w8": (4, 8, 1.11),
+        "128x128x128": (8, 8, 1.135),
+        "128x128x32": (4, 4, 1.719),
+        "128x128x64": (4, 8, 1.142),
+        "128x32x128": (8, 8, 1.369),
+        "128x64x128": (8, 8, 1.26),
+        "64x128x128": (4, 8, 1.152),
+        "64x256x64": (4, 4, 1.177),
+        "64x64x128": (4, 8, 1.261),
+        "32x128x128": (4, 4, 1.306),
+    },
+}
+R2_VP_MN_USE_TABLE = True
+# successive-halving tuned forms (tune-engine SuccessiveHalving over a
+# growing shape set per (layout, geometry), each config timed against the
+# dispatcher's form in one process on gfx942): (micro-block, trait
+# overrides, time relative to that form). The form takes
+# the trait overrides and tries the micro-block first; its cost is the
+# fitted model x the factor.
+R2_VP_MN_TUNED = {
+    ("CCR", "128x128x32"): (
+        (4, 4),
+        {
+            "ab_double_buffer": True,
+            "lds_swizzle_r": 1,
+            "sched_strategy": "",
+            "vgpr_prefetch": 3,
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 2,
+        },
+        0.898,
+    ),
+    ("CCR", "128x128x64"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.922,
+    ),
+    ("CCR", "256x224x64"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 0,
+            "vp_mn_worder": 1,
+        },
+        0.982,
+    ),
+    ("CCR", "256x256x64"): (
+        (8, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 3,
+        },
+        0.987,
+    ),
+    ("CCR", "64x64x128"): (
+        (4, 8),
+        {
+            "ab_double_buffer": True,
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vgpr_prefetch": 3,
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 0,
+            "vp_mn_worder": 1,
+        },
+        0.863,
+    ),
+    ("CRR", "192x256x64w8"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 0,
+            "vp_mn_worder": 1,
+        },
+        0.902,
+    ),
+    ("CRR", "256x256x64w8"): (
+        (4, 8),
+        {"sched_strategy": "", "vp_mn_order": 0, "vp_mn_pipe": 1, "vp_mn_worder": 3},
+        0.991,
+    ),
+    ("CRR", "64x128x128"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 1,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 3,
+        },
+        0.737,
+    ),
+    ("RRR", "128x128x32"): (
+        (4, 4),
+        {
+            "ab_double_buffer": True,
+            "lds_swizzle_r": 1,
+            "sched_strategy": "",
+            "vgpr_prefetch": 3,
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 2,
+        },
+        0.929,
+    ),
+    ("RRR", "128x128x64"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.915,
+    ),
+    ("RRR", "256x256x64"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.984,
+    ),
+    ("RRR", "64x64x128"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.792,
+    ),
+    # (the top configs of the targets whose halving state lost its last
+    # rung, re-timed on the full shape set)
+    ("CCR", "192x256x64w8"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.941,
+    ),
+    ("CCR", "64x128x128"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 0,
+            "vp_mn_worder": 1,
+        },
+        0.921,
+    ),
+    ("CRR", "128x128x64"): (
+        (4, 8),
+        {
+            "sched_strategy": "iterative-minreg",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 0,
+            "vp_mn_worder": 0,
+        },
+        0.85,
+    ),
+    ("CRR", "64x64x128"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.67,
+    ),
+    ("RRR", "128x64x128"): (
+        (4, 8),
+        {
+            "lds_swizzle_r": 0,
+            "sched_strategy": "",
+            "vp_mn_order": 2,
+            "vp_mn_pipe": 1,
+            "vp_mn_worder": 0,
+        },
+        0.929,
+    ),
+}
+R2_VP_MN_USE_TUNED = True
+# (fit data: r2_native_fit.py; with vp_mn_wrap where the micro-block needs it)
+from .r2_native_fit import R2_NATIVE_LIN  # noqa: E402
+
+# the fitted per (layout, geometry, micro-block) time models
+# (r2_native_fit.R2_NATIVE_LIN) for the native plans' cost and micro-block
+# choice; False: the RCR model x r2_native_cost_factor
+R2_VP_MN_USE_FIT = True
+
+
+def g5_geo_of(spec: UniversalGemmSpec) -> Optional[str]:
+    """The G5_VGPR_GEOS name of a g5 body (None: not a g5 geometry)."""
+    t = spec.tile
+    for name, g in G5_VGPR_GEOS.items():
+        if (g[0], g[1], g[2], g[3], g[4]) == (
+            t.tile_m,
+            t.tile_n,
+            t.tile_k,
+            t.warp_m,
+            t.warp_n,
+        ):
+            return name
+    return None
+
+
+def _r2_lay(req) -> str:
+    return str(getattr(req, "layout", "RCR") or "RCR").upper()
+
+
+def r2_vp_mn_form(
+    req: GemmRequest, spec: UniversalGemmSpec
+) -> Optional[UniversalGemmSpec]:
+    """The native NN / TN / TT form of a g5 vgpr_prefetch spec for req
+    (None: no micro-block fits the tile / thread count / leading dimension,
+    or the request is RCR)."""
+    from ...instances.common.gemm_universal import is_valid_spec, launch_shape_error
+
+    lay = _r2_lay(req)
+    if lay == "RCR" or not int(getattr(spec.trait, "vgpr_prefetch", 0)):
+        return None
+    tr0 = replace(
+        spec.trait,
+        sched_strategy=R2_VP_MN_SCHED.get(lay, spec.trait.sched_strategy),
+        **R2_VP_MN_TRAIT,
+    )
+    data = replace(spec.data, layout=lay)
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    geo = g5_geo_of(spec) or ""
+    order = []
+    tuned = R2_VP_MN_TUNED.get((lay, geo)) if R2_VP_MN_USE_TUNED else None
+    if tuned is not None and not int(spec.trait.split_k) > 1:
+        tr_t = replace(tr0, **tuned[1])
+        for wrap in (0, 1):
+            s = replace(
+                spec,
+                data=data,
+                trait=replace(
+                    tr_t, vp_mn_kv=tuned[0][0], mn_vec=tuned[0][1], vp_mn_wrap=wrap
+                ),
+            )
+            if is_valid_spec(s, arch=req.arch)[0] and not launch_shape_error(
+                s, M, N, K
+            ):
+                return s
+        # the tuned micro-block does not fit this leading dimension: the
+        # tuned traits with the next micro-block that does
+        tr0 = tr_t
+    if R2_VP_MN_USE_FIT:
+        # the fitted micro-blocks of this (layout, geometry), cheapest first
+        # for this K (one wave's a + b * K_slice)
+        ks = -(-K // (spec.tile.tile_k * int(spec.trait.split_k))) * spec.tile.tile_k
+        fits = [
+            (ab[0] + ab[1] * ks, mic)
+            for (L_, g_, mic), ab in R2_NATIVE_LIN.items()
+            if L_ == lay and g_ == geo
+        ]
+        order += [(mic, w) for _c, mic in sorted(fits) for w in (0, 1)]
+    ent = R2_VP_MN_TABLE.get(lay, {}).get(geo) if R2_VP_MN_USE_TABLE else None
+    if ent is not None:
+        # the measured micro-block of this (layout, geometry)
+        order += [(ent[:2], 0), (ent[:2], 1)]
+    order += [
+        (mic, w) for w in ((0, 1) if R2_VP_MN_WRAP else (0,)) for mic in R2_VP_MN_MICRO
+    ]
+    seen = set()
+    for (kv, mv), wrap in order:
+        if (kv, mv, wrap) in seen:
+            continue
+        seen.add((kv, mv, wrap))
+        s = replace(
+            spec,
+            data=data,
+            trait=replace(tr0, vp_mn_kv=kv, mn_vec=mv, vp_mn_wrap=wrap),
+        )
+        if is_valid_spec(s, arch=req.arch)[0] and not launch_shape_error(s, M, N, K):
+            return s
+    return None
+
+
+def _g5_plan_tile_trait(
+    req: GemmRequest, geo: str, split_k: int
+) -> tuple[TileSpec, TraitSpec]:
+    """The RCR (tile, trait) of g5 plan (geo, split_k) for req."""
+    tm, tn, tk = G5_VGPR_GEOS[geo][0], G5_VGPR_GEOS[geo][1], G5_VGPR_GEOS[geo][2]
+    tile, trait = _g5_tile_trait(geo, bool(req.M % tm), bool(req.N % tn))
+    if req.K % tk:
+        trait = replace(trait, pad_k=True)
+    elif split_k > 1:
+        trait = replace(trait, split_k=split_k, pad_fast_tile=False)
+    return tile, trait
+
+
+def r2_native_cost_factor(lay: str, spec: UniversalGemmSpec) -> float:
+    """Modelled time of the native form spec over its RCR body."""
+    t, tr = spec.tile, spec.trait
+    ent = (
+        R2_VP_MN_TABLE.get(lay, {}).get(g5_geo_of(spec) or "")
+        if R2_VP_MN_USE_TABLE
+        else None
+    )
+    if ent is not None and (int(tr.vp_mn_kv), int(tr.mn_vec)) == ent[:2]:
+        return float(ent[2])
+    f = R2_VP_MN_COST.get(lay, 1.0)
+    f *= R2_VP_MN_MICRO_COST.get(int(tr.vp_mn_kv) * int(tr.mn_vec), 1.3)
+    if ent is not None:
+        # not the measured micro-block (the leading dimension refused it)
+        f = max(f, float(ent[2]) * 1.15)
+    if int(tr.vp_mn_wrap):
+        a_mn, b_mn = lay[0] == "C", lay[1] == "R"
+        rep = 0.0
+        for is_mn, tmn in ((a_mn, t.tile_m), (b_mn, t.tile_n)):
+            if is_mn:
+                n = (tmn // int(tr.mn_vec)) * (t.tile_k // int(tr.vp_mn_kv))
+                th = spec.block_size
+                rep = max(rep, (-(-n // th) * th - n) / max(1, n))
+        f *= 1.0 + R2_VP_MN_WRAP_COST * rep
+    return f
+
+
+def r2_native_cost(
+    req: GemmRequest, geo: str, split_k: int, form: UniversalGemmSpec, rcr_cost: float
+) -> float:
+    """Modelled time (us) of the native form ``form`` of g5 plan (geo,
+    split_k): the fitted model of its (layout, geometry, micro-block) when there
+    is one (waves x (a + b * K_slice), the g5 traffic floor and split cost as
+    in g5_vgpr_cost), else ``rcr_cost`` x :func:`r2_native_cost_factor`."""
+    lay = _r2_lay(req)
+    tr = form.trait
+    ab = (
+        R2_NATIVE_LIN.get((lay, geo, (int(tr.vp_mn_kv), int(tr.mn_vec))))
+        if R2_VP_MN_USE_FIT
+        else None
+    )
+    tuned = R2_VP_MN_TUNED.get((lay, geo)) if R2_VP_MN_USE_TUNED else None
+    t_factor = 1.0
+    if ab is not None and tuned is not None and R2_VP_MN_USE_FIT:
+        # the tuning baseline was the fitted-model form: the cheapest fitted
+        # micro-block for this K, x the measured tuning factor
+        tk_ = G5_VGPR_GEOS[geo][2]
+        ks_ = -(-int(req.K) // (tk_ * split_k)) * tk_
+        cands = [
+            v for (L_, g_, _m), v in R2_NATIVE_LIN.items() if L_ == lay and g_ == geo
+        ]
+        ab = min(cands, key=lambda v: v[0] + v[1] * ks_)
+        t_factor = float(tuned[2])
+    if ab is None:
+        return rcr_cost * r2_native_cost_factor(lay, form)
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    tm, tn, tk = G5_VGPR_GEOS[geo][0], G5_VGPR_GEOS[geo][1], G5_VGPR_GEOS[geo][2]
+    tiles = -(-M // tm) * -(-N // tn)
+    ks = -(-K // (tk * split_k)) * tk
+    cost = -(-(tiles * split_k) // arch_num_cus(req.arch)) * (
+        max(ab[0], G5_VGPR_A_MIN) + ab[1] * ks
+    )
+    cost = max(cost, tiles * split_k * (tm + tn) * ks * 2 / G5_VGPR_TRAFFIC_BW)
+    if split_k > 1:
+        fixed, per_byte = G5_VGPR_SPLIT_COST
+        cost += fixed + per_byte * M * N * 4 * split_k
+    return cost * t_factor
+
+
+_R2_PLAN_CACHE: dict = {}
+
+
+def r2_vp_mn_plans(req: GemmRequest) -> list:
+    """Every (cost, geometry, split_k) of the g5 cost model whose body has a
+    native form for the non-RCR req (cost x r2_native_cost_factor),
+    cheapest first."""
+    lay = _r2_lay(req)
+    key = (
+        int(req.M),
+        int(req.N),
+        int(req.K),
+        req.arch,
+        lay,
+        str(getattr(req, "dtype", "fp16")),
+        R2_VP_MN,
+        R2_VP_MN_WRAP,
+        tuple(R2_VP_MN_MICRO),
+        tuple(sorted(R2_VP_MN_TRAIT.items())),
+        tuple(sorted(R2_VP_MN_SCHED.items())),
+        tuple(sorted(R2_VP_MN_COST.items())),
+        tuple(sorted(R2_VP_MN_MICRO_COST.items())),
+        R2_VP_MN_WRAP_COST,
+        R2_VP_MN_USE_TABLE,
+        R2_VP_MN_USE_FIT,
+        len(R2_NATIVE_LIN),
+        R2_VP_MN_TN_ANY_K,
+        R2_VP_MN_USE_TUNED,
+        len(R2_VP_MN_TUNED),
+        R2_EXTRA_GEOS_ON,
+        tuple(sorted((k, tuple(sorted(v.items()))) for k, v in R2_VP_MN_TABLE.items())),
+        tuple(sorted((k, v[:3] + v[-1:]) for k, v in G5_VGPR_GEOS.items())),
+        G5_VGPR_SPLIT_K,
+        tuple(G5_VGPR_SPLITS),
+        G5_VGPR_K_TAIL,
+    )
+    hit = _R2_PLAN_CACHE.get(key)
+    if hit is not None:
+        return list(hit)
+    from ...instances.common.gemm_universal import DataSpec
+
+    dt = str(getattr(req, "dtype", "fp16"))
+    dt = dt if dt in ("fp16", "bf16") else "fp16"
+    out = []
+    for cost, geo, s in g5_vgpr_plans(
+        req.M, req.N, req.K, req.arch, any_k_tail=lay == "CRR" and R2_VP_MN_TN_ANY_K
+    ):
+        tile, trait = _g5_plan_tile_trait(req, geo, s)
+        spec = UniversalGemmSpec(
+            name="r2_probe",
+            tile=tile,
+            trait=trait,
+            data=DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt, layout="RCR"),
+            wave_size=64,
+        )
+        f = r2_vp_mn_form(req, spec)
+        if f is None:
+            continue
+        out.append((r2_native_cost(req, geo, s, f, cost), geo, s))
+    out.sort()
+    if len(_R2_PLAN_CACHE) > 8192:
+        _R2_PLAN_CACHE.clear()
+    _R2_PLAN_CACHE[key] = tuple(out)
+    return out

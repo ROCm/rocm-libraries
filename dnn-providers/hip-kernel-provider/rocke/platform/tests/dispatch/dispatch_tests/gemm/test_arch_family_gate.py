@@ -50,7 +50,18 @@ class TestArchFamilyGate(unittest.TestCase):
     def test_cdna_selection_prefers_mem_when_cshuffle_tile_does_not_divide(self):
         # M=64 breaks the 128x128 cshuffle tile but the 64x128 mem tile divides;
         # the intended pick is cdna_mem. Pre-fix this returned rdna_wmma.
-        result = dispatch_gemm_fp16(GemmRequest(M=64, N=128, K=32, arch="gfx950"))
+        # (the universal bodies only: gemm_skinny / ring_small_any take this
+        # shape in auto mode)
+        from unittest import mock
+
+        from rocke.dispatch.gemm import skinny as _SK
+
+        with mock.patch.object(_SK, "RING_ANY", False):
+            result = dispatch_gemm_fp16(
+                GemmRequest(
+                    M=64, N=128, K=32, arch="gfx950", algorithm="universal_gemm"
+                )
+            )
         self.assertEqual(result.candidate.spec_id, "cdna_mem_64x128")
         self.assertNotIn("rdna", result.candidate.name)
 
@@ -60,7 +71,16 @@ class TestArchFamilyGate(unittest.TestCase):
         self.assertEqual(result.candidate.spec_id, "rdna_wmma_default")
 
     def test_cdna_cshuffle_still_selected_when_it_divides(self):
-        result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))
+        from unittest import mock
+
+        from rocke.dispatch.gemm import skinny as _SK
+
+        with mock.patch.object(_SK, "RING_ANY", False):
+            result = dispatch_gemm_fp16(
+                GemmRequest(
+                    M=128, N=128, K=32, arch="gfx950", algorithm="universal_gemm"
+                )
+            )
         self.assertEqual(result.candidate.spec_id, "cdna_cshuffle_default")
 
 

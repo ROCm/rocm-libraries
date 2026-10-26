@@ -309,3 +309,43 @@ def test_body_guard_rejects_other_levers():
     plan, _ = _plan("P3_r4")
     with pytest.raises(ValueError, match="GETT body"):
         GettHooks(plan, GettKnobs(), body_spec(tile_k=plan.tile_k, hb_sched=True))
+
+
+# ------------------------------------------------------------------------------------------------ wide D (> 2 GiB)
+
+_CANON_LARGE = (("K", "M"), ("K", "N"), ("N", "M"), {"M": 38400, "N": 30240, "K": 3072})
+
+
+def _canon(ext=None, **kw):
+    a, b, d, e = _CANON_LARGE
+    return TensorGettSpec.make(a, b, d, ext or e, **kw)
+
+
+@pytest.mark.parametrize("knobs", [GettKnobs(), GettKnobs(bilinear=True, epi_pair=True)])
+def test_wide_ragged_d_is_admitted_and_masks_the_summed_offset(knobs):
+    """A ragged D over 2 GiB (38400 x 30240) is served: the row / column
+    sentinel would land inside D there, so the epilogue masks the summed
+    offset (an unsigned add of the element offset, then one select)."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.instances.common.tensor import gett as G
+
+    sp = _canon(knobs=knobs)
+    ok, why = is_valid_spec(sp)
+    assert ok, why
+    hooks = GettHooks(sp.plan(), sp.knobs, sp.body(), dtype=sp.dtype)
+    assert hooks.wide_d() and hooks.d_bytes() > G.NARROW_D_BYTES
+    ir = lower_kernel_to_llvm(build_tensor_gett(sp), arch="gfx950")
+    assert "add nuw i32" in ir
+    assert str(G.WIDE_OOB - (1 << 32)) in ir  # the wide sentinel (as an i32)
+
+
+def test_narrow_d_keeps_the_row_column_sentinel():
+    sp = _canon(ext={"M": 9600, "N": 7560, "K": 3072})
+    hooks = GettHooks(sp.plan(), sp.knobs, sp.body(), dtype=sp.dtype)
+    assert not hooks.wide_d()
+
+
+def test_d_beyond_the_32bit_offsets_is_refused():
+    # 65536 x 32768 f16 = 4 GiB: past MAX_D_BYTES
+    ok, why = is_valid_spec(_canon(ext={"M": 65536, "N": 32768, "K": 64}))
+    assert not ok and "D spans more than" in why

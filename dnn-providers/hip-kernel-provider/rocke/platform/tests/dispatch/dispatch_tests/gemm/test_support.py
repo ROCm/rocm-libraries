@@ -18,7 +18,9 @@ from rocke.dispatch.gemm.support import (
 
 class TestGemmSupportPredicates(unittest.TestCase):
     def _gfx950_query(self) -> GemmSupportQuery:
-        result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))
+        result = dispatch_gemm_fp16(
+            GemmRequest(M=128, N=128, K=32, arch="gfx950", algorithm="universal_gemm")
+        )
         return support_query_from_universal_spec(result.spec, arch="gfx950")
 
     def test_valid_query_is_supported(self):
@@ -65,18 +67,29 @@ class TestGemmSupportPredicates(unittest.TestCase):
         self.assertIn("WMMA path supports only the 'default' epilogue", why)
 
     def test_request_shape_support_respects_padding_flags(self):
-        result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))
+        result = dispatch_gemm_fp16(
+            GemmRequest(M=128, N=128, K=32, arch="gfx950", algorithm="universal_gemm")
+        )
         ok, why = request_shape_supported(
             GemmRequest(M=130, N=128, K=32, arch="gfx950"), result.spec
         )
         self.assertFalse(ok)
         self.assertIn("M=130", why)
 
+        # pad_m alone is not enough on the global-load body: the ragged tile's
+        # loads of rows >= M read past A; pad_row_clamp or
+        # the guarded loader (kc_row_guard) bounds them
         padded = replace(result.spec, trait=replace(result.spec.trait, pad_m=True))
         ok, why = request_shape_supported(
             GemmRequest(M=130, N=128, K=32, arch="gfx950"), padded
         )
-        self.assertTrue(ok, why)
+        self.assertFalse(ok)
+        self.assertIn("pad_row_clamp", why)
+        req = GemmRequest(M=130, N=128, K=32, arch="gfx950")
+        for lever in ("pad_row_clamp", "kc_row_guard"):
+            bounded = replace(padded, trait=replace(padded.trait, **{lever: True}))
+            ok, why = request_shape_supported(req, bounded)
+            self.assertTrue(ok, f"{lever}: {why}")
 
 
 if __name__ == "__main__":

@@ -281,12 +281,19 @@ class TestWriteGranularity(unittest.TestCase):
         # pad_k (the DRAM->LDS loads do not mask K), so they are refused
         s = _spec(_F_TILE, replace(_F_TRAIT, pad_m=True, pad_n=True, pad_k=True))
         self.assertTrue(is_valid_spec(s, arch="gfx950")[0])  # K-multiple launches
-        self.assertIsNone(launch_shape_error(s, 1000, 1000, 4096))
-        err = launch_shape_error(s, 1000, 1000, 1000)
+        self.assertIsNone(launch_shape_error(s, 1024, 1024, 4096))
+        err = launch_shape_error(s, 1024, 1024, 1000)
         self.assertIsNotNone(err)
         self.assertIn("direct_to_lds", err)
+        # ragged rows: the unbounded DMA would read rows past the operand
+        err = launch_shape_error(s, 1000, 1000, 4096)
+        self.assertIsNotNone(err)
+        self.assertIn("dtl_tight_rsrc", err)
         # the global-load path masks the K tail: a plain pad_k body is fine
-        plain = _spec(_PICK_TILE, TraitSpec(pad_m=True, pad_n=True, pad_k=True))
+        # (ragged rows: pad_row_clamp keeps the row loads inside the operand)
+        plain = _spec(
+            _PICK_TILE, TraitSpec(pad_m=True, pad_n=True, pad_k=True, pad_row_clamp=True)
+        )
         self.assertTrue(is_valid_spec(plain, arch="gfx950")[0])
         self.assertIsNone(launch_shape_error(plain, 1000, 1000, 1000))
 

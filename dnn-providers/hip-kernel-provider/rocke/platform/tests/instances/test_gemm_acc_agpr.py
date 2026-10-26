@@ -758,11 +758,17 @@ class TestLaunchShape(unittest.TestCase):
                 self.assertTrue(err.startswith(dim), err)
                 with self.assertRaises(ValueError):
                     check_launch_shape(s, m, n, k)
+        # the DTL body has no K mask, so pad_k alone does not make K % 64 != 0
+        # safe (the last tile would read the next row); dtl_k_tail does
         pk = replace(s, trait=replace(s.trait, pad_k=True))
         self.assertIsNone(launch_shape_error(pk, 8192, 8192, 4160))
         # pad_k does not cover a K tail on the direct-to-LDS path (the
         # DRAM->LDS loads copy whole K tiles), so the launch is refused
         self.assertIn("direct_to_lds", launch_shape_error(pk, 8192, 8192, 4128))
+        self.assertIn("dtl_k_tail", launch_shape_error(pk, 8192, 8192, 4128))
+        kt = replace(s, trait=replace(s.trait, pad_k=True, dtl_k_tail=True))
+        self.assertIsNone(launch_shape_error(kt, 8192, 8192, 4128))
+        self.assertIn("multiple of 8", launch_shape_error(kt, 8192, 8192, 4132))
         sk = replace(s, trait=replace(s.trait, split_k=2))
         self.assertIsNone(launch_shape_error(sk, 8192, 8192, 8192))
         self.assertIn("split_k * tile_k", launch_shape_error(sk, 8192, 8192, 8256))

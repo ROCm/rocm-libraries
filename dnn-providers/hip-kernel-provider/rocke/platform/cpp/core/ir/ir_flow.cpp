@@ -1256,6 +1256,32 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16, ops, 3, rocke_f16(), NULL, "bl1");
 }
 
+/* Dtype-generic scalar buffer load (Python IRBuilder.buffer_load):
+ * f16 / bf16 (2-byte) or f32 / i32 (4-byte), one element, OOB-clamped. */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset || !dtype)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load: NULL operand");
+    if(!(dtype == rocke_f16() || dtype == rocke_bf16() || dtype == rocke_f32()
+         || dtype == rocke_i32()))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load: unsupported dtype '%s'", dtype->name);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD, ops, 3, dtype, &attrs, "bl1");
+}
+
 /* D16-form scalar half buffer load: ``raw.ptr.buffer.load.f16`` returns
  * ``half`` directly (no i16 bitcast). Port of Python
  * IRBuilder.buffer_load_f16_d16 / the pinned PR9710

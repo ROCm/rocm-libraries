@@ -77,6 +77,36 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
         def decode(buf):
             return _f32_from_bf16(np, buf)
 
+    # Split-K bodies atomic-add f32 partials into a zeroed f32 workspace
+    # ``Cf32[M, N]`` (the kernel's C parameter); the caller rounds it to the
+    # output dtype. Binding the 16-bit C buffer there would overrun it.
+    spec = getattr(result, "spec", None)
+    split_k = int(getattr(getattr(spec, "trait", None), "split_k", 1) or 1)
+    # split_k_serial: the kernel reduces in-launch and stores
+    # C itself; it takes the f32 partial slots W and the i32 counters Cnt
+    # (zeroed once here; the kernel leaves them zeroed)
+    serial = int(getattr(getattr(spec, "trait", None), "split_k_serial", 0) or 0)
+    ws = (0, 0)
+    if split_k > 1 and serial:
+        from ...instances.common.gemm_universal import split_k_serial_workspace
+
+        ws = split_k_serial_workspace(spec, M, N)
+    elif split_k > 1:
+        c_host = np.empty((M, N), dtype=np.float32)
+
+        def decode(buf):  # noqa: F811 - the f32 workspace, rounded to dtype
+            if dtype == "fp16":
+                return buf.astype(np.float16).astype(np.float32)
+            return _f32_from_bf16(np, _bf16_from_f32(np, buf))
+
+    # native NN / TN / TT layouts store an MN-contiguous operand transposed
+    # (A as [K, M], B as [K, N]); the logical problem and reference are the same
+    lay = str(getattr(req, "layout", "RCR")).upper()
+    if lay[0] == "C":
+        a_host = np.ascontiguousarray(a_host.T)
+    if lay[1] == "R":
+        b_host = np.ascontiguousarray(b_host.T)
+
     def make_args(rt: Any) -> Tuple[bytes, Tuple[int, ...]]:
         a_dev = rt.alloc(nbytes(a_host))
         b_dev = rt.alloc(nbytes(b_host))
@@ -84,6 +114,14 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
         rt.memcpy_h2d(a_dev, as_u8_buffer(a_host), nbytes(a_host))
         rt.memcpy_h2d(b_dev, as_u8_buffer(b_host), nbytes(b_host))
         rt.memset(c_dev, 0, nbytes(c_host))
+        if ws[0]:
+            w_dev = rt.alloc(4 * ws[0])
+            n_dev = rt.alloc(4 * max(1, ws[1]))
+            rt.memset(n_dev, 0, 4 * max(1, ws[1]))
+            return (
+                struct.pack("<QQQQQiii", a_dev, b_dev, c_dev, w_dev, n_dev, M, N, K),
+                (a_dev, b_dev, c_dev, w_dev, n_dev),
+            )
         return (
             struct.pack("<QQQiii", a_dev, b_dev, c_dev, M, N, K),
             (a_dev, b_dev, c_dev),
