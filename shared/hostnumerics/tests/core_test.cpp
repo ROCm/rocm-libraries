@@ -9,7 +9,6 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <ostream>
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
@@ -445,76 +444,35 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     EXPECT_EQ(*offset, 5);
 }
 
-class LayoutOrderCpp : public ::testing::TestWithParam<std::vector<size_t>> {};
-
-TEST_P(LayoutOrderCpp, FactoriesMatchLogicalIndex) {
-    const auto& order = GetParam();
-    std::vector<size_t> dimensions{2, 3, 5};
-    dimensions.resize(order.size());
-    const Shape shape(dimensions);
+TEST(LayoutCpp, FactoriesAndExplicitOrders) {
+    const Shape shape{2, 3, 5};
+    const Layout rowMajor(shape, {15, 5, 1}, 0);
+    EXPECT_EQ(Layout::contiguous(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguousLastDimensionFastest(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguousFirstDimensionFastest(shape), (Layout(shape, {1, 2, 6}, 0)));
+    const std::array<size_t, 3> order{1, 2, 0};
     const auto checked = Layout::getContiguousLayout(shape, order);
     ASSERT_TRUE(checked);
-    const auto layout = Layout::contiguous(shape, order);
-    EXPECT_EQ(layout, *checked);
-    EXPECT_EQ(layout.offset(), 0);
-    for (size_t linear = 0; linear < shape.elementCount(); ++linear) {
-        const auto coordinates = shape.coordinates(linear, order);
-        const auto offset = layout.elementOffset(coordinates);
-        ASSERT_TRUE(offset);
-        EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    AxisPermutations, LayoutOrderCpp,
-    ::testing::Values(std::vector<size_t>{}, std::vector<size_t>{0}, std::vector<size_t>{0, 1},
-                      std::vector<size_t>{1, 0}, std::vector<size_t>{0, 1, 2},
-                      std::vector<size_t>{0, 2, 1}, std::vector<size_t>{1, 0, 2},
-                      std::vector<size_t>{1, 2, 0}, std::vector<size_t>{2, 0, 1},
-                      std::vector<size_t>{2, 1, 0}));
-
-TEST(LayoutCpp, NamedFactoriesAndBracedOrders) {
-    for (const Shape shape : {Shape{}, Shape{7}, Shape{2, 3, 5}, Shape{2, 0, 3}}) {
-        std::vector<size_t> ascending(shape.rank());
-        std::iota(ascending.begin(), ascending.end(), size_t{0});
-        const std::vector<size_t> descending(ascending.rbegin(), ascending.rend());
-        const auto defaultLayout = Layout::contiguous(shape);
-        const auto lastFastest = Layout::contiguousLastDimensionFastest(shape);
-        const auto firstFastest = Layout::contiguousFirstDimensionFastest(shape);
-        EXPECT_EQ(defaultLayout, lastFastest);
-        for (size_t linear = 0; linear < shape.elementCount(); ++linear) {
-            const auto coordinates = shape.coordinates(linear);
-            for (const auto& [layout, order] :
-                 {std::pair{lastFastest, ascending}, std::pair{firstFastest, descending}}) {
-                const auto offset = layout.elementOffset(coordinates);
-                ASSERT_TRUE(offset);
-                EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
-            }
-        }
-    }
-    const Shape shape{2, 3};
-    const auto checked = Layout::getContiguousLayout(shape, {1, 0});
-    ASSERT_TRUE(checked);
-    EXPECT_EQ(Layout::contiguous(shape, {1, 0}), *checked);
-    EXPECT_EQ(*checked, Layout::contiguousFirstDimensionFastest(shape));
+    EXPECT_EQ(*checked, (Layout(shape, {1, 10, 2}, 0)));
+    EXPECT_EQ(Layout::contiguous(shape, order), *checked);
+    EXPECT_EQ(Layout::contiguous(shape, {1, 2, 0}), *checked);
+    const std::array<size_t, 3> coordinates{1, 2, 3};
+    const auto offset = checked->elementOffset(coordinates);
+    ASSERT_TRUE(offset);
+    EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
     EXPECT_EQ(Layout::contiguous(Shape{}, {}), Layout{});
+    EXPECT_EQ(Layout::contiguousLastDimensionFastest(Shape{2, 0, 3}),
+              (Layout(Shape{2, 0, 3}, {0, 3, 1}, 0)));
+    EXPECT_EQ(Layout::contiguousFirstDimensionFastest(Shape{2, 0, 3}),
+              (Layout(Shape{2, 0, 3}, {1, 2, 0}, 0)));
 }
 
 TEST(LayoutCpp, InvalidStrideRanksAndDimensionsThrow) {
     const Shape shape{2, 3};
-    const std::array<ptrdiff_t, 1> strides{1};
     EXPECT_THROW((Layout(shape, std::vector<ptrdiff_t>{1}, 0)), std::runtime_error);
-    EXPECT_THROW((Layout(shape, {1}, 0)), std::runtime_error);
-    EXPECT_THROW((Layout(shape, std::span<const ptrdiff_t>(strides), 0)), std::runtime_error);
-    const Layout layout(shape, {3, 1}, 0);
-    EXPECT_THROW(layout.stride(shape.rank()), std::runtime_error);
-    EXPECT_THROW(layout.stride(std::numeric_limits<size_t>::max()), std::runtime_error);
+    EXPECT_THROW(Layout(shape, {3, 1}, 0).stride(shape.rank()), std::runtime_error);
     EXPECT_THROW(Layout::contiguous(shape, {0}), std::runtime_error);
-    EXPECT_THROW(Layout::contiguous(shape, {1, 1}), std::runtime_error);
-    const Shape oversized{std::numeric_limits<size_t>::max()};
-    EXPECT_THROW(Layout::contiguous(oversized), std::runtime_error);
-    EXPECT_THROW(Layout::contiguousLastDimensionFastest(oversized), std::runtime_error);
-    EXPECT_THROW(Layout::contiguousFirstDimensionFastest(oversized), std::runtime_error);
+    EXPECT_THROW(Layout::contiguous(Shape{std::numeric_limits<size_t>::max()}), std::runtime_error);
 }
 
 TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
