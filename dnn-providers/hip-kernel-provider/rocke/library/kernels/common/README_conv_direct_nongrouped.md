@@ -4,7 +4,7 @@ Source: [`conv_direct_nongrouped.py`](conv_direct_nongrouped.py) —
 `DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`,
 `nongrouped_specs`, `nongrouped_knobs`, `tile_w_candidates`.
 
-C++ engine twin: `platform/cpp/instances/common/conv_direct_nongrouped.cpp`
+C++ engine twin: `library/cpp/instances/common/conv_direct_nongrouped.cpp`
 (public header `rocke/instance_conv_direct_nongrouped.h`), byte-identical `.ll`.
 
 ## Why a separate family
@@ -315,8 +315,8 @@ heuristic, not a validity rule: the per-shape
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |
 | AOT cache | runtime channels, width filtering, `groups == 1` only, plans pack against the signature | `pytest tests/test_direct_kernel_cache.py` |
 
-`rocke.core.backend.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
-reaches the C++ builder directly through the `rocke_engine.conv_direct_nongrouped_*`
+`kernels.conv.engine_bridge.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
+reaches the C++ builder directly through the `rocke_library_engine.conv_direct_nongrouped_*`
 binding.
 
 When changing the builder, change `conv_direct_nongrouped.cpp` in the same change and

@@ -361,8 +361,8 @@ kernel for an A/B comparison; the AOT grid does not sweep it.
 | `conv_implicit_gemm_dgrad.py` | Python builder (this instance) |
 | `../../benchmarks/common/benchmark_implicit_gemm_conv.py` | `--direction dgrad` sweep |
 | `../../builders/common/conv_reference.py` | `dgrad_reference()` via `torch.nn.grad.conv2d_input` |
-| `../../../platform/cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
-| `../../../platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
+| `../../cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
+| `../../cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
 | `../conv/aot_jobs.py` | AOT grid: tilde and stride-1 (tap-outer) binaries, the `CACHE_DGRAD_HALO_*` sub-grid |
 | `../conv/kernel_identity.py` | `KernelIdentity` and `identity_supports_problem`: which problems a cached binary serves (`tap_outer_k` needs `kpg % tile_k == 0`; a halo binary needs `Ho == Hi`, `Wo == Wi`, `Wo <= halo_max_wo`) |

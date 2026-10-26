@@ -17,7 +17,7 @@ section "Windowed Depthwise Dgrad Kernel".
 `DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
 (VALU and `dot2` forms) and `_build_dw_dgrad_win_mfma` (Toeplitz MFMA form) in
 [`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
-C++ mirror [`conv_direct_grouped_build_depthwise_dgrad_win.cpp`](../../../../../cpp/instances/common/conv_direct_grouped_build_depthwise_dgrad_win.cpp).
+C++ mirror [`conv_direct_grouped_build_depthwise_dgrad_win.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_depthwise_dgrad_win.cpp).
 AOT cache variant `direct_depthwise_dgrad_win` (`DW_WIN_*`,
 `_dw_win_policy_reason` in
 [`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py));

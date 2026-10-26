@@ -4,7 +4,7 @@
 
 ``vector_width_reason`` (library/kernels/common/_conv_implicit_gemm_common.py)
 and its C++ twin ``rocke_conv_vector_width_ok``
-(platform/cpp/instances/common/conv_implicit_gemm.cpp) cap any explicit
+(library/cpp/instances/common/conv_implicit_gemm.cpp) cap any explicit
 ``vector_size_*`` at one 16-byte per-lane access. An fp32 operand at width 8
 is 32 bytes and must be rejected for every implicit-GEMM conv direction
 (forward, wgrad, dgrad); fp16/bf16 at width 8 is exactly 16 bytes and must
@@ -15,7 +15,7 @@ here, not just the Python-side ``is_valid_*`` gates.
 
 No GPU and no comgr needed for the predicate/admission tests. The
 cross-engine check builds and lowers through the C++ engine binding, which
-only needs the installed ``rocke_engine`` extension (skipped if absent).
+only needs the installed ``rocke_library_engine`` extension (skipped if absent).
 """
 
 from __future__ import annotations
@@ -207,11 +207,13 @@ class TestCppTwinAgrees(_SharedGeometry, unittest.TestCase):
 
     def setUp(self):
         try:
-            from rocke.core.backend import _import_engine
+            from rocke.core.backend import import_engine
 
-            self._eng = _import_engine()
+            from kernels.conv.engine_bridge import ENGINE_MODULE
+
+            self._eng = import_engine(ENGINE_MODULE)
         except Exception as e:  # noqa: BLE001 -- extension not built here
-            self.skipTest(f"rocke_engine extension unavailable: {e}")
+            self.skipTest(f"rocke_library_engine extension unavailable: {e}")
 
     def _dict(self, *, dtype_d: str, vector_size_c: int) -> dict:
         # Built directly (not via conv_implicit_gemm_spec_to_dict, which only

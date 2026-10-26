@@ -22,7 +22,7 @@ section "4c dgrad". The fused weight transform:
 `is_valid_dgrad_4c_problem`, `build_direct_4c_dgrad`, `direct_4c_dgrad_launch`;
 `dgrad_4c_spec_for_problem` is a kernel-level helper)
 in [`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
-C++ mirror in [`conv_direct_grouped_build_4c_phases_and_loop.cpp`](../../../../../cpp/instances/common/conv_direct_grouped_build_4c_phases_and_loop.cpp)
+C++ mirror in [`conv_direct_grouped_build_4c_phases_and_loop.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_4c_phases_and_loop.cpp)
 and `conv_direct_grouped_spec_and_validate.cpp`. AOT cache variant
 `direct_grouped_dgrad_4c` (`DGRAD_4C_*` in
 [`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py));
@@ -158,7 +158,7 @@ disjoint hold-out with warm and with flushed caches:
   staging passes, the knob grid and 1x1, plus one binary per form on several
   shapes. Bad unless `|out - ref| <= tol + tol * |ref|`, `tol = 1e-2`, output
   NaN-filled first.
-- Public dual-engine entry. `rocke.core.backend.lower_conv_direct_grouped`
+- Public dual-engine entry. `kernels.conv.engine_bridge.lower_conv_direct_grouped`
   flattens the spec (`conv_direct_grouped_spec_to_dict`) for the binding
   (`fill_direct_conv_problem`, `dg4_build_spec`), which must read every
   kernel-shaping field. The dict once dropped `dtype`, so the C++ backend built

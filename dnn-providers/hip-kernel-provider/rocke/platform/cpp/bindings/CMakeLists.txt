@@ -64,7 +64,7 @@ if(NOT pybind11_DIR)
 endif()
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(rocke_engine rocke_engine.cpp rocke_engine_img2col.cpp
+pybind11_add_module(rocke_engine rocke_engine.cpp
                     rocke_engine_attention.cpp rocke_engine_moe_gemm_fused.cpp
                     rocke_engine_fmha_extra.cpp rocke_engine_fused_moe_e2e.cpp)
 target_include_directories(rocke_engine PRIVATE "${ROCKE_INCLUDE_DIR}")

@@ -24,7 +24,7 @@ Generic `DirectConvSpec` / `build_direct_conv` (transposed spec from
 `build_direct_conv_4c` in
 [`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
 C++ mirrors `rocke_build_direct_conv`
-([`conv_direct_grouped_build_generic.cpp`](../../../../../cpp/instances/common/conv_direct_grouped_build_generic.cpp))
+([`conv_direct_grouped_build_generic.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_generic.cpp))
 and the 4c builder. AOT cache variants
 `direct_grouped_dgrad_fused` and `direct_grouped_dgrad_4c` in
 [`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py);

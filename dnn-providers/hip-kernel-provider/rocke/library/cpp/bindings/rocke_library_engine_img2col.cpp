@@ -1,14 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * bindings/rocke_engine_img2col.cpp -- img2col family bindings for the rocke_engine
- * module. Kept in its own translation unit because the img2col helper header
+ * library/cpp/bindings/rocke_library_engine_img2col.cpp -- img2col family
+ * bindings for the rocke_library_engine module. Kept in its own translation
+ * unit because the img2col helper header
  * defines its own struct rocke_conv_problem (a peer copy of the conv
  * implicit-GEMM problem with the same tag); compiling it alongside
  * instance_conv_implicit_gemm.h in the same TU is a C++ redefinition. Here the
  * only conv header included is instance_img2col.h, so the tag is unique.
  *
- * register_img2col(m) is called from the main module file, adding:
+ * register_img2col(m) is called from rocke_library_engine.cpp, adding:
  *   img2col_lower_llvm(spec, arch) / img2col_serialize_ir(spec, arch)
  *   img2col_verify(spec, arch)
  */
@@ -146,7 +147,7 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     {
         if(ll)
             free(ll);
-        throw std::runtime_error("rocke_engine.img2col_lower_llvm failed (status="
+        throw std::runtime_error("rocke_library_engine.img2col_lower_llvm failed (status="
                                  + std::to_string((int)st)
                                  + "): " + (err[0] ? err : "unknown error"));
     }
@@ -158,7 +159,7 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 std::string serialize_ir(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
-    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.img2col_serialize_ir",
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.img2col_serialize_ir",
                                 rocke_img2col_spec_t,
                                 build_spec,
                                 rocke_build_img2col_new(&b, &s, arch.c_str()));
@@ -167,7 +168,7 @@ std::string serialize_ir(const py::dict& d, const std::string& arch)
 std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
-    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.img2col_verify",
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.img2col_verify",
                              rocke_img2col_spec_t,
                              build_spec,
                              rocke_build_img2col_new(&b, &s, arch.c_str()));

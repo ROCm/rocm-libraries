@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Dual-engine parity of the public ``lower_conv_direct_grouped`` entry point.
 
-``rocke.core.backend.lower_conv_direct_grouped`` flattens a
+``kernels.conv.engine_bridge.lower_conv_direct_grouped`` flattens a
 ``DirectConv16cSpec`` / ``DirectConv4cSpec`` / ``DirectConvSpec`` into a dict
 (``conv_direct_grouped_spec_to_dict``) for the C++ binding. Every spec field
 that changes the emitted kernel must survive that flattening -- the problem
@@ -13,7 +13,7 @@ returns a different kernel than the Python engine. The byte-identity gate covers
 pair, not this binding path, so this test lowers those specs through both
 backends and compares the ``.ll``.
 
-CPU only (no kernel launch). The binding half skips when the ``rocke_engine``
+CPU only (no kernel launch). The binding half skips when the ``rocke_library_engine``
 extension is not importable.
 
 Run:
@@ -35,13 +35,13 @@ from kernels.common.conv_direct_grouped import (
     is_valid_spec_4c,
     make_dgrad_4c_spec,
 )
-from rocke.core.backend import (
+from kernels.conv.engine_bridge import (
     conv_direct_grouped_spec_to_dict,
     lower_conv_direct_grouped,
 )
 
-_HAS_ENGINE = importlib.util.find_spec("rocke_engine") is not None
-_SKIP = "" if _HAS_ENGINE else "rocke_engine extension not importable"
+_HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
+_SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
 
 
 def _p4(dtype, N=2, H=13, W=17, groups=32, K=3):

@@ -31,7 +31,7 @@ This document does not repeat it.
 | Piece | File |
 |---|---|
 | Builder, spec, validator | `library/kernels/common/conv_implicit_gemm_dgrad.py` (`DgradConvSpec`, `_build_tilde_dgrad`, `is_valid_dgrad_spec`) |
-| C++ mirror (byte-identical IR) | `platform/cpp/instances/common/conv_implicit_gemm_dgrad.cpp`, header `platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` |
+| C++ mirror (byte-identical IR) | `library/cpp/instances/common/conv_implicit_gemm_dgrad.cpp`, header `library/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` |
 | AOT grid | `library/kernels/conv/aot_jobs.py` (`_dgrad_caps`, `_dgrad_tap_outer_variants`, `_dgrad_halo_jobs_for`, `CACHE_DGRAD_*`) |
 | Cache identity / predicates | `library/kernels/conv/kernel_identity.py` (`KernelIdentity`, `identity_supports_problem`; `KernelCache.supports_problem` in `library/benchmarks/common/kernel_cache.py` wraps it) |
 

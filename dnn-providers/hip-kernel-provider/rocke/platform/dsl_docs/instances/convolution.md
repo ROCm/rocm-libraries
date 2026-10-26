@@ -1027,11 +1027,11 @@ builds the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride
 1/2 and offers a problem only the widths `tile_w_candidates` would pick for it.
 
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
-`cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
+`library/cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 33+)
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
-`rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
+`rocke_library_engine.conv_direct_nongrouped_*` / `kernels.conv.engine_bridge.lower_conv_direct_nongrouped`.
 
 ## Direct Dgrad on WMMA (gfx1250)
 
@@ -1121,7 +1121,7 @@ in fp32.
   The LDS-DMA kernels (tiled, `DwWgradLdsSpec`, gather) also require a wave64
   target with 16-byte `buffer_load ... lds` (`async_lds_max_dwords >= 4`).
 
-C++ engine twins: `rocke_build_direct_wgrad_tiled` (`cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
+C++ engine twins: `rocke_build_direct_wgrad_tiled` (`library/cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
 also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_dw_wgrad.cpp`), `rocke_build_direct_wgrad_gather`
 (`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
