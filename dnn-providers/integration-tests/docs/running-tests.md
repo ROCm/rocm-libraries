@@ -271,6 +271,12 @@ samples. Spaces live in `gauntlet/spaces/` (`<Op>[.<Name>].space.json`); with no
 `--filter` every space runs, and a space whose graphs the engine does not accept
 reports `DECLINED`, not a failure.
 
+Before the first batch the driver lists the binary's tests on an empty bundle root with
+the run's own flags. If that fails (a bad `--test-engine` or `--test-article`, a missing
+config, a crash at startup) or the binary reports that it found no HIP device, the driver
+prints the log tail and exits 2 without running a sample, instead of reporting every
+sample as a load crash.
+
 | Variable | Flag | Meaning | Default |
 |---|---|---|---|
 | `HIPDNN_FUZZ_SAMPLES` | `--samples` | Samples per space. `0` is unlimited. | 32 |

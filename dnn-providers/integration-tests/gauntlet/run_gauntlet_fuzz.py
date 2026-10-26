@@ -74,6 +74,8 @@ DEFAULT_CASE_TIMEOUT = "10m"
 LOG_TAIL_LINES = 200
 LOG_TAIL_BYTES = 32 * 1024
 HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
+ZERO_TESTS_MARKER = "Error: zero tests ran"
+NO_DEVICE_MARKER = "No HIP devices available"
 POLL_SECONDS = 0.05
 MAX_PRINTED_FINDINGS = 20
 
@@ -382,6 +384,7 @@ class Fuzz:
         error = None
         try:
             self._print_header()
+            self._preflight()
             self._loop()
         except BaseException as e:  # noqa: BLE001 - report what we have, then re-raise
             error = e
@@ -414,6 +417,34 @@ class Fuzz:
             print(
                 "  warning: unlimited run without a time budget; stop it with SIGINT",
                 flush=True,
+            )
+
+    def _preflight(self):
+        """Fail fast when the binary cannot run at all (RFC 0023 7.4).
+
+        Lists the tests of the binary on an empty bundle root with the run's own flags and no
+        filter. A healthy binary lists its compiled-in tests and exits 0; a bad
+        ``--test-engine`` or ``--test-article``, a missing config or a crash at startup exits
+        non-zero. Without this every batch would die the same way, be bisected down to single
+        cases and be reported as ``load-crash`` with exit status 0.
+        """
+        empty = self.work / "preflight-bundles"
+        empty.mkdir(parents=True, exist_ok=True)
+        log_path, _ = self._next_invocation("preflight")
+        result = self._spawn(self._command("preflight", None, bundles=empty), log_path)
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        if result.aborted:
+            return
+        if result.hung or result.returncode != 0:
+            what = "hung" if result.hung else f"exited with status {result.returncode}"
+            raise DriverError(
+                f"the binary {what} when asked to list its tests with this run's flags, so no"
+                f" sample could run (log {log_path}):\n{log_tail(log_path)}"
+            )
+        if NO_DEVICE_MARKER in text:
+            raise DriverError(
+                "the binary found no HIP device and exited 0 without running anything"
+                f" (log {log_path}):\n{log_tail(log_path)}"
             )
 
     def _time_up(self):
@@ -489,12 +520,14 @@ class Fuzz:
         stem = f"{self._invocation:05d}-{kind}"
         return self.logs / f"{stem}.log", self.reports / f"{stem}.jsonl"
 
-    def _command(self, kind, names, report=None):
-        cmd = list(self.binary_cmd) + ["--golden-data-dir", str(self.bundles)]
+    def _command(self, kind, names, report=None, bundles=None):
+        root = self.bundles if bundles is None else bundles
+        cmd = list(self.binary_cmd) + ["--golden-data-dir", str(root)]
         if report is not None:
             cmd += ["--outcome-report", str(report)]
-        cmd.append("--gtest_filter=" + ":".join(names))
-        if kind == "list":
+        if names is not None:
+            cmd.append("--gtest_filter=" + ":".join(names))
+        if kind in ("list", "preflight"):
             cmd.append("--gtest_list_tests")
         a = self.args
         for flag, value in (
@@ -597,7 +630,12 @@ class Fuzz:
                 )
             return
         listed = parse_listing(listing_text)
-        if listing.hung or listing.returncode != 0:
+        # A listing that selects nothing makes the real binary print "Error: zero tests
+        # ran." and exit 1 (main.cpp). That is "nothing registered", answered below per case
+        # with the load message; only a hang, a signal or any other non-zero exit is a crash
+        # while registering, and that is bisected.
+        nothing_registered = ZERO_TESTS_MARKER in listing_text and not listed
+        if listing.hung or (listing.returncode != 0 and not nothing_registered):
             self._isolate(sp, samples, listing, "while listing tests")
             return
         remaining = []
@@ -787,6 +825,22 @@ class Fuzz:
             return max(self.engines_seen, key=self.engines_seen.get)
         return None
 
+    @staticmethod
+    def _freeze_command(graph):
+        """``import_graph.py`` on a failure's graph; absolute paths, so it runs from anywhere."""
+        return shlex.join(
+            [
+                sys.executable,
+                str((MIGRATION_DIR / "import_graph.py").resolve()),
+                "--graph",
+                str(Path(graph).resolve()),
+                "--bundle-dir",
+                str((HERE.parent / "integration-test-bundles").resolve()),
+                "--tier",
+                "quick",
+            ]
+        )
+
     def _replay_argv(self, sp, sample, work_dir):
         a = self.args
         argv = [
@@ -942,8 +996,7 @@ class Fuzz:
             f"{command}\n"
             f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
             f"{os.environ.get(HOST_FILL_ENV)!r})\n"
-            f"freeze: python migration-scripts/import_graph.py --graph {folder / (case + '.json')}"
-            " --bundle-dir integration-test-bundles --tier quick\n",
+            f"freeze: {self._freeze_command(folder / (case + '.json'))}\n",
         )
         return folder
 

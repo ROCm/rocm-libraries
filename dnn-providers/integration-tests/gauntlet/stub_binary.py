@@ -33,7 +33,8 @@ Behaviours: ``pass``, ``unclaimed_pass``, ``declined``, ``wrong``, ``unexercised
 ``PASS`` whose reason says whether ``probe_path`` exists when the case runs),
 ``load_skip`` (the case is not registered, so it is absent from ``--gtest_list_tests``),
 ``reg_crash`` (the process dies at registration, before any case starts) and
-``run_start_crash`` (listing works; a run that selects the case dies before any case starts).
+``startup_fail`` (a top-level control key, not a per-case behaviour: every invocation exits 1 at
+startup, as a bad ``--test-engine`` does), ``run_start_crash`` (listing works; a run that selects the case dies before any case starts).
 """
 
 import fnmatch
@@ -43,6 +44,8 @@ import re
 import sys
 import time
 from pathlib import Path
+
+BUILTIN_TEST = "StubBuiltin.Smoke"
 
 BEHAVIOURS = (
     "pass", "unclaimed_pass", "declined", "wrong", "unexercised",
@@ -156,6 +159,11 @@ FINISHED = {
 def main(argv):
     opts = parse_args(argv)
     control = load_control()
+    if control.get("startup_fail"):
+        sys.stderr.write(
+            "Error: Engine 'STUB_ENGINE' is not loaded. Check the plugin path.\n"
+        )
+        return 1
     engine = opts["passthrough"].get("--test-engine") or control.get(
         "engine", "STUB_ENGINE"
     )
@@ -186,9 +194,20 @@ def main(argv):
         r for r in registered if gtest_matches(f"{r[0]}.{r[1]}", opts["filter"])
     ]
 
+    # Like the real binary, which has C++ tests compiled in: with a filter that selects
+    # nothing at all it prints "Error: zero tests ran." and exits 1, listing or running.
+    builtin = gtest_matches(BUILTIN_TEST, opts["filter"])
+    if not selected and not builtin:
+        if log:
+            _log(log, argv, "list" if opts["list"] else "run", [])
+        sys.stderr.write("Error: zero tests ran.\n")
+        return 1
+
     if opts["list"]:
         if log:
             _log(log, argv, "list", [f"{r[0]}.{r[1]}" for r in selected])
+        if builtin:
+            print("StubBuiltin.\n  Smoke")
         last = None
         for suite, test, *_ in selected:
             if suite != last:

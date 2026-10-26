@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import random
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1505,3 +1506,70 @@ def test_fault_folder_survives_a_later_crash(run):
         (run.work / "failures/SdpaFwd_Default_s1000/outcome.json").read_text()
     )
     assert first["result"]["outcome"] == "WRONG"
+
+
+# --------------------------------------------------------------------------
+# A binary that cannot run at all, and a batch in which nothing registers
+# --------------------------------------------------------------------------
+
+
+def test_a_binary_that_fails_at_startup_stops_the_run_with_status_2(run, capsys):
+    run.control(startup_fail=True)
+    assert run.run("--samples", "8", "--batch-size", "8") == 2
+    # Stopped by the preflight: no batch was written, listed or bisected.
+    assert run.invocations == []
+    assert not (run.work / "bundles" / "gauntlet").exists()
+    assert run.outcome_list == []
+    err = capsys.readouterr().err
+    assert "exited with status 1" in err and "is not loaded" in err
+    assert "load-crash" not in json.dumps(run.summary)
+
+
+def test_the_preflight_lists_the_binary_on_an_empty_bundle_root(run):
+    assert run.run("--samples", "2", "--batch-size", "2") == 0
+    first = run.invocations[0]
+    assert first["mode"] == "list" and first["tests"] == []
+    assert not any(
+        arg.startswith("--gtest_filter=") for arg in first["argv"]
+    ), "the preflight must not filter"
+    root = first["argv"][first["argv"].index("--golden-data-dir") + 1]
+    assert list(Path(root).iterdir()) == []
+
+
+def test_a_batch_in_which_nothing_registers_is_load_not_load_crash(run):
+    run.control(cases={"s1000": "load_skip"})
+    assert run.run("--samples", "1") == 0
+    [outcome] = run.outcome_list
+    assert outcome["case"] == "s1000" and outcome["outcome"] == "UNEXERCISED"
+    assert (
+        outcome["reason"].startswith("load:")
+        and "stub load failure" in outcome["reason"]
+    )
+    assert "load-crash" not in outcome["reason"]
+    listings = [i for i in run.invocations if i["mode"] == "list"]
+    # One for the preflight, one for the batch; no bisection and no run.
+    assert len(listings) == 2
+    assert not [i for i in run.invocations if i["mode"] == "run"]
+
+
+def test_every_sample_of_a_batch_failing_to_load_is_load_not_load_crash(run):
+    run.control(default="load_skip")
+    assert run.run("--samples", "4", "--batch-size", "4") == 0
+    assert [o["outcome"] for o in run.outcome_list] == ["UNEXERCISED"] * 4
+    assert all(o["reason"].startswith("load:") for o in run.outcome_list)
+    assert len([i for i in run.invocations if i["mode"] == "list"]) == 2
+
+
+def test_the_freeze_command_is_quoted_and_independent_of_the_working_directory(run):
+    run.control(cases={"s1000": "wrong"})
+    assert run.run("--samples", "1") == 1
+    text = (run.failure_dir("s1000") / "replay.txt").read_text()
+    [line] = [ln for ln in text.splitlines() if ln.startswith("freeze: ")]
+    words = shlex.split(line[len("freeze: ") :])
+    assert Path(words[0]).is_absolute() and Path(words[1]).name == "import_graph.py"
+    assert Path(words[1]).is_absolute()
+    graph = words[words.index("--graph") + 1]
+    bundle_dir = words[words.index("--bundle-dir") + 1]
+    assert Path(graph).is_absolute() and Path(graph).exists()
+    assert Path(bundle_dir).is_absolute() and Path(bundle_dir).is_dir()
+    assert words[words.index("--tier") + 1] == "quick"

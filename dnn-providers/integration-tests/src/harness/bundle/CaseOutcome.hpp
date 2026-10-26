@@ -44,8 +44,9 @@ CaseOutcome classifyCaseOutcome(const VerificationOutcome& outcome,
                                 VerificationDepth required,
                                 bool hadOtherFailure);
 
-/// Who a record is about. Everything here is known before the case runs, so the
-/// `started` record carries exactly this.
+/// Who a record is about. Everything here is known before the case runs. The `started`
+/// record carries only `test` and `bundle` (enough to name the case a crash happened in);
+/// the `finished` record carries all of it.
 struct CaseIdentity
 {
     std::string test; ///< "Suite.Test", the name --gtest_filter selects on
