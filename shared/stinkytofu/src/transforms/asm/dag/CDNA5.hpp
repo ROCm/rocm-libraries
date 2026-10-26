@@ -802,6 +802,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int lead = blockPrefetchLead_;
         return lead > 0 && lead < StageWmmaCounter::kSingleStageLeadBelow;
     }
+    // Issued now, `node` would cost an s_wait_alu: the scoreboard needs more instructions between
+    // its address VALUs and it to hide the va_vdst wait. Only WMMAs are counted so far.
+    bool needsMoreInstsBeforeIssue(const DAGNode* node) const {
+        return waitAlu_ && waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
+    }
     bool prefetchHeldForLead(const DAGNode* node) const {
         auto it = prefetchEarliestWmma_.find(node->inst);
         if (it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second)
@@ -809,8 +814,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // Single-stage loop: the group waits until its address VALUs' va_vdst is hidden, as
         // develop's hazard gate did. A group not ready by the stage barrier then lands after its
         // tensor_load (the barrier no longer waits for it); a ready one still goes before it.
-        return singleStageLoop() && waitAlu_ && isGlobalPrefetch(*node->inst) &&
-               waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
+        return singleStageLoop() && isGlobalPrefetch(*node->inst) &&
+               needsMoreInstsBeforeIssue(node);
     }
     // Some memory op the scoreboard still holds (unplacedMemWaitsOut) is waiting in a queue.
     bool heldMemOpPending() const {
@@ -827,7 +832,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (!isGlobalPrefetch(inst) && !isBufferMemLoad(inst) && !isGlobalMemLoad(inst))
             return false;
         if (prefetchEarliestWmma_.count(&inst)) return false;
-        return waitAlu_->untilFree(inst, WaitAluHideOp::Wmma, formWmma_) > 0;
+        return needsMoreInstsBeforeIssue(node);
     }
     // A filler feeding a prefetch's address; never strict-held, or it lands right in
     // front of the prefetch and turns into a va_vdst stall.
