@@ -193,8 +193,13 @@ class TileMmaDriver:
         """Walk the M x N x K atom grid for the wave tile (in ``tiling.order``), issuing one
         ``b.mma`` per atom and accumulating each C subtile. The fragments are
         subtile-contiguous (from the wave layouts), so every atom is a register slice.
-        Checks operand dtypes, then runs the single validation (:func:`_validate_mma_issue` -- operand
-        soundness, pairwise K-match, accumulator consistency, atom contiguity) before issuing.
+        Checks operand dtypes, then runs the single validation (:func:`_validate_mma_issue` --
+        operand soundness, pairwise K-match, accumulator consistency, atom contiguity) before
+        issuing. Each fragment's register vector type is guaranteed by :class:`Fragment` itself,
+        not re-checked here.
+
+        Returns the updated accumulator as a new :class:`Fragment`; the `accumulator` argument is
+        not mutated, so the result must be assigned (``acc = driver(b, a_frag, b_frag, acc)``).
         """
         plan = self._plan
         for name, fragment in (

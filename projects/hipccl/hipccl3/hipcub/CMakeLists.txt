@@ -47,13 +47,13 @@ endif()
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(hipcub 4.x) consumers.
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "5.0.0")
 # Set the CCCL-compatible version.
-set(HIPCUB_CCCL_VERSION_MAJOR 2)
-set(HIPCUB_CCCL_VERSION_MINOR 8)
-set(HIPCUB_CCCL_VERSION_PATCH 2)
+set(HIPCUB_CCCL_VERSION_MAJOR 3)
+set(HIPCUB_CCCL_VERSION_MINOR 0)
+set(HIPCUB_CCCL_VERSION_PATCH 3)
 # Set the minimum required rocPRIM version
-set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCPRIM_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
 set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
@@ -80,10 +80,8 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 are supported")
 endif()
 
 # Set HIP flags
@@ -186,7 +184,7 @@ elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" S
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)

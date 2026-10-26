@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
  *  limitations under the License.
  */
 
-#include <thrust/functional.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/permutation_iterator.h>
 #include <thrust/reduce.h>
@@ -27,6 +28,10 @@
 #include "test_utils.hpp"
 
 #include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 using IntegralVectorTestsParams =
   ::testing::Types<Params<thrust::host_vector<signed char>>,
@@ -41,11 +46,35 @@ using IntegralVectorTestsParams =
 TESTS_DEFINE(PermutationIteratorTests, FullTestsParams);
 TESTS_DEFINE(PermutationIteratorIntegralVectorTests, IntegralVectorTestsParams);
 
-TEST(PermutationIteratorTests, UsingHip)
+// ensure that we properly support thrust::permutation_iterator from _THRUST_STD
+TEST(PermutationIteratorTests, TestPermutationIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+  using base_it = thrust::host_vector<int>::iterator;
+
+  using it       = thrust::permutation_iterator<base_it, base_it>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = _THRUST_STD::random_access_iterator_tag;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, int&>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
 }
 
 TYPED_TEST(PermutationIteratorTests, TestPermutationIteratorSimple)
@@ -184,7 +213,7 @@ TYPED_TEST(PermutationIteratorIntegralVectorTests, TestPermutationIteratorReduce
     T(0),
     thrust::plus<T>());
   ASSERT_EQ(result2, -19);
-};
+}
 
 TEST(PermutationIteratorTests, TestPermutationIteratorHostDeviceGather)
 {
@@ -297,4 +326,11 @@ TYPED_TEST(PermutationIteratorTests, TestPermutationIteratorWithCountingIterator
     Vector ref{0, 1, 2, 3};
     ASSERT_EQ(output, ref);
   }
+}
+
+TEST(PermutationIteratorTests, UsingHip)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }

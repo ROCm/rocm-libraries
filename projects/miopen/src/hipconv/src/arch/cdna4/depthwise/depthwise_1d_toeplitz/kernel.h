@@ -17,6 +17,7 @@
 // depthwise_2d_toeplitz; this path wins large-spatial.
 
 #include "conv_kernel.h"
+#include "config_desc.h"
 #include "config_table.h"
 #include "depthwise_conv_kernel.h"
 #include "../../bunnies_cdna4.hpp"
@@ -1020,33 +1021,7 @@ public:
 
     std::string_view name() const override { return "depthwise_1d_toeplitz"; }
 
-    std::string describe_config() const override
-    {
-        // Compact self-contained run label (abbrev name + every knob):
-        //
-        //   dw1d=depthwise_1d_toeplitz  k=filter(khxkw)  s=stride  F/D/W=direction
-        //   u=dgrad upsample  w=waves/wg  c=block_c  nc=narrow-C  f=batch-fold
-        const char* dir = (cfg_.direction == Direction::Fprop)   ? "F"
-                          : (cfg_.direction == Direction::Dgrad) ? "D"
-                                                                 : "W";
-        std::string s   = "dw1d k" + std::to_string(cfg_.kh);
-        if(cfg_.kw != cfg_.kh)
-            s += "x" + std::to_string(cfg_.kw);
-        s += " s" + std::to_string(cfg_.stride);
-        s += ' ';
-        s += dir;
-        if(cfg_.dilation > 1)
-            s += " u" + std::to_string(cfg_.dilation);
-        s += " w" + std::to_string(cfg_.waves_per_wg);
-        s += " c" + std::to_string(cfg_.block_c());
-        if(cfg_.narrow_c)
-            s += " nc";
-        if(cfg_.w_fold > 1)
-            s += " f" + std::to_string(cfg_.w_fold);
-        if(cfg_.lds_buffers != 3)
-            s += " b" + std::to_string(cfg_.lds_buffers);
-        return s;
-    }
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
 
     void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
     {

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "ScalarTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuRMSNormPlan.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
@@ -70,6 +71,26 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicable)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->x_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuRMSNormFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+
+    const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT>
+        patient;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
@@ -215,6 +236,27 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicable)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->dy_tensor_uid());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuRMSNormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+
+    const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT>
+        patient;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)

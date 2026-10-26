@@ -154,8 +154,8 @@ struct Arguments
 
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
-    char gpu_arch[16];
-    char gpu_arch_exclude[16];
+    char gpu_arch[32];
+    char gpu_arch_exclude[32];
 
     // memory padding for testing write out of bounds
     uint32_t pad;
@@ -183,6 +183,10 @@ struct Arguments
     int32_t fast_check_repeat;
     int32_t fast_check_inject;
     int8_t  requires_streamk;
+    // integer_exact value pattern: '' (standard), ternary or sparse_k (hipblaslt_init.hpp)
+    char    integer_exact_pattern[16];
+    // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
+    int8_t  allow_no_solution;
     int8_t  timing;
 
     char transA;
@@ -199,6 +203,9 @@ struct Arguments
     int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
+    // hipblasLtInt4Encoding_t for the w4a16 path; ignored unless scaleA is a
+    // w4a16 group-scale mode.
+    int32_t                  int4_encoding;
     bool                     scaleC;
     bool                     scaleD;
     bool                     scaleE;
@@ -319,6 +326,8 @@ struct Arguments
     OPER(fast_check_repeat) SEP      \
     OPER(fast_check_inject) SEP      \
     OPER(requires_streamk) SEP       \
+    OPER(integer_exact_pattern) SEP  \
+    OPER(allow_no_solution) SEP      \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -332,6 +341,7 @@ struct Arguments
     OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
+    OPER(int4_encoding) SEP          \
     OPER(scaleC) SEP                 \
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \

@@ -10,6 +10,8 @@ rocThrust documentation
 
 rocThrust is a parallel algorithm library that has been ported to `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and `ROCm <https://rocm.docs.amd.com/en/latest/>`_, and uses the `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ library.
 
+rocThrust has been updated to align with CCCL 3.0.3, establishing a hard dependency on libhipcxx and adopting the changes made in upstream Thrust. See :doc:`about/rocThrust-cccl-update` for migration guidance.
+
 The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust.
 
 .. grid:: 2

@@ -190,6 +190,15 @@ from rocke.core.ir import (
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # Shared problem/geometry fields live in an architecture-neutral module.
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+    DecodeShape,
+    PersistBtHkvMinor,
+    PersistHkvMajor,
+    PersistHqMinorSwz,
+    PersistQbMajor,
+)
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
@@ -200,6 +209,12 @@ from kernels.common.attention_dense_spec import (
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._lse_store import (
+    dense_row_has_key,
+    lse_store,
+    validate_dense_lse,
+    zero_keyless_row,
+)
 
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -445,9 +460,31 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   every tile. Off by default: the peel is recorded negative (register
     #   pressure on the gfx942 tiled_2d kernel); kept to re-measure on dense.
     causal_diag_split: bool = field(default=False, kw_only=True)
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [B, Hq, Sq, 1] through a trailing ``lse_ptr`` kernel argument. Off by default;
+    #   off emits no new IR, so the shipped kernel and its goldens are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
+
+    @classmethod
+    def supported_persist_decodes(cls) -> frozenset[str]:
+        # The persistent body takes the shape at runtime, so only decodes with a
+        # runtime-operand form (no gqa_pair*, whose NP equals the baked work count).
+        return frozenset(
+            {
+                "auto",
+                PersistQbMajor.name,
+                PersistHkvMajor.name,
+                PersistBtHkvMinor.name,
+                PersistHqMinorSwz.name,
+            }
+        )
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.causal_bottom_right:
             raise ValueError(
                 "gfx942 attention_dense: causal_bottom_right not yet supported"
@@ -548,18 +585,16 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
         Each one gets a host-computed magic multiplier and shift
         (:func:`_fastdiv_kernargs`), so the in-loop divide stays a mul-hi, an add and
-        a shift instead of the backend's software integer division. ``gqa`` is in
-        both orders: qb_major derives ``hkv = hq / gqa``, and hkv_major splits its
-        work index by ``gqa`` into the query head within the kv group.
+        a shift instead of the backend's software integer division. Each decode
+        class declares its own (``PersistDecode.fastdiv_divisors``); a decode
+        without the kv head as a digit lists ``gqa`` for ``hkv = hq / gqa``.
 
         A function of the resolved decode order only, never of the shape, so it is
         fixed by the cache key: the key carries the resolved order on the persistent
         grid (``attention_dense_cache_key``)."""
         if not (self.persistent and self.runtime_shape):
             return ()
-        if self.resolved_persist_decode == "hkv_major":
-            return ("batch", "gqa", "nqb")
-        return ("batch", "num_query_heads", "gqa")
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
 
     @property
     def runtime_kernarg_fields(self) -> tuple[str, ...]:
@@ -711,6 +746,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append(f"fence{spec.pv_sched_fence_mask:x}")
     if spec.causal_diag_split:
         parts.append("dsplit")
+    if spec.emit_lse:
+        parts.append("lse")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -1015,8 +1052,9 @@ def supports_attention_dense(
     In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
-    LDS budget and 32-bit addressing, and sliding-window (KV-loop prune + window mask).
-    varlen / ragged / sinks are later follow-ups (rejected below).
+    LDS budget and 32-bit addressing, sliding-window (KV-loop prune + window mask), and
+    attention sinks (alone or with sliding-window). varlen / ragged are later
+    follow-ups (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -1064,8 +1102,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: ragged not yet supported"
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    if spec.use_sinks:
-        return False, "gfx942 attention_dense: sinks not yet supported"
+    # use_sinks is supported here (m/l seed per work item). The shared __post_init__
+    # still rejects it combined with paged or varlen.
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the
@@ -1239,7 +1277,9 @@ def supports_attention_dense(
     # Sliding-window + causal: the last query block's window can start past
     # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
     # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
-    if spec.sliding_window and spec.causal:
+    # Sinks make the zero-trip loop well-defined: l stays at the l0 = 1 seed and
+    # o at zero, so the output is 0, which is softmax([sink]) applied to no values.
+    if spec.sliding_window and spec.causal and not spec.use_sinks:
         _n_q = spec.seqlen_q // spec.block_m
         # Floor division, so the guard reads the same tile count the KV loop uses
         # (n_ktiles = Skv // BN). The shared spec enforces seqlen_kv % block_n == 0,
@@ -1251,7 +1291,8 @@ def supports_attention_dense(
             return False, (
                 f"sliding_window={spec.sliding_window}: last query block's window "
                 f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
-                f"count {_n_ktiles} -> zero-trip KV loop -> NaN"
+                f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
+                f"with use_sinks)"
             )
     return True, ""
 
@@ -1296,8 +1337,14 @@ def build_attention_dense(
     return _build_attention_dense_single_buffer(_as_gfx942_spec(spec))
 
 
-def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width):
-    """O = acc / l, ``width`` contiguous head-dim elements per global store."""
+def _emit_o_store(
+    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
+):
+    """O = acc / l, ``width`` contiguous head-dim elements per global store.
+
+    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
+    unchanged store sequence.
+    """
     for dt in range(d_tiles):
         for g in range(4):
             for c in range(0, 4, width):
@@ -1309,9 +1356,10 @@ def _emit_o_store(b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width)
                     )
                     for kk in range(c, c + width)
                 ]
-                b.global_store_vN(
-                    o, addr, b.vec_pack(vals, dtype), width, align=2 * width
-                )
+                packed = b.vec_pack(vals, dtype)
+                if row_has_key is not None:
+                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
+                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_single_buffer(
@@ -1389,9 +1437,26 @@ def _build_attention_dense_single_buffer(
         gqa_p = b.div(hq_p, hkv_p)
         stride_q_p = b.mul(hq_p, b.const_i32(D))
         stride_k_p = b.mul(hkv_p, b.const_i32(D))
+        # The runtime shape as the work decodes read it (DecodeShape).
+        shape_values = {
+            "batch": batch_p,
+            "seqlen_q": seqlen_q_p,
+            "seqlen_kv": seqlen_kv_p,
+            "num_query_heads": hq_p,
+            "num_kv_heads": hkv_p,
+            "gqa": gqa_p,
+        }
     else:
         batch_p = seqlen_q_p = seqlen_kv_p = None
         hq_p = hkv_p = gqa_p = stride_q_p = stride_k_p = None
+        shape_values = None
+    # Per-query-head sink logits [Hq], after every runtime kernarg field (the gfx950
+    # ABI order). Declared only when use_sinks, so the non-sink ABI and IR are
+    # unchanged.
+    if spec.use_sinks:
+        sinks = b.param(
+            "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
 
     # The baked branch emits each stride constant in place, at its use: the IR
     # builder is side-effecting, so sharing one const node would renumber every SSA
@@ -1402,6 +1467,14 @@ def _build_attention_dense_single_buffer(
     def _stride_k():
         return stride_k_p if spec.runtime_shape else b.const_i32(stride_k_tok)
 
+    if spec.emit_lse:
+        lse = b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1866,8 +1939,18 @@ def _build_attention_dense_single_buffer(
                 start_tile = b.select(b.cmp_lt(start_tile, _last), start_tile, _last)
 
         # ---- online-softmax main loop (non-pipelined, single buffer) ----
-        m0 = neg_inf
-        l0 = b.const_f32(0.0)
+        if spec.use_sinks:
+            # The sink is a virtual key with logit sink[hq] and zero value: seed the
+            # running max with it (log2 domain) and the denominator with exp2(0) = 1.
+            # Seeded once per work item before the loop, never inside the doubled
+            # 32x32x8 K steps. The loop's l_i*alpha rescales the seed on every tile,
+            # including the first, so no tile-0 fix-up is needed.
+            sink_h = b.global_load(sinks, hq, dtype, align=2)
+            m0 = b.fmul(b.cast_to_f32(sink_h), b.const_f32(LOG2E))
+            l0 = b.const_f32(1.0)
+        else:
+            m0 = neg_inf
+            l0 = b.const_f32(0.0)
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         iter_args = [("m", m0), ("l", l0)] + [
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
@@ -2056,7 +2139,11 @@ def _build_attention_dense_single_buffer(
         o_acc = list(res[2 : 2 + D_TILES])
 
         # Epilogue: O[query,dim] = (P@V)/l, from the transposed C[dim,query] accum.
-        rcp_l = b.rcp(l_i)
+        if spec.emit_lse:
+            positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
+            rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
+        else:
+            rcp_l = b.rcp(l_i)
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
@@ -2067,8 +2154,49 @@ def _build_attention_dense_single_buffer(
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
+        if spec.emit_lse:
+            row_has_key = dense_row_has_key(
+                b,
+                qtok,
+                seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv),
+                causal=causal,
+                diagonal=0,
+                window=SW,
+            )
+            lse_index = b.add(
+                b.mul(
+                    b.add(
+                        b.mul(
+                            bt,
+                            hq_p if spec.runtime_shape else b.const_i32(Hq),
+                        ),
+                        hq,
+                    ),
+                    seqlen_q_p if spec.runtime_shape else b.const_i32(Sq),
+                ),
+                qtok,
+            )
+            # With sinks every row has mass: a row with no key keeps the sink seed
+            # (m = sink * LOG2E, l = 1), so its LSE is the sink logit.
+            row_has_mass = (
+                b.cmp_eq(b.const_i32(1), b.const_i32(1))
+                if spec.use_sinks
+                else row_has_key
+            )
+            # Both half-waves hold the same query row; one of them writes its LSE.
+            with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
+                lse_store(b, lse, lse_index, res[0], l_i, row_has_mass=row_has_mass)
         _emit_o_store(
-            b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, D_TILES, spec.o_store_width
+            b,
+            o,
+            q_row_byte,
+            d_half,
+            o_acc,
+            rcp_l,
+            dtype,
+            D_TILES,
+            spec.o_store_width,
+            row_has_key=row_has_key if spec.emit_lse else None,
         )
 
     # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----
@@ -2096,30 +2224,18 @@ def _build_attention_dense_single_buffer(
         # constant, so this per-CTA divide strength-reduces.
         nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
         w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
-        divisor = {
-            "batch": batch_p,
-            "num_query_heads": hq_p,
-            "gqa": gqa_p,
-            "nqb": nqb_p,
-        }
 
         def _div(n, d):
             # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is nsw);
-            # attention_dense_runtime_args holds W under that bound.
+            # attention_dense_runtime_args holds every decode dividend under that
+            # bound.
             return b.lshr(
                 b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
             )
 
-        def _divmod(n, d):
-            q = _div(n, d)
-            return q, b.sub(n, b.mul(q, divisor[d]))
-
-        if spec.resolved_persist_decode == "hkv_major":
-            half_p = b.lshr(nqb_p, b.const_i32(1))
-            fold_p = b.add(b.sub(nqb_p, b.const_i32(1)), half_p)  # NQB-1+half
-        elif spec.interleave and causal:
-            # NQB == 1 needs no gate: qb0 is then 0 and the flip yields 0 too.
-            nqb_m1_p = b.sub(nqb_p, b.const_i32(1))
+        work_shape = DecodeShape(
+            b, spec, {**shape_values, "nqb": nqb_p, "w": w_p}, fastdiv=_div
+        )
         cta_id = b.block_id_x()
         outer = b.scf_for(cta_id, w_p, b.const_i32(NP), iv_name="wi")
         with outer as wi:
@@ -2131,44 +2247,21 @@ def _build_attention_dense_single_buffer(
             # barrier suffices because there is no pending lgkm to sink here.
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            if spec.resolved_persist_decode == "hkv_major":
-                # hkv-MAJOR + causal-balanced decode (gfx950 §):
-                #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
-                # hkv in the MSB keeps each grid-stride phase within ~1 kv-head so the
-                # shared GQA K/V stays L2-resident across its gqa query heads; blk is
-                # folded so a CTA striding both halves of a kv-head does qb=X and
-                # qb=NQB-1-X (constant causal cost) -- qb_major's balance + L2 win.
-                rem, bt_v = _divmod(wi, "batch")
-                r2, hql = _divmod(rem, "gqa")
-                hkv_v, blk = _divmod(r2, "nqb")
-                hq_v = b.add(b.mul(hkv_v, gqa_p), hql)
-                qb_hi = b.sub(fold_p, blk)  # NQB-1-(blk-half)
-                qb_v = b.select(b.cmp_lt(blk, half_p), blk, qb_hi)
-            elif spec.resolved_persist_decode == "qb_major":
-                # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
-                # triangular causal-cost index) in the MSB spreads cheap+expensive
-                # query blocks across each CTA under grid-stride. Optional interleave
-                # reverses qb for ODD hq to further balance the causal tail. Keying on
-                # hq (not rem = qb0*Hq + hq) keeps the map a bijection: each hq's qb
-                # range is either identity or reversed. For even Hq the two agree;
-                # for odd Hq rem parity aliases two qb0 onto one qb and skips another.
-                rem, bt_v = _divmod(wi, "batch")
-                qb0, hq_v = _divmod(rem, "num_query_heads")
-                hkv_v = _div(hq_v, "gqa")
-                if spec.interleave and causal:
-                    odd = b.cmp_eq(b.mod(hq_v, b.const_i32(2)), b.const_i32(1))
-                    qb_v = b.select(odd, b.sub(nqb_m1_p, qb0), qb0)
-                else:
-                    qb_v = qb0
-            else:
-                raise ValueError(
-                    "gfx942 attention_dense: persist_decode="
-                    f"{spec.resolved_persist_decode!r} is not implemented "
-                    "by this builder"
-                )
-            _run_work_item(qb_v, hq_v, bt_v, hkv=hkv_v)
+            d = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
+                work_shape, wi
+            )
+            # The kv head from the decode where it is a digit, else hq // gqa through
+            # the gqa fastdiv pair: no runtime division in the grid-stride loop.
+            hkv_v = d.hkv if d.hkv is not None else work_shape.div(d.hq, "gqa")
+            _run_work_item(d.qb, d.hq, d.bt, hkv=hkv_v)
     else:
-        _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
+        d = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+            DecodeShape(b, spec, shape_values),
+            b.block_id_x(),
+            b.block_id_y(),
+            b.block_id_z(),
+        )
+        _run_work_item(d.qb, d.hq, d.bt)
     b.ret()
     return b.kernel
 
@@ -2178,7 +2271,8 @@ def _build_attention_dense_single_buffer(
 
 def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     """Launch grid: persistent = 1-D grid of ``num_persistent`` CTAs; default =
-    one CTA per (query-block, query-head, batch).
+    one CTA per (query-block, query-head, batch), laid out by the nonpersist
+    decode.
 
     Sized from ``spec.block_m`` (``_BLOCK_M`` at the default) so the grid and the
     body's query tiling cannot disagree -- a mismatch writes some rows twice and
@@ -2188,11 +2282,7 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
     spec = _as_gfx942_spec(spec)
-    # ceil kept for parity with the gfx950 helper; on gfx942 it is always exact,
-    # because ragged is rejected and supports_attention_dense then enforces
-    # seqlen_q % block_m == 0.
-    nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
-    return (nqb, spec.num_query_heads, spec.batch)
+    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
@@ -2207,7 +2297,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature: q/k/v/o pointers + f32 scale, plus one i32 per
     ``spec.runtime_kernarg_fields`` entry: the shape (batch, seqlen_q, seqlen_kv,
     num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
-    per work-decode divisor.
+    per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
+    ``spec.use_sinks`` and an f32 ``lse_ptr`` when ``spec.emit_lse``, in that order.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -2232,6 +2323,11 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     # library/tests/test_attention_builds.py.
     for field in _as_gfx942_spec(spec).runtime_kernarg_fields:
         sig = sig.scalar(field, "i32")
+    if spec.use_sinks:
+        # Mirrors the sink_ptr param declared after the runtime kernarg fields.
+        sig = sig.ptr("sink_ptr", spec.dtype)
+    if _as_gfx942_spec(spec).emit_lse:
+        sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
 
 
@@ -2242,22 +2338,24 @@ _FASTDIV_DIVIDEND_LIMIT = 1 << 30
 
 def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
     """``{<divisor>_magic, <divisor>_shift}`` for every ``spec.fastdiv_divisors``
-    entry, from :func:`rocke.helpers.transforms.calculate_magic_numbers`. The magic
+    entry, from :func:`rocke.helpers.magic_division.calculate_magic_numbers`. The magic
     is a uint32 passed as its two's-complement i32 bit pattern, which is what the
     kernel's unsigned mul-hi reads.
 
-    Raises when the work-item count reaches the fast-division dividend limit: every
-    decode dividend is below it, and past it the quotient is wrong with no fault."""
+    Raises when a decode dividend can reach the fast-division dividend limit (the
+    work-item count, or the decode's own bound): past it the quotient is wrong with
+    no fault."""
     if not spec.fastdiv_divisors:
         return {}
-    from rocke.helpers.transforms import calculate_magic_numbers
+    from rocke.helpers.magic_division import calculate_magic_numbers
 
     nqb = spec.seqlen_q // spec.block_m
-    work = nqb * spec.num_query_heads * spec.batch
-    if work >= _FASTDIV_DIVIDEND_LIMIT:
+    bound = PERSIST_DECODES[spec.resolved_persist_decode].fastdiv_dividend_bound(spec)
+    if bound >= _FASTDIV_DIVIDEND_LIMIT:
         raise ValueError(
-            f"gfx942 attention_dense: persistent work-item count {work} "
-            f"(nqb*Hq*B) must be below 2**30 for the work decode's fast division"
+            f"gfx942 attention_dense: persistent decode dividend bound {bound} "
+            f"(the work-item count nqb*Hq*B, or the decode's own) must be below "
+            f"2**30 for the work decode's fast division"
         )
     value = {
         "batch": spec.batch,
@@ -2299,10 +2397,14 @@ def run_attention_dense_torch(
     arch: str = "gfx942",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    sinks=None,
+    lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
     ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
+    ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
+    ``spec.use_sinks``.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
@@ -2317,7 +2419,14 @@ def run_attention_dense_torch(
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
-    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument."""
+    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument.
+
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    [B, Hq, Sq, 1] on the same GPU, separate from every input and output. The kernel
+    writes the natural-log softmax normalizer while still returning ``out``. Rows
+    with no allowed key (a sliding window past the end of the keys) write O=0 and
+    LSE=-inf; with an attention sink, those rows instead write the sink logit as
+    LSE. Supplying ``lse`` with ``emit_lse=False`` is an error."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -2327,6 +2436,22 @@ def run_attention_dense_torch(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
+    if not spec.use_sinks and sinks is not None:
+        raise ValueError("sinks provided but spec.use_sinks is False")
+    if spec.use_sinks:
+        if sinks is None:
+            raise ValueError("spec.use_sinks=True requires sinks that are not None")
+        if sinks.shape != (spec.num_query_heads,):
+            raise ValueError(
+                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
+            )
+        if sinks.dtype != q.dtype:
+            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
+        if not sinks.is_contiguous():
+            raise ValueError("sinks must be contiguous")
+        if not sinks.is_cuda:
+            raise ValueError("sinks must be a CUDA tensor")
+    validate_dense_lse(spec, q, k, v, out, lse, sinks=sinks)
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -2351,6 +2476,10 @@ def run_attention_dense_torch(
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
     vals.update(attention_dense_runtime_args(spec))
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
+    if spec.emit_lse:
+        vals["lse_ptr"] = lse
     launcher(
         vals,
         config=LaunchConfig(

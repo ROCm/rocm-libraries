@@ -57,7 +57,7 @@ void fillPacked(std::vector<T>& buf, unsigned int seed)
     }
 }
 
-// Wraps a borrowed packed buffer as a ragged tensor ([B, S, H, D], BSHD_SEQ_AXIS).
+// Wraps a borrowed packed buffer as a ragged tensor ([B, H, S, D], SDPA_SEQ_AXIS).
 template <typename T>
 ShallowRaggedTensor<T> wrapRagged(T* buf,
                                   const std::vector<int64_t>& dims,
@@ -65,7 +65,7 @@ ShallowRaggedTensor<T> wrapRagged(T* buf,
                                   const std::vector<int64_t>& cum)
 {
     return ShallowRaggedTensor<T>(
-        buf, dims, raggedStrides(dims), BSHD_SEQ_AXIS, makeRaggedOffsetAux(cum, seqStride));
+        buf, dims, raggedStrides(dims), SDPA_SEQ_AXIS, makeRaggedOffsetAux(cum, seqStride));
 }
 
 // Valid ragged tensor over a caller-owned buffer sized for the packed tokens. The negative tests
@@ -422,8 +422,8 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, AbsentAttnScaleIsOne)
     EXPECT_NE(absent, run(0.25f));
 }
 
-// Pins the RFC-0014 layout with literals rather than the raggedDims helpers: dims [B, S, H, D],
-// sequence at axis 1, contiguous strides, and element (token t, head h, dim d) stored at
+// Pins the RFC-0014 layout with literals rather than the raggedDims helpers: dims [B, H, S, D],
+// sequence at axis 2, BSHD strides, and element (token t, head h, dim d) stored at
 // t * H * D + h * D + d. Each batch is copied straight from the packed buffers into the dense
 // reference's [1, H, S, D] layout.
 TEST(TestCpuFpReferenceSdpaRaggedFp32, RfcLayoutLiteralShape)
@@ -431,8 +431,8 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, RfcLayoutLiteralShape)
     const std::vector<int64_t> seqLens = {3, 5};
     const int64_t heads = 2;
     const int64_t dim = 4;
-    const std::vector<int64_t> dims = {2, 5, 2, 4};
-    const std::vector<int64_t> strides = {40, 8, 4, 1};
+    const std::vector<int64_t> dims = {2, 2, 5, 4};
+    const std::vector<int64_t> strides = {40, 4, 8, 1};
     const int64_t tokenWidth = heads * dim;
     const auto cum = cumTokens(seqLens);
     const auto packedCount = static_cast<size_t>(cum.back() * tokenWidth);
@@ -446,7 +446,7 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, RfcLayoutLiteralShape)
     fillPacked(vB, 33);
     const auto wrap = [&](std::vector<float>& buf) {
         return ShallowRaggedTensor<float>(
-            buf.data(), dims, strides, /*seqAxis=*/1, makeRaggedOffsetAux(cum, tokenWidth));
+            buf.data(), dims, strides, /*seqAxis=*/2, makeRaggedOffsetAux(cum, tokenWidth));
     };
     auto q = wrap(qB);
     auto k = wrap(kB);
@@ -531,7 +531,7 @@ TEST(TestCpuFpReferenceSdpaRaggedFp8, RaggedGqaPerKvHeadDescaleQkv)
         {4, 6}, {5, 3}, 4, numHeadsKv, 128, descaleQ, descaleK, descaleV, -1, -1, true);
 }
 
-// --- Dense LSE ([B, Sq_max, H, 1], the frontend's default stats layout) ---
+// --- Dense LSE ([B, H, Sq_max, 1], the frontend's default stats layout) ---
 // A dense LSE must match the ragged LSE on valid rows and leave padding rows untouched. The GPU
 // reference follows the same contract.
 TEST(TestCpuFpReferenceSdpaRaggedFp32, DenseLseMatchesRaggedLse)
@@ -896,10 +896,10 @@ bool throwsOnEditedQTokens(const std::vector<int64_t>& qTokens, int64_t offsetUn
     std::vector<float> oB(64, 0.0f);
     auto qAux = makeRaggedOffsetAux(valid, 16);
     auto oAux = makeRaggedOffsetAux(valid, 16);
-    ShallowRaggedTensor<float> q(qB.data(), dims, raggedStrides(dims), BSHD_SEQ_AXIS, qAux);
+    ShallowRaggedTensor<float> q(qB.data(), dims, raggedStrides(dims), SDPA_SEQ_AXIS, qAux);
     auto k = wrapRagged(kB.data(), dims, 16, valid);
     auto v = wrapRagged(vB.data(), dims, 16, valid);
-    ShallowRaggedTensor<float> o(oB.data(), dims, raggedStrides(dims), BSHD_SEQ_AXIS, oAux);
+    ShallowRaggedTensor<float> o(oB.data(), dims, raggedStrides(dims), SDPA_SEQ_AXIS, oAux);
     setTokenOffsets(*qAux, qTokens, offsetUnit);
     setTokenOffsets(*oAux, qTokens, offsetUnit);
     try
@@ -970,12 +970,13 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnBadOutputShape)
                  std::invalid_argument);
 }
 
-// A pre-RFC [B, H, S, D] tensor (BSHD strides, ragged along axis 2) is rejected. With H == S and
-// a full batch the offsets and S_max checks pass, so only the layout check can catch it.
-TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnHeadsBeforeSequenceLayout)
+// A [B, S, H, D] tensor ragged along axis 1 is rejected, since SDPA tensors are ragged along
+// SDPA_SEQ_AXIS. With H == S and a full batch the offsets and S_max checks pass, so only the
+// sequence-axis check can catch it.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnSequenceBeforeHeadsLayout)
 {
-    const std::vector<int64_t> dims = {1, 4, 4, 16}; // [B, H, S, D]
-    const std::vector<int64_t> strides = {256, 16, 64, 1};
+    const std::vector<int64_t> dims = {1, 4, 4, 16}; // [B, S, H, D]
+    const std::vector<int64_t> strides = {256, 64, 16, 1};
     const auto cum = cumTokens({4});
     std::vector<float> qB(256, 0.5f);
     std::vector<float> kB(256, 0.5f);
@@ -983,7 +984,7 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnHeadsBeforeSequenceLayout)
     std::vector<float> oB(256, 0.0f);
     const auto wrap = [&](std::vector<float>& buf) {
         return ShallowRaggedTensor<float>(
-            buf.data(), dims, strides, /*seqAxis=*/2, makeRaggedOffsetAux(cum, 64));
+            buf.data(), dims, strides, /*seqAxis=*/1, makeRaggedOffsetAux(cum, 64));
     };
     auto q = wrap(qB);
     auto k = wrap(kB);
@@ -993,15 +994,16 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnHeadsBeforeSequenceLayout)
                  std::invalid_argument);
 }
 
-// The layout check itself: the RFC-0014 order passes; heads before sequence, or a seq stride too
-// small for one token, fail.
+// The layout check itself: [B, H, S, D] with BSHD strides passes; contiguous BHSD, sequence
+// before heads, or a seq stride too small for one token, fail.
 TEST(TestCpuFpReferenceSdpaRaggedFp32, TokenMajorLayoutCheck)
 {
     using hipdnn_test_sdk::detail::isTokenMajorRaggedLayout;
-    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 5, 3, 8}, {120, 24, 8, 1}));
-    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 5, 3, 8}, {160, 32, 8, 1})); // padded token
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 8, 24, 1})); // [B, H, S, D]
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 5, 3, 8}, {120, 16, 8, 1})); // tokens overlap
+    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 8, 24, 1}));
+    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {160, 8, 32, 1})); // padded token
+    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 40, 8, 1})); // contiguous BHSD
+    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 5, 3, 8}, {120, 24, 8, 1})); // [B, S, H, D]
+    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 8, 16, 1})); // tokens overlap
     EXPECT_FALSE(isTokenMajorRaggedLayout({2, 5, 3}, {15, 3, 1})); // not rank 4
 }
 
@@ -1054,7 +1056,7 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, TokenOffsetsMatchElementOffsets)
                              const std::shared_ptr<ITensor>& table,
                              int64_t multiplier) {
             return ShallowRaggedTensor<float>(
-                buf, dims, raggedStrides(dims), BSHD_SEQ_AXIS, table, std::nullopt, multiplier);
+                buf, dims, raggedStrides(dims), SDPA_SEQ_AXIS, table, std::nullopt, multiplier);
         };
         auto q = wrap(qB.data(), qDims, qoTable, heads * dim);
         auto k = wrap(kB.data(), kDims, kvTable, headsKv * dim);
@@ -1094,16 +1096,22 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, SlidingWindowLeftOnlyBottomRight)
 // mirror must too, instead of running attention over empty Q and K rows.
 TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnZeroHeadDim)
 {
-    // [1, 4, 2, 0] has a zero H x D block, so give it a 2-element token stride to be constructible.
-    const std::vector<int64_t> qkDims = {1, 4, 2, 0};
-    const std::vector<int64_t> qkStrides = {8, 2, 1, 1};
+    // [1, 2, 4, 0] has a zero H x D block, so give it a 2-element token stride to be constructible.
+    const std::vector<int64_t> qkDims = {1, 2, 4, 0};
+    const std::vector<int64_t> qkStrides = {8, 1, 2, 1};
     const auto cum = cumTokens({4});
     std::vector<float> qB(8, 1.0f);
     std::vector<float> kB(8, 1.0f);
-    ShallowRaggedTensor<float> q(
-        qB.data(), qkDims, qkStrides, BSHD_SEQ_AXIS, makeRaggedOffsetAux(cum, qkStrides[1]));
-    ShallowRaggedTensor<float> k(
-        kB.data(), qkDims, qkStrides, BSHD_SEQ_AXIS, makeRaggedOffsetAux(cum, qkStrides[1]));
+    ShallowRaggedTensor<float> q(qB.data(),
+                                 qkDims,
+                                 qkStrides,
+                                 SDPA_SEQ_AXIS,
+                                 makeRaggedOffsetAux(cum, raggedSeqStride(qkStrides)));
+    ShallowRaggedTensor<float> k(kB.data(),
+                                 qkDims,
+                                 qkStrides,
+                                 SDPA_SEQ_AXIS,
+                                 makeRaggedOffsetAux(cum, raggedSeqStride(qkStrides)));
     std::vector<float> vB;
     std::vector<float> oB;
     auto v = makeValidRagged(vB, raggedDims(1, 4, 2, 16), {4});
@@ -1113,18 +1121,18 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnZeroHeadDim)
                  std::invalid_argument);
 }
 
-// A zero K head count must be rejected before numHeads % numHeadsK divides by it. [1, 4, 0, 16]
+// A zero K head count must be rejected before numHeads % numHeadsK divides by it. [1, 0, 4, 16]
 // has an empty H x D block, so it gets an explicit 16-element token stride to be constructible.
 TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnZeroKvHeads)
 {
-    const std::vector<int64_t> kDims = {1, 4, 0, 16};
+    const std::vector<int64_t> kDims = {1, 0, 4, 16};
     const std::vector<int64_t> kStrides = {64, 16, 16, 1};
     std::vector<float> kB(64, 1.0f);
     ShallowRaggedTensor<float> k(kB.data(),
                                  kDims,
                                  kStrides,
-                                 BSHD_SEQ_AXIS,
-                                 makeRaggedOffsetAux(cumTokens({4}), kStrides[1]));
+                                 SDPA_SEQ_AXIS,
+                                 makeRaggedOffsetAux(cumTokens({4}), raggedSeqStride(kStrides)));
     std::vector<float> qB;
     std::vector<float> vB;
     std::vector<float> oB;

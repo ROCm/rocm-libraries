@@ -1275,6 +1275,18 @@ class TestVMed3F32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+class TestVMaximumMinimumF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+    """``v_maximumminimum_f32 v0, v1, v2, v3``."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import VMaximumMinimumF32
+        from rocisa.container import vgpr
+        module = Module("k")
+        module.add(VMaximumMinimumF32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2), src2=vgpr(3)))
+    """)
+
+
 class TestVAShiftRightI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """``v_ashrrev_i32 v0, v1, v2``."""
 

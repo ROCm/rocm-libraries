@@ -469,7 +469,7 @@ class MIDesign:
   def get_mi_finder_log_name(self, size: Sequence[int]) -> Path:
     """Build the MI finder log path for a given size."""
 
-    GEMM_type = self._gt.gemm_name
+    GEMM_type = self.config["GemmProblem"].name
     M_dim, N_dim, B_dim, K_dim = size
     catName = f'_M{M_dim}'+f'_N{N_dim}'+f'_B{B_dim}'+f'_K{K_dim}'
     # TODO: match the name with the lib name convention

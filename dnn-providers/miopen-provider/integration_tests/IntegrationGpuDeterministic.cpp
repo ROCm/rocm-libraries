@@ -138,36 +138,6 @@ protected:
 };
 
 // ============================================================================
-// Deterministic Convolution Smoke Test Cases
-// ============================================================================
-
-inline std::vector<ConvTestCase> getDeterministicConvTestCases4D()
-{
-    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    return {
-        // Filter 1x1 - basic case
-        {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
-        // Filter 3x3 with padding - common case
-        {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
-        // Grouped convolution - 2 groups
-        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
-    };
-}
-
-inline std::vector<ConvTestCase> getDeterministicConvTestCases5D()
-{
-    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    return {
-        // Filter 1x1x1 - basic 5D case
-        {{1, 8, 8, 8, 8}, {1, 8, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
-        // Filter 3x3x3 with padding - common 5D case
-        {{1, 8, 8, 8, 8}, {1, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
-    };
-}
-
-// ============================================================================
 // Deterministic Batchnorm Test Cases (for no-solver verification)
 // ============================================================================
 

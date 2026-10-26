@@ -439,16 +439,14 @@ def _resolve_flavor(requested: str) -> str:
     """
     if requested != "auto":
         return requested
-    try:
-        from rocke.core.lower_llvm import _flavor_for_llvm
-        from rocke.runtime.comgr import loaded_compiler_info
+    from rocke.core.lower_llvm import _flavor_for_llvm, _resolve_llvm_flavor
+    from rocke.runtime.comgr import loaded_compiler_info
 
-        info = loaded_compiler_info()
-        if info is not None and info.llvm_version is not None:
-            return _flavor_for_llvm(info.llvm_version[0])
-    except Exception:  # noqa: BLE001 - fall through to the documented default
-        pass
-    return os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")
+    info = loaded_compiler_info()
+    if info is not None and info.llvm_version is not None:
+        return _flavor_for_llvm(info.llvm_version[0])
+    # Preserve this driver's compiler-first, environment-second precedence.
+    return _resolve_llvm_flavor()
 
 
 def main() -> int:

@@ -28,6 +28,7 @@
 
 #include <thrust/copy.h>
 #include <thrust/count.h>
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 

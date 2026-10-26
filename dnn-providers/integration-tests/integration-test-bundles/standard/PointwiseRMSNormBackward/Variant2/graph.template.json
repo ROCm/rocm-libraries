@@ -19,9 +19,9 @@
         "in_1_tensor_uid": 8,
         "in_2_tensor_uid": null,
         "operation": "relu_bwd",
-        "relu_lower_clip": null,
-        "relu_lower_clip_slope": null,
-        "relu_upper_clip": null,
+        "relu_lower_clip": "${case.attributes.relu_lower_clip}",
+        "relu_lower_clip_slope": "${case.attributes.relu_lower_clip_slope}",
+        "relu_upper_clip": "${case.attributes.relu_upper_clip}",
         "softplus_beta": null,
         "swish_beta": null
       },

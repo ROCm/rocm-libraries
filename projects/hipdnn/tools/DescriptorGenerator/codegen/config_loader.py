@@ -89,6 +89,7 @@ def load_config(path: Path) -> OperationConfig:
                 required=tf.get("required", True),
                 frontend_getter=stripped_fg,
                 expected_data_type=tf.get("expected_data_type", ""),
+                work_data_dependent=_work_data_dependent(op["name"], tf),
             )
         )
 
@@ -152,6 +153,7 @@ def load_config(path: Path) -> OperationConfig:
                 required=taf.get("required", False),
                 test_uids=taf.get("test_uids", []),
                 test_label=taf.get("test_label", ""),
+                work_data_dependent=_work_data_dependent(op["name"], taf),
             )
         )
 
@@ -248,6 +250,21 @@ def load_config(path: Path) -> OperationConfig:
     _validate_config(config)
 
     return config
+
+
+def _work_data_dependent(operation_name: str, tensor_raw: dict) -> bool:
+    """Read a tensor field's ``work_data_dependent`` flag (default ``False``).
+
+    Only a YAML boolean is accepted: a quoted ``"false"`` would otherwise be
+    truthy and annotate the field.
+    """
+    value = tensor_raw.get("work_data_dependent", False)
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"Operation '{operation_name}', tensor field '{tensor_raw['name']}': "
+            f"work_data_dependent must be true or false, got {value!r}."
+        )
+    return value
 
 
 def _parse_frontend_config(fe_raw: dict, operation_name: str) -> FrontendConfig:

@@ -542,8 +542,8 @@ Tests:
   matrix_size:
       - { M:  50, N:  100,  K: 64 }
   pointer_mode_device: false
-  transA: N
-  transB: N
+  transA: [ N, T ]
+  transB: [ N, T ]
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
   graph_test: true

@@ -195,7 +195,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_CSR_ALG2</td>
@@ -203,20 +202,17 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMV_COO_ALG2</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
 *  <tr><td>HIPSPARSE_SPMV_BSR_ALG1</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmv_sell_algorithms">SELL Algorithms</caption>
 *  <tr><th>SELL Algorithms
 *  <tr><td>HIPSPARSE_SPMV_SELL_ALG1</td>
 *  </table>
@@ -228,7 +224,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmv_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -238,7 +233,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="spmv_mixed">Mixed Precisions</caption>
 *  <tr><th>A / X      <th>Y          <th>compute_type
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I  <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F  <td>HIP_R_32F
@@ -250,7 +244,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed-regular Real Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_real">Mixed-regular real precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
 *  <tr><td>HIP_R_32F <td>HIP_R_64F
 *  <tr><td>HIP_C_32F <td>HIP_C_64F
@@ -258,7 +251,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed-regular Complex Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_complex">Mixed-regular Complex precisions</caption>
 *  <tr><th>A         <th>X / Y / compute_type
 *  <tr><td>HIP_R_32F <td>HIP_C_32F
 *  <tr><td>HIP_R_64F <td>HIP_C_64F

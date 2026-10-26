@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -24,13 +25,17 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
+#include "compilation/CodeObjectLoad.hpp"
 #include "compilation/ICompiledProgram.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
+#include "engines/kernel_ingestor_engine/CodeObjectTarget.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -80,14 +85,17 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 
-/// What a kpack kernel needs to be loaded again for another device: the archive it was
-/// resolved to, the entry inside it, and the declared digest the loader verifies. Held
-/// because `buildIngestorKernelCode` derives them from a descriptor that a prepared
-/// dispatch does not keep.
+/// What a kpack kernel needs to be loaded again for another device, or read again for a
+/// save: the archive it was resolved to, the entry inside it, and the declared digest the
+/// loader verifies. Held because `buildIngestorKernelCode` derives them from a descriptor
+/// that a prepared dispatch does not keep.
 ///
 /// `strippedArch` is the feature-stripped architecture the plan was matched against,
-/// which is what a second device must agree with. `label` and `symbol` are carried so a
-/// later failure names the descriptor as precisely as the first load would have.
+/// which is what a second device must agree with. `deviceArch` is the decorated
+/// architecture of the device the plan was built for. A read for a save selects the
+/// archive entry with it, so the read gets the entry the plan loaded. A device resolved
+/// later does not change it. `label` and `symbol` are carried so a later failure names
+/// the descriptor as precisely as the first load does.
 struct KpackSource
 {
     std::filesystem::path archive;
@@ -96,7 +104,47 @@ struct KpackSource
     std::string sha256;
     std::string label;
     std::string strippedArch;
+    std::string deviceArch;
 };
+
+/// A kernel's code object bytes and the facts that identify them.
+struct IngestorCodeObject
+{
+    std::vector<uint8_t> bytes;
+    /// The base architecture of the GPU the plan was saved on.
+    std::string target;
+    /// Lowercase hex SHA-256 of `bytes`.
+    std::string sha256;
+    std::string symbol;
+};
+
+namespace detail
+{
+
+// A failed load of saved code. The driver refusing the bytes or the symbol means the plan
+// is valid but cannot run here. A device that cannot be made current is a provider fault.
+[[noreturn]] inline void refuseCodeObjectLoad(const compilation::CodeObjectLoadFailure& failure,
+                                              const std::string& label)
+{
+    switch(failure.stage())
+    {
+    case compilation::CodeObjectLoadStage::MODULE_LOAD:
+        serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                          "the driver refuses the code object of " + label
+                                              + " at stage MODULE_LOAD: " + failure.what());
+    case compilation::CodeObjectLoadStage::SYMBOL_LOOKUP:
+        serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                          "the driver refuses the code object of " + label
+                                              + " at stage SYMBOL_LOOKUP: " + failure.what());
+    case compilation::CodeObjectLoadStage::BIND_DEVICE:
+    default:
+        break;
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                   failure.what());
+}
+
+} // namespace detail
 
 /// The program plus the kernel resolved out of it, answered per device.
 ///
@@ -107,8 +155,9 @@ struct KpackSource
 /// only through its stream, which a default token leaves to whatever is current.
 ///
 /// KPACK kernels therefore retain what a second resolution needs and memoise per
-/// ordinal. Every other source kind compiles against an architecture rather than a
-/// device and answers with the one kernel it was built with.
+/// ordinal. Code restored from a saved plan does the same with its stored bytes. Every
+/// other source kind compiles against an architecture rather than a device and answers
+/// with the one kernel it was built with.
 ///
 /// Movable rather than copyable: built by value and stored in a PreparedDispatch. The
 /// memo lives behind a pointer so moving one does not move a locked mutex.
@@ -120,7 +169,7 @@ public:
                        std::unique_ptr<compilation::IRunnableKernel> kernel)
         : _memo(std::make_unique<Memo>())
     {
-        _memo->byOrdinal.emplace(ANY_DEVICE, Resolved{std::move(program), std::move(kernel)});
+        storeResolved(ANY_DEVICE, Resolved{std::move(program), std::move(kernel)});
     }
 
     /// KPACK: the first device's result, plus the coordinates and the architecture that
@@ -140,7 +189,27 @@ public:
         // name says whichever constructor ran. Stripping twice is idempotent.
         _source->strippedArch
             = std::string(hipdnn_plugin_sdk::stripArchFeatures(_source->strippedArch));
-        _memo->byOrdinal.emplace(deviceOrdinal, Resolved{std::move(program), std::move(kernel)});
+        storeResolved(deviceOrdinal, Resolved{std::move(program), std::move(kernel)});
+    }
+
+    /// Code restored from a saved plan: loads @p code on @p deviceOrdinal now, so a driver
+    /// that refuses the bytes fails the restore and not a later execute. Another device
+    /// loads its own module from the same bytes on first use. The bytes stay in memory for
+    /// the life of the plan, because no archive is available to read them again.
+    ///
+    /// @param label Names the kernel in failure messages.
+    /// @throws HipdnnPluginException with a load refusal when the driver refuses the
+    ///         bytes or the symbol, and with INTERNAL_ERROR when the device cannot be made
+    ///         current.
+    static IngestorKernelCode fromSavedKernelCode(hipdnn_plugin_sdk::ingestor::SavedKernelCode code,
+                                                  std::string label,
+                                                  int deviceOrdinal)
+    {
+        requireRealOrdinal(deviceOrdinal);
+        auto shared
+            = std::make_shared<const hipdnn_plugin_sdk::ingestor::SavedKernelCode>(std::move(code));
+        Resolved resolved = loadSavedKernelCode(*shared, label, deviceOrdinal);
+        return {std::move(shared), std::move(label), deviceOrdinal, std::move(resolved)};
     }
 
     /// Recorded as well as applied: every kernel already resolved is updated, and a
@@ -198,6 +267,15 @@ public:
     ///         kernel is asked for a device and no coordinates were retained.
     compilation::IRunnableKernel& kernelFor(int deviceOrdinal) const;
 
+    /// Reads this kernel's code object again from its source and verifies its digest.
+    /// Loads no module and touches no HIP state. It takes no lock of this kernel, so other
+    /// threads can launch it meanwhile.
+    ///
+    /// @throws HipdnnPluginException with a save refusal when the bytes cannot be read
+    ///         or do not match the descriptor's digest, and with INTERNAL_ERROR when this
+    ///         code does not expose its bytes.
+    IngestorCodeObject readCodeObject() const;
+
     virtual ~IngestorKernelCode() = default;
 
     IngestorKernelCode(const IngestorKernelCode&) = delete;
@@ -236,19 +314,37 @@ protected:
         requireRealOrdinal(deviceOrdinal);
         _source = KpackSource{};
         _source->strippedArch = std::string(hipdnn_plugin_sdk::stripArchFeatures(strippedArch));
-        _memo->byOrdinal.emplace(deviceOrdinal, Resolved{std::move(program), std::move(kernel)});
+        storeResolved(deviceOrdinal, Resolved{std::move(program), std::move(kernel)});
     }
 
-    /// The two steps a device this object has not seen before requires, as overridable
-    /// units so a subclass can stand in for hardware.
-    ///
-    /// Neither is a hook for production: nothing overrides them outside tests, and a
-    /// default build resolves both against HIP and the archive. They exist because the
-    /// behaviour above them -- which ordinal is admitted, which is refused, and which is
-    /// answered without touching either step -- is otherwise reachable only on a host
-    /// holding two architectures at once, and no such host exists.
+    // Code restored from a saved plan, with the first device already loaded.
+    IngestorKernelCode(std::shared_ptr<const hipdnn_plugin_sdk::ingestor::SavedKernelCode> stored,
+                       std::string label,
+                       int deviceOrdinal,
+                       Resolved resolved)
+        : _memo(std::make_unique<Memo>())
+        , _stored(std::move(stored))
+    {
+        requireRealOrdinal(deviceOrdinal);
 
-    /// Which ordinal @p stream launches on. Overridable alongside the two below so a
+        // The source holds what the admission rule and the failure messages read.
+        _source = KpackSource{};
+        _source->symbol = _stored->symbol;
+        _source->label = std::move(label);
+        _source->strippedArch = std::string(hipdnn_plugin_sdk::stripArchFeatures(_stored->target));
+        storeResolved(deviceOrdinal, std::move(resolved));
+    }
+
+    // The steps for a device that this object has not seen before. Each step is a
+    // virtual function, so a subclass can stand in for the hardware.
+    //
+    // Only tests override them. A default build does each step with HIP, the archive or
+    // the stored bytes. The logic above the steps admits a device, refuses a device, or
+    // answers a known device without a step. For stored bytes, the default
+    // resolveForDevice checks the exact target before it calls loadStoredOnDevice.
+    // loadStoredOnDevice replaces only the load step.
+
+    /// Which ordinal @p stream launches on. Overridable alongside the steps below so a
     /// test can prove this is not consulted for a program that runs anywhere.
     virtual int resolveLaunchOrdinal(hipStream_t stream) const
     {
@@ -271,6 +367,23 @@ protected:
     /// only once the architecture has been accepted.
     virtual Resolved resolveForDevice(int deviceOrdinal, const std::string& reportedArch) const
     {
+        if(_stored != nullptr)
+        {
+            // The plan was matched against the stripped arch only. The stored bytes also
+            // need a device that can run their exact target.
+            if(!isCodeObjectTargetCompatible(_stored->sourceKind, _stored->target, reportedArch))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                    _source->label + ": symbol '" + _stored->symbol + "' was saved for target '"
+                        + _stored->target + "' but is being launched on device "
+                        + std::to_string(deviceOrdinal) + ", which reports '" + reportedArch
+                        + "'; a plan is being executed under a handle from a device that "
+                          "cannot run its code object");
+            }
+            return loadStoredOnDevice(*_stored, _source->label, deviceOrdinal);
+        }
+
         if(_loader == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -290,6 +403,15 @@ protected:
                                      _source->label);
         auto kernel = program->getKernel(_source->symbol);
         return Resolved{std::move(program), std::move(kernel)};
+    }
+
+    // Loads the stored bytes on deviceOrdinal and gets the symbol from the new module.
+    // Runs only after the device passes the architecture check and the target check.
+    virtual Resolved loadStoredOnDevice(const hipdnn_plugin_sdk::ingestor::SavedKernelCode& code,
+                                        const std::string& label,
+                                        int deviceOrdinal) const
+    {
+        return loadSavedKernelCode(code, label, deviceOrdinal);
     }
 
     /// A device-bound program must name a real device. ANY_DEVICE is what says "runs
@@ -320,6 +442,22 @@ private:
     /// constructor would file a device-specific program under the runs-anywhere key and
     /// silently bypass the architecture gate for every later ordinal.
     static constexpr int ANY_DEVICE = std::numeric_limits<int>::min();
+
+    static Resolved loadSavedKernelCode(const hipdnn_plugin_sdk::ingestor::SavedKernelCode& code,
+                                        const std::string& label,
+                                        int deviceOrdinal)
+    {
+        try
+        {
+            auto loaded = compilation::loadCodeObjectOnDevice(
+                code.codeObject, code.symbol, deviceOrdinal, label);
+            return Resolved{std::move(loaded.program), std::move(loaded.kernel)};
+        }
+        catch(const compilation::CodeObjectLoadFailure& failure)
+        {
+            detail::refuseCodeObjectLoad(failure, label);
+        }
+    }
 
     struct Geometry
     {
@@ -355,9 +493,38 @@ private:
         }
     }
 
+    // Refuses an entry with no program or no kernel, so every read of an entry can use
+    // its kernel.
+    void requireLoaded(int deviceOrdinal, const Resolved& resolved) const
+    {
+        if(resolved.program != nullptr && resolved.kernel != nullptr)
+        {
+            return;
+        }
+        const std::string device = deviceOrdinal == ANY_DEVICE
+                                       ? std::string("any device")
+                                       : "device " + std::to_string(deviceOrdinal);
+        const std::string subject
+            = _source.has_value()
+                  ? _source->label + ": kernel code for symbol '" + _source->symbol + "'"
+                  : std::string("ingestor kernel code");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       subject + " on " + device
+                                                           + " has no loaded program or kernel");
+    }
+
+    // Every write to the memo goes through here.
+    compilation::IRunnableKernel& storeResolved(int deviceOrdinal, Resolved resolved) const
+    {
+        requireLoaded(deviceOrdinal, resolved);
+        auto& entry = _memo->byOrdinal.emplace(deviceOrdinal, std::move(resolved)).first->second;
+        return *entry.kernel;
+    }
+
     std::unique_ptr<Memo> _memo;
     const compilation::KpackKernelLoader* _loader = nullptr;
     std::optional<KpackSource> _source;
+    std::shared_ptr<const hipdnn_plugin_sdk::ingestor::SavedKernelCode> _stored;
     Geometry _geometry;
 };
 
@@ -424,10 +591,90 @@ inline compilation::IRunnableKernel& IngestorKernelCode::kernelFor(int deviceOrd
     }
 
     Resolved resolved = resolveForDevice(deviceOrdinal, reportedArch);
+    requireLoaded(deviceOrdinal, resolved);
     applyGeometry(*resolved.kernel);
+    return storeResolved(deviceOrdinal, std::move(resolved));
+}
 
-    auto& stored = _memo->byOrdinal.emplace(deviceOrdinal, std::move(resolved)).first->second;
-    return *stored.kernel;
+namespace detail
+{
+
+// The save refusal a failed kpack read gives. A digest mismatch means the archive and the
+// descriptor disagree, so it is damage. The plan is valid for every other stage, but its
+// code cannot be read here.
+inline serialization::IngestorPlanRefusal kpackSaveRefusal(compilation::KpackLoadStage stage)
+{
+    return stage == compilation::KpackLoadStage::DIGEST_MISMATCH
+               ? serialization::IngestorPlanRefusal::DAMAGED
+               : serialization::IngestorPlanRefusal::INCOMPATIBLE;
+}
+
+inline const char* kpackLoadStageName(compilation::KpackLoadStage stage)
+{
+    switch(stage)
+    {
+    case compilation::KpackLoadStage::OPEN_ARCHIVE:
+        return "OPEN_ARCHIVE";
+    case compilation::KpackLoadStage::ARCH_LOOKUP:
+        return "ARCH_LOOKUP";
+    case compilation::KpackLoadStage::ENTRY_LOOKUP:
+        return "ENTRY_LOOKUP";
+    case compilation::KpackLoadStage::DECOMPRESS:
+        return "DECOMPRESS";
+    case compilation::KpackLoadStage::DIGEST_MISMATCH:
+        return "DIGEST_MISMATCH";
+    case compilation::KpackLoadStage::MODULE_LOAD:
+        return "MODULE_LOAD";
+    default:
+        break;
+    }
+    return "UNKNOWN";
+}
+
+} // namespace detail
+
+inline IngestorCodeObject IngestorKernelCode::readCodeObject() const
+{
+    if(!_source.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "the code bytes of this source kind are not exposed");
+    }
+    if(_source->archive.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "kernel '" + _source->symbol
+                + "' cannot read its code object: no archive coordinates were retained");
+    }
+
+    std::string selectedArch;
+    try
+    {
+        const compilation::KpackCodeObject codeObject
+            = compilation::readVerifiedKpackCodeObject(_source->archive.string(),
+                                                       _source->tocKey,
+                                                       _source->deviceArch,
+                                                       _source->sha256,
+                                                       selectedArch);
+        const auto* first = static_cast<const uint8_t*>(codeObject.data());
+        IngestorCodeObject result;
+        result.bytes.assign(first, first + codeObject.size());
+        // This holds the device base name. It relies on archive keys that carry no feature suffix.
+        result.target = std::string(hipdnn_plugin_sdk::stripArchFeatures(_source->deviceArch));
+        result.sha256 = _source->sha256;
+        result.symbol = _source->symbol;
+        return result;
+    }
+    catch(const compilation::KpackModuleLoadFailure& failure)
+    {
+        serialization::refuseIngestorPlanSave(
+            detail::kpackSaveRefusal(failure.stage()),
+            "kpack kernel source for " + _source->label + ", symbol '" + _source->symbol
+                + "': cannot read its code object at stage "
+                + detail::kpackLoadStageName(failure.stage()) + ": " + failure.what());
+    }
 }
 
 /// Fails unless the argument list a descriptor records matches the one its pack marshals.
@@ -500,6 +747,17 @@ inline IngestorKernelCode buildForSourceKind(
     const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& expectedSignature)
 {
     using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
+
+    // A multi-launch kernel has no `source`: the default one would compile nothing and read
+    // as a missing file. The pack launches an entry through launchKernelDefinition().
+    if(!kernel.sources.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            hipdnn_plugin_sdk::ingestor::describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                + " carries several launches ('sources'); pass one launch's definition from "
+                  "launchKernelDefinition() to buildIngestorKernelCode");
+    }
 
     switch(kernel.source.kind)
     {
@@ -630,7 +888,8 @@ inline IngestorKernelCode buildForSourceKind(
                                               kernel.source.sha256,
                                               label,
                                               std::string(hipdnn_plugin_sdk::stripArchFeatures(
-                                                  context.deviceProperties.gcnArchName))},
+                                                  context.deviceProperties.gcnArchName)),
+                                              context.deviceProperties.gcnArchName},
                                   context.deviceId,
                                   std::move(program),
                                   std::move(runnableKernel)};

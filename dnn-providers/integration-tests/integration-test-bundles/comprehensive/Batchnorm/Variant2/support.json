@@ -1,0 +1,121 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_3_1_1_bfp16_nchw_9bf823",
+          "2_3_1_1_bfp16_nhwc",
+          "2_3_1_1_fp16_nchw",
+          "2_3_1_1_fp16_nhwc",
+          "2_3_1_1_fp32_nchw",
+          "2_3_1_1_fp32_nhwc_b020db",
+          "2_3_2_4_4_bfp16_ndhwc_5751f7",
+          "2_3_2_4_4_fp16_ncdhw_1f01b4",
+          "2_3_3_1_1_bfp16_ncdhw",
+          "2_3_3_1_1_bfp16_ndhwc",
+          "2_3_3_1_1_fp16_ncdhw",
+          "2_3_3_1_1_fp16_ndhwc_28bdde",
+          "2_3_3_1_1_fp32_ncdhw_34ae7a",
+          "2_3_3_1_1_fp32_ndhwc",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_bfp16_nhwc",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp16_nhwc",
+          "32_3_1_14_fp32_nchw",
+          "32_3_1_14_fp32_nhwc"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_14_bfp16_ncl",
+          "1_16_14_bfp16_nlc",
+          "1_16_14_fp16_ncl",
+          "1_16_14_fp16_nlc",
+          "1_16_14_fp32_ncl",
+          "1_16_14_fp32_nlc",
+          "2_3_1_1_bfp16_nhwc",
+          "2_3_1_1_fp16_nchw",
+          "2_3_1_1_fp16_nhwc",
+          "2_3_1_1_fp32_nchw",
+          "2_3_1_bfp16_ncl",
+          "2_3_1_fp16_nlc",
+          "2_3_1_fp32_ncl",
+          "2_3_1_fp32_nlc",
+          "2_3_3_1_1_bfp16_ncdhw",
+          "2_3_3_1_1_bfp16_ndhwc",
+          "2_3_3_1_1_fp16_ncdhw",
+          "2_3_3_1_1_fp32_ndhwc",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_bfp16_nhwc",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp16_nhwc",
+          "32_3_1_14_fp32_nchw",
+          "32_3_1_14_fp32_nhwc",
+          "4_8_56_bfp16_ncl",
+          "4_8_56_bfp16_nlc",
+          "4_8_56_fp16_ncl",
+          "4_8_56_fp16_nlc",
+          "4_8_56_fp32_ncl",
+          "4_8_56_fp32_nlc"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

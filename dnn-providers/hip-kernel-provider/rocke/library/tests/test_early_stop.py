@@ -25,14 +25,34 @@ def test_skips_kernels_far_off_the_best(monkeypatch):
     # The first kernel is always measured: warmup and timed loop in one call.
     assert stop.measure(fast, warmup=3, iters=10) == 1.0
     assert calls[-1] == (fast, 3, 10)
-    # Within the factor: the warmup is timed separately, then the loop.
+    # Within the factor: the warmup is timed separately (a one-launch probe,
+    # then the rest), then the loop.
     assert stop.measure(ok, warmup=3, iters=10) == 4.0
-    assert calls[-2:] == [(ok, 0, 3), (ok, 0, 10)]
+    assert calls[-3:] == [(ok, 0, 1), (ok, 0, 2), (ok, 0, 10)]
     # Beyond it: only the warmup runs, and the kernel is reported.
     n = len(calls)
     assert stop.measure(slow, warmup=3, iters=10) is None
-    assert calls[n:] == [(slow, 0, 3)]
+    assert calls[n:] == [(slow, 0, 1), (slow, 0, 2)]
     assert stop.n_stopped == 1 and stop.best_ms == 1.0
+    assert not stop.last_hopeless
+
+
+def test_hopeless_kernels_stop_after_one_launch(monkeypatch):
+    fast, borderline, hopeless = object(), object(), object()
+    calls = _fake_timer(monkeypatch, {fast: 1.0, borderline: 19.0, hopeless: 21.0})
+    stop = EarlyStop(5.0, after=1)
+    stop.measure(fast, warmup=3, iters=10)
+    # Past factor x best but inside HOPELESS_MARGIN of it: the full warmup
+    # decides, as before.
+    n = len(calls)
+    assert stop.measure(borderline, warmup=3, iters=10) is None
+    assert calls[n:] == [(borderline, 0, 1), (borderline, 0, 2)]
+    assert not stop.last_hopeless
+    # Past HOPELESS_MARGIN x factor x best: the first launch is enough.
+    n = len(calls)
+    assert stop.measure(hopeless, warmup=3, iters=10) is None
+    assert calls[n:] == [(hopeless, 0, 1)]
+    assert stop.last_hopeless and stop.n_stopped == 2
 
 
 def test_factor_zero_disables(monkeypatch):
@@ -45,15 +65,28 @@ def test_factor_zero_disables(monkeypatch):
 
 
 def test_waits_for_the_first_kernels(monkeypatch):
-    fast, slow = object(), object()
-    _fake_timer(monkeypatch, {fast: 1.0, slow: 100.0})
+    fast, slow, hopeless = object(), object(), object()
+    _fake_timer(monkeypatch, {fast: 1.0, slow: 15.0, hopeless: 100.0})
     stop = EarlyStop(5.0, after=3)
     stop.measure(fast, warmup=3, iters=10)
-    # Kernels 2 and 3 are timed in full however slow they are...
-    assert stop.measure(slow, warmup=3, iters=10) == 100.0
-    assert stop.measure(slow, warmup=3, iters=10) == 100.0
+    # Kernels 2 and 3 are timed in full unless they are hopeless...
+    assert stop.measure(slow, warmup=3, iters=10) == 15.0
+    assert stop.measure(slow, warmup=3, iters=10) == 15.0
     # ...from the fourth on early stopping applies.
     assert stop.measure(slow, warmup=3, iters=10) is None
+
+
+def test_hopeless_kernels_stop_before_the_first_kernels(monkeypatch):
+    """The best so far only overstates the true best, so a kernel past
+    HOPELESS_MARGIN x factor x it is skipped even while ``after`` holds."""
+    fast, hopeless = object(), object()
+    calls = _fake_timer(monkeypatch, {fast: 1.0, hopeless: 100.0})
+    stop = EarlyStop(5.0, after=3)
+    stop.measure(fast, warmup=3, iters=10)
+    n = len(calls)
+    assert stop.measure(hopeless, warmup=3, iters=10) is None
+    assert calls[n:] == [(hopeless, 0, 1)]
+    assert stop.last_hopeless and stop.n_measured == 1
 
 
 def _reset_handoff(monkeypatch):
@@ -146,3 +179,28 @@ def test_failed_kernels_neither_prune_nor_record(monkeypatch, tmp_path):
     assert stop.measure(ok, warmup=3, iters=10) == 2.0
     assert stop.best_ms == 2.0
     assert list(json.loads(record.read_text()).values()) == [2.0]
+
+
+def test_hopeless_needs_an_absolute_excess_too(monkeypatch):
+    """Next to a tiny best, a first launch's host-side setup alone can pass the
+    relative margin; the absolute excess keeps such a kernel on the full
+    warmup path."""
+    fast, cold = object(), object()
+    calls = _fake_timer(monkeypatch, {fast: 0.01, cold: 0.5})
+    stop = EarlyStop(5.0, after=1)
+    stop.measure(fast, warmup=3, iters=10)
+    n = len(calls)
+    assert stop.measure(cold, warmup=3, iters=10) is None
+    assert calls[n:] == [(cold, 0, 1), (cold, 0, 2)]
+    assert not stop.last_hopeless
+
+
+def test_failed_kernels_are_not_probed(monkeypatch):
+    """A kernel that failed verification keeps its FAIL row: no probe stops it
+    before ``after`` holds."""
+    fast, wrong = object(), object()
+    _fake_timer(monkeypatch, {fast: 1.0, wrong: 100.0})
+    stop = EarlyStop(5.0, after=3)
+    stop.measure(fast, warmup=3, iters=10)
+    assert stop.measure(wrong, warmup=3, iters=10, passed=False) == 100.0
+    assert stop.best_ms == 1.0

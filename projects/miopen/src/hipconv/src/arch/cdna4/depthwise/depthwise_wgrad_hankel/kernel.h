@@ -977,7 +977,7 @@ public:
 
     std::string_view name() const override { return "depthwise_wgrad_hankel"; }
 
-    std::string describe_config() const override { return ConfigMatcher(cfg_).describe(); }
+    KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     // Does not chain to DepthwiseConvKernel::is_applicable. That base serves the
     // fprop/dgrad families and requires output == input, which never holds once
@@ -1015,16 +1015,6 @@ public:
         if(in_image > INT32_MAX || out_image > INT32_MAX)
             return false;
         return true;
-    }
-
-    bool matches_descriptor(std::string_view spec, std::string* error) const override
-    {
-        ConfigMatcher matcher(cfg_);
-        if(matcher.match(spec))
-            return true;
-        if(error)
-            *error = matcher.error();
-        return false;
     }
 
     bool is_valid_config(const ConvParams& par) const override

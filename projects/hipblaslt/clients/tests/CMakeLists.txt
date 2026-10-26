@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 add_subdirectory(src)
+add_subdirectory(unit)
 
 set(HIPBLASLT_TEST_DATA "${CMAKE_CURRENT_BINARY_DIR}/../hipblaslt_gtest.data")
 
@@ -46,12 +47,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     apply_test_category_labels(
       hipblaslt-test
       "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-      "${PROJECT_BINARY_DIR}/staging"
-      "${HIPBLASLT_CTEST_INSTALL_FILE}"
-    )
-    apply_test_category_labels(
-      hipblaslt-test-tuning-store
-      "${CMAKE_CURRENT_SOURCE_DIR}/tuning_store_test_categories.yaml"
       "${PROJECT_BINARY_DIR}/staging"
       "${HIPBLASLT_CTEST_INSTALL_FILE}"
     )

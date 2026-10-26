@@ -1,5 +1,40 @@
 # Changelog for hipconv
 
+## v0.4.0 - 2026-10-06
+
+### Added
+
+| Kernel         | Architecture     | Layer type            | Direction | Data type           | Filter, stride                          | PR         |
+|----------------|------------------|-----------------------|-----------|---------------------|-----------------------------------------|------------|
+| `direct_wgrad` | CDNA 5 (gfx1250) | dense, grouped conv2d | wgrad     | fp16, bf16; dW fp32 | 2×2, 3×3, 4×4, 5×5, 3×1, 1×3; stride 1  | #212, #297 |
+
+* `describe_config(kernel, full)`: `full` includes default values, so the description selects
+  exactly that config through `matches_descriptor()` (#291).
+* `version()`, this build's version as `git describe --tags` names it (#291).
+* `config_version()`, the major and minor version (e.g. `v0.4`), for keying a stored config
+  description. Within a minor version, a full description always selects the same config
+  (#291).
+
+### Fixed
+
+* Add the missing config descriptors to `grouped`, `grouped_wgrad`, and `depthwise_2d_toeplitz`.
+  Change the `depthwise_1d_toeplitz` descriptors to use the standard form. Add the missing
+  `row_pad` field to the `patch_embed` descriptor (#291).
+* Every config descriptor registers every field of its kernel's `Config`, so a `--config` spec
+  can name any of them. Fields added to `direct` (CDNA 4 and CDNA 5), `direct_l1`,
+  `direct_wgrad`, and `depthwise_wgrad_hankel` (CDNA 4 and CDNA 5). The short description of
+  every `direct` config now includes `kh` and `kw`, and on CDNA 4 also `tile_size_c` (#291).
+* `ConvParams::is_valid()` rejects a layer whose dilated filter is wider than its padded
+  input on some axis (`output_is_empty()`). Such a layer reached kernel matching and scored
+  a NaN weighted throughput index (#167, #288).
+* `ConvLaunch::make` returns `nullopt`, and `launch()` returns `hipErrorNotSupported`, for
+  an explicit-GEMM pointwise or patch-embedding layer whose GEMM hipBLASLt has no algorithm
+  for on the current device. The launch failed with `HIPBLAS_STATUS_INTERNAL_ERROR` instead,
+  and ended the driver's run. Selection is unchanged and still needs no GPU; the driver
+  binds the next ranked kernel or reports `no_match` (#244, #281).
+* `launch()` and `ConvLaunch::launch` return `hipErrorUnknown` when any other hipBLASLt call
+  in an explicit-GEMM launch fails. The hipBLASLt exception escaped both instead (#281).
+
 ## v0.3.2 - 2026-10-02
 
 ### Added

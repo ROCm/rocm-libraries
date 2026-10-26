@@ -8,8 +8,11 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipdnn_shim_test
@@ -26,6 +29,13 @@ inline std::shared_ptr<fe::graph::Tensor_attributes> makeTensor(fe::graph::Graph
                             .set_stride(stride)
                             .set_data_type(fe::DataType_t::FLOAT)
                             .set_uid(uid));
+}
+
+inline void expectGraphNotSupported(const fe::error_t& error, const std::string& expectedText)
+{
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(error.get_message().find(expectedText), std::string::npos);
 }
 
 // Fills q/k/v (BHSD) with the canonical shapes used by the native SDPA node

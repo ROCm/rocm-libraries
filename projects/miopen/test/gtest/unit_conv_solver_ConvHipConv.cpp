@@ -79,8 +79,7 @@ auto GetConv3dDepthSmokeTestCases(miopenDataType_t datatype, bool tf32_compute =
 // Dense wgrad shapes whose channel count leaves a partial tile, which is where the
 // direct_wgrad epilogue's channel guard splits a wave. The defect these cover (ROCM-31508)
 // appeared only on non-default perf configs, which GetTestParams()'s Tunable(5) sweeps, and
-// only on channel counts that are not a multiple of the 32-wide wave tile. gfx950 only, since
-// gfx1250 has no dense wgrad kernel.
+// only on channel counts that are not a multiple of the 32-wide wave tile.
 auto GetConvWrwDenseTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
 {
     return std::vector<TestCase>{
@@ -97,8 +96,8 @@ auto GetConvWrwDenseTestCases(miopenDataType_t datatype, miopenTensorLayout_t la
 
 // Dense layers, one per filter shape the direct kernels specialize on.
 //
-// gfx950 serves them with direct_l1 or direct, and direct_wgrad; gfx1250 with direct, which
-// has no wgrad, so their Wrw suites are gfx950-only.
+// gfx950 serves them with direct_l1 or direct, and direct_wgrad; gfx1250 with direct and
+// direct_wgrad.
 auto GetConvDenseTestCases(miopenDataType_t datatype, bool tf32_compute = false)
 {
     constexpr auto layout = miopenTensorNHWC;
@@ -114,7 +113,8 @@ auto GetConvDenseTestCases(miopenDataType_t datatype, bool tf32_compute = false)
     };
 }
 
-// Vertical 3x1 filters, which only gfx950 serves (direct_l1, direct_wgrad).
+// Vertical 3x1 filters: gfx950 serves every direction (direct_l1, direct_wgrad), gfx1250 Wrw
+// only (direct_wgrad).
 auto GetConvDenseVerticalTestCases(miopenDataType_t datatype)
 {
     constexpr auto layout = miopenTensorNHWC;
@@ -633,27 +633,27 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseWrw,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParamsGfx950()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseWrw,
     GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16,
-    testing::Combine(testing::Values(GetTestParamsGfx950()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
                          GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
-                         testing::Combine(testing::Values(GetTestParamsGfx950()),
+                         testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvWrwDenseTestCases(
                                               miopenBFloat16, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
                          GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16,
-                         testing::Combine(testing::Values(GetTestParamsGfx950()),
+                         testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvWrwDenseTestCases(
                                               miopenBFloat16, miopenTensorNCHW))));
@@ -688,14 +688,14 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(SmokeDense,
                          GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
-                         testing::Combine(testing::Values(GetTestParamsGfx950()),
+                         testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvDenseTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeDense,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParamsGfx950()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvDenseTestCases(miopenBFloat16))));
 
@@ -751,14 +751,14 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseVertical,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParamsGfx950()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvDenseVerticalTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseVertical,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParamsGfx950()),
+    testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvDenseVerticalTestCases(miopenBFloat16))));
 

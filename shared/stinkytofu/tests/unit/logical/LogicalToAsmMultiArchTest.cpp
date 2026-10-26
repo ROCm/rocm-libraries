@@ -146,6 +146,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VMed3I32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VMed3F32:
             return VMed3F32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VMaximumMinimumF32:
+            return VMaximumMinimumF32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VAndB32:
             return VAndB32(vgpr(0), vgpr(1), vgpr(2));
         case logical::VAndOrB32:
@@ -963,6 +965,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     // Vector Ternary (med3, lshl_or)
     {logical::VMed3I32, "v_med3_i32"},
     {logical::VMed3F32, "v_med3_f32"},
+    {logical::VMaximumMinimumF32, "v_maximumminimum_f32"},
     {logical::VLShiftLeftOrB32, "v_lshl_or_b32"},
     // Vector Shift (ashr)
     {logical::VAShiftRightI32, "v_ashrrev_i32"},

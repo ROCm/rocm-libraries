@@ -25,7 +25,7 @@ For YAML keys, CLI, and the full driver pipeline, see the [parent `config_genera
 
 3. **`hw_profiles/<id>/post_processor.py`** — Subclass [`BasePostProcessor`](post_processor.py): use `@post_process` for ordered steps. `MT_DU` handling lives on the base class. Provide heuristic and generic subclasses if both search spaces need different behavior.
 
-4. **`__init__.py`** — Register all four: `_HEURISTIC_PROFILES`, `_GENERIC_PROFILES`, `_HEURISTIC_POST_PROCESSORS`, `_GENERIC_POST_PROCESSORS`.
+4. **`__init__.py`** — Register profiles and post-processors: `_HEURISTIC_PROFILES`, `_GENERIC_PROFILES`, `_HEURISTIC_POST_PROCESSORS`, `_GENERIC_POST_PROCESSORS`. For gfx950, also `_SUBTILE_PROFILES` and `_SUBTILE_POST_PROCESSORS`.
 
 5. **Tests** — Extend or add cases under [`tests/config_generator/`](../../../tests/config_generator/).
 
@@ -39,6 +39,10 @@ Until step 4 is done, `get_optimization_params` will raise `KeyError` for the ne
 
 - **Split of concerns:** `MIDesign` owns MI discovery and filtering style; optimization profiles own enumerations of other fork axes and non-MI group dimensions; post-processors apply cross-cutting edits (e.g. tightening lists) without reimplementing MI logic.
 
-- **Search space selection:** Parallel class sets and registries for the same `ARCH` string. `get_optimization_params` / `get_post_processor` switch on `config["search_space"]` and index the right map.
+- **Search space selection:** Three parallel class sets — heuristic, generic, and subtile — keyed by `config["search_space"]`. Subtile is gfx950-only (MI16x16 base, UseSubtileImpl=1, narrowed fork-param allowlist). `get_optimization_params` / `get_post_processor` switch on the search space string and index the right registry map.
+
+- **Persistent-only options:** `PrefetchAcrossPersistent` and `PersistentXCCMapping` exist only for a persistent `TileProcessingStrategy`. Tensile raises on an explicit `PrefetchAcrossPersistent` with strategy `None`, which aborts a Ductile run, and zeroes the XCC remap there. Where a profile searches the non-persistent kernel alongside persistent ones (gfx1250 generic, Equality libraries), emit them as one group of valid pairs rather than as crossed flat axes.
+
+- **gfx1250 ClusterDim:** the generic profile offers every cluster shape whose size divides the WGPs of a shader engine (16 on every gfx1250 key; `[[1, 1]]` on gfx1250-strict, which has no TDM multicast). The generic post-processor then moves `ClusterDim` into the MI groups, keeping for each MI the shapes that tile its grid with the least traffic per size ([`hw_profiles/gfx1250/cluster_dim.py`](hw_profiles/gfx1250/cluster_dim.py)). `ConfigSectionGenerator` offsets the Ductile `group_0` costs so an MI's sampling probability does not grow with its number of shapes.
 
 For extension patterns, read `generate_for_size` on [`BaseOptimizationParams`](optimization_param.py) and `apply` on [`BasePostProcessor`](post_processor.py).

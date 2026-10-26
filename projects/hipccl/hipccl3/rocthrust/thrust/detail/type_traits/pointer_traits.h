@@ -25,9 +25,11 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
+#include <thrust/detail/type_traits/is_thrust_pointer.h>
 #include <thrust/iterator/iterator_traits.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
@@ -141,31 +143,6 @@ struct rebind_pointer<
   //  static_assert(_THRUST_STD::is_same<OldT, Tag>::value, "3");
   using type = Ptr<T, Tag, typename _THRUST_STD::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
 };
-
-namespace pointer_traits_detail
-{
-
-template <typename Ptr, typename Enable = void>
-struct pointer_raw_pointer_impl
-{};
-
-template <typename T>
-struct pointer_raw_pointer_impl<T*>
-{
-  using type = T*;
-};
-
-template <typename Ptr>
-struct pointer_raw_pointer_impl<Ptr, _THRUST_STD::void_t<typename Ptr::raw_pointer>>
-{
-  using type = typename Ptr::raw_pointer;
-};
-
-} // namespace pointer_traits_detail
-
-template <typename T>
-struct pointer_raw_pointer : pointer_traits_detail::pointer_raw_pointer_impl<T>
-{};
 
 namespace pointer_traits_detail
 {
@@ -330,12 +307,6 @@ template <typename FromPtr, typename ToPtr>
 struct is_void_pointer_system_convertible
     : ::internal::_And<_THRUST_STD::is_same<typename pointer_element<FromPtr>::type, void>,
                        is_pointer_system_convertible<FromPtr, ToPtr>>
-{};
-
-// this could be a lot better, but for our purposes, it's probably
-// sufficient just to check if pointer_raw_pointer<T> has meaning
-template <typename T>
-struct is_thrust_pointer : is_metafunction_defined<pointer_raw_pointer<T>>
 {};
 
 // avoid inspecting traits of the arguments if they aren't known to be pointers

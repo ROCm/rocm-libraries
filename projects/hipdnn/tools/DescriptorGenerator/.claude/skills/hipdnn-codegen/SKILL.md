@@ -16,7 +16,9 @@ This skill is **near-autonomous**. The agent first tries to resolve everything i
 
 In a clean, well-known op (cuDNN-aligned with a clear analog), the agent may not prompt at all on the three classes above.
 
-There is one **mandatory** prompt whenever the agent had to construct the FBS schema (from a user description, or from `cudnn-frontend`): **schema confirmation** (Step 2a-ii). Schema mistakes propagate through every layer, so the agent must show the schema and get explicit user sign-off before continuing. This prompt is skipped only when the user supplied a complete FBS file.
+There are two **mandatory** prompts:
+- **Schema confirmation** (Step 2a-ii), whenever the agent had to construct the FBS schema (from a user description, or from `cudnn-frontend`). Schema mistakes propagate through every layer, so the agent must show the schema and get explicit user sign-off before continuing. This prompt is skipped only when the user supplied a complete FBS file.
+- **Work-model confirmation** (Step 11, Class C), whenever the op has no `logicalFlops` decision in `EngineFeatures.hpp` yet: the FLOP formula, or "no counting convention" with a reason, and which operands are content-dependent (`work_data_dependent`). A missing or wrong answer degrades UHD heuristics without any build or test failure (no `graph.flops`, or counts from padded shapes), so the agent proposes its derivation and gets explicit sign-off.
 
 Everything else is mechanical and is derived from the FBS schema, existing codebase state, and the conventions in this skill.
 
@@ -100,7 +102,7 @@ Pick the path that matches what the user provided:
   1. Run the directory listing + node-file fetch from Step 3a-i to locate the matching cuDNN node header (e.g., `include/cudnn_frontend/node/<op>.h`).
   2. From that header, find the **attributes class** it references (e.g., `Conv_fprop_attributes`). Fetch its source — usually under `include/cudnn_frontend/graph_properties.h` or alongside the node header.
   3. Walk the attributes class:
-     - Each tensor input/output method (typically `set_<name>(...)`) becomes a `<name>_tensor_uid: long` field. Note which are required vs optional.
+     - Each tensor input/output method (typically `set_<name>(...)`) becomes a `<name>_tensor_uid: long (cache_uid)` field (`long = null (cache_uid)` when optional). Note which are required vs optional. Add `work_data_dependent` to the annotation (`(cache_uid, work_data_dependent)`) when the tensor's contents, not its shape, decide how much work the op does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) is not work-data-dependent. Declare each attribute used at file scope (`attribute "cache_uid";`, `attribute "work_data_dependent";`).
      - Each scalar/vector attribute (typically `set_<attr>(...)`) becomes a typed field with the matching cuDNN name.
      - Mode-style enums become a `<field>: <Enum>` field; capture the enum members from the cuDNN definition.
   4. Use the same naming as cuDNN (lowercase snake_case for fields, matching cuDNN attribute identifiers). Apply `_EXT` per the rule in Step 3a only to fields with no cuDNN equivalent.
@@ -124,7 +126,7 @@ When required, show the schema and the parsed structure, and get explicit sign-o
 > <full schema contents>
 > ```
 >
-> Tensor inputs: `<list>`. Tensor outputs: `<list>`. Optional fields: `<list>`. Mode enums: `<list>`.
+> Tensor inputs: `<list>`. Tensor outputs: `<list>`. Optional fields: `<list>`. Mode enums: `<list>`. Work-data-dependent operands: `<list or none>`.
 >
 > Confirm before I proceed: is this schema correct? (Yes / Edit-and-resend / No-rewrite)"
 
@@ -154,12 +156,13 @@ Read the FBS schema file. Map fields to YAML config following these rules:
 | FBS Field Pattern | YAML Section | YAML `type` |
 |---|---|---|
 | `*_tensor_uid: long` | `tensor_fields` | (tensors are UIDs) |
+| `*_tensor_uid: long (cache_uid, work_data_dependent)` | `tensor_fields`, with `work_data_dependent: true` | (tensors are UIDs) |
 | `field: [long]` | `data_fields` | `vector_int64` |
 | `field: SomeEnum` | `data_fields` | `mode` |
 | `field: float` | `data_fields` | `scalar_float` |
 | `field: long` (non-UID) | `data_fields` | `scalar_int64` |
 | `field: bool` | `data_fields` | `bool` |
-| `field: [long]` (array of UIDs) | `tensor_array_fields` | (tensor arrays) |
+| `field: [long]` (array of UIDs) | `tensor_array_fields` | (tensor arrays; `work_data_dependent` as for `tensor_fields`) |
 
 Derive all config fields from the schema and existing codebase — do NOT ask the user for these. Use existing configs and backend code to determine:
 
@@ -402,6 +405,15 @@ Read each fragment file from the output and insert it into the correct shared fi
 | `fragments/node_unpack_override.txt` | Frontend node header | Add method to the node class. |
 | `fragments/descriptor_lifting_additions.txt` | Existing `<Op>OperationDescriptor.{hpp,cpp}` | Apply per Step 9 — adds `<unordered_map>` include, `fromNode()` declaration, `_name` member, operation name/type handling, and `fromNode()` implementation. |
 
+**Work-model fragments** (for `backend` or `full` mode). Apply `fbs_tensor_fields.txt` now; insert the other three after the Step 11 Class C answer, which picks between them:
+
+| Fragment | Target File | Insertion Point |
+|----------|-------------|----------------|
+| `fragments/fbs_tensor_fields.txt` | `$HIPDNN_SRC/flatbuffers_sdk/schemas/<op>_attributes.fbs` | Make each tensor-uid declaration carry the listed annotations, `(cache_uid)` or `(cache_uid, work_data_dependent)`, and declare each attribute used at file scope. Then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (`pre-commit run node-operands-hipdnn --all-files`, or `python $HIPDNN_SRC/scripts/gen_node_operands.py`) so `cachekey_generated.h` and `node_operands_generated.h` are regenerated. |
+| `fragments/node_flops_overload.txt` | `$HIPDNN_SRC/plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` | Counted op: after the last `nodeFlops` overload. Replace the stub's TODO and `std::nullopt` with the agreed formula. |
+| `fragments/logical_flops_case.txt` | Same file | Counted op: the `case` in the `logicalFlops()` switch, before `default:`. No counting convention: only the `NO_COUNTING_CONVENTION` entry from this fragment, with the agreed reason on the line above it; skip the other two fragments. |
+| `fragments/work_model_test_case.txt` | `$HIPDNN_SRC/plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` | Counted op: in the `cases` vector of `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`. Set the attributes the formula reads and replace the expected `0.0` with the hand-computed FLOPs. |
+
 **Mode enum fragments** (for any mode when `enum_def` is present):
 
 | Fragment | Target Files | Insertion |
@@ -450,7 +462,7 @@ For `backend` mode when a frontend node already exists, or for `full` mode:
 
 ### 11. Ask About Operation-Specific Logic
 
-There are two classes of question the agent is expected to ask the user. Everything else is derived from the schema, existing code, and conventions.
+There are three classes of question the agent is expected to ask the user. Everything else is derived from the schema, existing code, and conventions.
 
 **Class A: cuDNN naming uncertainty (fallback only — see Step 3a-i).** First try the cudnn-frontend GitHub web-check. Only ask the user when the directory listing is ambiguous, the matched file disagrees with itself, or web access is unavailable.
 
@@ -473,6 +485,15 @@ There are two classes of question the agent is expected to ask the user. Everyth
   - e.g., "input channels must match weight channels"
   - e.g., "stride and dilation must be > 0"
   - **Default:** leave with just the standard null/dim checks
+
+**Class C: work model (mandatory for `backend` or `full` mode; skip only when `grep -n "NodeAttributes::<Op>Attributes" $HIPDNN_SRC/plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` already shows a `logicalFlops` case or a `NO_COUNTING_CONVENTION` entry).** UHD heuristics publish the op's logical FLOPs and its operands; see `docs/AddingNewOperations.md`, "Work Model (FLOPs)" and "Operand Features". Derive a proposal first: the convention in RFC 0019 §6.8 (logical work, not executed work), the formulas of analogous ops in `EngineFeatures.hpp`, and the op's reference implementation. Then confirm both answers with `AskUserQuestion`:
+
+- "FLOPs of one `<Op>` node. I propose `<formula, e.g. 2 * x.numel>` (`<source: analogous op / reference>`). Confirm, give the formula, or answer 'no counting convention' with the reason (e.g. 'rows follow routing offsets', 'opaque custom op')."
+  - Formula → insert `node_flops_overload.txt` with the formula in place of the TODO stub, the `logicalFlops` case, and the `work_model_test_case.txt` entry with the hand-computed expected value for its test shapes.
+  - No counting convention → only the `NO_COUNTING_CONVENTION` entry from `logical_flops_case.txt`, with the reason as its comment. Graphs holding the op get no `graph.flops` and no `tflops` metric; say so in the report.
+- "Which operands' **contents**, not shapes, decide how much work the op does (valid lengths, page tables, block masks, routing offsets)? I propose `<list or none>`. An operand read densely whatever its values (an additive bias, a dropout seed) does not count."
+  - Each listed operand gets `work_data_dependent: true` in its YAML `tensor_fields` / `tensor_array_fields` entry and `(cache_uid, work_data_dependent)` in the schema. If the answer changes either, update both, re-run Step 5, and re-apply `fbs_tensor_fields.txt` (Step 7), which regenerates `node_operands_generated.h`.
+  - A required work-data-dependent operand leaves the work unknown on every graph (`logicalFlops` returns `std::nullopt` whenever such an operand is present): pick "no counting convention" for the FLOPs, as `MoeGroupedMatmul` does.
 
 Do NOT ask the user about any other fields or decisions — derive everything else from the schema, existing code, and conventions.
 
@@ -514,6 +535,19 @@ Before building, do a quick self-check:
 - Every switch case references a valid enum constant
 - CMake lists include all new source/test files
 
+**Work-model oracle** (local, before the build). Each check must pass; fix the cause, do not skip it:
+- `node_operands_generated.h` is regenerated for the current schemas: from the repository root, `pre-commit run node-operands-hipdnn --all-files` passes. The hook rewrites `$HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h`; a "files were modified by this hook" failure means it was stale, so keep the rewrite and run the hook again until it passes. Do the same for `cache-key-hipdnn` (`cachekey_generated.h`). Without `pre-commit`, run `python $HIPDNN_SRC/scripts/gen_node_operands.py` and `python $HIPDNN_SRC/scripts/gen_cache_key.py`.
+- The regenerated header visits the new op, and its `visit()` passes `true` as the last `visitor.tensor(...)` argument for exactly the agreed work-data-dependent operands:
+  ```bash
+  grep -n "<Op>Attributes" $HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h
+  ```
+  Its `static_assert` against `NodeAttributes::MAX` names the last union member; it must be the current last member of `NodeAttributes` in `graph.fbs`.
+- The op has exactly one `logicalFlops` decision:
+  ```bash
+  grep -n "NodeAttributes::<Op>Attributes" $HIPDNN_SRC/plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp
+  ```
+  shows either a `case` in `logicalFlops()` (with a `nodeFlops` overload that no longer returns the stub's `std::nullopt`, and an entry in `TestEngineFeatures.cpp`'s `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` with a non-zero expected value) or a `NO_COUNTING_CONVENTION` entry with its reason, never both.
+
 Build the project. The exact `cmake` invocation depends on whether you're in a standalone hipDNN checkout or a `rocm-libraries` superbuild — see [`docs/Building.md`](../../../../../docs/Building.md) for the canonical commands. In an existing build directory:
 
 ```bash
@@ -522,6 +556,7 @@ ninja 2>&1 | tail -100
 ```
 
 If the build fails, **read the errors and fix them**. Common issues:
+- **`node_operands_generated.h is stale: rerun scripts/gen_node_operands.py`** (`static_assert`) → the schema changed after the header was generated. Run the `node-operands-hipdnn` hook and commit the header.
 - **Missing converter function in `Types.hpp`** → insert from `mode_frontend_plumbing_<field>.txt`. Includes both `toBackend<Foo>Mode` and `fromHipdnn<Foo>Mode` — the unpacker calls the inverse.
 - **Missing `#include`** → add it.
 - **Wrong attribute name (missing or extra `_EXT` suffix)** → check `HipdnnBackendAttributeName.h` against the YAML's `attr_suffix` per field. Re-derive per the cuDNN parity rule in Step 3a.
@@ -535,6 +570,8 @@ After the build succeeds, run unit tests:
 ninja unit-check 2>&1 | tail -50
 ```
 
+Then run `hipdnn_plugin_sdk_tests --gtest_filter='TestEngineFeatures.*'` from the build tree. `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention` fails for a `NodeAttributes` member with neither a counted case nor a `NO_COUNTING_CONVENTION` entry, and for a counted entry whose expected FLOPs do not match. `TestEngineFeatures.cpp` is compiled only with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`; if the build dir has it off, reconfigure with it on or report the test as not run.
+
 If tests fail, diagnose and fix. Do not report success with failing tests.
 
 ### 14. Report Results
@@ -542,6 +579,7 @@ If tests fail, diagnose and fix. Do not report success with failing tests.
 Summarize what was generated and placed:
 - List all files created/modified
 - **Surface the cuDNN parity decisions made and their source** — for each YAML name field (`enum_name`, `attr_suffix`, `compute_data_type_attr`, `operation_type_enum`), state either the matching cuDNN constant or "no equivalent — `_EXT` applied". When the source was the cudnn-frontend web-check, include the GitHub URL fetched and the snippet/line referenced (per Step 3a-i). This lets review verify Step 3a was applied correctly and spot any misread.
+- **State the work-model decision** (Step 11, Class C): the FLOP formula and the `EngineFeatures.hpp` lines it landed on, or the `NO_COUNTING_CONVENTION` entry and its reason (graphs holding the op then have no `graph.flops` and no `tflops` metric); the operands annotated `work_data_dependent`; and the result of the Step 13 work-model oracle.
 - Note any stubs that still need implementation (custom infer_properties, custom validation)
 - Note any fragment insertions that need manual verification (enum value ranges, CMake)
 - Confirm build passed and tests passed

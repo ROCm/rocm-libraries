@@ -57,13 +57,14 @@
 
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <type_traits>
 #include <vector>
 
 using namespace rocsparse_ut;
 
 // rocsparse_Xcsr2ell_strided_batched is defined (extern "C") in
 // library/src/conversion/rocsparse_csr2ell_strided_batched.cpp but declared in no
-// header, public or internal. Declare the one overload under test here; the
+// header, public or internal. Declare the overloads under test here; the
 // defining translation unit is compiled into this binary.
 extern "C" rocsparse_status rocsparse_scsr2ell_strided_batched(rocsparse_handle handle,
                                                                rocsparse_int    batch_count,
@@ -93,10 +94,28 @@ extern "C" rocsparse_status rocsparse_dcsr2ell_strided_batched(rocsparse_handle 
                                                                rocsparse_int  ell_val_stride,
                                                                rocsparse_int* ell_col_ind);
 
+#define CSR2ELL_STRIDED_BATCHED_DECL(NAME, T)                                  \
+    extern "C" rocsparse_status NAME(rocsparse_handle          handle,         \
+                                     rocsparse_int             batch_count,    \
+                                     rocsparse_int             m,              \
+                                     const rocsparse_mat_descr csr_descr,      \
+                                     const T*                  csr_val,        \
+                                     rocsparse_int             csr_val_stride, \
+                                     const rocsparse_int*      csr_row_ptr,    \
+                                     const rocsparse_int*      csr_col_ind,    \
+                                     const rocsparse_mat_descr ell_descr,      \
+                                     rocsparse_int             ell_width,      \
+                                     T*                        ell_val,        \
+                                     rocsparse_int             ell_val_stride, \
+                                     rocsparse_int*            ell_col_ind)
+CSR2ELL_STRIDED_BATCHED_DECL(rocsparse_ccsr2ell_strided_batched, rocsparse_float_complex);
+CSR2ELL_STRIDED_BATCHED_DECL(rocsparse_zcsr2ell_strided_batched, rocsparse_double_complex);
+#undef CSR2ELL_STRIDED_BATCHED_DECL
+
 namespace
 {
-    // Typed front end for the two overloads declared above, so the body of the
-    // test is written once and instantiated per precision.
+    // Typed front end for the overloads declared above, so the body of the test is
+    // written once and instantiated per precision.
     template <typename T>
     rocsparse_status csr2ell_strided_batched(rocsparse_handle          handle,
                                              rocsparse_int             batch_count,
@@ -110,66 +129,42 @@ namespace
                                              rocsparse_int             ell_width,
                                              T*                        ell_val,
                                              rocsparse_int             ell_val_stride,
-                                             rocsparse_int*            ell_col_ind);
-
-    template <>
-    rocsparse_status csr2ell_strided_batched<float>(rocsparse_handle          handle,
-                                                    rocsparse_int             batch_count,
-                                                    rocsparse_int             m,
-                                                    const rocsparse_mat_descr csr_descr,
-                                                    const float*              csr_val,
-                                                    rocsparse_int             csr_val_stride,
-                                                    const rocsparse_int*      csr_row_ptr,
-                                                    const rocsparse_int*      csr_col_ind,
-                                                    const rocsparse_mat_descr ell_descr,
-                                                    rocsparse_int             ell_width,
-                                                    float*                    ell_val,
-                                                    rocsparse_int             ell_val_stride,
-                                                    rocsparse_int*            ell_col_ind)
+                                             rocsparse_int*            ell_col_ind)
     {
-        return rocsparse_scsr2ell_strided_batched(handle,
-                                                  batch_count,
-                                                  m,
-                                                  csr_descr,
-                                                  csr_val,
-                                                  csr_val_stride,
-                                                  csr_row_ptr,
-                                                  csr_col_ind,
-                                                  ell_descr,
-                                                  ell_width,
-                                                  ell_val,
-                                                  ell_val_stride,
-                                                  ell_col_ind);
-    }
-
-    template <>
-    rocsparse_status csr2ell_strided_batched<double>(rocsparse_handle          handle,
-                                                     rocsparse_int             batch_count,
-                                                     rocsparse_int             m,
-                                                     const rocsparse_mat_descr csr_descr,
-                                                     const double*             csr_val,
-                                                     rocsparse_int             csr_val_stride,
-                                                     const rocsparse_int*      csr_row_ptr,
-                                                     const rocsparse_int*      csr_col_ind,
-                                                     const rocsparse_mat_descr ell_descr,
-                                                     rocsparse_int             ell_width,
-                                                     double*                   ell_val,
-                                                     rocsparse_int             ell_val_stride,
-                                                     rocsparse_int*            ell_col_ind)
-    {
-        return rocsparse_dcsr2ell_strided_batched(handle,
-                                                  batch_count,
-                                                  m,
-                                                  csr_descr,
-                                                  csr_val,
-                                                  csr_val_stride,
-                                                  csr_row_ptr,
-                                                  csr_col_ind,
-                                                  ell_descr,
-                                                  ell_width,
-                                                  ell_val,
-                                                  ell_val_stride,
-                                                  ell_col_ind);
+        rocsparse_status (*f)(rocsparse_handle,
+                              rocsparse_int,
+                              rocsparse_int,
+                              const rocsparse_mat_descr,
+                              const T*,
+                              rocsparse_int,
+                              const rocsparse_int*,
+                              const rocsparse_int*,
+                              const rocsparse_mat_descr,
+                              rocsparse_int,
+                              T*,
+                              rocsparse_int,
+                              rocsparse_int*);
+        if constexpr(std::is_same_v<T, float>)
+            f = rocsparse_scsr2ell_strided_batched;
+        else if constexpr(std::is_same_v<T, double>)
+            f = rocsparse_dcsr2ell_strided_batched;
+        else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
+            f = rocsparse_ccsr2ell_strided_batched;
+        else
+            f = rocsparse_zcsr2ell_strided_batched;
+        return f(handle,
+                 batch_count,
+                 m,
+                 csr_descr,
+                 csr_val,
+                 csr_val_stride,
+                 csr_row_ptr,
+                 csr_col_ind,
+                 ell_descr,
+                 ell_width,
+                 ell_val,
+                 ell_val_stride,
+                 ell_col_ind);
     }
 
     template <typename T>
@@ -183,6 +178,16 @@ namespace
     const char* precision_name<double>()
     {
         return "double";
+    }
+    template <>
+    const char* precision_name<rocsparse_float_complex>()
+    {
+        return "float complex";
+    }
+    template <>
+    const char* precision_name<rocsparse_double_complex>()
+    {
+        return "double complex";
     }
 }
 
@@ -206,7 +211,13 @@ namespace
     template <typename T>
     T batch_value(int64_t batch, int64_t row)
     {
-        return static_cast<T>(row == 0 ? (batch + 1) : -(batch + 1));
+        const float re = static_cast<float>(row == 0 ? (batch + 1) : -(batch + 1));
+        if constexpr(std::is_same_v<
+                         T,
+                         rocsparse_float_complex> || std::is_same_v<T, rocsparse_double_complex>)
+            return T(re, static_cast<float>(row + 2));
+        else
+            return static_cast<T>(re);
     }
 
     // RAII for a mat descr.
@@ -364,6 +375,8 @@ TEST_F(Csr2EllStridedBatched, grid_stride_at_first_clamped_batch_count)
 
     run<float>(grid_y_cap + 1, csr_val_stride, ell_val_stride);
     run<double>(grid_y_cap + 1, csr_val_stride, ell_val_stride);
+    run<rocsparse_float_complex>(grid_y_cap + 1, csr_val_stride + 3, ell_val_stride + 1);
+    run<rocsparse_double_complex>(grid_y_cap + 1, csr_val_stride, ell_val_stride + 2);
 }
 
 // Comfortably past the cap, so the tail [65535, 70000) exercises the stride

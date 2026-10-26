@@ -49,6 +49,8 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimGraphSupportCheck.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimKnobWrapper.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimNoteTriage.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimNoteTriageTable.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimEngineFilters.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimPlanSurface.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimLogging.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimUtils.cpp>
@@ -57,6 +59,7 @@ add_executable(
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
+    TestEngineQueries.cpp
     TestError.cpp
     TestFrontendLogging.cpp
     TestGraph.cpp
@@ -117,8 +120,10 @@ add_executable(
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
+# detail/EngineQueries.hpp decodes FlatBuffers pages; the frontend itself does not link the SDK.
 target_link_libraries(
     hipdnn_frontend_tests GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk
+    hipdnn_flatbuffers_sdk
 )
 clang_tidy_check(hipdnn_frontend_tests)
 

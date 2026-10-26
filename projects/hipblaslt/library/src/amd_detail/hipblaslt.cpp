@@ -670,6 +670,27 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescSetAttribute");
 
+    // No kernel applies an aux scale, so refuse one rather than leave E unscaled.
+    if(matmulAttr == HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER && buf != nullptr
+       && sizeInBytes >= sizeof(void*))
+    {
+        const void* scaleAux = nullptr;
+        memcpy(&scaleAux, buf, sizeof(void*));
+        if(scaleAux != nullptr)
+        {
+            log_error(__func__,
+                      "MatmulDesc: an epilogue aux scale is not supported and is not applied",
+                      "attribute",
+                      "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER",
+                      "scale_aux",
+                      scaleAux,
+                      "size_in_bytes",
+                      sizeInBytes);
+            rocblaslt::Debug::Instance().markerStop();
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_matmul_desc_set_attribute((rocblaslt_matmul_desc)matmulDesc,
                                             (rocblaslt_matmul_desc_attributes)matmulAttr,

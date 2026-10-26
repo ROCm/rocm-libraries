@@ -54,7 +54,9 @@ struct FastCheckMatrix
     int64_t     stride = 0; // distance between batches, in elements
 };
 
-// D = alpha * diag(scale_alpha_vec) * op(A) * op(B) + beta * C + bias * 1^T, per batch.
+// D = scale_d * (alpha * diag(scale_alpha_vec .* scale_a) * op(A) * op(B) * diag(scale_b)
+//                + beta * scale_c * C + bias * 1^T), per batch. scale_a is one value or one per
+// row of D, and scale_b one value or one per column. Every scale must be an integer.
 // Dimensions and batch_count must be nonnegative. If M, N or batch_count is zero,
 // there are no output elements and verification does not read any operands.
 struct FastCheckProblem
@@ -84,6 +86,14 @@ struct FastCheckProblem
     hipDataType bias_type   = HIP_R_32F;
     int64_t     bias_stride = 0; // distance between per-batch bias vectors, in elements
 
+    const void* scale_a        = nullptr; // one value, or length M when scale_a_vector
+    bool        scale_a_vector = false;
+    const void* scale_b        = nullptr; // one value, or length N when scale_b_vector
+    bool        scale_b_vector = false;
+    hipDataType scale_ab_type  = HIP_R_32F;
+    double      scale_c        = 1;
+    double      scale_d        = 1;
+
     uint64_t seed = 0; // selects the random probe vectors
 
     // D's layout on the device, used only to report element offsets in failure messages.
@@ -104,13 +114,24 @@ bool fast_check_supported_type(hipDataType type, std::string* why = nullptr);
 // The parts of the check that depend only on the inputs: probe vectors and the expected probe
 // sums of D. Compute once and pass to fast_check_result for every solution run on the same
 // inputs. problem.D supplies only its type here; its data is not read.
+//
+// It also bounds, from the actual inputs, the largest magnitude the GPU's accumulator can hold
+// at any point: max_partial bounds any partial sum over any subset of K, the form split-K,
+// Stream-K and every summation order take, and max_result bounds every finished element of D
+// before rounding to D's type. When either reaches the range the compute type holds exactly,
+// the result depends on summation order and status fails before any kernel runs.
 struct FastCheckExpected
 {
-    FastCheckResult                    status; // fails on unsupported or non-integer inputs
+    FastCheckResult status; // fails on unsupported, non-integer or inexact inputs
+    double          max_partial = 0; // bounds |partial sum|, scaled by alpha and scale or not
+    double          max_result  = 0; // bounds |element of D| before rounding to D's type
     std::vector<uint64_t>              row_probe; // r, length N
     std::vector<uint64_t>              col_probe; // t, length M
-    std::vector<int64_t>               scale; // scaleAlpha_vector, or ones; length M
-    std::vector<std::vector<int64_t>>  bias; // per batch, length M
+    std::vector<int64_t>               scale; // scaleAlpha_vector .* scale_a, or ones; length M
+    std::vector<int64_t>               col_scale; // scale_b, or ones; length N
+    int64_t                            alpha = 0; // alpha * scale_d
+    int64_t                            beta  = 0; // beta * scale_c * scale_d
+    std::vector<std::vector<int64_t>>  bias; // per batch, length M, times scale_d
     std::vector<std::vector<uint64_t>> row_sums; // per batch, expected D * r
     std::vector<std::vector<uint64_t>> col_sums; // per batch, expected t^T * D
 };
@@ -135,6 +156,59 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  problem,
 
 // The probe vector entry for the given seed and index, in [1, kFastCheckModulus).
 uint64_t fast_check_probe(uint64_t seed, uint64_t index);
+
+// Returns why a case that needs device_bytes of device memory and host_bytes of host memory
+// cannot run here, or an empty string when both fit. Device memory is what hipMemGetInfo reports
+// free; host memory is MemAvailable from /proc/meminfo, which counts reclaimable page cache,
+// unlike sysinfo's freeram. Before reporting a shortfall, releases idle client-pool buffers and
+// queries again, since those buffers otherwise hide memory available to the next case.
+std::string fast_check_memory_shortfall(size_t device_bytes, size_t host_bytes);
+
+// Reads element i of a host buffer of the given type as a double.
+double fast_check_load(const void* data, hipDataType type, size_t i);
+
+// Activations fast_check checks exactly. GELU and SiLU have no exact integer form.
+enum class FastCheckActivation
+{
+    none,
+    relu, // max(x, 0)
+    clamp, // max(arg1, min(x, arg2))
+};
+
+// With an activation, D is not linear in the inputs, so it is checked through E, the
+// pre-activation result the kernel also writes: E is verified like D (with scale_e in place of
+// scale_d), and then every element of D must equal scale_d * act(E / scale_e), rounded to D's
+// type. Copies the M x N x batch regions of D and E to the host. Sets *amax, when given, to the
+// largest |act(E / scale_e)|, the value amaxD must hold. Fails, and sets *amax to NaN, when an
+// element of E is outside the range its type stores exactly.
+FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
+                                             const FastCheckMatrix& e,
+                                             int64_t                batch_count,
+                                             double                 scale_d,
+                                             double                 scale_e,
+                                             FastCheckActivation    act,
+                                             double                 arg1,
+                                             double                 arg2,
+                                             hipStream_t            stream,
+                                             double*                amax);
+
+// The largest |element| of a verified device D divided by scale_d, the value amaxD must hold
+// without an activation, or NaN when D holds values outside the range its type stores exactly
+// or cannot be copied.
+// Copies D's M x N x batch region to the host.
+double fast_check_amax_device(const FastCheckMatrix& d,
+                              int64_t                batch_count,
+                              double                 scale_d,
+                              hipStream_t            stream);
+
+// Checks the bias gradient a GEMM writes for one batch, exactly from the inputs: source 'a'
+// (BGRADA) sums each row of op(A) over K, and 'b' (BGRADB) each column of op(B). bias holds the
+// kernel's output on the host, in bias_type. Refuses non-integer inputs or a reduction whose
+// absolute-sum bound reaches the compute type's exact integer limit.
+FastCheckResult fast_check_bias_gradient(const FastCheckProblem& problem,
+                                         char                    source,
+                                         const void*             bias,
+                                         hipDataType             bias_type);
 
 // Pass/fail for each solution and iteration of a test, so the end of the test can say which
 // solutions failed and on which iterations. Each defect class lives in a few of the hundreds of

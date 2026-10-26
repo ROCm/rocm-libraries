@@ -44,8 +44,8 @@ def _base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
-    once there is enough work to fill it (``nqb*Hq*B >= num_persistent``), and
-    non-tile-multiple self-attention lengths take the on-chip ragged path.
+    at D128, and non-tile-multiple self-attention lengths take the on-chip
+    ragged path.
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -58,6 +58,9 @@ def _base_spec(req: AttentionRequest):
         _tuned_waves_per_eu,
     )
 
+    # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
+    # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
+    # be defending against an input shape that cannot reach this function.
     if req.arch != "gfx942":
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
@@ -71,8 +74,9 @@ def _base_spec(req: AttentionRequest):
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
-    nqb = (sq + bm - 1) // bm
-    work = nqb * int(req.nhead_q) * int(req.batch)
+    # The persistent grid measured ahead at D128 for every batch and mask; at
+    # D64 the non-persistent grid did.
+    persistent = head_size == 128
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -84,12 +88,14 @@ def _base_spec(req: AttentionRequest):
         dtype=dtype,
         block_m=bm,
         block_n=bn,
-        persistent=work >= _GFX942_NUM_PERSISTENT,
+        persistent=persistent,
         num_persistent=_GFX942_NUM_PERSISTENT,
         persist_decode="auto",
         ragged=ragged,
         sliding_window=int(req.sliding_window),
+        use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
+        emit_lse=bool(req.emit_lse),
     )
 
 
@@ -125,11 +131,11 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         variant_id=_VARIANT_ID,
         base_spec=_base_spec,
         supports=_supports,
-        # Dense: causal + sliding-window; no sinks or moving bottom-right
-        # diagonal. Head size stays out -- D64/D128 coverage is
-        # ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window"}),
-        # _base_spec picks these from the work size and dtype/head size.
+        # Dense: causal, sliding-window and sinks (alone or combined), optional
+        # LSE output; no moving bottom-right diagonal. Head size stays out:
+        # D64/D128 coverage is ``supports_attention_dense``'s call.
+        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        # _base_spec picks these from the dtype and head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )
 

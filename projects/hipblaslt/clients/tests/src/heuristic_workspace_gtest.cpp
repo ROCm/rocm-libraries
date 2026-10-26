@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // The C++ heuristic query must apply a workspace limit from 2 GiB to UINT32_MAX as the C query
-// does. Kernels address the workspace with 32-bit offsets, so both APIs reject anything larger.
+// does. Kernels address the workspace with 32-bit offsets, so both APIs clamp anything larger to
+// UINT32_MAX. Callers pass SIZE_MAX to mean "no limit", so a larger value must not be an error.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -40,7 +41,7 @@ namespace
         return out;
     }
 
-    // The buffers are never read: only the heuristic queries run.
+    // The buffers hold no data: the tests check statuses and heuristic results only.
     class HeuristicWorkspaceLimit : public ::testing::Test
     {
     protected:
@@ -173,19 +174,52 @@ namespace
         }
     }
 
-    // Every entry point that takes a workspace size or limit rejects it before selecting or
-    // launching a kernel, so no solution library is needed.
-    TEST_F(HeuristicWorkspaceLimit, smoke_RejectsWorkspaceAboveUint32Max)
+    // The preference stores a limit above UINT32_MAX as UINT32_MAX, so no solution library is
+    // needed.
+    TEST_F(HeuristicWorkspaceLimit, smoke_PreferenceClampsLimitAboveUint32Max)
     {
         for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
         {
             SCOPED_TRACE(limit);
-            EXPECT_EQ(setLimit(limit), HIPBLAS_STATUS_INVALID_VALUE);
+            hipblasLtMatmulPreference_t pref = nullptr;
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit)),
+                      HIPBLAS_STATUS_SUCCESS);
+            uint64_t stored  = 0;
+            size_t   written = 0;
+            EXPECT_EQ(
+                hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                      HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                      &stored,
+                                                      sizeof(stored),
+                                                      &written),
+                HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(stored, kUint32Max);
+            hipblasLtMatmulPreferenceDestroy(pref);
+        }
+    }
 
-            std::vector<hipblasLtMatmulHeuristicResult_t> results;
-            EXPECT_EQ(cppHeuristic(limit, results), HIPBLAS_STATUS_INVALID_VALUE);
-            EXPECT_TRUE(results.empty());
+    // Every entry point that takes a workspace size or limit treats a value above UINT32_MAX
+    // as UINT32_MAX.
+    TEST_F(HeuristicWorkspaceLimit, smoke_ClampsWorkspaceAboveUint32Max)
+    {
+        // Results at the cap are the reference. Solutions that fit the real buffer are run.
+        std::vector<hipblasLtMatmulHeuristicResult_t> capped, fitting;
+        if(cHeuristic(kUint32Max, capped) != HIPBLAS_STATUS_SUCCESS || capped.empty()
+           || cHeuristic(kWorkspace, fitting) != HIPBLAS_STATUS_SUCCESS || fitting.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
 
+        for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
+        {
+            SCOPED_TRACE(limit);
+            std::vector<hipblasLtMatmulHeuristicResult_t> c, cpp;
+            ASSERT_EQ(cHeuristic(limit, c), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(summary(c), summary(capped));
+            ASSERT_EQ(cppHeuristic(limit, cpp), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(summary(cpp), summary(capped));
+
+            // The algo's own workspace limit keeps the kernel inside the real buffer.
             EXPECT_EQ(hipblasLtMatmul(handle,
                                       desc,
                                       &alpha,
@@ -198,11 +232,12 @@ namespace
                                       layoutD,
                                       d,
                                       layoutD,
-                                      nullptr,
+                                      &fitting.front().algo,
                                       ws,
                                       limit,
                                       nullptr),
-                      HIPBLAS_STATUS_INVALID_VALUE);
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -214,8 +249,8 @@ namespace
                                      HIPBLAS_COMPUTE_32F);
             ASSERT_EQ(setProblem(gemm), HIPBLAS_STATUS_SUCCESS);
             gemm.setMaxWorkspaceBytes(limit);
-            hipblasLtMatmulAlgo_t algo{};
-            EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_INVALID_VALUE);
+            hipblasLtMatmulAlgo_t algo = fitting.front().algo;
+            EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_SUCCESS);
         }
     }
 } // namespace

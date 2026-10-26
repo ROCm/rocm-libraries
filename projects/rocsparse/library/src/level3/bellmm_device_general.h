@@ -28,6 +28,9 @@
 
 namespace rocsparse
 {
+    // col_offset is the first dense column of the panel this invocation handles. The
+    // kernel wrapper supplies it from a grid-stride loop, so a grid.y clamped to the
+    // hardware limit of 65535 still covers every column of B and C.
     template <rocsparse_int BELL_BLOCK_DIM,
               rocsparse_int BLK_SIZE_Y,
               typename T,
@@ -35,7 +38,8 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void bellmm_general_blockdim_device(rocsparse_operation trans_A,
+    ROCSPARSE_DEVICE_ILF void bellmm_general_blockdim_device(I                   col_offset,
+                                                             rocsparse_operation trans_A,
                                                              rocsparse_operation trans_B,
                                                              I                   Mb,
                                                              I                   N,
@@ -54,9 +58,10 @@ namespace rocsparse
                                                              rocsparse_index_base idx_base)
     {
         // Each thread block is responsible for one block-row of A (hipBlockIdx_x) and a tile of
-        // BLK_SIZE_Y columns of the dense matrices (hipBlockIdx_y). Within the block, hipThreadIdx_x
-        // selects the row inside the A block (stepping by BELL_BLOCK_DIM to cover block dimensions
-        // larger than the thread block) and hipThreadIdx_y selects the dense column.
+        // BLK_SIZE_Y columns of the dense matrices starting at col_offset. Within the block,
+        // hipThreadIdx_x selects the row inside the A block (stepping by BELL_BLOCK_DIM to cover
+        // block dimensions larger than the thread block) and hipThreadIdx_y selects the dense
+        // column.
         const I block_row = hipBlockIdx_x;
         if(block_row >= Mb)
         {
@@ -71,7 +76,7 @@ namespace rocsparse
         const I ell_block_width = bell_cols / block_dim;
 
         // Dense column handled by this thread.
-        const I n = hipThreadIdx_y + hipBlockIdx_y * BLK_SIZE_Y;
+        const I n = hipThreadIdx_y + col_offset;
 
         for(I x = 0; x < block_dim; x += BELL_BLOCK_DIM)
         {

@@ -222,6 +222,40 @@ void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
                                            rocke_value_t* smem_dst,
                                            const rocke_ctl_staged_t* staged);
 
+/* Address-prefetch split (Python plan_slots / slot_offsets / issue_slots).
+ *
+ * Lets a K loop carry each chunk's byte offset across iterations instead of
+ * deriving it right before the read. A staged buffer doubles as the slot list:
+ * plan_slots fills row/col (v = NULL), issue_slots fills v, and store_lds then
+ * consumes it unchanged. */
+
+/* CoalescedTileLoader.plan_slots(): decode every per-thread chunk's tile-local
+ * (row, col) into `slots` (count = vecs_per_thread, v left NULL). */
+void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
+                                            const rocke_coalesced_tile_loader_t* self,
+                                            rocke_value_t* tid,
+                                            rocke_ctl_staged_t* slots);
+
+/* CoalescedTileLoader.slot_offsets(): one byte voffset per slot, invalid chunks
+ * redirected to oob_sentinel. Writes slots->count values into out_offsets.
+ * Buffer-resource loaders only. */
+void rocke_coalesced_tile_loader_slot_offsets(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              const rocke_ctl_staged_t* slots,
+                                              rocke_loads_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t** out_offsets);
+
+/* CoalescedTileLoader.issue_slots(): one buffer read per slot from `offsets`
+ * (slots->count entries). Copies row/col from `slots` into `staged` and fills
+ * each staged v; `staged` may alias `slots`. */
+void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* rsrc,
+                                             const rocke_ctl_staged_t* slots,
+                                             rocke_value_t* const* offsets,
+                                             rocke_ctl_staged_t* staged);
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */

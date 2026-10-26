@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -30,24 +31,64 @@ _NOTE_FIELDS = {
     "sgpr_spill": r"\.sgpr_spill_count:\s+(\d+)",
     "lds_bytes": r"\.group_segment_fixed_size:\s+(\d+)",
     "max_flat_workgroup_size": r"\.max_flat_workgroup_size:\s+(\d+)",
+    "wave_size": r"\.wavefront_size:\s+(\d+)",
 }
 
 # The code object records the ISA it was built for
 # (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`). That beats any caller-supplied
-# arch: the occupancy model must follow the binary, not a stale CLI flag.
-_TARGET_FIELD = r"amdhsa\.target:\s*\S*?--(gfx[0-9a-z]+)"
+# arch: the occupancy model must follow the binary, not a stale CLI flag. The
+# processor name may be a generic target (`gfx11-generic`); feature suffixes
+# (`:xnack-`) are not part of it.
+_TARGET_FIELD = r"amdhsa\.target:\s*\S*?--(gfx[0-9a-z-]+)"
 
-# Minimal per-arch caps for the coarse VGPR-limited occupancy estimate.
-# vgpr_per_simd = physical VGPRs per SIMD; granularity = allocation quantum.
-_CAPS = {
-    "rdna": {"vgpr_per_simd": 1536, "granularity": 24, "max_waves_per_simd": 16},
-    "cdna": {"vgpr_per_simd": 512, "granularity": 16, "max_waves_per_simd": 8},
+
+@dataclass(frozen=True)
+class _VgprFile:
+    """One SIMD's VGPR file, as the compiler's occupancy calculation sees it.
+
+    The waves resident on a SIMD share ``vgprs_per_simd`` registers. Each wave's
+    VGPR count is rounded up to a multiple of ``granule``, so a kernel using ``v``
+    VGPRs fits ``vgprs_per_simd // round_up(v, granule)`` waves, capped at
+    ``max_waves_per_simd``. The numbers hold for code built at ``wave_size``.
+    """
+
+    wave_size: int
+    vgprs_per_simd: int
+    granule: int
+    max_waves_per_simd: int
+
+
+# The register file differs between processors of one family (gfx1100 has 1.5x the
+# VGPRs of gfx1102), so the model is keyed by processor, never by family. A generic
+# target takes the values of its smallest member: its code runs on every member,
+# and the compiler budgets occupancy for that member. These RDNA values match the
+# compiler's own occupancy report (llc's "; Occupancy:" comment) for every VGPR
+# count from 1 to 256 at wave32; test_occupancy.py pins them and re-checks them
+# against the local llc. Wave64 code on these processors is not modelled. The CDNA
+# register files come from ``_ARCH_CAPS`` below (see ``_VGPR_FILES``).
+_LARGE_RDNA_VGPR_FILE = _VgprFile(
+    wave_size=32, vgprs_per_simd=1536, granule=24, max_waves_per_simd=16
+)
+_RDNA_VGPR_FILE = _VgprFile(
+    wave_size=32, vgprs_per_simd=1024, granule=16, max_waves_per_simd=16
+)
+
+_RDNA_VGPR_FILES = {
+    "gfx1100": _LARGE_RDNA_VGPR_FILE,
+    "gfx1101": _LARGE_RDNA_VGPR_FILE,
+    "gfx1102": _RDNA_VGPR_FILE,
+    "gfx1103": _RDNA_VGPR_FILE,
+    "gfx1150": _RDNA_VGPR_FILE,
+    "gfx1151": _LARGE_RDNA_VGPR_FILE,
+    "gfx1152": _RDNA_VGPR_FILE,
+    "gfx1153": _RDNA_VGPR_FILE,
+    "gfx1154": _RDNA_VGPR_FILE,
+    "gfx11-generic": _RDNA_VGPR_FILE,
+    "gfx1200": _LARGE_RDNA_VGPR_FILE,
+    "gfx1201": _LARGE_RDNA_VGPR_FILE,
+    "gfx12-generic": _LARGE_RDNA_VGPR_FILE,
+    "gfx1250": _RDNA_VGPR_FILE,
 }
-
-
-def _family(arch: str) -> str:
-    m = re.match(r"gfx(\d+)", arch or "")
-    return "cdna" if (m and m.group(1).startswith("9")) else "rdna"
 
 
 def _readelf() -> Optional[str]:
@@ -89,25 +130,38 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
     return fields
 
 
-def _occupancy_estimate(vgpr: int, arch: str) -> Optional[int]:
-    """Coarse VGPR-limited waves/SIMD (relative ranking, not absolute)."""
-    caps = dict(_CAPS.get(_family(arch), {}))
-    if (arch or "").split(":", 1)[0] == "gfx90a":
-        caps["granularity"] = 8
-    if not caps or vgpr <= 0:
+def _occupancy_estimate(vgpr: int, arch: str, wave_size: int) -> Optional[int]:
+    """Coarse VGPR-limited waves/SIMD (relative ranking, not absolute).
+
+    ``arch`` is a processor name (feature suffixes such as ``:xnack-`` are
+    ignored) and ``wave_size`` the wave size the code was built for. Raises
+    ``ValueError`` for a processor or wave size the model has no data for, rather
+    than guessing from a neighbouring part. Returns ``None`` when ``vgpr`` is 0.
+    """
+    processor = (arch or "").split(":", 1)[0]
+    vgpr_file = _VGPR_FILES.get(processor)
+    if vgpr_file is None:
+        raise ValueError(
+            f"no occupancy model for processor {processor!r}; "
+            f"the VGPR file is recorded for: {', '.join(_VGPR_FILES)}"
+        )
+    if wave_size != vgpr_file.wave_size:
+        raise ValueError(
+            f"no occupancy model for wave{wave_size} code on {processor}; "
+            f"its VGPR file is recorded for wave{vgpr_file.wave_size} code"
+        )
+    if vgpr <= 0:
         return None
-    alloc = -(-vgpr // caps["granularity"]) * caps["granularity"]  # round up
-    if alloc <= 0:
-        return caps["max_waves_per_simd"]
-    return min(caps["vgpr_per_simd"] // alloc, caps["max_waves_per_simd"])
+    alloc = _align_up(vgpr, vgpr_file.granule)
+    return min(vgpr_file.vgprs_per_simd // alloc, vgpr_file.max_waves_per_simd)
 
 
 def _align_up(n: int, gran: int) -> int:
     return ((n + gran - 1) // gran) * gran
 
 
-# Full per-arch caps for the multi-limiter model below (a superset of the VGPR-only
-# ``_CAPS`` above). Values lifted from the ``probe_occupancy`` tool and the arch
+# Full per-arch caps for the CDNA multi-limiter model below (adds the AGPR, LDS and
+# workgroup limiters to the VGPR file). Values lifted from the ``probe_occupancy`` tool and the arch
 # docs. ``combined_reg_pool`` = arch VGPRs and accumulator VGPRs share one register
 # file, so occupancy is set by their SUM (CDNA4/gfx950), not the tighter of two
 # separate pools (CDNA3/gfx942, CDNA2/gfx90a).
@@ -150,6 +204,22 @@ _ARCH_CAPS = {
         simds_per_cu=4,
         combined_reg_pool=False,
     ),
+}
+
+
+# Every processor the VGPR-limited estimate covers: the RDNA files above, and each
+# CDNA processor's VGPR file as recorded in ``_ARCH_CAPS``.
+_VGPR_FILES = {
+    **{
+        processor: _VgprFile(
+            wave_size=64,
+            vgprs_per_simd=caps["vgpr_per_simd"],
+            granule=caps["granularity"],
+            max_waves_per_simd=caps["waves_per_simd"],
+        )
+        for processor, caps in _ARCH_CAPS.items()
+    },
+    **_RDNA_VGPR_FILES,
 }
 
 
@@ -255,8 +325,12 @@ def resources(hsaco_bytes: bytes, arch: str) -> dict:
 
     `arch` is only a fallback: when the code object names its own target, that wins,
     so passing a stale `--arch` can no longer produce a wave count for the wrong
-    family. `target_arch` reports what was actually used, so a caller can flag the
-    disagreement.
+    processor. `target_arch` reports what was actually used, so a caller can flag
+    the disagreement.
+
+    Raises ``ValueError`` when the occupancy model has no data for that processor
+    or for the code object's wave size, or when the notes do not record the wave
+    size.
     """
     f = parse_notes(hsaco_bytes)
     if not f:
@@ -277,5 +351,10 @@ def resources(hsaco_bytes: bytes, arch: str) -> dict:
         "source": "elf_notes",
         "target_arch": effective_arch,
     }
-    res["occupancy"] = _occupancy_estimate(res["vgpr"], effective_arch)
+    if "wave_size" not in f:
+        raise ValueError(
+            "the code object's notes do not record .wavefront_size, "
+            "which the occupancy estimate needs"
+        )
+    res["occupancy"] = _occupancy_estimate(res["vgpr"], effective_arch, f["wave_size"])
     return res

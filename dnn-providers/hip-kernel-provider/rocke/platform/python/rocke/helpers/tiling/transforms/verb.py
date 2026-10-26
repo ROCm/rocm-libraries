@@ -5,8 +5,7 @@
 
 The solving is done in ``observers.classify_transform`` / ``_core._classify_maps``; this module only
 emits the register permutation a ``reorder`` plan describes. It lives apart from ``emit`` so the memory
-verbs never import the solver; the IRBuilder ``b`` is duck-typed, so this module takes NO IR import (the
-tests drive it with a plain-int builder, exactly like the address-map replay).
+verbs never import the solver.
 """
 
 from __future__ import annotations

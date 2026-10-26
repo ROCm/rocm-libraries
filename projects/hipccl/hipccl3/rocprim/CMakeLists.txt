@@ -154,26 +154,26 @@ endif()
 
 if(ROCPRIM_ENABLE_ASSERTS)
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
-      set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
-      set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
+    string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+    set(BUILD_TYPE_CXX_FLAGS "CMAKE_CXX_FLAGS_${BUILD_TYPE}")
+    set(BUILD_TYPE_C_FLAGS "CMAKE_C_FLAGS_${BUILD_TYPE}")
   endif()
 
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   string(REGEX REPLACE "-DNDEBUG( |$)" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
   if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
-      string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_CXX_FLAGS} "${${BUILD_TYPE_CXX_FLAGS}}")
+    string(REGEX REPLACE "-DNDEBUG( |$)" "" ${BUILD_TYPE_C_FLAGS} "${${BUILD_TYPE_C_FLAGS}}")
   endif()
 endif()
 
 # Check if mold linker is available and use it if so
 find_program(MOLD_LINKER mold)
 if(MOLD_LINKER)
-    message(STATUS "Using mold linker")
-    add_link_options(-fuse-ld=mold)
+  message(STATUS "Using mold linker")
+  add_link_options(-fuse-ld=mold)
 else()
-    message(STATUS "mold not found, using default linker")
+  message(STATUS "mold not found, using default linker")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
@@ -207,7 +207,7 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)

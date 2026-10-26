@@ -53,16 +53,9 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 # Supported GPU architectures for the bridge (single source of truth).
 _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
-# Single source of truth for the preshuffle B-shuffle permutation used by the
-# bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
-# (WeightPreshufflePipelineAGmemBGmemCRegV2), whose device-side B packing matches
-# ck_tile::shuffle_b (permute_n=False). Old-TE's default_config.json /
-# default_ci_config.json set permute_n=true, but that is a HOST-marker that
-# selects a distinct (permuteN) TE pipeline the bridge does not generate -- it
-# does NOT map to a separate bridged device kernel. Honoring true here would
-# mis-shuffle B (GPU-verified max_rel ~1.25 vs ~5e-4). So every bridge pin reads
-# this one constant. TODO: to support permute_n=True, emit the permuteN pipeline
-# in unified_gemm_codegen and set this to a swept/config-driven value.
+# The packed-B pipelines (preshufflev2, preshuffle_tdm) read B packed with
+# shuffle_b_v0; comp_async, comp_tdm and comp_tdm_v2 read B in ordinary layout.
+# PermuteN is not bridged; preserve the non-permuteN contract for packed B.
 BRIDGE_PERMUTE_N = False
 
 
@@ -377,7 +370,7 @@ class GemmKernelConfig:
     reduction_strategy: str = "atomic"
 
     # --- Preshuffle only ---------------------------------------------------
-    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b).
+    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b_v0).
     # Mirrors Old-TE's permute_n config knob; participates in the kernel name so
     # it must match unified_gemm_codegen.py::key_name. Ignored by other variants.
     permute_n: bool = False
@@ -587,7 +580,7 @@ class GemmKernelConfig:
                 "vector_size_c": [self.vector_size_c],
             },
             # Top-level knob read by unified_gemm_codegen for the preshuffle
-            # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
+            # variant (selects shuffle_b_permuteN vs shuffle_b_v0). Harmless for
             # other variants, which ignore it.
             "permute_n": self.permute_n,
         }
@@ -666,6 +659,7 @@ class GemmKernelConfig:
             pad_k=self.pad_k,
             gfx_arch=self.gfx_arch,
             variant=self.variant,
+            persistent=self.persistent,
         )
 # ============================================================================
 # Problem
@@ -1266,6 +1260,65 @@ def _output_dtype(dtype: str) -> str:
     return _OUTPUT_DTYPE.get(dtype, dtype)
 
 
+# numpy dtypes the runners hand straight across the C ABI. Host buffers are
+# memcpy'd verbatim, so each itemsize must equal the kernel's sizeof(ElementType);
+# bf16/fp8/bf8 inputs go through the encode helpers instead.
+_NATIVE_IN_NP = {"fp16": np.float16, "fp32": np.float32, "int8": np.int8}
+_C_NP = {"fp16": np.float16, "bf16": np.uint16, "fp32": np.float32, "int32": np.int32}
+
+
+def _native_codec(np_type):
+    return (
+        lambda x, ocp: np.ascontiguousarray(x, dtype=np_type),
+        lambda h, ocp: h.astype(np.float32),
+    )
+
+
+# Host codec for the A/B elements of a kernel dtype: (encode fp32 -> the host
+# buffer the kernel reads, decode that buffer -> fp32). The second argument is
+# the fp8/bf8 OCP flag (None -> local arch). run() and reference() share it.
+_INPUT_CODEC = {
+    **{d: _native_codec(t) for d, t in _NATIVE_IN_NP.items()},
+    "bf16": (lambda x, ocp: _fp32_to_bf16_u16(x), lambda h, ocp: _bf16_u16_to_fp32(h)),
+    "fp8": (_fp32_to_fp8_u8, _fp8_u8_to_fp32),
+    "bf8": (_fp32_to_bf8_u8, _bf8_u8_to_fp32),
+}
+
+
+def _input_codec(dtype: str):
+    """Return the (encode, decode) host codec of A/B ``dtype``; raise if unknown."""
+    if dtype not in _INPUT_CODEC:
+        raise ValueError(f"unsupported input dtype {dtype!r}; add it to _NATIVE_IN_NP")
+    return _INPUT_CODEC[dtype]
+
+
+def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -> np.ndarray:
+    """Encode an A/B host operand into the kernel's element dtype; raise if unknown."""
+    return _input_codec(dtype)[0](x, use_ocp)
+
+
+def _c_numpy_dtype(dtype: str):
+    """Return (C dtype token, host numpy type) for input ``dtype``; raise if unknown.
+
+    fp8/bf8 accumulate into fp16 and int8 into int32, otherwise C is the input
+    dtype. A silent fallback would size the host C buffer wrong across the C ABI.
+    """
+    out_dtype = _output_dtype(dtype)
+    if out_dtype not in _C_NP:
+        raise ValueError(
+            f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
+            "add it to _C_NP so the host buffer matches sizeof(CDataType)"
+        )
+    return out_dtype, _C_NP[out_dtype]
+
+
+def _decode_c(C_h: np.ndarray, out_dtype: str) -> np.ndarray:
+    """Decode a host C buffer into a numerically comparable array; raise if unknown."""
+    if out_dtype not in _C_NP:
+        raise ValueError(f"unsupported C dtype {out_dtype!r}; add it to _C_NP")
+    return _bf16_u16_to_fp32(C_h) if out_dtype == "bf16" else C_h
+
+
 def _dtype_from_kernel_name(name: str) -> str:
     """Extract the dtype token from a kernel name like ``gemm_<dtype>_<layout>_...``."""
     parts = name.split("_")
@@ -1306,6 +1359,18 @@ class GpuGemmRunner:
     @property
     def kernel_name(self) -> str:
         return self._kernel_name
+
+    def reference(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
+        """fp32 ``A @ B`` on the values the kernel reads in run(A, B, ...).
+
+        A and B are rounded through the same host encoding run() uses (bf16,
+        fp8/bf8 in the arch's OCP or FNUZ format, fp16), so a verify metric
+        measures compute error, not input quantization. Leading batch axes
+        broadcast, so GpuBatchedGemmRunner shares this method.
+        """
+        encode, decode = _input_codec(_dtype_from_kernel_name(self._kernel_name))
+        Aq, Bq = (decode(encode(X, self._use_ocp), self._use_ocp) for X in (A, B))
+        return Aq @ Bq
 
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
@@ -2523,8 +2588,6 @@ def _gfx1250_pipeline_supported(
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it."""
-    if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
-        return True
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2535,7 +2598,7 @@ def _gfx1250_pipeline_supported(
         dtype_a=dtype,
         dtype_b=dtype,
         layout=layout,
-        variant_supported=variant in ("standard", "batched"),
+        variant_supported=variant in ("standard", "batched", "preshuffle"),
         variant_name=variant,
         persistent=bool(persistent),
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
@@ -2621,10 +2684,12 @@ def expand_sweep(
     pipelines = _expand_values(tr.get("pipeline"), ["compv3"])
     schedulers = _expand_values(tr.get("scheduler"), ["intrawave"])
     epilogues = _expand_values(tr.get("epilogue"), ["cshuffle"])
-    pad_ms = _expand_values(tr.get("pad_m"), [False])
-    pad_ns = _expand_values(tr.get("pad_n"), [False])
-    pad_ks = _expand_values(tr.get("pad_k"), [False])
-    persistents = _expand_values(tr.get("persistent"), [False])
+    # JSON configs may spell the boolean traits as strings ("false").
+    is_true = _codegen_common().is_true
+    pad_ms = [is_true(v) for v in _expand_values(tr.get("pad_m"), [False])]
+    pad_ns = [is_true(v) for v in _expand_values(tr.get("pad_n"), [False])]
+    pad_ks = [is_true(v) for v in _expand_values(tr.get("pad_k"), [False])]
+    persistents = [is_true(v) for v in _expand_values(tr.get("persistent"), [False])]
     if vector_sizes is None:
         vector_sizes = list(
             itertools.product(
@@ -2795,19 +2860,6 @@ def expand_sweep(
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
         if not _warp_config_supported(wm, wn, wk, arch):
             continue
-        # gfx1250 correctness gate (ROCm/rocm-libraries#11161): the compv3
-        # intrawave pipeline is hand-scheduled for MFMA/CDNA (wave64) and
-        # miscompiles for 8-warp blocks (2x4x1 / 4x2x1) on gfx1250 (WMMA/wave32),
-        # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
-        # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
-        # bit-accurate). Gate it off until the pipeline is ported to wave32.
-        if (
-            arch == "gfx1250"
-            and pipe == "compv3"
-            and sched == "intrawave"
-            and wm * wn == 8
-        ):
-            continue
         if _codegen_common().gfx1250_fp32_tile_reject_reason(
             arch, dtype, tm, tn, wm * wn * wk
         ):
@@ -2881,6 +2933,14 @@ def expand_sweep(
                     elementwise_op=ew_op,
                     d_layout=d_layout_word,
                 )
+                # gfx1250 preshuffle pipelines (arch/layout/pad/wave/dtype
+                # rules): same helper the codegen applies, so the sweep never
+                # hands back a config whose header is never emitted.
+                if variant == "preshuffle" and _codegen_common().preshuffle_pipeline_reject_reason(
+                    pipe, arch, layout[:3], pm, pn, pk, wm * wn * wk, dtype,
+                    warp_tile_k=wtk, warp_k=wk, tile_k=tk,
+                ):
+                    continue
                 val = None
                 for vec in vector_sizes:
                     cv, reason = c.with_vector_sizes(tuple(vec))

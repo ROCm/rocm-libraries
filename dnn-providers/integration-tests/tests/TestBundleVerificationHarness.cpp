@@ -7,10 +7,12 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,6 +29,7 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
@@ -57,6 +60,17 @@ protected:
     std::shared_ptr<IntegrationTestBundle> loadRunnableBundle(const std::string& name) const
     {
         return fixtures::loadBundle(_tempDir, name, /*includeGoldenOutput=*/true);
+    }
+
+    /// Writes and loads the ragged bundle with `goldenOutput` as y. Its offsets
+    /// {0, 20, 60} give batch 0 one sequence row and batch 1 two.
+    std::shared_ptr<IntegrationTestBundle>
+        loadRunnableRaggedBundle(const std::string& name,
+                                 const std::vector<float>& goldenOutput) const
+    {
+        const auto dir = _tempDir / name;
+        fixtures::writeRaggedBundleFiles(dir, name, {0, 20, 60}, goldenOutput);
+        return fixtures::loadWrittenBundle(dir, name);
     }
 
     /// Builds the real harness on top of `mocks`, drives it through one bundle, and
@@ -312,10 +326,10 @@ TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
     const auto wrapper = bundle->graphWrapper();
     const auto& attributes = wrapper.getTensorMap();
 
-    auto hostOutputs
-        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/false);
-    auto deviceOutputs
-        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/true);
+    auto hostOutputs = detail::allocateSentinelOutputs(
+        attributes, bundle->outputTensorUids, TensorMap{}, /*onDevice=*/false);
+    auto deviceOutputs = detail::allocateSentinelOutputs(
+        attributes, bundle->outputTensorUids, TensorMap{}, /*onDevice=*/true);
 
     for(const int64_t uid : bundle->outputTensorUids)
     {
@@ -521,6 +535,60 @@ TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
     EXPECT_TRUE(harness.inputs().empty());
 }
 
+TEST_F(TestGoldenHarnessFixture, RaggedBundleWithoutBlobsIsUnverifiable)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    auto bundle = makeRuntimePbvFillBundle();
+    bundle->graphBuffer = test_utils::markFirstTensorRagged(bundle->graphBuffer.data());
+    ASSERT_FALSE(bundle->blobs.has_value());
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("ragged inputs require golden blobs"),
+              std::string::npos);
+    EXPECT_TRUE(harness.inputs().empty());
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedDeviceSentinelFillMatchesTheHostFill)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto bundle = loadRunnableRaggedBundle(
+        "ragged_sentinel", std::vector<float>(fixtures::K_RAGGED_OUTPUT_ELEMS, 0.0f));
+    const auto loadedTensors = bundle->loadTensors();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& attributes = wrapper.getTensorMap();
+
+    auto hostOutputs = detail::allocateSentinelOutputs(
+        attributes, bundle->outputTensorUids, loadedTensors, /*onDevice=*/false);
+    auto deviceOutputs = detail::allocateSentinelOutputs(
+        attributes, bundle->outputTensorUids, loadedTensors, /*onDevice=*/true);
+
+    for(const int64_t uid : bundle->outputTensorUids)
+    {
+        auto& expected = *hostOutputs.at(uid);
+        auto& actual = *deviceOutputs.at(uid);
+        ASSERT_NE(dynamic_cast<hipdnn_data_sdk::utilities::RaggedTensorBase<float>*>(&actual),
+                  nullptr)
+            << "uid " << uid;
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace()) << "uid " << uid;
+
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
+
 TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)
 {
     testing_support::HarnessMocks mocks;
@@ -542,6 +610,54 @@ TEST_F(TestGoldenHarnessFixture, MismatchingOutputYieldsFail)
 
     ::testing::TestPartResultArray results;
     runCapturing(mocks, loadRunnableBundle("mismatch"), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedMatchingOutputYieldsPass)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeRaggedOutput, fixtures::K_OUTPUT_VALUE);
+
+    const std::vector<float> golden(fixtures::K_RAGGED_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, loadRunnableRaggedBundle("ragged_match", golden), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedNaNGoldenRowIsNotCompared)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeRaggedOutput, fixtures::K_OUTPUT_VALUE);
+
+    std::vector<float> golden(fixtures::K_RAGGED_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+    const auto batch1FirstRow = golden.begin() + 20;
+    std::fill(batch1FirstRow, batch1FirstRow + 20, std::numeric_limits<float>::quiet_NaN());
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, loadRunnableRaggedBundle("ragged_nan_row", golden), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedInBlockMismatchYieldsFail)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeRaggedOutput, fixtures::K_OUTPUT_VALUE);
+
+    std::vector<float> golden(fixtures::K_RAGGED_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+    golden[45] = fixtures::K_OUTPUT_VALUE + 100.0f;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, loadRunnableRaggedBundle("ragged_mismatch", golden), &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));

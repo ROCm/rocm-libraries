@@ -35,6 +35,22 @@ class TestKernelSourceEmission:
         assert "source_file" not in doc
         assert "entry_point" not in doc
 
+    def test_rocke_target_is_emitted_only_when_set(self):
+        ks = KernelSource(
+            kind="rocke",
+            source="kernels/gfx1151/wmma_fmha_fwd.py",
+            builder="build_wmma_fmha_fwd",
+            spec={"head_size": 64},
+            target="generic",
+        )
+        # Key order is part of the descriptor bytes: target sits before the spec.
+        assert list(ks.as_document()) == ["kind", "source", "builder", "target", "spec"]
+        assert ks.as_document()["target"] == "generic"
+
+    def test_hip_never_emits_a_target(self):
+        ks = KernelSource(kind="hip", source="X.cpp", entry="X", target="generic")
+        assert "target" not in ks.as_document()
+
     def test_embedded_emits_only_embedded_keys(self):
         ks = KernelSource(kind="embedded_source", source_file="X.cpp", entry_point="X")
         doc = ks.as_document()

@@ -1,0 +1,92 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Plan2: Non-power-of-2 problem size support
+# PrefetchGL2 for non-power-of-2 MacroTile support (e.g., problem size 256x224)
+# Note: ClusterDim and PrefetchGL2 not beneficial for A0, testing edge cases with odd sizes
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Non-power-of-2 MacroTile sizes
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [96, 80, 1, 64]     # Small non-power-2
+          - Exact: [192, 160, 1, 128]  # Medium non-power-2
+          - Exact: [256, 224, 1, 128]  # Non-power-of-2
+          - Exact: [224, 256, 1, 128]  # Transposed
+          - Exact: [384, 320, 1, 192]  # Larger non-power-2
+          - Exact: [95, 81, 1, 63]     # Odd non-power-2
+          # === RANGE SIZES ===
+          - Range: [ [96, 96, 384], [80, 80, 320], [1], [128] ]
+
+  # Test various non-power-of-2 sizes
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [96, 96, 1, 64]     # Small non-power-2
+          - Exact: [192, 192, 1, 128]  # Medium non-power-2
+          - Exact: [320, 320, 1, 128]  # Larger non-power-2
+          - Exact: [96, 160, 1, 128]   # Non-square non-power-2
+          - Exact: [160, 96, 1, 128]   # Transposed
+          - Exact: [97, 193, 1, 129]   # Odd non-power-2
+          # === RANGE SIZES ===
+          - Range: [ [96, 96, 320], [96, 96, 320], [1], [128] ]

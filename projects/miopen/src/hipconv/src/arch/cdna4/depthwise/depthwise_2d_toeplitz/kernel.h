@@ -25,6 +25,7 @@
 
 #include "bunnies_cdna4.hpp"
 #include "conv_kernel.h"
+#include "config_desc.h"
 #include "config_table.h"
 #include "depthwise_conv_kernel.h"
 #include "mathutil.h"
@@ -733,6 +734,8 @@ public:
     }
 
     std::string_view name() const override { return "depthwise_2d_toeplitz"; }
+
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
 
     // Depthwise fp16/bf16 fprop, stride 1/2, 3x3/5x5/7x7. Channels multiple of 8.
     //

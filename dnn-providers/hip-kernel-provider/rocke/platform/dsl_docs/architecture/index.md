@@ -46,6 +46,11 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 ## Kernel optimization design
 
+- [`ck_tile_merged_groups.md`](ck_tile_merged_groups.md) — how CK Tile's
+  `NumGroupsToMerge` works in grouped convolution, read as the basis for porting
+  the same capability to ROCKE. Records where ROCKE's forward arrangement
+  deliberately departs from CK's and why. Line numbers are pinned to the commit
+  named in its header and will drift.
 - [`kernel_opt_design.md`](kernel_opt_design.md) — proposal for combining current
   gfx950 tiled-2D attention optimization controls.
 - [`wavescope_integration.md`](wavescope_integration.md) — how source locations
