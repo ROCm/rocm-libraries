@@ -1953,9 +1953,10 @@ def lower_conv_direct_fwd_wmma(
     )
 
 
-def conv_winograd_fwd_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
+def conv_winograd_fwd_spec_to_dict(spec: Any, stages: Any) -> Dict[str, Any]:
     """:class:`WinogradFwdSpec` + its stage (``"K1"`` / ``"K2a"`` / ``"K2"`` /
-    ``"K4"``) -> flat dict (problem nested)."""
+    ``"K4"``) or a sequence of stage names (a merged launch) -> flat dict
+    (problem nested)."""
     p = spec.problem
     d = dict(
         problem=dict(
@@ -1976,6 +1977,7 @@ def conv_winograd_fwd_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
             Di=p.Di,
         ),
         m=spec.m,
+        m_w=spec.m_w,
         io_dtype=spec.io_dtype,
         operand_dtype=spec.operand_dtype,
         vec=spec.vec,
@@ -1987,34 +1989,45 @@ def conv_winograd_fwd_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
         wg_tile_rows=spec.wg_tile_rows,
         nt_stores=spec.nt_stores,
         lds_lanes=spec.lds_lanes,
+        filter_rows=spec.filter_rows,
+        filter_vec=spec.filter_vec,
         name=spec.name,
-        stage=stage,
     )
+    if isinstance(stages, str):
+        d["stage"] = stages
+    else:
+        d["merged"] = list(stages)
     return d
 
 
 def lower_conv_winograd_fwd(
     spec: Any,
-    stage: str,
+    stages: Any,
     *,
     arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
-    """Lower one Winograd forward transform stage (``stage`` = ``"K1"`` /
-    ``"K2a"`` / ``"K2"`` / ``"K4"``) of a :class:`WinogradFwdSpec`."""
+    """Lower one Winograd forward transform stage (``stages`` = ``"K1"`` /
+    ``"K2a"`` / ``"K2"`` / ``"K4"``) or a merged launch (``stages`` = a
+    sequence of stage names) of a :class:`WinogradFwdSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common import conv_winograd_fwd as wf
         from .lower_llvm import lower_kernel_to_llvm
 
-        build = {
-            "K1": wf.build_winograd_filter_transform,
-            "K2a": wf.build_winograd_prescale,
-            "K2": wf.build_winograd_input_transform,
-            "K4": wf.build_winograd_output_transform,
-        }[stage]
-        k = build(spec, arch=arch)
+        if isinstance(stages, str):
+            build = {
+                "K1": wf.build_winograd_filter_transform,
+                "K2a": wf.build_winograd_prescale,
+                "K2": wf.build_winograd_input_transform,
+                "K4": wf.build_winograd_output_transform,
+            }[stages]
+            k = build(spec, arch=arch)
+        else:
+            k = wf.build_winograd_merged(
+                wf.WinogradMergedSpec(spec, tuple(stages)), arch=arch
+            )
         ll = lower_kernel_to_llvm(k, arch=arch)
         ir = ""
         if wi:
@@ -2024,7 +2037,7 @@ def lower_conv_winograd_fwd(
         return ll, ir
 
     eng = _import_engine()
-    sd = conv_winograd_fwd_spec_to_dict(spec, stage)
+    sd = conv_winograd_fwd_spec_to_dict(spec, stages)
     return _lower_family(
         "conv_winograd_fwd",
         spec,

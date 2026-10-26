@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_conv_winograd_fwd.h -- C++ engine port of the Winograd
- * F(m x m, 3 x 3) forward transform kernels in
+ * F(mh x mw, 3 x 3) forward transform kernels in
  * library/kernels/common/conv_winograd_fwd.py.
  *
  *   Python (conv_winograd_fwd.py)           C (this header)
@@ -16,6 +16,8 @@
  *   build_winograd_prescale (K2a)           rocke_build_winograd_fwd_stage(K2A)
  *   build_winograd_input_transform (K2)     rocke_build_winograd_fwd_stage(K2)
  *   build_winograd_output_transform (K4)    rocke_build_winograd_fwd_stage(K4)
+ *   build_winograd_merged(WinogradMergedSpec)
+ *                                           rocke_build_winograd_merged
  *
  * The problem extents are baked into the kernels. Every buffer is addressed
  * with 32-bit offsets through buffer resources (out-of-range offsets read 0 /
@@ -39,7 +41,7 @@ extern "C" {
 typedef struct rocke_winograd_fwd_spec
 {
     rocke_conv_problem_t problem;
-    int m; /* 4: output tile size (2 or 4) */
+    int m; /* 4: output tile rows (2, 4 or 6) */
     const char* io_dtype; /* "fp16" */
     const char* operand_dtype; /* "fp16" */
     int vec; /* 8 */
@@ -51,6 +53,9 @@ typedef struct rocke_winograd_fwd_spec
     int wg_tile_rows; /* 1 */
     bool nt_stores; /* true */
     int lds_lanes; /* 32 */
+    int filter_rows; /* 1 */
+    int filter_vec; /* 0 */
+    int m_w; /* 0: output tile columns (0 = m) */
     const char* name; /* "conv_winograd_fwd" */
 } rocke_winograd_fwd_spec_t;
 
@@ -102,9 +107,25 @@ rocke_kernel_def_t* rocke_build_winograd_fwd_stage_new(rocke_ir_builder_t* b,
                                                        rocke_winograd_fwd_stage_t stage,
                                                        const char* arch);
 
-/* Build one stage + lower to LLVM IR. *out_ll is malloc'd (caller frees). */
+/* build_winograd_merged(WinogradMergedSpec(spec, names)): independent stages
+ * as one launch on disjoint ranges of a flat grid. */
+rocke_kernel_def_t* rocke_build_winograd_merged(rocke_ir_builder_t* b,
+                                                const rocke_winograd_fwd_spec_t* spec,
+                                                const rocke_winograd_fwd_stage_t* names,
+                                                int n_names,
+                                                const char* arch);
+rocke_kernel_def_t* rocke_build_winograd_merged_new(rocke_ir_builder_t* b,
+                                                    const rocke_winograd_fwd_spec_t* spec,
+                                                    const rocke_winograd_fwd_stage_t* names,
+                                                    int n_names,
+                                                    const char* arch);
+
+/* Build (one stage when n_names == 0, else the merged kernel) + lower to LLVM IR.
+ * *out_ll is malloc'd (caller frees). */
 rocke_status_t rocke_winograd_fwd_lower_to_llvm(const rocke_winograd_fwd_spec_t* spec,
                                                 rocke_winograd_fwd_stage_t stage,
+                                                const rocke_winograd_fwd_stage_t* names,
+                                                int n_names,
                                                 const char* arch,
                                                 rocke_llvm_flavor_t flavor,
                                                 char** out_ll,

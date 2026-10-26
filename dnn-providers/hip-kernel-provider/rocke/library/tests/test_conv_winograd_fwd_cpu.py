@@ -149,7 +149,10 @@ def test_tile_counts_dilation():
     [
         (dict(m=4, io_dtype="bf16", operand_dtype="bf16"), "bf16 operands"),
         (dict(m=2, io_dtype="fp16", operand_dtype="bf16"), "bf16 operands"),
-        (dict(m=6), "m must be"),
+        (dict(m=3), "m must be"),
+        (dict(m=4, m_w=5), "m_w must be"),
+        (dict(m=4, filter_rows=4), "filter_rows"),
+        (dict(m=6, m_w=2, io_dtype="bf16", operand_dtype="bf16"), "bf16 operands"),
         (dict(vec=3), "vec must be"),
     ],
 )
@@ -206,7 +209,7 @@ class _NumOps:
         return Fraction(c) * x + y
 
 
-@pytest.mark.parametrize("m", [2, 4])
+@pytest.mark.parametrize("m", [2, 4, 6])
 def test_shared_subexpression_transforms_match_matrices(m):
     """``bt_1d`` / ``at_1d`` (the kernels' CSE forms) equal ``B^T d`` / ``A^T d``."""
     at, _, bt = toom_cook(m)
@@ -279,3 +282,225 @@ def test_tuned_options_are_valid(m, ps):
         problem=p, m=m, io_dtype="bf16", prescale=ps, **tuned_transform_options(m, ps)
     )
     assert [st.name for st in transform_stages(s)] == ["K1", "K2", "K4"]
+
+
+# ---------------------------------------------------------------------------
+# F(6,3) and mixed F(mh x mw, 3 x 3) tiles
+# ---------------------------------------------------------------------------
+
+
+def test_toom_cook_f6_identity_exact():
+    at, g, bt = toom_cook(6)
+    n = 8
+    for i in range(6):
+        for q in range(3):
+            for p in range(n):
+                s = sum(at[i][j] * g[j][q] * bt[j][p] for j in range(n))
+                assert s == Fraction(1 if p == i + q else 0)
+    # Every coefficient is a binary fraction (exact in fp32); B^T's largest
+    # row 1-norm is 15 (PRESCALE_BETA 225).
+    for mat in (at, bt):
+        for r in mat:
+            for v in r:
+                assert v.denominator & (v.denominator - 1) == 0
+    assert max(sum(abs(v) for v in r) for r in bt) == 15
+
+
+_MIXED = [(6, 4), (4, 6), (6, 6), (4, 2), (2, 6), (6, 2)]
+
+
+@pytest.mark.parametrize("mt", _MIXED, ids=[f"{a}x{b}" for a, b in _MIXED])
+@pytest.mark.parametrize("pi", range(len(_PROBLEMS)))
+def test_mixed_tile_model_matches_direct(mt, pi):
+    p = _PROBLEMS[pi]
+    rng = np.random.default_rng(pi)
+    x = rng.standard_normal((p.N, p.Hi, p.Wi, p.C))
+    w = rng.standard_normal((p.K, 3, 3, p.cpg))
+    y, U, V, M = winograd_fwd_reference_np(x, w, p, mt)
+    s = WinogradFwdSpec(problem=p, m=mt[0], m_w=mt[1])
+    assert s.n2 == (mt[0] + 2) * (mt[1] + 2)
+    assert V.shape == (s.num_tiles, s.n2, p.C) and U.shape == (s.n2, p.K, p.cpg)
+    np.testing.assert_allclose(y, _direct(x, w, p), rtol=0, atol=1e-8)
+
+
+def test_mixed_tile_fp16_operands_within_tolerance():
+    """F(6x4) with U/V/M rounded to fp16 stays well inside 5e-2 (and close
+    to F(4,3)); F(6,3) is about twice F(4,3)'s error."""
+    p = ConvProblem(N=1, Hi=24, Wi=24, C=128, K=8, Y=3, X=3, pH=1, pW=1)
+    rng = np.random.default_rng(3)
+    x = rng.uniform(-1, 1, (p.N, p.Hi, p.Wi, p.C))
+    w = rng.uniform(-1, 1, (p.K, 3, 3, p.C))
+    ref = _direct(x, w, p)
+
+    def rnd(_name, a):
+        return a.astype(np.float16).astype(np.float64)
+
+    errs = {}
+    for mt in ((4, 4), (6, 4), (6, 6)):
+        y = winograd_fwd_reference_np(x, w, p, mt, round_fn=rnd)[0]
+        errs[mt] = np.abs(y - ref).max() / max(np.abs(ref).max(), 1.0)
+    assert errs[(6, 4)] < 2e-2 and errs[(4, 4)] < 2e-2
+    assert errs[(6, 6)] < 5e-2
+
+
+def test_mixed_tile_geometry_and_gemm_problem():
+    p = ConvProblem(
+        N=2, Hi=128, Wi=128, C=64, K=32, Y=3, X=3, pH=24, pW=24, dH=24, dW=24
+    )
+    s = WinogradFwdSpec(problem=p, m=6, m_w=4)
+    # 24 x 24 sub-grids of 6 x 6 (5 x 5 for some, padded): 1 x 2 tiles each.
+    assert (s.sub_h, s.sub_w, s.tiles_h, s.tiles_w) == (6, 6, 1, 2)
+    assert (s.nh, s.nw, s.n2) == (8, 6, 48)
+    gp = winograd_gemm_problem(p, (6, 4))
+    assert (gp.N, gp.groups, gp.C, gp.K) == (s.num_tiles, 48, 48 * 64, 48 * 32)
+    assert s.prescale_beta == pytest.approx(150.0)
+
+
+@pytest.mark.parametrize("mt", [(6, 4), (4, 6), (6, 6), (2, 6)])
+@pytest.mark.parametrize("ps", [False, True])
+def test_mixed_tile_kernels_build(mt, ps):
+    p = ConvProblem(N=1, Hi=19, Wi=23, C=24, K=40, Y=3, X=3, pH=1, pW=1)
+    opts = tuned_transform_options(mt, ps, p)
+    s = WinogradFwdSpec(
+        problem=p, m=mt[0], m_w=mt[1], io_dtype="bf16", prescale=ps, **opts
+    )
+    for st in transform_stages(s):
+        st.build(s, arch="gfx1250")
+
+
+# ---------------------------------------------------------------------------
+# Tuned options, merged launches, batch split
+# ---------------------------------------------------------------------------
+
+
+def test_tuned_options_skip_lds_for_sparse_dilated_subgrids():
+    dense = ConvProblem(N=1, Hi=64, Wi=64, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    d12 = ConvProblem(
+        N=1, Hi=128, Wi=128, C=64, K=64, Y=3, X=3, pH=12, pW=12, dH=12, dW=12
+    )
+    assert tuned_transform_options(2, False, dense)["input_block_tiles"] == (4, 8)
+    assert "input_block_tiles" not in tuned_transform_options(2, False, d12)
+    # F4 and larger tiles always use the register path (see the options doc).
+    assert "input_block_tiles" not in tuned_transform_options(4, False, dense)
+    assert "input_block_tiles" not in tuned_transform_options((6, 4), False, dense)
+    assert tuned_transform_options(2, False)["filter_rows"] == 4
+    assert tuned_transform_options(4, False)["filter_rows"] == 2
+
+
+@pytest.mark.parametrize("fr", [1, 2, 3, 6])
+def test_filter_rows_model(fr):
+    """K1 with several G rows per thread builds; its grid shrinks with it."""
+    from kernels.common.conv_winograd_fwd import filter_transform_grid
+
+    p = ConvProblem(N=1, Hi=8, Wi=8, C=16, K=24, Y=3, X=3, pH=1, pW=1)
+    s = WinogradFwdSpec(problem=p, m=4, filter_rows=fr, filter_vec=8)
+    assert filter_transform_grid(s)[1] == 6 // fr
+    build_winograd_filter_transform(s, arch="gfx1250")
+
+
+_MERGE_SPECS = [
+    # (problem kwargs, m, prescale): K2 block 64 < K1 block 128 (split K1),
+    # K2 block 512 > 128 (packed K1), equal blocks, odd channel counts.
+    (dict(N=2, Hi=16, Wi=16, C=64, K=64, pH=1, pW=1), 2, False),
+    (dict(N=1, Hi=32, Wi=32, C=1280, K=1280, pH=1, pW=1), 4, True),
+    (dict(N=1, Hi=32, Wi=32, C=1280, K=1280, pH=1, pW=1), 4, False),
+    (dict(N=1, Hi=17, Wi=19, C=24, K=40, pH=1, pW=1), 2, False),
+    (dict(N=1, Hi=17, Wi=19, C=24, K=40, pH=1, pW=1), (6, 4), False),
+]
+
+
+@pytest.mark.parametrize("case", range(len(_MERGE_SPECS)))
+@pytest.mark.parametrize("order", [("K2", "K1"), ("K1", "K2")])
+def test_merged_layout_covers_every_block_once(case, order):
+    from kernels.common.conv_winograd_fwd import (
+        WinogradMergedSpec,
+        build_winograd_merged,
+        check_merged_layout,
+        merged_stage,
+    )
+
+    pk, m, ps = _MERGE_SPECS[case]
+    p = ConvProblem(Y=3, X=3, **pk)
+    mh, mw = m if isinstance(m, tuple) else (m, m)
+    s = WinogradFwdSpec(
+        problem=p,
+        m=mh,
+        m_w=mw,
+        io_dtype="bf16",
+        prescale=ps,
+        **tuned_transform_options(m, ps, p),
+    )
+    names = tuple(
+        "K2a" if (n == "K2" and ps and s.prescale_split) else n for n in order
+    )
+    lay = merged_stage(s, names)
+    check_merged_layout(s, lay)
+    by = {st.name: st for st in transform_stages(s)}
+    # Barrier stages keep their own block; the merged block is theirs.
+    k2 = [n for n in names if n != "K1"][0]
+    assert lay.block == by[k2].block
+    k = build_winograd_merged(WinogradMergedSpec(s, tuple(names)), arch="gfx1250")
+    assert [prm.name for prm in k.params] == [a["name"] for a in lay.signature]
+
+
+def test_merged_layout_check_rejects_a_bad_layout():
+    import dataclasses
+
+    from kernels.common.conv_winograd_fwd import check_merged_layout, merged_stage
+
+    p = ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    s = WinogradFwdSpec(
+        problem=p, m=2, io_dtype="fp16", **tuned_transform_options(2, False)
+    )
+    lay = merged_stage(s, ("K2", "K1"))
+    # The bug the check guards: packing two K2 blocks (LDS + barriers) into one.
+    bad = dataclasses.replace(lay, packs=(2,) + lay.packs[1:])
+    with pytest.raises(ValueError):
+        check_merged_layout(s, bad)
+
+
+def test_batch_split_chunks():
+    from benchmarks.common.benchmark_winograd_conv import batch_chunks
+
+    kw = dict(io_dtype="fp16", operand_dtype="fp16")
+    # deeplab n16 c2048 d12: V is 3.06 GB with F(4,3) -> 2 chunks of N = 8.
+    p37 = ConvProblem(
+        N=16, Hi=128, Wi=128, C=2048, K=256, Y=3, X=3, pH=12, pW=12, dH=12, dW=12
+    )
+    assert batch_chunks(p37, (4, 4), "auto", **kw) == 2
+    # VAE n8 c256 768x768: x itself is 2.4 GB -> 4 chunks keep x < 2 GiB too.
+    p100 = ConvProblem(N=8, Hi=768, Wi=768, C=256, K=256, Y=3, X=3, pH=1, pW=1)
+    c = batch_chunks(p100, (4, 4), "auto", **kw)
+    assert 8 % c == 0 and c >= 2
+    small = ConvProblem(N=8, Hi=32, Wi=32, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    assert batch_chunks(small, (4, 4), "auto", **kw) == 1
+    assert batch_chunks(small, (4, 4), "4", **kw) == 4
+    with pytest.raises(ValueError):
+        batch_chunks(small, (4, 4), "3", **kw)
+
+
+def test_auto_tiles_ranking():
+    from kernels.common.conv_winograd_fwd import auto_tiles, tile_cost
+
+    cus = 128
+    p = ConvProblem(N=8, Hi=48, Wi=48, C=1280, K=1280, Y=3, X=3, pH=1, pW=1)
+    # bf16 I/O never offers the transposed 4x6 tile (its prescale spills).
+    assert (4, 6) not in auto_tiles(p, "bf16", count=8, num_cus=cus)
+    wide = ConvProblem(N=2, Hi=20, Wi=96, C=512, K=512, Y=3, X=3, pH=1, pW=1)
+    assert (4, 6) in auto_tiles(wide, "fp16", count=8, num_cus=cus)
+    # Transposed tiles of equal cost are not both returned.
+    got = auto_tiles(p, "fp16", count=3, num_cus=cus)
+    assert len(got) == 3
+    assert not ((6, 4) in got and (4, 6) in got)
+    # A dilated layer with 6 x 6 sub-grids: a 6-wide tile axis covers each
+    # sub-grid exactly, the 4-wide axes pad it to 8.
+    d24 = ConvProblem(
+        N=1, Hi=128, Wi=128, C=2048, K=256, Y=3, X=3, pH=24, pW=24, dH=24, dW=24
+    )
+    assert 6 in auto_tiles(d24, "fp16", count=1, num_cus=cus)[0]
+    # Costs grow with N, and the prescale pass costs extra with bf16 I/O.
+    p1 = ConvProblem(N=1, Hi=48, Wi=48, C=1280, K=1280, Y=3, X=3, pH=1, pW=1)
+    assert tile_cost(p, (4, 4), num_cus=cus) > 2 * tile_cost(p1, (4, 4), num_cus=cus)
+    assert tile_cost(p, (4, 4), "bf16", num_cus=cus) > tile_cost(p, (4, 4), num_cus=cus)
+    with pytest.raises(ValueError):
+        tile_cost(p, (4, 4), num_cus=0)

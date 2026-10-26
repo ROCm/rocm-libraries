@@ -4946,9 +4946,10 @@ def cases():
             build_direct_fwd_wmma_case(_prob, **_over),
         )
 
-    # --- conv_winograd_fwd: Winograd F(m x m, 3x3) forward transforms ---
-    # K2 input transform (register path, fused bf16 prescale). The full matrix
-    # (and the C++ twin) lives in library/tests/parity/conv_winograd_fwd_emit.*.
+    # --- conv_winograd_fwd: Winograd F(m x m_w, 3x3) forward transforms ---
+    # K2 input transform (register path, fused bf16 prescale), K4 output
+    # transform and the merged K2+K1 launch. The full matrix (and the C++
+    # twin) lives in library/tests/parity/conv_winograd_fwd_emit.*.
     def build_winograd_fwd_case(stage, **spec_kw):
         def _build():
             from kernels.common._conv_implicit_gemm_common import ConvProblem
@@ -4956,6 +4957,10 @@ def cases():
 
             p = ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1)
             spec = wf.WinogradFwdSpec(problem=p, **spec_kw)
+            if isinstance(stage, tuple):
+                return wf.build_winograd_merged(
+                    wf.WinogradMergedSpec(spec, stage), arch="gfx1250"
+                )
             build = {
                 "K2": wf.build_winograd_input_transform,
                 "K4": wf.build_winograd_output_transform,
@@ -4967,6 +4972,8 @@ def cases():
     for _case_id, _stage, _over in (
         ("f4_k2", "K2", {}),
         ("f4_bf16_prescale_k2", "K2", dict(io_dtype="bf16", prescale=True)),
+        ("f6x4_k4", "K4", dict(m=6, m_w=4)),
+        ("f4_merged_k2_k1", ("K2", "K1"), {}),
     ):
         add(
             "conv_winograd_fwd",

@@ -113,11 +113,16 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 
 # Interpolation points of the Toom-Cook construction (plus the point at
 # infinity).
-_POINTS = {2: (0, 1, -1), 4: (0, 1, -1, 2, -2)}
+_POINTS = {
+    2: (0, 1, -1),
+    4: (0, 1, -1, 2, -2),
+    6: (0, 1, -1, 2, -2, Fraction(1, 2), Fraction(-1, 2)),
+}
 _R = 3  # filter taps per axis
 
-# Largest |V| / max|x_patch| for each m: (max row 1-norm of B^T) ** 2.
-PRESCALE_BETA = {2: 4.0, 4: 100.0}
+# Largest |V| / max|x_patch| for each m: (max row 1-norm of B^T) ** 2 (for a
+# mixed F(mh x mw) tile the product of the two row norms).
+PRESCALE_BETA = {2: 4.0, 4: 100.0, 6: 225.0}
 # Scaled V is kept at or below 2**14 so fp16 V and M stay finite.
 _PRESCALE_LOG2_LIMIT = 14
 # Largest exponent K2 emits; anything larger means a non-finite input.
@@ -305,12 +310,21 @@ class WinogradFwdSpec:
     wg_tile_rows: int = 1
     nt_stores: bool = True
     lds_lanes: int = 32
+    # K1: rows of ``G g`` per thread (a divisor of n); n reads w once.
+    filter_rows: int = 1
+    # K1 channel vector width (0: ``vec``).
+    filter_vec: int = 0
+    # Output tile width (0: ``m``): ``F(m x m_w, 3 x 3)``, ``m`` rows by
+    # ``m_w`` columns per tile, ``(m + 2) * (m_w + 2)`` bins.
+    m_w: int = 0
     name: str = "conv_winograd_fwd"
 
     def __post_init__(self) -> None:
         p = self.problem
         if self.m not in _POINTS:
             raise ValueError(f"m must be one of {tuple(_POINTS)} (got {self.m})")
+        if self.m_w and self.m_w not in _POINTS:
+            raise ValueError(f"m_w must be 0 or one of {tuple(_POINTS)}")
         if p.is_3d:
             raise ValueError("Winograd fwd supports 2-D convolutions only")
         if (p.Y, p.X) != (3, 3):
@@ -321,7 +335,9 @@ class WinogradFwdSpec:
             raise ValueError(f"io_dtype must be one of {_IO_DTYPES}")
         if self.operand_dtype not in _IO_DTYPES:
             raise ValueError(f"operand_dtype must be one of {_IO_DTYPES}")
-        if self.operand_dtype == "bf16" and (self.m != 2 or self.io_dtype != "bf16"):
+        if self.operand_dtype == "bf16" and (
+            (self.mh, self.mw) != (2, 2) or self.io_dtype != "bf16"
+        ):
             raise ValueError(
                 "bf16 operands are only accurate enough for F(2,3) with bf16 I/O"
             )
@@ -333,6 +349,10 @@ class WinogradFwdSpec:
             raise ValueError("block_size must be <= 1024")
         if p.Ho <= 0 or p.Wo <= 0:
             raise ValueError("empty output")
+        if self.filter_vec not in (0, 1, 2, 4, 8):
+            raise ValueError(f"filter_vec must be 0/1/2/4/8 (got {self.filter_vec})")
+        if self.filter_rows < 1 or self.nh % self.filter_rows:
+            raise ValueError(f"filter_rows must divide n = {self.nh}")
         if self.tiles_per_thread < 1:
             raise ValueError("tiles_per_thread must be >= 1")
         if self.prescale_mode not in ("fused", "split"):
@@ -350,12 +370,37 @@ class WinogradFwdSpec:
     # -- geometry --
 
     @property
+    def mh(self) -> int:
+        """Output tile rows."""
+        return self.m
+
+    @property
+    def mw(self) -> int:
+        """Output tile columns."""
+        return self.m_w or self.m
+
+    @property
+    def tile_mn(self) -> Tuple[int, int]:
+        return (self.mh, self.mw)
+
+    @property
+    def nh(self) -> int:
+        """Input patch rows (= bins along H)."""
+        return self.mh + _R - 1
+
+    @property
+    def nw(self) -> int:
+        return self.mw + _R - 1
+
+    @property
     def n(self) -> int:
-        return self.m + _R - 1
+        """Patch size of a square tile (``nh``)."""
+        return self.nh
 
     @property
     def n2(self) -> int:
-        return self.n * self.n
+        """Bins per tile."""
+        return self.nh * self.nw
 
     @property
     def sub_h(self) -> int:
@@ -368,11 +413,11 @@ class WinogradFwdSpec:
 
     @property
     def tiles_h(self) -> int:
-        return ceil_div(self.sub_h, self.m)
+        return ceil_div(self.sub_h, self.mh)
 
     @property
     def tiles_w(self) -> int:
-        return ceil_div(self.sub_w, self.m)
+        return ceil_div(self.sub_w, self.mw)
 
     @property
     def num_tiles(self) -> int:
@@ -391,8 +436,8 @@ class WinogradFwdSpec:
 
     @property
     def vec_cg(self) -> int:
-        """Vector width over C/groups (K1)."""
-        return _pow2_vec(self.problem.cpg, self.vec)
+        """Vector width over C/groups (K1; ``filter_vec`` if set)."""
+        return _pow2_vec(self.problem.cpg, self.filter_vec or self.vec)
 
     @property
     def input_lds(self) -> bool:
@@ -408,7 +453,7 @@ class WinogradFwdSpec:
 
     @property
     def prescale_beta(self) -> float:
-        return PRESCALE_BETA[self.m]
+        return math.sqrt(PRESCALE_BETA[self.mh] * PRESCALE_BETA[self.mw])
 
     @property
     def prescale_limit_log2(self) -> int:
@@ -454,7 +499,8 @@ class WinogradFwdSpec:
         return sum(self.workspace_bytes().values())
 
     def short(self) -> str:
-        tags = [self.problem.short(), f"f{self.m}", self.io_dtype]
+        mt = f"f{self.m}" if self.mw == self.mh else f"f{self.mh}x{self.mw}"
+        tags = [self.problem.short(), mt, self.io_dtype]
         if self.operand_dtype != self.io_dtype:
             tags.append(f"op{self.operand_dtype}")
         tags.append(f"v{self.vec}")
@@ -471,35 +517,77 @@ class WinogradFwdSpec:
             tags.append(f"ll{self.lds_lanes}")
         if self.prescale:
             tags.append("pss" if self.prescale_split else "ps")
+        if self.filter_rows != 1:
+            tags.append(f"fr{self.filter_rows}")
+        if self.filter_vec:
+            tags.append(f"fv{self.filter_vec}")
         return "_".join(tags)
 
     def kernel_name(self, stage: str) -> str:
         return kernel_name_join(self.name, stage, self.short())
 
 
-def tuned_transform_options(m: int, prescale: bool) -> dict:
+# Smallest fraction of an LDS region's tiles that must be real tiles for K2
+# to use the LDS path (dilated sub-grids of a few tiles waste most of a 4x8
+# region: a dilated layer with 3x3 tiles per sub-grid runs K2 faster on
+# the register path).
+_LDS_MIN_FILL = 0.75
+
+
+def tuned_transform_options(
+    m, prescale: bool, problem: Optional[ConvProblem] = None
+) -> dict:
     """Transform-kernel knobs measured best on gfx1250 (``WinogradFwdSpec`` kwargs).
 
-    Without prescale K2 stages 4 x 8-tile regions through LDS (each input pixel
-    read ~1.2x instead of up to (n / m)**2 times), 4 tiles per thread, 16
-    lanes x vec channels per workgroup. With prescale the fused register path
-    (one pass over x) beats the split max pass + LDS path. F4 uses 8-byte
-    vectors (16-byte ones raise the VGPR count without a gain); F2 keeps the
-    phase-1 width of 8.
+    ``m``: the tile, an int or ``(mh, mw)`` (the returned dict holds no tile
+    size). Without prescale K2 stages 4 x 8-tile regions through LDS (each
+    input pixel read ~1.2x instead of up to (n / m)**2 times), 4 tiles per
+    thread, 16 lanes x vec channels per workgroup. With prescale the fused
+    register path (one pass over x) beats the split max pass + LDS path. F4
+    and larger tiles use 8-byte vectors (16-byte ones raise the VGPR count
+    without a gain); F2 keeps the phase-1 width of 8. Given ``problem``, the
+    LDS path is skipped when the tile grid of a (dilation) sub-grid fills
+    less than ``_LDS_MIN_FILL`` of the regions.
     """
-    out = dict(vec=4 if m == 4 else 8)
+    mh, mw = _split_m(m)
+    mw = mw or mh
+    big = max(mh, mw) >= 4
+    # K1: F2 computes all 4 rows of G g per thread (w read once), F4 two of
+    # six.
+    out = dict(vec=4 if big else 8, filter_rows=2 if mh >= 4 else mh + 2)
     if not prescale:
-        out.update(input_block_tiles=(4, 8), tiles_per_thread=4, lds_lanes=16)
+        if (mh + 2) * (mw + 2) >= 36:
+            # F4 and larger tiles: the register path, one tile per thread.
+            # The LDS path is as fast or faster *alone*, but inside the
+            # pipeline the kernel after it ran intermittently slower.
+            # Root cause not found.
+            return out
+        bh, bw = 4, 8
+        if problem is not None:
+            th = ceil_div(ceil_div(problem.Ho, problem.dH), mh)
+            tw = ceil_div(ceil_div(problem.Wo, problem.dW), mw)
+            fill = th * tw / (ceil_div(th, bh) * bh * ceil_div(tw, bw) * bw)
+            if fill < _LDS_MIN_FILL:
+                return out
+        out.update(input_block_tiles=(bh, bw), tiles_per_thread=4, lds_lanes=16)
     return out
 
 
-def winograd_gemm_problem(problem: ConvProblem, m: int) -> ConvProblem:
+def _split_m(m) -> Tuple[int, int]:
+    """``m`` (square tile) or ``(mh, mw)`` -> ``(m, m_w)`` spec arguments."""
+    if isinstance(m, (tuple, list)):
+        return int(m[0]), int(m[1])
+    return int(m), 0
+
+
+def winograd_gemm_problem(problem: ConvProblem, m) -> ConvProblem:
     """The grouped 1x1 conv K3 computes: ``M = V (x) U`` per (bin, group).
 
     ``N = T`` tiles, ``Hi = Wi = 1``, ``C = n2 * C``, ``K = n2 * K``,
     ``groups = n2 * g``; group index ``bin * g + gi`` (see the module doc).
     """
-    spec = WinogradFwdSpec(problem=problem, m=m)
+    mh, mw = _split_m(m)
+    spec = WinogradFwdSpec(problem=problem, m=mh, m_w=mw)
     n2 = spec.n2
     return ConvProblem(
         N=spec.num_tiles,
@@ -513,7 +601,7 @@ def winograd_gemm_problem(problem: ConvProblem, m: int) -> ConvProblem:
     )
 
 
-def winograd_gemm_flops(problem: ConvProblem, m: int) -> int:
+def winograd_gemm_flops(problem: ConvProblem, m) -> int:
     """MACs * 2 of the middle GEMM (for the reduction-vs-direct report)."""
     gp = winograd_gemm_problem(problem, m)
     return gp.flops
@@ -570,7 +658,30 @@ def bt_1d(ops, m: int, d: Sequence):
             ops.fma(-2.0, d31, d42),
             ops.fma(4.0, d[1], ops.fma(-5.0, d[3], d[5])),
         ]
-    raise ValueError(f"unsupported m={m}")
+    _, _, bt = toom_cook(m)
+    return _matvec_1d(ops, bt, d)
+
+
+def _matvec_1d(ops, mat, d: Sequence):
+    """``mat @ d`` for constant rows (no shared subexpressions): every
+    non-zero coefficient is one add / sub / fma (exact binary fractions)."""
+    out = []
+    for row in mat:
+        terms = [(float(c), d[k]) for k, c in enumerate(row) if c != 0]
+        unit = [t for t in terms if abs(t[0]) == 1.0]
+        rest = [t for t in terms if abs(t[0]) != 1.0]
+        acc = None
+        for c, v in unit:
+            if acc is None:
+                acc = v if c > 0 else ops.sub(ops.sub(v, v), v)
+            else:
+                acc = ops.add(acc, v) if c > 0 else ops.sub(acc, v)
+        for c, v in rest:
+            acc = (
+                ops.fma(c, v, acc) if acc is not None else ops.fma(c, v, ops.sub(v, v))
+            )
+        out.append(acc if acc is not None else ops.sub(d[0], d[0]))
+    return out
 
 
 def at_1d(ops, m: int, d: Sequence):
@@ -588,7 +699,8 @@ def at_1d(ops, m: int, d: Sequence):
             ops.fma(4.0, s34, s12),
             ops.add(ops.fma(8.0, d34, d12), d[5]),
         ]
-    raise ValueError(f"unsupported m={m}")
+    at, _, _ = toom_cook(m)
+    return _matvec_1d(ops, at, d)
 
 
 # ---------------------------------------------------------------------------
@@ -945,7 +1057,7 @@ _FILTER_BLOCK = 128
 def filter_transform_grid(spec: WinogradFwdSpec) -> Tuple[int, int, int]:
     p = spec.problem
     items = p.K * (p.cpg // spec.vec_cg)
-    return (ceil_div(items, _FILTER_BLOCK), spec.n, 1)
+    return (ceil_div(items, _FILTER_BLOCK), spec.nh // spec.filter_rows, 1)
 
 
 def filter_transform_block(spec: WinogradFwdSpec) -> int:  # noqa: ARG001
@@ -978,11 +1090,12 @@ def build_winograd_filter_transform(
     cg = p.cpg
     cgv = cg // vec
     items = p.K * cgv
-    n = spec.n
-    gint, den = filter_matrix_int(spec.m)
-    scale = 1.0 / float(den * den)  # power of two for F2; one rounding for F4
+    n, nw = spec.nh, spec.nw
+    gint, den = filter_matrix_int(spec.mh)
+    gint_w, den_w = filter_matrix_int(spec.mw)
+    scale = 1.0 / float(den * den_w)  # power of two for F2; one rounding for F4
 
-    b = IRBuilder(spec.kernel_name("filter"))
+    b = _new_builder(spec.kernel_name("filter"))
     b.kernel.attrs["max_workgroup_size"] = _FILTER_BLOCK
     w = b.param(
         "w", PtrType(_ir_dtype(spec.io_dtype), "global"), noalias=True, readonly=True
@@ -999,7 +1112,7 @@ def build_winograd_filter_transform(
     u_rsrc = b.buffer_rsrc(u, u_bytes)
 
     gid = b.add(b.mul(b.block_id_x(), b.const_i32(_FILTER_BLOCK)), b.thread_id_x())
-    row_i = b.block_id_y()
+    row_y = b.block_id_y()
     ok = b.cmp_lt(gid, b.const_i32(items))
     k = b.div(gid, b.const_i32(cgv))
     c = b.mul(b.mod(gid, b.const_i32(cgv)), b.const_i32(vec))
@@ -1016,46 +1129,60 @@ def build_winograd_filter_transform(
                 _raw_to_f32(b, _load_raw(b, w_rsrc, off, spec.io_dtype, vec), vec)
             )
         taps.append(row)
-    # G[i][ky] for the runtime row i (uniform): a select chain over the n rows.
-    coef = []
-    for ky in range(3):
-        cval = b.const_f32(float(gint[0][ky]))
-        for i in range(1, n):
-            cval = b.select(
-                b.cmp_eq(row_i, b.const_i32(i)), b.const_f32(float(gint[i][ky])), cval
-            )
-        coef.append(cval)
-    # tmp[kx][ch] = sum_ky G[i][ky] * g[ky][kx][ch]
-    tmp = [
-        [
-            b.fma(
-                coef[2],
-                taps[2][kx][ch],
-                b.fma(coef[1], taps[1][kx][ch], b.fmul(coef[0], taps[0][kx][ch])),
-            )
-            for ch in range(vec)
-        ]
-        for kx in range(3)
-    ]
     sc = b.const_f32(scale)
-    # U[i * n + j][k][c]
-    ubase = _oob_sel(
-        b,
-        ok,
-        b.mul(
-            b.add(
-                b.mul(b.add(b.mul(row_i, b.const_i32(n * p.K)), k), b.const_i32(cg)), c
-            ),
-            b.const_i32(2),
-        ),
-    )
-    for j in range(n):
-        vals = [
-            b.fmul(_lincomb(b, [(gint[j][kx], tmp[kx][ch]) for kx in range(3)]), sc)
-            for ch in range(vec)
+    nr = spec.filter_rows
+    for rr in range(nr):
+        if nr == n:
+            row_i = b.const_i32(rr)
+            coef = [b.const_f32(float(gint[rr][ky])) for ky in range(3)]
+        else:
+            row_i = b.add(b.mul(row_y, b.const_i32(nr)), b.const_i32(rr))
+            # G[i][ky] for the runtime row i (uniform): a select chain.
+            coef = []
+            for ky in range(3):
+                cval = b.const_f32(float(gint[0][ky]))
+                for i in range(1, n):
+                    cval = b.select(
+                        b.cmp_eq(row_i, b.const_i32(i)),
+                        b.const_f32(float(gint[i][ky])),
+                        cval,
+                    )
+                coef.append(cval)
+        # tmp[kx][ch] = sum_ky G[i][ky] * g[ky][kx][ch]
+        tmp = [
+            [
+                b.fma(
+                    coef[2],
+                    taps[2][kx][ch],
+                    b.fma(coef[1], taps[1][kx][ch], b.fmul(coef[0], taps[0][kx][ch])),
+                )
+                for ch in range(vec)
+            ]
+            for kx in range(3)
         ]
-        off = b.add(ubase, b.const_i32(j * p.K * cg * 2))
-        _store_vec_f32(b, u_rsrc, off, vals, spec.operand_dtype)
+        # U[i * n + j][k][c]
+        ubase = _oob_sel(
+            b,
+            ok,
+            b.mul(
+                b.add(
+                    b.mul(
+                        b.add(b.mul(row_i, b.const_i32(nw * p.K)), k), b.const_i32(cg)
+                    ),
+                    c,
+                ),
+                b.const_i32(2),
+            ),
+        )
+        for j in range(nw):
+            vals = [
+                b.fmul(
+                    _lincomb(b, [(gint_w[j][kx], tmp[kx][ch]) for kx in range(3)]), sc
+                )
+                for ch in range(vec)
+            ]
+            off = b.add(ubase, b.const_i32(j * p.K * cg * 2))
+            _store_vec_f32(b, u_rsrc, off, vals, spec.operand_dtype)
     return b.kernel
 
 
@@ -1121,16 +1248,17 @@ def build_winograd_input_transform(
     if spec.input_lds:
         return _build_input_lds(spec)
     p = spec.problem
-    n, m = spec.n, spec.m
+    n, m = spec.nh, spec.mh  # rows
+    nw, mw = spec.nw, spec.mw  # columns
     vec = spec.vec_c
     rm = _input_run_map(spec)
     R = rm.tiles
-    ncols = m * R + (n - m)
+    ncols = mw * R + (nw - mw)
     T = spec.num_tiles
     ps = spec.prescale
     split = ps and spec.prescale_split
 
-    b = IRBuilder(spec.kernel_name("input"))
+    b = _new_builder(spec.kernel_name("input"))
     b.kernel.attrs["max_workgroup_size"] = rm.block
     x = b.param(
         "x", PtrType(_ir_dtype(spec.io_dtype), "global"), noalias=True, readonly=True
@@ -1152,7 +1280,7 @@ def build_winograd_input_transform(
     rc = _run_coords(b, spec, rm)
     c = b.mul(rc.cv, b.const_i32(vec))
     h0 = b.add(b.sub(rc.a, b.const_i32(p.pH)), b.mul(rc.ti, b.const_i32(p.dH * m)))
-    w0 = b.add(b.sub(rc.bsub, b.const_i32(p.pW)), b.mul(rc.tj0, b.const_i32(p.dW * m)))
+    w0 = b.add(b.sub(rc.bsub, b.const_i32(p.pW)), b.mul(rc.tj0, b.const_i32(p.dW * mw)))
     img_row0 = b.mul(rc.n, b.const_i32(p.Hi))
     # Row part (with the channel offset) and column part of each patch offset.
     row_ok, row_pix = [], []
@@ -1223,9 +1351,9 @@ def build_winograd_input_transform(
                 colmax.append(acc)
             tmax = []
             for r in range(R):
-                acc = colmax[m * r]
-                for vv in range(1, n):
-                    acc = b.smax(acc, colmax[m * r + vv])
+                acc = colmax[mw * r]
+                for vv in range(1, nw):
+                    acc = b.smax(acc, colmax[mw * r + vv])
                 tmax.append(acc)
         else:
             colmax = []
@@ -1237,9 +1365,9 @@ def build_winograd_input_transform(
                 colmax.append(acc)
             tmax = []
             for r in range(R):
-                acc = colmax[m * r]
-                for vv in range(1, n):
-                    acc = _max_bits(b, acc, colmax[m * r + vv], vec)
+                acc = colmax[mw * r]
+                for vv in range(1, nw):
+                    acc = _max_bits(b, acc, colmax[mw * r + vv], vec)
                 tmax.append(_hmax_bits(b, acc, vec))
             tmax = _group_max_bits(b, tmax, rm.tpc, rm.block, "wino_amax")
         lane0 = b.cmp_eq(rc.cv, b.const_i32(0))
@@ -1272,7 +1400,8 @@ def _input_tiles_transform(b, spec, raw, R, tile_ok, scales, vbase0, v_rsrc, vec
     ``tile_ok[r]``.
     """
     p = spec.problem
-    n, m = spec.n, spec.m
+    n, m = spec.nh, spec.mh
+    nw, mw = spec.nw, spec.mw
     ops = _IROps(b)
     vstride = spec.n2 * p.C * 2
     colt = {}
@@ -1288,17 +1417,18 @@ def _input_tiles_transform(b, spec, raw, R, tile_ok, scales, vbase0, v_rsrc, vec
         return colt[vv]
 
     for r in range(R):
-        cols = [col_transform(m * r + vv) for vv in range(n)]
+        cols = [col_transform(mw * r + vv) for vv in range(nw)]
         vbase = _oob_sel(b, tile_ok[r], b.add(vbase0, b.const_i32(r * vstride)))
         for i in range(n):
             outs = [
-                bt_1d(ops, m, [cols[vv][ch][i] for vv in range(n)]) for ch in range(vec)
+                bt_1d(ops, mw, [cols[vv][ch][i] for vv in range(nw)])
+                for ch in range(vec)
             ]
-            for j in range(n):
+            for j in range(nw):
                 vals = [outs[ch][j] for ch in range(vec)]
                 if scales[r] is not None:
                     vals = [b.fmul(x_, scales[r]) for x_ in vals]
-                off = b.add(vbase, b.const_i32((i * n + j) * p.C * 2))
+                off = b.add(vbase, b.const_i32((i * nw + j) * p.C * 2))
                 pending.append((off, _pack_vec_f32(b, vals, spec.operand_dtype)))
     # All stores last, after a scheduling barrier: a store's data VGPRs must
     # not be reused while the store is in flight (``s_wait_xcnt``), which
@@ -1338,8 +1468,8 @@ def _lds_map(spec: WinogradFwdSpec) -> _LdsMap:
     cc = tpc * vec
     cx = ceil_div(nv, tpc)
     lv = min(_pow2_vec(p.C, 8), cc)
-    rh = spec.m * bh + spec.n - spec.m
-    rw = spec.m * bw + spec.n - spec.m
+    rh = spec.mh * bh + spec.nh - spec.mh
+    rw = spec.mw * bw + spec.nw - spec.mw
     nbh = ceil_div(spec.tiles_h, bh)
     nbw = ceil_div(spec.tiles_w, bw)
     tpt = spec.tiles_per_thread
@@ -1381,14 +1511,15 @@ def _build_input_lds(spec: WinogradFwdSpec) -> KernelDef:
     only): the region's per-pixel maxima are staged too.
     """
     p = spec.problem
-    n, m = spec.n, spec.m
+    n, m = spec.nh, spec.mh
+    nw, mw = spec.nw, spec.mw
     vec = spec.vec_c
     lm = _lds_map(spec)
     T = spec.num_tiles
     ps = spec.prescale
     dt = _ir_dtype(spec.io_dtype)
 
-    b = IRBuilder(spec.kernel_name("input"))
+    b = _new_builder(spec.kernel_name("input"))
     b.kernel.attrs["max_workgroup_size"] = lm.block
     x = b.param("x", PtrType(dt, "global"), noalias=True, readonly=True)
     v = b.param(
@@ -1420,7 +1551,7 @@ def _build_input_lds(spec: WinogradFwdSpec) -> KernelDef:
     ti0 = b.mul(bhi, b.const_i32(lm.bh))
     tj0 = b.mul(bwi, b.const_i32(lm.bw))
     h0 = b.add(b.sub(a, b.const_i32(p.pH)), b.mul(ti0, b.const_i32(p.dH * m)))
-    w0 = b.add(b.sub(bsub, b.const_i32(p.pW)), b.mul(tj0, b.const_i32(p.dW * m)))
+    w0 = b.add(b.sub(bsub, b.const_i32(p.pW)), b.mul(tj0, b.const_i32(p.dW * mw)))
     img_row0 = b.mul(img, b.const_i32(p.Hi))
     c0 = b.mul(cxi, b.const_i32(lm.cc))
 
@@ -1497,11 +1628,11 @@ def _build_input_lds(spec: WinogradFwdSpec) -> KernelDef:
             ),
             tj,
         )
-        pbase = b.add(b.mul(bi, b.const_i32(m * lm.rw)), b.mul(bj, b.const_i32(m)))
+        pbase = b.add(b.mul(bi, b.const_i32(m * lm.rw)), b.mul(bj, b.const_i32(mw)))
         raw = []
         for uu in range(n):
             row = []
-            for vv in range(n):
+            for vv in range(nw):
                 idx = b.add(
                     b.mul(
                         b.add(pbase, b.const_i32(uu * lm.rw + vv)), b.const_i32(lm.cc)
@@ -1515,7 +1646,7 @@ def _build_input_lds(spec: WinogradFwdSpec) -> KernelDef:
         if ps:
             acc = None
             for uu in range(n):
-                for vv in range(n):
+                for vv in range(nw):
                     pm = b.vec_extract(
                         b.smem_load_vN(
                             pm_lds,
@@ -1597,7 +1728,7 @@ def build_winograd_prescale(
     npix = p.N * p.Hi * p.Wi
     T = spec.num_tiles
 
-    b = IRBuilder(spec.kernel_name("pmax"))
+    b = _new_builder(spec.kernel_name("pmax"))
     b.kernel.attrs["max_workgroup_size"] = _PRESCALE_BLOCK
     x = b.param(
         "x", PtrType(_ir_dtype(spec.io_dtype), "global"), noalias=True, readonly=True
@@ -1674,11 +1805,12 @@ def build_winograd_output_transform(
     only ``m x n`` intermediates per channel are live), ``m2`` vector stores.
     """
     p = spec.problem
-    n, m = spec.n, spec.m
+    n, m = spec.nh, spec.mh
+    nw, mw = spec.nw, spec.mw
     vec = spec.vec_k
     rm = _output_run_map(spec)
 
-    b = IRBuilder(spec.kernel_name("output"))
+    b = _new_builder(spec.kernel_name("output"))
     b.kernel.attrs["max_workgroup_size"] = rm.block
     mm = b.param(
         "mm",
@@ -1707,11 +1839,11 @@ def build_winograd_output_transform(
             _load_raw(
                 b,
                 m_rsrc,
-                b.add(mbase, b.const_i32((uu * n + vv) * p.K * 2)),
+                b.add(mbase, b.const_i32((uu * nw + vv) * p.K * 2)),
                 spec.operand_dtype,
                 vec,
             )
-            for vv in range(n)
+            for vv in range(nw)
         ]
         for uu in range(n)
     ]
@@ -1721,7 +1853,7 @@ def build_winograd_output_transform(
         scale = _pow2_f32(b, b.global_load_i32(e_ptr, t_safe))
 
     ho0 = b.add(rc.a, b.mul(rc.ti, b.const_i32(p.dH * m)))
-    wo0 = b.add(rc.bsub, b.mul(rc.tj0, b.const_i32(p.dW * m)))
+    wo0 = b.add(rc.bsub, b.mul(rc.tj0, b.const_i32(p.dW * mw)))
     img_row0 = b.mul(rc.n, b.const_i32(p.Ho))
     yrow = []
     for i in range(m):
@@ -1736,7 +1868,7 @@ def build_winograd_output_transform(
         )
         yrow.append(_oob_sel(b, okr, off))
     ycol = []
-    for j in range(m):
+    for j in range(mw):
         wo = b.add(wo0, b.const_i32(j * p.dW))
         ycol.append(
             _oob_sel(
@@ -1748,7 +1880,7 @@ def build_winograd_output_transform(
     b.sched_barrier(0)
     # Column pass: colt[v][ch][i] = (A^T M[:, v])[i]
     colt = []
-    for vv in range(n):
+    for vv in range(nw):
         data = [_raw_to_f32(b, raw[uu][vv], vec) for uu in range(n)]
         colt.append(
             [at_1d(ops, m, [data[uu][ch] for uu in range(n)]) for ch in range(vec)]
@@ -1756,9 +1888,9 @@ def build_winograd_output_transform(
     pending = []
     for i in range(m):
         outs = [
-            at_1d(ops, m, [colt[vv][ch][i] for vv in range(n)]) for ch in range(vec)
+            at_1d(ops, mw, [colt[vv][ch][i] for vv in range(nw)]) for ch in range(vec)
         ]
-        for j in range(m):
+        for j in range(mw):
             vals = [outs[ch][j] for ch in range(vec)]
             if scale is not None:
                 vals = [b.fmul(x_, scale) for x_ in vals]
@@ -1837,11 +1969,383 @@ def transform_stages(spec: WinogradFwdSpec) -> List[TransformStage]:
 
 
 # ---------------------------------------------------------------------------
+# Tile choice (analytic cost model)
+# ---------------------------------------------------------------------------
+
+# Tiles the automatic choice considers. F(6,3) on both axes is excluded: with
+# fp16 operands its rocke error metric is 1.4-2.1e-2 (about 2x F(4,3), over
+# the ~1.5e-2 budget); one F6 axis (6x4: 1.0-1.6e-2) is within it.
+AUTO_TILES: Tuple[Tuple[int, int], ...] = (
+    (4, 4),
+    (6, 4),
+    (2, 2),
+    (6, 2),
+    (4, 2),
+    (2, 4),
+    (2, 6),
+    (4, 6),
+)
+# The tile ranking is an analytic roofline sum in byte equivalents: the K3
+# GEMM flops at the occupancy of its first round of blocks, divided by a
+# nominal machine balance (GEMM flops that cost as much as one byte of
+# transform traffic), plus the bytes the transforms move. Every tile of a
+# problem runs the same launches, so a launch term would drop out of the
+# ranking. The balance is a nominal parameter, not a fit; pass the target's
+# own ratio to rank for a different part.
+COST_FLOPS_PER_BYTE = 256.0
+# Edge of the K3 output block the occupancy is counted in.
+_COST_GEMM_BLOCK = 256
+
+
+def tile_cost(
+    problem: ConvProblem,
+    tile,
+    io_dtype: str = "fp16",
+    *,
+    num_cus: int,
+    flops_per_byte: float = COST_FLOPS_PER_BYTE,
+) -> float:
+    """Relative cost (byte equivalents) of the 4-kernel pipeline with
+    ``tile`` (``m`` or ``(mh, mw)``), with the default operand / prescale
+    choice of ``io_dtype``: GEMM flops over the block occupancy of the first
+    round (``256 x 256`` blocks over ``num_cus``) and ``flops_per_byte``,
+    plus the bytes the transforms move (x, V twice, M twice, y, w, U twice)
+    and the extra x pass of the prescale. Only meant to rank tiles of one
+    problem."""
+    import dataclasses
+
+    if num_cus < 1:
+        raise ValueError(f"num_cus must be >= 1, got {num_cus}")
+    mh, mw = _split_m(tile)
+    one = dataclasses.replace(problem, N=1)  # linear in N; one image fits 2 GiB
+    s = WinogradFwdSpec(problem=one, m=mh, m_w=mw)
+    b = s.buffer_bytes()
+    n = problem.N
+    blocks = (
+        ceil_div(s.num_tiles * n, _COST_GEMM_BLOCK)
+        * ceil_div(problem.kpg, _COST_GEMM_BLOCK)
+        * s.n2
+        * problem.groups
+    )
+    occ = min(1.0, blocks / num_cus)
+    gemm = n * winograd_gemm_flops(one, (mh, s.mw)) / occ / flops_per_byte
+    moved = n * (b["x"] + 2 * b["V"] + 2 * b["M"] + b["y"]) + b["w"] + 2 * b["U"]
+    ps_x = n * b["x"] if (io_dtype == "bf16" and max(mh, s.mw) >= 4) else 0
+    return gemm + moved + ps_x
+
+
+def auto_tiles(
+    problem: ConvProblem,
+    io_dtype: str = "fp16",
+    count: int = 2,
+    tiles: Sequence[Tuple[int, int]] = AUTO_TILES,
+    *,
+    num_cus: int,
+    flops_per_byte: float = COST_FLOPS_PER_BYTE,
+) -> List[Tuple[int, int]]:
+    """The ``count`` tiles with the lowest :func:`tile_cost` (ties keep the
+    order of ``tiles``; a transposed tile of the same cost is dropped). With
+    bf16 I/O the transposed 4x6 tile is skipped: its fused-prescale input
+    transform spills (6x4 is the same work)."""
+    cands = []
+    for i, t in enumerate(tiles):
+        if io_dtype == "bf16" and tuple(t) == (4, 6):
+            continue
+        try:
+            c = tile_cost(
+                problem, t, io_dtype, num_cus=num_cus, flops_per_byte=flops_per_byte
+            )
+        except ValueError:
+            continue
+        # A transposed tile of equal cost (square sub-grids) adds nothing.
+        if any(abs(c - c2) <= 1e-9 * c and t2 == tuple(t)[::-1] for c2, _, t2 in cands):
+            continue
+        cands.append((c, i, tuple(t)))
+    cands.sort()
+    return [t for _, _, t in cands[:count]]
+
+
+# ---------------------------------------------------------------------------
+# Merged launches: several transform kernels in one grid
+# ---------------------------------------------------------------------------
+
+# Set while :func:`build_winograd_merged` emits one stage's body: the stage
+# builders then write into the merged kernel through a :class:`_SubBuilder`
+# instead of creating their own kernel.
+_MERGE_TARGET: Optional["_SubBuilder"] = None
+
+
+def _new_builder(name: str) -> IRBuilder:
+    if _MERGE_TARGET is not None:
+        return _MERGE_TARGET
+    return IRBuilder(name)
+
+
+class _SubBuilder(IRBuilder):
+    """An :class:`IRBuilder` view that emits into another builder's kernel.
+
+    It shares every piece of state with ``base`` (value counter, region stack,
+    params, kernel), so ops land in the region ``base`` is currently filling;
+    only the work-item ids are replaced by the stage's own (decoded from the
+    merged flat grid) and parameters of the same name are shared.
+    """
+
+    def __init__(self, base: IRBuilder, block_ids, tid: Value):  # noqa: D107
+        self.__dict__ = base.__dict__
+        object.__setattr__(self, "_sub_ids", (tuple(block_ids), tid))
+
+    def block_id_x(self) -> Value:
+        return self._sub_ids[0][0]
+
+    def block_id_y(self) -> Value:
+        return self._sub_ids[0][1]
+
+    def block_id_z(self) -> Value:
+        return self._sub_ids[0][2]
+
+    def thread_id_x(self) -> Value:
+        return self._sub_ids[1]
+
+    def param(self, name: str, t, **attrs) -> Value:
+        if name in self._param_values:
+            return self._param_values[name]
+        return super().param(name, t, **attrs)
+
+
+@dataclass(frozen=True)
+class MergedStage:
+    """Launch data of a merged transform kernel (see
+    :func:`build_winograd_merged`)."""
+
+    name: str
+    parts: Tuple[str, ...]
+    grid: Tuple[int, int, int]
+    block: int
+    signature: list
+    # (first flat block, flat blocks) of each part
+    ranges: Tuple[Tuple[int, int], ...]
+    # stage blocks per merged block (> 0) or merged blocks per stage block (< 0)
+    packs: Tuple[int, ...]
+
+
+# Stages with no barrier / LDS: their blocks may be packed into, or split
+# across, the merged kernel's blocks (thread ids are remapped).
+_BARRIER_FREE_STAGES = ("K1",)
+
+
+def _merge_layout(stages: Sequence["TransformStage"]):
+    """``(block, ranges, packs, flat blocks)``. The merged block is the block
+    of the stages that use barriers / LDS (they must agree; they run with
+    their own block unchanged), else the largest one. ``packs[i]`` > 0: that
+    many stage blocks per merged block; < 0: ``-packs[i]`` merged blocks per
+    stage block (only for barrier-free stages)."""
+    fixed = {st.block for st in stages if st.name not in _BARRIER_FREE_STAGES}
+    if len(fixed) > 1:
+        raise ValueError(f"stages with barriers need one block size, got {fixed}")
+    block = fixed.pop() if fixed else max(st.block for st in stages)
+    ranges, packs = [], []
+    start = 0
+    for st in stages:
+        gx, gy, gz = st.grid
+        sub = gx * gy * gz
+        if st.block == block:
+            pack, nflat = 1, sub
+        elif st.name not in _BARRIER_FREE_STAGES:
+            raise ValueError(f"{st.name}: block {st.block} != merged block {block}")
+        elif st.block < block:
+            if block % st.block:
+                raise ValueError(f"{st.name}: block {st.block} does not divide {block}")
+            pack = block // st.block
+            nflat = ceil_div(sub, pack)
+        else:
+            if st.block % block:
+                raise ValueError(f"{st.name}: block {block} does not divide {st.block}")
+            pack = -(st.block // block)
+            nflat = sub * -pack
+        ranges.append((start, nflat))
+        packs.append(pack)
+        start += nflat
+    return block, tuple(ranges), tuple(packs), start
+
+
+def merged_stage(
+    spec: WinogradFwdSpec, names: Sequence[str] = ("K1", "K2")
+) -> MergedStage:
+    """Launch layout of ``names`` (stages of :func:`transform_stages`) merged
+    into one kernel: disjoint ranges of a flat 1-D grid, in the given order."""
+    by = {st.name: st for st in transform_stages(spec)}
+    missing = [nm for nm in names if nm not in by]
+    if missing:
+        raise ValueError(f"no stage(s) {missing} in this pipeline")
+    stages = [by[nm] for nm in names]
+    block, ranges, packs, total = _merge_layout(stages)
+    sig: list = []
+    seen = set()
+    for st in stages:
+        for a in st.signature:
+            if a["name"] not in seen:
+                seen.add(a["name"])
+                sig.append(a)
+    return MergedStage(
+        "+".join(names), tuple(names), (total, 1, 1), block, sig, ranges, packs
+    )
+
+
+def check_merged_layout(spec: WinogradFwdSpec, lay: MergedStage) -> None:
+    """Host-side check of a merged launch: the ranges tile the flat grid,
+    and every (stage block, stage thread) of every part is covered exactly
+    once by the remapping :func:`build_winograd_merged` emits (enumerated
+    here in Python). Raises ``ValueError``."""
+    by = {st.name: st for st in transform_stages(spec)}
+    nxt = 0
+    for nm, (start, nflat), pack in zip(lay.parts, lay.ranges, lay.packs):
+        st = by[nm]
+        if start != nxt or nflat <= 0:
+            raise ValueError(f"{nm}: range {(start, nflat)} not contiguous")
+        nxt = start + nflat
+        nsub = st.grid[0] * st.grid[1] * st.grid[2]
+        seen = set()
+        for loc in range(nflat):
+            for tid in range(0, lay.block, 32):  # one probe per wave
+                if pack > 1:
+                    sb, stid = loc * pack + tid // st.block, tid % st.block
+                    if sb >= nsub:
+                        continue  # guarded off in the kernel
+                elif pack < 0:
+                    sb, stid = loc // -pack, (loc % -pack) * lay.block + tid
+                else:
+                    sb, stid = loc, tid
+                if not (0 <= sb < nsub and 0 <= stid < st.block):
+                    raise ValueError(f"{nm}: flat {start + loc} -> block {sb}/{stid}")
+                if (sb, stid) in seen:
+                    raise ValueError(f"{nm}: block {sb} thread {stid} twice")
+                seen.add((sb, stid))
+        if len(seen) != nsub * ceil_div(st.block, 32):
+            raise ValueError(f"{nm}: {len(seen)} wave slots of {nsub} blocks covered")
+    if nxt != lay.grid[0]:
+        raise ValueError(f"ranges cover {nxt} of {lay.grid[0]} blocks")
+
+
+# A merged kernel's LDS is reserved by every block, K1's included: past this
+# the K1 part loses most of its occupancy (seen with a 114 KB K2 region,
+# where the merged launch was slower than two separate ones).
+MERGE_MAX_LDS_BYTES = 32 * 1024
+
+
+def merge_worthwhile(spec: WinogradFwdSpec) -> bool:
+    """Whether merging K1 with the first input-transform stage should pay:
+    only when that stage reserves little LDS (the register path, or a small
+    LDS region)."""
+    if spec.prescale and spec.prescale_split:
+        return True  # K2a uses no LDS
+    if not spec.input_lds:
+        return True
+    lm = _lds_map(spec)
+    return lm.loads * lm.block * lm.lv * 2 <= MERGE_MAX_LDS_BYTES
+
+
+@dataclass(frozen=True)
+class WinogradMergedSpec:
+    """Independent transform stages of ``fwd`` (``names``, e.g. ``("K2",
+    "K1")``) merged into one launch (:func:`build_winograd_merged`)."""
+
+    fwd: WinogradFwdSpec
+    names: Tuple[str, ...] = ("K1", "K2")
+
+
+def build_winograd_merged(
+    spec: WinogradMergedSpec, *, arch: str = "gfx1250"
+) -> KernelDef:
+    """Several independent transform stages as one kernel.
+
+    Each stage gets a disjoint range of the flat grid (:func:`merged_stage`);
+    a block decodes its stage-local block ids from its flat id and runs that
+    stage's body unchanged. Stages with barriers / LDS (K2, K2a) keep their
+    own block, which is the merged block; a barrier-free stage (K1) whose
+    block differs is packed into (smaller) or split across (larger) merged
+    blocks with remapped thread ids (see :func:`_merge_layout`). This saves one launch and the
+    tail of the shorter stage overlaps the longer one; it is only valid for
+    stages without a data dependency (K1 and K2, or K1 and K2a).
+    """
+    spec, names = spec.fwd, spec.names
+    lay = merged_stage(spec, names)
+    check_merged_layout(spec, lay)
+    by = {st.name: st for st in transform_stages(spec)}
+    stages = [by[nm] for nm in lay.parts]
+    b = IRBuilder(spec.kernel_name("merged_" + "_".join(lay.parts).lower()))
+    flat = b.block_id_x()
+    tid = b.thread_id_x()
+
+    def emit(i: int) -> None:
+        st = stages[i]
+        start, nflat = lay.ranges[i]
+        pack = lay.packs[i]
+        local = b.sub(flat, b.const_i32(start))
+        if pack > 1:
+            # Barrier-free stage with a smaller block: sub-block = tid / bs.
+            sub = b.add(
+                b.mul(local, b.const_i32(pack)),
+                b.div(tid, b.const_i32(st.block)),
+            )
+            stid = b.mod(tid, b.const_i32(st.block))
+        elif pack < 0:
+            # Barrier-free stage with a larger block: -pack merged blocks each.
+            sub = b.div(local, b.const_i32(-pack))
+            stid = b.add(
+                b.mul(b.mod(local, b.const_i32(-pack)), b.const_i32(lay.block)), tid
+            )
+        else:
+            sub = local
+            stid = tid
+        gx, gy, gz = st.grid
+        bx = b.mod(sub, b.const_i32(gx)) if gx > 1 else b.const_i32(0)
+        r = b.div(sub, b.const_i32(gx)) if gx > 1 else sub
+        by_ = b.mod(r, b.const_i32(gy)) if gy > 1 else b.const_i32(0)
+        bz = b.div(r, b.const_i32(gy)) if gy > 1 else r
+
+        def body():
+            global _MERGE_TARGET
+            _MERGE_TARGET = _SubBuilder(b, (bx, by_, bz), stid)
+            try:
+                st.build(spec, arch=arch)
+            finally:
+                _MERGE_TARGET = None
+
+        if pack > 1 and nflat * pack != gx * gy * gz:
+            with b.scf_if(b.cmp_lt(sub, b.const_i32(gx * gy * gz))):
+                body()
+        else:
+            body()
+
+    def chain(i: int) -> None:
+        if i == len(stages) - 1:
+            emit(i)
+            return
+        start, nflat = lay.ranges[i]
+        # if / else (not two ifs): barriers inside a branch must survive.
+        with b.scf_if_else(b.cmp_lt(flat, b.const_i32(start + nflat))) as (t, e):
+            with t:
+                emit(i)
+            with e:
+                chain(i + 1)
+
+    chain(0)
+    b.kernel.attrs["max_workgroup_size"] = lay.block
+    # The launcher packs kernargs by ``lay.signature``: it must match the
+    # parameter order the stage bodies declared.
+    got = [prm.name for prm in b.kernel.params]
+    want = [a["name"] for a in lay.signature]
+    if got != want:
+        raise ValueError(f"merged kernel params {got} != signature {want}")
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
 # Host-side reference of the 4-stage algorithm (numpy; CPU tests)
 # ---------------------------------------------------------------------------
 
 
-def winograd_fwd_reference_np(x, w, problem: ConvProblem, m: int, *, round_fn=None):
+def winograd_fwd_reference_np(x, w, problem: ConvProblem, m, *, round_fn=None):
     """Numpy model of K1..K4 with the same tiling, layouts and index maps.
 
     ``x`` is NHWC, ``w`` KYXC (``Cg`` innermost). ``round_fn(name, arr)`` lets
@@ -1851,13 +2355,17 @@ def winograd_fwd_reference_np(x, w, problem: ConvProblem, m: int, *, round_fn=No
     """
     import numpy as np
 
-    spec = WinogradFwdSpec(problem=problem, m=m)
+    mh, mw = _split_m(m)
+    spec = WinogradFwdSpec(problem=problem, m=mh, m_w=mw)
+    mw = spec.mw
     p = problem
-    n, n2 = spec.n, spec.n2
-    at_f, g_f, bt_f = toom_cook(m)
-    at = np.array([[float(v) for v in r] for r in at_f])
-    g = np.array([[float(v) for v in r] for r in g_f])
-    bt = np.array([[float(v) for v in r] for r in bt_f])
+    n, nw, n2 = spec.nh, spec.nw, spec.n2
+
+    def mats(mm):
+        return [np.array([[float(v) for v in r] for r in f]) for f in toom_cook(mm)]
+
+    at, g, bt = mats(mh)
+    at_w, g_w, bt_w = mats(mw)
     rnd = round_fn or (lambda _name, a: a)
     G, Cg, Kg = p.groups, p.cpg, p.kpg
     x = np.asarray(x, np.float64)
@@ -1865,7 +2373,7 @@ def winograd_fwd_reference_np(x, w, problem: ConvProblem, m: int, *, round_fn=No
 
     # K1: U[bin][k][c] (bin = i*n + j)
     wk = w.transpose(0, 3, 1, 2)  # K, Cg, 3, 3
-    u4 = np.einsum("ia,kcab,jb->ijkc", g, wk, g)
+    u4 = np.einsum("ia,kcab,jb->ijkc", g, wk, g_w)
     U = rnd("U", u4.reshape(n2, p.K, Cg))
 
     # K2: V[t][bin][c]
@@ -1880,16 +2388,16 @@ def winograd_fwd_reference_np(x, w, problem: ConvProblem, m: int, *, round_fn=No
                     for tj in range(tw):
                         ts.append((nn, a, bs, ti, tj))
     for t, (nn, a, bs, ti, tj) in enumerate(ts):
-        d = np.zeros((n, n, p.C))
+        d = np.zeros((n, nw, p.C))
         for uu in range(n):
-            hi = a - p.pH + dH * (ti * m + uu)
+            hi = a - p.pH + dH * (ti * mh + uu)
             if not 0 <= hi < p.Hi:
                 continue
-            for vv in range(n):
-                wi = bs - p.pW + dW * (tj * m + vv)
+            for vv in range(nw):
+                wi = bs - p.pW + dW * (tj * mw + vv)
                 if 0 <= wi < p.Wi:
                     d[uu, vv] = x[nn, hi, wi]
-        V[t] = np.einsum("iu,uvc,jv->ijc", bt, d, bt).reshape(n2, p.C)
+        V[t] = np.einsum("iu,uvc,jv->ijc", bt, d, bt_w).reshape(n2, p.C)
     V = rnd("V", V)
 
     # K3: M[t][bin][k] = sum_c V[t][bin][g*Cg + c] * U[bin][g*Kg + k][c]
@@ -1903,13 +2411,13 @@ def winograd_fwd_reference_np(x, w, problem: ConvProblem, m: int, *, round_fn=No
     # K4
     y = np.zeros((p.N, p.Ho, p.Wo, p.K))
     for t, (nn, a, bs, ti, tj) in enumerate(ts):
-        Y = np.einsum("iu,uvk,jv->ijk", at, M[t].reshape(n, n, p.K), at)
-        for i in range(m):
-            ho = a + dH * (ti * m + i)
+        Y = np.einsum("iu,uvk,jv->ijk", at, M[t].reshape(n, nw, p.K), at_w)
+        for i in range(mh):
+            ho = a + dH * (ti * mh + i)
             if ho >= p.Ho:
                 continue
-            for j in range(m):
-                wo = bs + dW * (tj * m + j)
+            for j in range(mw):
+                wo = bs + dW * (tj * mw + j)
                 if wo < p.Wo:
                     y[nn, ho, wo] = Y[i, j]
     return y, U, V, M

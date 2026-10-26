@@ -159,8 +159,10 @@ class K3Plan:
         m: int,
         ws: int = 0,
         reduce_art=None,
+        stream: int = 0,
     ) -> Callable[[], None]:
-        """Pre-bound launches of the whole plan (grid math checked)."""
+        """Pre-bound launches of the whole plan (grid math checked) on
+        ``stream`` (0: torch's current stream)."""
         from kernels.common.conv_winograd_gemm_wmma import (
             winograd_gemm_reduce_grid,
             winograd_gemm_reduce_signature,
@@ -184,7 +186,9 @@ class K3Plan:
             )
             d = ws if s.spec.split_k else m
             vals = s.spec.launch_values(prob, v, u, d, s.splits, s.batches)
-            cfg = LaunchConfig(grid=grid, block=(s.spec.threads_per_block, 1, 1))
+            cfg = LaunchConfig(
+                grid=grid, block=(s.spec.threads_per_block, 1, 1), stream=stream
+            )
             fns.append(lau.bind(vals, config=cfg))
             if s.spec.split_k:
                 if reduce_art is None or not ws:
@@ -199,7 +203,12 @@ class K3Plan:
                 )
                 rv = winograd_gemm_reduce_values(prob, ws, m, vals["splits"])
                 fns.append(
-                    red.bind(rv, config=LaunchConfig(grid=rgrid, block=(256, 1, 1)))
+                    red.bind(
+                        rv,
+                        config=LaunchConfig(
+                            grid=rgrid, block=(256, 1, 1), stream=stream
+                        ),
+                    )
                 )
 
         def run(_f=tuple(fns)):

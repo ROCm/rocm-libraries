@@ -5,7 +5,8 @@
  * forward transform parity harness. Selects one of N sampled configs by
  * argv[1], builds the rocke_winograd_fwd_spec_t identically to the Python
  * emitter conv_winograd_fwd_emit.py (same table, same order), builds the stage
- * (rocke_build_winograd_fwd_stage_new) and lowers it for the config's arch,
+ * (rocke_build_winograd_fwd_stage_new) or the merged launch
+ * (rocke_build_winograd_merged_new) and lowers it for the config's arch,
  * printing the .ll (or the serialized IR / verifier output) to stdout.
  *
  * Config index table: see the Python emitter (must stay in sync).
@@ -23,89 +24,140 @@
 typedef struct cfg
 {
     int N, Hi, Wi, C, K, Y, X, pad, dil, groups;
-    int m;
+    int m, m_w;
     const char* io;
     const char* op;
     int vec, block, ps, tpt;
     const char* pmode;
-    int bh, bw, wgr, nt, lanes;
+    int bh, bw, wgr, nt, lanes, frows, fvec;
     const char* stage;
     const char* arch;
 } cfg_t;
 
 static const cfg_t CONFIGS[] = {
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 0: F4 fp16 K1 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 1: F4 fp16 K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 2: F4 fp16 K4 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 3: F2 K1 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "fp16",   "fp16",
-     8, 256, 0,  2,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 4: F2 K2, 2 tiles per thread */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 5: F2 K4 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "bf16",   "fp16",
-     8, 256, 1,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 6: F4 bf16 fused prescale K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "bf16",   "fp16",
-     8, 256, 1,  1,  "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 7: F4 bf16 fused prescale K4 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,     "bf16",   "fp16",
-     8, 256, 1,  1,  "split", 0, 0, 1, 1, 32, "K2a", "gfx1250"}, /* 8: F4 bf16 split prescale K2a */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "bf16",   "fp16",
-     8, 256, 1,  1,  "split", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 9: F4 bf16 split prescale K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "bf16",   "bf16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 10: F2 bf16 operands K1 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "bf16",   "bf16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 11: F2 bf16 operands K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "bf16",   "bf16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 12: F2 bf16 operands K4 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "fp16",   "fp16",
-     8, 256, 0,  4,  "fused", 4, 8, 1, 1, 16, "K2", "gfx1250"}, /* 13: F2 LDS region 4x8, 4 tiles per thread, 16 lanes K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "bf16",   "fp16",
-     8, 256, 1,  1,  "fused", 2, 4, 1, 1, 32, "K2", "gfx1250"}, /* 14: F4 bf16 LDS region 2x4 + split prescale K2 */
-    {1, 40,  40, 128, 64,      3, 3, 2, 2, 1,  4,    "fp16",   "fp16",
-     4, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 15: F4 dilation 2 K1 (vec 4) */
-    {1, 40,  40, 128, 64,      3, 3, 2, 2, 1,  4,    "fp16",   "fp16",
-     4, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 16: F4 dilation 2 K2 */
-    {1, 40,  40, 128, 64,      3, 3, 2, 2, 1,  4,    "fp16",   "fp16",
-     4, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 17: F4 dilation 2 K4 */
-    {2, 16,  16, 128, 128,     3, 3, 1, 1, 4,  2,    "fp16",   "fp16",
-     8, 256, 0,  2,   "fused", 0, 0, 2, 1, 32, "K2", "gfx1250"}, /* 18: F2 groups 4 K2, 2 tiles per thread, 2 tile rows */
-    {2, 16,  16, 128, 128,     3, 3, 1, 1, 4,  2,    "fp16",   "fp16",
-     8, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 19: F2 groups 4 K1 */
-    {2, 16,  16, 128, 128,     3, 3, 1, 1, 4,  2,    "fp16",   "fp16",
-     8, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 20: F2 groups 4 K4 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 0, 32, "K1", "gfx1250"}, /* 21: F4 regular stores K1 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 0, 32, "K2", "gfx1250"}, /* 22: F4 regular stores K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 0, 32, "K4", "gfx1250"}, /* 23: F4 regular stores K4 */
-    {1, 13,  11, 33, 35,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 24: F4 odd channels (vec 1) K1 */
-    {1, 13,  11, 33, 35,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 25: F4 odd channels (vec 1) K2 */
-    {1, 13,  11, 33, 35,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K4", "gfx1250"}, /* 26: F4 odd channels (vec 1) K4 */
-    {1, 13,  11, 33, 35,      3, 3, 1, 1, 1,  4,     "bf16",   "fp16",
-     8, 256, 1,  1,  "split", 0, 0, 1, 1, 32, "K2a", "gfx1250"}, /* 27: F4 bf16 odd channels split prescale K2a */
-    {1, 8,   8, 512, 64,      3, 3, 1, 1, 1,  4,    "bf16",   "fp16",
-     4, 256, 1, 1,   "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 28: F4 bf16 fused prescale over 128 lanes (LDS group max) K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  3,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 29: F4 K2 3 tiles per thread (partial runs) */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4,    "fp16",  "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx950"}, /* 30: gfx950: F4 K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "bf16",  "fp16",
-     8, 256, 1,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx950"}, /* 31: gfx950: F2 bf16 fused prescale K2 */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  3,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K2", "gfx1250"}, /* 32: rejected: m = 3 */
-    {1, 12,  12, 64, 64,      5, 5, 2, 1, 1,  4,    "fp16",   "fp16",
-     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, "K1", "gfx1250"}, /* 33: rejected: 5x5 filter */
-    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2,    "fp16",   "fp16",
-     8, 256, 0,  4,  "fused", 2, 3, 1, 1, 32, "K2", "gfx1250"}, /* 34: rejected: tiles_per_thread does not divide the LDS block */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K1",   "gfx1250"}, /* 0: F4 fp16 K1 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 1: F4 fp16 K2 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 2: F4 fp16 K4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K1",   "gfx1250"}, /* 3: F2 K1 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "fp16",   "fp16", 8,
+     256, 0,  2,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 4: F2 K2, 2 tiles per thread */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 5: F2 K4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 4, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K1",   "gfx1250"}, /* 6: F(6x4) K1 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 4, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 7: F(6x4) K2 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 4, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 8: F(6x4) K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 2,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 2, 0, "K1", "gfx1250"}, /* 9: F(4x2) K1, 2 filter rows */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 2, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 10: F(4x2) K2 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 2, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 11: F(4x2) K4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2, 6, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 12: F(2x6) K2 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2, 6, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 13: F(2x6) K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "bf16",   "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 14: F4 bf16 fused prescale K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "bf16",   "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250"}, /* 15: F4 bf16 fused prescale K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,     "bf16",   "fp16", 8,
+     256, 1,  1,  "split", 0,  0, 1, 1, 32, 1, 0, "K2a", "gfx1250"}, /* 16: F4 bf16 split prescale K2a */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "bf16",   "fp16", 8,
+     256, 1,  1,  "split", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 17: F4 bf16 split prescale K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "bf16",   "bf16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K1", "gfx1250"}, /* 18: F2 bf16 operands K1 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "bf16",   "bf16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 19: F2 bf16 operands K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "bf16",   "bf16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250"}, /* 20: F2 bf16 operands K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "fp16",   "fp16", 8,
+     256, 0,  4,  "fused", 4,  8, 1, 1, 16, 1, 0, "K2", "gfx1250"}, /* 21: F2 LDS region 4x8, 4 tiles per thread, 16 lanes K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "bf16",   "fp16", 8,
+     256, 1,  1,  "fused", 2,  4, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 22: F4 bf16 LDS region 2x4 + split prescale K2 */
+    {1,   40, 40, 128,     64, 3, 3, 2, 2,  1, 4, 0,    "fp16",   "fp16", 4,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 2, 0, "K1", "gfx1250"}, /* 23: F4 dilation 2 K1 (vec 4, 2 filter rows) */
+    {1, 40,  40, 128, 64,      3, 3, 2, 2, 1,  4, 0, "fp16", "fp16",
+     4, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 24: F4 dilation 2 K2 */
+    {1, 40,  40, 128, 64,      3, 3, 2, 2, 1,  4, 0, "fp16", "fp16",
+     4, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 25: F4 dilation 2 K4 */
+    {2,   16, 16, 128,     128, 3, 3, 1, 1,  4, 2, 0,    "fp16",   "fp16", 8,
+     256, 0,  2,  "fused", 0,   0, 2, 1, 32, 1, 0, "K2", "gfx1250"}, /* 26: F2 groups 4 K2, 2 tiles per thread, 2 tile rows */
+    {2, 16,  16, 128, 128,     3, 3, 1, 1, 4,  2, 0, "fp16", "fp16",
+     8, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, 1, 0, "K1",   "gfx1250"}, /* 27: F2 groups 4 K1 */
+    {2, 16,  16, 128, 128,     3, 3, 1, 1, 4,  2, 0, "fp16", "fp16",
+     8, 256, 0,  1,   "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 28: F2 groups 4 K4 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 0, 32, 1, 2, "K1", "gfx1250"}, /* 29: F4 regular stores K1 (filter_vec 2) */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 0, 32, 1, 0, "K2", "gfx1250"}, /* 30: F4 regular stores K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 0, 32, 1, 0, "K4", "gfx1250"}, /* 31: F4 regular stores K4 */
+    {1,   13, 11, 33,      35, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K1", "gfx1250"}, /* 32: F4 odd channels (vec 1) K1 */
+    {1,   13, 11, 33,      35, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 33: F4 odd channels (vec 1) K2 */
+    {1,   13, 11, 33,      35, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx1250"}, /* 34: F4 odd channels (vec 1) K4 */
+    {1,   13, 11, 33,      35, 3, 3, 1, 1,  1, 4, 0,     "bf16",   "fp16", 8,
+     256, 1,  1,  "split", 0,  0, 1, 1, 32, 1, 0, "K2a", "gfx1250"}, /* 35: F4 bf16 odd channels split prescale K2a */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 0, "fp16",  "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2,K1", "gfx1250"}, /* 36: merged K2+K1 F4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  2, 0, "fp16",  "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K1,K2", "gfx1250"}, /* 37: merged K1+K2 F2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,        "bf16",   "fp16", 8,
+     256, 1,  1,  "split", 0,  0, 1, 1, 32, 1, 0, "K2a,K1", "gfx1250"}, /* 38: merged K2a+K1 bf16 split prescale */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,       "fp16",   "fp16", 8,
+     256, 0,  4,  "fused", 4,  8, 1, 1, 16, 1, 0, "K2,K1", "gfx1250"}, /* 39: merged K2+K1 F2 LDS region */
+    {1,   8, 8, 512,     64, 3, 3, 1, 1,  1, 4, 0,    "bf16",   "fp16", 4,
+     256, 1, 1, "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 40: F4 bf16 fused prescale over 128 lanes (LDS group max) K2 */
+    {2,  20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,       "fp16",   "fp16", 8,
+     64, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2,K1", "gfx1250"}, /* 41: merged K2+K1 with a 64-thread K2 block (K1 split) */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  3,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 42: F4 K2 3 tiles per thread (partial runs) */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 43: F6 K2 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K4",   "gfx1250"}, /* 44: F6 K4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  4, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx950"}, /* 45: gfx950: F4 K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "bf16",  "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx950"}, /* 46: gfx950: F2 bf16 fused prescale K2 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,       "fp16",  "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2,K1", "gfx950"}, /* 47: gfx950: merged K2+K1 */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 6, 4,    "bf16",  "fp16", 8,
+     256, 1,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K4", "gfx950"}, /* 48: gfx950: F(6x4) bf16 prescale K4 */
+    {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  3, 0, "fp16", "fp16",
+     8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 49: rejected: m = 3 */
+    {1,   12, 12, 64,      64, 5, 5, 2, 1,  1, 4, 0,    "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K1", "gfx1250"}, /* 50: rejected: 5x5 filter */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,        "fp16",   "fp16", 8,
+     256, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2a,K1", "gfx1250"}, /* 51: rejected: merged K2a without a split prescale */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 2, 0,    "fp16",   "fp16", 8,
+     256, 0,  4,  "fused", 2,  3, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 52: rejected: tiles_per_thread does not divide the LDS block */
 };
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
+
+/* "K2,K1" -> stages; returns the count (0 on an unknown name). */
+static int parse_stages(const char* text, rocke_winograd_fwd_stage_t* out, int cap)
+{
+    char buf[64];
+    int n = 0;
+    snprintf(buf, sizeof buf, "%s", text);
+    for(char* tok = strtok(buf, ","); tok != NULL && n < cap; tok = strtok(NULL, ","))
+    {
+        if(!rocke_winograd_fwd_stage_from_name(tok, &out[n]))
+            return 0;
+        ++n;
+    }
+    return n;
+}
 
 int main(int argc, char** argv)
 {
@@ -127,6 +179,7 @@ int main(int argc, char** argv)
         c->N, c->Hi, c->Wi, c->C, c->K, c->Y, c->X, 1, 1, c->pad, c->pad, c->dil, c->dil);
     s.problem.groups = c->groups;
     s.m = c->m;
+    s.m_w = c->m_w;
     s.io_dtype = c->io;
     s.operand_dtype = c->op;
     s.vec = c->vec;
@@ -139,15 +192,21 @@ int main(int argc, char** argv)
     s.wg_tile_rows = c->wgr;
     s.nt_stores = c->nt != 0;
     s.lds_lanes = c->lanes;
+    s.filter_rows = c->frows;
+    s.filter_vec = c->fvec;
 
-    rocke_winograd_fwd_stage_t stage;
-    if(!rocke_winograd_fwd_stage_from_name(c->stage, &stage))
+    rocke_winograd_fwd_stage_t stages[4];
+    int n = parse_stages(c->stage, stages, 4);
+    if(n == 0)
     {
         fprintf(stderr, "bad stage %s\n", c->stage);
         return 2;
     }
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = rocke_build_winograd_fwd_stage_new(&b, &s, stage, c->arch);
+    rocke_kernel_def_t* kernel
+        = (n > 1 || strchr(c->stage, ',') != NULL)
+              ? rocke_build_winograd_merged_new(&b, &s, stages, n, c->arch)
+              : rocke_build_winograd_fwd_stage_new(&b, &s, stages[0], c->arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);
