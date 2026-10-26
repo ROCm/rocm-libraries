@@ -537,7 +537,12 @@ Python emitter and the compiled C emitter for each config index and diffs the
    [rocke_representative_ir_sha256/](platform/tests/golden/rocke_representative_ir_sha256/),
    one `<family>.json` shard per family; `--only <family>[,...]` rewrites just
    those shards, so unrelated changes do not conflict in the golden);
-   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
+   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`
+   (the convolution families -- implicit-GEMM fwd/wgrad/dgrad, deep fused conv,
+   direct conv, Winograd -- live in
+   [test_conv_ir_golden.py](library/tests/test_conv_ir_golden.py) and its
+   [conv_representative_ir/](library/tests/golden/conv_representative_ir/) shards,
+   not the platform harness).
 3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.

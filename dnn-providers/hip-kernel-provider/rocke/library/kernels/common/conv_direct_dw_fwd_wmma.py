@@ -40,7 +40,7 @@ results as a scalar kernel up to fp32 summation order.
 AOT: N, H, W, Ho, Wo, groups and the strides are kernargs; KH, KW and PAD are
 capabilities; block_waves, block_h, w_fold and prefetch_rows are knobs.
 
-C++ twin: ``platform/cpp/instances/common/conv_direct_dw_fwd_wmma.cpp``
+C++ twin: ``library/cpp/instances/common/conv_direct_dw_fwd_wmma.cpp``
 (``instance_conv_direct_dw_fwd_wmma.h``).
 """
 

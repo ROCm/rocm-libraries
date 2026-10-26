@@ -13,7 +13,7 @@ commands to replay them.
 Knob reference (`preload_weights`, `dgrad_fused_weights`, `dgrad_weights_lds`,
 `waves_per_eu`, `row_guard`, `row_exit`, the row-stream knobs, name flags and
 the cached images):
-[`dsl_docs/instances/convolution.md`](../../../../../dsl_docs/instances/convolution.md),
+[`dsl_docs/instances/convolution.md`](../../../kernels/conv/docs/convolution.md),
 sections "4c dgrad" and "Generic Kernel dgrad: fused weights". The 4c kernel:
 [`dgrad_4c_bf16_case_study.md`](dgrad_4c_bf16_case_study.md).
 
@@ -22,14 +22,14 @@ sections "4c dgrad" and "Generic Kernel dgrad: fused weights". The 4c kernel:
 Generic `DirectConvSpec` / `build_direct_conv` (transposed spec from
 `make_dgrad_fprop_spec`) and the 4c `DirectConv4cSpec` /
 `build_direct_conv_4c` in
-[`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
+[`conv_direct_grouped.py`](../../../kernels/common/conv_direct_grouped.py);
 C++ mirrors `rocke_build_direct_conv`
-([`conv_direct_grouped_build_generic.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_generic.cpp))
+([`conv_direct_grouped_build_generic.cpp`](../../../cpp/instances/common/conv_direct_grouped_build_generic.cpp))
 and the 4c builder. AOT cache variants
 `direct_grouped_dgrad_fused` and `direct_grouped_dgrad_4c` in
-[`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py);
+[`direct_aot_jobs.py`](../../../kernels/conv/direct_aot_jobs.py);
 cache specs from `make_direct_spec` in
-[`direct_variants.py`](../../../../../../library/kernels/conv/direct_variants.py).
+[`direct_variants.py`](../../../kernels/conv/direct_variants.py).
 Not dispatched yet (the grouped-convolution dispatcher is being reworked
 separately), so both are reached through the cache (`--run-from-cache`).
 

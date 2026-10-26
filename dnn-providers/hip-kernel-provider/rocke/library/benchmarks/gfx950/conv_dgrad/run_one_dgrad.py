@@ -18,16 +18,17 @@ and a timing loop share a process -- verify in a separate run (the sweep driver'
 ``--print-name-only`` builds and compiles but never touches the GPU queue, which
 is how you get the ``--kernel-regex`` for a capture without perturbing it.
 
-Usage:
-    python3 run_one_dgrad.py --kouter on --stride 2
-    python3 run_one_dgrad.py --tile-m 128 --print-name-only
-    python3 run_one_dgrad.py --tap-outer off   # the flat k_dg loop at stride 1
+Usage (from ``rocke/``, with ``PYTHONPATH=$(pwd)/platform/python:$(pwd)/library``):
+    python3 -m benchmarks.gfx950.conv_dgrad.run_one_dgrad --kouter on --stride 2
+    python3 -m benchmarks.gfx950.conv_dgrad.run_one_dgrad --tile-m 128 --print-name-only
+    python3 -m benchmarks.gfx950.conv_dgrad.run_one_dgrad --tap-outer off   # the flat k_dg loop at stride 1
 
     ROCPROF_TRACE_DECODER_LIB=<dir with librocprof-trace-decoder.so> \\
-    python3 ../../../../../dsl_docs/optimization/utilities/tools/wavescope/\\
+    python3 platform/dsl_docs/optimization/utilities/tools/wavescope/\\
 capture_wavescope_trace.py --output-dir ./att_out \\
         --kernel-regex "rocke_trace_dgrad.*kouter" \\
-        -- python3 run_one_dgrad.py --kouter on --stride 2 --warmup 1 --iters 2
+        -- python3 -m benchmarks.gfx950.conv_dgrad.run_one_dgrad \\
+           --kouter on --stride 2 --warmup 1 --iters 2
 """
 
 import argparse

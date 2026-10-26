@@ -6,11 +6,11 @@ SPDX-License-Identifier: MIT
 # Split-K auto-deduction for conv wgrad — gfx950 case study
 
 How the split-K degree and reduction for implicit-GEMM conv wgrad/dgrad came to
-be chosen by a fitted cost model (`rocke.helpers.split_k_planner`, resolved for
+be chosen by a fitted cost model (`kernels.conv.split_k_planner`, resolved for
 conv by `kernels.common.conv_split_k.resolve_conv_split_k`) instead of the CK
-"fill the device" formula (`rocke.helpers.split_k.select_split_k_wgrad`).
+"fill the device" formula (`kernels.common.conv_split_k.select_split_k_wgrad`).
 
-Per [`platform/AGENTS.md`](../../../../../AGENTS.md) §Compliance this document
+Per [`platform/AGENTS.md`](../../../../platform/AGENTS.md) §Compliance this document
 records **methodology, levers and relative ratios only**: every number below is
 a ratio between configurations measured in the same process on the same
 silicon; no absolute latency, throughput or bandwidth appears here, in the
@@ -213,7 +213,7 @@ Every timed point in every run was preceded by `--verify` of that kernel at
 that degree against the torch reference, at the benchmark's declared dtype
 tolerance; failing points were never timed or ranked. The resolver itself is
 covered by CPU tests (`library/tests/test_conv_split_k.py`,
-`platform/tests/dispatch/dispatch_tests/gemm/test_split_k_planner.py`) and the
+`library/tests/test_conv_split_k_planner.py`) and the
 GPU wgrad correctness test, which builds the packed-atomic kernel at the
 resolver's degree. The GPU dgrad correctness test does the same for a dgrad
 shape the model splits about a hundred ways, and at the 16-bit atomic cap a

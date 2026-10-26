@@ -11,7 +11,10 @@ This page covers:
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
   `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
 - `library/kernels/common/img2col.py`
-- `instances/common/pooling.py`
+
+Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
+instance; it is documented in
+[`platform/dsl_docs/instances/small_ops.md`](../../../../platform/dsl_docs/instances/small_ops.md).
 
 The implicit-GEMM tile/pipeline heuristic (formerly an experimental
 `conv_implicit_gemm_auto.py` alternate builder) now lives under
@@ -294,7 +297,7 @@ for each thread's coalesced output chunk:
 - Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
 - `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, K and kpg multiples of 4, a target with workgroup-cluster launch, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
 
-`split_k = -1` (auto) is resolved before validation by the conv split-K resolver (`resolve_conv_split_k("fwd", ...)`), as for wgrad and dgrad. Its degree comes from `rocke.helpers.split_k.select_split_k_fwd`:
+`split_k = -1` (auto) is resolved before validation by the conv split-K resolver (`resolve_conv_split_k("fwd", ...)`), as for wgrad and dgrad. Its degree comes from `kernels.common.conv_split_k.select_split_k_fwd`:
 - It splits only when the unsplit grid is under half of 8 workgroups per CU and the reduction is at least 512 deep.
 - The degree is a power of two toward that target grid, at most 32, and keeps at least 2 K tiles per slice.
 - It is then held to the gridDim.z budget and the i32 workspace.
@@ -323,7 +326,7 @@ Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the 
 
 ### Backward Passes (wgrad / dgrad)
 
-Source: `instances/common/conv_implicit_gemm_wgrad.py` and `instances/common/conv_implicit_gemm_dgrad.py`.
+Source: `library/kernels/common/conv_implicit_gemm_wgrad.py` and `library/kernels/common/conv_implicit_gemm_dgrad.py`.
 
 Both backward directions reuse the forward implicit-GEMM skeleton (tile loop, LDS staging, MFMA phase, epilogue) over different GEMM mappings. `kpg`/`cpg` are the per-group filter and channel counts (`K`/`C` when `groups == 1`):
 
@@ -392,7 +395,7 @@ DgradConvSpec.default_lds_k_outer(
 
 The dgrad deducer additionally takes `pipeline` and returns `False` for `pipeline == "wavelet"`: the wavelet loader does not implement the K-outer tile (the `validate()` gate rejects the pair), so the predicate keeps that combination off the sweep. A caller that omits the keyword gets the `"mem"` default and so never sees the exclusion — wavelet callers must pass their own pipeline.
 
-Both predicates are the single selection point for the sweep driver `benchmark/benchmark_implicit_gemm_conv.py`, so no caller keeps its own copy. (The grouped-convolution dispatcher, `library/dispatch/grouped_convolution.py`, registers fixed lists of forward and dgrad AOT instances whose names already record `lds_k_outer`; it derives no layout itself.)
+Both predicates are the single selection point for the sweep driver `library/benchmarks/common/benchmark_implicit_gemm_conv.py`, so no caller keeps its own copy. (The grouped-convolution dispatcher, `library/dispatch/grouped_convolution.py`, registers fixed lists of forward and dgrad AOT instances whose names already record `lds_k_outer`; it derives no layout itself.)
 
 The dgrad predicate is deliberately **asymmetric** — it keys on `dtype_b` / `warp_tile_n` only, never their A-side counterparts, because only B flips; copying wgrad's symmetric predicate would over-reject dgrad specs whose A side differs. It additionally carries `cpg`: the saving is proportional to the B load width, which collapses to 1 on an odd channel run. There `axis_b` is already `"col"`, there is no scatter to remove, and K-outer would be a small pure regression.
 
@@ -475,7 +478,7 @@ These are specialized kernels for grouped direct convolution bake-off cases (`cp
 
 ### `DirectConvProblem`
 
-Verified from `instances/conv_direct_grouped.py`:
+Verified from `library/kernels/common/conv_direct_grouped.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -633,8 +636,8 @@ shape. Scope: `cpg = kpg = 4`, a "same" 1x1/3x3 filter and
 `stage_rows`) pays on larger grids and taller images; on small grids the
 fused generic kernel (next section), which tiles H, or implicit GEMM is the
 better choice. Case studies:
-[`dgrad_4c_bf16_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_4c_bf16_case_study.md),
-[`dgrad_fused_weights_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md).
+[`dgrad_4c_bf16_case_study.md`](../../../builders/gfx950/conv_dgrad/dgrad_4c_bf16_case_study.md),
+[`dgrad_fused_weights_case_study.md`](../../../builders/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md).
 
 ### Generic Kernel dgrad: fused weights (`DirectConvSpec`, AOT variant `direct_grouped_dgrad_fused`)
 
@@ -733,8 +736,8 @@ in `library/kernels/conv/direct_aot_jobs.py`; the validator still accepts what
 they skip, so a JIT sweep can try it. Strided problems, filters past 7x7,
 channels past 32 and 5x5/7x7 pairs over `PRELOAD_WEIGHT_VGPR_BUDGET` have no
 fused binary. Case studies:
-[`dgrad_fused_weights_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md),
-[`grouped_generic_row_stream_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/grouped_generic_row_stream_case_study.md).
+[`dgrad_fused_weights_case_study.md`](../../../builders/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md),
+[`grouped_generic_row_stream_case_study.md`](../../../builders/gfx950/conv_dgrad/grouped_generic_row_stream_case_study.md).
 
 ### Depthwise Kernel (`DirectDepthwiseSpec`)
 
@@ -827,7 +830,7 @@ Streams the input rows through the same runtime `scf_for_iter` as
 (no `block_w` outer loop). `stride >= 1` supported via `D[N, Ho, Wo, total_k]`.
 
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
-`tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
+`library/tests/parity/conv_direct_grouped_emit.{c,py}`.
 
 ### Depthwise Tiled Kernel (`DirectDepthwiseTiledSpec`)
 
@@ -1070,7 +1073,7 @@ Parity gate: configs 0-19 of
 `block_h = 0` configs both engines reject) and 62-72 (the wave32 WMMA form;
 68-72 -- 9x9 past the fragment budget, wave32 on gfx950, wave64 on gfx1250,
 `fwd` at stride 1 and 2 -- both reject). Case study:
-[`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
+[`depthwise_windowed_dgrad_case_study.md`](../../../builders/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
 
 ### Row-Streaming Depthwise Dgrad Kernel (`DirectDepthwiseDgradStreamSpec`)
 
@@ -1188,8 +1191,8 @@ builds the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `library/cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 33+)
-(`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
-`conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
+(`platform/tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
+`conv_direct_nongrouped/*` in `library/tests/test_conv_ir_golden.py`, binding
 `rocke_library_engine.conv_direct_nongrouped_*` / `kernels.conv.engine_bridge.lower_conv_direct_nongrouped`.
 
 ## Stem Dgrad on WMMA (gfx1250)
@@ -1236,7 +1239,7 @@ C++ engine twins: `library/cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.c
 (shared staging in `instance_conv_dgrad_stem_wmma_internal.hpp`); byte-identity
 gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
 (llvm23 lane), Python IR golden `conv_dgrad_{patch,smallc}_wmma/*` in
-`tests/instances/rocke_ir_parity_harness.py`, bindings
+`library/tests/test_conv_ir_golden.py`, bindings
 `rocke_library_engine.conv_dgrad_{patch,smallc}_wmma_*` /
 `kernels.conv.engine_bridge.lower_conv_dgrad_{patch,smallc}_wmma`.
 
@@ -1636,7 +1639,7 @@ also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
 (`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+), Python IR
-golden `conv_direct_wgrad/*` in `tests/instances/rocke_ir_parity_harness.py`.
+golden `conv_direct_wgrad/*` in `library/tests/test_conv_ir_golden.py`.
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:
@@ -1677,40 +1680,6 @@ grid_z = 1
 ```
 
 Use for debugging, verification, and baselines. Generally not the fastest production conv path because it materializes the expanded matrix.
-
-## Pooling
-
-Source: `instances/common/pooling.py`.
-
-```python
-@dataclass(frozen=True)
-class PoolingProblem:
-    N: int; Hi: int; Wi: int; C: int
-    Y: int; X: int        # pool window
-    sH: int = 1; sW: int = 1
-    pH: int = 0; pW: int = 0
-    dH: int = 1; dW: int = 1
-
-
-class PoolOp(Enum):
-    MAX = "max"
-    SUM = "sum"
-    AVG = "avg"
-```
-
-Algorithm:
-
-```text
-1. One thread per NHWC output element.
-2. Decompose flat output index into (n, ho, wo, c).
-3. Loop over pooling window (y, x).
-4. Compute input (hi, wi) via embed-style formulas.
-5. Mask out invalid (hi, wi).
-6. Reduce in f32: max / sum (for avg, divide by selected count or window count).
-7. Cast back to output dtype and store.
-```
-
-Grid: `ceil_div(total_output_elements, block_size)`.
 
 ## Convolution Failure Modes
 

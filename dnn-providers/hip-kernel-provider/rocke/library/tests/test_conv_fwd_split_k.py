@@ -393,7 +393,7 @@ class TestSplitKPolicy(unittest.TestCase):
     and the arch."""
 
     def _pick(self, M, N, K, tile=(16, 16, 64), groups=1, arch="gfx1250"):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         tm, tn, tk = tile
         return select_split_k_fwd(
@@ -401,7 +401,7 @@ class TestSplitKPolicy(unittest.TestCase):
         ).split_k
 
     def test_fills_toward_the_target_grid(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        from kernels.common.conv_split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
 
         target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
         # Deep enough that only the grid limits the degree.
@@ -413,7 +413,7 @@ class TestSplitKPolicy(unittest.TestCase):
                 self.assertLessEqual(got * tiles, target)
 
     def test_a_grid_that_fills_the_device_is_not_split(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
+        from kernels.common.conv_split_k import FWD_SPLIT_K_TARGET_CTAS_PER_CU
 
         target = 256 * FWD_SPLIT_K_TARGET_CTAS_PER_CU
         self.assertEqual(self._pick(16 * (target // 2), 16, 1 << 20), 1)
@@ -422,7 +422,7 @@ class TestSplitKPolicy(unittest.TestCase):
         self.assertGreater(self._pick(16 * 8, 16, 1 << 20, groups=2), 1)
 
     def test_shallow_reductions_are_not_split(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_MIN_GEMM_K
+        from kernels.common.conv_split_k import FWD_SPLIT_K_MIN_GEMM_K
 
         self.assertEqual(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K - 1), 1)
         self.assertGreater(self._pick(16, 16, FWD_SPLIT_K_MIN_GEMM_K), 1)
@@ -439,14 +439,14 @@ class TestSplitKPolicy(unittest.TestCase):
         )
 
     def test_a_smaller_part_splits_less(self):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         kw = dict(M=16 * 64, N=16, K=1 << 20, tile_m=16, tile_n=16, tile_k=64)
         full = select_split_k_fwd(**kw).split_k
         self.assertEqual(select_split_k_fwd(**kw, num_cus=128).split_k, full // 2)
 
     def test_degrees_stay_on_the_ladder_and_under_the_cap(self):
-        from rocke.helpers.split_k import FWD_SPLIT_K_MAX
+        from kernels.common.conv_split_k import FWD_SPLIT_K_MAX
 
         for M in (1, 49, 196, 784, 3136):
             for K in (512, 2304, 4608, 17280):
@@ -477,7 +477,7 @@ class TestSplitKResolver(unittest.TestCase):
         )
 
     def test_auto_follows_the_policy_on_gfx1250(self):
-        from rocke.helpers.split_k import select_split_k_fwd
+        from kernels.common.conv_split_k import select_split_k_fwd
 
         p = TestSplitKDegrees._SMALL
         got = self._resolve(p)

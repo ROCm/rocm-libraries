@@ -44,13 +44,13 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 | `README.md` | this guide |
 | `wmma_probe.py` | builds the gfx1201 WMMA GEMM and verifies `C = A @ B.T` with random asymmetric inputs to confirm the lane map (a PASS at multiple tile counts uniquely pins it) |
 | `matmul_nbits_verify.py` | builds + numeric-verifies the `MatMulNBits` int4 matmul; `--family large_n / skinny_n / decode_gemv`, optional `--opt` body |
-| `deep_fused_conv_pool_verify.py` | emits + verifies the experimental fused conv0(3×3)→ReLU→conv1(1×1)→ReLU→2×2 maxpool kernel (no HBM intermediates) |
+| `library/builders/gfx1201/deep_fused_conv_pool_verify.py` | emits + verifies the experimental fused conv0(3×3)→ReLU→conv1(1×1)→ReLU→2×2 maxpool kernel (no HBM intermediates) |
 
 The kernel sources these drivers build live outside this directory:
 `instances/gfx1201/wmma_gemm.py` (GEMM + lane maps),
 `instances/common/matmul_nbits.py` + its family bodies (`_matmul_nbits_large_n.py`,
 `_matmul_nbits_large_n_opt.py` for `--opt`, `_matmul_nbits_decode_gemv.py`), and
-`instances/gfx1201/deep_fused_conv_pool.py` (conv-pool spec).
+`library/kernels/gfx1201/deep_fused_conv_pool.py` (conv-pool spec).
 
 ## Run
 
@@ -110,7 +110,7 @@ Flags: `--arch` (default `gfx1201`; `gfx1151` also supported), `--group-size`
 ### 3. Deep-fused conv + maxpool (experimental)
 
 ```bash
-PYTHONPATH=python python3 -m rocke.examples.gfx1201.deep_fused_conv_pool_verify \
+PYTHONPATH=python:../library python3 -m builders.gfx1201.deep_fused_conv_pool_verify \
     --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
 ```
 
@@ -125,7 +125,7 @@ N/H/W/C), `--k0 32` (conv0 output channels), `--k1 24` (conv1 output channels),
 `--pool-tile-h 4`, `--pool-tile-w 4`, `--warp-m 2`, `--warp-n 1`,
 `--pipeline mem` (`mem`/`compv3`/`compv4`), `--unroll-k`, `--tol 1e-2`,
 `--seed 123`, `--output-dir` (default `output/deep_fused_conv_pool` next to this
-driver, i.e. `examples/gfx1201/output/deep_fused_conv_pool`). This path is
+driver, i.e. `library/builders/gfx1201/output/deep_fused_conv_pool`). This path is
 **gfx1201-only** — the driver exits if `--arch` (or `--isa`) resolves to anything
 else.
 

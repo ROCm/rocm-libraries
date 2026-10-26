@@ -168,19 +168,25 @@ def main() -> int:
         help="restrict to LLVM flavors (comma-separated; default: all committed)",
     )
     ap.add_argument("--verbose", action="store_true", help="list waived reports too")
+    ap.add_argument(
+        "--cases",
+        default="",
+        help="corpus module file exposing cases() (default: the platform "
+        "representative-IR harness)",
+    )
     args = ap.parse_args()
 
     _bootstrap_sys_path()
     from rocke.core.arch import domain as arch_domain
     from rocke.core.lower_llvm import LLVM_FLAVORS
-    from rocke_ir_parity_harness import cases
+    from _corpus import load_corpus
 
     # Pin the lane to `warn` before lowering anything: an exported `off` would
     # give a green gate over a disabled lane, and `error` would stop each case
     # at its first negative instead of reporting all of them.
     os.environ[arch_domain.MODE_ENV] = arch_domain.MODE_WARN
 
-    keep = list(cases())
+    keep = list(load_corpus(args.cases).cases())
     if args.only:
         wanted = [s for s in args.only.split(",") if s]
         keep = [c for c in keep if any(w in c["case_id"] for w in wanted)]

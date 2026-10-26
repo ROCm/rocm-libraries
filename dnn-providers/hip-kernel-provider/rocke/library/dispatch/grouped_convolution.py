@@ -117,7 +117,7 @@ from kernels.common.conv_winograd_select import (
     winograd_ineligible_reason,
     winograd_plans,
 )
-from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
+from rocke.helpers.split_k import num_cus as arch_num_cus
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from .conv_winograd_plan import (
     ConvWinogradSpec,
@@ -1240,7 +1240,7 @@ _WINOGRAD_ARCHES = ("gfx1250",)
 
 
 def _winograd_model(arch: str) -> WinogradCostModel:
-    return WinogradCostModel(num_cus=_ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS))
+    return WinogradCostModel(num_cus=arch_num_cus(arch))
 
 
 def _winograd_spec(

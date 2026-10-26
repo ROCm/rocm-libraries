@@ -57,6 +57,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _corpus import load_corpus as _load_corpus
 from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
 from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
@@ -200,7 +201,7 @@ def _unpaired_opt(
 
 
 def _dump_corpus(
-    out_dir: Path, flavor: str, keep: list
+    out_dir: Path, flavor: str, keep: list, lower_case=None
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, tuple[str, str]]]:
     """Lower every selected case to a .ll on disk.
 
@@ -211,7 +212,10 @@ def _dump_corpus(
     the first such case aborted the whole run with FATAL, which on an llvm22
     host reds the default `run_all.py` gate over one llvm23-gated instance.
     """
-    from rocke_ir_parity_harness import lower_case, safe
+    from rocke_ir_parity_harness import safe
+
+    if lower_case is None:
+        from rocke_ir_parity_harness import lower_case
 
     modules: dict[str, tuple[Path, str]] = {}
     skipped: dict[str, tuple[str, str]] = {}
@@ -349,15 +353,22 @@ def main() -> int:
         "--verbose", action="store_true", help="full diagnostic per failure"
     )
     ap.add_argument("--list", action="store_true", help="list the corpus and exit")
+    ap.add_argument(
+        "--cases",
+        default="",
+        help="corpus module file exposing cases()/lower_case() (default: the "
+        "platform representative-IR harness)",
+    )
     args = ap.parse_args()
 
     _bootstrap_sys_path()
-    from rocke_ir_parity_harness import cases, current_flavor
+    from rocke_ir_parity_harness import current_flavor
 
+    corpus = _load_corpus(args.cases)
     native = current_flavor()
     flavor = args.flavor or native
 
-    keep = list(cases())
+    keep = list(corpus.cases())
     if args.only:
         wanted = [s for s in args.only.split(",") if s]
         keep = [c for c in keep if any(w in c["case_id"] for w in wanted)]
@@ -449,7 +460,7 @@ def main() -> int:
 
     print(f"\n== lowering {len(keep)} cases ==")
     try:
-        modules, not_lowerable = _dump_corpus(ir_dir, flavor, keep)
+        modules, not_lowerable = _dump_corpus(ir_dir, flavor, keep, corpus.lower_case)
     except Exception as exc:  # a lowering failure is a validity failure too
         print(f"FATAL: lowering raised {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

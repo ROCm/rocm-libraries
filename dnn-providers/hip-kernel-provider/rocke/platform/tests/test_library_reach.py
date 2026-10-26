@@ -34,13 +34,11 @@ LIBRARY_PACKAGES = frozenset({"kernels", "builders", "dispatch", "benchmarks"})
 # platform-relative path -> library imports it may still make. Burn down only.
 ALLOWED = {
     "cpp/bindings/prove_parity_binding.py": 2,
-    "dsl_docs/development/verify_dsl_docs.py": 2,
     "dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/extract_rocke_isa.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/profile_register_usage.py": 2,
     "python/rocke/core/lower_cktile.py": 2,
     "python/rocke/examples/common/hip_lowering_parity.py": 4,
-    "python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py": 5,
     "python/rocke/heuristics/gen_sweep_data.py": 2,
     "python/rocke/portable_ir/drivers/bench_jit_validation.py": 2,
     "python/rocke/portable_ir/drivers/roll_coverage.py": 1,
@@ -50,12 +48,9 @@ ALLOWED = {
     "python/rocke/portable_ir/drivers/verify_recording_production.py": 1,
     "python/rocke/portable_ir/examples/export_mha.py": 1,
     "python/rocke/portable_ir/tests/test_recording_builder.py": 1,
-    "tests/core/test_cshuffle_reuse_barrier.py": 3,
-    "tests/core/test_ir_serialize.py": 1,
-    "tests/core/test_pipeline_basic.py": 4,
-    "tests/instances/rocke_ir_parity_harness.py": 51,
+    "tests/instances/rocke_ir_parity_harness.py": 19,
     "tests/portable_ir/test_recipe_roller.py": 1,
-    "tests/test_rocke.py": 12,
+    "tests/test_rocke.py": 2,
 }
 
 

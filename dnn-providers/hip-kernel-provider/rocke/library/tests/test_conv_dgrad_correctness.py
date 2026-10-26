@@ -1904,7 +1904,7 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
         )
 
     def test_resolved_degree(self):
-        from rocke.helpers.split_k_planner import split_k_cost_model
+        from kernels.conv.split_k_planner import split_k_cost_model
 
         for dtype in ("bf16", "fp16"):
             with self.subTest(dtype=dtype):

@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT
 How `dispatch.grouped_convolution._wgrad_merge_degree()` was derived, and why it
 ended up with no fitted constant in it at all.
 
-Per [`platform/AGENTS.md`](../../../../../AGENTS.md) §Compliance this document
+Per [`platform/AGENTS.md`](../../../../platform/AGENTS.md) §Compliance this document
 records **methodology, levers, and relative ratios only**. Every number below is
 a ratio between two rocke configurations measured in the same process on the
 same silicon; no absolute latency, throughput, or achieved-FLOP figure appears

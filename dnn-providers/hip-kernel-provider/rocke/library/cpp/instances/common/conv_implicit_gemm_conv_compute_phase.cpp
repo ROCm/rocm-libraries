@@ -71,7 +71,8 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
  * and 16x16x32, and 4 for 16x16x16. Hardcoding the stride at 8 made the
  * 16x16x16 atom read k rows 8..27 of a 16-row tile -- past the end of the
  * K-outer tile. The emitted IR is unchanged for the two 8-element atoms.
- * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py. */
+ * Mirrors _tr_frag() in conv_implicit_gemm_wgrad.py, a thin binding of
+ * ConvKOuterFragmentReader.fragment (library/kernels/common/_conv_layouts.py). */
 /* Element type for the K-outer transpose read, from the operand dtype string.
  * Mirrors Python's
  *   _smem_dtype = BF16 if a_dtype == "bf16" else F32 if a_dtype == "fp32" else None
