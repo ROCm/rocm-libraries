@@ -914,39 +914,36 @@ TEST(TestFlydslSdpaBwdSplitKernel, APackedDkdvObjectServesDenseGqaOnly)
     EXPECT_FALSE(serves(Slot::DKDV, grouped, packed));
 }
 
-TEST(TestFlydslSdpaBwdSplitKernel, ADqObjectThatStagesTheBiasNeedsTheStagingContract)
+TEST(TestFlydslSdpaBwdSplitGraph, BI8DeclinesA16BitBiasOutsideTheStagingContract)
 {
     // A bias row stride of 17 is not a multiple of 8 elements.
     const auto unstaged = baseSpec().withEdit([](SdpaBwdGraph& g) {
         auto& bias = addBias(g);
         bias.strides = {int64_t{8} * 16 * 17, int64_t{16} * 17, 17, 1};
     });
-    const RowSpec staged = biasRow();
-    RowSpec direct = biasRow();
-    direct.biasStage = "direct";
-    EXPECT_FALSE(serves(Slot::DQ, unstaged, staged));
-    EXPECT_TRUE(serves(Slot::DQ, unstaged, direct));
-    EXPECT_TRUE(serves(Slot::DQ, withBias(baseSpec(), false), staged));
-    // dkdv has no staging mode: it reads the bias in place.
-    EXPECT_TRUE(serves(Slot::DKDV, unstaged, biasRow()));
+    ASSERT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
+        matchSdpaBwdSpec(unstaged, flydsl_sdpa_bwd::MatchOptions{true})));
+    EXPECT_FALSE(graphMatch(unstaged).has_value());
+    EXPECT_TRUE(graphMatch(withBias(baseSpec(), false)).has_value());
 }
 
-TEST(TestFlydslSdpaBwdSplitKernel, ARowBroadcastBiasIsStagedOnlyAtAKeyLengthOfWholeVectors)
+TEST(TestFlydslSdpaBwdSplitGraph, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfWholeVectors)
 {
-    // A row-broadcast bias has no padding behind its single row, so the staged object's last
+    // A row-broadcast bias has no padding behind its single row, so a staged object's last
     // 16-byte chunk stays inside the allocation only when Sk is a multiple of 8 elements.
-    const auto rowBroadcast = [](int64_t seqKv) {
-        return dimsSpec(2, 8, 16, seqKv, 64).withEdit([=](SdpaBwdGraph& g) {
-            auto& bias = addBias(g, {2, 8, 1, seqKv});
-            bias.strides = {int64_t{8} * 24, 24, 24, 1};
+    const auto rowBroadcast = [](SdpaBwdSpec spec, int64_t seqKv) {
+        spec.seqKv = seqKv;
+        return spec.withEdit([=](SdpaBwdGraph& g) {
+            auto& bias = addBias(g, {g.batch, g.heads, 1, seqKv});
+            bias.strides = {g.heads * int64_t{24}, 24, 24, 1};
         });
     };
-    const RowSpec staged = biasRow();
-    RowSpec direct = biasRow();
-    direct.biasStage = "direct";
-    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(20), staged));
-    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(20), direct));
-    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(24), staged));
+    EXPECT_FALSE(graphMatch(rowBroadcast(baseSpec(), 20)).has_value());
+    EXPECT_TRUE(graphMatch(rowBroadcast(baseSpec(), 24)).has_value());
+    // fp32 dQ objects load the bias directly: no staging contract.
+    RowSpec single = biasRow();
+    single.dtype = "fp32";
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(fp32Spec(), 18), single));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ADbiasGraphNeedsADqObjectThatStoresDb)
