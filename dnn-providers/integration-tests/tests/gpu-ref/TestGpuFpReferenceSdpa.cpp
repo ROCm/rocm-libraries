@@ -1653,8 +1653,9 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
 // ============================================================================
 
 // Per-batch lengths with Sq != Skv in every batch, so a wrong bottom-right offset or a read of
-// padding shows up. Every padding slot of Q/K/V holds NaN. Padded query rows must give O = 0
-// and LSE = -inf on both references; live rows must agree within the GPU tolerance.
+// K/V padding shows up. Every padding slot of Q/K/V holds NaN; a padded Q row only feeds its own
+// output row, so the Q fill checks that those rows give O = 0 and LSE = -inf on both references.
+// Live rows must agree within the GPU tolerance.
 struct GpuPaddingCase
 {
     const char* name;

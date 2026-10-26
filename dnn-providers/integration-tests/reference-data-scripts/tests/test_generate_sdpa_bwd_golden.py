@@ -100,7 +100,7 @@ class TestGenerateSdpaBwdGoldenBundles(unittest.TestCase):
         self.assertEqual(outputs["dq_tensor_uid"], 4)
         self.assertEqual(outputs["dk_tensor_uid"], 3)
         self.assertEqual(outputs["dv_tensor_uid"], 5)
-        # dBias is not generated yet, so its UID must be explicitly absent.
+        # This configuration has no --dbias, so the dBias UID must be explicitly absent.
         self.assertIsNone(outputs["dbias_tensor_uid"])
 
     def test_backward_stats_tensor_is_rank_four_fp32(self):

@@ -290,9 +290,10 @@ def validate_forward_source_pairing(
 ) -> None:
     """Cross-check forward_source against the forward bundle it names.
 
-    RFC 0011 4.2 asks for exactly this comparison: a difference in method,
-    version or generation timestamp means the forward bundle was regenerated
-    without its backward partner, which no test would otherwise catch.
+    RFC 0011 4.2 asks for this comparison: a difference in method or generation
+    timestamp means the forward bundle was regenerated without its backward
+    partner, which no test would otherwise catch. The version field is required
+    to be present but is not compared.
 
     The `bundle` field is optional, because RFC 0011's own example omits it; the
     check is skipped, rather than failed, when it is absent or when the forward

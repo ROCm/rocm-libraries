@@ -338,8 +338,8 @@ private:
         case NodeAttrs::SdpaAttributes:
         {
             // A node with any ragged primary is keyed as ragged. A partly ragged node is declined
-            // either way: the ragged plan needs all four primaries ragged, and the dense plan
-            // rejects any ragged tensor.
+            // by both plans (the ragged plan needs all four primaries ragged, and the dense plan
+            // rejects any ragged tensor); isApplicable then tries the dense rewrite.
             const auto* sdpaAttributes = node.attributes_as_SdpaAttributes();
             if(sdpaAttributes != nullptr
                && hipdnn_test_sdk::detail::hasRaggedSdpaPrimary(*sdpaAttributes, tensorMap))

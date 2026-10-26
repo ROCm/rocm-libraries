@@ -134,22 +134,24 @@ Design, the full feature table for both references, and how they are tested:
 | Feature | Dense SDPA Forward | Ragged SDPA Forward | SDPA Backward |
 |---------|--------------------|---------------------|---------------|
 | Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. | Required input |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Not supported; lengths come from `ragged_offset` alone | Supported (same rules as dense forward) |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch | Lengths come from `ragged_offset`; supplied seq_len tensors go through the dense rewrite (below) | Supported (same rules as dense forward) |
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same | Same |
-| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Not supported | Supported |
-| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Not supported | Not supported (the backward node has no `rng_dump`) |
-| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Not supported | Supported (same rules) |
+| Dropout with an explicit mask (`dropout_mask` FLOAT [B or 1, H or 1, Sq, Skv] + one-element `dropout_scale`; backward also `dropout_scale_inv`) | Supported | Through the dense rewrite | Supported |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output (FLOAT [B, H, Sq, Skv]): the engine's dumped keep mask is applied as the explicit mask with scale 1/(1−p). Without `rng_dump`, not supported | Through the dense rewrite (same rule) | Not supported (the backward node has no `rng_dump`) |
+| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite | Supported (same rules) |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported | Not supported |
-| Additive attention bias (`attn_mask`) | Supported | Not supported | Supported |
+| Additive attention bias (`attn_mask`) | Supported | Through the dense rewrite | Supported |
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K, V or both, each with its own block size; table width `ceil(max_seq_len_kv / block_size)`; an unset extent is inferred as cuDNN does (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) | - |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite | - |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |
-| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected | - |
+| FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs. cuDNN `sdpa_fp8` softmax and output scaling: `scale_s` with `descale_s`, `scale_o`, and the `amax_s` / `amax_o` outputs, each a one-element `FLOAT` tensor (SEM-024); not with dropout | Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite | - |
 
 "Not supported" means the reference reports the graph as not applicable; it never ignores an attribute.
+"Through the dense rewrite" means the native ragged plan declines the feature and the executor runs the
+graph through the dense rewrite (below) under the dense column's rules.
 Dense FP8 forward is registered for `FP8_E4M3`, `FP8_E4M3_FNUZ`, `FP8_E5M2` and `FP8_E5M2_FNUZ` inputs
 with `BFP16` output or an output in the input's FP8 format; ragged
 FP8 forward for `FP8_E4M3` inputs with `BFP16` output.

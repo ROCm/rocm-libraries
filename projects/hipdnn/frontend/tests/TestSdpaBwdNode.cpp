@@ -63,7 +63,7 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsMinimal)
 
 TEST(TestSdpaBwdNode, PreValidateChecksDiagonalBandBounds)
 {
-    // cuDNN's left_bound counts the diagonal key: 0 keeps no keys; -1 is unbounded.
+    // left_bound must be positive or -1 (unbounded); right_bound must be >= -1.
     const auto validate = [](std::optional<int64_t> left, std::optional<int64_t> right) {
         auto attrs = makeMinimalAttrs(
             makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));

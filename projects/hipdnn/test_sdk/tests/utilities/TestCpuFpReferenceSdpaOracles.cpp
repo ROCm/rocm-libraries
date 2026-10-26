@@ -653,7 +653,8 @@ INSTANTIATE_TEST_SUITE_P(,
                              return std::string(info.param.name);
                          });
 
-// A batch with no keys (seq_len_kv = 0) has no live row: O = 0, LSE = -inf, all gradients 0.
+// A batch with no keys (seq_len_kv = 0) has no live row: O = 0, LSE = -inf and dQ = 0; dK and dV
+// (all padding here) are only checked to be finite.
 TEST(TestCpuFpReferenceSdpaClosedForm, EmptyKeySequence)
 {
     SdpaRun r({1, 1, 2, 4}, {1, 1, 3, 4}, {1, 1, 3, 4});

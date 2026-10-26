@@ -37,7 +37,8 @@ public:
                               ErrorCode::INVALID_VALUE,
                               attributes.getUnsupportedReason());
 
-        // cuDNN's left_bound counts the diagonal key, so 0 keeps no keys; -1 is unbounded.
+        // left_bound counts the diagonal key; -1 is unbounded. 0 is rejected in both directions
+        // (cuDNN's backward rejects it too).
         HIPDNN_RETURN_IF_TRUE(
             attributes.left_bound.has_value()
                 && (*attributes.left_bound == 0 || *attributes.left_bound < -1),

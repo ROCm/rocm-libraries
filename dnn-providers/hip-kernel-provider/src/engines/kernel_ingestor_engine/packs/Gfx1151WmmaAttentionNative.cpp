@@ -396,7 +396,7 @@ std::optional<MaskParameters> maskFor(const data_objects::SdpaAttributes& attrib
         = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     const int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    // left_bound = 0 keeps no keys (cuDNN rejects it).
+    // hipDNN's band domain excludes left_bound = 0 (SdpaSemanticsRegister SEM-005).
     if(left < UNBOUNDED || right < UNBOUNDED || left == 0 || !fitsI32(left) || !fitsI32(right))
     {
         return std::nullopt;

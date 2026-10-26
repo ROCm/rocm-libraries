@@ -2,8 +2,8 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: In progress
-- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`); see §4.10.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run every other single-node ragged SDPA graph, forward or backward, through a dense padded rewrite; see §4.10.
+- **Last verified**: 2026-10-26 against `develop` (e7d4664bda9) plus the SDPA reference changes described in §4.10
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -932,8 +932,11 @@ scope for this RFC.
 > consumption is implemented for SDPA forward on both references:
 > the CPU `SdpaRaggedFwdPlan.hpp` and the GPU `GpuSdpaRaggedFwdPlan.hpp`.
 > These plans accept only an `INT32` `ragged_offset` aux, although the
-> sketches below also allow `int64`. No other op consumes ragged
-> tensors yet. The §4.11 pre-supplied input bundle is not implemented.
+> sketches below also allow `int64`. Any other single-node ragged SDPA
+> graph, forward or backward, runs through a dense padded rewrite
+> (`RaggedSdpaDensify.hpp`) that unpacks the ragged tensors, runs the
+> dense plan and packs the outputs back; it accepts `INT32` and `INT64`
+> offsets. No op other than SDPA consumes ragged tensors yet. The §4.11 pre-supplied input bundle is not implemented.
 > The bundle harness loads ragged inputs from golden blobs instead.
 > The sketches below show the intended shape.
 

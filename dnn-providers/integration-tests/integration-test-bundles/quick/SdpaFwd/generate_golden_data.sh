@@ -12,6 +12,7 @@
 #   bash generate_golden_data.sh              # Generate all tiers
 #   bash generate_golden_data.sh quick        # Generate quick tier only
 #   bash generate_golden_data.sh standard     # Generate standard tier only
+#   GENERATE_DISCRIMINATING=1 bash generate_golden_data.sh none   # Discriminating bundles only
 
 set -euo pipefail
 

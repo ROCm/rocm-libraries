@@ -34,9 +34,10 @@ DUT's a32 accumulation contract. A higher-precision (e.g. FP64) reference would
 diverge from the DUT's rounding trajectory at every stage and force artificially
 loose tolerances that hide real regressions.
 
-The rounded intermediates documented by ALMIOPEN-2704 are not modelled yet; the
-metadata records `intermediate_rounding: "none"` so bundles generated before and
-after that work are distinguishable without diffing tensors.
+Kernels that round intermediates such as P and dS to the IO dtype before their
+matrix products are not modelled yet; the metadata records
+`intermediate_rounding: "none"` so bundles generated before and after such a mode
+is added are distinguishable without diffing tensors.
 
 Supported operation axes (deliberately narrow -- see "Not supported" below)
 --------------------------------------------------------------------------
@@ -143,9 +144,11 @@ UID_STATS = 8
 # The additive attention-mask tensor, present only with --additive-mask. It
 # takes the first free UID so the mask-free topology keeps the UIDs above.
 UID_ATTN_MASK = 9
-# The same tensor in the paired forward bundle. The forward generator owns a
-# different UID map (UIDs 0-11 are already taken there), so the mask gets the
-# first UID free in *that* map rather than reusing UID_ATTN_MASK.
+# The same tensor in the paired forward bundle, which uses the forward
+# generator's UID map. The forward generator assigns 0-11 and 12-19 (fp8 scaling
+# and Max/Sum_exp), but the paired forward graph carries none of 12-19, so the
+# mask and dropout tensors below reuse 12-14. Pick other UIDs before pairing a
+# forward graph that uses those features.
 FWD_UID_ATTN_MASK = 12
 
 # Padding, dropout and dBias tensors, present only when their flags are given.
@@ -364,8 +367,7 @@ def compute_backward(
     scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
     if attn_bias is not None:
         # The graph's attention-mask tensor is added to the scores before the
-        # diagonal band is applied, as the CPU reference does. dBias is not an
-        # output here, so the bias affects the gradients only through P.
+        # diagonal band is applied, as the CPU reference does.
         scores = scores + attn_bias.float()
     if keep_mask is not None:
         # Masked positions contribute nothing; set P to exactly zero rather than
@@ -671,8 +673,8 @@ def _base_meta_json(config, direction, reference_backend):
         "seed": config["seed"],
         "input_range": [config["min_val"], config["max_val"]],
         "deterministic": True,
-        # The rounded intermediates documented by ALMIOPEN-2704 are not modelled
-        # yet; bundles generated once they are will say so here.
+        # Rounding of intermediates (P, dS) to the IO dtype is not modelled yet;
+        # bundles generated once it is will say so here.
         "intermediate_rounding": "none",
         "config": {
             "batch": config["q_dims"][0],

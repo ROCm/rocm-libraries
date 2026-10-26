@@ -91,8 +91,7 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
         sdpaAttrs.set_descale_v(makeAttr("DESCALE_V", descaleDataType, scalarDims, 7));
         if(withDescaleS)
         {
-            // Softmax descale is part of the fp8 contract but unsupported by the v3
-            // forward kernel, so the executor must reject graphs that carry it.
+            // Softmax descale without scale_s: the plan declines it (cuDNN sdpa_fp8 pairs them).
             sdpaAttrs.set_descale_s(makeAttr("DESCALE_S", DataType::FLOAT, scalarDims, 8));
         }
     }
@@ -116,11 +115,9 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
 namespace
 {
 
-// Builds a minimal single-node SDPA-forward flatbuffer graph directly. The frontend
-// graph builder only emits the O and Stats (LSE) outputs and silently drops any
-// max/sum_exp request, so the plan builder's rejection of those softmax-stats outputs
-// can only be exercised at the flatbuffer level. `attrs` carries the unsupported field
-// under test; the q/k/v/o uids and a packed float [1, 2, 4, 8] shape are filled in here.
+// Builds a minimal single-node SDPA-forward flatbuffer graph directly, so tests can set fields
+// and tensors the frontend graph builder does not emit or would reject. `attrs` carries the
+// field under test; the q/k/v/o uids and a packed float [1, 2, 4, 8] shape are filled in here.
 //
 // When `maskDataType` is engaged (any dtype, including DataType::UNSET), a [1, 1, 4, 4] mask
 // tensor of that dtype is added under uid 5 and attrs.attn_mask_tensor_uid is set to 5. When
@@ -533,10 +530,8 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsAlibiMask)
 {
-    // SdpaFwdPlanBuilder does not implement ALiBi positional encoding, so it must
-    // refuse to claim nodes that have alibi_mask=true. Otherwise a graph with ALiBi
-    // would silently fall through to a CPU plan that ignores the ALiBi attribute
-    // and produces wrong results.
+    // ALiBi needs top-left causal masking (right_bound = 0), as in cuDNN; this graph has no
+    // band, so the plan must decline it rather than run it.
     const std::vector<int64_t> qDims = {1, 2, 4, 8};
     const std::vector<int64_t> kDims = {1, 2, 4, 8};
     const std::vector<int64_t> vDims = {1, 2, 4, 8};
@@ -788,6 +783,8 @@ INSTANTIATE_TEST_SUITE_P(
     TestSdpaFwdPlanPagedApplicability,
     Values(
         PagedApplicabilityCase{"PagedKv", {}, true},
+        // cuDNN infers the extent from the dense V when only K is paged (6), so the table
+        // (3 blocks of 2) fits.
         PagedApplicabilityCase{
             "PagedKOnly", {true, false, true, DataType::INT32, std::nullopt, std::nullopt}, true},
         PagedApplicabilityCase{
@@ -798,8 +795,6 @@ INSTANTIATE_TEST_SUITE_P(
                                false},
         PagedApplicabilityCase{
             "MaxSeqLenBeyondCapacity", {true, true, true, DataType::INT32, 7, std::nullopt}, false},
-        // cuDNN infers the extent from the dense V when only K is paged (6), so the table
-        // (3 blocks of 2) fits; see PagedKOnly above.
         // cuDNN: the table has exactly ceil(max_seq_len_kv / block size) entries (2, not 3).
         PagedApplicabilityCase{
             "TableWiderThanMaxSeqLen", {true, true, true, DataType::INT32, 4, std::nullopt}, false},
@@ -1012,8 +1007,8 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
     EXPECT_TRUE(exactValidation.allClose(oT, oRef));
 }
 
-// cuDNN's left_bound counts the diagonal key: the shared band rule rejects 0 (no keys kept) and
-// values below -1, and passes positive bounds and -1 through unchanged.
+// The shared band rule rejects left_bound = 0 and values below -1 (hipDNN's band domain), and
+// passes positive bounds and -1 through unchanged.
 TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
 {
     const auto extract = [](int64_t left) {
@@ -1811,10 +1806,8 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsNonFloatDescale)
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
 {
-    // The v3 forward kernel supports only q/k/v descales. Softmax/output
-    // (de)quantization (descale_s, scale_s/o, amax) is not modeled, so an fp8 graph
-    // that additionally carries descale_s must be rejected even though q/k/v descales
-    // are present.
+    // cuDNN sdpa_fp8 pairs descale_s with scale_s, so an fp8 graph that carries descale_s
+    // without scale_s must be declined even though q/k/v descales are present.
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     auto graph = buildDescaleSdpaFwdGraph(dims,
                                           dims,

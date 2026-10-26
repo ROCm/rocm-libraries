@@ -153,24 +153,26 @@ Design, the full feature table for both references, and how they are tested:
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
 | Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Not supported; lengths come from `ragged_offset` alone |
-| FP8 (descale) inputs | `FP8_E4M3`, `FP8_E5M2` and their FNUZ forms, with `BFP16` output; requires all three `FLOAT` Q/K/V descales (scalar or `[B, H_kv, 1, 1]`; a paged K or V needs a scalar), rejected for other inputs. Q/K/V are dequantized on the device first, as in the CPU reference. cuDNN `sdpa_fp8` softmax and output scaling (`scale_s` with `descale_s`, `scale_o`, `amax_s`, `amax_o`; one-element `FLOAT`; not with dropout) as in the CPU reference (SEM-024); `BFP16` or input-format FP8 output | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax are rejected |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Lengths come from `ragged_offset`; supplied seq_len tensors go through the dense rewrite (below) |
+| FP8 (descale) inputs | `FP8_E4M3`, `FP8_E5M2` and their FNUZ forms, with `BFP16` output; requires all three `FLOAT` Q/K/V descales (scalar or `[B, H_kv, 1, 1]`; a paged K or V needs a scalar), rejected for other inputs. Q/K/V are dequantized on the device first, as in the CPU reference. cuDNN `sdpa_fp8` softmax and output scaling (`scale_s` with `descale_s`, `scale_o`, `amax_s`, `amax_o`; one-element `FLOAT`; not with dropout) as in the CPU reference (SEM-024); `BFP16` or input-format FP8 output | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V read in place through INT32 page tables, as the CPU reference (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) |
-| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Not supported |
+| ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite |
 | `padding_mask` without both seq_len tensors | Not supported | Not supported |
 | Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite |
-| Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Not supported |
+| Dropout with an explicit mask (`dropout_mask` + `dropout_scale`; backward `dropout_scale_inv`) | Supported (forward and backward) | Through the dense rewrite |
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`) | cuDNN semantics: `left_bound = L` keeps L keys up to and including the diagonal, `right_bound = R` keeps R keys past it; `left_bound = 0` is rejected | Same (band anchored per the ragged batch's lengths) |
-| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference (forward and backward follow the CPU table) | Not supported |
+| Philox dropout (`dropout_probability`, seed, offset) | Supported only with an `rng_dump` output, as in the CPU reference; the backward has no Philox dropout | Through the dense rewrite (same rule) |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`) | Supported, as in the CPU reference | Through the dense rewrite (below) |
-| Additive attention bias (`attn_mask`) | - | Not supported |
+| Additive attention bias (`attn_mask`) | Supported, as in the CPU reference | Through the dense rewrite |
 
 The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
 strides and an `INT32` `ragged_offset` aux on every primary. A node is keyed as ragged when any of
 its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
-plan rejects any ragged tensor. So a partly ragged node is declined. The CPU reference keys and gates
-ragged nodes the same way.
+plan rejects any ragged tensor. So a partly ragged node is declined by both plans and goes to the dense
+rewrite. The CPU reference keys and gates ragged nodes the same way. "Through the dense rewrite" in the
+table means the native ragged plan declines the feature and the executor runs the graph through the dense
+rewrite (below) under the dense column's rules.
 
 Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
 rewrite (`RaggedSdpaDensify.hpp`, shared with the CPU reference; the GPU executor stages the packed buffers
@@ -211,7 +213,7 @@ host validator.
 | Reduction | Yes | Yes |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
-| SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense incl. FP8 E4M3 / E4M3 FNUZ and variable seq. len.; ragged incl. FP8 E4M3) |
+| SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |

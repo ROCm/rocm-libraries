@@ -579,8 +579,6 @@ INSTANTIATE_TEST_SUITE_P(
                 false}),
     caseName);
 
-// Explicit-mask dropout (cuDNN custom dropout) in backward: GPU vs CPU with GQA, bias + dBias and
-// bottom-right causal; with and without LSE and with and without dropout_scale_inv.
 // Standard tier: the same CPU-vs-GPU comparison at medium shapes (hundreds of keys, GQA, Dqk != Dv,
 // bias with dBias, bands, padding), where accumulation order and long rows matter. Quick runs the
 // small cases above on every change.
@@ -642,6 +640,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                    false}),
                          caseName);
 
+// Explicit-mask dropout (cuDNN custom dropout) in backward: GPU vs CPU with GQA, bias + dBias and
+// bottom-right causal; with and without LSE and with and without dropout_scale_inv.
 struct BwdDropoutCase
 {
     const char* name;
