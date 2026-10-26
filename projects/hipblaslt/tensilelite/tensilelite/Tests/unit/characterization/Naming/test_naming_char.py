@@ -210,13 +210,11 @@ def test_kernel_name_min_split_gsu_unit(make_state, snapshot):
 
 
 @pytest.mark.parametrize("gsu", [4, -1], ids=["gsu4", "gsu_neg1"])
-def test_kernel_name_min_split_gsu_typeerror(make_state, gsu):
-    # CHARACTERIZED BUG: with ignoreInternalArgs=True (getKernelNameMin) and
-    # splitGSU=True, GSU>1 or GSU==-1 is rewritten to the string "M" at
-    # Naming.py:172, then compared with `"M" > 0` at Naming.py:177 -> TypeError.
-    # Pinned as current behaviour; see ADR 0003.
-    with pytest.raises(TypeError):
-        N.getKernelNameMin(make_state(GlobalSplitU=gsu), splitGSU=True)
+def test_kernel_name_min_split_gsu_multi_variant(make_state, gsu):
+    state = make_state(GlobalSplitU=gsu)
+
+    assert "GSUM" in N.getKernelNameMin(state, splitGSU=True).split("_")
+    assert state["GlobalSplitU"] == gsu
 
 
 def test_name_does_not_mutate_state(make_state):

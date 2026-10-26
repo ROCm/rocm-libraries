@@ -443,6 +443,32 @@ class TestGenerateForkedSolutions:
         # Dedup should yield <=1 unique solution.
         assert len(sols) <= 1, f"Expected dedup to <=1, got {len(sols)}"
 
+    def test_register_allocation_configs_with_one_mode_keep_the_first(
+            self, toolchain, problem_type, debug_config, capsys):
+        """Configs with one mode name one solution: the first stays and the
+        last is reported. "apply" spells the first, so it is not reported."""
+        from config_harness import _isolated_globals_with_isa
+
+        assembler, iim = toolchain
+        const = _make_constant_params()
+        perms = [
+            {"StinkyTofuRegisterAllocation": "2,classes=vs"},
+            {"StinkyTofuRegisterAllocation": "apply"},
+            {"StinkyTofuRegisterAllocation": "2,classes=s"},
+        ]
+
+        with _isolated_globals_with_isa(iim):
+            sols = M._generateForkedSolutions(
+                problem_type, const, perms, assembler, debug_config, iim
+            )
+
+        assert [sol["StinkyTofuRegisterAllocation"] for sol in sols] == [2]
+        warnings = [line for line in capsys.readouterr().out.splitlines()
+                    if "StinkyTofuRegisterAllocation" in line]
+        assert len(warnings) == 1
+        assert "'2,classes=s' is not built for 1 kernel(s)" in warnings[0]
+        assert "Benchmark it in a separate run." in warnings[0]
+
 
 # ---------------------------------------------------------------------------
 # PRONG D — solutions_from_config breadth: two ProblemSizeGroups in same config

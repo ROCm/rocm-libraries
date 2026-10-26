@@ -14,8 +14,13 @@
  * parametric rocke_direct_conv_spec_t and the MFMA dgrad weight transforms,
  * baked and runtime-channel; from index 95 the split-C non-grouped spec and its
  * rocke_direct_conv_split_reduce_spec_t second pass; from index 103 the grouped /
- * group-merge non-grouped spec) identically to the Python emitter
- * conv_direct_grouped_emit.py, builds the
+ * group-merge non-grouped spec; from index 114 the direct wgrad kernels:
+ * rocke_direct_wgrad_tiled_spec_t, rocke_dw_wgrad_{fold,cols,lds}_spec_t,
+ * rocke_direct_wgrad_gather_spec_t and, from index 148, the 4x4x4 MFMA
+ * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t; from
+ * index 163 the bf16 rocke_direct_conv_4c_spec_t; from index 166 the
+ * depthwise forward kernels on the wave32 gfx1250) identically to the Python
+ * emitter conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
@@ -24,8 +29,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/instance_conv_direct_dw_wgrad.h"
+#include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
+#include "rocke/instance_conv_direct_wgrad_gather.h"
+#include "rocke/instance_conv_direct_wgrad_tiled.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -48,7 +58,14 @@ enum
     KIND_GENERIC = 12,
     KIND_TRANSPOSE = 13,
     KIND_REORG = 14,
-    KIND_SPLIT_REDUCE = 15
+    KIND_SPLIT_REDUCE = 15,
+    KIND_WGRAD_TILED = 16,
+    KIND_DW_WGRAD_FOLD = 17,
+    KIND_DW_WGRAD_COLS = 18,
+    KIND_DW_WGRAD_LDS = 19,
+    KIND_WGRAD_GATHER = 20,
+    KIND_DW_WGRAD_MFMA = 21,
+    KIND_GROUPED_WGRAD_MFMA = 22
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -68,6 +85,64 @@ enum
 /* Grouped (grouped = true, group_merge) non-grouped configs follow the 8 split-C
  * ones. */
 #define NONGROUPED_GROUPED_CFG_BASE 103
+/* The direct wgrad kernels (tiled, depthwise fold / cols / lds, gather) follow
+ * the 11 grouped non-grouped configs. */
+#define WGRAD_DIRECT_CFG_BASE 114
+
+/* bf16 4c configs 163..165 follow the direct wgrad ones. */
+#define FOURC_BF16_CFG_BASE 163
+/* Depthwise forward on a wave32 target (gfx1250), configs 166..170, follows
+ * the bf16 4c ones: see _wave32_spec in the Python emitter. */
+#define WAVE32_CFG_BASE 166
+
+/* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
+ * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
+static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char** arch)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.cpg = 4;
+    p.kpg = 4;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
+    p.stride = 1;
+    p.dtype = "bf16";
+    *s4 = rocke_direct_conv_4c_spec_default();
+    switch(idx)
+    {
+    case 0:
+        p.N = 2;
+        p.H = 13;
+        p.W = 13;
+        p.groups = 32;
+        s4->block_q = 4;
+        s4->block_groups = 16;
+        *arch = "gfx950";
+        break;
+    case 1:
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 16;
+        s4->block_q = 8;
+        s4->block_groups = 16;
+        *arch = "gfx942";
+        break;
+    case 2:
+        p.N = 2;
+        p.H = 15;
+        p.W = 15;
+        p.groups = 32;
+        s4->block_q = 16;
+        s4->block_groups = 32;
+        *arch = "gfx950";
+        break;
+    default:
+        return -1;
+    }
+    s4->problem = p;
+    return 0;
+}
 
 static rocke_direct_conv_problem_t
     mk_dw_problem(int N, int H, int W, int groups, int KH, int PAD, int stride, const char* dtype)
@@ -717,6 +792,69 @@ static int make_reject_cfg(int idx,
         s16->problem = p;
         s16->block_groups = 4;
         *kind = KIND_16C;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Config WAVE32_CFG_BASE + idx (see _wave32_spec in the Python emitter): the
+ * preloading, spatial, tiled and column-streamed depthwise forward kernels at
+ * wave_size 32 on gfx1250, then the preloading kernel at wave_size 64 (a
+ * logical wave the wave32 target runs as two hardware waves). Returns 0 on
+ * success, -1 past the last one. */
+static int make_wave32_cfg(int idx,
+                           int* kind,
+                           rocke_direct_depthwise_spec_t* sdw,
+                           rocke_direct_depthwise_spatial_spec_t* ssp,
+                           rocke_direct_depthwise_tiled_spec_t* stiled,
+                           rocke_direct_depthwise_col_spec_t* sdwc,
+                           const char** arch)
+{
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 2;
+        sdw->wave_size = 32;
+        *kind = KIND_DW;
+        return 0;
+    case 1:
+        *ssp = rocke_direct_depthwise_spatial_spec_default();
+        ssp->problem = mk_dw_problem(2, 14, 14, 3, 3, 1, 2, "bf16");
+        ssp->block_waves = 2;
+        ssp->wave_size = 32;
+        *kind = KIND_SPATIAL;
+        return 0;
+    case 2:
+        *stiled = rocke_direct_depthwise_tiled_spec_default();
+        stiled->problem = mk_dw_problem(2, 16, 16, 96, 5, 2, 1, "bf16");
+        stiled->block_w = 8;
+        stiled->block_h = 2;
+        stiled->block_waves = 2;
+        stiled->wave_size = 32;
+        *kind = KIND_DW_TILED;
+        return 0;
+    case 3:
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = mk_dw_problem(2, 12, 12, 96, 3, 1, 2, "fp16");
+        sdwc->block_h = 8;
+        sdwc->block_w = 2;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        sdwc->wave_size = 32;
+        *kind = KIND_DWCOL;
+        return 0;
+    case 4:
+        /* wave64 (logical) spec on the wave32 target. */
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = mk_dw_problem(2, 14, 14, 64, 3, 1, 1, "fp16");
+        sdw->block_w = 8;
+        sdw->block_waves = 1;
+        *kind = KIND_DW;
         return 0;
     default:
         return -1;
@@ -1535,6 +1673,426 @@ static int make_cfg(int idx,
     }
 }
 
+/* ---- direct wgrad configs (see _wgrad_direct_spec in the Python emitter) ---- */
+typedef struct wgrad_direct_specs
+{
+    rocke_direct_wgrad_tiled_spec_t tiled;
+    rocke_dw_wgrad_fold_spec_t fold;
+    rocke_dw_wgrad_cols_spec_t cols;
+    rocke_dw_wgrad_lds_spec_t lds;
+    rocke_direct_wgrad_gather_spec_t gather;
+    rocke_dw_wgrad_mfma_spec_t dw_mfma;
+    rocke_grouped_wgrad_mfma_spec_t grouped_mfma;
+} wgrad_direct_specs_t;
+
+/* _wp(): N=2 H=16 W=32 groups=1 cpg=kpg=64 3x3 PAD=1 stride=1 bf16. */
+static rocke_direct_conv_problem_t mk_wp(void)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 2;
+    p.H = 16;
+    p.W = 32;
+    p.groups = 1;
+    p.cpg = 64;
+    p.kpg = 64;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
+    p.stride = 1;
+    p.dtype = "bf16";
+    return p;
+}
+
+/* _dwp(C): depthwise over C channels. */
+static rocke_direct_conv_problem_t mk_dwp(int C)
+{
+    rocke_direct_conv_problem_t p = mk_wp();
+    p.groups = C;
+    p.cpg = 1;
+    p.kpg = 1;
+    return p;
+}
+
+static void mk_filter(rocke_direct_conv_problem_t* p, int KH, int KW, int PAD, int stride)
+{
+    p->KH = KH;
+    p->KW = KW;
+    p->PAD = PAD;
+    p->stride = stride;
+}
+
+/* Returns 0 on success, -1 if unknown. */
+static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, const char** arch)
+{
+    rocke_direct_wgrad_tiled_spec_t* ts = &w->tiled;
+    rocke_dw_wgrad_cols_spec_t* cs = &w->cols;
+    rocke_dw_wgrad_lds_spec_t* ls = &w->lds;
+    rocke_direct_wgrad_gather_spec_t* gs = &w->gather;
+    *ts = rocke_direct_wgrad_tiled_spec_default();
+    w->fold = rocke_dw_wgrad_fold_spec_default();
+    *cs = rocke_dw_wgrad_cols_spec_default();
+    *ls = rocke_dw_wgrad_lds_spec_default();
+    *gs = rocke_direct_wgrad_gather_spec_default();
+    rocke_dw_wgrad_mfma_spec_t* dm = &w->dw_mfma;
+    rocke_grouped_wgrad_mfma_spec_t* gm = &w->grouped_mfma;
+    *dm = rocke_dw_wgrad_mfma_spec_default();
+    *gm = rocke_grouped_wgrad_mfma_spec_default();
+    *arch = "gfx950";
+    if(idx <= 6 || idx == 20)
+        *kind = KIND_WGRAD_TILED;
+    else if(idx <= 8)
+        *kind = KIND_DW_WGRAD_FOLD;
+    else if(idx <= 11)
+        *kind = KIND_DW_WGRAD_COLS;
+    else if(idx <= 15)
+        *kind = KIND_DW_WGRAD_LDS;
+    else if(idx <= 33)
+        *kind = KIND_WGRAD_GATHER;
+    else if(idx <= 40 || idx == 45 || idx == 46)
+        *kind = KIND_DW_WGRAD_MFMA;
+    else
+        *kind = KIND_GROUPED_WGRAD_MFMA;
+    ts->problem = mk_wp();
+    gs->problem = mk_wp();
+    gm->problem = mk_wp();
+    switch(idx)
+    {
+    case 0:
+        ts->problem.cpg = 128;
+        ts->problem.kpg = 128;
+        ts->problem.H = 30;
+        return 0;
+    case 1:
+        ts->problem.groups = 2;
+        ts->problem.kpg = 32;
+        ts->problem.dtype = "fp16";
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 4;
+        ts->waves_k = 2;
+        ts->waves_c = 1;
+        ts->rows_per_seg = 12;
+        ts->prefetch = 1;
+        return 0;
+    case 2:
+        ts->problem.N = 4;
+        ts->problem.H = 15;
+        ts->problem.W = 40;
+        ts->unfold_n = 4;
+        ts->rows_per_seg = 15;
+        ts->row_unroll = 3;
+        return 0;
+    case 3:
+        ts->q_groups = 2;
+        ts->waves_k = 2;
+        ts->rows_per_seg = 6;
+        return 0;
+    case 4:
+        ts->q_groups = 2;
+        ts->pingpong = true;
+        ts->waves_k = 2;
+        ts->wave_k16 = 1;
+        ts->rows_per_seg = 12;
+        ts->prefetch = 3;
+        ts->target_blocks = 64;
+        return 0;
+    case 5:
+        mk_filter(&ts->problem, 1, 1, 0, 1);
+        ts->problem.cpg = 32;
+        ts->problem.kpg = 32;
+        ts->problem.dtype = "fp16";
+        ts->waves_k = 1;
+        ts->waves_c = 1;
+        ts->rows_per_seg = 6;
+        ts->unfold_n = 2;
+        return 0;
+    case 6:
+        mk_filter(&ts->problem, 5, 5, 2, 1);
+        ts->problem.cpg = 48;
+        ts->problem.kpg = 40;
+        ts->wave_k16 = 1;
+        ts->wave_c16 = 1;
+        ts->waves_k = 2;
+        ts->waves_c = 2;
+        ts->rows_per_seg = 15;
+        ts->unfold_n = 2;
+        return 0;
+    case 7:
+        w->fold.taps = 9;
+        return 0;
+    case 8:
+        w->fold.taps = 27;
+        w->fold.name = "fold27";
+        return 0;
+    case 9:
+        cs->problem = mk_dwp(3);
+        mk_filter(&cs->problem, 7, 7, 3, 2);
+        cs->problem.H = 20;
+        return 0;
+    case 10:
+        cs->problem = mk_dwp(3);
+        mk_filter(&cs->problem, 11, 11, 5, 1);
+        cs->problem.H = 12;
+        cs->problem.W = 48;
+        cs->problem.dtype = "fp16";
+        cs->strip = 16;
+        cs->threads = 256;
+        cs->target_blocks = 4096;
+        return 0;
+    case 11:
+        cs->problem = mk_dwp(8);
+        cs->problem.H = 10;
+        cs->problem.W = 24;
+        cs->threads = 128;
+        return 0;
+    case 12:
+        ls->problem = mk_dwp(64);
+        return 0;
+    case 13:
+        ls->problem = mk_dwp(192);
+        ls->problem.stride = 2;
+        ls->problem.H = 30;
+        ls->problem.W = 40;
+        ls->problem.dtype = "fp16";
+        ls->lanes_w = 8;
+        ls->prefetch = 1;
+        ls->target_blocks = 2048;
+        return 0;
+    case 14:
+        ls->problem = mk_dwp(40);
+        ls->problem.H = 20;
+        ls->problem.W = 20;
+        ls->lanes_c = 4;
+        ls->lanes_w = 16;
+        ls->cols_per_lane = 2;
+        ls->prefetch = 3;
+        ls->rows_per_seg = 8;
+        return 0;
+    case 15:
+        ls->problem = mk_dwp(16);
+        mk_filter(&ls->problem, 3, 1, 0, 1);
+        ls->problem.H = 9;
+        ls->problem.W = 12;
+        ls->lanes_c = 2;
+        ls->rows_per_seg = 5;
+        return 0;
+    case 16: /* gathered X (S * C = 6), the stem shape */
+        gs->problem.cpg = 3;
+        gs->problem.kpg = 24;
+        gs->problem.stride = 2;
+        gs->problem.H = 32;
+        gs->problem.W = 64;
+        return 0;
+    case 17: /* transpose-read X, phase 0 */
+        gs->problem.cpg = 24;
+        gs->problem.kpg = 96;
+        gs->problem.stride = 2;
+        gs->problem.H = 30;
+        gs->problem.W = 40;
+        gs->wave_k16 = 1;
+        gs->waves_k = 6;
+        gs->rows_per_seg = 8;
+        gs->target_blocks = 256;
+        return 0;
+    case 18: /* transpose-read X at phase 4 */
+        gs->problem.cpg = 4;
+        gs->problem.kpg = 32;
+        gs->problem.dtype = "fp16";
+        gs->prefetch = 1;
+        return 0;
+    case 19: /* 7x7 stride 2: five leading X rows per segment, two k-waves */
+        gs->problem.cpg = 3;
+        gs->problem.kpg = 64;
+        mk_filter(&gs->problem, 7, 7, 3, 2);
+        gs->problem.H = 40;
+        gs->problem.W = 64;
+        gs->waves_k = 2;
+        gs->rows_per_seg = 8;
+        return 0;
+    case 20: /* must reject: the tiled kernel is stride 1 only */
+        ts->problem.stride = 2;
+        return 0;
+    case 21: /* must reject: no ds_read_b64_tr_b16 on gfx942 */
+        gs->problem.cpg = 3;
+        gs->problem.kpg = 24;
+        gs->problem.stride = 2;
+        gs->problem.W = 64;
+        *arch = "gfx942";
+        return 0;
+    case 22: /* KW * C = 72 outputs over 64 threads: a second epilogue pass */
+        *kind = KIND_DW_WGRAD_COLS;
+        cs->problem = mk_dwp(8);
+        mk_filter(&cs->problem, 9, 9, 4, 1);
+        return 0;
+    case 23: /* must reject: a 512 x 88 fp32 reduction buffer is 176 KiB of LDS */
+        *kind = KIND_DW_WGRAD_COLS;
+        cs->problem = mk_dwp(8);
+        mk_filter(&cs->problem, 11, 11, 5, 1);
+        cs->threads = 512;
+        return 0;
+    case 24: /* must reject: the padded rings are 200,704 B (logical rows 145,152) */
+        *kind = KIND_DW_WGRAD_LDS;
+        ls->problem = mk_dwp(64);
+        ls->problem.stride = 2;
+        ls->prefetch = 5;
+        return 0;
+    case 25: /* must reject: gfx942 DMAs one dword per lane into LDS */
+    case 26: /* must reject: gfx1250 is wave32 */
+        *kind = KIND_DW_WGRAD_LDS;
+        ls->problem = mk_dwp(64);
+        *arch = idx == 25 ? "gfx942" : "gfx1250";
+        return 0;
+    case 27: /* must reject: sixteen waves pad each X slot to 16 KiB (196,864 B) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 3;
+        gs->problem.stride = 2;
+        gs->wave_k16 = 1;
+        gs->waves_k = 16;
+        return 0;
+    case 28: /* must reject: six 32 KiB ring buffers */
+        *kind = KIND_WGRAD_TILED;
+        ts->problem.cpg = 256;
+        ts->problem.kpg = 256;
+        ts->waves_k = 8;
+        ts->waves_c = 2;
+        ts->prefetch = 5;
+        ts->row_unroll = 6;
+        return 0;
+    case 29: /* must reject: row_unroll -3 divides by 3 but runs no rows */
+        *kind = KIND_WGRAD_TILED;
+        ts->row_unroll = -3;
+        return 0;
+    case 30:
+        *kind = KIND_WGRAD_TILED;
+        ts->target_blocks = 0;
+        return 0;
+    case 31:
+        *kind = KIND_WGRAD_TILED;
+        ts->problem.dtype = NULL;
+        return 0;
+    case 32: /* valid padding, three k-waves of one atom (two k tiles) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 8;
+        gs->problem.kpg = 96;
+        gs->problem.PAD = 0;
+        gs->wave_k16 = 1;
+        gs->waves_k = 3;
+        return 0;
+    case 33: /* valid padding at stride 2, three k-waves of two atoms (a partial tile) */
+        *kind = KIND_WGRAD_GATHER;
+        gs->problem.cpg = 3;
+        gs->problem.kpg = 104;
+        gs->problem.PAD = 0;
+        gs->problem.stride = 2;
+        gs->problem.W = 64;
+        gs->waves_k = 3;
+        gs->prefetch = 1;
+        return 0;
+    case 34: /* depthwise 4x4x4 MFMA: 7x7, preshifted window, both prologue bodies */
+        dm->problem = mk_dwp(64);
+        mk_filter(&dm->problem, 7, 7, 3, 1);
+        dm->problem.W = 20;
+        dm->q_tiles = 4;
+        return 0;
+    case 35: /* 3x3 fp16 (no preshift), a partial channel tile, prefetch 1 */
+        dm->problem = mk_dwp(72);
+        dm->problem.H = 9;
+        dm->problem.W = 30;
+        dm->problem.dtype = "fp16";
+        dm->rows_per_chunk = 4;
+        dm->prefetch = 1;
+        return 0;
+    case 36: /* three 7x7 images packed in one 32-wide tile */
+        dm->problem = mk_dwp(128);
+        mk_filter(&dm->problem, 7, 7, 3, 1);
+        dm->problem.N = 5;
+        dm->problem.H = 7;
+        dm->problem.W = 7;
+        dm->rows_per_chunk = 14;
+        dm->unfold_n = 3;
+        return 0;
+    case 37: /* 5x5 "valid" padding, two packed images, three staging buffers */
+        dm->problem = mk_dwp(64);
+        mk_filter(&dm->problem, 5, 5, 0, 1);
+        dm->problem.H = 10;
+        dm->problem.W = 6;
+        dm->q_tiles = 5;
+        dm->unfold_n = 2;
+        dm->prefetch = 3;
+        return 0;
+    case 38: /* 11x11: 3x3 tap groups */
+        dm->problem = mk_dwp(64);
+        mk_filter(&dm->problem, 11, 11, 5, 1);
+        dm->problem.H = 12;
+        dm->problem.W = 12;
+        dm->q_tiles = 2;
+        dm->rows_per_chunk = 8;
+        dm->target_blocks = 64;
+        return 0;
+    case 39: /* PAD = KH - 1: one prologue body only */
+        dm->problem = mk_dwp(64);
+        dm->problem.PAD = 2;
+        dm->q_tiles = 4;
+        return 0;
+    case 40: /* must reject: stride 2 */
+        dm->problem = mk_dwp(64);
+        dm->problem.stride = 2;
+        return 0;
+    case 41: /* grouped 4x4x4 MFMA: 4 channels per group */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        return 0;
+    case 42: /* 8 channels per group, fp16, a partial channel tile, 2x2 wave split */
+        gm->problem.groups = 9;
+        gm->problem.cpg = 8;
+        gm->problem.kpg = 8;
+        gm->problem.dtype = "fp16";
+        gm->problem.W = 24;
+        gm->waves_q = 2;
+        gm->wave_q4 = 2;
+        gm->rows_per_chunk = 8;
+        gm->prefetch = 3;
+        return 0;
+    case 43: /* 5x5, one wave over four column groups, four staging buffers */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        mk_filter(&gm->problem, 5, 5, 2, 1);
+        gm->waves_q = 1;
+        gm->wave_q4 = 4;
+        gm->prefetch = 4;
+        gm->target_blocks = 64;
+        return 0;
+    case 44: /* must reject: 16 channels per group */
+        gm->problem.groups = 4;
+        gm->problem.cpg = 16;
+        gm->problem.kpg = 16;
+        return 0;
+    case 45: /* must reject: no blocks */
+        dm->problem = mk_dwp(64);
+        dm->target_blocks = 0;
+        return 0;
+    case 46: /* must reject: a negative block budget */
+        dm->problem = mk_dwp(64);
+        dm->target_blocks = -1;
+        return 0;
+    case 47: /* must reject: no blocks */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        gm->target_blocks = 0;
+        return 0;
+    case 48: /* must reject: a negative block budget */
+        gm->problem.groups = 16;
+        gm->problem.cpg = 4;
+        gm->problem.kpg = 4;
+        gm->target_blocks = -1;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -1561,9 +2119,35 @@ int main(int argc, char** argv)
     rocke_direct_conv_spec_t sgen;
     rocke_direct_transpose_weights_dgrad_spec_t stp;
     rocke_direct_reorganize_weights_spec_t sreorg;
+    wgrad_direct_specs_t swd;
     rocke_direct_conv_split_reduce_spec_t sred;
     const char* arch = "gfx950";
-    if(idx >= NONGROUPED_GROUPED_CFG_BASE)
+    if(idx >= WAVE32_CFG_BASE)
+    {
+        if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= FOURC_BF16_CFG_BASE)
+    {
+        kind = KIND_4C;
+        if(make_4c_bf16_cfg(idx - FOURC_BF16_CFG_BASE, &s4, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WGRAD_DIRECT_CFG_BASE)
+    {
+        if(make_wgrad_direct_cfg(idx - WGRAD_DIRECT_CFG_BASE, &kind, &swd, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= NONGROUPED_GROUPED_CFG_BASE)
     {
         kind = KIND_NONGROUPED;
         if(make_nongrouped_grouped_cfg(idx - NONGROUPED_GROUPED_CFG_BASE, &snongrouped, &arch) != 0)
@@ -1638,8 +2222,22 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_reorganize_weights_new(&b, &sreorg, arch);
     else if(kind == KIND_DW_TILED)
         kernel = rocke_build_direct_depthwise_tiled_new(&b, &stiled, arch);
+    else if(kind == KIND_WGRAD_TILED)
+        kernel = rocke_build_direct_wgrad_tiled_new(&b, &swd.tiled, arch);
+    else if(kind == KIND_DW_WGRAD_FOLD)
+        kernel = rocke_build_dw_wgrad_fold_new(&b, &swd.fold, arch);
+    else if(kind == KIND_DW_WGRAD_COLS)
+        kernel = rocke_build_dw_wgrad_cols_new(&b, &swd.cols, arch);
+    else if(kind == KIND_DW_WGRAD_LDS)
+        kernel = rocke_build_dw_wgrad_lds_new(&b, &swd.lds, arch);
+    else if(kind == KIND_WGRAD_GATHER)
+        kernel = rocke_build_direct_wgrad_gather_new(&b, &swd.gather, arch);
     else if(kind == KIND_SPLIT_REDUCE)
         kernel = rocke_build_direct_conv_split_reduce_new(&b, &sred, arch);
+    else if(kind == KIND_DW_WGRAD_MFMA)
+        kernel = rocke_build_dw_wgrad_mfma_new(&b, &swd.dw_mfma, arch);
+    else if(kind == KIND_GROUPED_WGRAD_MFMA)
+        kernel = rocke_build_grouped_wgrad_mfma_new(&b, &swd.grouped_mfma, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)

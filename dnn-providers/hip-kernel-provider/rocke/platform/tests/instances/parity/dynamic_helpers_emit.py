@@ -5,7 +5,7 @@
 # tests/parity/dynamic_helpers_emit.py -- Python reference emitter for the
 # runtime-shape (AOT) helpers: SoftwarePipeline.run_ping_pong_dynamic and the
 # dynamic coordinate transforms (EmbedDynamic, UnmergeMagicDynamic, PadDynamic,
-# DynamicTensorDescriptor).
+# DynamicTensorDescriptor), and the runtime-chunk chiplet remap.
 #
 # Those helpers are otherwise only byte-compared through the conv families,
 # which drive a narrow slice of their argument space. Each config here builds
@@ -19,6 +19,7 @@
 #
 # arch = gfx950, llvm_flavor = AUTO, matching the C side.
 from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.transforms import (
@@ -243,6 +244,25 @@ def build_pad_dynamic(b: IRBuilder) -> None:
     b.ret()
 
 
+def _chiplet_runtime(*, explicit_chunk: bool):
+    """chiplet_transform_chunked_runtime over a runtime grid size: the default
+    chunk (num_wgs / num_xcds, derived in-kernel) or an explicit runtime chunk.
+    """
+
+    def build(b: IRBuilder) -> None:
+        o = _ptr(b, "O", I32)
+        p_n = b.param("p_num_wgs", I32)
+        p_chunk = b.param("p_chunk", I32) if explicit_chunk else None
+        wgid = b.block_id_x()
+        remapped = chiplet_transform_chunked_runtime(
+            b, wgid, num_wgs=p_n, num_xcds=8, chunk_size=p_chunk
+        )
+        b.global_store(o, wgid, remapped)
+        b.ret()
+
+    return build
+
+
 CONFIGS = [
     # 0: k_lo=None (const 0 lower bound), no zero-fill select, default flags.
     _pingpong(
@@ -294,6 +314,10 @@ CONFIGS = [
     ),
     # 7: unmerge_magic_dynamic with mixed int/Value triples and a dim-1 triple.
     build_unmerge_mixed,
+    # 8: chiplet_transform_chunked_runtime, chunk derived from num_wgs.
+    _chiplet_runtime(explicit_chunk=False),
+    # 9: chiplet_transform_chunked_runtime with an explicit runtime chunk.
+    _chiplet_runtime(explicit_chunk=True),
 ]
 
 
