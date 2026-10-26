@@ -201,6 +201,49 @@ if(NOT PIN_PROBE_OK)
 endif()
 
 # ---------------------------------------------------------------------------------------
+# Windows DLL shadowing
+# ---------------------------------------------------------------------------------------
+# The sample exes are built outside the ROCm tree. The Windows loader searches the exe's
+# directory, then System32, and only then PATH, so the driver's older amd_comgr.dll and
+# amdhip64_<N>.dll in System32 win over the installed ones. That mix crashes MIOpen's first
+# backward-convolution solver query with an access violation. Only a copy beside the exe
+# overrides System32. Same workaround as projects/hipdnn/cmake/WindowsDllStaging.cmake,
+# which this standalone project cannot include; remove both together once the driver stops
+# shipping stale copies.
+if(WIN32)
+    # Don't rely on hipdnn_frontend finding hip transitively.
+    find_package(hip CONFIG REQUIRED)
+    if(NOT hip_BIN_INSTALL_DIR)
+        message(FATAL_ERROR
+            "E25 STAGE: hip_BIN_INSTALL_DIR is not set, so the ROCm DLLs cannot be staged "
+            "next to the samples")
+    endif()
+    # The DLL name carries the HIP major version (amdhip64_7.dll), so glob for it.
+    file(GLOB _hip_runtime_dlls "${hip_BIN_INSTALL_DIR}/amdhip64_*.dll")
+    set(_shadowed_dlls "${hip_BIN_INSTALL_DIR}/amd_comgr.dll" ${_hip_runtime_dlls})
+    # An empty glob would stage only comgr and quietly leave the crash in place.
+    if(NOT _hip_runtime_dlls OR NOT EXISTS "${hip_BIN_INSTALL_DIR}/amd_comgr.dll")
+        message(FATAL_ERROR
+            "E25 STAGE: expected amd_comgr.dll and amdhip64_*.dll in ${hip_BIN_INSTALL_DIR}")
+    endif()
+
+    set(_staged_dlls "")
+    foreach(_dll IN LISTS _shadowed_dlls)
+        get_filename_component(_dll_name "${_dll}" NAME)
+        set(_dst "${CMAKE_CURRENT_BINARY_DIR}/${_dll_name}")
+        add_custom_command(
+            OUTPUT "${_dst}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" "${_dst}"
+            DEPENDS "${_dll}"
+            COMMENT "Staging ${_dll_name} next to the samples (DLL-shadowing workaround)"
+            VERBATIM)
+        list(APPEND _staged_dlls "${_dst}")
+    endforeach()
+    add_custom_target(stage_shadowed_rocm_dlls DEPENDS ${_staged_dlls}
+        COMMENT "Staging shadowed ROCm DLLs next to the samples")
+endif()
+
+# ---------------------------------------------------------------------------------------
 # Per-sample registration
 # ---------------------------------------------------------------------------------------
 if(HIPDNN_ENABLE_SDPA)
@@ -322,6 +365,10 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
     # hipdnn_frontend, not hipdnn_frontend_dynamic: a direct backend link has no runtime
     # discovery step to go wrong, and discovery is not what this job tests.
     target_link_libraries(${target} PRIVATE hipdnn_frontend Catch2::Catch2WithMain)
+    # Each compile_* ctest case builds a single target, so every exe depends on the staging.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${target} stage_shadowed_rocm_dlls)
+    endif()
     # No -Werror. Upstream builds the corpus with it; we deliberately do not.
 
     # Compilation is itself a ctest case. A driver that stopped at the first build error

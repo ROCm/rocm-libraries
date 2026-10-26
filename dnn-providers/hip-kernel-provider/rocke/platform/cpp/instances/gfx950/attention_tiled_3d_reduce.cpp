@@ -245,6 +245,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
  *       if in_rng is not None:
  *           ms = select(in_rng, ms, neg_inf)
  *           ls = select(in_rng, ls, zero_f)
+ *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment -> -inf
  *       cache (sv, in_rng, sv_safe), ms, ls
  *       local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
@@ -282,6 +283,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
         rocke_value_t* idx;
         rocke_value_t* ms;
         rocke_value_t* ls;
+        rocke_value_t* has_mass;
 
         sv = rocke_b_add(b, rocke_b_const_i32(b, (int64_t)j * THREADS), ctx->tid);
 
@@ -312,6 +314,13 @@ void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
             ms = rocke_b_select(b, in_rng, ms, ctx->neg_inf);
             ls = rocke_b_select(b, in_rng, ls, ctx->zero_f);
         }
+
+        /* A segment whose tiles were all masked for this row stores max=0 with
+         * sum=0. Its max carries no mass, so it must not set overall_max (it
+         * would underflow every real segment's factor) nor get a factor in
+         * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
+        has_mass = rocke_b_fcmp(b, "ogt", ls, ctx->zero_f);
+        ms = rocke_b_select(b, has_mass, ms, ctx->neg_inf);
 
         if(s_seg_sv != NULL)
         {
