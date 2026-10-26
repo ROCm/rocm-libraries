@@ -1734,6 +1734,189 @@ def lower_conv_direct_dgrad_wmma(
     )
 
 
+def conv_winograd_fwd_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
+    """:class:`WinogradFwdSpec` + its stage (``"K1"`` / ``"K2a"`` / ``"K2"`` /
+    ``"K4"``) -> flat dict (problem nested)."""
+    p = spec.problem
+    d = dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        m=spec.m,
+        io_dtype=spec.io_dtype,
+        operand_dtype=spec.operand_dtype,
+        vec=spec.vec,
+        block_size=spec.block_size,
+        prescale=spec.prescale,
+        tiles_per_thread=spec.tiles_per_thread,
+        prescale_mode=spec.prescale_mode,
+        input_block_tiles=list(spec.input_block_tiles),
+        wg_tile_rows=spec.wg_tile_rows,
+        nt_stores=spec.nt_stores,
+        lds_lanes=spec.lds_lanes,
+        name=spec.name,
+        stage=stage,
+    )
+    return d
+
+
+def lower_conv_winograd_fwd(
+    spec: Any,
+    stage: str,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower one Winograd forward transform stage (``stage`` = ``"K1"`` /
+    ``"K2a"`` / ``"K2"`` / ``"K4"``) of a :class:`WinogradFwdSpec`."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common import conv_winograd_fwd as wf
+        from .lower_llvm import lower_kernel_to_llvm
+
+        build = {
+            "K1": wf.build_winograd_filter_transform,
+            "K2a": wf.build_winograd_prescale,
+            "K2": wf.build_winograd_input_transform,
+            "K4": wf.build_winograd_output_transform,
+        }[stage]
+        k = build(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_fwd_spec_to_dict(spec, stage)
+    return _lower_family(
+        "conv_winograd_fwd",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_fwd_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_fwd_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def conv_winograd_gemm_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`WinogradGemmWmmaSpec` -> flat dict (the Winograd K3 GEMM).
+    ``sched`` is forwarded as-is; ``None`` means no scheduler strategy."""
+    return dict(
+        dtype=spec.dtype,
+        name=spec.name,
+        waves_m=spec.waves_m,
+        waves_n=spec.waves_n,
+        frags_m=spec.frags_m,
+        frags_n=spec.frags_n,
+        tile_k=spec.tile_k,
+        stages=spec.stages,
+        lds_pad=spec.lds_pad,
+        epilogue=spec.epilogue,
+        split_k=spec.split_k,
+        prefetch=spec.prefetch,
+        xcd_remap=spec.xcd_remap,
+        num_xcds=spec.num_xcds,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def lower_conv_winograd_gemm_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`WinogradGemmWmmaSpec` (the gfx1250 Winograd K3 GEMM)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_winograd_gemm_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_gemm_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_winograd_gemm_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gemm_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gemm_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_winograd_gemm_reduce(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`WinogradGemmReduceSpec` (the split-K slab reduce of the
+    Winograd K3 GEMM)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_reduce
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_winograd_gemm_reduce(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = dict(dtype=spec.dtype)
+    return _lower_family(
+        "conv_winograd_gemm_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gemm_reduce_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gemm_reduce_serialize_ir(sd, arch=arch),
+        "wino_gemm_reduce",
+    )
+
+
 def lower_img2col(
     spec: Any,
     *,

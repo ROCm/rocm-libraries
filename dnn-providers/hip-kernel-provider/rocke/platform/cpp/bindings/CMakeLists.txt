@@ -66,7 +66,8 @@ find_package(pybind11 CONFIG REQUIRED)
 
 pybind11_add_module(rocke_engine rocke_engine.cpp rocke_engine_img2col.cpp
                     rocke_engine_attention.cpp rocke_engine_moe_gemm_fused.cpp
-                    rocke_engine_fmha_extra.cpp rocke_engine_fused_moe_e2e.cpp)
+                    rocke_engine_fmha_extra.cpp rocke_engine_fused_moe_e2e.cpp
+                    rocke_engine_winograd_fwd.cpp rocke_engine_winograd_gemm.cpp)
 target_include_directories(rocke_engine PRIVATE "${ROCKE_INCLUDE_DIR}")
 
 # Link the engine archive whole, plus libm. The engine is C++; its symbols are
