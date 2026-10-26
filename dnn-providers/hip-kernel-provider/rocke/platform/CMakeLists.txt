@@ -568,10 +568,12 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # spec-wrapper parity gate, and the 3D decode split rule and K/V cache policy.
+    # dense block-order decodes, spec-wrapper parity gate, and the 3D decode split
+    # rule and K/V cache policy.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
@@ -656,7 +658,6 @@ if(ROCKE_INSTALL_TESTS)
     # (checked by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
@@ -782,12 +783,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
+        "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
         "tests/library/tests/test_mla_prefill_gfx942_numeric.py"
-        "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
         "tests/library/tests/test_wmma_fmha_decode_numeric.py"
