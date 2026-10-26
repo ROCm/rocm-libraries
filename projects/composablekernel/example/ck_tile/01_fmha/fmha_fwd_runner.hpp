@@ -116,6 +116,12 @@ auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 }
 
 template <>
+auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
+{
+    return get_elimit<FmhaFwdMxFp8>(init_method);
+}
+
+template <>
 auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 {
     double rtol = 1e-1;
@@ -280,7 +286,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     if(selected_kernel_name != nullptr)
         selected_kernel_name->clear();
 
-    constexpr bool is_mx = ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp4>::value;
+    constexpr bool is_mx =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16, FmhaFwdMxFp4>::value;
 
     using QDataType             = typename TypeConfig::QDataType;
     using KDataType             = typename TypeConfig::KDataType;
@@ -324,6 +331,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             return "fp8fp32";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8>)
             return "mxfp8";
+        else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8Bf16>)
+            return "mxfp8bf16";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
             return "mxfp4";
         else

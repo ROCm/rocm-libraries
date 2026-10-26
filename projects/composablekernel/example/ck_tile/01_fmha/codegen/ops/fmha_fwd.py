@@ -39,6 +39,7 @@ DTYPE_BITS = {
     "fp8fp32": 8,
     "bf8": 8,
     "mxfp8": 8,
+    "mxfp8bf16": 8,
     "mxfp4": 4,
 }
 
@@ -1591,8 +1592,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _DT_FP16_BF16 = ("fp16", "bf16")
     _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
     _DT_FP8FP32 = ("fp8fp32",)
-    # MXFP8 inputs with an FP32 O.
-    _DT_MXFP8 = ("mxfp8",)
+    # MXFP8 inputs with an FP32 or BF16 O.
+    _DT_MXFP8 = ("mxfp8", "mxfp8bf16")
 
     # Define scheduled tile configurations once. Codegen inventory and pipeline
     # compatibility share these entries; runtime constraints are attached to copies.
