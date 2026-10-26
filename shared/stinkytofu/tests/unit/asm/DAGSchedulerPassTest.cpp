@@ -783,6 +783,66 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
+// The two LDS tokens are different banks, but both rounds use physical barrier -1.
+// Model the rotating pipeline: read the old bank, make the next bank available, then
+// release/refill the old bank. Barrier placement heuristics must never overlap rounds.
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundsPreserveOrderAcrossLdsTokens) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    auto [readySignal, readyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/32, /*addrReg=*/304, /*ldsToken=*/1);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    auto [releaseSignal, releaseWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* refill = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224,
+                                           /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    runPassWithUnrollGemm();
+
+    const std::vector<StinkyInstruction*> expected{readySignal, readyWait, releaseSignal,
+                                                   releaseWait};
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && isBarrier(*inst)) actual.push_back(inst);
+    }
+    EXPECT_EQ(actual, expected) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, releaseWait), positionOf(*bb, refill)) << scheduleOrder(*bb);
+}
+
+// A region can begin with a wait or end with a signal. Their partners are fixed
+// across region boundaries, so the in-region order must include these unpaired halves.
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierOrderIncludesHalvesAcrossRegionBoundaries) {
+    auto insertFenceBeforeWait = [&](StinkyInstruction* wait) {
+        bb->removeIR(wait);
+        AsmIRBuilder builder(*bb, arch);
+        auto* fence = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch));
+        fence->addSrcReg(StinkyRegister(0));
+        bb->insertIR(bb->end(), wait);
+        return fence;
+    };
+
+    auto [firstSignal, firstWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* firstFence = insertFenceBeforeWait(firstWait);
+    auto [middleSignal, middleWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    auto [lastSignal, lastWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    auto* lastFence = insertFenceBeforeWait(lastWait);
+
+    runPassWithUnrollGemm();
+
+    const std::vector<StinkyInstruction*> expected{firstSignal, firstFence, firstWait, middleSignal,
+                                                   middleWait,  lastSignal, lastFence, lastWait};
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && (isBarrier(*inst) || isWaitCnt(*inst))) actual.push_back(inst);
+    }
+    EXPECT_EQ(actual, expected) << scheduleOrder(*bb);
+}
+
 // A non-overlapping pair stays on one threshold and issues together.
 TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     bb->addSuccessor(bb);

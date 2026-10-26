@@ -63,6 +63,25 @@ static bool isWorkgroupBarrier(const StinkyInstruction& inst) {
     return true;
 }
 
+// LDS tokens describe memory dependencies, not independent hardware barriers. All-wave
+// split barriers share one arrival counter and a completion bit per wave, so a second
+// signal must not overtake the preceding wait. Preserve the workgroup-barrier subsequence
+// of the input, including unpaired halves whose partner is outside this region. Other
+// instructions may still move between a signal and its wait.
+//
+// These are correctness edges, installed before SCC and ready-queue policy constraints.
+// The base register DAG and these edges all point forward in program order, so they
+// cannot introduce a cycle; later heuristic constraints must yield to them.
+static void preserveWorkgroupBarrierOrder(DAGNodeList& dagNodes,
+                                          std::vector<std::unordered_set<unsigned>>& dagGraph) {
+    DAGNode* previous = nullptr;
+    for (DAGNode& node : dagNodes) {
+        if (!isWorkgroupBarrier(*node.inst)) continue;
+        if (previous != nullptr) addEdgeById(previous, &node, dagGraph);
+        previous = &node;
+    }
+}
+
 // SCC is spelled two ways: as a descriptor flag, and as an ordinary operand once
 // legalizeImplicitSpecialRegisters has materialized it. Ask about both, so the answer does
 // not depend on where this pass sits relative to that one.
@@ -343,6 +362,8 @@ static void scheduleRegionWithMovableSideEffects(
     }
 
     if (regionSize == 0) return;
+
+    preserveWorkgroupBarrierOrder(dagNodes, dagGraph);
 
     // Prefix sum over the region in original program order: cumCycles[k] = the
     // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
