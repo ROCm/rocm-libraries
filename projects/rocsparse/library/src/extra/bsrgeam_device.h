@@ -833,10 +833,6 @@ namespace rocsparse
         rocsparse_int lid = tid & (BLOCKSIZE / BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKSIZE / BLOCKDIM);
 
-        // Each block processes a row. `row` is supplied by the kernel wrapper from a
-        // grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers every
-        // block row.
-
         // Row entry marker and value accumulator
         __shared__ int table;
         __shared__ T   data[BLOCKDIM * BLOCKDIM];

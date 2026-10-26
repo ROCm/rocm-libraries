@@ -35,10 +35,6 @@
 
 #include "gebsr2csr_device.h"
 
-// One block per block row, clamped to the device's grid.x limit. With
-// BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to dim3 unclamped
-// narrows it to unsigned int and silently drops most of the matrix. The kernels
-// grid-stride over the block rows, so an undersized grid still covers [0, mb).
 #define launch_gebsr2csr_block_per_row_1_32_kernel(block_size, brow_block_dim, bcol_block_dim) \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                        \
         (rocsparse::                                                                           \

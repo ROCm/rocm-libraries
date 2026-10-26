@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,19 +60,14 @@ namespace rocsparse
         rocsparse_int c = lid & (COL_BLOCK_DIM - 1);
         rocsparse_int r = lid / COL_BLOCK_DIM;
 
-        // Hoisted out of the block-row loop below: r and c do not depend on the block
-        // row, so a thread that falls outside the block has nothing to do for any of
-        // them. This kernel has no barrier, so returning early here is safe.
+        // r and c do not depend on the block row, and this kernel has no barrier, so
+        // threads outside the block can leave before the block-row loop.
         if(r >= row_block_dim || c >= col_block_dim)
         {
             return;
         }
 
-        // Grid-stride over the block rows: grid.x is clamped against maxGridSize[0],
-        // so one grid sweep only covers hipGridDim_x of them. The bound is block
-        // uniform (hipBlockIdx_x, hipGridDim_x and the kernel argument mb), and the
-        // kernel holds no __shared__ state and has no __syncthreads(), so iterations
-        // are independent.
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
         for(int64_t bid64 = hipBlockIdx_x; bid64 < mb; bid64 += hipGridDim_x)
         {
             const rocsparse_int bid = static_cast<rocsparse_int>(bid64);
@@ -136,11 +131,7 @@ namespace rocsparse
             csr_row_ptr[0] = csr_base;
         }
 
-        // Grid-stride over the block rows: grid.x is clamped against maxGridSize[0],
-        // so one grid sweep only covers hipGridDim_x of them. The bound is block
-        // uniform (hipBlockIdx_x, hipGridDim_x and the kernel argument mb), and the
-        // kernel holds no __shared__ state and has no __syncthreads(), so iterations
-        // are independent.
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
         for(int64_t bid64 = hipBlockIdx_x; bid64 < mb; bid64 += hipGridDim_x)
         {
             const rocsparse_int bid = static_cast<rocsparse_int>(bid64);

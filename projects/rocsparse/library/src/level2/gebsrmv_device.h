@@ -51,10 +51,6 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // `row` is the block row this block handles. The kernel wrapper supplies it
-        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
-        // every block row.
-
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
         const rocsparse_int row_end   = bsr_row_ptr[row + 1] - idx_base;
@@ -131,11 +127,8 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
-        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
-        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
-        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
-        // largest representable rocsparse_int.
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
         const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
@@ -212,11 +205,8 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
-        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
-        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
-        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
-        // largest representable rocsparse_int.
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
         const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
@@ -324,11 +314,8 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
-        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
-        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
-        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
-        // largest representable rocsparse_int.
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
         const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
@@ -447,11 +434,8 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
-        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
-        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
-        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
-        // largest representable rocsparse_int.
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
         const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
@@ -573,10 +557,6 @@ namespace rocsparse
 
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
-
-        // `row` is the block row this block handles. The kernel wrapper supplies it
-        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
-        // every block row.
 
         // Offset into x vector
         const rocsparse_int idx = (dir == rocsparse_direction_column)
@@ -808,10 +788,6 @@ namespace rocsparse
 
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
-
-        // `row` is the block row this block handles. The kernel wrapper supplies it
-        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
-        // every block row.
 
         // Offset into x vector
         const rocsparse_int idx = (dir == rocsparse_direction_column)

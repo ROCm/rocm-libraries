@@ -32,10 +32,6 @@
 
 namespace rocsparse
 {
-// One block per block row, clamped to the device's grid.x limit. With
-// BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to dim3 unclamped
-// narrows it to unsigned int and silently drops most of the matrix. The kernels
-// grid-stride over the block rows, so an undersized grid still covers [0, mb).
 #define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)              \
     THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
         (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                 \
@@ -81,12 +77,7 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride over the block rows: grid.x is clamped against
-        // maxGridSize[0], so one grid sweep only covers hipGridDim_x of them. The
-        // bound is block uniform -- it uses only hipBlockIdx_x, hipGridDim_x and the
-        // kernel argument mb, never hipThreadIdx_x and never a value read from
-        // memory. gebsrmvn_general_device holds no __shared__ state and contains no
-        // barrier, so iterations need no fence between them.
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
         for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
         {
             rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(static_cast<rocsparse_int>(row),
