@@ -504,9 +504,9 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     // 5. Resolve attention scale at execute time (runtime pass-by-value support).
-    const float resolvedScale
-        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
-            _params.attnScale, deviceBuffers, numDeviceBuffers)));
+    // Throws BAD_PARAM before the first launch for a scale the kernels mishandle.
+    const float resolvedScale = plan_utils::resolveSupportedAttnScale(
+        _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaBwdPlan::execute");
 
     // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable.
