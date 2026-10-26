@@ -46,7 +46,6 @@ import os
 import sys
 import subprocess
 import re
-import struct
 
 try:
     import orjson as json
@@ -261,43 +260,7 @@ def writeJson(filename, data):
         json_object = json.dumps(data, option=json.OPT_INDENT_2).decode("utf-8") if 'orjson' in sys.modules else json.dumps(data, indent=2)
         f.write(json_object)
 
-def _packMeshTables(d):
-    """Replace MeshBased dict-per-entry tables with a flat binary blob.
-
-    Walks a serialized library state dict in-place. For every Matching node
-    whose distance is "MeshBased", replaces the ``table`` list of dicts with:
-
-    - ``table_bin``: ``bytes`` — packed little-endian int32 records, 5 per
-      entry (key[0..3], solutionIndex).
-    - ``table_count``: ``int`` — number of entries.
-
-    The original ``table`` key is removed. Other distance types (GridBased,
-    Equality, etc.) are left unchanged.
-    """
-    if not isinstance(d, dict):
-        return
-    if d.get("type") == "Matching" and d.get("distance") == "MeshBased":
-        table = d.get("table")
-        if isinstance(table, list):
-            n = len(table)
-            buf = bytearray(n * 20)
-            for i, entry in enumerate(table):
-                key = entry["key"]
-                idx = entry["index"]
-                struct.pack_into("<5i", buf, i * 20,
-                                 int(key[0]), int(key[1]), int(key[2]), int(key[3]),
-                                 int(idx))
-            d["table_bin"] = bytes(buf)
-            d["table_count"] = n
-            del d["table"]
-        return
-    for val in d.values():
-        if isinstance(val, dict):
-            _packMeshTables(val)
-        elif isinstance(val, list):
-            for item in val:
-                if isinstance(item, dict):
-                    _packMeshTables(item)
+_packMeshTables = BinaryLibraryIO._packMeshTables
 
 
 def writeMsgPack(filename, data):
