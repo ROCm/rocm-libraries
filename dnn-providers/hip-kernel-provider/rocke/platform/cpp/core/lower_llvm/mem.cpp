@@ -1161,6 +1161,46 @@ static void op_tile_buffer_load_f16_d16(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, soffset));
 }
 
+/* Python _op_tile_buffer_load: a dtype-generic scalar buffer load. 2-byte
+ * types use the i16 intrinsic, 4-byte types the i32 one. */
+static void op_tile_buffer_load(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const char* elem = ll_attr_str(op, "elem_type", "");
+    const char* llvm_elem;
+    const char* tmp;
+    bool narrow;
+    if(strcmp(elem, "f16") == 0)
+        llvm_elem = "half";
+    else if(strcmp(elem, "bf16") == 0)
+        llvm_elem = "bfloat";
+    else if(strcmp(elem, "f32") == 0)
+        llvm_elem = "float";
+    else if(strcmp(elem, "i32") == 0)
+        llvm_elem = "i32";
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "buffer_load: unsupported elem_type");
+        return;
+    }
+    narrow = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
+    rocke_ll_need(L, narrow ? "raw.ptr.buffer.load.i16" : "raw.ptr.buffer.load.i32");
+    tmp = rocke_ll_fresh(L, narrow ? "blu16" : "bli32");
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.raw.ptr.buffer.load.%s("
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   tmp,
+                   narrow ? "i16" : "i32",
+                   narrow ? "i16" : "i32",
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
+    rocke_ll_emitf(
+        L, "  %s = bitcast %s %s to %s", ll_res(op), narrow ? "i16" : "i32", tmp, llvm_elem);
+}
+
 static void op_tile_buffer_store_vN_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1991,6 +2031,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, op_tile_buffer_load_f16_d16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD, op_tile_buffer_load);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_BF16, op_tile_buffer_load_bf16);

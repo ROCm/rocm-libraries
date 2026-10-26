@@ -683,6 +683,39 @@ static void build_buffer_store_cachepolicy(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* The dtype-generic scalar buffer load for every element type (the 16-bit
+ * ones through the i16 intrinsic, the 32-bit ones through i32). */
+static void build_buffer_load_scalar(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    memset(&wo, 0, sizeof(wo));
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i32(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_i32(), "global"), &wo);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* rs = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_value_t* rd = rocke_b_buffer_rsrc(b, dst, nbytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, 4));
+    rocke_value_t* h = rocke_b_buffer_load(b, rs, off, c0, rocke_f16());
+    rocke_value_t* g = rocke_b_buffer_load(b, rs, off, c0, rocke_bf16());
+    rocke_value_t* f = rocke_b_buffer_load(b, rs, off, c0, rocke_f32());
+    rocke_value_t* i = rocke_b_buffer_load(b, rs, off, c0, rocke_i32());
+    rocke_b_buffer_store_f16(b, rd, off, c0, h);
+    rocke_b_buffer_store_bf16(b, rd, off, c0, g);
+    rocke_b_buffer_store_f32(b, rd, off, c0, f);
+    rocke_b_buffer_store_f32(b, rd, off, c0, rocke_b_bitcast(b, i, rocke_f32()));
+    rocke_b_ret(b);
+}
+
 static const config_t FEATURE_CONFIGS[] = {
     {build_data_prefetch, "gfx1250"},
     {build_cluster, "gfx1250"},
@@ -690,6 +723,7 @@ static const config_t FEATURE_CONFIGS[] = {
     {build_multicast, "gfx1250"},
     {build_tdm, "gfx1250"},
     {build_buffer_store_cachepolicy, "gfx1250"},
+    {build_buffer_load_scalar, "gfx1250"},
 };
 static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
 
