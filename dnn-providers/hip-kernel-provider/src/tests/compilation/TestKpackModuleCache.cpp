@@ -373,7 +373,7 @@ TEST(TestKpackModuleCacheLoad, ADecodeFailureEvictsTheHandleButAMissingEntryOrAr
     ASSERT_FALSE(probe.expired()) << "a lease is held, so the archive should be retained";
 
     // Intact in both: it lacks what was asked for. Not evicting rests on memoized discovery;
-    // see KpackModuleCache::load.
+    // see readVerifiedKpackCodeObject.
     const auto absentArch = loadForAnAbsentArch(archive);
     ASSERT_TRUE(absentArch.has_value());
     ASSERT_EQ(absentArch->stage(), KpackLoadStage::ARCH_LOOKUP) << absentArch->what();
