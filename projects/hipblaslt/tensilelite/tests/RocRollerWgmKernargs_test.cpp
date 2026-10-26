@@ -201,8 +201,23 @@ TEST(RocRollerWgmKernargs, KernargsFollowTheHoistedFormula)
     }
 }
 
-TEST(RocRollerWgmKernargs, RejectsNonPowerOfTwoMacroTile)
+TEST(RocRollerWgmKernargs, NumTilesAreInt64CeilDiv)
 {
-    EXPECT_THROW(evaluateRocRollerWgmKernargs(128, 128, 96, 128), std::runtime_error);
+    // Power-of-two tiles agree with the shift the eleven roles already use.
+    auto pow2 = evaluateRocRollerWgmKernargs(4096, 4096, 128, 256, 2);
+    EXPECT_EQ(pow2.numTilesM, 32);
+    EXPECT_EQ(pow2.numTilesN, 16);
+    EXPECT_EQ(fields(pow2), (std::array<int64_t, 11>{16, 0, 0, 2, 1073741823, 1, 0, 4, 0, 9, 16}));
+
+    // 192 is not a power of two. The eleven roles are still computed from the
+    // same ceil-div, and the int64 fields keep it without the int32 truncation.
+    auto wide = evaluateRocRollerWgmKernargs(193, 384, 192, 192);
+    EXPECT_EQ(wide.numTilesM, 2);
+    EXPECT_EQ(wide.numTilesN, 2);
+}
+
+TEST(RocRollerWgmKernargs, RejectsZeroMacroTile)
+{
     EXPECT_THROW(evaluateRocRollerWgmKernargs(128, 128, 128, 0), std::runtime_error);
+    EXPECT_THROW(evaluateRocRollerWgmKernargs(128, 128, 0, 128), std::runtime_error);
 }
