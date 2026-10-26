@@ -6,7 +6,7 @@
 
 Architecture: gfx950
 GemmType: F8F8S_NT
-Source: rocm-libraries 5c58d88c12, 2026-10-26
+Source: rocm-libraries 501708505c, 2026-10-26
 MatrixInstructions:
   - [16, 16, 128, 1, 1, 1, 1, 4, 1]  # MT64x16  DepthU 128,256,512,1024
   - [16, 16, 128, 1, 1, 1, 2, 4, 1]  # MT64x32  DepthU 128,256,512
