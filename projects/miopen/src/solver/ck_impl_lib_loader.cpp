@@ -12,6 +12,7 @@
 
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <type_traits>
 
@@ -552,14 +553,19 @@ ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
                                                    const conv::ProblemDescription& problem,
                                                    const std::string& kernel_id) const
 {
-    const bool want_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
-    auto sol             = GetSolution(solver, ctx, problem, kernel_id, want_tf32);
-    // The kernel_id may have been chosen via the FP32 fallback (no TF32 instance for this problem),
-    // in which case the TF32 build fails; fall back to FP32 so a reused config is never worse than
-    // the search path -- mirroring FillValidKernelsWithTf32Fallback at the solution level.
-    if(want_tf32 && !sol.Succeeded())
-        sol = GetSolution(solver, ctx, problem, kernel_id, false);
-    return sol;
+    const auto dtype = problem.GetInDataType();
+    bool use_tf32    = (dtype == miopenFloat) && problem.UseTF32();
+    // A perf-db-restored config carries only kernel_id; if it was chosen via the FP32 fallback (no
+    // TF32 instance for this problem) a TF32 build would fail and log a spurious error. Decide
+    // before building: use TF32 only if kernel_id is in the TF32 valid set -- the same predicate
+    // the config build used in FillValidKernelsWithTf32Fallback.
+    if(use_tf32)
+    {
+        const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
+        use_tf32 =
+            std::find(tf32_kernels.begin(), tf32_kernels.end(), kernel_id) != tf32_kernels.end();
+    }
+    return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }
 
 std::vector<std::string> CkImplLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const

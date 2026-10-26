@@ -30,6 +30,7 @@ endif()
 if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable tests that currently hang or crash under ASAN with CK kernels.
     list(APPEND SKIP_TESTS
+        group_conv2d_fwd_tf32_reuse_test.cpp
         group_conv3d_bwd.cpp
         group_conv3d_fwd.cpp
         group_conv3d_wrw.cpp

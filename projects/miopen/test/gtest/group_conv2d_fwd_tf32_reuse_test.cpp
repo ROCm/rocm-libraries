@@ -35,6 +35,7 @@
 #include "group_conv.hpp"
 
 #include <miopen/conv/solvers.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/tensor.hpp>
 
 #include <algorithm>
@@ -205,6 +206,11 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
         ASSERT_EQ(restored.kernel_id, cfg.kernel_id);
         ASSERT_FALSE(restored.UseTF32())
             << "test precondition: a reloaded perf-db config must have dropped use_tf32";
+
+        // Mirror the production restore path (find_solution.hpp): a reloaded config is validated
+        // before use, so the restored (use_tf32-dropped) config must pass this gate.
+        ASSERT_TRUE(solv.IsValidPerformanceConfig(ctx, problem_tf32, restored))
+            << "restored perf-db config rejected by IsValidPerformanceConfig";
 
         tensor<float> out_tf32 = result_src;
         run(problem_tf32, restored, out_tf32);
@@ -394,3 +400,49 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(1.0f),
                                           testing::Values(0.0f),
                                           testing::Values(Tf32ReuseLayout<3u>())));
+
+// Directly exercises the FP32-availability fallback in CkImplLibLoader::GetSolutionTf32Aware: a
+// kernel_id valid under FP32 but not TF32 (as chosen by FillValidKernelsWithTf32Fallback) must
+// build as FP32, not be forced into a missing TF32 instance. Skips on builds with no such kernel.
+TEST(GPU_GroupConv2DFwdTf32ReuseFallback_FP32, Fp32OnlyIdBuildsAsFp32)
+{
+    using miopen::solver::CkImplLibLoader;
+    using miopen::solver::CKSolverType;
+
+    auto& handle = get_handle();
+    GroupConvTestConfig<2u> cfg{8, 256, 384, 384, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}};
+    const auto in  = miopen::TensorDescriptor(miopenFloat, miopenTensorNHWC, cfg.GetInput());
+    const auto wei = miopen::TensorDescriptor(miopenFloat, miopenTensorNHWC, cfg.GetWeights());
+    auto conv      = cfg.GetConv();
+    conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathDefault);
+    const auto out = conv.GetForwardOutputTensor(in, wei, miopenFloat);
+    miopen::conv::ProblemDescription problem{in, wei, out, conv, miopen::conv::Direction::Forward};
+    auto ctx = miopen::ExecutionContext{&handle};
+    problem.SetupComputeType(ctx);
+    if(!problem.UseTF32())
+        GTEST_SKIP() << "TF32 compute is not enabled on this device";
+
+    const auto& loader = CkImplLibLoader::Get(handle.GetDeviceName());
+    ASSERT_TRUE(loader.IsLoaded());
+    const auto tf32 = loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenFloat, true);
+    const auto fp32 =
+        loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenFloat, false);
+    std::string fp32_only;
+    for(const auto& k : fp32)
+        if(std::find(tf32.begin(), tf32.end(), k) == tf32.end())
+        {
+            fp32_only = k;
+            break;
+        }
+    if(fp32_only.empty())
+        GTEST_SKIP() << "no FP32-only grouped-fwd kernel on this build; fallback not reproducible";
+
+    // Precondition: forcing TF32 on this id fails to build (it has no TF32 instance).
+    ASSERT_FALSE(
+        loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, fp32_only, true).Succeeded())
+        << "expected TF32 build of an FP32-only id to fail";
+    // The fallback-aware path must recover and build it as FP32.
+    EXPECT_TRUE(
+        loader.GetSolutionTf32Aware(CKSolverType::GrpConvFwd, ctx, problem, fp32_only).Succeeded())
+        << "GetSolutionTf32Aware did not fall back to FP32 for an FP32-only id";
+}

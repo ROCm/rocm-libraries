@@ -111,9 +111,9 @@ public:
                 bool use_tf32) const;
 
     /// Build the solution when only kernel_id is trustworthy (e.g. a perf-db-restored config, whose
-    /// use_tf32 was dropped in serialization). Recomputes TF32 from the problem; if the kernel was
-    /// chosen via the FP32 fallback (no TF32 instance) the TF32 build fails, so it falls back to
-    /// FP32 -- the same tf32->fp32 availability fallback the config build used.
+    /// use_tf32 was dropped in serialization). Recomputes TF32 from the problem, but uses it only
+    /// if kernel_id is in the TF32 valid set, so a kernel chosen via the FP32 fallback (no TF32
+    /// instance) builds as FP32 -- the same tf32->fp32 availability fallback the config build used.
     MIOPEN_INTERNALS_EXPORT ConvSolution
     GetSolutionTf32Aware(CKSolverType solver,
                          const ExecutionContext& ctx,
