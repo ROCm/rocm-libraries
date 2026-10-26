@@ -23,51 +23,32 @@
  * ************************************************************************ */
 
 //
-// Regression tests for the one-block-per-block-row compute grids in gebsrmv,
-// gebsr2csr and bsrgeam (AISPARSE-705).
+// Grid-stride tests for the block-row grids of gebsrmv, gebsr2csr and bsrgeam.
 //
-// FOCUS: twenty launches across those three routines sized grid.x at one block
-// (or one wavefront) per block row straight from a rocsparse_int block-row
-// count, with no clamp against handle->properties.maxGridSize[0] and no
-// grid-stride loop in the kernel behind it. With BUILD_ROCSPARSE_ILP64=ON
-// rocsparse_int is int64_t, so dim3 narrows the count to unsigned int and the
-// kernels silently leave most of the matrix unprocessed. The fix clamps every
-// grid and grid-strides the block rows.
+// These launches clamp grid.x with rocsparse::get_grid_size_x, to
+// min(maxGridSize[0], (2^32 - 1) / blockDim.x) blocks, and grid-stride over the
+// block rows.
 //
-// HOW THIS IS TESTED CHEAPLY: reproducing the narrowing for real needs more
-// than 2^32 block rows, which is far more memory than any GPU here has -- and
-// it needs an ILP64 build, which nothing in CI produces. Instead these tests
-// shrink handle->properties.maxGridSize[0] -- the very limit the new code
-// clamps against -- to a handful of blocks and drive a SMALL matrix through the
-// public entry points. That reproduces the defect's actual mechanism, a launch
-// grid smaller than the work, on a few kilobytes: with MB = 40 block rows and
-// the limit set to 3, block rows 3..39 are reached ONLY by the new grid-stride
-// loops. This is the AISPARSE-702 idiom.
+// The forced-limit cases shrink handle->properties.maxGridSize[0] with
+// ScopedMaxGridSizeX to 3 blocks and to 1 block and run MB = 200 block rows, so
+// most block rows are reached only by the grid-stride loops. They pass on a
+// launcher that ignores maxGridSize[0], so they check the loops, not the clamp.
 //
-// WHAT THESE CASES DO AND DO NOT PROVE. They are load-bearing for the
-// grid-stride loops, which are the half of the fix that can silently corrupt a
-// result at any matrix size. They cannot fail on the clamp alone: removing only
-// the clamp makes the grid larger (40 blocks instead of 3), and a larger grid
-// is still covered correctly by the stride loop. The clamp guards the dim3
-// narrowing, whose only observable effect needs an ILP64 build and more than
-// 2^32 block rows, so no affordable test can reach it. Both halves of that
-// statement were checked by breaking the source and rebuilding with
-// CCACHE_DISABLE=1.
+// rocsparse_gebsrmv sends square blocks to bsrmv and rocsparse_gebsr2csr sends
+// them to bsr2csr, so every gebsrmv and gebsr2csr shape here is non-square.
 //
-// There is deliberately NO device-memory guard and no size-based skip: the
-// footprint is a few hundred kilobytes, so every case below runs on every GPU,
-// including the 15 GB gfx1201.
+// TARGET: rocsparse-unit-test-device.
 //
 #include "unit_test_utils.hpp"
 
+// ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit
+// get_grid_size_x clamps grid.x against.
+#include "unit_test_grid_clamp.hpp"
+
 #include "rocsparse.h"
 
-// Internal handle definition. These tests need the complete _rocsparse_handle
-// type to shrink handle->properties.maxGridSize[0]; that field is what the
-// hardened launch paths clamp their grids against, and shrinking it is the only
-// way to put the grid below the work without an enormous matrix.
-#include "rocsparse_handle.hpp"
-
+#include <cstdint>
+#include <string>
 #include <vector>
 
 using namespace rocsparse_ut;
@@ -76,13 +57,11 @@ namespace
 {
     constexpr rocsparse_index_base BASE = rocsparse_index_base_zero;
 
-    // Number of block rows. Small enough to stay in a few hundred kilobytes,
-    // far more than the clamped grid below so the grid-stride loops do most of
-    // the work.
-    constexpr rocsparse_int MB = 40;
+    // Number of block rows in the forced-limit cases.
+    constexpr rocsparse_int MB = 200;
 
-    // The shrunk grid.x limit. 3 blocks for 40 block rows means ~92% of the
-    // block rows are reached only by a grid-stride loop.
+    // The shrunk grid.x limit. At MB = 200 every grid under test is wider: the
+    // 1xn-4xn kernels pack 32 block rows per block and still need 7 blocks.
     constexpr int CLAMPED_GRID_X = 3;
 
     // y entries keep this value where the routine must not write, and the beta
@@ -107,34 +86,6 @@ namespace
         MatDescr(const MatDescr&) = delete;
 
         MatDescr& operator=(const MatDescr&) = delete;
-    };
-
-    // Temporarily shrink the grid.x limit the hardened launch paths clamp
-    // against, and restore it on scope exit so a failed assertion cannot leak
-    // the override into another assertion in the same test.
-    //
-    // Duplicated from AISPARSE-699/700's clients/unittests/unit_test_grid_clamp.hpp
-    // rather than included from it: that header is on a sibling branch that has
-    // not merged, and a test that does not compile standalone is worse than
-    // fifteen duplicated lines. Collapse to an include once it lands.
-    struct ScopedMaxGridSizeX
-    {
-        rocsparse_handle handle;
-        int              saved;
-
-        ScopedMaxGridSizeX(rocsparse_handle h, int limit)
-            : handle(h)
-            , saved(h->properties.maxGridSize[0])
-        {
-            handle->properties.maxGridSize[0] = limit;
-        }
-        ~ScopedMaxGridSizeX()
-        {
-            handle->properties.maxGridSize[0] = saved;
-        }
-        ScopedMaxGridSizeX(const ScopedMaxGridSizeX&) = delete;
-
-        ScopedMaxGridSizeX& operator=(const ScopedMaxGridSizeX&) = delete;
     };
 
     // A block-diagonal GEBSR matrix: block row i holds a single
@@ -215,13 +166,13 @@ namespace
         }
         return got.size() == want.size() ? -1 : 0;
     }
+
 }
 
 // ---------------------------------------------------------------------------
 // gebsrmv: 16 grids across the eight rocsparse_gebsrmv_template_row_block_dim_*
 // files, behind seven device functions (general, 1xn, 2xn, 3xn, 4xn, mxn,
-// mxn_16). The (row_block_dim, col_block_dim) pairs below are chosen to reach
-// every one of the seven.
+// mxn_16).
 // ---------------------------------------------------------------------------
 class GebsrmvGridClamp : public HandleTest
 {
@@ -291,31 +242,49 @@ protected:
                            << " dir=" << static_cast<int>(dir) << ": first wrong y entry " << bad
                            << " (block row " << (bad / rbd) << " of " << m.mb << ") got "
                            << got[bad] << " want " << want[bad] << ". grid.x was clamped to "
-                           << grid_x
-                           << ", so block rows past it are covered only by the kernel's "
-                              "grid-stride loop.";
+                           << grid_x;
     }
 
-    // One pair per device function reached by rocsparse_gebsrmv's dispatch:
-    //   (1, 2)   -> gebsrmvn_1xn_device      (row_block_dim_1.cpp)
-    //   (2, 2)   -> gebsrmvn_2xn_device      (row_block_dim_2.cpp)
-    //   (3, 3)   -> gebsrmvn_3xn_device      (row_block_dim_3.cpp)
-    //   (4, 4)   -> gebsrmvn_4xn_device      (row_block_dim_4.cpp)
-    //   (5, 5)   -> gebsrmvn_mxn_device      (row_block_dim_5_8.cpp)
-    //   (5, 9)   -> gebsrmvn_mxn_16_device   (row_block_dim_5_8.cpp)
-    //   (10, 10) -> gebsrmvn_mxn_16_device   (row_block_dim_9_12.cpp)
-    //   (14, 14) -> gebsrmvn_mxn_16_device   (row_block_dim_13_16.cpp)
-    //   (5, 12)  -> gebsrmvn_general_device  (row_block_dim_5_8.cpp)
-    //   (20, 20) -> gebsrmvn_general_device  (row_block_dim_17_inf.cpp)
+    // One shape per grid. With one block per block row, blocks_per_row is 1, so
+    // the 1xn-4xn files pick WFSIZE 4.
+    //   (1, 2)   gebsrmvn_1xn_kernel<128, 2, 4>      row_block_dim_1.cpp
+    //   (1, 20)  gebsrmvn_general_kernel<32, 32>     row_block_dim_1.cpp
+    //   (2, 3)   gebsrmvn_2xn_kernel<128, 3, 4>      row_block_dim_2.cpp
+    //   (2, 20)  gebsrmvn_general_kernel<32, 32>     row_block_dim_2.cpp
+    //   (3, 2)   gebsrmvn_3xn_kernel<128, 2, 4>      row_block_dim_3.cpp
+    //   (3, 20)  gebsrmvn_general_kernel<96, 32>     row_block_dim_3.cpp
+    //   (4, 3)   gebsrmvn_4xn_kernel<128, 3, 4>      row_block_dim_4.cpp
+    //   (4, 20)  gebsrmvn_general_kernel<128, 32>    row_block_dim_4.cpp
+    //   (5, 4)   gebsrmvn_mxn_kernel<60, 5, 4>       row_block_dim_5_8.cpp
+    //   (5, 9)   gebsrmvn_mxn_16_kernel<90, 5, 9>    row_block_dim_5_8.cpp
+    //   (5, 12)  gebsrmvn_general_kernel<128, 16>    row_block_dim_5_8.cpp
+    //   (10, 4)  gebsrmvn_mxn_16_kernel<40, 10, 4>   row_block_dim_9_12.cpp
+    //   (10, 12) gebsrmvn_general_kernel<256, 16>    row_block_dim_9_12.cpp
+    //   (14, 4)  gebsrmvn_mxn_16_kernel<56, 14, 4>   row_block_dim_13_16.cpp
+    //   (14, 20) gebsrmvn_general_kernel<512, 32>    row_block_dim_13_16.cpp
+    //   (20, 5)  gebsrmvn_general_kernel<256, 8>     row_block_dim_17_inf.cpp
     static std::vector<std::pair<rocsparse_int, rocsparse_int>> shapes()
     {
-        return {
-            {1, 2}, {2, 2}, {3, 3}, {4, 4}, {5, 5}, {5, 9}, {10, 10}, {14, 14}, {5, 12}, {20, 20}};
+        return {{1, 2},
+                {1, 20},
+                {2, 3},
+                {2, 20},
+                {3, 2},
+                {3, 20},
+                {4, 3},
+                {4, 20},
+                {5, 4},
+                {5, 9},
+                {5, 12},
+                {10, 4},
+                {10, 12},
+                {14, 4},
+                {14, 20},
+                {20, 5}};
     }
 };
 
-// grid.x clamped well below the block-row count: block rows 3..39 are reached
-// only by the grid-stride loop.
+// grid.x clamped well below the block-row count.
 TEST_F(GebsrmvGridClamp, grid_smaller_than_block_rows)
 {
     for(const auto& s : shapes())
@@ -325,11 +294,9 @@ TEST_F(GebsrmvGridClamp, grid_smaller_than_block_rows)
     }
 }
 
-// Hardest case for the loop: grid.x == 1, so a single block sweeps all 40 block
-// rows sequentially. For the mxn and mxn_16 kernels that also puts 40
-// consecutive iterations through the shared sdata reduction, so a missing
-// __syncthreads() between iterations -- one iteration's trailing reads of sdata
-// racing the next one's first store -- shows up here as a wrong y entry.
+// grid.x == 1, so a single block sweeps every block row. For the mxn and mxn_16
+// kernels that also runs consecutive rows through the same shared sdata
+// reduction, which may expose a missing barrier between iterations.
 TEST_F(GebsrmvGridClamp, single_block_sweeps_every_block_row)
 {
     for(const auto& s : shapes())
@@ -419,22 +386,25 @@ protected:
     }
 };
 
-// (2, 2) reaches gebsr2csr_block_per_row_1_32_kernel, (2, 64) reaches
-// gebsr2csr_block_per_row_33_128_kernel; both grids are sized from mb.
+// (2, 4) and (4, 2) reach gebsr2csr_block_per_row_1_32_kernel<256, 2, 4> and
+// <256, 4, 2>; (2, 64) reaches gebsr2csr_block_per_row_33_128_kernel.
 TEST_F(Gebsr2csrGridClamp, grid_smaller_than_block_rows)
 {
     for(int grid_x : {CLAMPED_GRID_X, 1})
     {
-        check(2, 2, rocsparse_direction_row, grid_x);
-        check(2, 2, rocsparse_direction_column, grid_x);
-        check(2, 64, rocsparse_direction_row, grid_x);
-        check(2, 64, rocsparse_direction_column, grid_x);
+        for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            check(2, 4, dir, grid_x);
+            check(4, 2, dir, grid_x);
+            check(2, 64, dir, grid_x);
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
-// bsrgeam: 2 grids, both behind bsrgeam_block_per_row_multipass_device2, which
-// rocsparse_bsrgeam dispatches to for 8 < block_dim <= 32.
+// bsrgeam: 4 grids. block_dim 4 and 5-8 launch bsrgeam_wf_per_row_multipass_kernel
+// <64, 4> and <64, 8>; 9-16 and 17-32 launch
+// bsrgeam_block_per_row_multipass_kernel2 <256, 16> and <256, 32>.
 // ---------------------------------------------------------------------------
 class BsrgeamGridClamp : public HandleTest
 {
@@ -462,8 +432,8 @@ protected:
 
         MatDescr descr_a, descr_b, descr_c;
 
-        // The structure pass is a different set of kernels, outside this
-        // change; run it at the real grid limit.
+        // The structure pass is a different set of kernels; run it at the real
+        // grid limit.
         rocsparse_int nnzb_c = 0;
         ASSERT_EQ(rocsparse_bsrgeam_nnzb(handle,
                                          dir,
@@ -520,9 +490,11 @@ protected:
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         }
 
-        std::vector<float> want(static_cast<size_t>(nnzb_c) * block_dim * block_dim);
+        std::vector<rocsparse_int> want_col(MB);
+        std::vector<float>         want(static_cast<size_t>(nnzb_c) * block_dim * block_dim);
         for(rocsparse_int i = 0; i < MB; ++i)
         {
+            want_col[i] = i + BASE;
             for(rocsparse_int r = 0; r < block_dim; ++r)
             {
                 for(rocsparse_int c = 0; c < block_dim; ++c)
@@ -533,29 +505,35 @@ protected:
             }
         }
 
+        const std::vector<rocsparse_int> got_col = to_host(d_col_ind_c.ptr, d_col_ind_c.n);
+        const int64_t                    bad_col = first_mismatch(got_col, want_col);
+        EXPECT_EQ(bad_col, -1) << "block_dim=" << block_dim << " dir=" << static_cast<int>(dir)
+                               << ": first wrong bsr_col_ind_C entry " << bad_col << " of " << MB
+                               << ". grid.x was clamped to " << grid_x;
+
         const std::vector<float> got = to_host(d_val_c.ptr, d_val_c.n);
         const int64_t            bad = first_mismatch(got, want);
         EXPECT_EQ(bad, -1) << "block_dim=" << block_dim << " dir=" << static_cast<int>(dir)
                            << ": first wrong bsr_val_C entry " << bad << " (block row "
                            << (bad / (block_dim * block_dim)) << " of " << MB << ") got "
                            << got[bad] << " want " << want[bad] << ". grid.x was clamped to "
-                           << grid_x
-                           << ", so block rows past it are covered only by the kernel's "
-                              "grid-stride loop.";
+                           << grid_x;
     }
 };
 
-// block_dim 16 reaches the <= 16 launch, block_dim 32 the <= 32 one; those are
-// the two grids AISPARSE-705 covers in this file. grid.x == 1 additionally runs
-// 40 consecutive multipass sweeps through the same shared table/data arrays,
-// which is what the __syncthreads() added after each iteration guards.
+// block_dim 4 and 6 reach the wf_per_row kernels, 16 and 32 the block_per_row
+// ones. grid.x == 1 also runs consecutive rows through the same shared arrays,
+// which may expose a missing barrier between iterations.
 TEST_F(BsrgeamGridClamp, grid_smaller_than_block_rows)
 {
     for(int grid_x : {CLAMPED_GRID_X, 1})
     {
-        check(16, rocsparse_direction_row, grid_x);
-        check(16, rocsparse_direction_column, grid_x);
-        check(32, rocsparse_direction_row, grid_x);
-        check(32, rocsparse_direction_column, grid_x);
+        for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            check(4, dir, grid_x);
+            check(6, dir, grid_x);
+            check(16, dir, grid_x);
+            check(32, dir, grid_x);
+        }
     }
 }
