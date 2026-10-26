@@ -29,7 +29,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile.KernelWriterAssembly import (
+from tensilelite.KernelWriterAssembly import (
     REGISTER_BUDGET_OVERFLOW_CODES,
     KernelWriterAssembly,
 )
@@ -467,7 +467,7 @@ class TestRejectionReporting:
         mkb.setGprs(totalVgprs=288, totalAgprs=0, totalSgprs=_MAX_SGPR + 2)
 
         warnings = []
-        import Tensile.KernelWriterAssembly as kwa_module
+        import tensilelite.KernelWriterAssembly as kwa_module
         original = kwa_module.printWarning
         kwa_module.printWarning = warnings.append
         try:
