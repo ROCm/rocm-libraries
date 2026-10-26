@@ -204,8 +204,9 @@ valid answer.
   owner's performance or accuracy data? If not, record "no ground truth supplied".
 - **Knobs:** after enumerating the variant space below, ask whether to exclude or
   prioritise knobs or narrow cells, using `--plan-space`'s exact instance counts; above
-  `reduction.aot_budget_per_arch` the user narrows them before any pack. Estimate compile
-  time as instances × seconds per kernel compile, measured on the build machine.
+  `reduction.aot_budget_per_arch` the user narrows them, or approves the count in
+  `$EVIDENCE`, before any pack. Estimate compile time as instances × seconds per kernel
+  compile, measured on the build machine.
 
 **Owner data.** Set `OWNER_DATA` to the owner's file (CSV with a header, or a JSON list
 of rows) and convert each row into a graph of a separate `ground_truth` corpus. Pass one
@@ -989,6 +990,16 @@ among variants sharing its other knobs, which divide every shape a larger tile d
    selection being shipped. A `space: full` selection ships with the manifest's flip, per
    the README's *Updating the captured catalog*.
 
+**Catalog size.** A cold benchmarked plan build prepares every knob-filtered candidate,
+so its cost grows with the candidate count. Keep the catalog small enough to stay
+buildable and searchable; when it grows too large, reduce it with this stage. For a large
+catalog, also ship or pre-seed a winner cache (`HIPDNN_CACHE_DIR`), which serves only
+hardware matching its recorded device key
+([Environment Configuration](../../../../docs/Environment.md#hipdnn_force_benchmarking)).
+Nothing in CI or the build checks `reduction.aot_budget_per_arch`; only the stage 7
+`--strict` dry run does. It counts kernels per pack per arch, but build cost follows the
+per-graph candidate count N, so a catalog under budget can still have a large N.
+
 **Explicitly untuned engine.** To show what the shipped selection leaves on the table,
 measure the cold heuristic against `dnn-benchmark --autotune` (fresh `--cache-dir` per
 phase, the cohort rules in [workloads.md](workloads.md)) and report the gap and the
@@ -1054,11 +1065,21 @@ this output with `--strict`: exit 1 means a row is outside the margin, missing, 
 in any timing round, failing correctness or without a passing correctness verdict, so fix
 it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
 nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
-further or justify the count in `$EVIDENCE`:
+further or record the user's approval of the count in `$EVIDENCE`:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" --dry-run --strict
 ```
+
+**Large catalogs: plan-build measurement.** Before shipping a large catalog (stage 6's
+*Catalog size*), measure the cold plan-build time on the installed engine from stage 5's
+baseline device proof, with `HIPDNN_FORCE_BENCHMARKING=1` and a fresh `HIPDNN_CACHE_DIR`.
+Judge "large" by the per-graph candidate count N in the engine log line
+`will benchmark N candidate(s) (M before knob filtering)` and by the measured time, not
+by the per-arch kernel total. That build loads at most N kpack modules (fewer where
+candidates share a code object), and they stay resident for the life of the process.
+Record the numbers on the Jira ticket, never in the repo. If the build is too slow or N
+is too large, reduce the selection (stage 6) and repeat.
 
 Harvest final phase results and available engine logs into the per-input outcome ledger,
 then join within each corpus/phase.
