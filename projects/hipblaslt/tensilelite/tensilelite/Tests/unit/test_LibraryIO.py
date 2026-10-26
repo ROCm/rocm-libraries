@@ -564,6 +564,84 @@ def test_companion_csv_xz_path_not_found(tmp_path: Any) -> None:
     assert LibraryIO._companionCsvXzPath(str(yaml_path)) is None
 
 
+def _make_meshbased_dict(table: Any = None) -> dict[str, Any]:
+    return {
+        "MinimumRequiredVersion": "0.0.0",
+        "ArchitectureName": "gfx950",
+        "LibraryType": "MeshBased",
+        "IndexOrder": [2, 3, 0, 1],
+        "ExactLogic": table,
+        "ProblemType": {"OperationType": "GEMM"},
+        "Solutions": [{"SolutionIndex": 0}],
+    }
+
+
+def test_parse_meshbased_loads_companion_csv(tmp_path: Any) -> None:
+    """MeshBased with empty table loads ExactLogic from companion .csv.xz."""
+    import csv as _csv
+    import lzma
+
+    yaml_path = tmp_path / "mesh.yaml"
+    yaml_path.write_text("")
+    csv_path = tmp_path / "mesh.yaml.csv.xz"
+    with lzma.open(csv_path, "wt", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["M", "N", "batch", "K", "solutionIdx"])
+        writer.writerow([128, 128, 1, 64, 0])
+
+    data = _make_meshbased_dict(table=None)
+    LibraryIO.prepareLibraryLogicDict(data)
+    assert data["Library"]["distance"] == "MeshBased"
+    assert not data["Library"]["table"]
+
+    LibraryIO._companionCsvXzPath.__module__  # ensure it's accessible
+    with patch.object(LibraryIO, "_companionCsvXzPath", return_value=str(csv_path)):
+        # Only test the companion CSV block — mock everything after line 784
+        with pytest.raises((KeyError, SystemExit, Exception)):
+            LibraryIO.parseLibraryLogicData(
+                data, str(yaml_path), None, False, False, False, {}, False,
+            )
+    assert data["Library"]["table"] == [[[128, 128, 1, 64], [0, 0.0]]]
+    assert data["ExactLogic"] == data["Library"]["table"]
+
+
+def test_parse_meshbased_warns_when_table_present(tmp_path: Any) -> None:
+    """MeshBased with inline table ignores companion CSV and warns."""
+    yaml_path = tmp_path / "mesh.yaml"
+    yaml_path.write_text("")
+
+    table = [[[128, 128, 1, 64], [0, 0.0]]]
+    data = _make_meshbased_dict(table=table)
+    LibraryIO.prepareLibraryLogicDict(data)
+
+    with patch.object(LibraryIO, "_companionCsvXzPath", return_value="/fake.csv.xz"), \
+         patch.object(LibraryIO, "printWarning") as mock_warn:
+        with pytest.raises((KeyError, SystemExit, Exception)):
+            LibraryIO.parseLibraryLogicData(
+                data, str(yaml_path), None, False, False, False, {}, False,
+            )
+    mock_warn.assert_called_once()
+    assert "ignored" in mock_warn.call_args[0][0].lower()
+
+
+def test_parse_meshbased_exits_when_no_companion(tmp_path: Any) -> None:
+    """MeshBased with empty table and no companion CSV exits."""
+    yaml_path = tmp_path / "mesh.yaml"
+    yaml_path.write_text("")
+
+    data = _make_meshbased_dict(table=None)
+    LibraryIO.prepareLibraryLogicDict(data)
+
+    with patch.object(LibraryIO, "_companionCsvXzPath", return_value=None), \
+         patch.object(LibraryIO, "printExit") as mock_exit:
+        with pytest.raises((KeyError, SystemExit, Exception)):
+            LibraryIO.parseLibraryLogicData(
+                data, str(yaml_path), None, False, False, False, {}, False,
+            )
+    mock_exit.assert_called_once()
+    assert "no companion csv" in mock_exit.call_args[0][0].lower()
+
+
 def test_reorder_solution_dict_for_dict_merge_sorts_internal_support_params() -> None:
     """``reorderSolutionDictForDictMerge`` sorts nested ``InternalSupportParams``."""
     state = {
