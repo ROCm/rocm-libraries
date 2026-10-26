@@ -388,6 +388,61 @@ protected:
                               "grid-stride loop.";
     }
 
+    // As check_with_grid_x, through rocsparse_dbsrmv: no mask, and the kernels
+    // read the row end from bsr_row_ptr[row + 1] because bsr_end_ptr is null.
+    void check_bsrmv_with_grid_x(rocsparse_int block_dim, rocsparse_direction dir, int grid_x)
+    {
+        const bsr_matrix<double> m = make_matrix<double>(block_dim, dir);
+
+        std::vector<rocsparse_int> row_ptr(m.row_ptr);
+        row_ptr.push_back(m.end_ptr.back());
+
+        device_vector<rocsparse_int> d_row_ptr{row_ptr};
+        device_vector<rocsparse_int> d_col_ind{m.col_ind};
+        device_vector<double>        d_val{m.val};
+        device_vector<double>        d_x{m.x};
+        device_vector<double>        d_y{std::vector<double>(static_cast<size_t>(m.mb) * block_dim,
+                                                      static_cast<double>(Y_INIT))};
+        ASSERT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr && d_x.ptr && d_y.ptr);
+
+        MatDescr     descr;
+        const double alpha = ALPHA;
+        const double beta  = BETA;
+
+        {
+            ScopedMaxGridSizeX clamp(handle, grid_x);
+
+            ASSERT_EQ(rocsparse_dbsrmv(handle,
+                                       dir,
+                                       rocsparse_operation_none,
+                                       m.mb,
+                                       m.nb,
+                                       m.nnzb,
+                                       &alpha,
+                                       descr.d,
+                                       d_val,
+                                       d_row_ptr,
+                                       d_col_ind,
+                                       block_dim,
+                                       nullptr,
+                                       d_x,
+                                       &beta,
+                                       d_y),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+
+        const std::vector<double> got  = to_host(d_y.ptr, d_y.n);
+        const std::vector<double> want = reference(m, dir, {});
+        ASSERT_EQ(got.size(), want.size());
+
+        const int64_t bad = first_mismatch(got, want);
+        EXPECT_EQ(bad, -1) << "bsrmv block_dim=" << block_dim << " dir=" << static_cast<int>(dir)
+                           << ": first wrong y entry " << bad << " (block row " << (bad / block_dim)
+                           << " of " << m.mb << ") got " << got[bad] << " want " << want[bad]
+                           << ". grid.x was clamped to " << grid_x;
+    }
+
     // A non-null bsr_mask_ptr with size_of_mask == 0 selects no block rows: the
     // call must succeed and leave y untouched.
     template <typename T>
@@ -553,6 +608,20 @@ TEST_F(BsrxmvGridClamp, double_block_dims_5_and_8_reach_the_templated_kernels)
             check_with_grid_x<double>(block_dim, rocsparse_direction_column, {}, grid_x);
             check_with_grid_x<double>(block_dim, rocsparse_direction_row, mask, grid_x);
             check_with_grid_x<double>(block_dim, rocsparse_direction_column, mask, grid_x);
+        }
+    }
+}
+
+// rocsparse_Xbsrmv reaches the same kernels with a null bsr_end_ptr. Double
+// reaches the templated 5x5 and 8x8 kernels on wave64.
+TEST_F(BsrxmvGridClamp, bsrmv_null_end_ptr)
+{
+    for(rocsparse_int block_dim : block_dims_in_scope())
+    {
+        for(int grid_x : {1, CLAMPED_GRID_X})
+        {
+            check_bsrmv_with_grid_x(block_dim, rocsparse_direction_row, grid_x);
+            check_bsrmv_with_grid_x(block_dim, rocsparse_direction_column, grid_x);
         }
     }
 }
