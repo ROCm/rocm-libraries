@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -130,29 +130,29 @@ INSTANTIATE(int64_t, rocsparse_double_complex);
 
 void testing_gather_extra(const Arguments& arg)
 {
-    // Regression test for the gthr element-index overflow.
+    // Regression test for gthr with nnz past the 32-bit dispatch limit.
     //
-    // Before the fix, gthr_device computed the element index as
-    //   hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x
-    // in narrow arithmetic. Once nnz reaches 2^32 the block-index multiply
-    // wraps around, so the tail of the sparse vector past the wrap point is
-    // never gathered from y. The fix casts the block index to the (64-bit)
-    // index type before the multiply and iterates with a grid-stride loop.
+    // Before the fix the gather launched (nnz - 1) / 512 + 1 blocks of 512
+    // threads. For nnz = 2^32 + 512 that is 8,388,609 blocks, so
+    // grid.x * blockDim.x exceeded 2^32 - 1 and the launch was rejected. The
+    // fix clamps grid.x with get_grid_size_x and grid-strides over the rest
+    // with a 64-bit index.
     //
     // This drives the 64-bit-index path of rocsparse_gather (which dispatches
-    // to gthr_template) with nnz just past the 2^32 boundary and checks that an
-    // element beyond that boundary is actually gathered. To stay within a
-    // single device allocation everything is initialized on the device and a
-    // single element is probed.
+    // to gthr_template) with nnz just past 2^32 and checks that an element
+    // beyond that boundary is gathered. Everything is initialized on the
+    // device and a single element is probed.
     using I = int64_t;
     using T = float;
 
     static constexpr int64_t two_pow_32 = static_cast<int64_t>(1) << 32;
 
-    // nnz just beyond 2^32 so at least one block has a block index whose
-    // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
-    const I nnz  = two_pow_32 + 512;
-    const I size = 2;
+    // nnz just beyond 2^32, so the unclamped grid exceeds the dispatch limit.
+    const I nnz = two_pow_32 + 512;
+
+    // rocsparse_create_spvec_descr rejects nnz > size, so the dense vector has
+    // to be at least as long as the sparse one.
+    const I size = nnz;
 
     const rocsparse_index_base base = rocsparse_index_base_zero;
 
@@ -183,8 +183,8 @@ void testing_gather_extra(const Arguments& arg)
 
     CHECK_ROCSPARSE_ERROR(testing::rocsparse_gather(handle, y, x));
 
-    // Before the fix the wrapped block index leaves the probe element
-    // ungathered, so x_val[probe] stays 0 instead of y[1] = 3.
+    // The probe is past 2^32, so it is only gathered if the grid-stride loop
+    // reaches the elements the clamped grid does not cover.
     T x_out = static_cast<T>(0);
     CHECK_HIP_ERROR(
         hipMemcpy(&x_out, static_cast<T*>(dx_val) + probe_idx, sizeof(T), hipMemcpyDeviceToHost));
