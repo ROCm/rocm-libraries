@@ -1144,7 +1144,6 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype in ("fp16", "bf16")
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -1808,9 +1807,7 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
     # All other SW shapes also stay on their existing paths; the no-SW VALU
     # sub-flags auto-disable for SW via _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype in ("fp16", "bf16")
-        and problem.block_size == 16
+        problem.head_size == 128 and problem.block_size == 16
     ):
         return False
     if problem.head_size not in (64, 128):

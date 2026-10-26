@@ -336,6 +336,35 @@ _TILED_2D_BUDGET_GEOMETRIES = [
             sliding_window=128,
         ),
     ),
+    # gfx950 D128 bs16 sliding-window single-batch combo (this PR): the
+    # transposed-32x32 online-softmax path, now admitting bf16 alongside
+    # fp16. Distinct geometry from the gfx942 SW rows above (block_size=16,
+    # not the default 64), so those don't exercise this combo's LDS/scratch
+    # budget.
+    (
+        "fp16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
 ]
 
 
