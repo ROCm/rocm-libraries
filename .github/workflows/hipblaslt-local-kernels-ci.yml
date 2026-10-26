@@ -42,12 +42,12 @@ jobs:
       baseline_run_id: ${{ steps.ci-env.outputs.baseline-run-id }}
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github
       - id: ci-env
         uses: ./.github/actions/ci-env
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
@@ -105,9 +105,9 @@ jobs:
       LOCAL_KERNELS_ARCHITECTURE: ${{ matrix.architecture }}
     steps:
       - name: Checkout source under test
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Checkout shared SDK installer and GPU cleanup
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: ${{ needs.setup.outputs.therock_ref }}
@@ -139,7 +139,7 @@ jobs:
         run: bash projects/hipblaslt/scripts/local-kernels/run-tests.sh
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
           name: hipblaslt-local-kernels-${{ matrix.architecture }}
           path: local-kernels-test-logs
