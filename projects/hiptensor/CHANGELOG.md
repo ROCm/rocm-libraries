@@ -7,12 +7,12 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Added
 * Added support for the following new GPU targets:
   * gfx11-7: gfx1170, gfx1171.
+* Added fp64 support to hiptensorPermute for ranks 2-6.
+* Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added
-* Added fp64 support to hiptensorPermute for ranks 2-6.
-* Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 * Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
 * Added `gfx1250-strict` as a supported offload target and classified its device pass as `gfx1250`.
 
