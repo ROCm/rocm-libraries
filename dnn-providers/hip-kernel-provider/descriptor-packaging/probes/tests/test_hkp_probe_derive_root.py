@@ -920,6 +920,15 @@ def test_every_registered_output_type_has_checks():
 
 
 # --- multi-launch UKDs (`sources`) ---------------------------------------------
+def _sources_ukd(name, sources, arch=None):
+    """A multi-launch UKD carrying `sources` in place of `kernel_source`."""
+    ukd = _ukd(name, {}, arch)
+    del ukd["kernel_source"]
+    ukd["version"] = "1.1"
+    ukd["sources"] = sources
+    return ukd
+
+
 def _rocke_sources(name, launches, spec=None, arch=None):
     """A multi-launch rocke UKD. `launches` maps each launch name to (builder, role)."""
     sources = {}
@@ -933,11 +942,7 @@ def _rocke_sources(name, launches, spec=None, arch=None):
         if role is not None:
             entry["role"] = role
         sources[launch] = entry
-    ukd = _ukd(name, {}, arch)
-    del ukd["kernel_source"]
-    ukd["version"] = "1.1"
-    ukd["sources"] = sources
-    return ukd
+    return _sources_ukd(name, sources, arch)
 
 
 _DECODE_MERGE = {"decode": ("b1", None), "merge": ("b1", "merge")}
@@ -1038,14 +1043,6 @@ def test_authored_launch_order_does_not_change_the_compile_group(tmp_path):
 
 
 # --- hip and hsaco multi-launch UKDs -------------------------------------------
-def _sources_ukd(name, sources, arch=None):
-    ukd = _ukd(name, {}, arch)
-    del ukd["kernel_source"]
-    ukd["version"] = "1.1"
-    ukd["sources"] = sources
-    return ukd
-
-
 def _hip_sources(name, launches, source="a.cpp", build=None):
     """A multi-launch hip UKD. `launches` maps each launch name to its kernel symbol."""
     return _sources_ukd(

@@ -1410,22 +1410,27 @@ class TestDeskCheckReadsEachLaunchsObject:
             assert arch == ARCH
             return self._kernels.get(toc_key)
 
-    def test_each_launch_is_read_from_its_own_toc_key_and_verifies(
-        self, monkeypatch, tmp_path
-    ):
-        doc, records, payload = shipped(TWO_BUILDERS)
-        assert payload["segment"] != payload["reduce"]
-        by_toc_key = {doc["sources"][n]["toc_key"]: payload[n] for n in payload}
+    def _serve(self, monkeypatch, tmp_path, doc, kernels):
+        """Write the library file `doc` names and make `load_kpack` read `kernels`
+        (toc_key to bytes) out of it."""
         library = tmp_path / doc["sources"]["segment"]["library"]
         library.parent.mkdir(parents=True)
         library.write_bytes(b"archive")
-        archive = self._Archive(by_toc_key)
+        archive = self._Archive(kernels)
         kpack = type(
             "FakeKpack",
             (),
             {"PackedKernelArchive": type("A", (), {"read": lambda _path: archive})},
         )
         monkeypatch.setattr(desk_check, "load_kpack", lambda _dir: (kpack, None))
+
+    def test_each_launch_is_read_from_its_own_toc_key_and_verifies(
+        self, monkeypatch, tmp_path
+    ):
+        doc, records, payload = shipped(TWO_BUILDERS)
+        assert payload["segment"] != payload["reduce"]
+        by_toc_key = {doc["sources"][n]["toc_key"]: payload[n] for n in payload}
+        self._serve(monkeypatch, tmp_path, doc, by_toc_key)
         read = desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
         assert read == payload
         agreement.verify(doc, records, read)
@@ -1434,18 +1439,12 @@ class TestDeskCheckReadsEachLaunchsObject:
         self, monkeypatch, tmp_path
     ):
         doc, _records, payload = shipped(TWO_BUILDERS)
-        library = tmp_path / doc["sources"]["segment"]["library"]
-        library.parent.mkdir(parents=True)
-        library.write_bytes(b"archive")
-        archive = self._Archive(
-            {doc["sources"]["segment"]["toc_key"]: payload["segment"]}
+        self._serve(
+            monkeypatch,
+            tmp_path,
+            doc,
+            {doc["sources"]["segment"]["toc_key"]: payload["segment"]},
         )
-        kpack = type(
-            "FakeKpack",
-            (),
-            {"PackedKernelArchive": type("A", (), {"read": lambda _path: archive})},
-        )
-        monkeypatch.setattr(desk_check, "load_kpack", lambda _dir: (kpack, None))
         with pytest.raises(HkpPackError, match="launch 'reduce': toc_key 'vk-red'"):
             desk_check._payload(Entry(doc, str(tmp_path), [ARCH]), ARCH)
 

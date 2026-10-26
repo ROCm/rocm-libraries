@@ -392,6 +392,17 @@ def _validate_hsaco_source(ks, where):
         raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
 
 
+def _require_hsaco_arch(ukd, where):
+    """An hsaco UKD's non-empty `arch`, for one launch or a `sources` map. Its code
+    objects are built for specific archs, so a wildcard would ship their bytes into
+    every shard."""
+    if not ukd.get("arch"):
+        raise HkpPackError(
+            f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
+            "its code objects run on"
+        )
+
+
 def _validate_sources(ukd, where):
     """A UKD's `sources` map: two or more launches, all rocke, all hip or all
     hsaco (authored) or all kpack (packed). Returns the kind they share. Launches
@@ -502,11 +513,8 @@ def _validate_ukd_fields(ukd, where, log=print):
     if "sources" in ukd:
         kind = _validate_sources(ukd, where)
         _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
-        if kind == "hsaco" and not ukd.get("arch"):
-            raise HkpPackError(
-                f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
-                "the code objects run on"
-            )
+        if kind == "hsaco":
+            _require_hsaco_arch(ukd, where)
         return
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
@@ -526,13 +534,7 @@ def _validate_ukd_fields(ukd, where, log=print):
         validate_rocke_target(ks, where)
     elif kind == "hsaco":
         _validate_hsaco_source(ks, where)
-        # An hsaco object is built for specific archs, so a wildcard would ship
-        # its bytes into every shard.
-        if not ukd.get("arch"):
-            raise HkpPackError(
-                f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
-                "the code object runs on"
-            )
+        _require_hsaco_arch(ukd, where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
     else:
