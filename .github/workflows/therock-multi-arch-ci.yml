@@ -90,14 +90,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
           sparse-checkout: .github/scripts
           persist-credentials: false
       - name: Test sampling and failure handling
-        run: |
-          if ! git diff --quiet HEAD^ HEAD -- .github/scripts/run_random_hipblaslt_gemms.py .github/scripts/sample_hipblaslt_gemms.py .github/scripts/run_rocjitsu_hipblaslt_race_check.sh .github/scripts/tests/test_random_hipblaslt_gemms.py '.github/workflows/therock*'; then
-            python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
-          fi
+        run: python3 -B -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py
 
   ci-env:
     name: Load CI Environment
@@ -431,6 +427,7 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - random_gemm_runner_tests
       - ci-env
       - configure
       - setup
