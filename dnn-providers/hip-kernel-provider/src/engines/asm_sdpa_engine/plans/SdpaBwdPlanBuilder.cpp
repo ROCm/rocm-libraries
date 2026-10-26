@@ -16,6 +16,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -273,6 +274,154 @@ bool wouldBwdByteStridesFitUint32(
         "Ts (tsKv * stride_k)", tsKv * static_cast<int64_t>(k.strides()->Get(2)), K_BF16_BYTES);
 
     return ok;
+}
+
+// Byte offset of the last element of a rank-4 tensor from its first element,
+// sum_d (dims[d] - 1) * strides[d] * elementBytes, saturating.
+uint64_t lastElementByteOffset(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor,
+                               int64_t elementBytes)
+{
+    using plan_utils::lastIndex;
+    using plan_utils::saturatingProduct;
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    return plan_utils::saturatingSum(
+        {saturatingProduct({lastIndex(dims->Get(0)), strides->Get(0), elementBytes}),
+         saturatingProduct({lastIndex(dims->Get(1)), strides->Get(1), elementBytes}),
+         saturatingProduct({lastIndex(dims->Get(2)), strides->Get(2), elementBytes}),
+         saturatingProduct({lastIndex(dims->Get(3)), strides->Get(3), elementBytes})});
+}
+
+// Validate that the backward kernels form every tensor offset correctly.
+// wouldBwdByteStridesFitUint32 bounds each stride field on its own; the gfx942
+// ODO, DQDKDV and DQ_CONVERT kernels also combine the strides as follows (from
+// the .co disassembly), and an offset that overflows gives wrong gradients
+// with no error:
+// - ODO forms b * BAs + h * Hs + tile * 128 * Seqs for O, dO and the D
+//   workspace in one 32-bit register, so the byte offset of the last element
+//   of each must fit 32 bits. D covers Q's [B, H_q, S_q] at the LSE strides.
+//   On gfx942 with H = 4, S = 2048 and D = 128, ODO gave the right D for O and
+//   dO of exactly 4 GiB (B = 2048). At B = 2100, D of batches 2048-2099 came
+//   from O and dO 4 GiB lower. With B = 3, an O or dO batch stride of 2^31
+//   bytes gave wrong gradients, and 2^31 - 16384 bytes did not.
+// - Every kernel sizes a (batch, head) buffer from S * Seqs in 32 bits, and
+//   DQDKDV and DQ_CONVERT add the head offset of K, V, dK, dV and dQ to their
+//   sequence-tile offset in 32 bits. DQDKDV also forms the dK and dV row
+//   offsets h * Hs + r * Seqs in 32 bits for every row r of the last K/V tile,
+//   up to S_kv rounded up to the tile. So, for each of the eight tensors,
+//   (H - 1) * Hs + (S rounded up to its DQDKDV tile) * Seqs + D elements must
+//   fit 32 bits. On gfx942 with H = 2, S = 256 and a head stride of
+//   2^32 - 2048 bytes, K, V, dK, dV and dQ each gave wrong gradients. Q got
+//   them right: DQDKDV adds the Q head offset to the 64-bit base apart from
+//   the rows, so the Q bound is conservative, but dQ has Q's dims and needs it.
+// - DQDKDV reads LSE and D, and writes dq_acc, at offsets formed from
+//   (b * H_q + h) * S_q * 4 in 32 bits, so B * H_q * S_q * 4 must fit.
+// - Every row offset goes through v_mul_i32_i24, which reproduces a sequence
+//   byte stride only below 2^23. On gfx942 a sequence stride of 2^23 bytes on
+//   any one of the eight tensors gave wrong gradients, and 2^23 - 128 did not.
+// DQDKDV and DQ_CONVERT add batch offsets as 64-bit values, so Q, K, V, dQ, dK
+// and dV past 4 GiB stay accepted (on gfx942, each was correct with its third
+// batch at 2^32 bytes). Logs the first overflow found and returns false;
+// returns true when every offset fits.
+bool wouldBwdOffsetsFitKernelArithmetic(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dq,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
+    int64_t tileRowsQ,
+    int64_t tileRowsKv)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
+    using plan_utils::lastIndex;
+    using plan_utils::saturatingProduct;
+    using plan_utils::saturatingSum;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
+    constexpr uint64_t K_U32_MAX = plan_utils::K_U32_ADDRESS_MAX;
+
+    auto toString = [](const flatbuffers::Vector<int64_t>* values) {
+        return hipdnn_data_sdk::utilities::vecToString(
+            hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(values));
+    };
+
+    struct AddressedTensor
+    {
+        const char* name;
+        const TensorAttributes* tensor;
+        // Row tile of the kernel that addresses the tensor's rows from a slice base.
+        int64_t tileRows;
+        // Read by ODO, which adds the batch offset in 32 bits.
+        bool readByOdo;
+    };
+    for(const AddressedTensor& io : {AddressedTensor{"q", &q, tileRowsQ, false},
+                                     AddressedTensor{"k", &k, tileRowsKv, false},
+                                     AddressedTensor{"v", &v, tileRowsKv, false},
+                                     AddressedTensor{"o", &o, tileRowsQ, true},
+                                     AddressedTensor{"do", &dO, tileRowsQ, true},
+                                     AddressedTensor{"dq", &dq, tileRowsQ, false},
+                                     AddressedTensor{"dk", &dk, tileRowsKv, false},
+                                     AddressedTensor{"dv", &dv, tileRowsKv, false}})
+    {
+        const auto* dims = io.tensor->dims();
+        const auto* strides = io.tensor->strides();
+        const auto describe = [&]() {
+            return std::string(io.name) + " tensor (Actual dims: " + toString(dims)
+                   + ", strides: " + toString(strides) + ")";
+        };
+
+        // isApplicable checks only the dims rank of Q, K and V.
+        HIP_KERNEL_RETURN_FALSE_IF(dims->size() != 4 || strides->size() != 4,
+                                   "rank-4 dims and strides required for " + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            saturatingProduct({strides->Get(2), K_BF16_BYTES}) >= plan_utils::K_I24_STRIDE_BOUND,
+            "sequence byte stride must be below " + std::to_string(plan_utils::K_I24_STRIDE_BOUND)
+                + " for the kernels' 24-bit row-offset multiply for " + describe());
+        const uint64_t sliceEnd = saturatingSum(
+            {saturatingProduct({lastIndex(dims->Get(1)), strides->Get(1), K_BF16_BYTES}),
+             saturatingProduct({plan_utils::roundUpToTile(dims->Get(2), io.tileRows),
+                                strides->Get(2),
+                                K_BF16_BYTES}),
+             saturatingProduct({dims->Get(3), K_BF16_BYTES})});
+        HIP_KERNEL_RETURN_FALSE_IF(
+            sliceEnd > K_U32_MAX,
+            "head and sequence byte offsets overflow the kernels' 32-bit offsets for "
+                + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            io.readByOdo && lastElementByteOffset(*io.tensor, K_BF16_BYTES) > K_U32_MAX,
+            "byte offset of the last element overflows the ODO kernel's 32-bit offset for "
+                + describe());
+    }
+
+    // ODO writes D over Q's [B, H_q, S_q] at the LSE batch and head strides, one
+    // FP32 per row; DQDKDV reads LSE and D, and writes dq_acc, from
+    // ((b * H_q + h) * S_q) * 4.
+    const int64_t batchSize = q.dims()->Get(0);
+    const int64_t numHeadsQ = q.dims()->Get(1);
+    const int64_t seqLenQ = q.dims()->Get(2);
+    const auto* statsStrides = stats.strides();
+    const auto describeStats = [&]() {
+        return "stats tensor (Actual dims: " + toString(stats.dims()) + ", strides: "
+               + toString(statsStrides) + ") for q tensor dims " + toString(q.dims());
+    };
+    const uint64_t dLastOffset = saturatingSum(
+        {saturatingProduct({lastIndex(batchSize), statsStrides->Get(0), K_FP32_BYTES}),
+         saturatingProduct({lastIndex(numHeadsQ), statsStrides->Get(1), K_FP32_BYTES}),
+         saturatingProduct({lastIndex(seqLenQ), K_FP32_BYTES})});
+    HIP_KERNEL_RETURN_FALSE_IF(dLastOffset > K_U32_MAX,
+                               "byte offset of the last D element overflows the ODO "
+                               "kernel's 32-bit offset for "
+                                   + describeStats());
+    HIP_KERNEL_RETURN_FALSE_IF(
+        saturatingProduct({batchSize, numHeadsQ, seqLenQ, K_FP32_BYTES}) > K_U32_MAX,
+        "B * H_q * S_q * 4 overflows the DQDKDV kernel's 32-bit LSE, D and dq_acc offsets for "
+            + describeStats());
+
+    return true;
 }
 
 // Per-stage dispatch tuples differ. The odo (D-reduction) and dq_convert
@@ -731,6 +880,20 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                                              dqdkdvCfgOpt->ts,
                                                              useA32),
                                "Backward byte strides overflow uint32_t kernarg fields");
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdOffsetsFitKernelArithmetic(*qTensor,
+                                                                   *kTensor,
+                                                                   *vTensor,
+                                                                   *oTensor,
+                                                                   *doTensor,
+                                                                   *dqTensor,
+                                                                   *dkTensor,
+                                                                   *dvTensor,
+                                                                   *statsTensor,
+                                                                   dqdkdvCfgOpt->ts_qo,
+                                                                   dqdkdvCfgOpt->ts),
+                               "Backward tensor offsets overflow the kernels' 32-bit or 24-bit "
+                               "address arithmetic");
 
     return true;
 }

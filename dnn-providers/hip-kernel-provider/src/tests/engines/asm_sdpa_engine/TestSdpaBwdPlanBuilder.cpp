@@ -773,6 +773,359 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+// =============================================================================
+// Tensor offsets and the kernels' 32-bit and 24-bit address arithmetic
+// =============================================================================
+
+// Replaces the strides, and the dims when non-empty, of the tensor called name.
+// createSdpaBwdGraph names its tensors q, k, v, o, do, stats, dq, dk, dv.
+struct TensorLayout
+{
+    std::string name;
+    std::vector<int64_t> strides;
+    std::vector<int64_t> dims;
+};
+
+// Copy of a graph with the given tensor layouts applied.
+flatbuffers::FlatBufferBuilder withTensorLayouts(const flatbuffers::FlatBufferBuilder& base,
+                                                 const std::vector<TensorLayout>& layouts)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+    for(const auto& layout : layouts)
+    {
+        bool found = false;
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == layout.name)
+            {
+                tensor->strides = layout.strides;
+                if(!layout.dims.empty())
+                {
+                    tensor->dims = layout.dims;
+                }
+                found = true;
+            }
+        }
+        if(!found)
+        {
+            throw std::runtime_error("withTensorLayouts: no tensor named " + layout.name);
+        }
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return builder;
+}
+
+// The same layout on each named tensor.
+std::vector<TensorLayout> onEachTensor(const std::vector<std::string>& names,
+                                       const std::vector<int64_t>& strides,
+                                       const std::vector<int64_t>& dims = {})
+{
+    std::vector<TensorLayout> layouts;
+    layouts.reserve(names.size());
+    for(const auto& name : names)
+    {
+        layouts.push_back({name, strides, dims});
+    }
+    return layouts;
+}
+
+// The eight tensors the kernels address through the batch, head and sequence
+// byte strides of their argument blocks.
+const std::vector<std::string> K_STRIDED_TENSORS = {"q", "k", "v", "o", "do", "dq", "dk", "dv"};
+
+// B=2048 H=4 S=2048 D=128 BF16: O and dO of exactly 4 GiB.
+const std::vector<int64_t> K_DIMS_4GIB = {2048, 4, 2048, 128};
+
+// K_DIMS_4GIB with each batch padded by 64 elements, past 4 GiB.
+const std::vector<int64_t> K_PADDED_BATCH_4GIB
+    = {int64_t{4} * 2048 * 128 + 64, int64_t{2048} * 128, 128, 1};
+
+// Head strides (elements) of dK or dV with H=2, S_kv=200 and D=128. DQDKDV
+// addresses the 384 rows of two 192-row K/V tiles, so its offsets reach
+// Hs * 2 + 384 * 256 + 256 bytes. K_TAIL_HEAD_STRIDE_FITS is the largest even
+// stride that keeps this within 2^32 - 1. The next even stride does not, but
+// would if the last tile were not rounded up (Hs * 2 + 200 * 256 + 256).
+constexpr int64_t K_TAIL_HEAD_STRIDE_FITS = 2147434366;
+constexpr int64_t K_TAIL_HEAD_STRIDE_PAST = K_TAIL_HEAD_STRIDE_FITS + 2;
+
+// A graph with Q-side dims [1, 2, 256, 128] and K-side dims [1, 2, 200, 128].
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithKvTail()
+{
+    const std::vector<int64_t> kvDims = {1, 2, 200, 128};
+    return withTensorLayouts(createSdpaBwdGraph({1, 2, 256, 128}),
+                             onEachTensor({"k", "v", "dk", "dv"},
+                                          hipdnn_data_sdk::utilities::generateStrides(kvDims),
+                                          kvDims));
+}
+
+// The address-arithmetic helpers both plan builders use. Pure functions, so
+// these run without a device.
+TEST(TestSdpaAddressArithmetic, SaturatingProductIsExactBelow2Pow64)
+{
+    EXPECT_EQ(plan_utils::saturatingProduct({(int64_t{1} << 31) - 1, 2, 2}),
+              (uint64_t{1} << 33) - 4);
+    EXPECT_EQ(plan_utils::saturatingProduct({}), 1U);
+}
+
+TEST(TestSdpaAddressArithmetic, SaturatingProductSaturatesInsteadOfWrapping)
+{
+    EXPECT_EQ(plan_utils::saturatingProduct({int64_t{1} << 32, int64_t{1} << 32}), UINT64_MAX);
+    EXPECT_EQ(plan_utils::saturatingProduct({INT64_MAX, INT64_MAX, 2}), UINT64_MAX);
+}
+
+TEST(TestSdpaAddressArithmetic, SaturatingProductOfANegativeFactorSaturates)
+{
+    EXPECT_EQ(plan_utils::saturatingProduct({-1, 2}), UINT64_MAX);
+    EXPECT_EQ(plan_utils::saturatingProduct({0, -1}), UINT64_MAX);
+}
+
+// A size-1 axis contributes index 0, so its stride must not saturate the
+// product however large it is.
+TEST(TestSdpaAddressArithmetic, SaturatingProductWithAZeroFactorIsZero)
+{
+    EXPECT_EQ(plan_utils::saturatingProduct({INT64_MAX, INT64_MAX, 0}), 0U);
+}
+
+TEST(TestSdpaAddressArithmetic, SaturatingSumSaturatesInsteadOfWrapping)
+{
+    EXPECT_EQ(plan_utils::saturatingSum({UINT32_MAX, 1}), uint64_t{1} << 32);
+    EXPECT_EQ(plan_utils::saturatingSum({UINT64_MAX - 1, 2}), UINT64_MAX);
+}
+
+TEST(TestSdpaAddressArithmetic, LastIndexOfAnAxisOfAtMostOneElementIsZero)
+{
+    EXPECT_EQ(plan_utils::lastIndex(0), 0);
+    EXPECT_EQ(plan_utils::lastIndex(1), 0);
+    EXPECT_EQ(plan_utils::lastIndex(2048), 2047);
+}
+
+TEST(TestSdpaAddressArithmetic, RoundUpToTileCoversThePartialLastTile)
+{
+    EXPECT_EQ(plan_utils::roundUpToTile(513, 256), 768);
+    EXPECT_EQ(plan_utils::roundUpToTile(512, 256), 512);
+    EXPECT_EQ(plan_utils::roundUpToTile(200, 192), 384);
+    EXPECT_EQ(plan_utils::roundUpToTile(0, 192), 0);
+    EXPECT_EQ(plan_utils::roundUpToTile(200, 0), 200);
+    EXPECT_EQ(plan_utils::roundUpToTile(INT64_MAX - 1, 256), INT64_MAX);
+}
+
+// Layouts whose offsets fit every backward kernel's 32-bit and 24-bit
+// arithmetic, including tensors past 4 GiB that only DQDKDV and DQ_CONVERT
+// address: those add batch offsets as 64-bit values.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsOffsetsWithinKernelArithmetic)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    // On gfx942, ODO gave the right D for this shape (and not for B=2100).
+    acceptTests.emplace_back(createSdpaBwdGraph(K_DIMS_4GIB), "O and dO of exactly 4 GiB");
+    const std::vector<int64_t> kvDims8GiB = {2048, 4, 4096, 128};
+    acceptTests.emplace_back(
+        withTensorLayouts(createSdpaBwdGraph(K_DIMS_4GIB),
+                          onEachTensor({"k", "v", "dk", "dv"},
+                                       hipdnn_data_sdk::utilities::generateStrides(kvDims8GiB),
+                                       kvDims8GiB)),
+        "K, V, dK and dV of 8 GiB");
+    acceptTests.emplace_back(withTensorLayouts(createSdpaBwdGraph(K_DIMS_4GIB),
+                                               onEachTensor({"q", "dq"}, K_PADDED_BATCH_4GIB)),
+                             "Q and dQ past 4 GiB");
+    for(const char* name : {"dk", "dv"})
+    {
+        acceptTests.emplace_back(
+            withTensorLayouts(
+                createSdpaBwdGraphWithKvTail(),
+                {{name, {K_TAIL_HEAD_STRIDE_FITS, K_TAIL_HEAD_STRIDE_FITS, 128, 1}, {}}}),
+            std::string(name) + " offsets of the rounded-up last K/V tile just within 32 bits");
+    }
+    // 2^23 - 4 bytes: the largest even sequence stride below the 24-bit bound.
+    constexpr int64_t K_SEQ_STRIDE = (int64_t{1} << 22) - 2;
+    acceptTests.emplace_back(
+        withTensorLayouts(
+            createSdpaBwdGraph({1, 1, 16, 128}),
+            onEachTensor(
+                K_STRIDED_TENSORS,
+                {int64_t{16} * K_SEQ_STRIDE, int64_t{16} * K_SEQ_STRIDE, K_SEQ_STRIDE, 1})),
+        "sequence stride of 2^23 - 4 bytes on all eight tensors");
+    // O and dO broadcast over the batch keep the ODO offsets small, so only the
+    // LSE, D and dq_acc offsets grow with B: B * 256 * 4 = 2^32 - 1024.
+    acceptTests.emplace_back(
+        withTensorLayouts(createSdpaBwdGraph({(int64_t{1} << 22) - 1, 1, 256, 128}),
+                          onEachTensor({"o", "do"}, {0, int64_t{256} * 128, 128, 1})),
+        "B * H_q * S_q * 4 just below 2^32");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// ODO adds the batch, head and sequence-tile offsets of O, dO and D in one
+// 32-bit register. On gfx942, with B=2100 H=4 S=2048 D=128, D of batches
+// 2048-2099 came from O and dO 4 GiB lower.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsOdoOffsetsPast32Bits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    declineTests.emplace_back(createSdpaBwdGraph({2049, 4, 2048, 128}),
+                              "O and dO one batch past 4 GiB");
+    declineTests.emplace_back(createSdpaBwdGraph({2100, 4, 2048, 128}), "O and dO of B=2100");
+    for(const char* name : {"o", "do"})
+    {
+        declineTests.emplace_back(
+            withTensorLayouts(createSdpaBwdGraph(K_DIMS_4GIB), {{name, K_PADDED_BATCH_4GIB, {}}}),
+            std::string(name) + " alone past 4 GiB");
+    }
+    // ODO writes D at the stats batch stride: (2^30 - 128) * 4 + 255 * 4 bytes.
+    declineTests.emplace_back(
+        withTensorLayouts(createSdpaBwdGraph({2, 1, 256, 128}),
+                          {{"stats", {(int64_t{1} << 30) - 128, 256, 1, 1}, {}}}),
+        "D past 4 GiB at the stats batch stride");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Within a batch, every kernel sizes a (batch, head) buffer from S * Seqs in 32
+// bits, DQDKDV and DQ_CONVERT add the head offset to the sequence-tile offset in
+// 32 bits, and DQDKDV forms dK and dV row offsets in 32 bits up to S_kv rounded
+// up to its K/V tile.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsBatchSliceOffsetsPast32Bits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // H=2: the second head starts 2^32 - 2048 bytes in, and its 256 rows of
+    // 256 bytes end past 2^32. On gfx942 this gave wrong gradients for K, V, dK,
+    // dV and dQ, but not for Q, whose bound is conservative (dQ needs it).
+    constexpr int64_t K_HEAD_STRIDE = (int64_t{1} << 31) - 1024;
+    std::vector<GraphTest> declineTests;
+    declineTests.reserve(K_STRIDED_TENSORS.size() + 2);
+    for(const auto& name : K_STRIDED_TENSORS)
+    {
+        declineTests.emplace_back(
+            withTensorLayouts(createSdpaBwdGraph({1, 2, 256, 128}),
+                              {{name, {K_HEAD_STRIDE, K_HEAD_STRIDE, 128, 1}, {}}}),
+            name + " head offset plus 256 rows past 2^32");
+    }
+    for(const char* name : {"dk", "dv"})
+    {
+        declineTests.emplace_back(
+            withTensorLayouts(
+                createSdpaBwdGraphWithKvTail(),
+                {{name, {K_TAIL_HEAD_STRIDE_PAST, K_TAIL_HEAD_STRIDE_PAST, 128, 1}, {}}}),
+            std::string(name) + " offsets of the rounded-up last K/V tile past 2^32");
+    }
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Every backward row offset goes through v_mul_i32_i24, which multiplies only
+// the sign-extended low 24 bits of the sequence byte stride.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsSequenceStridesPast24Bits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // 2^23 bytes.
+    constexpr int64_t K_SEQ_STRIDE = int64_t{1} << 22;
+    for(const auto& name : K_STRIDED_TENSORS)
+    {
+        const GraphTest test{
+            withTensorLayouts(
+                createSdpaBwdGraph({1, 1, 16, 128}),
+                {{name,
+                  {int64_t{16} * K_SEQ_STRIDE, int64_t{16} * K_SEQ_STRIDE, K_SEQ_STRIDE, 1},
+                  {}}}),
+            name + " sequence stride of 2^23 bytes"};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// DQDKDV reads LSE and D, and writes dq_acc, at offsets formed from
+// (b * H_q + h) * S_q * 4 in 32 bits. O and dO are broadcast over the batch so
+// that only these offsets overflow: B * 256 * 4 = 2^32.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsLseOffsetsPast32Bits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest test{
+        withTensorLayouts(createSdpaBwdGraph({int64_t{1} << 22, 1, 256, 128}),
+                          onEachTensor({"o", "do"}, {0, int64_t{256} * 128, 128, 1})),
+        "B * H_q * S_q * 4 = 2^32"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+}
+
+// The offset checks index the dims and strides of all eight tensors up to the
+// head dim; isApplicable checks only the dims rank of Q, K and V.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonRank4Tensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> rank5Dims = {4, 8, 256, 128, 1};
+    const std::vector<int64_t> rank5Strides
+        = {int64_t{8} * 256 * 128, int64_t{256} * 128, 128, 1, 1};
+    std::vector<GraphTest> declineTests;
+    declineTests.emplace_back(
+        withTensorLayouts(createSdpaBwdGraph({4, 8, 256, 128}),
+                          {{"dq", {int64_t{256} * 128, 128, 1}, {32, 256, 128}}}),
+        "dQ of rank 3");
+    // A trailing unit axis keeps every index the offset checks read in range, so
+    // only the rank check declines these.
+    for(const char* name : {"o", "do", "dq", "dk", "dv"})
+    {
+        declineTests.emplace_back(withTensorLayouts(createSdpaBwdGraph({4, 8, 256, 128}),
+                                                    {{name, rank5Strides, rank5Dims}}),
+                                  std::string(name) + " of rank 5");
+    }
+    declineTests.emplace_back(
+        withTensorLayouts(createSdpaBwdGraph({4, 8, 256, 128}), {{"q", rank5Strides, {}}}),
+        "q with rank-4 dims and rank-5 strides");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

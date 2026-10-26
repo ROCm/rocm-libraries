@@ -209,6 +209,88 @@ inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elemen
 }
 
 // =============================================================================
+// Kernel address arithmetic
+// =============================================================================
+//
+// Besides storing each byte stride in a uint32 field, the kernels combine the
+// strides into tensor offsets and buffer sizes in 32-bit scalar registers,
+// where a carry out of 32 bits is lost, and form some row offsets with
+// v_mul_i32_i24, which multiplies only the sign-extended low 24 bits of the
+// stride (from the .co disassembly). An offset that does not fit is addressed
+// wrongly with no error, so the plan builders bound each one in isApplicable
+// with these helpers. Which offsets each kernel forms is documented where they
+// are checked.
+
+// Largest offset or buffer size a 32-bit register holds.
+constexpr uint64_t K_U32_ADDRESS_MAX = UINT32_MAX;
+
+// Exclusive bound on a byte stride that v_mul_i32_i24 multiplies exactly. From
+// 2^23 up, the low 24 bits sign-extend to a negative value and the bits above
+// them are dropped.
+constexpr uint64_t K_I24_STRIDE_BOUND = uint64_t{1} << 23;
+
+// Product of the factors. UINT64_MAX when a factor is negative; otherwise 0
+// when a factor is 0, and UINT64_MAX when the product does not fit 64 bits. A
+// caller comparing the result against a 32-bit limit therefore declines a
+// negative factor and never sees a wrapped product.
+inline uint64_t saturatingProduct(std::initializer_list<int64_t> factors)
+{
+    if(std::any_of(factors.begin(), factors.end(), [](int64_t factor) { return factor < 0; }))
+    {
+        return UINT64_MAX;
+    }
+    if(std::any_of(factors.begin(), factors.end(), [](int64_t factor) { return factor == 0; }))
+    {
+        return 0;
+    }
+    uint64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(__builtin_mul_overflow(product, static_cast<uint64_t>(factor), &product))
+        {
+            return UINT64_MAX;
+        }
+    }
+    return product;
+}
+
+// Sum of the terms, or UINT64_MAX when it does not fit 64 bits.
+inline uint64_t saturatingSum(std::initializer_list<uint64_t> terms)
+{
+    uint64_t sum = 0;
+    for(const uint64_t term : terms)
+    {
+        if(__builtin_add_overflow(sum, term, &sum))
+        {
+            return UINT64_MAX;
+        }
+    }
+    return sum;
+}
+
+// Index of the last element along an axis of `dim` elements. 0 for an axis of
+// at most one element: a kernel multiplies its stride by index 0 only, so that
+// stride never moves an offset.
+inline int64_t lastIndex(int64_t dim)
+{
+    return dim > 1 ? dim - 1 : 0;
+}
+
+// `rows` rounded up to a whole number of `tileRows`-row tiles, which is how far
+// a kernel that processes the last, partial tile like a full one addresses.
+// INT64_MAX when that does not fit, and `rows` itself when `tileRows` is not
+// positive.
+inline int64_t roundUpToTile(int64_t rows, int64_t tileRows)
+{
+    if(rows <= 0 || tileRows <= 0 || rows % tileRows == 0)
+    {
+        return rows;
+    }
+    const int64_t padding = tileRows - rows % tileRows;
+    return rows > INT64_MAX - padding ? INT64_MAX : rows + padding;
+}
+
+// =============================================================================
 // HIP device string query with error handling
 // =============================================================================
 //
