@@ -732,12 +732,7 @@ def _run_depthwise_sweep(
     n_skipped = 0
     pending = []
     for combo in combos:
-        try:
-            spec, ok, build = _candidate(*combo)
-        except ValueError:
-            # Refused on construction or validation: skip it, not the sweep.
-            n_skipped += 1
-            continue
+        spec, ok, build = _candidate(*combo)
         if not ok:
             n_skipped += 1
             continue
@@ -962,18 +957,15 @@ def _run_sweep(
         if tf32_narrow_reason("direct_grouped", p, {"fold_k32": fold_k32}, arch):
             n_skipped += 1
             continue
-        try:
-            spec = DirectConvSpec(
-                problem=p,
-                name="rocke_bench_direct_conv",
-                block_q=block_q,
-                block_groups=block_groups,
-                double_buffer=double_buffer,
-                **({"fold_k32": True} if fold_k32 else {}),
-            )
-            ok, _ = is_valid_spec(spec, arch=arch)
-        except ValueError:
-            ok = False
+        spec = DirectConvSpec(
+            problem=p,
+            name="rocke_bench_direct_conv",
+            block_q=block_q,
+            block_groups=block_groups,
+            double_buffer=double_buffer,
+            **({"fold_k32": True} if fold_k32 else {}),
+        )
+        ok, _ = is_valid_spec(spec, arch=arch)
         if not ok:
             n_skipped += 1
             continue
@@ -1170,14 +1162,7 @@ def _run_nongrouped_sweep(
     # Direct conv is AOT: the whole shape travels as kernargs.
     sig = conv_direct_args_signature(_abi_dtype(dtype))
 
-    try:
-        specs = nongrouped_specs(
-            p, arch=arch, name="rocke_bench_direct_conv_nongrouped"
-        )
-    except ValueError as e:
-        # The kernel has no build for this dtype (fp32/tf32) yet.
-        print(f"No non-grouped kernel for this problem: {e}", file=sys.stderr)
-        return 1, []
+    specs = nongrouped_specs(p, arch=arch, name="rocke_bench_direct_conv_nongrouped")
     # TF32 on an emulated arch: drop narrow atoms a wide one covers.
     specs = [
         sp
@@ -1454,20 +1439,16 @@ def _run_wgrad_sweep(
         if tf32_narrow_reason("direct_wgrad", p, {"mfma_k": mk}, arch):
             n_skipped += 1
             continue
-        try:
-            spec = DirectConvWgradSpec(
-                problem=p,
-                name="rocke_bench_direct_wgrad",
-                waves_k=waves_k,
-                waves_c=waves_c,
-                waves_q=waves_q,
-                ho_per_block=hpb,
-                mfma_k=mk,
-            )
-            ok, _ = is_valid_wgrad_spec(spec, arch=arch)
-        except ValueError:
-            # No wgrad kernel for this dtype (fp32/tf32): skip, not crash.
-            ok = False
+        spec = DirectConvWgradSpec(
+            problem=p,
+            name="rocke_bench_direct_wgrad",
+            waves_k=waves_k,
+            waves_c=waves_c,
+            waves_q=waves_q,
+            ho_per_block=hpb,
+            mfma_k=mk,
+        )
+        ok, _ = is_valid_wgrad_spec(spec, arch=arch)
         if not ok:
             n_skipped += 1
             continue
@@ -1728,16 +1709,13 @@ def _run_dgrad_sweep(
         n_skipped = 0
         pending = []
         for block_w, block_waves in combos_dw:
-            try:
-                spec = DirectDepthwiseDgradStreamSpec(
-                    problem=p,
-                    name="rocke_bench_dw_dgrad",
-                    block_w=block_w,
-                    block_waves=block_waves,
-                )
-                ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
-            except ValueError:
-                ok = False
+            spec = DirectDepthwiseDgradStreamSpec(
+                problem=p,
+                name="rocke_bench_dw_dgrad",
+                block_w=block_w,
+                block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
             if not ok:
                 n_skipped += 1
                 continue
@@ -1814,23 +1792,19 @@ def _run_dgrad_sweep(
                             continue
                         from dataclasses import replace as dc_replace
 
-                        try:
-                            fprop_spec = make_dgrad_fprop_spec(
-                                p,
-                                block_q=block_q,
-                                block_groups=block_groups,
-                                block_h=block_h,
-                                waves_q=waves_q,
-                                waves_k=waves_k,
-                                runtime_k_loop=use_rk,
-                                persistent_grid=use_pg,
-                            )
-                            if use_k32:
-                                fprop_spec = dc_replace(fprop_spec, fold_k32=True)
-                            ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
-                        except ValueError:
-                            # No MFMA dgrad for this dtype (fp32/tf32).
-                            ok = False
+                        fprop_spec = make_dgrad_fprop_spec(
+                            p,
+                            block_q=block_q,
+                            block_groups=block_groups,
+                            block_h=block_h,
+                            waves_q=waves_q,
+                            waves_k=waves_k,
+                            runtime_k_loop=use_rk,
+                            persistent_grid=use_pg,
+                        )
+                        if use_k32:
+                            fprop_spec = dc_replace(fprop_spec, fold_k32=True)
+                        ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
                         if not ok:
                             n_skipped += 1
                             continue
@@ -1876,16 +1850,13 @@ def _run_dgrad_sweep(
             n_skipped = 0
             pending = []
             for block_q, block_groups in combos:
-                try:
-                    spec = DirectConvDgradSpec(
-                        problem=p,
-                        name="rocke_bench_direct_dgrad",
-                        block_q=block_q,
-                        block_groups=block_groups,
-                    )
-                    ok, _ = is_valid_dgrad_spec(spec, arch=arch)
-                except ValueError:
-                    ok = False
+                spec = DirectConvDgradSpec(
+                    problem=p,
+                    name="rocke_bench_direct_dgrad",
+                    block_q=block_q,
+                    block_groups=block_groups,
+                )
+                ok, _ = is_valid_dgrad_spec(spec, arch=arch)
                 if not ok:
                     n_skipped += 1
                     continue

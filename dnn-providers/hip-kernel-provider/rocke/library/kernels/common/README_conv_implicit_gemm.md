@@ -76,7 +76,8 @@ B and D use simpler descriptors:
 | `fp32` | `"tf32"` | TF32 | TF32 compute: see below. MFMA targets only. |
 
 **TF32 compute.** Set `ConvDataSpec(dtype_a="fp32", dtype_b="fp32",
-dtype_d="fp32", mma_dtype="tf32")`. `dtype_d` may be any storage type.
+dtype_d="fp32", mma_dtype="tf32")`. TF32 is an fp32-convolution mode: all three
+tensors are fp32, and `ConvDataSpec.mma_dtype_reason()` rejects any other `dtype_d`.
 `"tf32"` is a compute mode, not a storage type: `dtype_a="tf32"` is rejected.
 
 - A and B stay fp32 in global memory and in LDS. Loaders, vector widths, the LDS

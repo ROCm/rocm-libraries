@@ -244,7 +244,7 @@ class TestTf32Rejections(unittest.TestCase):
 
     def test_16_bit_dw(self):
         spec = _spec(data=ConvDataSpec("fp32", "fp32", "bf16", mma_dtype="tf32"))
-        self._both(spec, "gfx950", "fp32 dW")
+        self._both(spec, "gfx950", "needs an fp32 output")
 
     def test_misaligned_row_stride(self):
         # tile_k + pad must be a multiple of min(fragment, 4): 4 on gfx950
@@ -256,11 +256,11 @@ class TestTf32Rejections(unittest.TestCase):
             self.assertTrue(ok, why)
 
     def test_atom_of_the_other_arch(self):
-        self._rejected(_spec(_ATOMS[0]), "gfx942", "unsupported tf32 warp_tile")
-        self._rejected(_spec(_ATOMS[2]), "gfx950", "unsupported tf32 warp_tile")
+        self._rejected(_spec(_ATOMS[0]), "gfx942", "not a TF32 atom on gfx942")
+        self._rejected(_spec(_ATOMS[2]), "gfx950", "not a TF32 atom on gfx950")
 
     def test_no_tf32_atom(self):
-        self._both(_spec(warp_tile_k=2), "gfx950", "no tf32 MFMA atom")
+        self._both(_spec(warp_tile_k=2), "gfx950", "not a TF32 atom")
 
 
 class TestTf32KernelName(unittest.TestCase):

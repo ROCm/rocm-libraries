@@ -1693,12 +1693,7 @@ def _caps_jobs(
             and tf32_narrow_reason(variant, probe, knobs, arch)
         ):
             continue
-        try:
-            # Some specs validate on construction: a variant with no kernel
-            # for this dtype (fp32/tf32) raises there.
-            spec = make_spec(variant, probe, knobs, wave_size)
-        except ValueError:
-            continue
+        spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
             continue
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
@@ -1853,10 +1848,7 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        try:
-            spec = make_spec(variant, probe, knobs, identity.wave_size)
-        except ValueError as e:
-            raise LookupError(f"the direct grid cannot build this identity: {e}")
+        spec = make_spec(variant, probe, knobs, identity.wave_size)
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")

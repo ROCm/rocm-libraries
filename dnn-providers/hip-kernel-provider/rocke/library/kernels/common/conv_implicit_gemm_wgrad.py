@@ -126,8 +126,7 @@ from kernels.common._conv_implicit_gemm_common import (
     _TF32_LDS_LOAD_MAX,
     _load_mma_operand,
     _mfma_issues_per_mma,
-    _tf32_lds_stride_reason,
-    _tf32_register_reason,
+    _tf32_conv_spec_reason,
     emit_param_block,
     make_a_descriptor,
     make_a_descriptor_dynamic,
@@ -1237,83 +1236,9 @@ _LDS_B64_CONFLICT_PERIOD_32 = frozenset({"gfx942"})
 
 
 def _wgrad_tf32_reason(spec: "WgradConvSpec", arch: Optional[str] = None) -> str:
-    """Why ``spec``'s dtypes cannot build, or ``""`` if they can.
-
-    Shared by ``validate`` (``arch=None``) and ``is_valid_wgrad_spec`` so the
-    hard and soft gates cannot drift apart. Every non-TF32 spec returns ``""``
-    here unless it spells TF32 as a storage dtype, which the byte-sizing gates
-    below would otherwise size as a 2-byte type.
-
-    TF32 keeps fp32 in memory and in an M-outer LDS tile, and reinterprets each
-    fragment it reads from LDS as ``vec<tf32xN>``. What that rules out:
-
-    * ``lds_k_outer``: its operand fetch is the 16-bit transpose read
-      (``ds_read_b64_tr_b16``); there is no 32-bit form and its pad is derived
-      from a 16-bit bank analysis.
-    * ``async_dma``: wgrad's direct global->LDS load needs the K-outer tile.
-    * WMMA (wave32): no target's WMMA catalog has a TF32 atom.
-    * a non-fp32 dW: not wired; TF32 is an fp32-convolution compute mode.
-
-    and what it requires: an LDS row stride the fragment read stays aligned on.
-    The fragment is read as loads of at most four fp32 (``_load_mma_operand``:
-    gfx950's 8-wide fragment is two ``<4 x float>`` halves, gfx942's 2-wide one
-    a single ``<2 x float>``), each claiming ``min(N, 4) * 4`` bytes -- at most
-    16, the pool's own alignment. The column is a multiple of
-    N, so every row honours the claim when the stride is a multiple of
-    ``min(N, 4)`` elements (the forward kernel's ``_tf32_lds_stride_reason``
-    rule). The default pad of 8 satisfies it for every TF32 atom.
-    """
-    data = spec.data
-    why = data.mma_dtype_reason()
-    if why:
-        return why
-    if not data.is_tf32:
-        return ""
-    if data.dtype_d != "fp32":
-        return (
-            f"tf32 wgrad requires an fp32 dW (dtype_d='fp32'); got "
-            f"dtype_d={data.dtype_d!r}"
-        )
-    if spec.lds_k_outer:
-        return (
-            "tf32 wgrad does not support lds_k_outer: the K-outer operand fetch "
-            "is a 16-bit transpose read (ds_read_b64_tr_b16) with no 32-bit "
-            "form; tf32 uses the M-outer fp32 tile"
-        )
-    if spec.async_dma:
-        return (
-            "tf32 wgrad does not support async_dma: the wgrad direct "
-            "global->LDS load requires the K-outer tile, which tf32 cannot use"
-        )
-    if spec.wave_size != 64 or (arch is not None and _wgrad_mma_family(arch) == "wmma"):
-        return (
-            "tf32 wgrad is MFMA-only (gfx942 native xf32, gfx950 bf16x3): no "
-            f"WMMA target has a tf32 atom (wave_size={spec.wave_size}"
-            + (f", arch={arch}" if arch is not None else "")
-            + ")"
-        )
-    try:
-        atom = spec.atom
-    except (KeyError, ValueError):
-        return (
-            f"no tf32 MFMA atom {spec.warp_tile_m}x{spec.warp_tile_n}x"
-            f"{spec.warp_tile_k}: gfx942 has 16x16x8 and 32x32x4, gfx950 "
-            "16x16x32 and 32x32x16"
-        )
-    if arch is not None and _wgrad_mma_family(arch) == "mma":
-        try:
-            op = _resolve_wgrad_op(spec, arch)
-        except ValueError:
-            op = None  # an atom of another arch: the catalog check rejects it
-        why = _tf32_register_reason(spec, op)
-        if why:
-            return why
-    try:
-        layout = spec.effective_lds_layout()
-    except ValueError as e:
-        return str(e)
-    # A and B share the layout, so one stride covers both tiles.
-    return _tf32_lds_stride_reason(layout.row_stride, atom.a_per_lane) or ""
+    """The shared TF32 gate (:func:`_tf32_conv_spec_reason`) for wgrad, whose
+    direct global->LDS load (``async_dma``) needs the K-outer tile."""
+    return _tf32_conv_spec_reason(spec, arch, async_needs_k_outer=True)
 
 
 def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:

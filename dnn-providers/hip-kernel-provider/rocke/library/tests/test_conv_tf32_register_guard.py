@@ -116,3 +116,58 @@ def test_native_gfx942_and_fp32_are_exempt(name, make, valid):
     assert _GUARD not in why, (name, why)
     _ok, why = valid(make(_BIG, _FP32, (16, 16, 4)), "gfx950")
     assert _GUARD not in why, (name, why)
+
+
+# ---------------------------------------------------------------------------
+# One TF32 gate for every direction (review: dtype_d policy, no drift, the
+# arch-free fragment lookup).
+# ---------------------------------------------------------------------------
+
+
+def test_tf32_atom_shapes_are_unique_across_arches():
+    """The arch-free TF32 gate reads the fragment width off the MfmaAtom table
+    by (m, n, k). That is sound only while no (m, n, k) is a TF32 atom on two
+    arches with different fragment widths; a new atom that breaks it fails here
+    rather than letting validate() check the wrong width."""
+    from rocke.core.arch import ArchTarget, known_arches
+    from rocke.helpers.atoms import mfma_atom
+
+    arches = known_arches()
+    seen = {}
+    for arch in arches:
+        for op in ArchTarget.from_gfx(arch).mma.ops:
+            if op.a_dtype != "tf32":
+                continue
+            key = (op.m, op.n, op.k)
+            seen.setdefault(key, set()).add(op.a_frag_len)
+    assert seen, "no TF32 atom in any arch catalog"
+    for key, widths in seen.items():
+        assert len(widths) == 1, f"TF32 atom {key} has fragment widths {widths}"
+        assert mfma_atom("tf32", *key).a_per_lane in widths, key
+
+
+@pytest.mark.parametrize(
+    "name,make,valid", _DIRECTIONS, ids=[d[0] for d in _DIRECTIONS]
+)
+def test_tf32_needs_an_fp32_output_in_every_direction(name, make, valid):
+    data = ConvDataSpec("fp32", "fp32", "fp16", mma_dtype="tf32")
+    ok, why = valid(make(_SMALL, data, (16, 16, 32)), "gfx950")
+    assert not ok and "needs an fp32 output" in why, (name, why)
+
+
+def test_dgrad_and_wgrad_share_one_tf32_gate():
+    """The same violation gets the same message from both families."""
+    misaligned = dict(lds_k_pad=2)
+    for warp_tile in ((16, 16, 32), (16, 16, 24)):
+        msgs = set()
+        for make, valid in (
+            (_dgrad, is_valid_dgrad_spec),
+            (_wgrad, is_valid_wgrad_spec),
+        ):
+            spec = make(_SMALL, _TF32, warp_tile)
+            if warp_tile == (16, 16, 32):
+                from dataclasses import replace
+
+                spec = replace(spec, **misaligned)
+            msgs.add(valid(spec, "gfx950")[1])
+        assert len(msgs) == 1, msgs

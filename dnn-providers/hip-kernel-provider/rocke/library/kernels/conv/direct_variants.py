@@ -577,12 +577,7 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
-    try:
-        # Some specs validate on construction: a variant with no kernel for
-        # the problem's dtype (fp32 / tf32) raises there.
-        spec = make_direct_spec(variant, problem, knobs, wave_size)
-    except ValueError as e:
-        return None, str(e)
+    spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why

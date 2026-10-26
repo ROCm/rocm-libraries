@@ -69,6 +69,7 @@ matmuls per wave — letting one wave process 16 groups simultaneously
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from rocke.core.ir import (
@@ -496,11 +497,14 @@ def _smem_store_elems(
         )
 
 
+@lru_cache(maxsize=None)
 def _f32_mma_ops(arch: str, dtype: str, m: int):
     """Catalog MMA ops of size ``m x m`` that serve fp32-storage ``dtype``.
 
     ``"tf32"`` -> the arch's TF32 atoms; ``"fp32"`` -> the exact fp32 atoms
-    (16x16x4 / 32x32x2). Sorted by fragment length, narrowest first.
+    (16x16x4 / 32x32x2). Sorted by fragment length, narrowest first. Cached:
+    the kernel builders ask once per emitted MMA with loop-invariant
+    arguments, and the catalog never changes within a process.
     """
     from rocke.core.arch import ArchTarget
 
@@ -515,9 +519,10 @@ def _f32_mma_ops(arch: str, dtype: str, m: int):
         and op.m == m
         and op.n == m
     ]
-    return sorted(ops, key=lambda op: op.a_frag_len)
+    return tuple(sorted(ops, key=lambda op: op.a_frag_len))
 
 
+@lru_cache(maxsize=None)
 def _f32_mma_plan(arch: str, dtype: str, m: int, frag: int):
     """How one logical ``m x m`` MMA with ``frag`` K-elements per lane is issued.
 

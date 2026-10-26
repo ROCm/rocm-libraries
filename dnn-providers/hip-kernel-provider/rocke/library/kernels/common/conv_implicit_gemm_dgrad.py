@@ -101,8 +101,7 @@ from kernels.common._conv_implicit_gemm_common import (
     _TF32_LDS_LOAD_MAX,
     _load_mma_operand,
     _mfma_issues_per_mma,
-    _tf32_lds_stride_reason,
-    _tf32_reason,
+    _tf32_conv_spec_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_param_block,
@@ -1301,51 +1300,12 @@ class DgradConvSpec:
         return pipeline != "wavelet"
 
 
-def _mma_dtype_conflict(spec: "DgradConvSpec") -> str:
-    """Why the spec's storage/MMA dtype pair cannot build, or ``""``.
+def _mma_dtype_conflict(spec: "DgradConvSpec", arch: Optional[str] = None) -> str:
+    """The shared TF32 gate (:func:`_tf32_conv_spec_reason`) for dgrad.
 
-    Arch-agnostic, shared by ``validate`` and ``is_valid_dgrad_spec`` (which
-    adds the per-arch checks in :func:`_tf32_reason`). Everything past the
-    first check applies to TF32 only, so every other spec is judged exactly as
-    before.
+    ``validate`` calls it arch-free; ``is_valid_dgrad_spec`` with the arch.
     """
-    why = spec.data.mma_dtype_reason()
-    if why is not None:
-        return why
-    if not spec.data.is_tf32:
-        return ""
-    if spec.lds_k_outer:
-        # The K-outer B tile is read with ds_read_tr16_b64 / ds_load_tr16_b128,
-        # 16-bit transpose reads; there is no 32-bit LDS transpose read, so a
-        # TF32 kernel (fp32 tiles in LDS) keeps the M-outer B tile.
-        return (
-            "mma_dtype='tf32': lds_k_outer is not supported -- the K-outer "
-            "transpose read is 16-bit only and TF32 keeps fp32 tiles in LDS"
-        )
-    if spec.wave_size != 64:
-        return (
-            f"mma_dtype='tf32' is MFMA-only; wave_size={spec.wave_size} is a "
-            "WMMA target"
-        )
-    try:
-        frag = spec.atom.a_per_lane
-    except (KeyError, ValueError):
-        return (
-            f"mma_dtype='tf32': warp_tile "
-            f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is not a "
-            "TF32 atom on any arch"
-        )
-    layout = spec.lds_layout
-    if layout is not None and layout.swizzle is not None:
-        return (
-            "mma_dtype='tf32': a swizzled lds_layout is not supported -- the "
-            "fragment is read as contiguous fp32 vectors"
-        )
-    try:
-        _row = spec.effective_lds_layout().row_stride
-    except ValueError as e:
-        return str(e)
-    return _tf32_lds_stride_reason(_row, frag) or ""
+    return _tf32_conv_spec_reason(spec, arch)
 
 
 def _uniform_k_decode_conflict(spec: "DgradConvSpec") -> str:
@@ -1672,13 +1632,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     p = spec.problem
     if p.is_3d:
         return False, "dgrad only supports 2-D convolution currently"
-    _dtype_why = _mma_dtype_conflict(spec)
+    _dtype_why = _mma_dtype_conflict(spec, arch)
     if _dtype_why:
         return False, _dtype_why
-    if spec.data.is_tf32:
-        _tf32_why = _tf32_reason(spec, target, _dgrad_mma_family(arch), arch)
-        if _tf32_why is not None:
-            return False, _tf32_why
     if spec.max_sub_gemms < 1:
         return False, "max_sub_gemms must be at least 1"
     # Before the record count: a patch record exists for patch problems only.
