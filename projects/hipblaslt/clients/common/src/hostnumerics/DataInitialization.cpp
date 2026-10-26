@@ -220,7 +220,8 @@ namespace hipblaslt::hostnumerics
                                    uint64_t seed = defaultInitializationSeed)
         {
             if(!scalarTypeInfo(type).supportsNaN)
-                return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::randomRawBits(), seed);
+                return GenerationRecipe::realOnlyLastDimensionFastest(
+                    GenerationRecipe::randomRawBits(), seed);
             return bindComponentRecipe(type, GenerationRecipe::typeNaN(), complexPolicy, seed);
         }
 
@@ -278,8 +279,9 @@ namespace hipblaslt::hostnumerics
 
         GenerationRecipe sentinelRecipe(GenerationRecipe::Component component, bool complexOutput)
         {
-            return complexOutput ? GenerationRecipe::replicatedLastDimensionFastest(std::move(component), 0)
-                                 : GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), 0);
+            return complexOutput
+                       ? GenerationRecipe::replicatedLastDimensionFastest(std::move(component), 0)
+                       : GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), 0);
         }
 
         bool supportsExplicitFloatingSentinel(ScalarType type)
@@ -438,11 +440,13 @@ namespace hipblaslt::hostnumerics
                 if(role == MatrixRole::A)
                     return GenerationRecipe::realOnlyLastDimensionFastest(
                         GenerationRecipe::constant(
-                            {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}), 0);
+                            {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}),
+                        0);
                 if(role == MatrixRole::B)
                     return GenerationRecipe::realOnlyLastDimensionFastest(
                         GenerationRecipe::constant({.value = 2.0})
-                            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}), 0);
+                            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}),
+                        0);
                 return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0);
             }
             case hipblaslt_initialization::inf:
@@ -476,7 +480,8 @@ namespace hipblaslt::hostnumerics
                 throw std::runtime_error(
                     "Sparse-K initialization requires a matrix with an optional batch axis.");
 
-            generate(destination, GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
+            generate(destination,
+                     GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
             const size_t kExtent = shape[reductionAxis];
             if(kExtent == 0)
                 return;
@@ -489,7 +494,8 @@ namespace hipblaslt::hostnumerics
             for(size_t axis = 0; axis < order.size(); ++axis)
                 order[axis] = order.size() - 1 - axis;
             const auto nonzero = GenerationRecipe::realOnly(
-                GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}), {.seed = seed, .indexOrder = std::move(order)});
+                GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}),
+                {.seed = seed, .indexOrder = std::move(order)});
             for(size_t batch = 0; batch < batches; ++batch)
                 for(size_t row = 0; row < shape[1 - reductionAxis]; ++row)
                 {
@@ -599,9 +605,9 @@ namespace hipblaslt::hostnumerics
         {
             const uint64_t scaleSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
                 seed, role == MatrixRole::A ? 0x41 : 0x42);
-            generate(
-                generated.scales,
-                GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}), scaleSeed));
+            generate(generated.scales,
+                     GenerationRecipe::realOnlyLastDimensionFastest(
+                         GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}), scaleSeed));
             generated.refreshReference();
         }
         return generated;
@@ -655,11 +661,14 @@ namespace hipblaslt::hostnumerics
                                        ComplexGenerationPolicy::Cartesian,
                                        seed);
         case hipblaslt_initialization::inf:
-            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::typeInfinity(), seed);
+            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::typeInfinity(),
+                                                                  seed);
         case hipblaslt_initialization::neg_zero:
-            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::typeNegativeZero(), seed);
+            return GenerationRecipe::realOnlyLastDimensionFastest(
+                GenerationRecipe::typeNegativeZero(), seed);
         case hipblaslt_initialization::neg_inf:
-            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::typeNegativeInfinity(), seed);
+            return GenerationRecipe::realOnlyLastDimensionFastest(
+                GenerationRecipe::typeNegativeInfinity(), seed);
         case hipblaslt_initialization::nan:
             return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
         case hipblaslt_initialization::fp16_accumulator_probe:

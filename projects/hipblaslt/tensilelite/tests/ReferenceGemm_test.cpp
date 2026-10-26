@@ -94,8 +94,10 @@ TEST(ReferenceInvocationAdapter, ZeroOutputOrBatchIsNoOpWithoutBindings)
             problem, inputs, roc::hostnumerics::IndexSelection::allLastDimensionFastest());
         ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(translation));
         EXPECT_EQ(std::get<hostnumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
-        executeReferenceGemm(
-            problem, inputs, roc::hostnumerics::IndexSelection::allLastDimensionFastest(), automaticExecution);
+        executeReferenceGemm(problem,
+                             inputs,
+                             roc::hostnumerics::IndexSelection::allLastDimensionFastest(),
+                             automaticExecution);
     }
 }
 
@@ -110,8 +112,10 @@ TEST(ReferenceInvocationAdapter, ZeroReductionDoesNotRequireProductOrAddendBindi
     inputs.alpha = std::numeric_limits<float>::quiet_NaN();
     inputs.beta  = 0.0f;
 
-    executeReferenceGemm(
-        problem, inputs, roc::hostnumerics::IndexSelection::allLastDimensionFastest(), automaticExecution);
+    executeReferenceGemm(problem,
+                         inputs,
+                         roc::hostnumerics::IndexSelection::allLastDimensionFastest(),
+                         automaticExecution);
     EXPECT_EQ(output, (std::array<float, 6>{}));
 }
 
@@ -610,10 +614,10 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
 
     SolveGemmCPU(problem, inputs, elementsToValidate);
 
-    const auto selection
-        = roc::hostnumerics::IndexSelection::primeStrideLastDimensionFastest(problem.d().totalLogicalElements(),
-                                                          problem.d().totalAllocatedElements(),
-                                                          elementsToValidate);
+    const auto selection = roc::hostnumerics::IndexSelection::primeStrideLastDimensionFastest(
+        problem.d().totalLogicalElements(),
+        problem.d().totalAllocatedElements(),
+        elementsToValidate);
     const std::vector<size_t> selected = selection.indices(problem.d().totalLogicalElements());
     ASSERT_EQ(selected.size(), elementsToValidate);
 
@@ -2185,8 +2189,8 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
     inputs.scaleA       = &scaleA;
     inputs.scaleB       = &scaleB;
     inputs.batchOffsetD = 3 * sizeof(float);
-    auto invocation
-        = hostnumerics::translateGemmInvocation(problem, inputs, hn::IndexSelection::allLastDimensionFastest());
+    auto invocation     = hostnumerics::translateGemmInvocation(
+        problem, inputs, hn::IndexSelection::allLastDimensionFastest());
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
     auto adapter = std::get<hostnumerics::GemmInvocationAdapter>(std::move(invocation));
     std::vector<hn::FreivaldsPlan> plans;
@@ -2216,9 +2220,9 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
     }
     EXPECT_EQ(d, std::vector<float>(d.size(), -99.0f));
 
-    a[0] = 0.5f;
-    auto changed
-        = hostnumerics::translateGemmInvocation(problem, inputs, hn::IndexSelection::allLastDimensionFastest());
+    a[0]         = 0.5f;
+    auto changed = hostnumerics::translateGemmInvocation(
+        problem, inputs, hn::IndexSelection::allLastDimensionFastest());
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(changed));
     auto refused
         = std::get<hostnumerics::GemmInvocationAdapter>(changed).prepareFreivalds(0, {}, {});

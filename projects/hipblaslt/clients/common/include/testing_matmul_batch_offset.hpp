@@ -87,10 +87,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     using roc::hostnumerics::compare;
     using roc::hostnumerics::ComparisonOptions;
     using roc::hostnumerics::generate;
+    using roc::hostnumerics::IndexSelection;
     using roc::hostnumerics::Layout;
     using roc::hostnumerics::MatmulOptions;
     using roc::hostnumerics::multiply;
-    using roc::hostnumerics::IndexSelection;
     using roc::hostnumerics::ScalarType;
     using roc::hostnumerics::Shape;
     using roc::hostnumerics::Tensor;
@@ -141,7 +141,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
-                             .withAffineValueMapping({.offset = 1}), 0));
+                             .withAffineValueMapping({.offset = 1}),
+                         0));
     generateMatrices(hostB,
                      bRows,
                      bColumns,
@@ -150,7 +151,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
-                             .withAffineValueMapping({.offset = 1}), 0));
+                             .withAffineValueMapping({.offset = 1}),
+                         0));
     generateMatrices(hostC,
                      M,
                      N,
@@ -158,7 +160,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      cPlan,
                      roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
-                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}), 0));
+                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}),
+                         0));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);

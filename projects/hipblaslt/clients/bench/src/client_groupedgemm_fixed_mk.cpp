@@ -966,9 +966,9 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 {
                     using roc::hostnumerics::ComparisonOptions;
                     using roc::hostnumerics::EpilogueOptions;
+                    using roc::hostnumerics::IndexSelection;
                     using roc::hostnumerics::Layout;
                     using roc::hostnumerics::matmul;
-                    using roc::hostnumerics::IndexSelection;
                     using roc::hostnumerics::referenceEpilogueInto;
                     using roc::hostnumerics::ScalarType;
                     using roc::hostnumerics::Shape;
