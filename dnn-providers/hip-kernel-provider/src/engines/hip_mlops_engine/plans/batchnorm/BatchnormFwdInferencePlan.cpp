@@ -110,14 +110,27 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 {
     // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
+    auto yDataType = _inferenceParams.optActivation().has_value()
+                         ? _inferenceParams.activationOut()->data_type()
+                         : _inferenceParams.y()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
 
     const bool useFp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     const bool useBfp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useFp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useBfp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
     const auto* xDims = _inferenceParams.x()->dims();
@@ -242,6 +255,8 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
                                           activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FPUPCAST", useFp16Upcast);
+    options.update("HIP_PLUGIN_USE_BFPUPCAST", useBfp16Upcast);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);

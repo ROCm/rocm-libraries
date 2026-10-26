@@ -201,7 +201,9 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 {
     // Determine data type configuration
     auto xDataType = _trainingParams.x()->data_type();
-    auto yDataType = _trainingParams.y()->data_type();
+    auto yDataType = _trainingParams.optActivation().has_value()
+                         ? _trainingParams.activationOut()->data_type()
+                         : _trainingParams.y()->data_type();
     auto scaleDataType = _trainingParams.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
@@ -385,7 +387,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto activationMode = ActivationMode::PASTHRU;
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        activationMode = (*_trainingParams.optActivation()).mode;
+        activationMode = _trainingParams.optActivation()->mode;
     }
 
     // Prepare compilation options
@@ -397,8 +399,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                           _trainingParams.scale(),
                                           deviceProperties,
                                           activationMode);
-    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix || useFp16Upcast);
-    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix || useBfp16Upcast);
+    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FPUPCAST", useFp16Upcast);
+    options.update("HIP_PLUGIN_USE_BFPUPCAST", useBfp16Upcast);
     options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
     options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
     options.update("HIP_PLUGIN_BN_VARIANT", variant);

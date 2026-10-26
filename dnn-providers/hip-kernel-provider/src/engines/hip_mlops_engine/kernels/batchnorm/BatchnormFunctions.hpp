@@ -128,6 +128,7 @@ __forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
     }
 }
 
+template <typename FpPrecType_C, typename FpType_C>
 __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
@@ -138,7 +139,10 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int xstride,
                                                       unsigned int batchStride)
 {
-    if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::fpmix)
+    // For upcast, two _FLOAT values can only be stored in one _FLOAT_PREC value if _FLOAT is not the same type as _FLOAT_PREC (i.e. only during backwards)
+    if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::fpmix
+                 || (hip_kernel_provider::config::input_type_strategy == type_strategy::fpupcast
+                     && !std::is_same_v<FpPrecType_C, FpType_C>))
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -169,7 +173,10 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                          / 2 * 2;
         }
     }
-    else if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::bfpmix)
+    else if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::bfpmix
+                      || (hip_kernel_provider::config::input_type_strategy
+                              == type_strategy::bfpupcast
+                          && !std::is_same_v<FpPrecType_C, FpType_C>))
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -223,15 +230,15 @@ __forceinline__ __device__ FpPrecType_C loadFromStash(const FpType_C* stash,
                                    ? ystride
                                    : config::channels / config::vec_size_x * config::spatial_size;
 
-    unsigned int index = getStashIndex(vindex,
-                                       zgroupoffset,
-                                       ygroupoffset,
-                                       ystride,
-                                       xgrp_size,
-                                       xgrp_id,
-                                       xlid,
-                                       xstride,
-                                       batchStride);
+    unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(vindex,
+                                                               zgroupoffset,
+                                                               ygroupoffset,
+                                                               ystride,
+                                                               xgrp_size,
+                                                               xgrp_id,
+                                                               xlid,
+                                                               xstride,
+                                                               batchStride);
 
     if constexpr(config::stash_method == 0 || config::stash_method == 1)
     {
@@ -262,15 +269,15 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
                                    ? ystride
                                    : config::channels / config::vec_size_x * config::spatial_size;
 
-    unsigned int index = getStashIndex(vindex,
-                                       zgroupoffset,
-                                       ygroupoffset,
-                                       ystride,
-                                       xgrp_size,
-                                       xgrp_id,
-                                       xlid,
-                                       xstride,
-                                       batchStride);
+    unsigned int index = getStashIndex<FpPrecType_C, FpType_C>(vindex,
+                                                               zgroupoffset,
+                                                               ygroupoffset,
+                                                               ystride,
+                                                               xgrp_size,
+                                                               xgrp_id,
+                                                               xlid,
+                                                               xstride,
+                                                               batchStride);
 
     if constexpr(config::stash_method == 0 || config::stash_method == 1)
     {

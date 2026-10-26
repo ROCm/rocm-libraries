@@ -16,6 +16,8 @@ enum class type_strategy : int
     fp32,
     fpmix,
     bfpmix,
+    fpupcast,
+    bfpupcast,
 };
 
 namespace detail
@@ -27,6 +29,8 @@ template <int LayoutChannelLast,
           int UseFp32,
           int UseFpmix,
           int UseBfpmix,
+          int UseFpupcast,
+          int UseBfpupcast,
           int UseAMDGCN,
           int NrnOpId>
 struct proto_config
@@ -39,7 +43,9 @@ struct proto_config
     static_assert(UseFp32 == 0 || UseFp32 == 1, "UseFp32 must be 0 or 1");
     static_assert(UseFpmix == 0 || UseFpmix == 1, "UseFpmix must be 0 or 1");
     static_assert(UseBfpmix == 0 || UseBfpmix == 1, "UseBfpmix must be 0 or 1");
-    static_assert(UseFp32 + UseFpmix + UseBfpmix == 1,
+    static_assert(UseFpupcast == 0 || UseFpupcast == 1, "UseFpupcast must be 0 or 1");
+    static_assert(UseBfpupcast == 0 || UseBfpupcast == 1, "UseBfpupcast must be 0 or 1");
+    static_assert(UseFp32 + UseFpmix + UseBfpmix + UseFpupcast + UseBfpupcast == 1,
                   "only one of these configs can and must be chosen.");
     static_assert(UseAMDGCN == 0 || UseAMDGCN == 1, "UseAMDGCN must be 0 or 1");
     static_assert(NrnOpId >= 0 && NrnOpId <= 10,
@@ -49,7 +55,11 @@ struct proto_config
     static constexpr bool save_mean_variance = static_cast<bool>(SaveMeanVariance);
     static constexpr bool running_result = static_cast<bool>(RunningResult);
     static constexpr type_strategy input_type_strategy
-        = UseFp32 ? type_strategy::fp32 : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix);
+        = UseFp32 ? type_strategy::fp32
+                  : (UseFpmix ? type_strategy::fpmix
+                              : (UseBfpmix ? type_strategy::bfpmix
+                                           : (UseFpupcast ? type_strategy::fpupcast
+                                                          : type_strategy::bfpupcast)));
     static constexpr bool use_amdgcn = UseAMDGCN;
     static constexpr auto neuron_op = static_cast<ActivationMode>(NrnOpId);
 };
@@ -62,6 +72,8 @@ using config = detail::proto_config<HIP_PLUGIN_LAYOUT_CHANNEL_LAST,
                                     HIP_PLUGIN_USE_FP32,
                                     HIP_PLUGIN_USE_FPMIX,
                                     HIP_PLUGIN_USE_BFPMIX,
+                                    HIP_PLUGIN_USE_FPUPCAST,
+                                    HIP_PLUGIN_USE_BFPUPCAST,
                                     HIP_PLUGIN_USE_AMDGCN,
                                     HIP_PLUGIN_BN_NRN_OP_ID>;
 

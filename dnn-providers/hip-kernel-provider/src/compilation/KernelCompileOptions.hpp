@@ -125,6 +125,8 @@ private:
         add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
         add("HIP_PLUGIN_USE_FPMIX", false);
         add("HIP_PLUGIN_USE_BFPMIX", false);
+        add("HIP_PLUGIN_USE_FPUPCAST", false);
+        add("HIP_PLUGIN_USE_BFPUPCAST", false);
         add("HIP_PLUGIN_LAYOUT_CHANNEL_LAST", isLayoutChannelLast);
         add("HIP_PLUGIN_USE_AMDGCN", 0);
     }

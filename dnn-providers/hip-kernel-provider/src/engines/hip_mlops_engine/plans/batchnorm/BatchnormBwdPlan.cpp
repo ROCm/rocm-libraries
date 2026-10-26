@@ -257,8 +257,10 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                           _params.scale(),
                                           deviceProperties,
                                           activationMode);
-    options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix() || problem.useFp16Upcast());
-    options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix() || problem.useBfp16Upcast());
+    options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix());
+    options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix());
+    options.update("HIP_PLUGIN_USE_FPUPCAST", problem.useFp16Upcast());
+    options.update("HIP_PLUGIN_USE_BFPUPCAST", problem.useBfp16Upcast());
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
     options.update("HIP_PLUGIN_BN_BATCHES", problem.batches());
     options.update("HIP_PLUGIN_BN_CHANNELS", problem.channels());

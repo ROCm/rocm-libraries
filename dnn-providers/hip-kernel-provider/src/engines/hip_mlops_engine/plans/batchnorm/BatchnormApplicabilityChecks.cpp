@@ -447,6 +447,14 @@ void BatchnormValidator::checkBwdTensorConfigSupported(
     }
 
     checkTensorConfigSupported(ioTensorIds, affineTensorIds, statTensorIds, {}, true);
+
+    if(core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type()
+       != core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
 }
 
 void BatchnormValidator::checkBwdActivationTensorConfigSupported(
@@ -493,6 +501,14 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
 
     checkTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, true);
+
+    if(core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.x_tensor_uid()).data_type()
+       != core::utils::findTensorAttributes(_tensorMap, bnBwdAttr.dx_tensor_uid()).data_type())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm backward requires that x and dx are the same type");
+    }
 }
 
 // --- Activation Mode Validators ---
