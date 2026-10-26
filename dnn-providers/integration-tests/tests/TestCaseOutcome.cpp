@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -290,9 +289,10 @@ TEST(TestCaseOutcome, FinishedRecordCarriesEveryField)
     auto identity = makeIdentity();
     identity.purpose = CasePurpose::PROBE;
 
-    auto outcome = VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "does not take it")
-                       .atStage(OutcomeStage::QUERY)
-                       .asDecline();
+    const auto outcome
+        = VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "does not take it")
+              .atStage(OutcomeStage::QUERY)
+              .asDecline();
     const auto record
         = makeCaseOutcomeRecord(identity, outcome, CaseOutcome::DECLINED, /*other=*/false);
 

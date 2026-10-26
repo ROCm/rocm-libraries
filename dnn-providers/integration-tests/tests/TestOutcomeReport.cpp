@@ -80,6 +80,9 @@ protected:
     std::vector<CaseIdentity> _started;
     std::vector<CaseOutcomeRecord> _finished;
     std::vector<std::string> _events;
+    // What onlyFinished() answers when nothing was published, so a missing record fails
+    // the row once instead of crashing it.
+    const CaseOutcomeRecord _noRecord{};
 
     void SetUp() override
     {
@@ -101,7 +104,8 @@ protected:
     }
 
     std::shared_ptr<IntegrationTestBundle> bundle(bool includeGoldenOutput = true,
-                                                  EnforcementLevel level = EnforcementLevel::FULL)
+                                                  EnforcementLevel level
+                                                  = EnforcementLevel::FULL) const
     {
         auto loaded = fixtures::loadBundle(_tempDir, "Bundle", includeGoldenOutput);
         loaded->metadata.enforcementLevel = level;
@@ -121,10 +125,10 @@ protected:
     }
 
     // Drives SetUp() and, unless SetUp() skipped, TestBody() once.
-    void drive(IntegrationBundleVerificationHarness& harness,
-               std::shared_ptr<IntegrationTestBundle> loaded,
-               ::testing::TestPartResultArray* results,
-               SupportClaimLocator claimLocator = {})
+    static void drive(IntegrationBundleVerificationHarness& harness,
+                      std::shared_ptr<IntegrationTestBundle> loaded,
+                      ::testing::TestPartResultArray* results,
+                      SupportClaimLocator claimLocator = {})
     {
         harness.setBundle(std::move(loaded), "test/bundle", std::move(claimLocator));
         driveHarness(harness, results);
@@ -134,8 +138,7 @@ protected:
     const CaseOutcomeRecord& onlyFinished() const
     {
         EXPECT_EQ(_finished.size(), 1u);
-        static const CaseOutcomeRecord EMPTY{};
-        return _finished.empty() ? EMPTY : _finished.front();
+        return _finished.empty() ? _noRecord : _finished.front();
     }
 
     // Runs a pinned harness over the default bundle with `configure` applied to the mocks
@@ -185,7 +188,7 @@ TEST_F(TestOutcomeReport, MatchingOutputIsPassWithItsStartedRecordFirst)
 
 TEST_F(TestOutcomeReport, PurposeComesFromTheCaseMetadata)
 {
-    auto tagged = bundle();
+    const auto tagged = bundle();
     tagged->metadata.purpose = CasePurpose::PROBE;
     engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
 
@@ -464,7 +467,7 @@ TEST_F(TestOutcomeReport, PassWithAHarnessComplaintIsUnexercised)
 
 TEST_F(TestOutcomeReport, MetadataGuardSkipInSetUpStillReports)
 {
-    auto locked = bundle();
+    const auto locked = bundle();
     locked->metadata.gpuArchitecture = "gfx900";
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
                                                  makeEngineUnderTest());

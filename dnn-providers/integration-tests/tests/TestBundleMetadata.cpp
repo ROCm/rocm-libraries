@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -578,10 +579,10 @@ TEST(TestLoadBundleMetadata, PurposeIsUnsetWhenAbsent)
 
 TEST(TestLoadBundleMetadata, PurposeParsesEachValue)
 {
-    const std::pair<const char*, CasePurpose> cases[]
-        = {{R"({"format_version": 1, "purpose": "claim"})", CasePurpose::CLAIM},
-           {R"({"format_version": 1, "purpose": "probe"})", CasePurpose::PROBE},
-           {R"({"format_version": 1, "purpose": "regression"})", CasePurpose::REGRESSION}};
+    const std::array<std::pair<const char*, CasePurpose>, 3> cases
+        = {{{R"({"format_version": 1, "purpose": "claim"})", CasePurpose::CLAIM},
+            {R"({"format_version": 1, "purpose": "probe"})", CasePurpose::PROBE},
+            {R"({"format_version": 1, "purpose": "regression"})", CasePurpose::REGRESSION}}};
     for(const auto& [text, expected] : cases)
     {
         const TempBundle bundle(text);
