@@ -50,29 +50,40 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
 }  // namespace roc::hostnumerics::detail
 
 namespace roc::hostnumerics {
-// Convert a native numeric value without encoding it. Target is a non-reference
-// C++ arithmetic type (integers up to 64 bits) or std::complex with a float,
-// double, or long double component. Source may also be a C++ enum, which converts
-// using its underlying numeric value.
-// Callers must specify integer rounding and overflow policies. These apply only
-// to non-Boolean integer destinations. For such a destination T,
-// the result is cast<T>(f_T(g(x))): g rounds TowardZero or NearestEven, leaving
-// integral inputs unchanged; f_T applies Identity, Saturate, or ModuloWrap for T.
-// Identity leaves g(x) unchanged, Saturate clamps it to T's range, and ModuloWrap
-// reduces it modulo 2^N, where N is T's bit width, with a two's-complement
-// interpretation for signed T.
-// Identity requires g(x) to fit in T before the final cast. For non-Boolean
-// integer destinations, input must not be NaN, and infinity requires Saturate.
-// Conversion from complex to any non-complex Target, including bool, requires a
-// zero imaginary component. Complex destinations convert components separately.
-// Floating destinations use native casts: finite input must be within the
-// destination's finite range. Integer policies do not control floating overflow,
-// precision loss, or rounding. Boolean conversion tests for a nonzero value.
-// Policies must be valid when used. This function does not validate inputs or
-// report conversion failures.
-// For example, convertScalar<int8_t>(128.75, {IntegerRounding::TowardZero,
-// IntegerOverflow::ModuloWrap}) returns -128. NearestEven with Identity maps 2.5
-// to 2 and 3.5 to 4.
+// Convert a native numeric value. Encoded FP8/BF16 storage requires its codecs.
+// This function returns a value without numerical validation or failure reporting.
+//
+// Types:
+// Source and Target are C++ arithmetic types (integers up to 64 bits) or
+// std::complex with a float, double, or long double component. Target cannot be
+// a reference. An enum Source contributes its underlying integer value; see the
+// Level example below. A ScalarType enumerator identifies an encoding and does
+// not supply a numeric value stored in that encoding.
+//
+// Integer destinations:
+// Apply rounding, then range handling, then the destination cast. Both policies
+// must be supplied explicitly. See IntegerRounding and IntegerOverflow in
+// scalar_conversion_options.hpp for policy behavior and integer-input preconditions.
+// Policy enumerators must be valid when used.
+//
+// Other destinations:
+// Floating destinations use native casts; finite input must lie within the
+// destination's finite range. Floating and Boolean destinations ignore the
+// integer policies. Complex destinations convert their components separately;
+// a real source supplies a zero imaginary component. Conversion from complex to
+// any non-complex Target, including bool, requires a zero imaginary component.
+//
+// Examples:
+// const ScalarConversionOptions options{IntegerRounding::NearestEven,
+//                                       IntegerOverflow::Identity};
+// convertScalar<int>(3.5, options) == 4;
+// convertScalar<double>(3.5, options) == 3.5;  // Floating values are not rounded to integers.
+// convertScalar<bool>(0.25, options) == true;  // Boolean conversion tests for nonzero.
+// convertScalar<int>(std::complex<double>{3.5, 0.0}, options) == 4;
+// std::complex<double>{3.5, 1.0} is outside the domain for a non-complex Target.
+//
+// enum class Level : int16_t { High = 3 };
+// convertScalar<int>(Level::High, options) == 3;  // Converts the enum's integer value.
 template <typename Target, typename Source>
 Target convertScalar(Source source, const ScalarConversionOptions& options) noexcept {
     return detail::convertScalarValue<Target>(std::move(source), options);
