@@ -229,6 +229,21 @@ namespace rocsparse
         const auto wavefront_index = hipThreadIdx_x / WF_SIZE;
         const auto lane_index      = hipThreadIdx_x % WF_SIZE;
 
+        // Generic so that the straight-line path keeps its unsigned 32-bit
+        // column index.
+        const auto sample_column = [&](auto ell_column_index) {
+            for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
+            {
+                const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
+                const auto column_index = ell_col_ind[ell_idx] - ell_base;
+
+                if(column_index >= 0 && column_index < n)
+                {
+                    ell_val[ell_idx] = dense_val[column_index * ld + row_index];
+                }
+            }
+        };
+
         if constexpr(GRID_STRIDE)
         {
             for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * NUM_ELL_COLUMNS_PER_BLOCK;
@@ -239,16 +254,7 @@ namespace rocsparse
 
                 if(ell_column_index < ell_width)
                 {
-                    for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
-                    {
-                        const auto ell_idx = ELL_IND(row_index, ell_column_index, m, ell_width);
-                        const auto column_index = ell_col_ind[ell_idx] - ell_base;
-
-                        if(column_index >= 0 && column_index < n)
-                        {
-                            ell_val[ell_idx] = dense_val[column_index * ld + row_index];
-                        }
-                    }
+                    sample_column(ell_column_index);
                 }
             }
         }
@@ -259,16 +265,7 @@ namespace rocsparse
 
             if(ell_column_index < ell_width)
             {
-                for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
-                {
-                    const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
-                    const auto column_index = ell_col_ind[ell_idx] - ell_base;
-
-                    if(column_index >= 0 && column_index < n)
-                    {
-                        ell_val[ell_idx] = dense_val[column_index * ld + row_index];
-                    }
-                }
+                sample_column(ell_column_index);
             }
         }
     }
@@ -294,42 +291,27 @@ namespace rocsparse
 
         const int64_t blocks_x
             = (static_cast<int64_t>(ell_width) - 1) / NUM_ELL_COLUMNS_PER_BLOCK + 1;
-        const uint32_t grid_x = rocsparse::get_grid_size_x(handle, blocks_x, BLOCKSIZE);
 
-        if(grid_x < blocks_x)
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK, WF_SIZE, true, T>),
-                dim3(grid_x),
-                dim3(BLOCKSIZE),
-                0,
-                handle->stream,
-                m,
-                n,
-                dense_val,
-                ld,
-                ell_width,
-                ell_val,
-                ell_col_ind,
-                ell_base);
-        }
-        else
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK, WF_SIZE, false, T>),
-                dim3(grid_x),
-                dim3(BLOCKSIZE),
-                0,
-                handle->stream,
-                m,
-                n,
-                dense_val,
-                ld,
-                ell_width,
-                ell_val,
-                ell_col_ind,
-                ell_base);
-        }
-        return rocsparse_status_success;
+        return rocsparse::dispatch_grid_stride_x(
+            handle, blocks_x, BLOCKSIZE, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK,
+                                                        WF_SIZE,
+                                                        decltype(grid_stride)::value,
+                                                        T>),
+                    dim3(grid),
+                    dim3(BLOCKSIZE),
+                    0,
+                    handle->stream,
+                    m,
+                    n,
+                    dense_val,
+                    ld,
+                    ell_width,
+                    ell_val,
+                    ell_col_ind,
+                    ell_base);
+                return rocsparse_status_success;
+            });
     }
 }
