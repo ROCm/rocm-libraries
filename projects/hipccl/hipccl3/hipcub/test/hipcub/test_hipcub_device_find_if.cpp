@@ -358,3 +358,125 @@ TEST(HipcubDeviceFindIfTests, FindIfIterator)
         ASSERT_EQ(output, expected);
     }
 }
+
+struct NotDefaultConstructible
+{
+    int value_;
+
+    HIPCUB_HOST_DEVICE
+    constexpr explicit NotDefaultConstructible(int value)
+        : value_(value)
+    {}
+
+    HIPCUB_HOST_DEVICE
+    friend constexpr bool operator==(const NotDefaultConstructible& lhs,
+                                     const NotDefaultConstructible& rhs)
+    {
+        return lhs.value_ == rhs.value_;
+    }
+    HIPCUB_HOST_DEVICE
+    friend constexpr bool operator!=(const NotDefaultConstructible& lhs,
+                                     const NotDefaultConstructible& rhs)
+    {
+        return lhs.value_ != rhs.value_;
+    }
+
+    HIPCUB_HOST_DEVICE
+    constexpr operator int() const noexcept
+    {
+        return value_;
+    }
+};
+
+struct index_to_value
+{
+    HIPCUB_HOST_DEVICE
+    NotDefaultConstructible operator()(int i)
+    {
+        return NotDefaultConstructible{static_cast<int>(i)};
+    }
+};
+
+static_assert(!_HIPCUB_STD::is_default_constructible_v<NotDefaultConstructible>,
+              "NotDefaultConstructible should not be default constructible");
+
+TEST(HipcubDeviceFindIfTests, FindIfNonDefaultConstructible)
+{
+    using type           = NotDefaultConstructible;
+    using output_type    = int;
+    using predicate_type = value_predicate_t<type>;
+
+    constexpr size_t min_size = 1;
+    constexpr size_t max_size = 10000000;
+
+    hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Get size
+        const size_t size = test_utils::get_random_value(min_size, max_size, seed_value);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        const output_type find_value = static_cast<int>(size - 1);
+        SCOPED_TRACE(testing::Message() << "with find_value = " << find_value);
+
+        std::vector<type> input(size, NotDefaultConstructible(0));
+        output_type       i = 0;
+        std::generate(input.begin(), input.end(), [&i] { return NotDefaultConstructible(i++); });
+
+        type* d_input;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(type)));
+        HIP_CHECK(
+            hipMemcpy(d_input, input.data(), input.size() * sizeof(type), hipMemcpyHostToDevice));
+        output_type* d_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, sizeof(output_type)));
+
+        // compare function
+        predicate_type predicate{NotDefaultConstructible(find_value)};
+
+        // Get size of d_temp_storage
+        size_t temp_storage_size_bytes;
+        HIP_CHECK(hipcub::DeviceFind::FindIf(nullptr,
+                                             temp_storage_size_bytes,
+                                             d_input,
+                                             d_output,
+                                             predicate,
+                                             size,
+                                             stream));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        void* d_temp_storage{};
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+        // Run
+        HIP_CHECK(hipcub::DeviceFind::FindIf(d_temp_storage,
+                                             temp_storage_size_bytes,
+                                             d_input,
+                                             d_output,
+                                             predicate,
+                                             size,
+                                             stream));
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        output_type output{};
+        HIP_CHECK(hipMemcpy(&output, d_output, sizeof(type), hipMemcpyDeviceToHost));
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
+
+        // Check
+        ASSERT_EQ(output, find_value);
+    }
+}

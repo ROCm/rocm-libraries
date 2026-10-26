@@ -107,14 +107,22 @@ struct find_if_impl_kernels
 
             unsigned int thread_first_index = identity;
 
+            // Necessary for non-default-constructible input types support
+            union raw_to_type
+            {
+                constexpr raw_to_type() : items_raw{} {};
+                char items_raw[sizeof(type) * items_per_thread];
+                type items[items_per_thread];
+            };
+            raw_to_type items;
+
             if(block_offset + items_per_block <= size)
             {
-                type items[items_per_thread];
-                block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
+                block_load_direct_striped<block_size>(thread_id, input + block_offset, items.items);
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < items_per_thread; ++i)
                 {
-                    if(predicate(items[i]))
+                    if(predicate(items.items[i]))
                     {
                         thread_first_index = min(thread_first_index, i);
                     }
@@ -124,10 +132,9 @@ struct find_if_impl_kernels
             {
                 const unsigned int valid = size - block_offset;
 
-                type items[items_per_thread];
                 block_load_direct_striped<block_size>(thread_id,
                                                       input + block_offset,
-                                                      items,
+                                                      items.items,
                                                       valid);
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < items_per_thread; ++i)
