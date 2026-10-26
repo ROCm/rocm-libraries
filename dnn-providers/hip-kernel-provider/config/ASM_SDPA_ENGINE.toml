@@ -23,22 +23,101 @@ version = 1
 #   rtol: relative tolerance
 #
 
+# SdpaBackward defect DEF-03 (test plan sdpa-bwd.md §4.8): the ASM kernel's fp16
+# dV loses precision when Skv <= 2 and Sq >= 512 (4 to 18 ulps, growing with Sq;
+# bf16 is bit-exact). The fp16 probes stay in their levels: every ASM run reports
+# them as skipped, and any other engine runs them. Delete this entry when the
+# kernel is fixed or the engine declines these shapes.
+[[test_skips]]
+filters = [
+    "*_SdpaBackward_*.def03a_*_fp16_*",
+    "*_SdpaBackward_*.def03d_*_fp16_*",
+    "*_SdpaBackward_*.x07_*_fp16_*",
+]
+reason = "DEF-03: fp16 dV loses precision at Skv <= 2 and Sq >= 512 (AITER kernel); tracking issue to be filed"
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
-# forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here.
-# Calibrated on gfx942 against the CPU reference, with O and the LSE derived from
-# Q, K and V by the bundle fill, over every SdpaBackward case and eight seeds: the
-# worst |GPU - CPU| was 7.8e-3 for bf16 and 2.0e-3 for fp16, about one bf16 and two
-# fp16 ulps of the largest gradient (|dV| up to 2.1). Each entry leaves about 3x
-# that at the worst element, and an all-zero output fails every case.
-# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
-# in "_fp16_" keeps it from also matching "bfp16_".
-[[tolerance_overrides]]
-filters = ["*_SdpaBackward_*.*_fp16_*"]
-atol = 2.5e-3
-rtol = 2.5e-3
+# forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here:
+# one per tolerance class and dtype of the SdpaBackward test plan. The generator
+# writes the block between the BEGIN and END lines.
+# BEGIN SdpaBackward tolerance classes, written by generate_sdpa_bwd_bundles.py --toml
+# Plan sdpa-bwd.md §6.2. Each SdpaBackward case id ends with its tolerance class token
+# after its dtype token, so every id matches exactly one row. The class follows from the
+# case's shape, band, scale and value domain and a NumPy estimate of max|ref| per
+# gradient: atol <= 0.1 x the smallest non-zero max|ref| (the guard), and a
+# same-precision kernel model passes with margin >= 2.5 against an FP32-accumulating
+# reference. rtol is two ulps of the dtype. Do not edit: rerun the generator.
 
+# class D, bf16: diffuse softmax
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_*.*_bfp16_*"]
-atol = 1e-2
-rtol = 1e-2
+filters = ["*_SdpaBackward_*.*_bfp16_*_told"]
+atol = 0.0025
+rtol = 0.016
+
+# class D, fp16: diffuse softmax
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_told"]
+atol = 0.00075
+rtol = 0.004
+
+# class DL, bf16: diffuse softmax, long rows (bf16, Skv > 1024)
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_toldl"]
+atol = 0.0012
+rtol = 0.016
+
+# class P, bf16: peaked softmax: causal, narrow window, Sq > Skv bottom-right, long Sq accumulation
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolp"]
+atol = 0.012
+rtol = 0.016
+
+# class P, fp16: peaked softmax: causal, narrow window, Sq > Skv bottom-right, long Sq accumulation
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolp"]
+atol = 0.003
+rtol = 0.004
+
+# class S, bf16: short query side, Sq <= 17 (decode-like); tiny dK, dV
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tols"]
+atol = 0.0003
+rtol = 0.016
+
+# class S, fp16: short query side, Sq <= 17 (decode-like); tiny dK, dV
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tols"]
+atol = 0.0002
+rtol = 0.004
+
+# class U, bf16: unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolu"]
+atol = 0.025
+rtol = 0.016
+
+# class U, fp16: unscaled or high-spread logits (lambda >= 2): unset scale, scale ~1, peaked value domain
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolu"]
+atol = 0.003
+rtol = 0.004
+
+# class K1, bf16: Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolk1"]
+atol = 0.0003
+rtol = 0.016
+
+# class K1, fp16: Skv <= 2: dQ and dK cancel to about 0 at Skv = 1; dV is a sum of dO rows
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp16_*_tolk1"]
+atol = 0.0003
+rtol = 0.004
+
+# class F32, fp32: fp32 IO (uncalibrated)
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_fp32_*_tolf32"]
+atol = 1e-05
+rtol = 1e-05
+# END SdpaBackward tolerance classes
