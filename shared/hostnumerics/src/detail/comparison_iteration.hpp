@@ -25,31 +25,7 @@ namespace roc::hostnumerics::detail {
 template <typename Function>
 void forEachSelectedIndex(const Shape& shape, const IndexSelection& selection,
                           Function&& function) {
-    const IndexIteration iteration(shape, selection.indexOrder(shape.rank()));
-    const size_t total = iteration.count();
-    std::vector<size_t> coordinates(shape.rank(), 0);
-    if (selection.kind() == IndexSelectionKind::Explicit) {
-        for (const size_t logicalIndex : selection.indices(total)) {
-            iteration.coordinates(logicalIndex, coordinates);
-            function(logicalIndex, std::span<const size_t>(coordinates));
-        }
-        return;
-    }
-    if (selection.selectsAll()) {
-        for (size_t logicalIndex = 0; logicalIndex < total; ++logicalIndex) {
-            iteration.coordinates(logicalIndex, coordinates);
-            function(logicalIndex, std::span<const size_t>(coordinates));
-        }
-        return;
-    }
-    size_t selected = 0;
-    for (size_t logicalIndex = selection.first();
-         logicalIndex < total && selected < selection.maxElements(); ++selected) {
-        iteration.coordinates(logicalIndex, coordinates);
-        function(logicalIndex, std::span<const size_t>(coordinates));
-        if (selection.stride() > std::numeric_limits<size_t>::max() - logicalIndex) break;
-        logicalIndex += selection.stride();
-    }
+    shape.forEachCoordinate(selection, std::forward<Function>(function));
 }
 
 ComparisonValue loadComparisonValue(const Tensor& view, ptrdiff_t logicalOffset);

@@ -84,7 +84,7 @@ void testPartialIndexSelection() {
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
         d, ScalarType::Float32);
-    problem.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({0, 3});
+    problem.outputSelection = IndexSelection(std::vector<size_t>({0, 3}), LastDimensionFastest{});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
     require(!support.supported &&

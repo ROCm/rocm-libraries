@@ -63,7 +63,7 @@ inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expe
                                       const ComparisonOptions& options) {
     // This is only an early success test. A byte mismatch falls through to the numerical
     // comparison because different encodings can still compare equal (for example, signed zero).
-    if (!options.selection.selectsAll() || observed.type() != expected.type() ||
+    if (!observed.shape().selectsAll(options.selection) || observed.type() != expected.type() ||
         observed.layout() != expected.layout() ||
         (!options.equalNaNs && scalarTypeInfo(observed.type()).supportsNaN))
         return false;
@@ -151,16 +151,13 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonReport result;
         result.allCloseEvaluated = true;
-        const bool selectsContiguousPrefix =
-            options.selection.kind() == IndexSelectionKind::Strided &&
-            options.selection.first() == 0 && options.selection.stride() == 1;
-        if ((options.selection.selectsAll() || selectsContiguousPrefix) &&
+        const auto* range =
+            std::get_if<roc::hostnumerics::IndexRange>(&options.selection.flatIndices());
+        const bool selectsContiguousPrefix = range && range->first == 0 && range->stride == 1;
+        if ((observed.shape().selectsAll(options.selection) || selectsContiguousPrefix) &&
             observed.shape().rank() != 0) {
             const Shape& shape = observed.shape();
-            const size_t selectedTotal =
-                options.selection.selectsAll()
-                    ? shape.elementCount()
-                    : std::min(shape.elementCount(), options.selection.maxElements());
+            const size_t selectedTotal = shape.selectedCount(options.selection);
             if (selectedTotal == 0) return result;
             constexpr size_t minimumElementsPerThread = 500'000;
             const size_t partitionCount = static_cast<size_t>(
@@ -173,7 +170,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                         evenlyPartitionedRange(selectedTotal, partitionCount, partition);
                     forEachLayoutOffsetPairRange(
                         observed.layout(), expected.layout(),
-                        options.selection.indexOrder(observed.shape().rank()), first, pastLast,
+                        observed.shape().indexOrder(options.selection), first, pastLast,
                         [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                             bool close = false;
                             if constexpr (scalarTypeInfo(Tag::type).category ==

@@ -473,7 +473,7 @@ class PermutationGenerationTests(unittest.TestCase):
         observed_values[tuple(point)] = 9
         observed = hv.from_numpy(observed_values)
         options = hv.ComparisonOptions()
-        options.selection = hv.IndexSelection.explicit_indices([13], index_order=order)
+        options.selection = hv.IndexSelection([13], order)
         report = hv.compare(observed, expected, options)
         self.assertFalse(report.passed)
         self.assertEqual(report.reported_mismatches[0].coordinates, point)
@@ -485,7 +485,7 @@ class PermutationGenerationTests(unittest.TestCase):
                 ).with_index_order(invalid)
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
             with self.assertRaises(RuntimeError):
-                options.selection = hv.IndexSelection.all(index_order=invalid)
+                options.selection = hv.IndexSelection(hv.IndexRange.all(), invalid)
                 hv.compare(observed, expected, options)
 
     def test_contiguous_axis_order_conversion_and_selections(self):
@@ -502,25 +502,25 @@ class PermutationGenerationTests(unittest.TestCase):
         converted = source.to(hv.ScalarType.Float64)
         np.testing.assert_array_equal(hv.to_numpy(converted, dtype=None), expected)
         for selection in (
-            hv.IndexSelection.all(index_order=order),
-            hv.IndexSelection.strided(
-                2, 3, index_order=order, max_elements=sys.maxsize * 2 + 1
-            ),
-            hv.IndexSelection.explicit_indices([1, 13, 23], index_order=order),
+            hv.IndexSelection(hv.IndexRange.all(), order),
+            hv.IndexSelection(hv.IndexRange(2, 3, sys.maxsize * 2 + 1), order),
+            hv.IndexSelection([1, 13, 23], order),
         ):
             options = hv.ComparisonOptions()
             options.selection = selection
             report = hv.compare(source, converted, options)
             self.assertTrue(report.passed)
-            self.assertEqual(report.compared, len(selection.indices(24)))
+            self.assertEqual(
+                report.compared, hv.Shape([2, 3, 4]).selected_count(selection)
+            )
 
     def test_invalid_order_is_rejected_for_empty_or_identical_comparisons(self):
         for dimensions in ((2, 3, 4), (2, 0, 4), ()):
             tensor = hv.Tensor(hv.ScalarType.Float32, hv.Shape(dimensions))
             options = hv.ComparisonOptions()
             for factory in (
-                lambda: hv.IndexSelection.all(index_order=[0, 0, 2]),
-                lambda: hv.IndexSelection.explicit_indices([], index_order=[0, 0, 2]),
+                lambda: hv.IndexSelection(hv.IndexRange.all(), [0, 0, 2]),
+                lambda: hv.IndexSelection([], [0, 0, 2]),
             ):
                 with self.assertRaises(RuntimeError):
                     options.selection = factory()

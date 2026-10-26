@@ -265,12 +265,12 @@ namespace TensileLite::Client
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::GeluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::GeluDerivativeActivation{});
+                             roc::hostnumerics::GeluDerivativeActivation{});
         case ActivationType::DRelu:
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::ReluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::ReluDerivativeActivation{});
+                             roc::hostnumerics::ReluDerivativeActivation{});
         case ActivationType::Silu:
             return roc::hostnumerics::ActivationFunction(roc::hostnumerics::SiluActivation{});
         case ActivationType::Swish:
@@ -369,7 +369,7 @@ namespace TensileLite::Client
         for(size_t axis = 0; axis < order.size(); ++axis)
             order[axis] = order.size() - 1 - axis;
         if(elementsToValidate == 0 || elementsToValidate >= *logicalCount)
-            return IndexSelection::all(order);
+            return IndexSelection(roc::hostnumerics::IndexRange::all(), order);
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
         const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
@@ -378,7 +378,8 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::PrimeStrideOverflow));
         }
-        return IndexSelection::strided(0, *stride, std::numeric_limits<size_t>::max(), order);
+        return IndexSelection(
+            roc::hostnumerics::IndexRange(0, *stride, std::numeric_limits<size_t>::max()), order);
     }
 
     inline roc::hostnumerics::IndexSelection

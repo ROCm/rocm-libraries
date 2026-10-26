@@ -91,8 +91,8 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         )
 
         selected = hv.ComparisonOptions()
-        selected.selection = hv.IndexSelection.strided(
-            0, 2, index_order=[1, 0], max_elements=sys.maxsize * 2 + 1
+        selected.selection = hv.IndexSelection(
+            hv.IndexRange(0, 2, sys.maxsize * 2 + 1), [1, 0]
         )
         selected_report = hv.compare(observed, expected, selected)
         expected_flat_fortran = expected_values.reshape(-1, order="F")

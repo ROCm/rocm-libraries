@@ -45,7 +45,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
                 conjugate_a=False,
                 conjugate_b=False,
-                output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+                output_selection=hv.IndexSelection(
+                    hv.IndexRange.all(), hv.LastDimensionFastest()
+                ),
                 backend=hv.GemmBackend.Automatic,
             )
         )
@@ -89,7 +91,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -111,7 +115,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -136,7 +142,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -159,7 +167,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -223,7 +233,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
         ).output
         np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
 
@@ -242,7 +254,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -275,7 +289,9 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,

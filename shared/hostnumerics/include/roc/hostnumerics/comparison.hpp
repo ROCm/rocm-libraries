@@ -95,7 +95,7 @@ struct ComparisonOptions {
     // `reportedComparisons`. `maxReportedMismatches` caps each reported vector independently.
     bool reportMatchingElements = false;
     size_t maxReportedMismatches = 10;
-    IndexSelection selection = IndexSelection::allLastDimensionFastest();
+    IndexSelection selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
 };
 
 struct ComparisonValue {
@@ -105,7 +105,7 @@ struct ComparisonValue {
 };
 
 /// One reported logical tensor element. `index` is the selected element's linear logical index in
-/// `ComparisonOptions::selection.indexOrder(rank)`; `coordinates` are tensor coordinates; offsets
+/// `Shape::indexOrder(ComparisonOptions::selection)`; `coordinates` are tensor coordinates; offsets
 /// are element offsets from the start of each tensor's storage, not byte offsets. Reported values
 /// are normalized to double and can round wide integers, while integer `absoluteDifference` is
 /// computed exactly before conversion to double. For a complex value, `absoluteDifference` is the

@@ -109,29 +109,4 @@ bool elementwiseStatisticsOnlyComparison(const ComparisonOptions& options) {
            !options.maximumUlpTolerance;
 }
 
-bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
-                        std::span<const size_t> order, std::span<const ptrdiff_t> observedStrides,
-                        std::span<const ptrdiff_t> expectedStrides, ptrdiff_t& observedOffset,
-                        ptrdiff_t& expectedOffset) {
-    const auto advanceDimension = [&](size_t dimension) {
-        if (coordinates[dimension] + 1 < shape.dimensions()[dimension]) {
-            ++coordinates[dimension];
-            observedOffset += observedStrides[dimension];
-            expectedOffset += expectedStrides[dimension];
-            return true;
-        }
-        observedOffset -=
-            static_cast<ptrdiff_t>(coordinates[dimension]) * observedStrides[dimension];
-        expectedOffset -=
-            static_cast<ptrdiff_t>(coordinates[dimension]) * expectedStrides[dimension];
-        coordinates[dimension] = 0;
-        return false;
-    };
-
-    for (size_t position = shape.rank(); position > 0; --position) {
-        const size_t axis = order[position - 1];
-        if (advanceDimension(axis)) return true;
-    }
-    return false;
-}
 }  // namespace roc::hostnumerics::detail

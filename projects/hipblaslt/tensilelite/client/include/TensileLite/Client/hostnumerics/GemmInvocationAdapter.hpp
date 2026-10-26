@@ -45,10 +45,10 @@ namespace TensileLite::Client::hostnumerics
 
     struct TranslatedGemmBatch
     {
-        TranslatedGemmBatch(TranslatedGemmBatch&&) noexcept = default;
+        TranslatedGemmBatch(TranslatedGemmBatch&&) noexcept            = default;
         TranslatedGemmBatch& operator=(TranslatedGemmBatch&&) noexcept = default;
 
-        TranslatedGemmBatch(const TranslatedGemmBatch&) = delete;
+        TranslatedGemmBatch(const TranslatedGemmBatch&)            = delete;
         TranslatedGemmBatch& operator=(const TranslatedGemmBatch&) = delete;
 
         roc::hostnumerics::MatmulOptions& matmulOptions()
@@ -85,8 +85,8 @@ namespace TensileLite::Client::hostnumerics
         {
             std::span<std::byte>              destination;
             roc::hostnumerics::Tensor         source;
-            roc::hostnumerics::IndexSelection selection
-                = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
+            roc::hostnumerics::IndexSelection selection = roc::hostnumerics::IndexSelection(
+                roc::hostnumerics::IndexRange::all(), roc::hostnumerics::LastDimensionFastest{});
         };
 
         struct BiasReduction
@@ -135,8 +135,8 @@ namespace TensileLite::Client::hostnumerics
         std::optional<roc::hostnumerics::Tensor> scaleAlpha;
         std::optional<roc::hostnumerics::Tensor> scaleA;
         std::optional<roc::hostnumerics::Tensor> scaleB;
-        roc::hostnumerics::IndexSelection        outputSelection
-            = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
+        roc::hostnumerics::IndexSelection outputSelection = roc::hostnumerics::IndexSelection(
+            roc::hostnumerics::IndexRange::all(), roc::hostnumerics::LastDimensionFastest{});
         std::optional<BoundEpilogue> epilogue;
         std::optional<BiasReduction> biasReduction;
         std::vector<CopyBack>        copyBacks;
@@ -160,7 +160,7 @@ namespace TensileLite::Client::hostnumerics
         GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept;
         GemmInvocationAdapter& operator=(GemmInvocationAdapter&&) noexcept;
 
-        GemmInvocationAdapter(const GemmInvocationAdapter&) = delete;
+        GemmInvocationAdapter(const GemmInvocationAdapter&)            = delete;
         GemmInvocationAdapter& operator=(const GemmInvocationAdapter&) = delete;
 
         size_t batchCount() const;

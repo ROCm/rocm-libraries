@@ -59,8 +59,8 @@ void testComparisonMetrics() {
                 !nonFiniteNormResult.passed(),
             "Non-finite norm invalidation did not produce a failing NaN ratio.");
     ComparisonOptions sampledMetrics = metrics;
-    sampledMetrics.selection =
-        IndexSelection::stridedLastDimensionFastest(1, 2, std::numeric_limits<size_t>::max());
+    sampledMetrics.selection = IndexSelection(IndexRange(1, 2, std::numeric_limits<size_t>::max()),
+                                              LastDimensionFastest{});
     const auto sampledMetricResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
                 Tensor::copyNativeStorage(std::span<const double>(expected)), sampledMetrics);
@@ -156,7 +156,7 @@ void testComparisonMetrics() {
     ComparisonOptions magnitudeAllCloseOnly = allCloseComparisonOptions(1.0, 0.0, false);
     magnitudeAllCloseOnly.computeElementwiseStatistics = false;
     magnitudeAllCloseOnly.computeFrobenius = false;
-    magnitudeAllCloseOnly.selection = IndexSelection::all(std::vector<size_t>{0});
+    magnitudeAllCloseOnly.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{0});
     require(!compare(Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseObserved)),
                      Tensor::copyNativeStorage(

@@ -1013,7 +1013,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     ComparisonOptions comparisonOptions{.absoluteTolerance     = tolerance,
                                                         .relativeTolerance     = 2.0 * tolerance,
                                                         .maxReportedMismatches = 10};
-                    comparisonOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+                    comparisonOptions.selection = IndexSelection(
+                        roc::hostnumerics::IndexRange::all(), std::vector<size_t>{1, 0});
                     const Layout comparisonLayout(
                         Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]}, i3 * stride_d[i]);
                     const auto comparison = roc::hostnumerics::compare(

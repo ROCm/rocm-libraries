@@ -210,7 +210,9 @@ imports infer the storage type from the array dtype.
 `to_numpy` requires a dtype argument; passing `None` selects the decoded mapping
 returned by `default_decoded_dtype`.
 
-IndexSelection selects logical indices independently of tensor storage. Factories with an order argument require a permutation of the tensor's axes, listed from slowest to fastest. The LastDimensionFastest factories choose ascending axes explicitly. `indexOrder(rank)` returns the chosen axes and checks the rank; an explicit empty order is valid only for rank zero. Shape and Layout also require a complete order or a function named for the chosen order.
+An IndexSelection defines an ordered set of coordinates to visit once paired with a Shape. It owns either an IndexRange with required first, stride and maximum count, or a sorted unique list of flat indices, plus an explicit axis permutation or the named LastDimensionFastest choice. Shape supplies selected counts, bounds checks, flat-index materialization and streaming coordinate visitation. Explicit empty orders are valid only for rank zero; an explicit index outside the shape fails before traversal. Full coverage is a range starting at zero with stride one and a sufficient maximum count. There is no separate All kind. Layout converts visited coordinates into storage offsets.
+
+C++ operation consumers use Shape::forEachCoordinate without expanding ranges into flat-index lists. Shape::selectedIndices and Python Shape.selected_coordinates explicitly materialize results when requested. primeIndexRange retains the allocated-element quotient, approximate sampling count and zero-request full coverage policy.
 
 The `hostnumerics` module mirrors the tensor, generation, operation, and
 comparison APIs shown in the Python tutorial above. Python operations accept
