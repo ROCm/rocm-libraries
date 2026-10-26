@@ -156,4 +156,6 @@ def test_i64_decode_matches_reference(gfx942_torch, num_query_heads, num_kv_head
         ref = torch.einsum("hgt,thd->hgd", scores.softmax(-1), values).reshape(
             -1, head_size
         )
-        torch.testing.assert_close(out[b].float(), ref, atol=1e-2, rtol=0)
+        # The output's spread is about 0.05 (max |o| about 0.2), so a looser
+        # bound could hide one misaddressed page.
+        torch.testing.assert_close(out[b].float(), ref, atol=2e-3, rtol=0)

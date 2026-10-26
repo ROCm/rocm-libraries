@@ -551,17 +551,16 @@ static void rocke__fast_paged_kv_voff_split(rocke_gfx942_attn2d_build_ctx_t* ctx
 
 /* ==========================================================================
  * Per-page i64 K/V resources (Python PAGE_RSRC_I64, _tile_pages, _page_voff).
- * With i64 K/V addressing, whole pages per tile and copies that never cross a
- * page, the tile's page ids are loaded once and each page gets one buffer
- * resource; a copy then needs only its offset within the page.
+ * With i64 K/V addressing the tile's page ids are loaded once and each page gets
+ * one buffer resource; a copy then needs only its offset within the page. The
+ * non-fast K/V loaders are i32-only otherwise.
  * ========================================================================== */
 
 #define ROCKE__MAX_TILE_PAGES 16
 
 static bool rocke__page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
-    return ctx->I64_KV_ADDR && !ctx->FAST_PAGED_KV_DESC && ctx->T % ctx->BS == 0
-           && (ctx->BS * ctx->HD) % rocke__kv_halves_per_call(ctx) == 0;
+    return ctx->I64_KV_ADDR && !ctx->FAST_PAGED_KV_DESC;
 }
 
 static int rocke__calls_per_page(const rocke_gfx942_attn2d_build_ctx_t* ctx)
@@ -580,6 +579,21 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
 {
     rocke_ir_builder_t* b = ctx->b;
     int n_pages = ctx->N_BLOCKS_PER_TILE;
+    /* The spec and supports_tiled_2d guarantee both (Python raises the same). */
+    int halves_per_call = rocke__kv_halves_per_call(ctx);
+    if(ctx->T % ctx->BS != 0 || (ctx->BS * ctx->HD) % halves_per_call != 0)
+    {
+        b->status = ROCKE_ERR_VALUE;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "i64 K/V copies need whole pages per tile and per copy "
+                 "(T=%d, BS=%d, HD=%d, halves per copy=%d)",
+                 ctx->T,
+                 ctx->BS,
+                 ctx->HD,
+                 halves_per_call);
+        return false;
+    }
     if(n_pages > ROCKE__MAX_TILE_PAGES)
     {
         b->status = ROCKE_ERR_VALUE;
@@ -695,8 +709,7 @@ void rocke_gfx942_attn2d_issue_k_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
             /* Non-fast paged-KV (N_BLOCKS_PER_TILE==1 / multi-block):
              *   linear_half = call*KV_HALVES_PER_CALL + lane_half_base
              *   voff, _ = paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=)
-             * I64_KV_ADDR reaches here only without whole pages per copy; its
-             * offset_i64_split is not ported, so the plain i32 voffset is used. */
+             * i32-only: I64_KV_ADDR takes the per-page path above. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
@@ -830,8 +843,7 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
         {
             /* Non-fast paged-KV: voff = paged_kv_desc.offset(tile_idx=,
              * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=).
-             * I64_KV_ADDR reaches here only without whole pages per copy; its
-             * offset_i64_split is not ported, so the plain i32 voffset is used. */
+             * i32-only: I64_KV_ADDR takes the per-page path above. */
             rocke_value_t* linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
