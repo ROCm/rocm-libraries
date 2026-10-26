@@ -192,6 +192,24 @@ def test_scaled_selection_names_the_scale_block_size() -> None:
         catalog.select(**query)
 
 
+def test_unscaled_gfx950_f8f6f4_rows_are_selected_by_their_formats() -> None:
+    # The gfx950 f8f6f4 MFMA without scales is a dense instruction: each (A format, B format) pair
+    # is its own row, selected by the two formats, and the scaled instruction of the same formats
+    # stays a separate row of family 'scaled'.
+    catalog = load_mma_traits()
+    query = {"target": "gfx950", "c": "fp32", "m": 16, "n": 16, "k": 128}
+    same = catalog.select(**query, a="fp8e4m3", b="fp8e4m3")
+    assert same.op_id == "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3"
+    assert (same.family, same.scale) == ("dense", None)
+    mixed = catalog.select(**query, a="fp8e4m3", b="fp4e2m1")
+    assert mixed.op_id == "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
+    assert (mixed.a_dtype, mixed.b_dtype) == ("fp8e4m3", "fp4e2m1")
+    scaled = catalog.select(
+        **query, a="fp8e4m3", b="fp8e4m3", family="scaled", scale_block_k=32
+    )
+    assert scaled.op_id == "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3"
+
+
 def test_scale_block_size_is_refused_outside_family_scaled() -> None:
     catalog = load_mma_traits()
     with pytest.raises(ValueError) as excinfo:

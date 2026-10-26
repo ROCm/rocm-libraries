@@ -68,12 +68,15 @@ def test_dtypes_are_canonical_names() -> None:
 def test_op_id_is_the_builtin_name_plus_the_formats_of_a_multi_format_builtin() -> None:
     # An op_id is its builtin without the __builtin_amdgcn_ prefix. A builtin whose A and B formats
     # are picked by an operand (the f8f6f4 instructions) has one row per format pair, named
-    # '<stem>_<a_dtype>_<b_dtype>'.
+    # '<stem>_<a_dtype>_<b_dtype>'. A dense row on a scaled builtin (the gfx950 f8f6f4 MFMA called
+    # with zero scales, which issues the instruction without scales) drops 'scale_' from its stem.
     rows = _document()["operations"]
     rows_per_builtin = Counter(row["llvm_builtin"] for row in rows)
     for row in rows:
         assert row["llvm_builtin"].startswith(_BUILTIN_PREFIX), row["op_id"]
         stem = row["llvm_builtin"][len(_BUILTIN_PREFIX) :]
+        if row["family"] != "scaled":
+            stem = stem.replace("scale_", "", 1)
         if rows_per_builtin[row["llvm_builtin"]] == 1:
             assert row["op_id"] == stem
         else:
