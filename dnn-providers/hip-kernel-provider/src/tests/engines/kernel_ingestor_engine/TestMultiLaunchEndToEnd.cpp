@@ -298,8 +298,8 @@ class MultiLaunchHarness
 {
 public:
     explicit MultiLaunchHarness(std::set<std::string> launches)
-        : _handler(std::move(launches))
-        , _tree(claimScratchDirectory(SCRATCH_LABEL))
+        : _tree(claimScratchDirectory(SCRATCH_LABEL))
+        , _handler(std::move(launches))
     {
         _scope.add(GRAPH_MATCH_SYMBOL, &acceptAnyGraph);
         _scope.add(DISPATCH_SYMBOL, &_handler);
@@ -325,9 +325,9 @@ public:
 private:
     // Declared in the order they are released in reverse: the symbols come out before the
     // handler they point at, and the tree outlasts both.
+    ScopedDirectory _tree;
     TwoStageDispatchHandler _handler;
     SymbolScope<Handle> _scope;
-    ScopedDirectory _tree;
 };
 
 /// The kernels @p validated offers a pointwise graph on a device of architecture @p arch,
