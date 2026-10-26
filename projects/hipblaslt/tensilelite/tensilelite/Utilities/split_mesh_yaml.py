@@ -65,7 +65,7 @@ def _write_csv_xz(exact_logic, out_path):
                 f"entry {i}: expected 2-element value, got {len(entry[1])}"
             )
     hasSpeed = any(entry[1][1] != 0.0 for entry in exact_logic)
-    sorted_logic = sorted(exact_logic, key=lambda e: (e[0][0], e[0][1], e[0][3]))
+    sorted_logic = sorted(exact_logic, key=lambda e: tuple(e[0]))
     with lzma.open(out_path, "wt", newline="") as f:
         writer = csv.writer(f)
         header = ["M", "N", "batch", "K", "solutionIdx"]
@@ -112,6 +112,11 @@ def process_file(yaml_path):
 
     round_trip = _loadMeshTableFromCsvXz(csv_path)
     orig_by_key = {tuple(e[0]): e[1] for e in exact_logic}
+    if len(orig_by_key) != len(exact_logic):
+        raise ValueError(
+            f"{os.path.basename(yaml_path)}: ExactLogic has "
+            f"{len(exact_logic) - len(orig_by_key)} duplicate key(s)"
+        )
     rt_by_key = {tuple(e[0]): e[1] for e in round_trip}
     if set(orig_by_key) != set(rt_by_key):
         missing = set(orig_by_key) - set(rt_by_key)
@@ -127,11 +132,10 @@ def process_file(yaml_path):
                 f"Round-trip index mismatch at {list(key)}: "
                 f"{orig_idx} != {rt_idx}"
             )
-        if type(orig_speed) is not type(rt_speed) or orig_speed != rt_speed:
+        if float(orig_speed) != rt_speed:
             raise ValueError(
                 f"Round-trip speed mismatch at {list(key)}: "
-                f"{orig_speed!r} ({type(orig_speed).__name__}) != "
-                f"{rt_speed!r} ({type(rt_speed).__name__})"
+                f"{orig_speed!r} != {rt_speed!r}"
             )
 
     _clear_exact_logic(data, fmt)
