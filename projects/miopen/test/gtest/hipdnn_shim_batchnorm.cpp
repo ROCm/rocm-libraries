@@ -55,21 +55,27 @@ void SetActivation(miopenActivationMode_t& mode,
     beta  = 0.3;
 }
 
-void SetUpTrain(TrainData& d, miopenBatchNormMode_t bn_mode = miopenBNSpatial)
+void SetUpTrain(TrainData& d,
+                miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
+                miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, miopenTensorNCHW);
+    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
-void SetUpInfer(InferData& d, miopenBatchNormMode_t bn_mode = miopenBNSpatial)
+void SetUpInfer(InferData& d,
+                miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
+                miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, miopenTensorNCHW, false);
+    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout, false);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
-void SetUpBwd(BwdData& d, miopenBatchNormMode_t bn_mode = miopenBNSpatial)
+void SetUpBwd(BwdData& d,
+              miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
+              miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, miopenTensorNCHW);
+    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
@@ -898,34 +904,42 @@ TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
 // the results match MIOpen's only to rounding.
 
 // Per-activation mode is folded into spatial mode over C*H*W channels of one
-// element each, which gives every element its own stats over the batch.
+// element each, which gives every element its own stats over the batch. MIOpen's
+// per-activation kernels read every tensor in memory order, whatever its layout,
+// and so does the fold. With the parameters laid out like x, as here, that is the
+// per-element answer for NHWC too.
 TEST(GPU_HipdnnShimBNPerActivation_FP32, MatchesCpuReference)
 {
     auto&& handle = get_handle();
 
+    for(const auto tensor_layout : {miopenTensorNCHW, miopenTensorNHWC})
     {
-        SCOPED_TRACE("train");
-        TrainData d;
-        SetUpTrain(d, miopenBNPerActivation);
-        const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
-        if(ExpectServed("per_activation_train", result))
-            CheckTrain(handle, d, true, true);
-    }
-    {
-        SCOPED_TRACE("infer");
-        InferData d;
-        SetUpInfer(d, miopenBNPerActivation);
-        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
-        if(ExpectServed("per_activation_infer", result))
-            CheckInfer(handle, d);
-    }
-    {
-        SCOPED_TRACE("bwd");
-        BwdData d;
-        SetUpBwd(d, miopenBNPerActivation);
-        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
-        if(ExpectServed("per_activation_bwd", result))
-            CheckBwd(handle, d);
+        const std::string suffix = tensor_layout == miopenTensorNHWC ? "_nhwc" : "";
+        SCOPED_TRACE(tensor_layout == miopenTensorNHWC ? "NHWC" : "NCHW");
+        {
+            SCOPED_TRACE("train");
+            TrainData d;
+            SetUpTrain(d, miopenBNPerActivation, tensor_layout);
+            const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
+            if(ExpectServed("per_activation_train" + suffix, result))
+                CheckTrain(handle, d, true, true);
+        }
+        {
+            SCOPED_TRACE("infer");
+            InferData d;
+            SetUpInfer(d, miopenBNPerActivation, tensor_layout);
+            const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
+            if(ExpectServed("per_activation_infer" + suffix, result))
+                CheckInfer(handle, d);
+        }
+        {
+            SCOPED_TRACE("bwd");
+            BwdData d;
+            SetUpBwd(d, miopenBNPerActivation, tensor_layout);
+            const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+            if(ExpectServed("per_activation_bwd" + suffix, result))
+                CheckBwd(handle, d);
+        }
     }
 }
 
@@ -1072,7 +1086,7 @@ TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
 }
 
 // ---------------------------------------------------------------------------
-// Gaps: MIOpen serves these, the hipDNN path declines them
+// Tuning policies
 
 // Restores the shared handle's tuning policy even when an ASSERT returns early, so
 // the tests after this one keep running under None.
@@ -1089,64 +1103,112 @@ struct ScopedHandleTuningPolicy
     miopenTuningPolicy_t saved = miopenTuningPolicyNone;
 };
 
-// MIOpen tunes the spatial training and backward solvers when the handle asks for
-// Search; the provider runs on a handle of its own and never sees that policy, so
-// the shim declines rather than run a perf config MIOpen would not have picked.
-// Inference is not tunable and stays served under the same policy, and DbUpdate is
-// declined like Search. The shape is used by no other test,
-// because a Search caches its tuned invoker on the handle under the shape's network
-// config, and in the disabled run alone that would change what later tests run.
-// Training passes no running stats, since a Search re-runs the kernel and would
+// Used by no test that runs under None, because a tuning policy caches its tuned
+// invoker on the handle under the shape's network config, and in the disabled run
+// alone that would change what later tests run.
+const BN2DTestCase& TuningCase()
+{
+    static const BN2DTestCase tuning_case{
+        3, 5, 7, 9, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return tuning_case;
+}
+
+// Training passes no running stats, since a search re-runs the kernel and would
 // apply the running-stat update more than once.
-TEST(GPU_HipdnnShimBNGaps_FP32, HandleTuningPolicy)
+hs::CallResult
+TrainUnderPolicy(miopen::Handle& handle, TrainData& d, miopenBatchNormMode_t mode = miopenBNSpatial)
+{
+    d.SetUpImpl(TuningCase(), mode, miopenTensorNCHW);
+    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+    return hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
+}
+
+hs::CallResult
+BwdUnderPolicy(miopen::Handle& handle, BwdData& d, miopenBatchNormMode_t mode = miopenBNSpatial)
+{
+    d.SetUpImpl(TuningCase(), mode, miopenTensorNCHW);
+    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+    return hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+}
+
+// MIOpen tunes the spatial training and backward solvers when the handle asks for
+// Search. The provider runs on a handle of its own, so the shim carries Search
+// over as the plan's benchmarking knob, under which the provider sets Search on
+// its handle. Inference is not tunable and is served without the knob.
+TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
 {
     auto&& handle = get_handle();
-    const BN2DTestCase tuning_case{
-        3, 5, 7, 9, miopen::batchnorm::Direction::ForwardTraining, true, true};
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
-    const char* reason = "tuning policy";
 
     {
         SCOPED_TRACE("train");
         TrainData d;
-        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
-        const auto result =
-            hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
-        if(RecordOutcome("tuning_policy_train", result, reason))
+        if(ExpectServed("tuning_policy_train", TrainUnderPolicy(handle, d)))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
-        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
-        if(RecordOutcome("tuning_policy_bwd", result, reason))
+        if(ExpectServed("tuning_policy_bwd", BwdUnderPolicy(handle, d)))
             CheckBwd(handle, d);
     }
     {
         SCOPED_TRACE("infer");
         InferData d;
-        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW, false);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
-        if(RecordOutcome("tuning_policy_infer", result, nullptr))
+        if(ExpectServed("tuning_policy_infer", result))
             CheckInfer(handle, d);
-        else
-            ADD_FAILURE() << "inference must stay served under a tuning policy";
+    }
+}
+
+// MIOpen's per-activation solvers are not tunable, so MIOpen serves them under
+// any policy, and so does the hipDNN path, even under the ones it declines for
+// spatial calls.
+TEST(GPU_HipdnnShimBNTuning_FP32, PerActivationIgnoresPolicy)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbClean);
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        if(ExpectServed("tuning_policy_per_activation_train",
+                        TrainUnderPolicy(handle, d, miopenBNPerActivation)))
+            CheckTrain(handle, d, true, false);
     }
     {
-        // Any policy other than None is declined, not only Search.
-        SCOPED_TRACE("dbupdate train");
-        const ScopedHandleTuningPolicy db_update(handle, miopenTuningPolicyDbUpdate);
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        if(ExpectServed("tuning_policy_per_activation_bwd",
+                        BwdUnderPolicy(handle, d, miopenBNPerActivation)))
+            CheckBwd(handle, d);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gaps: MIOpen serves these, the hipDNN path declines them
+
+// The provider sets only None or Search on its handle, so it cannot run the
+// policies that also write or clean the perf db. The shim declines them for
+// training and backward; DbUpdate stands for all three.
+TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
+    const char* reason = "tuning policy";
+
+    {
+        SCOPED_TRACE("train");
         TrainData d;
-        d.SetUpImpl(tuning_case, miopenBNSpatial, miopenTensorNCHW);
-        SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
-        const auto result =
-            hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
-        if(RecordOutcome("tuning_policy_dbupdate_train", result, reason))
+        if(RecordOutcome("tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        if(RecordOutcome("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
+            CheckBwd(handle, d);
     }
 }
 

@@ -40,7 +40,7 @@ struct PlanKeyHash
         size_t seed = std::hash<const void*>{}(key.handle);
         for(const int64_t value : key.problem)
             seed ^= static_cast<size_t>(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        return seed;
+        return key.benchmark ? ~seed : seed;
     }
 };
 
@@ -227,6 +227,36 @@ miopenStatus_t RecordSuccess()
     return miopenStatusSuccess;
 }
 
+// Builds `graph` like Graph::build, but on the first engine in heuristic order
+// that exposes the benchmarking knob, with the knob on. Engines without the knob
+// are skipped rather than used, because they would run the problem untuned.
+fe::Error BuildBenchmarked(fe::graph::Graph& graph, hipdnnHandle_t hipdnnHandle)
+{
+    if(fe::Error error = graph.build_operation_graph(hipdnnHandle); !error.is_good())
+        return error;
+    std::vector<fe::EngineConfigInfo> configs;
+    if(fe::Error error = graph.get_engine_configs(hipdnnHandle, configs); !error.is_good())
+        return error;
+
+    fe::Error error{fe::ErrorCode::GRAPH_NOT_SUPPORTED,
+                    "no hipDNN engine can benchmark this problem"};
+    for(const fe::EngineConfigInfo& config : configs)
+    {
+        if(!config.supportsExhaustive)
+            continue;
+        error = graph.create_execution_plan_ext(
+            config.engineId,
+            {fe::KnobSetting(fe::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
+        if(error.is_good())
+            error = graph.check_support();
+        if(error.is_good())
+            error = graph.build_plans();
+        if(error.is_good())
+            return error;
+    }
+    return error;
+}
+
 // Held across build() on purpose. A build can take seconds, but it happens once
 // per distinct problem and serializing it is far simpler than letting two
 // threads race to build the same graph.
@@ -244,7 +274,8 @@ AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t
                 RecordFailure(miopenStatusUnsupportedOp,
                               "could not build a hipDNN graph for this problem")};
 
-    const fe::Error error = graph->build(hipdnnHandle);
+    const fe::Error error =
+        key.benchmark ? BuildBenchmarked(*graph, hipdnnHandle) : graph->build(hipdnnHandle);
     if(!error.is_good())
         return {nullptr, RecordHipdnnFailure(error)};
 

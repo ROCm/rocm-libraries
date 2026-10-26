@@ -88,10 +88,14 @@ struct PlanKey
 {
     miopenHandle_t handle = nullptr;
     std::vector<int64_t> problem;
+    // Build the plan with the engine's benchmarking knob on, which makes the
+    // MIOpen provider run MIOpen under miopenTuningPolicySearch. Building fails
+    // when no engine exposes the knob, so the problem never runs untuned.
+    bool benchmark = false;
 
     bool operator==(const PlanKey& other) const
     {
-        return handle == other.handle && problem == other.problem;
+        return handle == other.handle && problem == other.problem && benchmark == other.benchmark;
     }
 };
 

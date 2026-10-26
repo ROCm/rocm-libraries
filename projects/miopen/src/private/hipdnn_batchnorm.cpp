@@ -80,6 +80,7 @@ struct BnProblem
     double momentum              = 0.0;
     bool hasRunningStats         = false;
     bool hasSavedStats           = false;
+    bool benchmark               = false; // tune, as miopenTuningPolicySearch does
 };
 
 // MIOpen's packed test: the elements exactly fill the span the strides reach.
@@ -228,20 +229,29 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
 // The provider runs MIOpen on a handle of its own, so a tuning policy set on the
 // caller's handle never reaches it. The spatial training and backward solvers
 // read that policy (Search tunes, DbClean drops the perf-db entry), so the
-// forwarded call could pick a different perf config than MIOpen would. The
-// inference solver is not tunable, so inference skips this check.
+// forwarded call has to carry it over. The provider sets None, or Search when
+// the plan has its benchmarking knob on, so Search is carried over as that knob.
+// It cannot express the other policies, which are declined until hipDNN can
+// carry the whole policy to the provider (ROCm/rocm-libraries#14372);
+// MIOPEN_DISABLE_HIPDNN_FOR sends these calls back to MIOpen meanwhile. The
+// inference and per-activation solvers are not tunable and ignore the policy,
+// so inference skips this check and per-activation runs as under None.
 // MIOPEN_FIND_ENFORCE needs no check: it is process-wide, so the provider's
 // handle sees it too.
-miopenStatus_t CheckTuningPolicy(miopenHandle_t handle)
+miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
 {
     miopenTuningPolicy_t policy = miopenTuningPolicyNone;
     if(const miopenStatus_t status = miopenGetTuningPolicy_impl(handle, &policy);
        status != miopenStatusSuccess)
         return RecordFailure(status, "could not read the handle's tuning policy");
-    if(policy != miopenTuningPolicyNone)
+    if(problem.bnMode == miopenBNPerActivation)
+        policy = miopenTuningPolicyNone;
+    if(policy != miopenTuningPolicyNone && policy != miopenTuningPolicySearch)
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply the handle's tuning policy; "
-                             "only miopenTuningPolicyNone is forwarded");
+                             "only miopenTuningPolicyNone and miopenTuningPolicySearch "
+                             "are forwarded");
+    problem.benchmark = policy == miopenTuningPolicySearch;
     return miopenStatusSuccess;
 }
 
@@ -355,20 +365,6 @@ std::optional<fe::graph::PointwiseAttributes> ActivationAttributes(const BnProbl
     return std::nullopt;
 }
 
-// Whether the elements lie in row-major order. A dim of extent 1 is never
-// stepped over, so its stride does not matter.
-bool IsRowMajor(const TensorInfo& info)
-{
-    int64_t expected = 1;
-    for(size_t i = info.dims.size(); i-- > 0;)
-    {
-        if(info.dims[i] != 1 && info.strides[i] != expected)
-            return false;
-        expected *= info.dims[i];
-    }
-    return true;
-}
-
 // What the MIOpen provider can run, whatever the kind. Empty when it can.
 // CheckProblem has already limited the rank to 4 or 5.
 std::string CheckSupported(const BnProblem& problem)
@@ -412,18 +408,19 @@ std::string CheckSupported(const BnProblem& problem)
                                  : "hipDNN batchnorm needs scale, bias and statistics shaped "
                                    "{1, C, 1, ...}";
     }
-    // FoldPerActivation reads every tensor as a flat run of elements per sample.
-    if(perActivation && !std::all_of(tensors.begin(), tensors.end(), IsRowMajor))
-        return "hipDNN per-activation batchnorm supports only row-major (NCHW, NCDHW) tensors";
     return {};
 }
 
 // Per-activation batchnorm is spatial batchnorm with every element of a sample
 // as its own channel, so it runs as spatial on {N, K, 1, 1}, K being the
 // elements per sample. Even the running variance agrees: both modes scale it
-// by N / (N - 1). CheckSupported has made every tensor row-major, so only the
-// descriptions change. The plan key keeps the mode, so the two never share a
-// plan by accident of shape.
+// by N / (N - 1). Only the descriptions change, and they ignore the strides:
+// MIOpen's per-activation kernels index every packed tensor as if it were NCHW,
+// whatever its layout, pairing the element at offset j of a sample with the
+// parameters at offset j. CheckSupported has made every tensor packed, so this
+// does the same. That is also the per-element answer when the parameters are laid
+// out like x, as with NHWC x and NHWC parameters. The plan key keeps the mode, so
+// the two never share a plan by accident of shape.
 void FoldPerActivation(BnProblem& problem)
 {
     if(problem.bnMode != miopenBNPerActivation)
@@ -452,6 +449,7 @@ PlanKey MakePlanKey(miopenHandle_t handle, const BnProblem& problem)
 {
     PlanKey key;
     key.handle                = handle;
+    key.benchmark             = problem.benchmark;
     std::vector<int64_t>& out = key.problem;
     out.push_back(static_cast<int64_t>(problem.kind));
     out.push_back(static_cast<int64_t>(problem.act));
@@ -745,7 +743,8 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
-    if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
+    if(const miopenStatus_t status = CheckTuningPolicy(handle, problem);
+       status != miopenStatusSuccess)
         return status;
     FoldPerActivation(problem);
     // Like MIOpen, write the saved statistics only when both are given, and
@@ -766,7 +765,8 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
         variantPack[kUidSavedInvVar] = saveInvVariance;
     }
     // An in-place update binds one buffer as both input and output. That holds
-    // because the graph runs exactly once; it must never be re-run to tune.
+    // because the graph runs once. Under Search, MIOpen's own search re-runs the
+    // kernel on these buffers, as it does when MIOpen serves the call.
     if(problem.hasRunningStats)
     {
         variantPack[kUidPrevRunMean] = const_cast<void*>(prevRunningMean);
@@ -877,6 +877,8 @@ miopenStatus_t BackwardFromComputedStats(miopenHandle_t handle,
 {
     const std::vector<TensorInfo>& tensors = backward.tensors;
 
+    // Not benchmarked: MIOpen's backward computes these statistics itself, so
+    // Search tunes no training solver for it.
     BnProblem training;
     training.kind    = GraphKind::BnFwdTraining;
     training.bnMode  = backward.bnMode;
@@ -985,7 +987,8 @@ miopenStatus_t Backward(miopenHandle_t handle,
 
     if(const std::string reason = CheckSupported(problem); !reason.empty())
         return RecordFailure(miopenStatusUnsupportedOp, reason);
-    if(const miopenStatus_t status = CheckTuningPolicy(handle); status != miopenStatusSuccess)
+    if(const miopenStatus_t status = CheckTuningPolicy(handle, problem);
+       status != miopenStatusSuccess)
         return status;
     FoldPerActivation(problem);
 
