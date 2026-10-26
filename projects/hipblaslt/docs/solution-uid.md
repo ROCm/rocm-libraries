@@ -1,10 +1,17 @@
 # Solution UID foundation
 
-`SolutionUID` is a stable 64-bit identifier for a hipBLASLt/TensileLite
-solution. Library generation assigns one. Until UID selection becomes
-mandatory, library load gives a solution without the field a temporary
-in-memory UID so existing logic continues to build. Runtime selection by UID
-is a later migration step.
+`SolutionUID` is a 64-bit identifier for a hipBLASLt/TensileLite solution
+record. An identifier persisted in logic YAML stays stable across library
+rebuilds. Library generation decodes that identifier and stores it in runtime
+metadata. When the YAML has no UID, generation assigns one for that build
+without updating the YAML; rebuilding can produce a different UID. Loading
+older prebuilt metadata with no UID leaves the runtime value at zero.
+Runtime selection by UID is a later migration step.
+
+Geko assigns a fresh UID to solutions copied into `final_libs` or `full_libs`,
+including copies from Origami. These are new records, even when they describe
+the same GPU kernel. When `TensileMergeLibrary` reuses an existing Equality
+solution with the same `SolutionNameMin`, it retains the Equality record's UID.
 
 ## Identifier format
 
