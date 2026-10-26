@@ -376,7 +376,7 @@ TEST(TestCudnnShimV8CoreFactories, ConvRecordValidatesSpatialArrays)
                         + " is not supported by the hipDNN cuDNN shim");
 }
 
-TEST(TestCudnnShimV8CoreFactories, PointwiseReluLowerClipKeptUnlessSlopeSet)
+TEST(TestCudnnShimV8CoreFactories, PointwiseReluDefaultsElided)
 {
     v8::PointwiseInputs inputs;
     inputs.mode = CUDNN_POINTWISE_RELU_FWD;
@@ -387,7 +387,7 @@ TEST(TestCudnnShimV8CoreFactories, PointwiseReluLowerClipKeptUnlessSlopeSet)
     std::shared_ptr<const v8::PointwiseRecord> record
         = v8::makePointwiseRecord(inputs, POINTWISE_LABELS);
     EXPECT_EQ(record->mode(), PointwiseMode_t::RELU_FWD);
-    EXPECT_EQ(record->reluLowerClip(), std::optional<double>(0.0));
+    EXPECT_FALSE(record->reluLowerClip().has_value());
     EXPECT_FALSE(record->reluUpperClip().has_value());
     EXPECT_FALSE(record->reluLowerClipSlope().has_value());
 

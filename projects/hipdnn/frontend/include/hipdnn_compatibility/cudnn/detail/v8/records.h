@@ -249,9 +249,8 @@ private:
     Fields _fields;
 };
 
-// The optional mode parameters hold only what lowering forwards (see
-// makePointwiseRecord): non-default values, plus the ReLU lower clip unless a
-// slope is set.
+// The optional mode parameters hold only what lowering forwards: the values
+// that differ from upstream's defaults (see makePointwiseRecord).
 class PointwiseRecord final : public RecordOf<CUDNN_BACKEND_POINTWISE_DESCRIPTOR>
 {
 public:

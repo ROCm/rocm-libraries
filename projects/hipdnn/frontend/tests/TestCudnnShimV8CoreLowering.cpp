@@ -784,14 +784,14 @@ TEST_F(TestCudnnShimV8CoreLowering, ReluClipNarrowsToFloatAndSaturates)
     const std::vector<hipdnnBackendDescriptor_t> ops
         = created(HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
     ASSERT_EQ(ops.size(), 2U);
-    for(const auto& [op, expected] :
-        {std::pair{ops[0], 0.0F}, std::pair{ops[1], -std::numeric_limits<float>::max()}})
+    // Plain ReLU carries none of its defaults.
+    EXPECT_FALSE(callOn(ops[0], HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP));
+    const auto lowerClip = callOn(ops[1], HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
+    ASSERT_TRUE(lowerClip);
+    EXPECT_EQ(lowerClip->type, HIPDNN_TYPE_FLOAT);
+    EXPECT_EQ(lowerClip->value<float>(), -std::numeric_limits<float>::max());
+    for(const hipdnnBackendDescriptor_t op : ops)
     {
-        const auto lowerClip = callOn(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
-        ASSERT_TRUE(lowerClip);
-        EXPECT_EQ(lowerClip->type, HIPDNN_TYPE_FLOAT);
-        EXPECT_EQ(lowerClip->value<float>(), expected);
-        // Default upper clip and slope stay off the hipDNN descriptor.
         EXPECT_FALSE(callOn(op, HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP));
         EXPECT_FALSE(callOn(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE));
     }

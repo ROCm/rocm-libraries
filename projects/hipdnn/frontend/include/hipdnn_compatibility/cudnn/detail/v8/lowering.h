@@ -594,9 +594,8 @@ inline void lowerOperation(const PointwiseOperationRecord& op, LoweringContext& 
     {
         attributes.set_input_2(context.tensor(op.in2()));
     }
-    // The record holds only non-default parameters (plus the ReLU lower clip
-    // when no slope is set); leaving the rest unset keeps them off the hipDNN
-    // descriptor.
+    // The record holds only non-default parameters; leaving the rest unset
+    // keeps them off the hipDNN descriptor.
     if(const std::optional<double> value = pointwise.reluLowerClip())
     {
         attributes.set_relu_lower_clip(narrowParameter(*value));

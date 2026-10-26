@@ -482,10 +482,9 @@ struct PointwiseInputs
     std::optional<std::int64_t> axis;
 };
 
-// Keeps only the mode parameters that differ from upstream's defaults, plus the
-// ReLU lower clip unless a slope is set. Upstream sets every parameter of the
-// mode, defaults included, and MIOpen rejects a fusion that carries the others
-// at all.
+// Keeps only the mode parameters that differ from upstream's defaults. Upstream
+// sets every parameter of the mode, defaults included, and MIOpen rejects a
+// fusion that carries a lower-clip slope at all.
 inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const PointwiseInputs& inputs,
                                                                   const PointwiseLabels& labels)
 {
@@ -510,15 +509,11 @@ inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const Pointwis
     fields.mode = requireLowerable(rawMode, labels.mode);
     fields.computeType = requireLowerable(rawComputeType, labels.computeType);
     // Defaults from PointWiseDesc_v8 (cudnn_frontend_PointWiseDesc.h).
+    fields.reluLowerClip = nonDefault(inputs.reluLowerClip, 0.0);
     fields.reluLowerClipSlope = nonDefault(inputs.reluLowerClipSlope, 0.0);
     fields.eluAlpha = nonDefault(inputs.eluAlpha, 1.0);
     fields.softplusBeta = nonDefault(inputs.softplusBeta, 1.0);
     fields.swishBeta = nonDefault(inputs.swishBeta, 1.0);
-    // Every engine reads a lower clip of 0 as standard ReLU, and hipBLASLt's ReLU
-    // epilogue requires it present. Beside a slope it stays elided: hipBLASLt
-    // would take {0, slope} for plain ReLU and drop the slope.
-    fields.reluLowerClip
-        = fields.reluLowerClipSlope ? nonDefault(inputs.reluLowerClip, 0.0) : inputs.reluLowerClip;
     // The upper-clip default is DBL_MAX, which upstream clamps to FLT_MAX for
     // FLOAT math; any bound at or above FLT_MAX clips nothing once narrowed.
     fields.reluUpperClip

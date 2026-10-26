@@ -365,7 +365,7 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseRequiredFieldStatuses)
     expectBuildStatus(noComputeType, CUDNN_STATUS_INVALID_VALUE);
 }
 
-TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultReluLowersOnlyLowerClip)
+TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultReluLowersNoParameters)
 {
     const fe::PointWiseDesc relu = fe::PointWiseDescBuilder()
                                        .setMode(PointwiseMode_t::RELU_FWD)
@@ -377,7 +377,7 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultReluLowersOnlyLowerClip
     EXPECT_EQ(scalarOn<hipdnnPointwiseMode_t>(op, HIPDNN_ATTR_POINTWISE_MODE),
               HIPDNN_POINTWISE_RELU_FWD);
     EXPECT_EQ(scalarOn<hipdnnDataType_t>(op, HIPDNN_ATTR_POINTWISE_MATH_PREC), HIPDNN_DATA_FLOAT);
-    EXPECT_EQ(scalarOn<float>(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP), 0.0F);
+    EXPECT_FALSE(isSet(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP));
     EXPECT_FALSE(isSet(op, HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP));
     EXPECT_FALSE(isSet(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE));
 }
@@ -398,7 +398,14 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultParametersElideAtLoweri
          PointwiseMode_t::RELU_FWD,
          DataType_t::DOUBLE,
          [](fe::PointWiseDescBuilder&) {},
-         {HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE}},
+         {HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP,
+          HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP,
+          HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE}},
+        {"relu explicit zero lower clip",
+         PointwiseMode_t::RELU_FWD,
+         DataType_t::FLOAT,
+         [](fe::PointWiseDescBuilder& b) { b.setReluLowerClip(0.0); },
+         {HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP}},
         {"relu upper clip at float max",
          PointwiseMode_t::RELU_FWD,
          DataType_t::FLOAT,
