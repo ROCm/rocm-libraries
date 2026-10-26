@@ -8,33 +8,27 @@
 #include <span>
 
 namespace roc::hostnumerics {
-// Convert a native numeric value. Encoded FP8/BF16 storage requires its codecs.
-// Callers must satisfy the numerical preconditions below; conversion does not validate.
+// Converts a numeric value to Target. Source and Target may each be bool, an
+// integer of at most 64 bits, float, double, long double, or std::complex of
+// one of those floating types.
 //
-// Types:
-// Source and Target are C++ arithmetic types (integers up to 64 bits) or
-// std::complex with a float, double, or long double component. Target cannot be a reference.
+// An integer Target receives the value rounded by options.integerRounding, with
+// the range handled by options.integerOverflow. Other targets ignore the options:
+// floating and Boolean targets behave like static_cast, and complex values
+// convert each component.
 //
-// Integer destinations:
-// Apply rounding, range handling, then the cast. Both policies are explicit;
-// see IntegerRounding and IntegerOverflow in
-// scalar_conversion_options.hpp for policy behavior and integer-input preconditions.
-// Policy enumerators must be valid when used.
+// Conversion does not validate its input. The caller must meet the requirements
+// of the chosen IntegerOverflow, keep finite values within a floating Target's
+// range, and convert a complex value to a real Target only when its imaginary
+// part is zero.
 //
-// Other destinations:
-// Floating destinations use native casts; finite input must lie within the
-// destination's finite range. Floating and Boolean destinations ignore the
-// integer policies. Complex destinations convert their components separately;
-// a real source supplies a zero imaginary component. Conversion from complex to
-// any non-complex Target, including bool, requires a zero imaginary component.
-//
-// Examples:
-// const ScalarConversionOptions options{IntegerRounding::NearestEven,
-//                                       IntegerOverflow::Identity};
-// convertScalar<int>(3.5, options) == 4;
-// convertScalar<double>(3.5, options) == 3.5;
-// convertScalar<bool>(0.25, options) == true;
-// convertScalar<int>(std::complex<double>{3.5, 0.0}, options) == 4;
+// Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
+//   convertScalar<int8_t>(double{2.5}, options) == 2
+//   convertScalar<int8_t>(double{3.5}, options) == 4
+//   convertScalar<int8_t>(int32_t{300}, options) == 127
+//   convertScalar<float>(int32_t{3}, options) == 3.0f
+//   convertScalar<bool>(double{0.25}, options) == true
+//   convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, options) == 4
 template <typename Target, typename Source>
 Target convertScalar(Source source, const ScalarConversionOptions& options) noexcept {
     using Destination = std::remove_cv_t<Target>;
