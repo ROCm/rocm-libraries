@@ -2707,10 +2707,13 @@ class TestWorkModelFragments:
         rendered = generator._render_template("fragments/fbs_tensor_fields.j2", config)
         assert 'attribute "work_data_dependent";' in rendered
         assert (
-            "    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);\n"
-            in rendered
+            "    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent, "
+            'matcher_input_tensor, matcher_name: "first_token_offset");\n' in rendered
         )
-        assert "    token_index_tensor_uid: long = null (cache_uid);\n" in rendered
+        assert (
+            "    token_index_tensor_uid: long = null (cache_uid, matcher_input_tensor, "
+            'matcher_name: "token_index");\n' in rendered
+        )
 
     def test_schema_fragment_omits_the_annotation_when_no_field_needs_it(
         self, convolution_fwd_config, generator
@@ -2720,7 +2723,32 @@ class TestWorkModelFragments:
         )
         assert "work_data_dependent;" not in rendered
         assert "(cache_uid, work_data_dependent)" not in rendered
-        assert "    x_tensor_uid: long (cache_uid);\n" in rendered
+        assert (
+            '    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");\n'
+            in rendered
+        )
+
+    def test_schema_fragment_names_the_opcode_and_each_tensor_direction(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/fbs_tensor_fields.j2", convolution_fwd_config
+        )
+        assert (
+            'table ConvolutionFwdAttributes (matcher_opcode: "convolution") {\n'
+            in rendered
+        )
+        assert (
+            '    y_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "y");\n'
+            in rendered
+        )
+        for attribute in (
+            "matcher_opcode",
+            "matcher_input_tensor",
+            "matcher_output_tensor",
+            "matcher_name",
+        ):
+            assert f'attribute "{attribute}";\n' in rendered
 
     def test_node_flops_stub_names_work_data_dependent_operands(
         self, load_test_config, generator
@@ -2739,13 +2767,20 @@ class TestWorkModelFragments:
     def test_tensor_declarations_match_the_in_tree_schema(
         self, config_name, load_test_config
     ):
-        """Each config's emitted tensor declarations, annotations included, match
-        its schema, so a schema field annotated ``work_data_dependent`` that the
-        YAML does not flag (or the reverse) fails here."""
+        """Each config's emitted tensor declarations, annotations included, and its
+        matcher_opcode match its schema, so a schema field annotated
+        ``work_data_dependent`` or flagged as the other direction than the YAML says
+        fails here."""
         config = load_test_config(config_name)
         schema = HIPDNN_SCHEMAS_DIR / config.fbs_schema_filename
-        declared = _schema_declarations(schema.read_text(encoding="utf-8"))
+        schema_text = schema.read_text(encoding="utf-8")
+        declared = _schema_declarations(schema_text)
         for field in [*config.tensor_fields, *config.tensor_array_fields]:
             assert (
                 declared.get(field.fbs_field) == field.fbs_declaration
             ), f"{config_name}: {field.fbs_field}"
+        assert re.search(
+            rf"\btable\s+{config.fbs_table}\s*"
+            rf'\(\s*matcher_opcode:\s*"{config.matcher_opcode}"\s*\)',
+            schema_text,
+        ), f"{config_name}: matcher_opcode"

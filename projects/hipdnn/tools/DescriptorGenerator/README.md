@@ -90,10 +90,11 @@ See `CLAUDE.md` for detailed integration steps (especially steps 4-7 and 12).
 The YAML config maps FBS schema fields to hipDNN backend API concepts. To create a new config:
 
 1. Read the FBS schema in `flatbuffers_sdk/schemas/`
-2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; a field annotated `work_data_dependent` sets `work_data_dependent: true`
-3. Identify data fields (vectors, enums, scalars) → `data_fields`
-4. Look at existing frontend node/attributes classes for naming conventions
-5. Use `convolution_fwd.yaml` as the reference config
+2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; `matcher_input_tensor` or `matcher_output_tensor` sets `direction`, and a field annotated `work_data_dependent` sets `work_data_dependent: true`
+3. Copy the table's `matcher_opcode` annotation to `matcher_opcode`
+4. Identify data fields (vectors, enums, scalars) → `data_fields`
+5. Look at existing frontend node/attributes classes for naming conventions
+6. Use `convolution_fwd.yaml` as the reference config
 
 See `CLAUDE.md` for a detailed mapping guide from FBS field types to YAML `type` values.
 
@@ -104,6 +105,7 @@ operation:
   name: "MyOp"                              # PascalCase operation name
   class_name: "MyOpOperationDescriptor"      # Full class name
   fbs_table: "MyOpAttributes"               # FlatBuffer table name
+  matcher_opcode: "my_op"                   # The table's matcher_opcode (naming rules in graph.fbs)
   fbs_generated_header: "my_op_attributes_generated.h"
 
   descriptor_type:
@@ -126,6 +128,9 @@ operation:
       fbs_field: "input_tensor_uid"
       attr_suffix: "INPUT"
       required: true
+      direction: "input"              # input | output: whether the node reads or writes
+                                      # the tensor; selects matcher_input_tensor or
+                                      # matcher_output_tensor in the schema
       # frontend_getter (optional): override the default getter resolution.
       # When unset, the loader matches by frontend.inputs[].name / outputs[].name,
       # then falls back to abbreviation-aware matching. Set it to a bare
@@ -156,6 +161,7 @@ operation:
       attr_name: "HIPDNN_ATTR_OPERATION_MY_OP_PEER_STATS"
       frontend_getter: "get_peer_stats()"
       required: false
+      direction: "input"              # as for tensor_fields
       test_uids: [100, 101]           # UIDs for test tensor descriptors
       test_label: "PeerStats"          # Label used in generated test case names
       work_data_dependent: false      # as for tensor_fields

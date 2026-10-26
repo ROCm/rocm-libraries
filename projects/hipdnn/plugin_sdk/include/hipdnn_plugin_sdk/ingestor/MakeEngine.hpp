@@ -96,7 +96,7 @@ inline nlohmann::json graphMatchIdentity(const GraphMatch& graphMatch)
     const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch);
     if(pattern == nullptr || *pattern == nullptr)
     {
-        return nlohmann::json("");
+        return std::string{};
     }
     const auto& compiled = **pattern;
     auto nodes = nlohmann::json::array();

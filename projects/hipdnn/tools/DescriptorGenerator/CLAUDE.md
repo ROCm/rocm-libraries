@@ -331,7 +331,7 @@ UHD heuristics publish each node's logical FLOPs (`graph.flops`, `graph.nodes[i]
 
 ### 12a. Schema Annotations — `flatbuffers_sdk/schemas/<op>_attributes.fbs`
 
-`fragments/fbs_tensor_fields.txt` lists the op table's tensor-uid declarations with their annotations: `(cache_uid)` on every tensor reference, plus `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true`. Make the schema match, declare each attribute it uses at file scope, then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
+`fragments/fbs_tensor_fields.txt` lists the op table's `matcher_opcode` and its tensor-uid declarations with their annotations: `cache_uid` on every tensor reference, `work_data_dependent` on each field whose YAML entry sets `work_data_dependent: true`, `matcher_input_tensor` or `matcher_output_tensor` from the entry's `direction`, and, on a scalar field, `matcher_name`. Make the schema match, declare each attribute it uses at file scope, and annotate its other scalar fields as `graph.fbs` describes. Then run the `op-schema-registry-hipdnn`, `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (or `scripts/gen_op_schema_registry.py`, `scripts/gen_cache_key.py` and `scripts/gen_node_operands.py`) and commit the regenerated `op_schema_registry.json`, `op_schema_registry_generated.h`, `cachekey_generated.h` and `node_operands_generated.h`. A stale `node_operands_generated.h` fails to compile: its `static_assert` pins `NodeAttributes::MAX`.
 
 ### 12b. FLOPs — `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp`
 
@@ -354,10 +354,10 @@ If a YAML config does not already exist for your operation, create one from the 
 Given an FBS schema like:
 
 ```fbs
-table ConvolutionWrwAttributes {
-    x_tensor_uid: long;       // → tensor_fields entry
-    dy_tensor_uid: long;      // → tensor_fields entry
-    dw_tensor_uid: long;      // → tensor_fields entry
+table ConvolutionWrwAttributes (matcher_opcode: "convolution_bwd_filter") {  // → matcher_opcode
+    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");     // → tensor_fields entry, direction: input
+    dy_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "dy");   // → tensor_fields entry, direction: input
+    dw_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "dw");  // → tensor_fields entry, direction: output
     pre_padding: [long];      // → data_fields entry (vector_int64)
     post_padding: [long];     // → data_fields entry (vector_int64)
     stride: [long];           // → data_fields entry (vector_int64)
@@ -378,6 +378,8 @@ Apply these rules:
 | `field: bool` | `data_fields` | `bool` |
 | `field: [long]` (array of UIDs) | `tensor_array_fields` | (for peer_stats etc.) |
 
+Every `tensor_fields` and `tensor_array_fields` entry sets `direction`: `input` for a field the schema flags `matcher_input_tensor`, `output` for `matcher_output_tensor`. It has no default, so an output is never declared as an operand by omission. The generator derives `matcher_name` from `fbs_field` without its `_tensor_uid` suffix.
+
 A tensor-uid field annotated `work_data_dependent` in the schema (`long (cache_uid, work_data_dependent)`) sets `work_data_dependent: true` on its `tensor_fields` or `tensor_array_fields` entry (default `false`). Set it when the tensor's contents, not its shape, decide how much work the node does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) stays `false`. The generator emits the annotation in `fragments/fbs_tensor_fields.txt` (Step 12a):
 
 ```yaml
@@ -385,6 +387,7 @@ tensor_fields:
   - name: "first_token_offset"
     fbs_field: "first_token_offset_tensor_uid"
     attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
+    direction: "input"
     required: true
     work_data_dependent: true   # Group boundaries decide how many rows are multiplied
 ```
@@ -397,6 +400,7 @@ operation:
   name: "ConvolutionWrw"                          # PascalCase, used in class/file names
   class_name: "ConvolutionWrwOperationDescriptor"  # = name + "OperationDescriptor"
   fbs_table: "ConvolutionWrwAttributes"            # Must match the FBS table name exactly
+  matcher_opcode: "convolution_bwd_filter"         # The table's matcher_opcode annotation
   fbs_generated_header: "convolution_wrw_attributes_generated.h"  # The flatc-generated header
 
   # Backend enum names — follow existing naming conventions

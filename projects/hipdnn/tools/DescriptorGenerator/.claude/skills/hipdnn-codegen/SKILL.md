@@ -102,7 +102,8 @@ Pick the path that matches what the user provided:
   1. Run the directory listing + node-file fetch from Step 3a-i to locate the matching cuDNN node header (e.g., `include/cudnn_frontend/node/<op>.h`).
   2. From that header, find the **attributes class** it references (e.g., `Conv_fprop_attributes`). Fetch its source — usually under `include/cudnn_frontend/graph_properties.h` or alongside the node header.
   3. Walk the attributes class:
-     - Each tensor input/output method (typically `set_<name>(...)`) becomes a `<name>_tensor_uid: long (cache_uid)` field (`long = null (cache_uid)` when optional). Note which are required vs optional. Add `work_data_dependent` to the annotation (`(cache_uid, work_data_dependent)`) when the tensor's contents, not its shape, decide how much work the op does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) is not work-data-dependent. Declare each attribute used at file scope (`attribute "cache_uid";`, `attribute "work_data_dependent";`).
+     - Each tensor input/output method (typically `set_<name>(...)`) becomes a `<name>_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "<name>")` field, with `matcher_output_tensor` instead for an output (`long = null (...)` when optional). Note which are required vs optional. Add `work_data_dependent` after `cache_uid` (`(cache_uid, work_data_dependent, matcher_input_tensor, ...)`) when the tensor's contents, not its shape, decide how much work the op does: valid lengths, page tables, block masks, routing offsets. An operand read densely whatever its values (an additive bias, a dropout seed) is not work-data-dependent.
+     - Annotate the table with its opcode, `table <Op>Attributes (matcher_opcode: "<opcode>")`, following the opcode naming rules in `graph.fbs`. Declare each attribute used at file scope (`attribute "cache_uid";`, `attribute "work_data_dependent";`, and the four `matcher_*` attributes).
      - Each scalar/vector attribute (typically `set_<attr>(...)`) becomes a typed field with the matching cuDNN name.
      - Mode-style enums become a `<field>: <Enum>` field; capture the enum members from the cuDNN definition.
   4. Use the same naming as cuDNN (lowercase snake_case for fields, matching cuDNN attribute identifiers). Apply `_EXT` per the rule in Step 3a only to fields with no cuDNN equivalent.
@@ -155,14 +156,16 @@ Read the FBS schema file. Map fields to YAML config following these rules:
 
 | FBS Field Pattern | YAML Section | YAML `type` |
 |---|---|---|
-| `*_tensor_uid: long` | `tensor_fields` | (tensors are UIDs) |
-| `*_tensor_uid: long (cache_uid, work_data_dependent)` | `tensor_fields`, with `work_data_dependent: true` | (tensors are UIDs) |
+| `*_tensor_uid: long (cache_uid, matcher_input_tensor, ...)` | `tensor_fields`, with `direction: "input"` | (tensors are UIDs) |
+| `*_tensor_uid: long (cache_uid, matcher_output_tensor, ...)` | `tensor_fields`, with `direction: "output"` | (tensors are UIDs) |
+| `*_tensor_uid: long (cache_uid, work_data_dependent, ...)` | `tensor_fields`, also with `work_data_dependent: true` | (tensors are UIDs) |
 | `field: [long]` | `data_fields` | `vector_int64` |
 | `field: SomeEnum` | `data_fields` | `mode` |
 | `field: float` | `data_fields` | `scalar_float` |
 | `field: long` (non-UID) | `data_fields` | `scalar_int64` |
 | `field: bool` | `data_fields` | `bool` |
-| `field: [long]` (array of UIDs) | `tensor_array_fields` | (tensor arrays; `work_data_dependent` as for `tensor_fields`) |
+| `field: [long]` (array of UIDs) | `tensor_array_fields` | (tensor arrays; `direction` and `work_data_dependent` as for `tensor_fields`) |
+| `table T (matcher_opcode: "<opcode>")` | `operation.matcher_opcode: "<opcode>"` | |
 
 Derive all config fields from the schema and existing codebase — do NOT ask the user for these. Use existing configs and backend code to determine:
 
@@ -409,7 +412,7 @@ Read each fragment file from the output and insert it into the correct shared fi
 
 | Fragment | Target File | Insertion Point |
 |----------|-------------|----------------|
-| `fragments/fbs_tensor_fields.txt` | `$HIPDNN_SRC/flatbuffers_sdk/schemas/<op>_attributes.fbs` | Make each tensor-uid declaration carry the listed annotations, `(cache_uid)` or `(cache_uid, work_data_dependent)`, and declare each attribute used at file scope. Then run the `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (`pre-commit run node-operands-hipdnn --all-files`, or `python $HIPDNN_SRC/scripts/gen_node_operands.py`) so `cachekey_generated.h` and `node_operands_generated.h` are regenerated. |
+| `fragments/fbs_tensor_fields.txt` | `$HIPDNN_SRC/flatbuffers_sdk/schemas/<op>_attributes.fbs` | Make the table's `matcher_opcode` and each tensor-uid declaration's annotations match the fragment, and declare each attribute used at file scope. Then run the `op-schema-registry-hipdnn`, `cache-key-hipdnn` and `node-operands-hipdnn` pre-commit hooks (`pre-commit run node-operands-hipdnn --all-files`, or the matching `python $HIPDNN_SRC/scripts/gen_*.py` scripts) so `op_schema_registry.json`, `op_schema_registry_generated.h`, `cachekey_generated.h` and `node_operands_generated.h` are regenerated. |
 | `fragments/node_flops_overload.txt` | `$HIPDNN_SRC/plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` | Counted op: after the last `nodeFlops` overload. Replace the stub's TODO and `std::nullopt` with the agreed formula. |
 | `fragments/logical_flops_case.txt` | Same file | Counted op: the `case` in the `logicalFlops()` switch, before `default:`. No counting convention: only the `NO_COUNTING_CONVENTION` entry from this fragment, with the agreed reason on the line above it; skip the other two fragments. |
 | `fragments/work_model_test_case.txt` | `$HIPDNN_SRC/plugin_sdk/tests/heuristics/TestEngineFeatures.cpp` | Counted op: in the `cases` vector of `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`. Set the attributes the formula reads and replace the expected `0.0` with the hand-computed FLOPs. |
