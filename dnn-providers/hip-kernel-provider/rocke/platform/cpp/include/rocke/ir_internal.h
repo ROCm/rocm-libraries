@@ -160,6 +160,14 @@ void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const c
  * core/ir.py::_refuse_unsigned_operands. */
 void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead);
 
+/* Throw ckc::TypeError unless the source of `op`, a u8 -> float conversion, is
+ * a u8 scalar. rocke_b_uitofp_f32 checks its input when the op is built; the
+ * lowerings call this for IR that did not come through it (hand-assembled or
+ * deserialized), because they would read any other source differently: LLVM's
+ * uitofp reads an i8 0xff as 255.0, the HIP cast of an int8_t as -1.0. The twin
+ * of core/ir.py::_refuse_non_u8_source, with the same message. */
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
+
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
@@ -194,6 +202,26 @@ void rocke_i_check_bitcast_width(const char* verb,
                                  const rocke_type_t* source,
                                  const rocke_type_t* target,
                                  const char* hint);
+
+/* ------------------------------------------------- loop-carried descriptors */
+
+/* Mirrors ir._is_buffer_descriptor: true when `value` is the result of a
+ * tile.buffer_rsrc op. */
+bool rocke_i_is_buffer_descriptor(const rocke_value_t* value);
+
+/* Mirrors ir._loop_carried_descriptor_message: writes into `buf` the refusal
+ * for a buffer descriptor as scf.for iter_arg `index` (its initial value or the
+ * value an iteration yields to it) and returns `buf`. A loop cannot carry a
+ * descriptor: the phi or HIP variable holding the carried value cannot hold the
+ * lowered descriptor (an opaque ptr addrspace(8) / rsrc_t). */
+const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap);
+
+/* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
+ * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
+ * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
+ * Accepts any operand / region counts. The builder, the verifier and both
+ * lowerings use it. */
+const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* ------------------------------------------------------------- attr helpers */
 

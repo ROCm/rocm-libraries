@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import subprocess
 import sys
+
+import rocke
 
 
 def test_old_import_paths_resolve_to_new_homes():
@@ -44,28 +48,26 @@ def test_public_names_unchanged():
     assert h.MFMA_ATTN_BLOCK_M == MFMA_ATTN_BLOCK_M == 16
 
 
-def _import_in_fresh_interpreter(first: str):
-    code = (
-        f"import importlib, sys; importlib.import_module({first!r}); "
-        "assert 'rocke.helpers.mfma_attention' in sys.modules"
+def _fresh_interpreter(code: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    package_root = str(Path(rocke.__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = package_root + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
-    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+    )
 
 
-def test_each_module_imports_first_without_cycle():
+def test_each_module_imports_in_fresh_interpreter_without_cycle():
     for mod in (
         "rocke.helpers._attention_shared",
         "rocke.helpers.wmma_attention",
         "rocke.helpers.mfma_attention",
     ):
-        r = _import_in_fresh_interpreter(mod)
-        if mod != "rocke.helpers.mfma_attention":
-            # importing the leaf/wmma module alone must not need mfma first
-            code = f"import importlib; importlib.import_module({mod!r})"
-            r = subprocess.run(
-                [sys.executable, "-c", code], capture_output=True, text=True
-            )
-        assert r.returncode == 0, r.stderr
+        code = f"import importlib; importlib.import_module({mod!r})"
+        result = _fresh_interpreter(code)
+        assert result.returncode == 0, result.stderr
 
 
 def test_shared_and_wmma_modules_do_not_import_mfma_module():
@@ -81,6 +83,10 @@ def test_shared_and_wmma_modules_do_not_import_mfma_module():
             if isinstance(node, ast.ImportFrom):
                 assert node.module != "mfma_attention", fname
                 assert "mfma_attention" not in [a.name for a in node.names], fname
+            elif isinstance(node, ast.Import):
+                assert all(
+                    not alias.name.endswith(".mfma_attention") for alias in node.names
+                ), fname
     tree = ast.parse((root / "_attention_shared.py").read_text(encoding="utf-8"))
     mods = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert "wmma_attention" not in mods

@@ -237,11 +237,13 @@ class TestDefaultUniformKDecode(unittest.TestCase):
         )
         self.assertTrue(jobs)
         for job in jobs:
-            self.assertTrue(job.spec_kwargs["uniform_k_decode"])
+            # The stride-1 tap-outer variant replaces the decode loop.
+            tapk = job.spec_kwargs.get("tap_outer_k", False)
+            self.assertEqual(job.spec_kwargs["uniform_k_decode"], not tapk)
             self.assertEqual(
                 job.identity.uniform_k_decode, job.spec_kwargs["uniform_k_decode"]
             )
-            self.assertIn("ukd", job.identity.label())
+            self.assertIn("tapk" if tapk else "ukd", job.identity.label())
 
     def test_jit_sweep_worker_uses_the_policy(self):
         from benchmarks.common.benchmark_implicit_gemm_conv import _build_dgrad_one

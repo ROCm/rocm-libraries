@@ -748,6 +748,13 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             }
         }
     }
+    {
+        char descriptor_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        {
+            v_errf(v, op, "%s", descriptor_error);
+        }
+    }
 
     /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;

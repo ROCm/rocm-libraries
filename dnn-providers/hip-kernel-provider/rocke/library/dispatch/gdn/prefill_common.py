@@ -25,6 +25,7 @@ validation. Arch-specific capability, spec construction and the tuned
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 from typing import Tuple
 
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
@@ -81,25 +82,46 @@ class GdnPrefillRequest(OperatorRequest):
         d = asdict(self)
         d["dtype"] = normalize_dtype(self.dtype)
         d["chunk_size"] = self.effective_chunk_size
+        # Canonicalize int fields for the identity payload: a validated request
+        # may carry numpy integers (Integral), which are real ints but do not
+        # serialize to JSON. Only an Integral that is not a bool converts, so
+        # malformed values (``seqlen="256"``, ``seqlen=2.5``, ``batch=None``)
+        # survive raw for request_errors to name -- Capability.check() calls
+        # this before request_errors, and the identity hash only runs on a
+        # request that passed it.
+        for name in (
+            "batch",
+            "seqlen",
+            "num_k_heads",
+            "num_v_heads",
+            "head_k_dim",
+            "head_v_dim",
+            "chunk_size",
+        ):
+            value = d.get(name)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                continue
+            d[name] = int(value)
         return d
 
     def dims(self) -> dict:
+        # Raw values: request_errors rejects a non-int field by name.
         return {
-            "batch": int(self.batch),
-            "seqlen": int(self.seqlen),
-            "num_k_heads": int(self.num_k_heads),
-            "num_v_heads": int(self.num_v_heads),
-            "head_k_dim": int(self.head_k_dim),
-            "head_v_dim": int(self.head_v_dim),
+            "batch": self.batch,
+            "seqlen": self.seqlen,
+            "num_k_heads": self.num_k_heads,
+            "num_v_heads": self.num_v_heads,
+            "head_k_dim": self.head_k_dim,
+            "head_v_dim": self.head_v_dim,
             "chunk_size": self.effective_chunk_size,
             "num_chunks": self.num_chunks,
         }
 
     def features(self) -> frozenset:
         active = set()
-        if bool(self.has_initial_state):
+        if self.has_initial_state:
             active.add("initial_state")
-        if bool(self.store_final_state):
+        if self.store_final_state:
             active.add("final_state")
         return frozenset(active)
 
@@ -120,15 +142,25 @@ class GdnPrefillRequest(OperatorRequest):
         """Value heads per key head. 1 = MHA; >1 = GQA gather."""
         if self.num_k_heads <= 0:
             return 0
-        return int(self.num_v_heads) // int(self.num_k_heads)
+        return self.num_v_heads // self.num_k_heads
 
     @property
     def num_chunks(self) -> int:
-        """Chunks per sequence. Zero when ``seqlen`` does not tile exactly."""
+        """Chunks per sequence. Zero when ``seqlen`` does not tile exactly.
+
+        Also zero when ``seqlen`` or the chunk is not an int: the capability
+        prefilter reads this through ``dims()`` before ``prefill_request_errors``
+        runs, so the arithmetic here must not raise on input that check is about
+        to reject by name.
+        """
         chunk = self.effective_chunk_size
-        if chunk <= 0 or int(self.seqlen) % chunk:
+        for v in (chunk, self.seqlen):
+            # Same rule as prefill_request_errors: Integral, not int.
+            if isinstance(v, bool) or not isinstance(v, Integral):
+                return 0
+        if chunk <= 0 or self.seqlen % chunk:
             return 0
-        return int(self.seqlen) // chunk
+        return self.seqlen // chunk
 
     @property
     def workgroups(self) -> int:
@@ -137,7 +169,7 @@ class GdnPrefillRequest(OperatorRequest):
         The scan's ``value_splits`` fan each of these out into more workgroups;
         that multiplication is the scan grid helper's job, not the request's.
         """
-        return int(self.batch) * int(self.num_v_heads)
+        return self.batch * self.num_v_heads
 
     @property
     def batch_heads(self) -> int:
@@ -163,14 +195,30 @@ def prefill_request_errors(req: OperatorRequest) -> list:
         return [f"expected GdnPrefillRequest, got {type(req).__name__}"]
     errors = []
     # Reject, never normalize: `int(32.7)` used to hand the caller chunk 32
-    # while they asked for something this family cannot serve. Dataclass
-    # annotations are documentation, not a guard, so the trust boundary checks.
-    for name in ("batch", "seqlen", "num_k_heads", "num_v_heads"):
+    # while they asked for something this family cannot serve, and a truthy
+    # non-bool (`has_initial_state="false"`) would select the kernel that
+    # reads h0. Dataclass annotations are documentation, not a guard, so the
+    # trust boundary checks.
+    for name in (
+        "batch",
+        "seqlen",
+        "num_k_heads",
+        "num_v_heads",
+        "head_k_dim",
+        "head_v_dim",
+    ):
         value = getattr(req, name)
-        if isinstance(value, bool) or not isinstance(value, int):
+        # Integral, not int: an ``np.int64(4)`` is an integer and the old
+        # ``int()`` coercion accepted it. ``bool`` is an Integral subclass but
+        # a flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{name} must be an int, got {type(value).__name__}")
+    for name in ("has_initial_state", "store_final_state"):
+        value = getattr(req, name)
+        if type(value) is not bool:
+            errors.append(f"{name} must be a bool, got {value!r}")
     if req.chunk_size is not None and (
-        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, int)
+        isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, Integral)
     ):
         errors.append(f"chunk_size must be an int, got {type(req.chunk_size).__name__}")
     if errors:
