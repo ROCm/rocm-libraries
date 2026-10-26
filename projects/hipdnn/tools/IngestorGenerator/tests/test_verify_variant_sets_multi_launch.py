@@ -81,35 +81,29 @@ def _as_hip(by_name, entries=("decode_kernel", "merge_kernel"), build=None) -> N
         }
 
 
-class TestHipLaunches:
-    def test_hip_launches_differing_only_in_entry_are_distinct_binaries(self):
-        left = {
-            "sources": {
-                "decode": {"kind": "hip", "source": "k.hip", "entry": "a"},
-                "merge": {"kind": "hip", "source": "k.hip", "entry": "b"},
-            }
-        }
-        right = {
-            "sources": {
-                "decode": {"kind": "hip", "source": "k.hip", "entry": "a"},
-                "merge": {"kind": "hip", "source": "k.hip", "entry": "c"},
-            }
-        }
-        assert gate_module._binary_key(left) != gate_module._binary_key(right)
+_HIP_LAUNCHES = {
+    "decode": {"kind": "hip", "source": "k.hip", "entry": "a"},
+    "merge": {"kind": "hip", "source": "k.hip", "entry": "b"},
+}
+_HSACO_LAUNCHES = {
+    "decode": {"kind": "hsaco", "file": "k.co", "symbol": "a"},
+    "merge": {"kind": "hsaco", "file": "k.co", "symbol": "b"},
+}
 
-    def test_hsaco_launches_differing_only_in_symbol_are_distinct_binaries(self):
-        left = {
-            "sources": {
-                "decode": {"kind": "hsaco", "file": "k.co", "symbol": "a"},
-                "merge": {"kind": "hsaco", "file": "k.co", "symbol": "b"},
-            }
-        }
-        right = {
-            "sources": {
-                "decode": {"kind": "hsaco", "file": "k.co", "symbol": "a"},
-                "merge": {"kind": "hsaco", "file": "k.co", "symbol": "c"},
-            }
-        }
+
+class TestHipLaunches:
+    @pytest.mark.parametrize(
+        "launches, field, value",
+        [
+            pytest.param(_HIP_LAUNCHES, "entry", "c", id="hip-entry"),
+            pytest.param(_HSACO_LAUNCHES, "symbol", "c", id="hsaco-symbol"),
+        ],
+    )
+    def test_launches_differing_only_in_one_field_are_distinct_binaries(
+        self, launches, field, value
+    ):
+        left = {"sources": launches}
+        right = {"sources": {**launches, "merge": {**launches["merge"], field: value}}}
         assert gate_module._binary_key(left) != gate_module._binary_key(right)
 
     def test_hip_launches_differing_only_in_build_are_distinct_binaries(self):
