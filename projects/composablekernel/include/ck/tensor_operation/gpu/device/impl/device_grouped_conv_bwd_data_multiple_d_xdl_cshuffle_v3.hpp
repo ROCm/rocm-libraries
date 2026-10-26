@@ -240,6 +240,8 @@ template <typename GridwiseGemm,
           InMemoryDataOperationEnum EGlobalMemoryDataOperation,
           bool HasMainKBlockLoop,
           bool NoMainKBlockLoop,
+          bool HasConstantTail,
+          TailNumber TailNum       = TailNumber::Full,
           index_t MinimumOccupancy = 1>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
@@ -304,11 +306,11 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
 
             if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
             {
-                if(gemm_kernel_args[group_id].Tail_ == TailNumber::Odd)
+                if constexpr(HasConstantTail)
                 {
                     GridwiseGemm::template Run<HasMainKBlockLoop,
                                                EGlobalMemoryDataOperation,
-                                               TailNumber::Odd,
+                                               TailNum,
                                                decltype(a_grid_desc_transform),
                                                decltype(b_grid_desc_transform),
                                                EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
@@ -327,24 +329,50 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                 }
                 else
                 {
-                    GridwiseGemm::template Run<HasMainKBlockLoop,
-                                               EGlobalMemoryDataOperation,
-                                               TailNumber::Even,
-                                               decltype(a_grid_desc_transform),
-                                               decltype(b_grid_desc_transform),
-                                               EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
-                        karg.p_a_grid + a_batch_offset,
-                        karg.p_b_grid + b_batch_offset,
-                        karg.p_c_grid + e_batch_offset,
-                        p_shared_0,
-                        p_shared_1,
-                        karg,
-                        a_grid_desc_transform,
-                        b_grid_desc_transform,
-                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                        k_idx,
-                        gridDim.z,
-                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    if(gemm_kernel_args[group_id].Tail_ == TailNumber::Odd)
+                    {
+                        GridwiseGemm::template Run<HasMainKBlockLoop,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Odd,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
+                    else
+                    {
+                        GridwiseGemm::template Run<HasMainKBlockLoop,
+                                                   EGlobalMemoryDataOperation,
+                                                   TailNumber::Even,
+                                                   decltype(a_grid_desc_transform),
+                                                   decltype(b_grid_desc_transform),
+                                                   EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>(
+                            karg.p_a_grid + a_batch_offset,
+                            karg.p_b_grid + b_batch_offset,
+                            karg.p_c_grid + e_batch_offset,
+                            p_shared_0,
+                            p_shared_1,
+                            karg,
+                            a_grid_desc_transform,
+                            b_grid_desc_transform,
+                            gemm_kernel_args[group_id]
+                                .e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            k_idx,
+                            gridDim.z,
+                            blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                    }
                 }
             }
             else
@@ -1185,6 +1213,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     template <typename GridwiseGemm_,
               bool HasMainLoop,
               bool NoMainLoop,
+              bool HasConstantTail,
+              TailNumber Tail,
               InMemoryDataOperationEnum MemOp>
     static auto SelectKernel()
     {
@@ -1201,7 +1231,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                 MemOp,
                 HasMainLoop,
-                NoMainLoop>;
+                NoMainLoop,
+                HasConstantTail,
+                Tail>;
         }
         else
         {
@@ -1272,11 +1304,27 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                     no_loop_in_all_gemm &= !gemm_kernel_args[i].HasMainKBlockLoop_;
                 }
 
-                auto launch_kernel = [&](auto has_main_k_block_loop_, auto no_main_k_block_loop) {
-                    constexpr bool has_main_loop = has_main_k_block_loop_.value;
-                    constexpr bool no_main_loop  = no_main_k_block_loop.value;
-                    const auto kernel =
-                        SelectKernel<GridwiseGemm_, has_main_loop, no_main_loop, ElementOp>();
+                bool has_const_tail_ = true;
+                const auto ref_tail  = gemm_kernel_args[0].Tail_;
+                for(auto i = 0; i < gemms_count_for_set; i++)
+                {
+                    has_const_tail_ &= gemm_kernel_args[i].Tail_ == ref_tail;
+                }
+
+                auto launch_kernel = [&](auto has_main_k_block_loop_,
+                                         auto no_main_k_block_loop,
+                                         auto has_constant_tail_,
+                                         auto tail_) {
+                    constexpr bool has_main_loop     = has_main_k_block_loop_.value;
+                    constexpr bool no_main_loop      = no_main_k_block_loop.value;
+                    constexpr bool has_constant_tail = has_constant_tail_.value;
+                    constexpr TailNumber tail        = tail_.value;
+                    const auto kernel                = SelectKernel<GridwiseGemm_,
+                                                                    has_main_loop,
+                                                                    no_main_loop,
+                                                                    has_constant_tail,
+                                                                    tail,
+                                                                    ElementOp>();
 
                     return launch_and_time_kernel_with_preprocess(stream_config,
                                                                   clear_workspace,
@@ -1292,18 +1340,43 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 };
                 if(has_loop_in_all_gemm)
                 {
-                    ave_time += launch_kernel(integral_constant<bool, true>{},
-                                              integral_constant<bool, false>{});
+                    if(has_const_tail_ && ref_tail == TailNumber::Odd)
+                    {
+                        ave_time += launch_kernel(integral_constant<bool, true>{},
+                                                  integral_constant<bool, false>{},
+                                                  integral_constant<bool, true>{},
+                                                  integral_constant<TailNumber, TailNumber::Odd>{});
+                    }
+                    else if(has_const_tail_ && ref_tail == TailNumber::Even)
+                    {
+                        ave_time +=
+                            launch_kernel(integral_constant<bool, true>{},
+                                          integral_constant<bool, false>{},
+                                          integral_constant<bool, true>{},
+                                          integral_constant<TailNumber, TailNumber::Even>{});
+                    }
+                    else
+                    {
+                        ave_time +=
+                            launch_kernel(integral_constant<bool, true>{},
+                                          integral_constant<bool, false>{},
+                                          integral_constant<bool, false>{},
+                                          integral_constant<TailNumber, TailNumber::Full>{});
+                    }
                 }
                 else if(no_loop_in_all_gemm)
                 {
                     ave_time += launch_kernel(integral_constant<bool, false>{},
-                                              integral_constant<bool, true>{});
+                                              integral_constant<bool, true>{},
+                                              integral_constant<bool, false>{},
+                                              integral_constant<TailNumber, TailNumber::Full>{});
                 }
                 else
                 {
                     ave_time += launch_kernel(integral_constant<bool, false>{},
-                                              integral_constant<bool, false>{});
+                                              integral_constant<bool, false>{},
+                                              integral_constant<bool, false>{},
+                                              integral_constant<TailNumber, TailNumber::Full>{});
                 }
             }
 
