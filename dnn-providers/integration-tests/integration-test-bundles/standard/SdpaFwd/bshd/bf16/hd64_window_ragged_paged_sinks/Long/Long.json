@@ -46,7 +46,7 @@
                 "attn_scale_value": 0.125,
                 "left_bound": 128,
                 "right_bound": 0,
-                "max_seq_len_kv": 2048,
+                "max_seq_len_kv": 832,
                 "diagonal_alignment": "BOTTOM_RIGHT",
                 "mma_core_mode": "unset",
                 "implementation": "AUTO"
@@ -59,26 +59,26 @@
             "name": "Q",
             "dims": [
                 3,
-                16,
-                300,
+                8,
+                96,
                 64
             ],
             "strides": [
-                307200,
+                49152,
                 64,
-                1024,
+                512,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 10,
-            "ragged_offset_multiplier": 1024
+            "ragged_offset_multiplier": 512
         },
         {
             "uid": 1,
             "name": "K",
             "dims": [
-                90,
+                39,
                 2,
                 32,
                 64
@@ -96,7 +96,7 @@
             "uid": 2,
             "name": "V",
             "dims": [
-                90,
+                39,
                 2,
                 32,
                 64
@@ -115,40 +115,40 @@
             "name": "O",
             "dims": [
                 3,
-                16,
-                300,
+                8,
+                96,
                 64
             ],
             "strides": [
-                307200,
+                49152,
                 64,
-                1024,
+                512,
                 1
             ],
             "data_type": "bfloat16",
             "virtual": false,
             "ragged_offset_tensor_uid": 10,
-            "ragged_offset_multiplier": 1024
+            "ragged_offset_multiplier": 512
         },
         {
             "uid": 4,
             "name": "LSE",
             "dims": [
                 3,
-                16,
-                300,
+                8,
+                96,
                 1
             ],
             "strides": [
-                4800,
+                768,
                 1,
-                16,
+                8,
                 1
             ],
             "data_type": "float",
             "virtual": false,
             "ragged_offset_tensor_uid": 10,
-            "ragged_offset_multiplier": 16
+            "ragged_offset_multiplier": 8
         },
         {
             "uid": 5,
@@ -210,12 +210,12 @@
             "dims": [
                 3,
                 1,
-                64,
+                26,
                 1
             ],
             "strides": [
-                64,
-                64,
+                26,
+                26,
                 1,
                 1
             ],
@@ -228,12 +228,12 @@
             "dims": [
                 3,
                 1,
-                64,
+                26,
                 1
             ],
             "strides": [
-                64,
-                64,
+                26,
+                26,
                 1,
                 1
             ],
@@ -245,12 +245,12 @@
             "name": "SinkToken",
             "dims": [
                 1,
-                16,
+                8,
                 1,
                 1
             ],
             "strides": [
-                16,
+                8,
                 1,
                 1,
                 1

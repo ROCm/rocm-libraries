@@ -332,6 +332,98 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn("tensor uid 0", completed.stderr)
             self.assertIn("input tensor contains NaN/Inf", completed.stderr)
 
+    # A padded SDPA batch: the dead row's LSE is -inf by contract (SEM-010).
+    SDPA_FWD_NODES = [
+        {
+            "type": "SdpaAttributes",
+            "inputs": {"q_tensor_uid": 0},
+            "outputs": {"o_tensor_uid": None, "stats_tensor_uid": 1},
+        }
+    ]
+    SDPA_BWD_NODES = [
+        {
+            "type": "SdpaBackwardAttributes",
+            "inputs": {"q_tensor_uid": None, "stats_tensor_uid": 0},
+            "outputs": {"dq_tensor_uid": 1},
+        }
+    ]
+
+    def padded_lse(self, dead_value: float) -> bytes:
+        return struct.pack("<3f", 0.5, dead_value, 1.25)
+
+    def test_sdpa_padded_stats_neg_inf_passes(self) -> None:
+        for label, nodes, padded in (
+            ("forward stats output", self.SDPA_FWD_NODES, "output"),
+            ("backward stats input", self.SDPA_BWD_NODES, "input"),
+        ):
+            with self.subTest(label=label):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    payload = {
+                        "input_bytes": self.filled_bytes("float", 3),
+                        "output_bytes": self.filled_bytes("float", 3),
+                        f"{padded}_bytes": self.padded_lse(float("-inf")),
+                    }
+                    self.write_bundle(
+                        root,
+                        Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                        input_dims=(3,),
+                        output_dims=(3,),
+                        nodes=nodes,
+                        **payload,
+                    )
+
+                    completed = self.run_verifier(root, require_data=True)
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sdpa_stats_pos_inf_or_nan_fails(self) -> None:
+        for value in (float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_bundle(
+                        root,
+                        Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                        output_dims=(3,),
+                        output_bytes=self.padded_lse(value),
+                        nodes=self.SDPA_FWD_NODES,
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertIn("tensor uid 1", completed.stderr)
+                    self.assertIn(
+                        "SDPA stats tensor contains NaN/+Inf at element index 1",
+                        completed.stderr,
+                    )
+
+    def test_sdpa_neg_inf_outside_stats_fails(self) -> None:
+        # Only the stats tensor may hold -inf; the same value in O is a defect.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bhsd/fp32/padneq/Small"),
+                output_dims=(3,),
+                output_bytes=self.padded_lse(float("-inf")),
+                nodes=[
+                    {
+                        "type": "SdpaAttributes",
+                        "inputs": {"q_tensor_uid": 0},
+                        "outputs": {"o_tensor_uid": 1, "stats_tensor_uid": None},
+                    }
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "output tensor contains NaN/Inf at element index 1", completed.stderr
+            )
+
     def test_flat_output_uid_node_type_is_valid(self) -> None:
         # ReductionAttributes puts "out_tensor_uid" directly on the node instead
         # of nesting it under an "outputs" object like every other node type.

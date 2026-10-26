@@ -22,11 +22,15 @@ Supported, fully composable operation axes:
   - block mask:   --block-mask (cuDNN block-sparse UINT8 tile bitmask; dense BATCH mode)
   - fp8 scaling:  --fp8-scaling (cuDNN sdpa_fp8: scale_s/descale_s/scale_o, amax_s/amax_o,
                   FP8_E4M3 output; dense, S_kv <= 128; requires --dtype fp8)
+  - graph-only:   --graph-only (no golden data: the graph plus a .meta.json whose `inputs`
+                  tell the harness how to fill every input; dense BATCH mode only)
 
 Any combination of the above may be applied in a single invocation (e.g. fp8 +
 bottom_right causal + group + stats), matching the 12 unique AITER forward tuples.
 
 Output: {base_filename}.json + {base_filename}.tensor{uid}.bin + {base_filename}.meta.json
+(--graph-only: no .bin files, and any {base_filename}.tensor*.bin / .tensors.dvc left by an
+earlier golden run are removed)
 
 Usage:
     python generate_sdpa_fwd_golden.py \
@@ -40,6 +44,7 @@ Usage:
 
 import argparse
 import datetime
+import glob
 import json
 import math
 import os
@@ -111,7 +116,9 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         --causal top_left as cuDNN requires. Every other bundle is unchanged.
 # 1.10.0 — Added --row-stats: cuDNN's Max / Sum_exp outputs (fp16_ref.py score_max_ref /
 #          score_sum_exp_ref). Every other bundle is unchanged.
-GENERATOR_VERSION = "1.10.0"
+# 1.11.0 — Added --graph-only: graph and metadata with harness input recipes, no golden data,
+#          for bundles above the RFC 0011 size budget. Every golden bundle is unchanged.
+GENERATOR_VERSION = "1.11.0"
 
 # FP8 operation: OCP fp8 inputs (Q/K/V, E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
 # AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -252,6 +259,72 @@ def block_mask_dims(B, H_q, S_q, S_kv):
     """cuDNN's block-mask shape: [B, H_q, ceil(S_q / 128), ceil(ceil(S_kv / 128) / 8)]."""
     tiles_kv = (S_kv + BLOCK_MASK_TILE - 1) // BLOCK_MASK_TILE
     return [B, H_q, (S_q + BLOCK_MASK_TILE - 1) // BLOCK_MASK_TILE, (tiles_kv + 7) // 8]
+
+
+# Graph-only block mask: the harness draws each UINT8 byte as a uniform float in [lo, hi)
+# truncated to an integer, so [128, 255) gives bytes 128..254: bit 7 is always set and bits
+# 0-6 are random. Bit 7 of byte 0 is tile column 7, so with at least 8 key tiles
+# (S_kv >= 8 * 128) no query row loses every key, as random_block_mask keeps tile column 0.
+GRAPH_ONLY_BLOCK_MASK_RANGE = (128.0, 255.0)
+GRAPH_ONLY_BLOCK_MASK_MIN_SEQ_KV = 8 * BLOCK_MASK_TILE
+
+
+def graph_only_input_recipes(dtype, fp8_format, block_mask, min_val, max_val):
+    """meta.json `inputs` for a graph-only bundle (InputFillRecipes: free(lo, hi) or
+    fixed(value), keyed by uid), mirroring how the golden path draws its inputs.
+
+    Q/K/V are uniform(min, max). For fp8 that is the quantized form the golden path
+    stores: codes over the format's full range [-fp8_max, fp8_max] with the per-tensor
+    descale amax / fp8_max (quantize_fp8_per_tensor), so the dequantized inputs are again
+    uniform(min, max). Descales are fixed and positive.
+    """
+    recipes = {}
+    if dtype == "fp8":
+        fp8_max = FP8_FORMATS[fp8_format][2]
+        descale = max(abs(min_val), abs(max_val)) / fp8_max
+        for uid in (UID_Q, UID_K, UID_V):
+            recipes[str(uid)] = {"kind": "free", "lo": -fp8_max, "hi": fp8_max}
+        for uid in (UID_DESCALE_Q, UID_DESCALE_K, UID_DESCALE_V):
+            recipes[str(uid)] = {"kind": "fixed", "value": descale}
+    else:
+        for uid in (UID_Q, UID_K, UID_V):
+            recipes[str(uid)] = {"kind": "free", "lo": min_val, "hi": max_val}
+    if block_mask:
+        lo, hi = GRAPH_ONLY_BLOCK_MASK_RANGE
+        recipes[str(UID_BLOCK_MASK)] = {"kind": "free", "lo": lo, "hi": hi}
+    return recipes
+
+
+def build_graph_only_meta_json(config, pytorch_version, inputs):
+    """Metadata of a graph-only bundle: the provenance of build_meta_json without the
+    golden-data fields, plus the harness input recipes. The harness verifies such a
+    bundle against its GPU or CPU reference executor."""
+    meta = build_meta_json(config, pytorch_version)
+    for key in (
+        "reference_backend",
+        "rocm_version",
+        "generation_precision",
+        "input_range",
+        "deterministic",
+    ):
+        del meta[key]
+    meta["reference_source"] = (
+        "hipDNN reference executor (graph-only bundle, no golden data)"
+    )
+    meta["inputs"] = inputs
+    return meta
+
+
+def remove_golden_data(base_filename):
+    """Delete golden tensors and the DVC pointer an earlier golden run left beside a
+    bundle that is now graph-only; returns the removed paths."""
+    stale = sorted(glob.glob(f"{glob.escape(base_filename)}.tensor*.bin"))
+    pointer = f"{base_filename}.tensors.dvc"
+    if os.path.exists(pointer):
+        stale.append(pointer)
+    for path in stale:
+        os.remove(path)
+    return stale
 
 
 def random_block_mask(dims, S_kv, rng):
@@ -828,6 +901,7 @@ def generate_forward_bundle(
     fp8_format="e4m3",
     alibi=False,
     row_stats=False,
+    graph_only=False,
 ):
     B, H_q, S_q, D_qk = q_dims
     B_v, H_kv, S_kv, D_v = v_dims
@@ -921,6 +995,18 @@ def generate_forward_bundle(
             "--ragged-offsets requires --layout bshd (RFC 0014 packed memory is "
             "sequence-outermost within a batch, with a single sequence stride)"
         )
+    if graph_only and (has_seq_lens or ragged or fp8_scaling or validate):
+        # Seq-lens, ragged offsets and the fp8 softmax/output scales need exact values
+        # that a uniform or fixed input recipe cannot express.
+        errors.append(
+            "--graph-only needs a dense BATCH bundle (no seq-lens, no ragged, no "
+            "--fp8-scaling) and cannot --validate"
+        )
+    if graph_only and block_mask and S_kv < GRAPH_ONLY_BLOCK_MASK_MIN_SEQ_KV:
+        errors.append(
+            f"--graph-only --block-mask needs S_kv >= {GRAPH_ONLY_BLOCK_MASK_MIN_SEQ_KV}, "
+            "so the always-set bit 7 of each mask byte names a real key tile"
+        )
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -931,6 +1017,32 @@ def generate_forward_bundle(
         attn_scale = 1.0
 
     os.makedirs(os.path.dirname(base_filename) or ".", exist_ok=True)
+
+    if graph_only:
+        write_graph_only_bundle(
+            base_filename,
+            q_dims,
+            k_dims,
+            v_dims,
+            o_dims,
+            attn_scale,
+            io_json=io_json,
+            o_json=o_json,
+            dtype=dtype,
+            causal=causal,
+            window_left=window_left,
+            window_right=window_right,
+            stats=stats,
+            seed=seed,
+            min_val=min_val,
+            max_val=max_val,
+            layout=layout,
+            block_mask=block_mask,
+            fp8_format=fp8_format,
+            alibi=alibi,
+            row_stats=row_stats,
+        )
+        return
 
     print(f"Generating forward bundle: {base_filename}")
     print(f"  Q: {q_dims}, K: {k_dims}, V: {v_dims}, O: {o_dims}")
@@ -1233,6 +1345,99 @@ def generate_forward_bundle(
             print("  Validation: PASSED" if ok else "  Validation: FAILED")
 
 
+def write_graph_only_bundle(
+    base_filename,
+    q_dims,
+    k_dims,
+    v_dims,
+    o_dims,
+    attn_scale,
+    *,
+    io_json,
+    o_json,
+    dtype,
+    causal,
+    window_left,
+    window_right,
+    stats,
+    seed,
+    min_val,
+    max_val,
+    layout,
+    block_mask,
+    fp8_format,
+    alibi,
+    row_stats,
+):
+    """Write {base}.json and {base}.meta.json (with `inputs` recipes) and no golden data."""
+    is_fp8 = dtype == "fp8"
+    print(f"Generating graph-only forward bundle: {base_filename}")
+    print(f"  Q: {q_dims}, K: {k_dims}, V: {v_dims}, O: {o_dims}, dtype: {dtype}")
+    for path in remove_golden_data(base_filename):
+        print(f"  Removed golden data: {path}")
+
+    graph_json = build_graph_json(
+        q_dims,
+        k_dims,
+        v_dims,
+        o_dims,
+        attn_scale,
+        dtype_str=io_json,
+        stats=stats,
+        causal=causal,
+        window_left=window_left,
+        window_right=window_right,
+        emit_seq_lens=False,
+        fp8=is_fp8,
+        o_dtype_str=o_json,
+        layout=layout,
+        ragged=False,
+        fp8_scaling=False,
+        block_mask=block_mask,
+        fp8_format=fp8_format,
+        alibi=alibi,
+        row_stats=row_stats,
+    )
+    json_path = f"{base_filename}.json"
+    with open(json_path, "w") as f:
+        json.dump(graph_json, f, indent=4)
+        f.write("\n")
+    print(f"  Graph JSON: {json_path}")
+
+    config = {
+        "q_dims": q_dims,
+        "v_dims": v_dims,
+        "dtype": dtype,
+        "causal": causal,
+        "window_left": window_left,
+        "window_right": window_right,
+        "group_mode": False,
+        "seq_lens_q": None,
+        "seq_lens_kv": None,
+        "stats": stats,
+        "seed": seed,
+        "min_val": min_val,
+        "max_val": max_val,
+        "scale": attn_scale,
+        "precision_note": None,
+        "layout": layout,
+        "ragged": False,
+        "ragged_physical_lens": None,
+        "fp8_scaling": False,
+        "block_mask": block_mask,
+        "fp8_format": fp8_format if is_fp8 else None,
+        "alibi": alibi,
+        "row_stats": row_stats,
+    }
+    inputs = graph_only_input_recipes(dtype, fp8_format, block_mask, min_val, max_val)
+    meta_json = build_graph_only_meta_json(config, torch.__version__, inputs)
+    meta_path = f"{base_filename}.meta.json"
+    with open(meta_path, "w") as f:
+        json.dump(meta_json, f, indent=4)
+        f.write("\n")
+    print(f"  Meta JSON: {meta_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate SDPA forward golden reference bundles"
@@ -1363,6 +1568,14 @@ def main():
         help="Attention scale (default: 1.0, no scaling, as for an unset attn_scale_value)",
     )
     parser.add_argument(
+        "--graph-only",
+        action="store_true",
+        help="Write no golden data: the graph plus a .meta.json whose `inputs` recipes "
+        "tell the harness how to fill each input; the harness verifies against its "
+        "reference executor. Removes golden data left by an earlier run. Dense BATCH "
+        "mode only",
+    )
+    parser.add_argument(
         "--validate",
         action="store_true",
         help="Cross-check golden output against AITER fmha_v3_fwd (requires GPU)",
@@ -1402,6 +1615,7 @@ def main():
         fp8_format=args.fp8_format,
         alibi=args.alibi,
         row_stats=args.row_stats,
+        graph_only=args.graph_only,
     )
     print("\nDone.")
 
