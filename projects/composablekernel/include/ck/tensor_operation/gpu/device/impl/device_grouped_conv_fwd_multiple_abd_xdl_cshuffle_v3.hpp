@@ -405,7 +405,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                                              AComputeDataType,
                                              BComputeDataType>
 #ifndef CK_CODE_GEN_RTC
-    , public GroupedConvOutputDefinition
+    ,
+      public GroupedConvOutputDefinition
 #endif
 {
     using IndexType = std::conditional_t<LargeTensors, ck::long_index_t, ck::index_t>;
@@ -1894,8 +1895,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         // Includes the gfx1250 WMMA-ported launch; qualification is by its actual
         // supported argument and Set addressing, never its formatted type name.
         return arg != nullptr &&
-               is_packed_grouped_conv_output<NDimSpatial, ELayout>(
-                   arg->e_g_n_k_wos_lengths_, arg->e_g_n_k_wos_strides_) &&
+               is_packed_grouped_conv_output<NDimSpatial, ELayout>(arg->e_g_n_k_wos_lengths_,
+                                                                   arg->e_g_n_k_wos_strides_) &&
                arg->a_g_n_c_wis_lengths_[0] == arg->e_g_n_k_wos_lengths_[0] &&
                arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_k_wos_lengths_[0] &&
                arg->a_g_n_c_wis_lengths_[1] == arg->e_g_n_k_wos_lengths_[1] &&

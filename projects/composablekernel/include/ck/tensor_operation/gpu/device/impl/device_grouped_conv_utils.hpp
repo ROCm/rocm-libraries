@@ -17,7 +17,7 @@ namespace device {
 // final conversion: every logical output is independent of its prior contents.
 struct GroupedConvOutputDefinition
 {
-    virtual ~GroupedConvOutputDefinition() = default;
+    virtual ~GroupedConvOutputDefinition()                                = default;
     virtual bool IsOutputFullyDefined(const BaseArgument* argument) const = 0;
 };
 
@@ -47,7 +47,7 @@ bool is_packed_grouped_conv_output(const Lengths& lengths, const Strides& stride
         return false;
 
     long_index_t packed_stride = 1;
-    const auto consume = [&](index_t i) {
+    const auto consume         = [&](index_t i) {
         if(lengths[i] <= 0 || strides[i] != packed_stride ||
            lengths[i] > 0x7fffffffffffffffLL / packed_stride)
             return false;

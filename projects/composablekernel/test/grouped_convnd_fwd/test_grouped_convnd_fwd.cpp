@@ -21,36 +21,46 @@ void CheckQualifiedForwardDirtyOutput()
 {
     using Pass = ck::tensor_operation::element_wise::PassThrough;
     using namespace ck::tensor_layout::convolution;
-    using ALayout = std::conditional_t<D == 2, NHWGC, NDHWGC>;
-    using BLayout = std::conditional_t<D == 2, GKYXC, GKZYXC>;
-    using ELayout = std::conditional_t<D == 2, NHWGK, NDHWGK>;
-    using Op = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
-        D, ALayout, BLayout, ck::Tuple<>, ELayout, T, T, ck::Tuple<>, T, Pass, Pass, Pass>;
+    using ALayout           = std::conditional_t<D == 2, NHWGC, NDHWGC>;
+    using BLayout           = std::conditional_t<D == 2, GKYXC, GKZYXC>;
+    using ELayout           = std::conditional_t<D == 2, NHWGK, NDHWGK>;
+    using Op                = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<D,
+                                                                                            ALayout,
+                                                                                            BLayout,
+                                                                                            ck::Tuple<>,
+                                                                                            ELayout,
+                                                                                            T,
+                                                                                            T,
+                                                                                            ck::Tuple<>,
+                                                                                            T,
+                                                                                            Pass,
+                                                                                            Pass,
+                                                                                            Pass>;
     constexpr ck::index_t G = 3, N = 2, C = 16, K = 16;
     std::array<ck::index_t, D + 3> a{}, as{}, b{}, bs{}, e{}, es{};
     std::array<ck::index_t, D> stride{}, dilation{}, pads{};
     a[0] = b[0] = e[0] = G;
     a[1] = e[1] = N;
     b[1] = e[2] = K;
-    a[2] = b[2] = C;
+    a[2] = b[2]         = C;
     ck::index_t spatial = 1;
     for(ck::index_t d = D; d > 0; --d)
     {
         a[d + 2] = e[d + 2] = d == D ? 5 : 3;
-        b[d + 2] = 1;
-        as[d + 2] = spatial * G * C;
-        es[d + 2] = spatial * G * K;
-        bs[d + 2] = C;
+        b[d + 2]            = 1;
+        as[d + 2]           = spatial * G * C;
+        es[d + 2]           = spatial * G * K;
+        bs[d + 2]           = C;
         spatial *= a[d + 2];
         stride[d - 1] = dilation[d - 1] = 1;
     }
     as[0] = C;
     as[1] = spatial * G * C;
     as[2] = bs[2] = es[2] = 1;
-    bs[0] = K * C;
-    bs[1] = C;
-    es[0] = K;
-    es[1] = spatial * G * K;
+    bs[0]                 = K * C;
+    bs[1]                 = C;
+    es[0]                 = K;
+    es[1]                 = spatial * G * K;
     std::vector<T> input(N * spatial * G * C), weight(G * K * C);
     std::vector<T> actual(N * spatial * G * K);
     for(std::size_t i = 0; i < input.size(); ++i)
@@ -68,9 +78,24 @@ void CheckQualifiedForwardDirtyOutput()
     for(const auto& op : instances)
     {
         auto arg = op->MakeArgumentPointer(input_device.GetDeviceBuffer(),
-                                          weight_device.GetDeviceBuffer(), {},
-                                          output_device.GetDeviceBuffer(), a, as, b, bs, {}, {},
-                                          e, es, stride, dilation, pads, pads, Pass{}, Pass{}, Pass{});
+                                           weight_device.GetDeviceBuffer(),
+                                           {},
+                                           output_device.GetDeviceBuffer(),
+                                           a,
+                                           as,
+                                           b,
+                                           bs,
+                                           {},
+                                           {},
+                                           e,
+                                           es,
+                                           stride,
+                                           dilation,
+                                           pads,
+                                           pads,
+                                           Pass{},
+                                           Pass{},
+                                           Pass{});
         if(!ck::tensor_operation::device::IsOutputFullyDefined(*op, arg.get()))
             continue;
         ASSERT_TRUE(op->IsSupportedArgument(arg.get()));
@@ -91,7 +116,8 @@ void CheckQualifiedForwardDirtyOutput()
                         {
                             float want = 0;
                             for(ck::index_t c = 0; c < C; ++c)
-                                want += ck::type_convert<float>(input[((n * spatial + s) * G + g) * C + c]) *
+                                want += ck::type_convert<float>(
+                                            input[((n * spatial + s) * G + g) * C + c]) *
                                         ck::type_convert<float>(weight[(g * K + k) * C + c]);
                             const float got = ck::type_convert<float>(
                                 actual[((n * spatial + s) * G + g) * K + k]);
@@ -114,7 +140,6 @@ TEST(TestGroupedConvndFwdOutputContract, PackedDirtyOutput)
 #endif
 }
 } // namespace
-
 
 static ck::index_t param_mask     = 0xffff;
 static ck::index_t instance_index = -1;

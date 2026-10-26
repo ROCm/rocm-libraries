@@ -302,7 +302,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                AComputeType,
                                                BComputeType>
 #ifndef CK_CODE_GEN_RTC
-    , public GroupedConvOutputDefinition
+    ,
+      public GroupedConvOutputDefinition
 #endif
 {
     // TODO: Extend support for more spatial dimensions.
@@ -1284,8 +1285,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         const auto* arg = dynamic_cast<const Argument*>(p_arg);
         // The retained internal clear covers spatial holes as well as all groups.
         return arg != nullptr && arg->gemms_count_ > 0 && arg->bwd_needs_zero_out &&
-               is_packed_grouped_conv_output<NDimSpatial, ELayout>(
-                   arg->e_g_n_c_wis_lengths_, arg->e_g_n_c_wis_strides_) &&
+               is_packed_grouped_conv_output<NDimSpatial, ELayout>(arg->e_g_n_c_wis_lengths_,
+                                                                   arg->e_g_n_c_wis_strides_) &&
                arg->a_g_n_k_wos_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
                arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
                arg->a_g_n_k_wos_lengths_[1] == arg->e_g_n_c_wis_lengths_[1] &&

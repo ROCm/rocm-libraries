@@ -329,7 +329,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                                              AComputeDataType,
                                              BComputeDataType>
 #ifndef CK_CODE_GEN_RTC
-    , public GroupedConvOutputDefinition
+    ,
+      public GroupedConvOutputDefinition
 #endif
 {
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle;
@@ -1931,8 +1932,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         const auto* arg = dynamic_cast<const Argument*>(p_arg);
         // The Set epilogue covers all valid M/N coordinates, including tile tails.
         return arg != nullptr &&
-               is_packed_grouped_conv_output<NDimSpatial, ELayout>(
-                   arg->e_g_n_k_wos_lengths_, arg->e_g_n_k_wos_strides_) &&
+               is_packed_grouped_conv_output<NDimSpatial, ELayout>(arg->e_g_n_k_wos_lengths_,
+                                                                   arg->e_g_n_k_wos_strides_) &&
                arg->a_g_n_c_wis_lengths_[0] == arg->e_g_n_k_wos_lengths_[0] &&
                arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_k_wos_lengths_[0] &&
                arg->a_g_n_c_wis_lengths_[1] == arg->e_g_n_k_wos_lengths_[1] &&
