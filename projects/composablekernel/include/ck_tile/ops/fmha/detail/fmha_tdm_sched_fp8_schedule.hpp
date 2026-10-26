@@ -24,14 +24,18 @@ struct FmhaTdmSchedFp8EvenlyInterleavedReadSchedule
     {
         static constexpr index_t kLoads          = Geometry::kKSuLoadCount;
         static constexpr index_t kHalf           = kLoads / 2;
-        static constexpr index_t kTailFirstRow   = kPvWmmasPerStage - 5;
         static constexpr index_t kMaxLoadsPerRow = 2;
+        // Tail: the last five rows; at D64 it starts after the first half instead.
+        static constexpr index_t kTailRows = 5;
+        static constexpr index_t kTailFirstRow =
+            kHalf <= kPvWmmasPerStage - kTailRows ? kPvWmmasPerStage - kTailRows : kHalf;
         struct Row
         {
             index_t accesses[kMaxLoadsPerRow]{};
             index_t size = 0;
         };
         Row rows[kPvWmmasPerStage]{};
+        static_assert(kLoads - kHalf <= kMaxLoadsPerRow * (kPvWmmasPerStage - kTailFirstRow));
 
         CK_TILE_HOST_DEVICE constexpr PvKRows()
         {
@@ -45,7 +49,6 @@ struct FmhaTdmSchedFp8EvenlyInterleavedReadSchedule
             }
         }
     };
-    static_assert(Geometry::kKSuLoadCount / 2 <= Geometry::kPvWmmasPerStage - 5);
 
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr auto MakePvRows()
@@ -74,6 +77,96 @@ struct FmhaTdmSchedFp8EvenlyInterleavedReadSchedule
         static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
             [&](auto i) {
                 visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+            });
+    }
+};
+
+// D256: the last QK stage reads the first V chunks; PV streams the rest kLead chunks ahead.
+template <typename Geometry>
+struct FmhaTdmSchedFp8D256StreamedVReadSchedule
+{
+    using Kind                                = FmhaTdmSchedLoadKind;
+    static constexpr index_t kNumQkStages     = Geometry::kQkStages;
+    static constexpr index_t kNumPvStages     = Geometry::kPvStages;
+    static constexpr index_t kQkWmmasPerStage = Geometry::kQkWmmasPerStage;
+    static constexpr index_t kPvWmmasPerStage = Geometry::kPvWmmasPerStage;
+    static constexpr index_t kChunkLoads      = Geometry::kVStageLoadCount / Geometry::kPvNIter;
+    static constexpr index_t kMIter           = Geometry::kPvMIter;
+    // PV row r runs V chunk r / kMIter; rows read chunk r / kMIter + kLead.
+    // Each chunk of lead holds its V reads in VGPRs longer; six hide the LDS read latency.
+    static constexpr index_t kLead = 6;
+    // Next-K group 0 reads go one per row from here, behind the V stream.
+    static constexpr index_t kKFirstRow = 16;
+    static_assert(kNumPvStages == 1 && kPvWmmasPerStage == Geometry::kPvNIter * kMIter);
+
+    template <index_t Stage>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQkRows()
+    {
+        static_assert(Stage >= 0 && Stage < kNumQkStages);
+        constexpr index_t loads =
+            Stage == kNumQkStages - 1 ? kLead * kChunkLoads : Geometry::kKSuLoadCount;
+        return FmhaTdmSchedActiveRows<kQkWmmasPerStage, loads>{};
+    }
+
+    struct PvRows
+    {
+        static constexpr index_t kMaxLoadsPerRow = 8;
+        struct Row
+        {
+            index_t accesses[kMaxLoadsPerRow]{};
+            bool is_k[kMaxLoadsPerRow]{};
+            index_t size = 0;
+        };
+        Row rows[kPvWmmasPerStage]{};
+
+        CK_TILE_HOST_DEVICE constexpr PvRows()
+        {
+            constexpr index_t v_loads = Geometry::kVStageLoadCount - kLead * kChunkLoads;
+            constexpr index_t v_rows  = kPvWmmasPerStage - kLead * kMIter;
+            for(index_t a = 0; a < v_loads; ++a)
+            {
+                Row& r               = rows[a * v_rows / v_loads];
+                r.accesses[r.size++] = kLead * kChunkLoads + a;
+            }
+            constexpr index_t k_loads = Geometry::kKSuLoadCount;
+            constexpr index_t k_rows  = kPvWmmasPerStage - kKFirstRow;
+            for(index_t a = 0; a < k_loads; ++a)
+            {
+                Row& r               = rows[kKFirstRow + a * k_rows / k_loads];
+                r.is_k[r.size]       = true;
+                r.accesses[r.size++] = a;
+            }
+        }
+    };
+
+    template <index_t Stage, index_t Wmma>
+    CK_TILE_HOST_DEVICE static constexpr bool PvReadsFirst()
+    {
+        return false;
+    }
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitQkRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < kQkWmmasPerStage);
+        constexpr auto row  = MakeQkRows<Stage>().rows[Wmma];
+        constexpr auto kind = Stage == kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
+        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+            [&](auto i) {
+                visitor(std::integral_constant<Kind, kind>{}, number<row.accesses[i]>{});
+            });
+    }
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitPvRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < kPvWmmasPerStage);
+        constexpr auto row = PvRows{}.rows[Wmma];
+        static_for<SecondHalf ? row.size / 2 : 0, SecondHalf ? row.size : row.size / 2, 1>{}(
+            [&](auto i) {
+                visitor(std::integral_constant < Kind,
+                        row.is_k[i] ? Kind::KRead : Kind::VRead > {},
+                        number<row.accesses[i]>{});
             });
     }
 };
@@ -119,7 +212,10 @@ struct FmhaTdmSchedFp8WmmaFirstPlacement : FmhaTdmSchedWmmaFirstPlacement<ReadPl
 };
 
 template <typename Geometry>
-using FmhaTdmSchedFp8DefaultScheduleFor = FmhaTdmSchedSequentialTileSchedule<
-    FmhaTdmSchedFp8WmmaFirstPlacement<FmhaTdmSchedFp8EvenlyInterleavedReadSchedule<Geometry>>>;
+using FmhaTdmSchedFp8DefaultScheduleFor =
+    FmhaTdmSchedSequentialTileSchedule<FmhaTdmSchedFp8WmmaFirstPlacement<
+        std::conditional_t<Geometry::kHeadDimQK == 256,
+                           FmhaTdmSchedFp8D256StreamedVReadSchedule<Geometry>,
+                           FmhaTdmSchedFp8EvenlyInterleavedReadSchedule<Geometry>>>>;
 
 } // namespace ck_tile

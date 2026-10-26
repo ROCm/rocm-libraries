@@ -133,7 +133,7 @@ struct TestConfigs<FmhaFwdMxFp8>
     }
 };
 
-// MXFP8 with a BF16 O exists only on gfx125x qr_tdm_fp8_sched: d=128, row-major V.
+// MXFP8 with a BF16 O exists only on gfx125x qr_tdm_fp8_sched; d64/d256 run in the Hdim suites.
 template <>
 struct TestConfigs<FmhaFwdMxFp8Bf16> : TestConfigs<FmhaFwdMxFp8>
 {
@@ -1190,6 +1190,146 @@ TEST_P(QuantScaleSink, DataTypeConfig)
         &kernel_name);
     CHECK_RESULT(result);
     ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+// Head dim 64 across every quantization scale: masks, sink logit and tokens, bias, LSE.
+using QuantScaleHdimParam =
+    std::tuple<mode_enum,
+               const char*,
+               bool,
+               std::tuple<int, int, int, int, int, std::string, std::string, int>>;
+
+class QuantScaleHdim64 : public TestWithParam<QuantScaleHdimParam>
+{
+};
+
+void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param)
+{
+    auto [mode, qscale, lse, dims]                                                  = param;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, bias_str, init_sink] = dims;
+    constexpr bool is_mx_fp8 =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
+    if(is_mx_fp8 && bias_str != "n")
+        GTEST_SKIP() << "MX has no elementwise bias";
+    // gfx125x MXFP8 runs on row-major V.
+    const bool is_v_rowmajor = is_mx_fp8 || def_is_v_rowmajor;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(hdim),
+        adjust_hdim(hdim),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        bias_str,
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        1,         // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleHdim64,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(false, true),                                            // lse
+            Values(std::tuple{2, 2, 1, 55, 256, "0", "n", 0},               // GQA, short query
+                   std::tuple{1, 3, -1, 300, 129, "0", "n", 0},             // query/key tails
+                   std::tuple{2, 1, -1, 256, 256, "1", "n", 0},             // causal
+                   std::tuple{1, 2, 1, 256, 700, "t:128,30", "n", 0},       // sliding window
+                   std::tuple{2, 4, 1, 1024, 1024, "t:127,0", "n", 1},      // gpt-oss
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512", "n", 1}, // sink tokens
+                   std::tuple{1, 2, -1, 1000, 300, "b", "n", 1},   // sink logit, empty rows
+                   std::tuple{2, 2, 1, 300, 1000, "0", "e", 0},    // elementwise bias
+                   std::tuple{1, 2, -1, 256, 700, "t", "e", 1}))); // bias, mask and sink logit
+
+TEST_P(QuantScaleHdim64, DataTypeConfig) { RunQuantScaleHdim(64, GetParam()); }
+
+// Head dim 256 (one workgroup per CU on gfx125x) with the same rows as head dim 64.
+class QuantScaleHdim256 : public TestWithParam<QuantScaleHdimParam>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleHdim256,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(false, true),                                            // lse
+            Values(std::tuple{2, 2, 1, 55, 256, "0", "n", 0},               // GQA, short query
+                   std::tuple{1, 3, -1, 300, 129, "0", "n", 0},             // query/key tails
+                   std::tuple{2, 1, -1, 256, 256, "1", "n", 0},             // causal
+                   std::tuple{1, 2, 1, 256, 700, "t:128,30", "n", 0},       // sliding window
+                   std::tuple{2, 4, 1, 1024, 1024, "t:127,0", "n", 1},      // gpt-oss
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512", "n", 1}, // sink tokens
+                   std::tuple{1, 2, -1, 1000, 300, "b", "n", 1},   // sink logit, empty rows
+                   std::tuple{2, 2, 1, 300, 1000, "0", "e", 0},    // elementwise bias
+                   std::tuple{1, 2, -1, 256, 700, "t", "e", 1}))); // bias, mask and sink logit
+
+TEST_P(QuantScaleHdim256, DataTypeConfig) { RunQuantScaleHdim(256, GetParam()); }
+
+// Decode-length queries in batch mode on every head dim, GQA and MHA.
+class QuantScaleShortQuery
+    : public TestWithParam<
+          std::tuple<int,
+                     const char*,
+                     bool,
+                     std::tuple<int, int, int, int, int, std::string, std::string, int>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleShortQuery,
+    Combine(Values(64, 128, 256),
+            QScaleValues,
+            Values(false, true),                                           // lse
+            Values(std::tuple{2, 8, 2, 1, 1024, "0", "n", 0},              // GQA 4, Pack-GQA n/pt
+                   std::tuple{3, 4, -1, 1, 500, "0", "n", 0},              // MHA, key tail
+                   std::tuple{2, 8, 2, 4, 700, "b", "n", 0},               // causal bottom-right
+                   std::tuple{1, 4, 1, 16, 2048, "b", "n", 0},             // causal, GQA ratio 4
+                   std::tuple{2, 8, 2, 16, 1000, "b:127,0", "n", 1},       // gpt-oss
+                   std::tuple{1, 8, 2, 4, 2048, "b:1023,0,4", "n", 0},     // sink tokens
+                   std::tuple{2, 4, 1, 1, 300, "0", "n", 1},               // sink logit
+                   std::tuple{1, 2, -1, 55, 256, "b", "e", 0},             // elementwise bias
+                   std::tuple{2, 4, 2, 127, 300, "b:1023,0,4", "n", 1}))); // 127 = tile - 1
+
+TEST_P(QuantScaleShortQuery, DataTypeConfig)
+{
+    auto [hdim, qscale, lse, dims] = GetParam();
+    RunQuantScaleHdim(hdim, {mode_enum::batch, qscale, lse, dims});
 }
 
 // Elementwise bias with LSE, including the early exit of empty rows next to a sink logit.

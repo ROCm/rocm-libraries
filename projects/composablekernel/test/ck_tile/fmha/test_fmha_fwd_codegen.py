@@ -1487,6 +1487,133 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         self.assertEqual(k.F_tile.F_occupancy, 1)
                         self.assertIn("_o1_qr_tdm_fp8_sched_", k.name)
 
+    def test_fp8_sched_d64_mirrors_d128(self):
+        key = lambda k: (
+            k.F_mode,
+            k.F_pipeline.F_qscale,
+            k.F_pipeline.F_mask,
+            k.F_pipeline.F_lse,
+            k.F_pipeline.F_sink,
+            k.F_pipeline.F_bias,
+            k.F_tile.F_occupancy,
+        )
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+            with self.subTest(dtype=dtype):
+                traits = {}
+                for hdim in (64, 128):
+                    pool, kernels = get_fwd_blobs(
+                        ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
+                    )
+                    sched = [
+                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
+                    ]
+                    traits[hdim] = Counter(key(k) for k in sched)
+                    if hdim == 64:
+                        api = pool.render("test")
+                        # FP8FP32 and MXFP8 have no other D64 pipeline.
+                        if dtype in ("fp8fp32", "mxfp8", "mxfp8bf16"):
+                            self.assertEqual(len(sched), len(kernels))
+                        else:
+                            self.assertLess(
+                                api.rindex("QRKSVS_TDM_SCHED_FP8"),
+                                api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+                            )
+                        for k in sched:
+                            # M128 N128 tile, K64 QK WMMA, K128 PV WMMA.
+                            t = k.F_tile
+                            self.assertEqual(
+                                (
+                                    t.F_bm0,
+                                    t.F_bn0,
+                                    t.F_bk0,
+                                    t.F_bn1,
+                                    t.F_bk1,
+                                    t.F_bk0max,
+                                ),
+                                (128, 128, 64, 64, 128, 64),
+                            )
+                            self.assertEqual((t.F_wk0, t.F_wk1), (64, 128))
+                        if dtype.startswith("mx"):
+                            # A D64 MX scale row is two bytes.
+                            self.assertIn(
+                                "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 2 == 0",
+                                api,
+                            )
+                            self.assertNotIn("% 4 == 0", api)
+                self.assertTrue(traits[64])
+                self.assertEqual(traits[64], traits[128])
+                # The D64 branch must come first, or the D128 branch shadows it.
+                pool, _ = get_fwd_blobs(
+                    ["gfx1250"], f"*_{dtype}_*", 0, [64, 128], "simplified"
+                )
+                api = pool.render("test")
+                self.assertLess(
+                    api.index("t.hdim_q <= 64 && t.hdim_v <= 64"),
+                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
+                )
+
+    def test_fp8_sched_d256_mirrors_d128_at_occupancy_one(self):
+        key = lambda k: (
+            k.F_mode,
+            k.F_pipeline.F_qscale,
+            k.F_pipeline.F_mask,
+            k.F_pipeline.F_lse,
+            k.F_pipeline.F_sink,
+            k.F_pipeline.F_bias,
+        )
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+            with self.subTest(dtype=dtype):
+                traits = {}
+                for hdim in (128, 256):
+                    pool, kernels = get_fwd_blobs(
+                        ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
+                    )
+                    sched = [
+                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
+                    ]
+                    # One D128 tile per bias choice; D256 has a single tile.
+                    traits[hdim] = Counter(
+                        key(k)
+                        for k in sched
+                        if hdim == 256
+                        or k.F_tile.F_occupancy
+                        == (1 if k.F_pipeline.F_bias == "bias" else 2)
+                    )
+                    if hdim == 256:
+                        self.assertEqual(len(sched), len(kernels))
+                        for k in sched:
+                            t = k.F_tile
+                            self.assertEqual(
+                                (
+                                    t.F_bm0,
+                                    t.F_bn0,
+                                    t.F_bk0,
+                                    t.F_bn1,
+                                    t.F_bk1,
+                                    t.F_bk0max,
+                                ),
+                                (128, 128, 256, 256, 128, 256),
+                            )
+                            self.assertEqual(
+                                (t.F_wk0, t.F_wk1, t.F_occupancy), (128, 128, 1)
+                            )
+                        if dtype.startswith("mx"):
+                            # D256 scale rows are read as int32s.
+                            self.assertIn(
+                                "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0",
+                                pool.render("test"),
+                            )
+                self.assertTrue(traits[256])
+                self.assertEqual(traits[256], traits[128])
+                pool, _ = get_fwd_blobs(
+                    ["gfx1250"], f"*_{dtype}_*", 0, [64, 128, 256], "simplified"
+                )
+                api = pool.render("test")
+                self.assertLess(
+                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
+                    api.index("t.hdim_q <= 256 && t.hdim_v <= 256"),
+                )
+
     def test_fp8_sched_group_mode_mirrors_batch(self):
         for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
             with self.subTest(dtype=dtype):

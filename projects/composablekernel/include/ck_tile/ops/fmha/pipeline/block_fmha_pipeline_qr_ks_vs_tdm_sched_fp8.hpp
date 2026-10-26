@@ -16,7 +16,7 @@
 
 namespace ck_tile {
 
-// Hand-scheduled gfx125 TDM pipeline for FP8 D128/V128 with K128 WMMA in both GEMMs.
+// Hand-scheduled gfx125 TDM pipeline for FP8 D64/D128/D256 (K64 QK WMMA at D64, else K128).
 template <typename Problem_,
           typename Policy_        = FmhaTdmSchedFp8PolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
@@ -112,11 +112,23 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // IsSupportedProblem above pins Geometry == FmhaTdmSchedGeometryFor<Problem>.
     using Geometry = typename Policy::Geometry;
     static_assert(Geometry::kM == kM0 && Geometry::kN == kN0 && Geometry::kDv == kN1);
-    // D128 blockscale folds the fp32 K descale into the scale of each QK stage's scores.
+    // D128/D256 blockscale folds the fp32 K descale into the scale of each QK stage's scores.
     static constexpr bool kKDescaleInSoftmax =
         kBlockScale && Geometry::kQkWmmaK == 128 && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
     static constexpr bool kKDescaleWithScaleS =
         kBlockScale && Geometry::kQkWmmaK == 128 && BiasEnum != BlockAttentionBiasEnum::NO_BIAS;
+    // D256 streams V inside PV and pairs PV rows with V chunks (PvOrdinal).
+    static constexpr bool kD256 = Geometry::kHeadDimQK == 256;
+
+    // D256 PV row r pairs V chunk r / 2 with P block r % 2; others run fragment r.
+    CK_TILE_HOST_DEVICE static constexpr index_t PvOrdinal(index_t row)
+    {
+        if constexpr(!kD256)
+            return row;
+        constexpr index_t kNumN = Policy::OutputFragments::kNumN;
+        const index_t chunk     = row / 2;
+        return ((row % 2) * 2 + chunk % 2) * kNumN + chunk / 2;
+    }
 
     static constexpr const char* name = "qr_tdm_fp8_sched";
 
@@ -265,9 +277,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         index_t seqlen_q    = 1;
     };
     static constexpr index_t kMxGranularity = 32;
-    static_assert(!kMx || (kQKHeaddim == kScaleBytes * kMxGranularity &&
+    // E8M0 bytes of one Q/K scale row; D64 pads the other two to 1.0 over its zero K half.
+    static constexpr index_t kMxQkScaleBytes = kQKHeaddim / kMxGranularity;
+    static_assert(!kMx || ((kMxQkScaleBytes == 2 || kMxQkScaleBytes == kScaleBytes ||
+                            kMxQkScaleBytes == 2 * kScaleBytes) &&
                            kPScaleGranularity == kMxGranularity),
-                  "MX needs one WMMA K step per head dim and a 32-element P/V scale block");
+                  "MX needs a 64, 128 or 256 head dim and a 32-element P/V scale block");
+    static constexpr int32_t kMxQkPadScale = kMxQkScaleBytes == 2 ? 0x7f7f0000 : 0;
+    // One scale dword per QK WMMA K step; D256 keeps each step's Q/K scales in its own plane.
+    static constexpr index_t kMxQkScaleDwords   = Geometry::kQkKIter;
+    static constexpr index_t kMxKScalesPerPlane = Geometry::kQkStages * Geometry::kQkSuNIter;
+    // Pointer and stride alignment of the Q/K scale rows read by LoadMxRowScale.
+    static constexpr index_t kMxQkScaleAlign = min(kMxQkScaleBytes, kScaleBytes);
+    // V scale rows each thread copies: two at D256.
+    static constexpr index_t kMxVRowsPerThread = max(Geometry::kDv / kBlockSize, index_t{1});
 
     // Compiler-only memory fence: keeps LDS reads below a barrier that publishes async writes.
     CK_TILE_DEVICE static void CompilerMemoryFence() { asm volatile("" ::: "memory"); }
@@ -399,11 +422,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // Byte i of a WMMA scale operand covers K elements [32i, 32i + 32) of the lane's row.
     CK_TILE_DEVICE static int32_t LoadMxRowScale(const e8m0_t* ptr, index_t row, index_t stride)
     {
-        return *reinterpret_cast<const int32_t*>(ptr + row * stride);
+        if constexpr(kMxQkScaleBytes >= kScaleBytes)
+            return *reinterpret_cast<const int32_t*>(ptr + row * stride);
+        else
+            return *reinterpret_cast<const uint16_t*>(ptr + row * stride) | kMxQkPadScale;
     }
 
-    // MX K/V scales of a KV tile are staged in LDS: kN K dwords (per column), then kDv V dwords.
-    static constexpr index_t kMxLdsTileDwords = Geometry::kN + Geometry::kDv;
+    // D64 K scale dwords hold two copied bytes; replace the upper two by the 1.0 pad scale.
+    template <index_t N>
+    CK_TILE_DEVICE static void PadMxKScales(array<int32_t, N>& scales)
+    {
+        if constexpr(kMxQkScaleBytes == 2)
+            static_for<0, N, 1>{}(
+                [&](auto i) { scales(i) = (scales[i] & 0xffff) | kMxQkPadScale; });
+    }
+
+    // MX scales of a KV tile in LDS: kN K dwords per plane, then the V dwords (first kDv used).
+    static constexpr index_t kMxKDwords       = Geometry::kN * kMxQkScaleDwords;
+    static constexpr index_t kMxLdsTileDwords = kMxKDwords + kBlockSize * kMxVRowsPerThread;
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     // Static LDS of one workgroup (arena, O staging, MX scales) must fit kBlockPerCu per CU.
     static_assert((Policy::GetLdsArenaSize() + kOLdsBytes +
@@ -443,51 +479,83 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             (reinterpret_cast<uintptr_t>(mx.v_ptr) + kv_load_start / kMxGranularity) %
                     kScaleBytes ==
                 0;
-        // Pinned so the compiler does not fold them back into per-tile multiplies.
-        return {PinToVgpr(t * mx.stride_k),
-                PinToVgpr(t * mx.stride_v),
+        // Threads past kDv copy the last V row into spare dwords, which keeps the copy branch-free.
+        const index_t v_row = Geometry::kDv == kBlockSize ? t : min(t, Geometry::kDv - 1);
+        // Pinned so the compiler does not fold them back into per-tile multiplies (D128 only).
+        const auto pin = [](index_t v) {
+            return kMxQkScaleBytes == kScaleBytes ? PinToVgpr(v) : v;
+        };
+        return {pin(t * mx.stride_k),
+                pin(v_row * mx.stride_v),
                 // kv_base < fast_end iff [kv_base, kv_base + kN0) ends by seqlen_k = kv_last + 1.
                 aligned ? kv_last + 2 - kN0 : 0};
     }
 
     // Full tiles copy one K and one V dword per thread; edge tiles clamp K and copy V bytewise.
+    template <bool kAllFast = false>
     CK_TILE_DEVICE static void IssueMxScalesToLds(const MxDescales& mx,
                                                   const MxCopyOffsets& off,
                                                   int32_t* lds,
                                                   index_t kv_base,
                                                   index_t kv_last)
     {
-        static_assert(kBlockSize == Geometry::kN && kBlockSize == Geometry::kDv);
+        static_assert(kBlockSize == Geometry::kN &&
+                      Geometry::kDv <= kBlockSize * kMxVRowsPerThread);
         using gint_t  = __attribute__((address_space(1))) int32_t;
         using gchar_t = __attribute__((address_space(1))) char;
         using lchar_t = __attribute__((address_space(3))) char;
         auto* k_dst   = fmha_tdm_sched_fp8_lds_ptr<int32_t>(fmha_tdm_sched_fp8_lds_offset(lds)) +
                       get_thread_id();
-        auto* v_dst = k_dst + Geometry::kN;
+        auto* v_dst = k_dst + kMxKDwords;
         // Unsigned adds keep each lane offset one 32-bit value next to the scalar base.
         const auto lane = [](index_t tile, index_t lane_off) {
             return static_cast<index_t>(static_cast<uint32_t>(tile) +
                                         static_cast<uint32_t>(lane_off));
         };
+        // A D64 K row has two scale bytes, copied bytewise; PadMxKScales fills the rest.
+        const auto copy_k = [&](const e8m0_t* src) {
+            if constexpr(kMxQkScaleBytes == kScaleBytes)
+                __builtin_amdgcn_global_load_async_to_lds_b32(
+                    ToGlobalPtr<gint_t>(src), k_dst, 0, 0);
+            else if constexpr(kMxQkScaleBytes > kScaleBytes)
+                static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
+                    __builtin_amdgcn_global_load_async_to_lds_b32(
+                        ToGlobalPtr<gint_t>(src + j * kScaleBytes), k_dst + j * Geometry::kN, 0, 0);
+                });
+            else
+                static_for<0, kMxQkScaleBytes, 1>{}([&](auto i) {
+                    __builtin_amdgcn_global_load_async_to_lds_b8(
+                        ToGlobalPtr<gchar_t>(src + i), reinterpret_cast<lchar_t*>(k_dst) + i, 0, 0);
+                });
+        };
         const index_t k_off = lane(kv_base * mx.stride_k, off.k);
-        if(__builtin_expect(kv_base < off.fast_end, 1))
+        if(kAllFast || __builtin_expect(kv_base < off.fast_end, 1))
         {
-            __builtin_amdgcn_global_load_async_to_lds_b32(
-                ToGlobalPtr<gint_t>(mx.k_ptr + k_off), k_dst, 0, 0);
+            copy_k(mx.k_ptr + k_off);
             __builtin_amdgcn_global_load_async_to_lds_b32(
                 ToGlobalPtr<gint_t>(mx.v_ptr + lane(kv_base / kMxGranularity, off.v)), v_dst, 0, 0);
+            static_for<1, kMxVRowsPerThread, 1>{}([&](auto r) {
+                __builtin_amdgcn_global_load_async_to_lds_b32(
+                    ToGlobalPtr<gint_t>(mx.v_ptr + lane(kv_base / kMxGranularity,
+                                                        off.v + r * kBlockSize * mx.stride_v)),
+                    v_dst + r * kBlockSize,
+                    0,
+                    0);
+            });
         }
         else
         {
-            __builtin_amdgcn_global_load_async_to_lds_b32(
-                ToGlobalPtr<gint_t>(mx.k_ptr + min(k_off, kv_last * mx.stride_k)), k_dst, 0, 0);
-            static_for<0, kScaleBytes, 1>{}([&](auto i) {
-                const index_t blk = min(kv_base + i * kMxGranularity, kv_last) / kMxGranularity;
-                __builtin_amdgcn_global_load_async_to_lds_b8(
-                    ToGlobalPtr<gchar_t>(mx.v_ptr + lane(blk, off.v)),
-                    reinterpret_cast<lchar_t*>(v_dst) + i,
-                    0,
-                    0);
+            copy_k(mx.k_ptr + min(k_off, kv_last * mx.stride_k));
+            static_for<0, kMxVRowsPerThread, 1>{}([&](auto r) {
+                static_for<0, kScaleBytes, 1>{}([&](auto i) {
+                    const index_t blk = min(kv_base + i * kMxGranularity, kv_last) / kMxGranularity;
+                    __builtin_amdgcn_global_load_async_to_lds_b8(
+                        ToGlobalPtr<gchar_t>(mx.v_ptr +
+                                             lane(blk, off.v + r * kBlockSize * mx.stride_v)),
+                        reinterpret_cast<lchar_t*>(v_dst + r * kBlockSize) + i,
+                        0,
+                        0);
+                });
             });
         }
     }
@@ -641,10 +709,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         static_assert(Policy::OutputFragments::kNumN == PvBlockGemm::NIterPerWarp / 2);
         static_assert(OaccBlockTileType::get_thread_buffer_size() ==
                       Policy::OutputFragments::Mapping::kThreadBufferSize);
-        if constexpr(Geometry::kN == 128)
+        if constexpr(Geometry::kN == Geometry::kDv)
             static_assert(std::is_same_v<typename SaccBlockTileType::StaticTileDistribution,
                                          typename OaccBlockTileType::StaticTileDistribution>,
-                          "N128 score/output distributions must preserve the fragment "
+                          "equal-width score/output distributions must preserve the fragment "
                           "reconstruction map");
 
         auto o_acc = Policy::OutputFragments::MakeZero();
@@ -814,6 +882,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         index_t remaining_loops          = num_total_loop;
         constexpr index_t k1_loops       = kN0 / kK1;
 
+        // Only D256 MX folds each QK stage into a lane row max as it lands; others use one tree.
+        constexpr bool kProgressiveMax = kD256 && kUseCountdownLoop && kMx;
+
         static_assert(1 <= k1_loops);
         // Fixed TDM prologue, issued back to back: Q, current K/V, and the look-ahead K1.
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
@@ -851,7 +922,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         // Begin of iteration 0 sees V0, K1 in flight; later Begins see at most the next K.
         constexpr index_t kTdmIssuedAfterV0 = 1;
 
-        [[maybe_unused]] array<int32_t, Geometry::kQkMIter> q_scales;
+        [[maybe_unused]] array<int32_t, Geometry::kQkMIter * kMxQkScaleDwords> q_scales;
         if constexpr(kMx)
         {
             static_assert(Geometry::QkWmma::kM == Geometry::QkWmma::kN &&
@@ -864,11 +935,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 const index_t row =
                     q_origin.at(I0) +
                     (m_iter * Geometry::kWaves + get_warp_id()) * Geometry::QkWmma::kM + mx_lane;
-                q_scales(m_iter) = LoadMxRowScale(mx.q_ptr, min(row, mx.seqlen_q - 1), mx.stride_q);
+                static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
+                    q_scales(number<j * Geometry::kQkMIter + m_iter>{}) = LoadMxRowScale(
+                        mx.q_ptr + j * kScaleBytes, min(row, mx.seqlen_q - 1), mx.stride_q);
+                });
             });
         }
         // MX scales of tile j + 1 land in LDS during iteration j; K is read one iteration early.
-        [[maybe_unused]] array<int32_t, Geometry::kQkStages * Geometry::kQkSuNIter> k_scales;
+        [[maybe_unused]] array<int32_t, kMxKScalesPerPlane * kMxQkScaleDwords> k_scales;
         [[maybe_unused]] array<int32_t, Geometry::kPvNIter> v_scales;
         [[maybe_unused]] MxCopyOffsets mx_copy;
         if constexpr(kMx)
@@ -918,6 +992,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         {
             CompilerMemoryFence();
             ReadMxScalesFromLds(MxScaleLds(0) + mx_lane, k_scales);
+            PadMxKScales(k_scales);
         }
         __builtin_amdgcn_sched_barrier(0);
         auto initial_k_lds_su_read_window =
@@ -934,8 +1009,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         auto mainloop = [&](KDataType* __restrict__ k_lds_cur_ptr,
                             KDataType* __restrict__ k_lds_next_ptr,
                             VDataType* __restrict__ v_lds_next_ptr,
-                            VDataType* __restrict__ v_lds_cur_ptr) {
+                            VDataType* __restrict__ v_lds_cur_ptr,
+                            auto mx_all_fast) {
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
+            [[maybe_unused]] array<float, 2> qk_lane_max;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
             [[maybe_unused]] float pv_output_scale_m1 = 1.0f;
             [[maybe_unused]] int32_t v_scale          = kE8m0One;
@@ -978,11 +1055,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
                 if constexpr(kBlockScale)
                     v_scale = v_scales_bs[stage];
-                // LDS-read MX scales are already VGPRs; a pin would add a wait per scale.
                 static_assert(!kMx || Geometry::kPvStages == 1, "MX V scales cover one PV stage");
 
                 auto emit_wmma = [&](auto, auto wmma) {
-                    constexpr index_t ordinal     = decltype(wmma)::value;
+                    constexpr index_t ordinal     = PvOrdinal(decltype(wmma)::value);
                     constexpr index_t d_msb       = ordinal / Policy::OutputFragments::kNumN;
                     constexpr index_t n           = ordinal % Policy::OutputFragments::kNumN;
                     constexpr index_t m_iter      = d_msb / 2;
@@ -1000,8 +1076,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
                     CWarpTensor c_warp_tensor;
-                    c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(number<0>{},
-                                                                                o_acc.at(wmma));
+                    c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(
+                        number<0>{}, o_acc.at(number<ordinal>{}));
+                    // LDS-read MX scales are already VGPRs; a pin would add a wait per scale.
                     if constexpr(kMx)
                         WarpGemm{}(c_warp_tensor,
                                    a_warp_tensor,
@@ -1012,15 +1089,28 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor, kE8m0One, v_scale);
                     else
                         WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-                    o_acc.at(wmma) =
+                    o_acc.at(number<ordinal>{}) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
 
                 // Dword next-K stores drop QK byte permutes; MX and blockscale keep bytes for size.
-                Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value,
-                                                             Mode,
-                                                             !kMx && !kBlockScale>(
-                    next_b_block_tensor, b_lds_window, emit_wmma);
+                if constexpr(kD256)
+                    Policy::template RunPvStageWithWmma<decltype(stage)::value,
+                                                        Mode,
+                                                        !kMx && !kBlockScale>(
+                        next_b_block_tensor,
+                        b_lds_window,
+                        v_tile,
+                        pinned(v_lds_read_window, number<kVBase>{}, number<1>{}),
+                        emit_wmma);
+                else
+                {
+                    typename Policy::NoStreamedV no_v;
+                    Policy::template RunPvStageWithWmma<decltype(stage)::value,
+                                                        Mode,
+                                                        !kMx && !kBlockScale>(
+                        next_b_block_tensor, b_lds_window, no_v, no_v, emit_wmma);
+                }
             };
 
             // Wave priority by phase: PV > QK > softmax exps > softmax max.
@@ -1095,15 +1185,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     const bool has_next = kUseCountdownLoop ? remaining_loops > 1
                                                             : i_total_loops + 1 < num_total_loop;
                     // The last tile reloads its own scales so the copy stays in bounds.
-                    IssueMxScalesToLds(mx,
-                                       mx_copy,
-                                       MxScaleLds(mx_loop + 1),
-                                       has_next ? next_tile_start : kv_tile_start,
-                                       kv_last);
+                    IssueMxScalesToLds<decltype(mx_all_fast)::value>(mx,
+                                                                     mx_copy,
+                                                                     MxScaleLds(mx_loop + 1),
+                                                                     has_next ? next_tile_start
+                                                                              : kv_tile_start,
+                                                                     kv_last);
                     // Address the post-softmax scale reads now so they need no fresh VALU there.
                     mx_k_read = PinToVgpr(LdsByteAddress(MxScaleLds(mx_loop + 1) + mx_lane));
                     mx_v_read =
-                        PinToVgpr(LdsByteAddress(MxScaleLds(mx_loop) + Geometry::kN + mx_lane));
+                        PinToVgpr(LdsByteAddress(MxScaleLds(mx_loop) + kMxKDwords + mx_lane));
                 }
                 // V is prefetched one iteration before its consumer.
                 if constexpr(kHasSink)
@@ -1150,56 +1241,52 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     });
                     __builtin_amdgcn_sched_barrier(0);
                 }
+                // WMMA scale operands of QK stage `stage`, used by MX only.
+                auto qk_a_scale = [&](auto) {
+                    if constexpr(kMx)
+                        return [&](auto m_iter, auto k_iter) {
+                            return q_scales[number<k_iter * Geometry::kQkMIter + m_iter>{}];
+                        };
+                    else
+                        return typename Policy::NoScale{};
+                };
+                auto qk_b_scale = [&](auto stage) {
+                    if constexpr(kMx)
+                        return [&](auto n_iter, auto k_iter) {
+                            return k_scales[number<k_iter * kMxKScalesPerPlane +
+                                                   decltype(stage)::value * Geometry::kQkSuNIter +
+                                                   decltype(n_iter)::value>{}];
+                        };
+                    else
+                        return typename Policy::NoScale{};
+                };
                 auto run_qk_lead_stage = [&](auto stage,
                                              auto& next_tile,
                                              const auto& window,
                                              auto& lead_tile,
                                              const auto& lead_window) {
-                    if constexpr(kMx)
-                        Policy::template RunQkScheduledLeadStage<decltype(stage)::value, Mode>(
-                            gemm_0_su,
-                            s_acc_su,
-                            q_tile,
-                            k_su_tile,
-                            next_tile,
-                            window,
-                            lead_tile,
-                            lead_window,
-                            [&](auto m_iter) { return q_scales[m_iter]; },
-                            [&](auto n_iter) {
-                                return k_scales[number<decltype(stage)::value *
-                                                           Geometry::kQkSuNIter +
-                                                       decltype(n_iter)::value>{}];
-                            });
-                    else
-                        Policy::template RunQkScheduledLeadStage<decltype(stage)::value, Mode>(
-                            gemm_0_su,
-                            s_acc_su,
-                            q_tile,
-                            k_su_tile,
-                            next_tile,
-                            window,
-                            lead_tile,
-                            lead_window);
+                    Policy::template RunQkScheduledLeadStage<decltype(stage)::value, Mode>(
+                        gemm_0_su,
+                        s_acc_su,
+                        q_tile,
+                        k_su_tile,
+                        next_tile,
+                        window,
+                        lead_tile,
+                        lead_window,
+                        qk_a_scale(stage),
+                        qk_b_scale(stage));
                 };
                 auto run_qk_stage = [&](auto stage, auto& next_tile, const auto& window) {
-                    if constexpr(kMx)
-                        Policy::template RunQkScheduledStage<decltype(stage)::value, Mode>(
-                            gemm_0_su,
-                            s_acc_su,
-                            q_tile,
-                            k_su_tile,
-                            next_tile,
-                            window,
-                            [&](auto m_iter) { return q_scales[m_iter]; },
-                            [&](auto n_iter) {
-                                return k_scales[number<decltype(stage)::value *
-                                                           Geometry::kQkSuNIter +
-                                                       decltype(n_iter)::value>{}];
-                            });
-                    else
-                        Policy::template RunQkScheduledStage<decltype(stage)::value, Mode>(
-                            gemm_0_su, s_acc_su, q_tile, k_su_tile, next_tile, window);
+                    Policy::template RunQkScheduledStage<decltype(stage)::value, Mode>(
+                        gemm_0_su,
+                        s_acc_su,
+                        q_tile,
+                        k_su_tile,
+                        next_tile,
+                        window,
+                        qk_a_scale(stage),
+                        qk_b_scale(stage));
                 };
                 static_for<0, Geometry::kQkStages, 1>{}([&](auto i_su) {
                     // Re-issued mid-QK so the extra setprio also splits the QK schedule.
@@ -1250,11 +1337,18 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     if constexpr(kKDescaleWithScaleS)
                         tile_elementwise_inout(
                             [kd = k_descales[i_su] * scale_s](auto& x) { x *= kd; }, s_acc_su);
+                    else if constexpr(kBlockScale && !kKDescaleInSoftmax)
+                        tile_elementwise_inout([kd = k_descales[i_su]](auto& x) { x *= kd; },
+                                               s_acc_su);
                     set_slice_tile(
                         s_acc,
                         s_acc_su,
                         sequence<0, decltype(i_su)::value * Geometry::kQkSuColumns>{},
                         sequence<kM0, (decltype(i_su)::value + 1) * Geometry::kQkSuColumns>{});
+                    if constexpr(kProgressiveMax && decltype(i_su)::value < Geometry::kQkStages - 1)
+                        Policy::template StageLaneMax<decltype(i_su)::value,
+                                                      (decltype(i_su)::value > 0)>(s_acc,
+                                                                                   qk_lane_max);
                 });
             };
 
@@ -1276,6 +1370,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
                 if constexpr(!kDeferTensorReady)
                     s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
+
+                const auto is_masked_out = [&](index_t row, index_t col) {
+                    if constexpr(kHasSink)
+                        return mask.IsOutOfSinkBound(row, col);
+                    else if constexpr(std::is_same_v<FmhaMask,
+                                                     SimplifiedGenericAttentionMask<true>>)
+                        return mask.IsOutOfBoundUnsigned(row, col);
+                    else
+                        return mask.IsOutOfBound(row, col);
+                };
+                // One predicate pass keeps D64 sink edge tiles from holding tail and pad indices.
+                constexpr bool kFusedEdgePredicate = Geometry::kHeadDimQK == 64 &&
+                                                     !FmhaMask::IsMasking &&
+                                                     BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
 
                 // Sink-aware k_origin
                 const auto k_origin = [&]() {
@@ -1311,6 +1419,35 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                 return (need_split_check && logical_seqlen_k_end <= col) ||
                                        (need_mask_check && mask.IsOutOfBound(row, col));
                             });
+                        if constexpr(kProgressiveMax)
+                            static_for<0, Geometry::kQkStages - 1, 1>{}([&](auto su) {
+                                Policy::template StageLaneMax<decltype(su)::value,
+                                                              (decltype(su)::value > 0)>(
+                                    s_acc, qk_lane_max);
+                            });
+                    }
+                }
+                else if constexpr(kFusedEdgePredicate)
+                {
+                    const bool needs_tail_predicate = k_origin.at(I0) + kN0 > logical_seqlen_k_end;
+                    const bool need_split_check =
+                        i_total_loops == (num_total_loop - 1) && needs_tail_predicate;
+                    bool need_mask_check = false;
+                    if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+                    {
+                        need_mask_check = mask.IsEdgeTile(
+                            q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                    }
+
+                    if(__builtin_expect(need_split_check || need_mask_check, false))
+                    {
+                        SetTileIfLaneBase(
+                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                return (need_split_check && logical_seqlen_k_end <= col) ||
+                                       (need_mask_check && is_masked_out(row, col));
+                            });
                     }
                 }
                 else
@@ -1334,21 +1471,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    if constexpr(kHasSink)
-                                        return mask.IsOutOfSinkBound(row, col);
-                                    else if constexpr(std::is_same_v<
-                                                          FmhaMask,
-                                                          SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsigned(row, col);
-                                    else
-                                        return mask.IsOutOfBound(row, col);
-                                });
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return is_masked_out(row, col);
+                                        });
                         }
                     }
                 }
@@ -1398,8 +1527,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }();
                     Schedule::template RunSplitSoftmax<Mode>(
                         [&]() {
-                            Policy::template RunSplitSoftmaxPart01<Problem>(
-                                s_new, m, softmax_scale, delta_m0, delta_m1, col_scale);
+                            if constexpr(kProgressiveMax)
+                                Policy::template RunSplitSoftmaxPart01FromPartial<Problem>(
+                                    s_new, m, softmax_scale, delta_m0, delta_m1, qk_lane_max);
+                            else
+                                Policy::template RunSplitSoftmaxPart01<Problem>(
+                                    s_new, m, softmax_scale, delta_m0, delta_m1, col_scale);
                         },
                         [&]() { s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>(); },
                         // Part 2 below rescales the output inside its exp stream.
@@ -1432,6 +1565,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 {
                     CompilerMemoryFence();
                     ReadMxScalesFromLds(MxScaleLanePtr(mx_k_read), k_scales);
+                    PadMxKScales(k_scales);
                     ReadMxScalesFromLds(MxScaleLanePtr(mx_v_read), v_scales);
                 }
                 // The K transfer here feeds iteration i+2, beyond the already prefetched K1.
@@ -1460,28 +1594,76 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             Schedule::Run(tile_ops);
         }; // mainloop
 
-        do
+        // Dense D256 MX runs a loop copy without the edge-tile scale path when every tile is full.
+        if constexpr(kMx && kUseCountdownLoop && kD256)
         {
-            bool is_even_loop   = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
-            auto k_lds_cur_ptr  = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk0)
-                                               : static_cast<KDataType* __restrict__>(smem_ptrk1);
-            auto k_lds_next_ptr = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk1)
-                                               : static_cast<KDataType* __restrict__>(smem_ptrk0);
-            auto v_lds_next_ptr = is_even_loop ? static_cast<VDataType* __restrict__>(smem_ptrv1)
-                                               : static_cast<VDataType* __restrict__>(smem_ptrv0);
-            auto v_lds_cur_ptr  = is_even_loop ? static_cast<VDataType* __restrict__>(smem_ptrv0)
-                                               : static_cast<VDataType* __restrict__>(smem_ptrv1);
-            mainloop(k_lds_cur_ptr, k_lds_next_ptr, v_lds_next_ptr, v_lds_cur_ptr);
-            if constexpr(kUseCountdownLoop)
-            {
-                even_buffer = !even_buffer;
-                --remaining_loops;
-            }
+            auto run_loop = [&](auto mx_all_fast) {
+                do
+                {
+                    bool is_even_loop   = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
+                    auto k_lds_cur_ptr  = is_even_loop
+                                              ? static_cast<KDataType* __restrict__>(smem_ptrk0)
+                                              : static_cast<KDataType* __restrict__>(smem_ptrk1);
+                    auto k_lds_next_ptr = is_even_loop
+                                              ? static_cast<KDataType* __restrict__>(smem_ptrk1)
+                                              : static_cast<KDataType* __restrict__>(smem_ptrk0);
+                    auto v_lds_next_ptr = is_even_loop
+                                              ? static_cast<VDataType* __restrict__>(smem_ptrv1)
+                                              : static_cast<VDataType* __restrict__>(smem_ptrv0);
+                    auto v_lds_cur_ptr  = is_even_loop
+                                              ? static_cast<VDataType* __restrict__>(smem_ptrv0)
+                                              : static_cast<VDataType* __restrict__>(smem_ptrv1);
+                    mainloop(
+                        k_lds_cur_ptr, k_lds_next_ptr, v_lds_next_ptr, v_lds_cur_ptr, mx_all_fast);
+                    if constexpr(kUseCountdownLoop)
+                    {
+                        even_buffer = !even_buffer;
+                        --remaining_loops;
+                    }
+                    else
+                    {
+                        i_total_loops++;
+                    }
+                } while(kUseCountdownLoop ? remaining_loops > 0 : i_total_loops < num_total_loop);
+            };
+            if(kv_load_start + (num_total_loop - 1) * kN0 < mx_copy.fast_end)
+                run_loop(std::true_type{});
             else
+                run_loop(std::false_type{});
+        }
+        else
+        {
+            do
             {
-                i_total_loops++;
-            }
-        } while(kUseCountdownLoop ? remaining_loops > 0 : i_total_loops < num_total_loop);
+                bool is_even_loop   = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
+                auto k_lds_cur_ptr  = is_even_loop
+                                          ? static_cast<KDataType* __restrict__>(smem_ptrk0)
+                                          : static_cast<KDataType* __restrict__>(smem_ptrk1);
+                auto k_lds_next_ptr = is_even_loop
+                                          ? static_cast<KDataType* __restrict__>(smem_ptrk1)
+                                          : static_cast<KDataType* __restrict__>(smem_ptrk0);
+                auto v_lds_next_ptr = is_even_loop
+                                          ? static_cast<VDataType* __restrict__>(smem_ptrv1)
+                                          : static_cast<VDataType* __restrict__>(smem_ptrv0);
+                auto v_lds_cur_ptr  = is_even_loop
+                                          ? static_cast<VDataType* __restrict__>(smem_ptrv0)
+                                          : static_cast<VDataType* __restrict__>(smem_ptrv1);
+                mainloop(k_lds_cur_ptr,
+                         k_lds_next_ptr,
+                         v_lds_next_ptr,
+                         v_lds_cur_ptr,
+                         std::false_type{});
+                if constexpr(kUseCountdownLoop)
+                {
+                    even_buffer = !even_buffer;
+                    --remaining_loops;
+                }
+                else
+                {
+                    i_total_loops++;
+                }
+            } while(kUseCountdownLoop ? remaining_loops > 0 : i_total_loops < num_total_loop);
+        }
         // Wave priority stays at kPvPrio; only the epilogue runs from here.
 
         // Reconstruct the CK tensor only at the final normalization boundary.

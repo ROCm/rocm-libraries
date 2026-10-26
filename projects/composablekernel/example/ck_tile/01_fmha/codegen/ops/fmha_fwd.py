@@ -1610,17 +1610,26 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ),
     }  # fmt: skip
 
-    # FP8 scheduled tiles (K128 WMMA in both GEMMs): FP8 Q/K/V with FP8/BF16/FP32 O, and MXFP8.
+    # FP8 scheduled tiles (QK WMMA K = min(head dim, 128), K128 PV): FP8/BF16/FP32 O, MXFP8.
     _DT_QR_TDM_SCHED_FP8 = ("fp8", "fp8bf16", "fp8fp32") + _DT_MXFP8
     _QR_TDM_SCHED_FP8_TILES = {
+        (64, 64): (
+            FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
+            FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 1),
+        ),
         (128, 128): (
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
         ),
+        # D256 runs one workgroup per CU, with or without bias.
+        (256, 256): (
+            FmhaFwdTileSize(128, 128, 256, 256, 128, 256, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
+        ),
     }  # fmt: skip
-    # Must match kFmhaTdmSchedFp8BlockPerCu / kFmhaTdmSchedFp8BiasBlockPerCu in the policy.
+    # Must match kFmhaTdmSchedFp8{,Bias,D256}BlockPerCu in the policy.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
+    _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
@@ -1636,6 +1645,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             tile.name == candidate.name
             for candidate in cls._QR_TDM_SCHED_TILES.get((hdim, tile.F_bn1), ())
         )
+
+    @classmethod
+    def _with_qr_tdm_sched_fp8_tiles(cls, result: dict) -> dict:
+        # Sched tiles may add head dims (FP8FP32 D64, D256); dispatch needs them ascending.
+        for hdims, tiles in cls._QR_TDM_SCHED_FP8_TILES.items():
+            result.setdefault(hdims, []).extend(copy.deepcopy(tiles))
+        return dict(sorted(result.items()))
+
+    @classmethod
+    def qr_tdm_fp8_sched_occupancy(cls, hdim: int, bias: str) -> int:
+        if hdim == 256:
+            return cls._QR_TDM_SCHED_FP8_D256_OCCUPANCY
+        if bias == "bias":
+            return cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
+        return cls._QR_TDM_SCHED_FP8_OCCUPANCY
 
     @classmethod
     def is_tile_supported_by_qr_tdm_fp8_sched(
@@ -1667,15 +1691,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             expr += f" && a.block_scale_size_q % {tile.F_bm0} == 0"
             expr += f" && a.block_scale_size_kv % {kv_scale_align} == 0"
         elif qscale == "mx":
-            # Q/K E8M0 rows are loaded as one int32 per lane.
+            # Q/K E8M0 rows (one byte per 32 head elements) are read as int16 or int32s.
+            row = min(hdim // 32, 4)
             expr += (
-                " && reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0"
-                " && reinterpret_cast<uintptr_t>(a.k_descale_ptr) % 4 == 0"
-                " && a.stride_q_descale % 4 == 0 && a.stride_k_descale % 4 == 0"
-                " && a.nhead_stride_q_descale % 4 == 0 && a.nhead_stride_k_descale % 4 == 0"
+                f" && reinterpret_cast<uintptr_t>(a.q_descale_ptr) % {row} == 0"
+                f" && reinterpret_cast<uintptr_t>(a.k_descale_ptr) % {row} == 0"
+                f" && a.stride_q_descale % {row} == 0 && a.stride_k_descale % {row} == 0"
+                f" && a.nhead_stride_q_descale % {row} == 0 && a.nhead_stride_k_descale % {row} == 0"
                 # Group mode leaves the batch strides unset and offsets by the token starts.
-                " && (t.is_group_mode || (a.batch_stride_q_descale % 4 == 0"
-                " && a.batch_stride_k_descale % 4 == 0))"
+                f" && (t.is_group_mode || (a.batch_stride_q_descale % {row} == 0"
+                f" && a.batch_stride_k_descale % {row} == 0))"
             )
         return CppConstraint(expr)
 
@@ -1699,10 +1724,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 and is_fp8_sched_tile
                 and kernel_ctx.pipeline.F_vlayout == "row"
                 and kernel_ctx.tile.F_occupancy
-                == (
-                    cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
-                    if kernel_ctx.pipeline.F_bias == "bias"
-                    else cls._QR_TDM_SCHED_FP8_OCCUPANCY
+                == cls.qr_tdm_fp8_sched_occupancy(
+                    problem_ctx.hdim, kernel_ctx.pipeline.F_bias
                 )
             )
 
@@ -1877,13 +1900,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
             }  # fmt: skip
-            result[(128, 128)].extend(
-                copy.deepcopy(cls._QR_TDM_SCHED_FP8_TILES[(128, 128)])
-            )
-            return result
+            return cls._with_qr_tdm_sched_fp8_tiles(result)
         elif dtype in cls._DT_MXFP8:
             return {
-                (128, 128): list(copy.deepcopy(cls._QR_TDM_SCHED_FP8_TILES[(128, 128)]))
+                hdims: list(copy.deepcopy(tiles))
+                for hdims, tiles in cls._QR_TDM_SCHED_FP8_TILES.items()
             }
         elif dtype in cls._DT_FP8FP32:
             result = {
@@ -1891,10 +1912,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
             }  # fmt: skip
-            result[(128, 128)].extend(
-                copy.deepcopy(cls._QR_TDM_SCHED_FP8_TILES[(128, 128)])
-            )
-            return result
+            return cls._with_qr_tdm_sched_fp8_tiles(result)
         else:
             raise ValueError(f"unsupported dtype={dtype}")
 

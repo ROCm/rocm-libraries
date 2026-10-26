@@ -169,6 +169,37 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     {
     };
 
+    // K64 has no scaled WMMA: zero-pad to K128, whose low eight dwords keep the K64 lane order.
+    template <typename CWarpTensor, typename AWarpTensor, typename BWarpTensor>
+    CK_TILE_DEVICE static void RunPaddedScaledWmma(CWarpTensor& c_warp_tensor,
+                                                   const AWarpTensor& a_warp_tensor,
+                                                   const BWarpTensor& b_warp_tensor,
+                                                   int32_t a_scale,
+                                                   int32_t b_scale)
+    {
+        using QDataType     = typename Geometry::QDataType;
+        using PaddedGemm    = WarpGemmDispatcher<QDataType, QDataType, float, 16, 16, 128, true>;
+        using Half          = int32_t __attribute__((ext_vector_type(8)));
+        constexpr auto zero = number<0>{};
+        constexpr auto one  = number<1>{};
+        static_assert(sizeof(typename AWarpTensor::DataType) == 1 &&
+                      AWarpTensor::get_thread_buffer_size() == sizeof(Half) &&
+                      BWarpTensor::get_thread_buffer_size() == sizeof(Half));
+
+        typename PaddedGemm::AWarpTensor a;
+        typename PaddedGemm::BWarpTensor b;
+        typename PaddedGemm::CWarpTensor c;
+        a.get_thread_buffer().template set_as<Half>(
+            zero, bit_cast<Half>(a_warp_tensor.get_thread_buffer()));
+        a.get_thread_buffer().template set_as<Half>(one, Half{});
+        b.get_thread_buffer().template set_as<Half>(
+            zero, bit_cast<Half>(b_warp_tensor.get_thread_buffer()));
+        b.get_thread_buffer().template set_as<Half>(one, Half{});
+        c.get_thread_buffer() = c_warp_tensor.get_thread_buffer();
+        PaddedGemm{}(c, a, b, a_scale, b_scale);
+        c_warp_tensor.get_thread_buffer() = c.get_thread_buffer();
+    }
+
     template <index_t WmmaOrdinal,
               typename BlockGemm,
               typename CBlockTensor,
@@ -226,12 +257,18 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
 
         if constexpr(std::is_same_v<AScaleFn, NoScale>)
             WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-        else
+        else if constexpr(WarpGemm::kK == 128)
             WarpGemm{}(c_warp_tensor,
                        a_warp_tensor,
                        b_warp_tensor,
-                       a_scale(number<m_iter>{}),
-                       b_scale(number<n_iter>{}));
+                       a_scale(number<m_iter>{}, number<k_iter>{}),
+                       b_scale(number<n_iter>{}, number<k_iter>{}));
+        else
+            RunPaddedScaledWmma(c_warp_tensor,
+                                a_warp_tensor,
+                                b_warp_tensor,
+                                a_scale(number<m_iter>{}, number<k_iter>{}),
+                                b_scale(number<n_iter>{}, number<k_iter>{}));
         c_block_tensor.set_y_sliced_thread_data(
             merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
@@ -362,43 +399,45 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         WaitQkStageTail<Stage>();
     }
 
-    // PV stage WMMAs interleaved with reads of the next tile's first K group.
+    // Marks a PV stage without streamed V reads (all but D256).
+    struct NoStreamedV
+    {
+    };
+
+    // PV stage WMMAs interleaved with next-K group 0 reads and, at D256, the streamed V chunks.
     template <index_t Stage,
               typename Mode,
               bool KDwordStore,
-              typename NextBBlockTensor,
-              typename BTileWindow,
+              typename NextKTensor,
+              typename KTileWindow,
+              typename VTensor,
+              typename VTileWindow,
               typename WmmaEmitter>
-    CK_TILE_DEVICE static void RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
-                                                           const BTileWindow& b_lds_window,
-                                                           WmmaEmitter& emit_wmma)
+    CK_TILE_DEVICE static void RunPvStageWithWmma(NextKTensor& next_k_tensor,
+                                                  const KTileWindow& k_lds_window,
+                                                  VTensor& v_tensor,
+                                                  const VTileWindow& v_lds_window,
+                                                  WmmaEmitter& emit_wmma)
     {
-        using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
-        using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
-        using Kind             = FmhaTdmSchedLoadKind;
-        static_assert(Stage >= 0 && Stage < SelectedSchedule::kNumPvStages);
-        static_assert((Stage < SelectedSchedule::kNumPvStages - 1 &&
-                       BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount) ||
-                      (Stage == SelectedSchedule::kNumPvStages - 1 &&
-                       BTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount));
-
+        using SelectedSchedule   = typename Mode::SelectedPolicy::Schedule;
+        using Executor           = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
+        using Kind               = FmhaTdmSchedLoadKind;
+        constexpr bool kStreamsV = !std::is_same_v<VTileWindow, NoStreamedV>;
+        static_assert(Stage == SelectedSchedule::kNumPvStages - 1 &&
+                      KTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount);
+        if constexpr(kStreamsV)
+            static_assert(VTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount);
         auto emit_token = [&](auto kind, auto access) {
             if constexpr(decltype(kind)::value == Kind::KRead)
-            {
-                static_assert(Stage == Geometry::kPvStages - 1);
-                KLoad::template LoadInstruction<decltype(access)::value, KDwordStore>(
-                    next_b_block_tensor, b_lds_window);
-            }
+                KLoad::template LoadInstruction<decltype(access)::value, KDwordStore>(next_k_tensor,
+                                                                                      k_lds_window);
             else
             {
-                static_assert(Stage < Geometry::kPvStages - 1);
-                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
-                                                                    b_lds_window);
+                static_assert(kStreamsV && decltype(access)::value >= 0, "V reads need a V window");
+                VLoad::template LoadAccess<decltype(access)::value>(v_tensor, v_lds_window);
             }
         };
-        auto emit_point = [](auto, auto, auto point) {
-            EmitSchedulePoint<decltype(point)::value>();
-        };
+        SchedulePointEmitter emit_point;
         // The output rescale is fused into softmax, so PV rows emit none.
         auto no_rescale = [](auto) {};
         Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point, no_rescale);
@@ -442,6 +481,27 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
             });
             return TreeMax<kTriples + kRest>(next);
         }
+    }
+
+    // Max of N values by Chains independent max3 chains, then a tree over the chain results.
+    template <index_t Chains, index_t N>
+    CK_TILE_DEVICE static float ChainedMax(const array<float, N>& v)
+    {
+        constexpr index_t kPerChain = (N + Chains - 1) / Chains;
+        array<float, Chains> acc{};
+        static_for<0, Chains, 1>{}([&](auto c) {
+            constexpr index_t kBegin = decltype(c)::value * kPerChain;
+            constexpr index_t kEnd   = min(kBegin + kPerChain, N);
+            acc(c)                   = v[number<kBegin>{}];
+            static_for<0, (kEnd - kBegin) / 2, 1>{}([&](auto i) {
+                constexpr index_t k = kBegin + 1 + 2 * decltype(i)::value;
+                if constexpr(k + 1 < kEnd)
+                    acc(c) = max(max(acc[c], v[number<k>{}]), v[number<k + 1>{}]);
+                else
+                    acc(c) = max(acc[c], v[number<k>{}]);
+            });
+        });
+        return TreeMax(acc);
     }
 
     // Copies the score pairs of row half Half, QK stages [SuBegin, SuEnd), into values from First.
@@ -501,6 +561,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
             values(number<0>{}) = old_max;
             if constexpr(std::is_same_v<ColScale, NoColumnScale>)
                 GatherRowPairs<decltype(half)::value, 0, Mapping::kNumSu, 1>(score, values);
+            // D64 blockscale sink tiles stay at three workgroups per CU with fewer max partials.
+            constexpr bool kChainedRowMax =
+                Problem::BlockFmhaShape::kQKHeaddim == 64 && Problem::kHasSink &&
+                !Problem::FmhaMask::IsMasking &&
+                Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
             const float lane_max = [&]() {
                 if constexpr(!std::is_same_v<ColScale, NoColumnScale>)
                 {
@@ -514,6 +580,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                     });
                     return TreeMax(scaled);
                 }
+                else if constexpr(kChainedRowMax)
+                    return ChainedMax<2>(values);
                 else
                     return TreeMax(values);
             }();
@@ -523,6 +591,53 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         const auto p1_m0 = row_part(number<0>{}, old_max_m0);
         const auto p1_m1 = row_part(number<1>{}, old_max_m1);
 
+        row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+        row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+        delta_m0                                 = p1_m0.delta;
+        delta_m1                                 = p1_m1.delta;
+    }
+
+    // Lane max of QK stage Su's columns per row half, folded into part when Accumulate.
+    template <index_t Su, bool Accumulate, typename ScoreTensor>
+    CK_TILE_DEVICE static void StageLaneMax(const ScoreTensor& score, array<float, 2>& part)
+    {
+        using Mapping = typename ScoreSoftmax::Mapping;
+        static_for<0, 2, 1>{}([&](auto half) {
+            constexpr index_t kFirst = Accumulate ? 1 : 0;
+            array<float, kFirst + 4 * Mapping::kPairsPerFragment> values{};
+            if constexpr(Accumulate)
+                values(number<0>{}) = part[half];
+            GatherRowPairs<decltype(half)::value, Su, Su + 1, kFirst>(score, values);
+            part(half) = TreeMax(values);
+        });
+    }
+
+    // RunSplitSoftmaxPart01 for scores whose earlier QK stages are already in part.
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart01FromPartial(ScoreTensor& score,
+                                                                RowTensor& row_max,
+                                                                float log2e_scale,
+                                                                float& delta_m0,
+                                                                float& delta_m1,
+                                                                const array<float, 2>& part)
+    {
+        using Softmax = ScoreSoftmax;
+        using Mapping = typename Softmax::Mapping;
+        static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                      !Problem::FmhaMask::IsMasking && !Problem::kHasLogitsSoftCap);
+        static_assert(RowTensor::get_thread_buffer_size() == 2);
+        constexpr index_t kSu = Mapping::kNumSu - 1;
+        auto row_part         = [&](auto half, float old_max) {
+            array<float, 2 + 4 * Mapping::kPairsPerFragment> values{};
+            values(number<0>{}) = old_max;
+            values(number<1>{}) = part[half];
+            GatherRowPairs<decltype(half)::value, kSu, kSu + 1, 2>(score, values);
+            const float lane_max = TreeMax(values);
+            return Softmax::template RunPart1<false>(
+                lane_max, Softmax::PermuteLaneX16(lane_max), old_max * log2e_scale, log2e_scale);
+        };
+        const auto p1_m0 = row_part(number<0>{}, row_max.get_thread_buffer()[number<0>{}]);
+        const auto p1_m1 = row_part(number<1>{}, row_max.get_thread_buffer()[number<1>{}]);
         row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
         row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
         delta_m0                                 = p1_m0.delta;
@@ -619,7 +734,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         static_assert(Mapping::kNumMsb == Plan::kNumMsb &&
                       Mapping::kPairsPerMsb == Plan::kPairsPerMsb);
         constexpr index_t kOutPairsPerFragment = OutputFragments::kElementsPerFragment / 2;
-        static_assert(OutputFragments::kNumFragments * kOutPairsPerFragment == Plan::kPairs);
+        // Output vs score pairs: D64 rescales one per two slots, D256 two per slot.
+        constexpr index_t kOutPairs = OutputFragments::kNumFragments * kOutPairsPerFragment;
+        constexpr index_t kSlotsPerOutPair =
+            kOutPairs < Plan::kPairs ? Plan::kPairs / kOutPairs : 1;
+        constexpr index_t kOutPairsPerSlot =
+            kOutPairs > Plan::kPairs ? kOutPairs / Plan::kPairs : 1;
+        static_assert(kOutPairs * kSlotsPerOutPair == Plan::kPairs * kOutPairsPerSlot);
         constexpr Plan plan = Plan::Make();
         // SALU, WMMA, VMEM and LDS may cross; VALU and TRANS keep the source order.
         constexpr int32_t kValuFence = LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::MFMA |
@@ -695,8 +816,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
             }
             exp_element(q, number<1>{});
             __builtin_amdgcn_sched_barrier(kValuFence);
-            rescale_pair(q);
-            __builtin_amdgcn_sched_barrier(kValuFence);
+            if constexpr(decltype(q)::value % kSlotsPerOutPair == 0)
+            {
+                static_for<0, kOutPairsPerSlot, 1>{}([&](auto j) {
+                    rescale_pair(number<decltype(q)::value / kSlotsPerOutPair * kOutPairsPerSlot +
+                                        decltype(j)::value>{});
+                });
+                __builtin_amdgcn_sched_barrier(kValuFence);
+            }
             if constexpr(plan.slot_node[decltype(q)::value] >= 0)
             {
                 add_node(number<plan.slot_node[decltype(q)::value]>{});
@@ -786,7 +913,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                Shape::Gemm1BlockWarps::at(number<2>{}) == Shape::Gemm0BlockWarps::at(number<2>{}) &&
                std::is_same_v<remove_cvref_t<typename Problem::SaccDataType>, float> &&
                std::is_same_v<remove_cvref_t<typename Problem::OaccDataType>, float> &&
-               Shape::kK0 == Geometry::kQkWmmaK && Shape::kSubQKHeaddim == Geometry::kHeadDimQK &&
+               Shape::kK0 == Geometry::kHeadDimQK && Shape::kSubQKHeaddim == Geometry::kHeadDimQK &&
                Shape::IsVLayoutRowMajor && Shape::NumWarps == Geometry::kWaves && is_wave32;
     }
 
@@ -977,16 +1104,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
 inline constexpr index_t kFmhaTdmSchedFp8BlockPerCu = 2;
 // The elementwise bias tile does not fit two workgroups' VGPRs, so it runs one per CU.
 inline constexpr index_t kFmhaTdmSchedFp8BiasBlockPerCu = 1;
-
-template <typename Geometry, index_t BlockPerCu>
-using FmhaTdmSchedFp8DefaultTuning = FmhaTdmSchedDerivedTuning<Geometry, BlockPerCu>;
+// D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
+inline constexpr index_t kFmhaTdmSchedFp8D256BlockPerCu = 1;
 
 template <typename Problem>
 using FmhaTdmSchedFp8PolicyFor = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<
     FmhaTdmSchedGeometryFor<Problem>,
-    FmhaTdmSchedFp8DefaultTuning<FmhaTdmSchedGeometryFor<Problem>,
-                                 Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS
-                                     ? kFmhaTdmSchedFp8BlockPerCu
-                                     : kFmhaTdmSchedFp8BiasBlockPerCu>>;
+    FmhaTdmSchedDerivedTuning<
+        FmhaTdmSchedGeometryFor<Problem>,
+        Problem::BlockFmhaShape::kQKHeaddim == 256             ? kFmhaTdmSchedFp8D256BlockPerCu
+        : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
+                                                               : kFmhaTdmSchedFp8BiasBlockPerCu>>;
 
 } // namespace ck_tile

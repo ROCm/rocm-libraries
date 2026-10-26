@@ -1532,7 +1532,7 @@ struct FmhaFwdKernel
             }
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
             {
-                // Q/K E8M0 rows are read as one int32 per lane.
+                // Q/K E8M0 rows are read per lane as int32s (D128/D256) or an int16 (D64).
                 const auto bits  = [](auto v) { return static_cast<uint64_t>(v); };
                 uint64_t offsets = bits(reinterpret_cast<uintptr_t>(kargs.q_descale_ptr)) |
                                    bits(reinterpret_cast<uintptr_t>(kargs.k_descale_ptr)) |
@@ -1542,8 +1542,8 @@ struct FmhaFwdKernel
                 if constexpr(!kIsGroupMode)
                     offsets |=
                         bits(kargs.batch_stride_q_descale) | bits(kargs.batch_stride_k_descale);
-                if(offsets % 4 != 0)
-                    return reject("MX Q/K descale pointers and strides must be 4-byte aligned.");
+                if(offsets % FmhaPipeline::kMxQkScaleAlign != 0)
+                    return reject("MX Q/K descale pointers and strides must align to a scale row.");
                 if constexpr(kIsGroupMode)
                 {
                     if(kargs.seqstart_v_scale_ptr == nullptr)
@@ -2752,7 +2752,8 @@ struct FmhaFwdKernel
             // If SplitKV off, we don't expect Q data reused by different ThreadGroups, bypass the
             // cache
             constexpr bool PrefillCase =
-                FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
+                FmhaPipeline::kM0 > 64 && (FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256 ||
+                                           kPipelineName == "qr_tdm_fp8_sched");
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
             const index_t i_m0                                = i_tile_m * FmhaPipeline::kM0;
