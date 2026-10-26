@@ -241,9 +241,10 @@ class KernelSource:
     role: str = ""
     #: ``packaged`` / ``rocke``, ``hip`` or ``hsaco``: the launches of a
     #: multi-stage kernel, each a FULL source of this source's kind (this source
-    #: with the launch's overrides merged on), keyed by launch name. Non-empty makes this source a template: the
-    #: UKD carries ``sources`` in place of ``kernel_source`` and this source's
-    #: own fields are never emitted. A launch carries no launches of its own.
+    #: with the launch's overrides merged on), keyed by launch name. Non-empty
+    #: makes this source a template: the UKD carries ``sources`` in place of
+    #: ``kernel_source`` and this source's own fields are never emitted. A launch
+    #: carries no launches of its own.
     launches: dict = field(default_factory=dict)
 
     def descriptor_fields(self) -> dict:

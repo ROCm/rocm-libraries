@@ -969,14 +969,15 @@ descriptor's launches never mix kinds. The override keys are per kind: `rocke` t
 (an override `build` replaces the base `build`); `hsaco` takes `file` and `symbol`. Two
 `hip` launches sharing `source` and `build` compile once, and two `hsaco` launches sharing
 `file` share one code object. `role` on a `hip` or `hsaco` launch is a `ConfigError`, and a
-`hsaco` launch still needs the kernel or pack `arch`. The generator then emits the authored descriptor with a `sources` map keyed by
-launch name, in place of `kernel_source`, and the descriptor declares UKD 1.1. Launch names
-are lowercase identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else
-is a `ConfigError`, and so is the key on an `embedded_source`. Two launch names may name
-one kernel (a stage that runs one kernel twice with different arguments), so equal
-launches are valid config. A kernel's launches are part
-of its candidate identity, so two entries that differ only in their launches are not
-de-duplicated. A config with no `launches` key generates exactly what it did before.
+`hsaco` launch still needs the kernel or pack `arch`. The generator then emits the
+authored descriptor with a `sources` map keyed by launch name, in place of
+`kernel_source`, and the descriptor declares UKD 1.1. Launch names are lowercase
+identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else is a
+`ConfigError`, and so is the key on an `embedded_source`. Two launch names may name one
+kernel (a stage that runs one kernel twice with different arguments), so equal launches
+are valid config. A kernel's launches are part of its candidate identity, so two entries
+that differ only in their launches are not de-duplicated. A config with no `launches` key
+generates exactly what it did before.
 
 A launch's `spec` override **replaces** the spec for that launch and is never varied by
 `variants`, `axes` or `shape_axes`: it is the same static spec in every expanded kernel. It

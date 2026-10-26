@@ -1246,14 +1246,13 @@ def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -
 
     For ``rocke``, a launch with no ``spec`` override takes the kernel's own
     spec, which for a kernel expanded from ``variants`` or ``axes`` is that
-    variant's. A launch
-    WITH a ``spec`` override carries that mapping unchanged on every kernel the
-    config expands: expansion varies only the kernel's own spec and never
-    writes into an override, so an override is static, never varied per
-    variant. Because the matcher-visible metadata is stated once per kernel, an
-    override may state a kmd field only at the value the kernel's own spec
-    holds; for an expanded set that rules out stating a varied one, which
-    differs on every other variant.
+    variant's. A launch WITH a ``spec`` override carries that mapping unchanged
+    on every kernel the config expands: expansion varies only the kernel's own
+    spec and never writes into an override, so an override is static, never
+    varied per variant. Because the matcher-visible metadata is stated once per
+    kernel, an override may state a kmd field only at the value the kernel's
+    own spec holds; for an expanded set that rules out stating a varied one,
+    which differs on every other variant.
     """
     if not isinstance(raw, dict):
         raise ConfigError(
