@@ -172,6 +172,22 @@ original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 
 See linear_index for the nested-loop interpretation of order. A shape with a
 zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
 )doc")
+        .def("index_order", &Shape::indexOrder, "selection"_a)
+        .def("selected_count", &Shape::selectedCount, "selection"_a)
+        .def("selects_all", &Shape::selectsAll, "selection"_a)
+        .def("selected_indices", &Shape::selectedIndices, "selection"_a)
+        .def(
+            "selected_coordinates",
+            [](const Shape& shape, const IndexSelection& selection) {
+                std::vector<std::vector<size_t>> result;
+                result.reserve(shape.selectedCount(selection));
+                shape.forEachCoordinate(
+                    selection, [&](size_t, std::span<const size_t> coordinates) {
+                        result.emplace_back(coordinates.begin(), coordinates.end());
+                    });
+                return result;
+            },
+            "selection"_a)
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())

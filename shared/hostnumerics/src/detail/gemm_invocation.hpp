@@ -33,7 +33,8 @@ struct GemmInvocation : MatmulOptions {
     Tensor a;
     Tensor b;
     Tensor d;
-    IndexSelection outputSelection = IndexSelection::allLastDimensionFastest();
+    IndexSelection outputSelection =
+        IndexSelection(roc::hostnumerics::IndexRange::all(), LastDimensionFastest{});
 };
 
 struct GemmExecutionInfo {

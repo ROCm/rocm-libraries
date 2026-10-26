@@ -40,10 +40,8 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 include_amax=False,
             )
 
-        full = run(hv.IndexSelection.all_last_dimension_fastest())
-        partial = run(
-            hv.IndexSelection.explicit_indices_last_dimension_fastest(selected)
-        )
+        full = run(hv.IndexSelection(hv.IndexRange.all(), hv.LastDimensionFastest()))
+        partial = run(hv.IndexSelection(selected, hv.LastDimensionFastest()))
 
         self.assertIsNotNone(full.raw_output)
         np.testing.assert_array_equal(
@@ -98,7 +96,9 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+            output_selection=hv.IndexSelection(
+                hv.IndexRange.all(), hv.LastDimensionFastest()
+            ),
             backend=hv.GemmBackend.Automatic,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -145,7 +145,9 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                output_selection=hv.IndexSelection.all_last_dimension_fastest(),
+                output_selection=hv.IndexSelection(
+                    hv.IndexRange.all(), hv.LastDimensionFastest()
+                ),
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
                 conjugate_a=False,
@@ -161,9 +163,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 hv.ScalarType.Float32,
                 alpha=float(alpha),
                 beta=float(beta),
-                output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
-                    selected
-                ),
+                output_selection=hv.IndexSelection(selected, hv.LastDimensionFastest()),
                 backend=hv.GemmBackend.Blocked,
                 compute_type_a=None,
                 compute_type_b=None,

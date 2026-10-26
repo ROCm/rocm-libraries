@@ -41,7 +41,7 @@ void testAutomaticSelectionUsesBlockedBackend() {
     const float firstOutput = output.loadAs<float>({0, 0});
 
     fillTensor(output, untouchedValue);
-    problem.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({0});
+    problem.outputSelection = IndexSelection(std::vector<size_t>({0}), LastDimensionFastest{});
     const GemmSupportInfo sparseSupport = queryGemmSupport(problem, GemmBackend::Blocked);
     require(sparseSupport.supported, "Blocked backend rejected sparse work.");
     const GemmTestRunInfo sparse = referenceGemm(problem, GemmBackend::Automatic);

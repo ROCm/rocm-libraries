@@ -17,7 +17,7 @@ TEST(Package, Blas) {
     matmulIntoWithBlasBackend(Tensor::copyNativeStorage<float>(layout, std::span<const float>(a)),
                               Tensor::copyNativeStorage<float>(layout, std::span<const float>(b)),
                               output, MatmulOptions{ScalarType::Float32},
-                              IndexSelection::allLastDimensionFastest());
+                              IndexSelection(IndexRange::all(), LastDimensionFastest{}));
 
     EXPECT_EQ(output.loadAs<float>({0, 0}), 19);
     EXPECT_EQ(output.loadAs<float>({1, 0}), 43);

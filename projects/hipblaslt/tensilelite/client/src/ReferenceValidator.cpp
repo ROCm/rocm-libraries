@@ -222,7 +222,10 @@ namespace TensileLite
                 if(!problem.stridedBatched())
                     throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
                 auto translated = hostnumerics::translateGemmInvocation(
-                    problem, inputs, IndexSelection::allLastDimensionFastest());
+                    problem,
+                    inputs,
+                    IndexSelection(roc::hostnumerics::IndexRange::all(),
+                                   roc::hostnumerics::LastDimensionFastest{}));
                 if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
                     throw std::invalid_argument("Freivalds: " + failure->reason);
                 const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
@@ -301,13 +304,15 @@ namespace TensileLite
                     // Preserve the requested guard check without a numerical reference.
                     // Its existing readback includes D; account for this explicit cost.
                     const size_t index = static_cast<size_t>(ContractionProblemGemm::TENSOR::D);
-                    passed &= !checkResults(problem.d(),
-                                            reference.d,
-                                            output.d,
-                                            output.maxElements.at(index),
-                                            output.gpu,
-                                            IndexSelection::explicitIndicesLastDimensionFastest({}),
-                                            -1);
+                    passed
+                        &= !checkResults(problem.d(),
+                                         reference.d,
+                                         output.d,
+                                         output.maxElements.at(index),
+                                         output.gpu,
+                                         IndexSelection(std::vector<size_t>({}),
+                                                        roc::hostnumerics::LastDimensionFastest{}),
+                                         -1);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());
                     fallback = true;
@@ -547,7 +552,8 @@ namespace TensileLite
                                     options.maxReportedMismatches),
                                 options.maxReportedMismatches);
             }
-            if(boundsCheck == BoundsCheckMode::NaN && (outputSelection.selectsAll() || m_freivalds))
+            if(boundsCheck == BoundsCheckMode::NaN
+               && (resultTensor.shape().selectsAll(outputSelection) || m_freivalds))
             {
                 sentinel.append(roc::hostnumerics::checkUnusedTensorStorage(
                                     resultTensor,

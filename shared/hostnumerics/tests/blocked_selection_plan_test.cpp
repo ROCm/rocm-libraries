@@ -24,7 +24,7 @@ void testSmallEdgeBlock() {
     require(compare(d, expected, {}).passed(), "Blocked backend result mismatch.");
 
     fillTensor(d, untouchedValue);
-    problem.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({0});
+    problem.outputSelection = IndexSelection(std::vector<size_t>({0}), LastDimensionFastest{});
     const GemmTestRunInfo selected = referenceGemm(problem, GemmBackend::Blocked);
     require(selected.outputElementsWritten == 1 && selected.outputElementsCovered == 4,
             "Selected blocked GEMM reported the wrong write or coverage count.");
@@ -34,11 +34,12 @@ void testSmallEdgeBlock() {
             "Blocked backend partial output selection mismatch.");
 
     fillTensor(d, untouchedValue);
-    problem.outputSelection = IndexSelection::explicitIndicesLastDimensionFastest({});
+    problem.outputSelection = IndexSelection(std::vector<size_t>({}), LastDimensionFastest{});
     const GemmTestRunInfo empty = referenceGemm(problem, GemmBackend::Blocked);
     require(empty.outputElementsWritten == 0 && empty.outputElementsCovered == 0,
             "Empty blocked output selection reported output work.");
-    requireOnlySelectedOutputsStored(d, IndexSelection::explicitIndicesLastDimensionFastest({}));
+    requireOnlySelectedOutputsStored(
+        d, IndexSelection(std::vector<size_t>({}), LastDimensionFastest{}));
 }
 
 void testExplicitSelectionBlockPlan() {
@@ -49,13 +50,14 @@ void testExplicitSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 1);
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection = IndexSelection::explicitIndicesLastDimensionFastest({
-        44 * columns + 69,
-        2 * columns + 3,
-        10 * columns + 15,
-        40 * columns + 5,
-        2 * columns + 3,
-    });
+    const IndexSelection selection = IndexSelection(std::vector<size_t>({
+                                                        44 * columns + 69,
+                                                        2 * columns + 3,
+                                                        10 * columns + 15,
+                                                        40 * columns + 5,
+                                                        2 * columns + 3,
+                                                    }),
+                                                    LastDimensionFastest{});
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
@@ -75,8 +77,8 @@ void testStridedSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 5);
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection =
-        IndexSelection::stridedLastDimensionFastest(3, 509, std::numeric_limits<size_t>::max());
+    const IndexSelection selection = IndexSelection(
+        IndexRange(3, 509, std::numeric_limits<size_t>::max()), LastDimensionFastest{});
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
@@ -110,8 +112,8 @@ void testBlockScaledSelectionBlockPlan() {
     }
 
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection = IndexSelection::explicitIndicesLastDimensionFastest(
-        {0, 32 * columns + 32, 32 * columns + 34});
+    const IndexSelection selection = IndexSelection(
+        std::vector<size_t>({0, 32 * columns + 32, 32 * columns + 34}), LastDimensionFastest{});
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);

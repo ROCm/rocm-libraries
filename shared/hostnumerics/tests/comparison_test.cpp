@@ -15,7 +15,7 @@ void testComparisonProgram() {
     emptyOptions.computeElementwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
-    emptyOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    emptyOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
     const auto compareEmpty = [&](const ComparisonOptions& options) {
         return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
@@ -32,7 +32,7 @@ void testComparisonProgram() {
     encodedEquality.computeElementwiseStatistics = false;
     encodedEquality.computeFrobenius = false;
     encodedEquality.maxReportedMismatches = 0;
-    encodedEquality.selection = IndexSelection::allLastDimensionFastest();
+    encodedEquality.selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
 
     const float quietNaN = std::numeric_limits<float>::quiet_NaN();
     const std::array<float, 4> identicalValues{quietNaN, -0.0f, 1.0f, -2.0f};
@@ -186,7 +186,8 @@ void testComparisonProgram() {
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
     bool rejectedZeroSelectionStride = false;
     try {
-        (void)IndexSelection::stridedLastDimensionFastest(0, 0, std::numeric_limits<size_t>::max());
+        (void)IndexSelection(IndexRange(0, 0, std::numeric_limits<size_t>::max()),
+                             LastDimensionFastest{});
     } catch (const std::runtime_error&) {
         rejectedZeroSelectionStride = true;
     }
@@ -227,8 +228,8 @@ void testComparisonProgram() {
     const Layout layout(Shape{2, 3}, {1, 3}, 0);
 
     ComparisonOptions selected;
-    selected.selection = IndexSelection::strided(0, 2, std::numeric_limits<size_t>::max(),
-                                                 std::vector<size_t>{1, 0});
+    selected.selection = IndexSelection(IndexRange(0, 2, std::numeric_limits<size_t>::max()),
+                                        std::vector<size_t>{1, 0});
     selected.computeFrobenius = false;
     const auto selectedResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
@@ -239,7 +240,7 @@ void testComparisonProgram() {
                 selectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}) &&
                 selectedResult.reportedMismatches[0].observedOffset == 6,
             "Selected comparison reported the wrong logical location.");
-    selected.selection = IndexSelection::explicitIndices({4}, std::vector<size_t>{1, 0});
+    selected.selection = IndexSelection(std::vector<size_t>({4}), std::vector<size_t>{1, 0});
     const auto explicitSelectedResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
         Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected);
@@ -252,7 +253,7 @@ void testComparisonProgram() {
     paddedMetrics.computeElementwiseStatistics = false;
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
-    paddedMetrics.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    paddedMetrics.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
     const auto paddedMetricResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
         Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics);
@@ -420,13 +421,13 @@ void testComparisonProgram() {
     parallelOptions.computeUlp = true;
     parallelOptions.ulpType = ScalarType::Float32;
     parallelOptions.maxReportedMismatches = 3;
-    parallelOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    parallelOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
     const ComparisonReport parallelResult =
         compare(largeObservedTensor, largeExpectedTensor, parallelOptions);
 
     ComparisonOptions serialOptions = parallelOptions;
-    serialOptions.selection = IndexSelection::strided(0, 1, std::numeric_limits<size_t>::max(),
-                                                      std::vector<size_t>{1, 0});
+    serialOptions.selection = IndexSelection(IndexRange(0, 1, std::numeric_limits<size_t>::max()),
+                                             std::vector<size_t>{1, 0});
     const ComparisonReport serialResult =
         compare(largeObservedTensor, largeExpectedTensor, serialOptions);
     require(parallelResult.compared == serialResult.compared &&
@@ -464,7 +465,7 @@ void testComparisonProgram() {
         Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeObserved));
     const Tensor largeLastDimensionExpected =
         Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeExpected));
-    allCloseOnly.selection = IndexSelection::allLastDimensionFastest();
+    allCloseOnly.selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
     const ComparisonReport lastDimensionParallelResult =
         compare(largeLastDimensionObserved, largeLastDimensionExpected, allCloseOnly);
     require(!lastDimensionParallelResult.passed() &&
@@ -474,7 +475,7 @@ void testComparisonProgram() {
 
     const std::array<float, 4> explicitlySelectedObserved{9.0f, 1.0f, 2.0f, 3.0f};
     const std::array<float, 4> explicitlySelectedExpected{0.0f, 1.0f, 2.0f, 3.0f};
-    allCloseOnly.selection = IndexSelection::explicitIndices({1, 2}, std::vector<size_t>{0});
+    allCloseOnly.selection = IndexSelection(std::vector<size_t>({1, 2}), std::vector<size_t>{0});
     const ComparisonReport explicitSelectionResult =
         compare(Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedObserved)),
                 Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedExpected)),

@@ -179,7 +179,7 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
     if (problem.blockScaleB && storageOverlaps(problem.d, *problem.blockScaleB))
         return {.reason = "Reference GEMM destination must not overlap the B block scale."};
     try {
-        (void)problem.outputSelection.indexOrder(problem.d.shape().rank());
+        (void)problem.d.shape().indexOrder(problem.outputSelection);
     } catch (const std::runtime_error& error) {
         return {.reason = error.what()};
     }

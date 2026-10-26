@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     options.computeElementwiseStatistics = false;
     options.computeFrobenius = false;
     options.maxReportedMismatches = 0;
-    options.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    options.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
 
     ComparisonReport report;
     const double componentSeconds =
@@ -66,14 +66,14 @@ int main(int argc, char** argv) {
 
     ComparisonOptions statisticsOptions = options;
     statisticsOptions.computeFrobenius = false;
-    statisticsOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    statisticsOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
     ComparisonReport statisticsReport;
     const double statisticsComponentSeconds = bestSeconds(
         [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
     ComparisonOptions detailedOptions = options;
-    detailedOptions.selection = IndexSelection::all(std::vector<size_t>{1, 0});
+    detailedOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
     ComparisonReport detailedReport;
     const double detailedComponentSeconds =
         bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });

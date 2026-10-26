@@ -29,7 +29,7 @@ Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> 
 
 void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
     addInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-            IndexSelection::allLastDimensionFastest());
+            IndexSelection(IndexRange::all(), LastDimensionFastest{}));
 }
 
 Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -44,7 +44,7 @@ Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 IndexSelection::allLastDimensionFastest());
+                 IndexSelection(IndexRange::all(), LastDimensionFastest{}));
 }
 
 Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -59,7 +59,7 @@ Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 IndexSelection::allLastDimensionFastest());
+                 IndexSelection(IndexRange::all(), LastDimensionFastest{}));
 }
 
 ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {

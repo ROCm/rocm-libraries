@@ -30,13 +30,13 @@ namespace {
 template <typename Observe>
 ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expected,
                                       const ComparisonOptions& options, Observe&& observe) {
-    const size_t selectedCount = options.selection.selectedCount(observed.elementCount());
+    const size_t selectedCount = observed.shape().selectedCount(options.selection);
     constexpr size_t minimumElementsPerThread = 500'000;
     // Keep norm accumulation serial so its rounding order is independent of the OpenMP runtime.
     // Complete selections can be partitioned into ordered logical ranges without materializing
     // indices; sparse selections retain their existing traversal.
     const int threadCount =
-        options.selection.selectsAll() && !options.computeFrobenius
+        observed.shape().selectsAll(options.selection) && !options.computeFrobenius
             ? detail::operationThreadCount(selectedCount, minimumElementsPerThread, 8)
             : 1;
 
@@ -62,8 +62,7 @@ ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expe
                 detail::evenlyPartitionedRange(selectedCount, partitionCount, partition);
             detail::forEachLayoutOffsetPairRange(
                 observed.layout(), expected.layout(),
-                options.selection.indexOrder(observed.shape().rank()), firstSelected,
-                pastLastSelected,
+                observed.shape().indexOrder(options.selection), firstSelected, pastLastSelected,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                     observe(partials[partition], logicalIndex, observedOffset, expectedOffset);
                 });
@@ -126,7 +125,7 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
         throw std::runtime_error("HostNumerics tensor comparison shape mismatch.");
 
     (void)detail::validatedIndexOrder(observed.shape().rank(),
-                                      options.selection.indexOrder(observed.shape().rank()));
+                                      observed.shape().indexOrder(options.selection));
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
 
@@ -328,7 +327,7 @@ SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
         throw std::runtime_error("Logical tensor addresses outside allocated storage.");
     std::vector<bool> used(allocatedElements, false);
     detail::forEachSelectedIndex(
-        layout.shape(), IndexSelection::allLastDimensionFastest(),
+        layout.shape(), IndexSelection(IndexRange::all(), LastDimensionFastest{}),
         [&](size_t, std::span<const size_t> coordinates) {
             used[static_cast<size_t>(detail::preparedElementOffset(layout, coordinates))] = true;
         });

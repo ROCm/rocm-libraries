@@ -137,10 +137,6 @@ ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
                                         const ComparisonValue& expected,
                                         const ComparisonOptions& options);
 bool elementwiseStatisticsOnlyComparison(const ComparisonOptions& options);
-bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
-                        std::span<const size_t> order, std::span<const ptrdiff_t> observedStrides,
-                        std::span<const ptrdiff_t> expectedStrides, ptrdiff_t& observedOffset,
-                        ptrdiff_t& expectedOffset);
 
 template <typename Function>
 void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
@@ -148,65 +144,19 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     if (observedLayout.shape() != expectedLayout.shape())
         throw std::runtime_error("Comparison offset traversal shape mismatch.");
     const Shape& shape = observedLayout.shape();
-    const IndexIteration iteration(shape, selection.indexOrder(shape.rank()));
-    const size_t total = iteration.count();
-    if (selection.kind() == IndexSelectionKind::Explicit) {
-        std::vector<size_t> coordinates(shape.rank(), 0);
-        for (const size_t logicalIndex : selection.indices(total)) {
-            iteration.coordinates(logicalIndex, coordinates);
-            function(logicalIndex, preparedElementOffset(observedLayout, coordinates),
-                     preparedElementOffset(expectedLayout, coordinates));
-        }
+    const size_t count = shape.selectedCount(selection);
+    if (count == 0) return;
+    const auto* range = std::get_if<roc::hostnumerics::IndexRange>(&selection.flatIndices());
+    if (range && range->stride == 1) {
+        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, shape.indexOrder(selection),
+                                     range->first, range->first + count,
+                                     std::forward<Function>(function));
         return;
     }
-    if (selection.selectsAll()) {
-        if (total == 0) return;
-    } else if (selection.first() >= total || selection.maxElements() == 0) {
-        return;
-    }
-
-    if (shape.rank() == 0) {
-        function(0, observedLayout.offset(), expectedLayout.offset());
-        return;
-    }
-
-    if (selection.selectsAll() || (selection.first() == 0 && selection.stride() == 1)) {
-        const size_t selectedTotal =
-            selection.selectsAll() ? total : std::min(total, selection.maxElements());
-        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, iteration.axes(), 0,
-                                     selectedTotal, std::forward<Function>(function));
-        return;
-    }
-
-    std::vector<size_t> coordinates(shape.rank(), 0);
-    iteration.coordinates(selection.first(), coordinates);
-    ptrdiff_t observedOffset = preparedElementOffset(observedLayout, coordinates);
-    ptrdiff_t expectedOffset = preparedElementOffset(expectedLayout, coordinates);
-
-    if (selection.stride() == 1) {
-        size_t logicalIndex = selection.first();
-        size_t selected = 0;
-        while (logicalIndex < total && selected < selection.maxElements()) {
-            function(logicalIndex, observedOffset, expectedOffset);
-            ++selected;
-            ++logicalIndex;
-            if (logicalIndex >= total || selected >= selection.maxElements()) break;
-            if (!advanceCoordinates(coordinates, shape, iteration.axes(), observedLayout.strides(),
-                                    expectedLayout.strides(), observedOffset, expectedOffset))
-                break;
-        }
-        return;
-    }
-
-    size_t selected = 0;
-    for (size_t logicalIndex = selection.first();
-         logicalIndex < total && selected < selection.maxElements(); ++selected) {
-        iteration.coordinates(logicalIndex, coordinates);
-        function(logicalIndex, preparedElementOffset(observedLayout, coordinates),
+    shape.forEachCoordinate(selection, [&](size_t index, std::span<const size_t> coordinates) {
+        function(index, preparedElementOffset(observedLayout, coordinates),
                  preparedElementOffset(expectedLayout, coordinates));
-        if (selection.stride() > std::numeric_limits<size_t>::max() - logicalIndex) break;
-        logicalIndex += selection.stride();
-    }
+    });
 }
 
 template <typename Observed, typename Expected>

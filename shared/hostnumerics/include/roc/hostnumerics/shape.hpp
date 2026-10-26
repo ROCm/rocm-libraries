@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <roc/hostnumerics/index_selection.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -150,8 +151,83 @@ class Shape {
         return m_dimensions == other.m_dimensions;
     }
 
+    std::vector<size_t> indexOrder(const IndexSelection& selection) const {
+        validateSelectionOrder(selection);
+        if (const auto* order = std::get_if<std::vector<size_t>>(&selection.order())) return *order;
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), size_t{0});
+        return order;
+    }
+
+    size_t selectedCount(const IndexSelection& selection) const {
+        validateSelectionOrder(selection);
+        if (auto error = detail::indexSelectionError(selection, elementCount()))
+            throw std::runtime_error(std::string(detail::message(*error)));
+        if (const auto* range = std::get_if<IndexRange>(&selection.flatIndices())) {
+            if (range->first >= elementCount()) return 0;
+            return std::min(1 + (elementCount() - 1 - range->first) / range->stride,
+                            range->maxElements);
+        }
+        return std::get<std::vector<size_t>>(selection.flatIndices()).size();
+    }
+
+    bool selectsAll(const IndexSelection& selection) const {
+        return selectedCount(selection) == elementCount();
+    }
+
+    // Materialization is explicit. Operation consumers can stream coordinates instead.
+    std::vector<size_t> selectedIndices(const IndexSelection& selection) const {
+        const size_t count = selectedCount(selection);
+        if (const auto* list = std::get_if<std::vector<size_t>>(&selection.flatIndices()))
+            return *list;
+        const auto& range = std::get<IndexRange>(selection.flatIndices());
+        std::vector<size_t> result(count);
+        for (size_t ordinal = 0; ordinal < count; ++ordinal)
+            result[ordinal] = range.first + ordinal * range.stride;
+        return result;
+    }
+
+    // Defines an ordered set of coordinates to visit. The coordinate span is reused
+    // and remains valid only during the callback. No flat-index list is allocated.
+    template <typename Function>
+    void forEachCoordinate(const IndexSelection& selection, Function&& function) const {
+        const size_t count = selectedCount(selection);
+        const auto order = indexOrder(selection);
+        std::vector<size_t> coordinates(rank());
+        const auto visit = [&](size_t index) {
+            computeCoordinates(index, order, coordinates);
+            function(index, std::span<const size_t>(coordinates));
+        };
+        if (const auto* range = std::get_if<IndexRange>(&selection.flatIndices())) {
+            if (range->stride == 1 && count != 0) {
+                computeCoordinates(range->first, order, coordinates);
+                for (size_t ordinal = 0; ordinal < count; ++ordinal) {
+                    function(range->first + ordinal, std::span<const size_t>(coordinates));
+                    if (ordinal + 1 == count) break;
+                    for (size_t position = rank(); position > 0; --position) {
+                        const size_t axis = order[position - 1];
+                        if (++coordinates[axis] < m_dimensions[axis]) break;
+                        coordinates[axis] = 0;
+                    }
+                }
+            } else {
+                for (size_t ordinal = 0; ordinal < count; ++ordinal)
+                    visit(range->first + ordinal * range->stride);
+            }
+        } else {
+            for (size_t index : std::get<std::vector<size_t>>(selection.flatIndices()))
+                visit(index);
+        }
+    }
+
    private:
     friend struct detail::ShapeAccess;
+
+    void validateSelectionOrder(const IndexSelection& selection) const {
+        if (const auto* order = std::get_if<std::vector<size_t>>(&selection.order());
+            order && order->size() != rank())
+            throw std::runtime_error("Index selection order rank does not match tensor rank.");
+    }
 
     void validateDimension(size_t dimension) const {
         if (dimension >= rank())

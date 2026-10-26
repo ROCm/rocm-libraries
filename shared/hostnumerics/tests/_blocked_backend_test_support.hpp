@@ -25,7 +25,9 @@ namespace blocked_backend_test {
 namespace {
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
+using roc::hostnumerics::IndexRange;
 using roc::hostnumerics::IndexSelection;
+using roc::hostnumerics::LastDimensionFastest;
 using roc::hostnumerics::Tensor;
 
 constexpr float untouchedValue = -12345.0f;
@@ -81,8 +83,8 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     Tensor expected = makeOutput(rows, columns, untouchedValue);
-    const auto selected = problem.outputSelection.indices(problem.d.elementCount());
-    const auto indexOrder = problem.outputSelection.indexOrder(problem.d.shape().rank());
+    const auto selected = problem.d.shape().selectedIndices(problem.outputSelection);
+    const auto indexOrder = problem.d.shape().indexOrder(problem.outputSelection);
     for (const size_t linearIndex : selected) {
         const auto coordinates = problem.d.shape().coordinates(linearIndex, indexOrder);
         const size_t row = coordinates[0];
