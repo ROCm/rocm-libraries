@@ -11,7 +11,7 @@
 #include <memory>
 #include <ostream>
 #include <roc/hostnumerics/detail/prime.hpp>
-#include <roc/hostnumerics/index_selection.hpp>
+#include <roc/hostnumerics/index_range.hpp>
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
@@ -638,100 +638,60 @@ TEST(Core, ScalarDispatchExceptions) {
         EXPECT_EQ(error.marker, 37);
     }
 }
-TEST(IndexSelectionCpp, StrictAndNamedOrders) {
-    static_assert(!std::is_default_constructible_v<IndexSelection>);
-    const Shape shape{2, 3};
-    const auto ascending = IndexSelection(std::vector<size_t>({1}), std::vector<size_t>{0, 1});
-    const auto descending = IndexSelection(std::vector<size_t>({1}), std::vector<size_t>{1, 0});
-    EXPECT_EQ(
-        shape.coordinates(shape.selectedIndices(ascending).front(), shape.indexOrder(ascending)),
-        (std::vector<size_t>{0, 1}));
-    EXPECT_EQ(
-        shape.coordinates(shape.selectedIndices(descending).front(), shape.indexOrder(descending)),
-        (std::vector<size_t>{1, 0}));
-    const auto scalar = IndexSelection(IndexRange::all(), std::vector<size_t>{});
-    EXPECT_TRUE(Shape{}.indexOrder(scalar).empty());
-    EXPECT_THROW(shape.indexOrder(scalar), std::runtime_error);
-    EXPECT_THROW(Shape{6}.indexOrder(ascending), std::runtime_error);
-    for (const auto& order :
-         {std::vector<size_t>{0, 0}, std::vector<size_t>{1}, std::vector<size_t>{0, 2}}) {
-        EXPECT_THROW(IndexSelection(IndexRange::all(), order), std::runtime_error);
-        EXPECT_THROW(IndexSelection(IndexRange(0, 2, 3), order), std::runtime_error);
-        EXPECT_THROW(IndexSelection(std::vector<size_t>({1}), order), std::runtime_error);
-        EXPECT_THROW(IndexSelection(primeIndexRange(6, 6, 0), order), std::runtime_error);
-    }
-    const std::array<IndexSelection, 4> named{
-        IndexSelection(IndexRange::all(), LastDimensionFastest{}),
-        IndexSelection(IndexRange(0, 2, 3), LastDimensionFastest{}),
-        IndexSelection(std::vector<size_t>({1}), LastDimensionFastest{}),
-        IndexSelection(primeIndexRange(6, 6, 2), LastDimensionFastest{})};
-    for (const auto& selection : named) {
-        EXPECT_TRUE(Shape{}.indexOrder(selection).empty());
-        EXPECT_EQ(Shape({2, 3}).indexOrder(selection), (std::vector<size_t>{0, 1}));
-        EXPECT_EQ(Shape({2, 3, 4}).indexOrder(selection), (std::vector<size_t>{0, 1, 2}));
-        EXPECT_EQ(shape.coordinates(1, Shape({2, 3}).indexOrder(selection)),
-                  (std::vector<size_t>{0, 1}));
-    }
-}
-
-TEST(IndexSelectionCpp, OwnsSpanOrdersAndIndices) {
-    auto selections = [] {
-        std::array<size_t, 3> order{2, 1, 0};
-        std::vector<size_t> indices{7, 1, 7};
-        std::array<IndexSelection, 4> result{IndexSelection(IndexRange::all(), order),
-                                             IndexSelection(IndexRange(0, 2, 3), order),
-                                             IndexSelection(std::vector<size_t>(indices), order),
-                                             IndexSelection(primeIndexRange(24, 24, 5), order)};
-        order[0] = 9;
-        indices[0] = 99;
-        return result;
-    }();
-    for (const auto& selection : selections) {
-        const auto order = Shape({2, 3, 4}).indexOrder(selection);
-        EXPECT_EQ((std::vector<size_t>(order.begin(), order.end())),
-                  (std::vector<size_t>{2, 1, 0}));
-    }
-    auto copied = selections[2];
-    selections[2] = IndexSelection(IndexRange::all(), LastDimensionFastest{});
-    EXPECT_EQ(Shape({2, 2, 2}).selectedIndices(copied), (std::vector<size_t>{1, 7}));
-    const auto moved = std::move(copied);
-    EXPECT_EQ(Shape({2, 2, 2}).selectedIndices(moved), (std::vector<size_t>{1, 7}));
-    EXPECT_EQ(Shape({2, 2, 2}).indexOrder(moved), (std::vector<size_t>{2, 1, 0}));
-}
-
-TEST(IndexSelectionCpp, SizeBoundaries) {
-    const size_t maximum = std::numeric_limits<size_t>::max();
-    const Shape shape{maximum};
-    EXPECT_EQ(shape.selectedCount(IndexSelection(IndexRange::all(), LastDimensionFastest{})),
-              maximum);
-    EXPECT_EQ(shape.selectedIndices(
-                  IndexSelection(IndexRange(maximum - 2, 3, maximum), LastDimensionFastest{})),
-              (std::vector<size_t>{maximum - 2}));
-    EXPECT_EQ(shape.selectedIndices(
-                  IndexSelection(IndexRange(1, maximum - 2, maximum), LastDimensionFastest{})),
-              (std::vector<size_t>{1, maximum - 1}));
-    EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
-}
-
-TEST(IndexSelectionCpp, VisitsCoordinatesAndChecksBoundsBeforeCallbacks) {
+TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
     const Shape shape{2, 4};
     const std::array<size_t, 2> order{0, 1};
-    for (const auto& selection : {IndexSelection(IndexRange(1, 2, 3), order),
-                                  IndexSelection(std::vector<size_t>{5, 1, 3, 5}, order)}) {
-        std::vector<std::vector<size_t>> visited;
-        shape.forEachCoordinate(selection, [&](size_t, std::span<const size_t> coordinates) {
-            visited.emplace_back(coordinates.begin(), coordinates.end());
-        });
-        EXPECT_EQ(visited, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
-    }
-    EXPECT_TRUE(shape.selectsAll(IndexSelection(IndexRange(0, 1, 8), order)));
+    const IndexRange range{1, 2, 3};
+    const std::set<size_t> indices{5, 1, 3, 5};
+    std::vector<std::vector<size_t>> ranged, explicitCoordinates;
+    shape.forEachCoordinate(range, order, [&](size_t, std::span<const size_t> coordinates) {
+        ranged.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    shape.forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> coordinates) {
+        explicitCoordinates.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    EXPECT_EQ(ranged, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
+    EXPECT_EQ(explicitCoordinates, ranged);
+    EXPECT_TRUE(shape.selectsAll(IndexRange(0, 1, 8)));
     size_t calls = 0;
-    const IndexSelection invalid(std::vector<size_t>{0, 8}, order);
+    const std::set<size_t> invalid{0, 8};
     EXPECT_THROW(
-        shape.forEachCoordinate(invalid, [&](size_t, std::span<const size_t>) { ++calls; }),
+        shape.forEachCoordinate(invalid, order, [&](size_t, std::span<const size_t>) { ++calls; }),
         std::runtime_error);
     EXPECT_EQ(calls, 0);
     EXPECT_THROW(IndexRange(0, 0, 3), std::runtime_error);
+}
+
+TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
+    const Shape shape{2, 0};
+    const std::array<size_t, 1> wrongRank{0};
+    size_t calls = 0;
+    const auto visit = [&](size_t, std::span<const size_t>) { ++calls; };
+    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(), wrongRank, visit), std::runtime_error);
+    EXPECT_THROW(shape.forEachCoordinate(std::set<size_t>{}, wrongRank, visit), std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    const std::array<size_t, 2> duplicate{0, 0};
+    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(), duplicate, visit), std::runtime_error);
+    const Shape scalar{};
+    scalar.forEachCoordinateLastDimensionFastest(
+        IndexRange::all(), [&](size_t index, std::span<const size_t> coordinates) {
+            EXPECT_EQ(index, 0);
+            EXPECT_TRUE(coordinates.empty());
+            ++calls;
+        });
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(IndexRangeCpp, SizeBoundaries) {
+    static_assert(!std::is_default_constructible_v<IndexRange>);
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    const Shape shape{maximum};
+    EXPECT_EQ(shape.selectedCount(IndexRange::all()), maximum);
+    EXPECT_EQ(shape.selectedIndices(IndexRange(maximum - 2, 3, maximum)),
+              (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(shape.selectedIndices(IndexRange(1, maximum - 2, maximum)),
+              (std::vector<size_t>{1, maximum - 1}));
+    EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
 }
 
 }  // namespace

@@ -20,9 +20,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -53,9 +52,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -192,9 +190,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=0.0,
             compute_type_a=None,
             compute_type_b=None,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -232,9 +229,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             alpha=1.0,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -260,9 +256,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=0.0,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -291,9 +286,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=0.0,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -321,9 +315,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=0.0,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -385,9 +378,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             alpha=1.0,
             beta=0.0,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -409,9 +401,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -436,9 +427,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -484,9 +474,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
             conjugate_b=False,
@@ -526,9 +515,8 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,

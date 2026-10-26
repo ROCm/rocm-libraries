@@ -33,15 +33,16 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 output_scale=2.0,
                 output_conversion=hv.OutputConversion.SaturatingInt8,
                 include_raw_output=True,
-                output_selection=selection,
+                indices=selection,
+                index_order=hv.LastDimensionFastest(),
                 activation_application=hv.ActivationApplication.Forward,
                 auxiliary_scale=complex(1.0, 0.0),
                 activation_parameter1=0.0,
                 include_amax=False,
             )
 
-        full = run(hv.IndexSelection(hv.IndexRange.all(), hv.LastDimensionFastest()))
-        partial = run(hv.IndexSelection(selected, hv.LastDimensionFastest()))
+        full = run(hv.IndexRange.all())
+        partial = run(set(selected))
 
         self.assertIsNotNone(full.raw_output)
         np.testing.assert_array_equal(
@@ -96,9 +97,8 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -145,9 +145,8 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                output_selection=hv.IndexSelection(
-                    hv.IndexRange.all(), hv.LastDimensionFastest()
-                ),
+                indices=hv.IndexRange.all(),
+                index_order=hv.LastDimensionFastest(),
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,
                 conjugate_a=False,
@@ -163,7 +162,8 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 hv.ScalarType.Float32,
                 alpha=float(alpha),
                 beta=float(beta),
-                output_selection=hv.IndexSelection(selected, hv.LastDimensionFastest()),
+                indices=set(selected),
+                index_order=hv.LastDimensionFastest(),
                 backend=hv.GemmBackend.Blocked,
                 compute_type_a=None,
                 compute_type_b=None,

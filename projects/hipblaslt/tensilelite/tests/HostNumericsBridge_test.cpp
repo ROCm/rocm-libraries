@@ -139,7 +139,7 @@ TEST(HostNumericsBridge, SamplingAndLayoutRejectUnrepresentableShapeAsAResult)
                                                        sizes.end(),
                                                        strides.begin(),
                                                        strides.end());
-        const auto selection = TensileLite::Client::getReferenceIndexSelection(descriptor, 1);
+        const auto selection = TensileLite::Client::getReferenceIndexRange(descriptor, 1);
         ASSERT_FALSE(selection.has_value());
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(selection.error()))
                       .find("element count exceeds size_t"),
@@ -149,8 +149,7 @@ TEST(HostNumericsBridge, SamplingAndLayoutRejectUnrepresentableShapeAsAResult)
         EXPECT_NE(std::string(TensileLite::Client::hostnumerics::detail::message(layout.error()))
                       .find("element count exceeds size_t"),
                   std::string::npos);
-        EXPECT_THROW(TensileLite::Client::referenceIndexSelection(descriptor, 1),
-                     std::runtime_error);
+        EXPECT_THROW(TensileLite::Client::referenceIndexRange(descriptor, 1), std::runtime_error);
     }
 }
 
@@ -168,11 +167,11 @@ TEST(HostNumericsBridge, SamplingAndLayoutAcceptOversizedEmptyShapes)
                                                        sizes.end(),
                                                        strides.begin(),
                                                        strides.end());
-        const auto selection = TensileLite::Client::getReferenceIndexSelection(descriptor, 1);
+        const auto selection = TensileLite::Client::getReferenceIndexRange(descriptor, 1);
         ASSERT_TRUE(selection.has_value());
         const auto layout = TensileLite::Client::getHostnumericsLayout(descriptor);
         ASSERT_TRUE(layout.has_value());
         EXPECT_EQ(layout->shape().elementCount(), 0);
-        EXPECT_NO_THROW(TensileLite::Client::referenceIndexSelection(descriptor, 1));
+        EXPECT_NO_THROW(TensileLite::Client::referenceIndexRange(descriptor, 1));
     }
 }

@@ -78,25 +78,23 @@ namespace hipblaslt::hostnumerics
                     scaledB,
                     expected,
                     ScalarType::Float32,
-                    roc::hostnumerics::IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                      roc::hostnumerics::LastDimensionFastest{}));
+                    roc::hostnumerics::IndexRange::all(),
+                    roc::hostnumerics::LastDimensionFastest{});
         }
         else if(a)
-            multiplyInto(
-                *a,
-                Tensor::scalar(ScalarType::Float32, alpha),
-                expected,
-                ScalarType::Float32,
-                roc::hostnumerics::IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                  roc::hostnumerics::LastDimensionFastest{}));
+            multiplyInto(*a,
+                         Tensor::scalar(ScalarType::Float32, alpha),
+                         expected,
+                         ScalarType::Float32,
+                         roc::hostnumerics::IndexRange::all(),
+                         roc::hostnumerics::LastDimensionFastest{});
         else if(b)
-            multiplyInto(
-                *b,
-                Tensor::scalar(ScalarType::Float32, beta),
-                expected,
-                ScalarType::Float32,
-                roc::hostnumerics::IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                  roc::hostnumerics::LastDimensionFastest{}));
+            multiplyInto(*b,
+                         Tensor::scalar(ScalarType::Float32, beta),
+                         expected,
+                         ScalarType::Float32,
+                         roc::hostnumerics::IndexRange::all(),
+                         roc::hostnumerics::LastDimensionFastest{});
         else
             throw std::runtime_error("MatrixTransform reference requires A or B.");
 

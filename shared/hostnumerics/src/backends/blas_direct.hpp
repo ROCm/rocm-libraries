@@ -141,7 +141,7 @@ GemmSupportInfo checkCommon(const GemmInvocation& problem) {
         return {.reason = "BLAS backend does not support block scaling."};
     if (problem.mathMode != MathMode::Default)
         return {.reason = "BLAS backend supports only default operand math."};
-    if (!problem.d.shape().selectsAll(problem.outputSelection))
+    if (!(problem.indicesCount == problem.d.elementCount()))
         return {.reason = "BLAS backend requires complete output selection."};
     const size_t m = problem.a.shape()[0];
     const size_t n = problem.b.shape()[1];

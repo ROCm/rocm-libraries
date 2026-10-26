@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -172,22 +173,63 @@ original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 
 See linear_index for the nested-loop interpretation of order. A shape with a
 zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
 )doc")
-        .def("index_order", &Shape::indexOrder, "selection"_a)
-        .def("selected_count", &Shape::selectedCount, "selection"_a)
-        .def("selects_all", &Shape::selectsAll, "selection"_a)
-        .def("selected_indices", &Shape::selectedIndices, "selection"_a)
+        .def("index_order_last_dimension_fastest", &Shape::indexOrderLastDimensionFastest)
+        .def("selected_count",
+             nb::overload_cast<const IndexRange&>(&Shape::selectedCount, nb::const_), "range"_a)
+        .def("selected_count",
+             nb::overload_cast<const std::set<size_t>&>(&Shape::selectedCount, nb::const_),
+             "indices"_a)
+        .def("selects_all", nb::overload_cast<const IndexRange&>(&Shape::selectsAll, nb::const_),
+             "range"_a)
+        .def("selects_all",
+             nb::overload_cast<const std::set<size_t>&>(&Shape::selectsAll, nb::const_),
+             "indices"_a)
+        .def("selected_indices", &Shape::selectedIndices, "range"_a)
         .def(
             "selected_coordinates",
-            [](const Shape& shape, const IndexSelection& selection) {
+            [](const Shape& shape, const IndexRange& range, const std::vector<size_t>& order) {
                 std::vector<std::vector<size_t>> result;
-                result.reserve(shape.selectedCount(selection));
                 shape.forEachCoordinate(
-                    selection, [&](size_t, std::span<const size_t> coordinates) {
+                    range, order, [&](size_t, std::span<const size_t> coordinates) {
                         result.emplace_back(coordinates.begin(), coordinates.end());
                     });
                 return result;
             },
-            "selection"_a)
+            "range"_a, "order"_a)
+        .def(
+            "selected_coordinates",
+            [](const Shape& shape, const std::set<size_t>& indices,
+               const std::vector<size_t>& order) {
+                std::vector<std::vector<size_t>> result;
+                shape.forEachCoordinate(
+                    indices, order, [&](size_t, std::span<const size_t> coordinates) {
+                        result.emplace_back(coordinates.begin(), coordinates.end());
+                    });
+                return result;
+            },
+            "indices"_a, "order"_a)
+        .def(
+            "selected_coordinates_last_dimension_fastest",
+            [](const Shape& shape, const IndexRange& range) {
+                std::vector<std::vector<size_t>> result;
+                shape.forEachCoordinateLastDimensionFastest(
+                    range, [&](size_t, std::span<const size_t> coordinates) {
+                        result.emplace_back(coordinates.begin(), coordinates.end());
+                    });
+                return result;
+            },
+            "range"_a)
+        .def(
+            "selected_coordinates_last_dimension_fastest",
+            [](const Shape& shape, const std::set<size_t>& indices) {
+                std::vector<std::vector<size_t>> result;
+                shape.forEachCoordinateLastDimensionFastest(
+                    indices, [&](size_t, std::span<const size_t> coordinates) {
+                        result.emplace_back(coordinates.begin(), coordinates.end());
+                    });
+                return result;
+            },
+            "indices"_a)
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())

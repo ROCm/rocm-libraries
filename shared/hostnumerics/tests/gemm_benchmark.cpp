@@ -26,7 +26,7 @@ using roc::hostnumerics::GemmBackend;
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
 using roc::hostnumerics::IndexRange;
-using roc::hostnumerics::IndexSelection;
+
 using roc::hostnumerics::LastDimensionFastest;
 using roc::hostnumerics::Layout;
 using roc::hostnumerics::primeIndexRange;
@@ -161,8 +161,9 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     const Shape outputShape{rows, columns};
-    const auto indexOrder = problem.d.shape().indexOrder(problem.outputSelection);
-    for (const size_t logicalIndex : problem.d.shape().selectedIndices(problem.outputSelection)) {
+    const auto& indexOrder = problem.indicesOrder;
+    for (size_t ordinal = 0; ordinal < problem.indicesCount; ++ordinal) {
+        const size_t logicalIndex = problem.indexAt(ordinal);
         const auto coordinates = problem.d.shape().coordinates(logicalIndex, indexOrder);
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
@@ -236,12 +237,10 @@ int main(int argc, char** argv) {
         const Options options = parseOptions(argc, argv);
         const NumericProfile profile = numericProfile(options.profile);
         const size_t outputElements = options.rows * options.columns;
-        const IndexSelection selection =
+        const IndexRange selection =
             options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? IndexSelection(IndexRange::all(), LastDimensionFastest{})
-                : IndexSelection(
-                      primeIndexRange(outputElements, outputElements, options.selectedOutputs),
-                      LastDimensionFastest{});
+                ? IndexRange::all()
+                : primeIndexRange(outputElements, outputElements, options.selectedOutputs);
 
         const ptrdiff_t aLeadingDimension =
             static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));
@@ -261,7 +260,7 @@ int main(int argc, char** argv) {
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2, false);
         const Tensor output(profile.outputType, outputLayout);
         GemmTestOptions requestOptions(profile.accumulatorType);
-        requestOptions.outputSelection = selection;
+
         if (profile.blockScaled) {
             constexpr size_t blockSize = 32;
             if (options.reductions % blockSize != 0)
@@ -273,6 +272,8 @@ int main(int argc, char** argv) {
             requestOptions.blockSizeB = blockSize;
         }
         GemmTestCase request(a, b, output, requestOptions);
+        roc::hostnumerics::detail::bindIndices(request, output.shape(), selection,
+                                               LastDimensionFastest{});
 
         const GemmBackend backend = options.backend;
         GemmTestRunInfo runInfo;
@@ -288,15 +289,16 @@ int main(int argc, char** argv) {
             milliseconds.push_back(std::chrono::duration<double, std::milli>(end - start).count());
         }
 
-        const IndexSelection validationSelection =
+        const IndexRange validationSelection =
             Shape{outputElements}.selectsAll(selection) && outputElements > 128
-                ? IndexSelection(primeIndexRange(outputElements, outputElements, 128),
-                                 LastDimensionFastest{})
+                ? primeIndexRange(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;
-        expectedOptions.outputSelection = validationSelection;
+
         GemmTestCase expectedRequest(a, b, expected, expectedOptions);
+        roc::hostnumerics::detail::bindIndices(expectedRequest, expected.shape(),
+                                               validationSelection, LastDimensionFastest{});
         runScalarOracle(expectedRequest, expected);
 
         const std::vector<size_t> validationIndices =
@@ -304,8 +306,10 @@ int main(int argc, char** argv) {
         const double tolerance = comparisonTolerance(profile.outputType);
         ComparisonOptions comparisonOptions =
             allCloseComparisonOptions(tolerance, 2.0 * tolerance, false);
-        comparisonOptions.selection = validationSelection;
-        if (!compare(output, expected, comparisonOptions).passed())
+
+        if (!compare(output, expected, comparisonOptions, validationSelection,
+                     LastDimensionFastest{})
+                 .passed())
             throw std::runtime_error("Benchmark result differs from the scalar oracle.");
         double checksum = 0.0;
         for (const size_t index : validationIndices) {

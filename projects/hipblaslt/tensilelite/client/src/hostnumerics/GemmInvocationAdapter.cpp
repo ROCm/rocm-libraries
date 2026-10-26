@@ -27,7 +27,7 @@ namespace TensileLite::Client::hostnumerics
     namespace detail
     {
         using roc::hostnumerics::ActivationFunction;
-        using roc::hostnumerics::IndexSelection;
+
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::MathMode;
         using roc::hostnumerics::ScalarCategory;
@@ -248,12 +248,12 @@ namespace TensileLite::Client::hostnumerics
 
         struct BatchInputs
         {
-            Tensor         a;
-            Tensor         b;
-            Tensor         c;
-            Tensor         d;
-            IndexSelection outputSelection = IndexSelection(
-                roc::hostnumerics::IndexRange::all(), roc::hostnumerics::LastDimensionFastest{});
+            Tensor                              a;
+            Tensor                              b;
+            Tensor                              c;
+            Tensor                              d;
+            std::set<size_t>                    outputIndices;
+            bool                                selectAllOutputs = true;
             std::optional<Tensor>               bias;
             std::optional<MatrixAxis>           biasAxis;
             std::optional<Tensor>               biasOutput;
@@ -279,13 +279,13 @@ namespace TensileLite::Client::hostnumerics
 
         struct BatchPlan
         {
-            BorrowedConstTensor   a;
-            BorrowedConstTensor   b;
-            BorrowedConstTensor   c;
-            BorrowedMutableTensor d;
-            Layout                outputLayout;
-            IndexSelection        outputSelection = IndexSelection(
-                roc::hostnumerics::IndexRange::all(), roc::hostnumerics::LastDimensionFastest{});
+            BorrowedConstTensor                  a;
+            BorrowedConstTensor                  b;
+            BorrowedConstTensor                  c;
+            BorrowedMutableTensor                d;
+            Layout                               outputLayout;
+            std::set<size_t>                     outputIndices;
+            bool                                 selectAllOutputs = true;
             std::optional<BorrowedConstTensor>   bias;
             std::optional<BorrowedMutableTensor> biasOutput;
             MatrixAxis                           biasAxis = MatrixAxis::Row;
@@ -373,10 +373,10 @@ namespace TensileLite::Client::hostnumerics
         using Layout             = roc::hostnumerics::Layout;
         using MathMode           = roc::hostnumerics::MathMode;
         using MatrixAxis         = detail::MatrixAxis;
-        using IndexSelection     = roc::hostnumerics::IndexSelection;
-        using ScalarType         = roc::hostnumerics::ScalarType;
-        using Shape              = roc::hostnumerics::Shape;
-        using Tensor             = roc::hostnumerics::Tensor;
+
+        using ScalarType = roc::hostnumerics::ScalarType;
+        using Shape      = roc::hostnumerics::Shape;
+        using Tensor     = roc::hostnumerics::Tensor;
 
         Tensor makeAddendTensor(const Layout& layout, std::span<const std::byte> source) const
         {
@@ -398,8 +398,10 @@ namespace TensileLite::Client::hostnumerics
             return makeOutputTensorForType(typeD, layout);
         }
 
+        template <typename Indices>
         std::optional<TranslationFailure> normalizeProblem(ContractionProblemGemm const& problem,
-                                                           IndexSelection outputSelection)
+                                                           const Indices&                indices,
+                                                           std::span<const size_t> globalOrder)
         {
             using detail::failure;
             using roc::hostnumerics::IdentityActivation;
@@ -588,47 +590,45 @@ namespace TensileLite::Client::hostnumerics
             const bool requiresCompleteD
                 = problem.outputAmaxD()
                   || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
-            std::vector<size_t> globalOrder;
-            try
-            {
-                globalOrder = Shape(problem.d().sizes()).indexOrder(outputSelection);
-            }
-            catch(std::runtime_error const& error)
-            {
-                return failure(TranslationFailureCode::InvalidDescriptor, error.what());
-            }
-            const IndexSelection globalSelection
-                = requiresCompleteD
-                      ? IndexSelection(roc::hostnumerics::IndexRange::all(), globalOrder)
-                      : std::move(outputSelection);
             const auto logicalCount
                 = roc::hostnumerics::detail::ShapeAccess::getElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");
-            if(auto error
-               = roc::hostnumerics::detail::indexSelectionError(globalSelection, *logicalCount))
-                return failure(TranslationFailureCode::InvalidDescriptor,
-                               std::string(message(*error)));
             const Shape outputShape(problem.d().sizes());
-            selectAllOutputs = outputShape.selectsAll(globalSelection);
+            try
+            {
+                outputShape.forEachCoordinate(std::set<size_t>{}, globalOrder, [](size_t, auto) {});
+                selectAllOutputs = requiresCompleteD || outputShape.selectsAll(indices);
+            }
+            catch(const std::runtime_error& error)
+            {
+                return failure(TranslationFailureCode::InvalidDescriptor, error.what());
+            }
             selectedByBatch.clear();
             if(!selectAllOutputs)
             {
                 selectedByBatch.resize(batches);
                 std::optional<TranslationFailure> selectionFailure;
-                outputShape.forEachCoordinate(
-                    globalSelection, [&](size_t, std::span<const size_t> coordinate) {
-                        const size_t selectedBatch = coordinate[batchD];
-                        const size_t row           = coordinate[indexMD];
-                        const size_t column        = coordinate[indexND];
-                        if(selectedBatch >= selectedByBatch.size())
-                            selectionFailure = failure(
-                                TranslationFailureCode::InvalidDescriptor,
-                                "Selected output batch exceeds the contraction batch count.");
-                        else
-                            selectedByBatch[selectedBatch].push_back(row * n + column);
-                    });
+                try
+                {
+                    outputShape.forEachCoordinate(
+                        indices, globalOrder, [&](size_t, std::span<const size_t> coordinate) {
+                            const size_t selectedBatch = coordinate[batchD];
+                            const size_t row           = coordinate[indexMD];
+                            const size_t column        = coordinate[indexND];
+                            if(selectedBatch >= selectedByBatch.size())
+                                selectionFailure = failure(
+                                    TranslationFailureCode::InvalidDescriptor,
+                                    "Selected output batch exceeds the contraction batch count.");
+                            else
+                                selectedByBatch[selectedBatch].insert(row * n + column);
+                        });
+                }
+                catch(const std::runtime_error& error)
+                {
+                    return failure(TranslationFailureCode::InvalidDescriptor, error.what());
+                }
                 if(selectionFailure)
                     return selectionFailure;
             }
@@ -915,16 +915,13 @@ namespace TensileLite::Client::hostnumerics
                     return failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(borrowedD.error())));
                 detail::BatchPlan plan{
-                    .a            = std::move(*borrowedA),
-                    .b            = std::move(*borrowedB),
-                    .c            = std::move(*borrowedC),
-                    .d            = std::move(*borrowedD),
-                    .outputLayout = layoutD,
-                    .outputSelection
-                    = selectAllOutputs ? IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                        roc::hostnumerics::LastDimensionFastest{})
-                                       : IndexSelection(std::vector<size_t>(selectedByBatch[batch]),
-                                                        roc::hostnumerics::LastDimensionFastest{}),
+                    .a             = std::move(*borrowedA),
+                    .b             = std::move(*borrowedB),
+                    .c             = std::move(*borrowedC),
+                    .d             = std::move(*borrowedD),
+                    .outputLayout  = layoutD,
+                    .outputIndices = selectAllOutputs ? std::set<size_t>{} : selectedByBatch[batch],
+                    .selectAllOutputs = selectAllOutputs,
                 };
 
                 if(problem.useBias())
@@ -1134,7 +1131,8 @@ namespace TensileLite::Client::hostnumerics
                 std::move(currentB),
                 std::move(currentC),
                 std::move(currentD),
-                plan.outputSelection,
+                plan.outputIndices,
+                plan.selectAllOutputs,
                 std::move(runtimeBias),
                 useBias ? std::optional<MatrixAxis>(plan.biasAxis) : std::nullopt,
                 std::move(runtimeBiasOutput),
@@ -1202,8 +1200,8 @@ namespace TensileLite::Client::hostnumerics
         size_t mxBlockA = 0;
         size_t mxBlockB = 0;
 
-        std::vector<std::vector<size_t>> selectedByBatch;
-        bool                             selectAllOutputs = true;
+        std::vector<std::set<size_t>> selectedByBatch;
+        bool                          selectAllOutputs = true;
 
         std::optional<Tensor>               scaleAlpha;
         std::optional<Tensor>               scaleA;
@@ -1240,13 +1238,43 @@ namespace TensileLite::Client::hostnumerics
             return value.item<std::complex<double>>() == std::complex<double>(0.0, 0.0);
         };
         if(!isZero(alpha) && a.shape()[1] != 0)
-            matmulInto(a, b, d, options, outputSelection, backend);
+        {
+            if(selectAllOutputs)
+                matmulInto(a,
+                           b,
+                           d,
+                           options,
+                           roc::hostnumerics::IndexRange::all(),
+                           roc::hostnumerics::LastDimensionFastest{},
+                           backend);
+            else
+                matmulInto(a,
+                           b,
+                           d,
+                           options,
+                           outputIndices,
+                           roc::hostnumerics::LastDimensionFastest{},
+                           backend);
+        }
     }
 
     void TranslatedGemmBatch::runPostGemmOperationsAndCopyOutputs() const
     {
         if(epilogue)
-            referenceEpilogueInto(epilogue->input, epilogue->outputs, epilogue->options);
+        {
+            if(selectAllOutputs)
+                referenceEpilogueInto(epilogue->input,
+                                      epilogue->outputs,
+                                      epilogue->options,
+                                      roc::hostnumerics::IndexRange::all(),
+                                      roc::hostnumerics::LastDimensionFastest{});
+            else
+                referenceEpilogueInto(epilogue->input,
+                                      epilogue->outputs,
+                                      epilogue->options,
+                                      outputIndices,
+                                      roc::hostnumerics::LastDimensionFastest{});
+        }
         if(biasReduction)
             referenceSumInto(biasReduction->input,
                              biasReduction->output,
@@ -1254,11 +1282,13 @@ namespace TensileLite::Client::hostnumerics
                              biasReduction->accumulatorType);
         for(const auto& copyBack : copyBacks)
         {
-            if(copyBack.source.shape().selectsAll(copyBack.selection))
+            if(copyBack.selectAllOutputs)
                 copyBack.source.copyLogicalElementsToEncodedStorage(copyBack.destination);
             else
-                copyBack.source.copySelectedElementsToEncodedStorage(copyBack.destination,
-                                                                     copyBack.selection);
+                copyBack.source.copySelectedElementsToEncodedStorage(
+                    copyBack.destination,
+                    copyBack.indices,
+                    copyBack.source.shape().indexOrderLastDimensionFastest());
         }
     }
 
@@ -1330,7 +1360,7 @@ namespace TensileLite::Client::hostnumerics
     {
         using detail::failure;
         using roc::hostnumerics::ActivationApplication;
-        using roc::hostnumerics::IndexSelection;
+
         using roc::hostnumerics::OutputConversion;
         using roc::hostnumerics::ScalarType;
         using roc::hostnumerics::Shape;
@@ -1373,23 +1403,17 @@ namespace TensileLite::Client::hostnumerics
 
         TranslatedGemmBatch translated(source.a, source.b, source.c, gemmOutput, accumulatorType);
         translated.copyBacks.push_back(
-            {source.dDestination, productOutput, source.outputSelection});
+            {source.dDestination, productOutput, source.outputIndices, source.selectAllOutputs});
         if(m_state->amax && m_state->amaxDestination)
-            translated.copyBacks.push_back(
-                {*m_state->amaxDestination,
-                 *m_state->amax,
-                 IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                roc::hostnumerics::LastDimensionFastest{})});
+            translated.copyBacks.push_back({*m_state->amaxDestination, *m_state->amax, {}, true});
         if(source.biasOutput && source.biasOutputDestination)
             translated.copyBacks.push_back(
-                {*source.biasOutputDestination,
-                 *source.biasOutput,
-                 IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                roc::hostnumerics::LastDimensionFastest{})});
+                {*source.biasOutputDestination, *source.biasOutput, {}, true});
         if(source.auxiliaryOutput && source.auxiliaryOutputDestination)
             translated.copyBacks.push_back({*source.auxiliaryOutputDestination,
                                             *source.auxiliaryOutput,
-                                            source.outputSelection});
+                                            source.outputIndices,
+                                            source.selectAllOutputs});
         auto& request        = translated.matmulOptions();
         request.computeTypeA = m_state->computeTypeA != m_state->typeA
                                    ? std::optional<ScalarType>(m_state->computeTypeA)
@@ -1426,8 +1450,9 @@ namespace TensileLite::Client::hostnumerics
             translated.scaleB = m_state->scaleB
                                     ? std::optional<Tensor>(m_state->scaleB->expandDims(0))
                                     : std::nullopt;
-        request.mathMode           = m_state->mathMode;
-        translated.outputSelection = source.outputSelection;
+        request.mathMode            = m_state->mathMode;
+        translated.outputIndices    = source.outputIndices;
+        translated.selectAllOutputs = source.selectAllOutputs;
 
         {
             TranslatedGemmBatch::BoundEpilogue epilogue(gemmOutput, productOutput, accumulatorType);
@@ -1484,7 +1509,6 @@ namespace TensileLite::Client::hostnumerics
             epilogue.options.outputScale = Tensor::scalar(accumulatorType, m_state->outputScale);
             if(m_state->typeD == ScalarType::Int8)
                 epilogue.options.outputConversion = OutputConversion::SaturatingInt8;
-            epilogue.options.outputSelection = translated.outputSelection;
 
             if(m_state->useGradient && m_state->useBias
                && m_state->biasSource == ContractionProblemGemm::D)
@@ -1538,12 +1562,27 @@ namespace TensileLite::Client::hostnumerics
     }
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const&     problem,
-                                ContractionInputs const&          inputs,
-                                roc::hostnumerics::IndexSelection outputSelection)
+        translateGemmInvocation(ContractionProblemGemm const&        problem,
+                                ContractionInputs const&             inputs,
+                                const roc::hostnumerics::IndexRange& indices,
+                                std::span<const size_t>              order)
     {
         auto state = std::make_unique<GemmInvocationAdapter::State>();
-        if(auto normalizationFailure = state->normalizeProblem(problem, std::move(outputSelection)))
+        if(auto normalizationFailure = state->normalizeProblem(problem, indices, order))
+            return std::move(*normalizationFailure);
+        if(auto bindingFailure = state->bindInputs(problem, inputs))
+            return std::move(*bindingFailure);
+        return GemmInvocationAdapter(std::move(state));
+    }
+
+    std::variant<GemmInvocationAdapter, TranslationFailure>
+        translateGemmInvocation(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                const std::set<size_t>&       indices,
+                                std::span<const size_t>       order)
+    {
+        auto state = std::make_unique<GemmInvocationAdapter::State>();
+        if(auto normalizationFailure = state->normalizeProblem(problem, indices, order))
             return std::move(*normalizationFailure);
         if(auto bindingFailure = state->bindInputs(problem, inputs))
             return std::move(*bindingFailure);
@@ -1555,10 +1594,11 @@ namespace TensileLite::Client::hostnumerics
                                 ContractionInputs const&      inputs,
                                 size_t                        elementsToValidate)
     {
-        auto selection = getReferenceIndexSelection(problem.d(), elementsToValidate);
+        auto selection = getReferenceIndexRange(problem.d(), elementsToValidate);
         if(!selection)
             return detail::failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(selection.error())));
-        return translateGemmInvocation(problem, inputs, std::move(*selection));
+        return translateGemmInvocation(
+            problem, inputs, *selection, referenceIndexOrder(problem.d()));
     }
 } // namespace TensileLite::Client::hostnumerics

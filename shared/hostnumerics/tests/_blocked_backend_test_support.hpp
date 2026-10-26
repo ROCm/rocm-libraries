@@ -26,7 +26,7 @@ namespace {
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
 using roc::hostnumerics::IndexRange;
-using roc::hostnumerics::IndexSelection;
+
 using roc::hostnumerics::LastDimensionFastest;
 using roc::hostnumerics::Tensor;
 
@@ -83,9 +83,10 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     Tensor expected = makeOutput(rows, columns, untouchedValue);
-    const auto selected = problem.d.shape().selectedIndices(problem.outputSelection);
-    const auto indexOrder = problem.d.shape().indexOrder(problem.outputSelection);
-    for (const size_t linearIndex : selected) {
+
+    const auto& indexOrder = problem.indicesOrder;
+    for (size_t ordinal = 0; ordinal < problem.indicesCount; ++ordinal) {
+        const size_t linearIndex = problem.indexAt(ordinal);
         const auto coordinates = problem.d.shape().coordinates(linearIndex, indexOrder);
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
@@ -147,8 +148,18 @@ float roundThrough(roc::hostnumerics::ScalarType type, float value) {
 
 void testReducedPrecisionAccumulators();
 void testSelectedBlockAccumulatorFamilies();
+template <typename Indices>
 void requireOnlySelectedOutputsStored(const roc::hostnumerics::Tensor& output,
-                                      const roc::hostnumerics::IndexSelection& selection);
+                                      const Indices& indices) {
+    std::set<size_t> selected;
+    output.shape().forEachCoordinateLastDimensionFastest(
+        indices, [&](size_t index, auto) { selected.insert(index); });
+    for (size_t index = 0; index < output.elementCount(); ++index)
+        if (!selected.contains(index))
+            require(output.loadAs<float>({index / output.shape()[1], index % output.shape()[1]}) ==
+                        untouchedValue,
+                    "Blocked backend modified an unselected output element.");
+}
 void testSmallEdgeBlock();
 void testExplicitSelectionBlockPlan();
 void testStridedSelectionBlockPlan();

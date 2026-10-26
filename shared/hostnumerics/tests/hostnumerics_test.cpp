@@ -25,8 +25,8 @@ TEST(Operations, RuntimeComplexAndExplicitAxisGemm) {
     hostnumerics_test::testRuntimeComplexAndExplicitAxisGemm();
 }
 
-TEST(Operations, IndexSelection) {
-    hostnumerics_test::testIndexSelection();
+TEST(Operations, ShapeVisitation) {
+    hostnumerics_test::testShapeVisitation();
 }
 
 TEST(Operations, ReferenceEpilogue) {

@@ -222,7 +222,8 @@ def matmul_into(
     compute_type_a,
     compute_type_b,
     math_mode,
-    output_selection,
+    indices,
+    index_order,
     backend,
     block_scale_a=None,
     block_scale_b=None,
@@ -251,4 +252,4 @@ def matmul_into(
         conjugate_a,
         conjugate_b,
     )
-    return _native._matmul_into(a, b, output, options, output_selection, backend)
+    return _native._matmul_into(a, b, output, options, indices, index_order, backend)

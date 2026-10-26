@@ -94,6 +94,9 @@ struct EpilogueInvocation : EpilogueOptions {
                                               : std::nullopt),
           amaxType(amax ? std::optional(amax->type()) : std::nullopt) {}
 
+    size_t indicesCount = 0;
+    std::vector<size_t> indicesOrder;
+    std::function<size_t(size_t)> indexAt;
     Tensor input;
     Tensor output;
     std::optional<Tensor> rawOutput;
@@ -234,10 +237,9 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
         if (complexCompute != isComplexScalarType(factor.type()))
             throw std::runtime_error("Reference epilogue input scale factor complexity mismatch.");
     }
-    (void)validatedIndexOrder(problem.input.shape().rank(),
-                              problem.input.shape().indexOrder(problem.outputSelection));
+    (void)validatedIndexOrder(problem.input.shape().rank(), problem.indicesOrder);
     return {
-        .selectedElements = problem.input.shape().selectedCount(problem.outputSelection),
+        .selectedElements = problem.indicesCount,
     };
 }
 
@@ -417,7 +419,7 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
         (!problem.rawOutput || hasProvablyIndependentElements(*problem.rawOutput)) &&
         (!problem.auxiliaryOutput || hasProvablyIndependentElements(*problem.auxiliaryOutput));
     constexpr size_t minimumElementsPerThread = 16'384;
-    if (problem.output.shape().selectsAll(problem.outputSelection)) {
+    if ((problem.indicesCount == problem.output.elementCount())) {
         if constexpr (!IsComplex<Accumulator>::value) {
             if (problem.amax) {
                 maximum = transformReduceParallelIndices(
@@ -435,16 +437,11 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
                 [&](size_t logicalIndex) { (void)computeLinearOutput(logicalIndex); });
         }
     } else {
-        const size_t selectedCount = problem.output.shape().selectedCount(problem.outputSelection);
-        const auto* range =
-            std::get_if<roc::hostnumerics::IndexRange>(&problem.outputSelection.flatIndices());
-        const IndexIteration iteration(problem.output.shape(),
-                                       problem.output.shape().indexOrder(problem.outputSelection));
+        const size_t selectedCount = problem.indicesCount;
+        const IndexIteration iteration(problem.output.shape(), problem.indicesOrder);
         const auto computeSelectedOutput = [&](size_t selectedIndex) {
             std::array<size_t, 2> coordinates{};
-            const size_t index = range ? range->first + selectedIndex * range->stride
-                                       : std::get<std::vector<size_t>>(
-                                             problem.outputSelection.flatIndices())[selectedIndex];
+            const size_t index = problem.indexAt(selectedIndex);
             iteration.coordinates(index, coordinates);
             return computeOutput(coordinates[0], coordinates[1]);
         };

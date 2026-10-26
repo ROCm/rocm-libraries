@@ -102,7 +102,7 @@ namespace TensileLite
                 if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
                 {
                     if(!m_freivalds)
-                        m_outputSelections.push_back(referenceIndexSelection(
+                        m_outputSelections.push_back(referenceIndexRange(
                             gemm->d(), static_cast<size_t>(m_elementsToValidate)));
                     size_t M          = gemm->freeSizeA(0);
                     size_t N          = gemm->freeSizeB(0);
@@ -123,7 +123,7 @@ namespace TensileLite
                     {
                         auto& g = grouped->gemms[i];
                         if(!m_freivalds)
-                            m_outputSelections.push_back(referenceIndexSelection(
+                            m_outputSelections.push_back(referenceIndexRange(
                                 g.d(), static_cast<size_t>(m_elementsToValidate)));
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
@@ -221,11 +221,11 @@ namespace TensileLite
                                const ContractionInputs&      inputs) {
                 if(!problem.stridedBatched())
                     throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
-                auto translated = hostnumerics::translateGemmInvocation(
-                    problem,
-                    inputs,
-                    IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                   roc::hostnumerics::LastDimensionFastest{}));
+                auto translated
+                    = hostnumerics::translateGemmInvocation(problem,
+                                                            inputs,
+                                                            roc::hostnumerics::IndexRange::all(),
+                                                            referenceIndexOrder(problem.d()));
                 if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
                     throw std::invalid_argument("Freivalds: " + failure->reason);
                 const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
@@ -304,15 +304,13 @@ namespace TensileLite
                     // Preserve the requested guard check without a numerical reference.
                     // Its existing readback includes D; account for this explicit cost.
                     const size_t index = static_cast<size_t>(ContractionProblemGemm::TENSOR::D);
-                    passed
-                        &= !checkResults(problem.d(),
-                                         reference.d,
-                                         output.d,
-                                         output.maxElements.at(index),
-                                         output.gpu,
-                                         IndexSelection(std::vector<size_t>({}),
-                                                        roc::hostnumerics::LastDimensionFastest{}),
-                                         -1);
+                    passed &= !checkResults(problem.d(),
+                                            reference.d,
+                                            output.d,
+                                            output.maxElements.at(index),
+                                            output.gpu,
+                                            roc::hostnumerics::IndexRange(0, 1, 0),
+                                            -1);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());
                     fallback = true;
@@ -390,14 +388,13 @@ namespace TensileLite
             }
         }
 
-        bool ReferenceValidator::checkResults(
-            TensorDescriptor const&                  tensor,
-            void const*                              refPtr,
-            void const*                              resPtr,
-            size_t                                   maxElements,
-            bool                                     isgpu,
-            const roc::hostnumerics::IndexSelection& outputSelection,
-            double                                   threshold)
+        bool ReferenceValidator::checkResults(TensorDescriptor const&              tensor,
+                                              void const*                          refPtr,
+                                              void const*                          resPtr,
+                                              size_t                               maxElements,
+                                              bool                                 isgpu,
+                                              const roc::hostnumerics::IndexRange& outputSelection,
+                                              double                               threshold)
         {
             const roc::hostnumerics::ScalarType scalarType
                 = toHostNumericsScalarType(tensor.dataType());
@@ -493,7 +490,6 @@ namespace TensileLite
 
             roc::hostnumerics::ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
-            options.selection                    = outputSelection;
             options.computeElementwiseStatistics = false;
             options.computeFrobenius             = false;
             options.reportMatchingElements       = m_printValids;
@@ -502,7 +498,11 @@ namespace TensileLite
             roc::hostnumerics::ComparisonReport comparison;
             {
                 ScopedTimer timer("validate_element_comparison");
-                comparison = roc::hostnumerics::compare(resultTensor, referenceTensor, options);
+                comparison = roc::hostnumerics::compare(resultTensor,
+                                                        referenceTensor,
+                                                        options,
+                                                        outputSelection,
+                                                        referenceIndexOrder(tensor));
             }
 
             const bool isComplex = roc::hostnumerics::scalarTypeInfo(scalarType).category
@@ -620,10 +620,10 @@ namespace TensileLite
             return false;
         }
 
-        bool ReferenceValidator::validate(ContractionProblemGemm const&            problem,
-                                          ContractionInputs const&                 reference,
-                                          ContractionInputs const&                 result,
-                                          const roc::hostnumerics::IndexSelection& outputSelection)
+        bool ReferenceValidator::validate(ContractionProblemGemm const&        problem,
+                                          ContractionInputs const&             reference,
+                                          ContractionInputs const&             result,
+                                          const roc::hostnumerics::IndexRange& outputSelection)
         {
             if(problem.tensors().empty())
                 return false;
@@ -657,12 +657,11 @@ namespace TensileLite
                     continue;
 
                 const auto tensorRole = static_cast<ContractionProblemGemm::TENSOR>(i);
-                const roc::hostnumerics::IndexSelection comparisonSelection
+                const roc::hostnumerics::IndexRange comparisonSelection
                     = tensorRole == ContractionProblemGemm::TENSOR::D
                               || tensorRole == ContractionProblemGemm::TENSOR::E
                           ? outputSelection
-                          : referenceIndexSelection(tensor,
-                                                    static_cast<size_t>(m_elementsToValidate));
+                          : referenceIndexRange(tensor, static_cast<size_t>(m_elementsToValidate));
 
                 void const* refPtr = nullptr;
                 void const* resPtr = nullptr;

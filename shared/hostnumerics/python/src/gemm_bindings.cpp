@@ -3,6 +3,7 @@
 
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -32,10 +33,11 @@ Tensor matmulOwned(Tensor a, Tensor b, ScalarType outputType, MatmulOptions opti
                   backend);
 }
 
+template <typename Indices, typename Order>
 void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
-                     IndexSelection selection, GemmBackend backend) {
+                     const Indices& indices, const Order& order, GemmBackend backend) {
     validatePythonGemmBackend(backend);
-    matmulInto(a, b, std::move(output), options, std::move(selection), backend);
+    matmulInto(a, b, std::move(output), options, indices, order, backend);
 }
 
 }  // namespace
@@ -59,7 +61,13 @@ void registerGemmBindings(nb::module_& module) {
 
     module.def("_matmul", &matmulOwned, "a"_a, "b"_a, "output_type"_a, "options"_a,
                "output_layout"_a, "backend"_a);
-    module.def("_matmul_into", &matmulIntoBound, "a"_a, "b"_a, "output"_a, "options"_a,
-               "output_selection"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<IndexRange, std::vector<size_t>>, "a"_a, "b"_a,
+               "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<IndexRange, LastDimensionFastest>, "a"_a, "b"_a,
+               "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<std::set<size_t>, std::vector<size_t>>, "a"_a,
+               "b"_a, "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<std::set<size_t>, LastDimensionFastest>, "a"_a,
+               "b"_a, "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
 }
 }  // namespace roc::hostnumerics::python_bindings

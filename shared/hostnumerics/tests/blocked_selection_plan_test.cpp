@@ -24,7 +24,8 @@ void testSmallEdgeBlock() {
     require(compare(d, expected, {}).passed(), "Blocked backend result mismatch.");
 
     fillTensor(d, untouchedValue);
-    problem.outputSelection = IndexSelection(std::vector<size_t>({0}), LastDimensionFastest{});
+    roc::hostnumerics::detail::bindIndices(problem, problem.d.shape(), std::set<size_t>({0}),
+                                           LastDimensionFastest{});
     const GemmTestRunInfo selected = referenceGemm(problem, GemmBackend::Blocked);
     require(selected.outputElementsWritten == 1 && selected.outputElementsCovered == 4,
             "Selected blocked GEMM reported the wrong write or coverage count.");
@@ -34,12 +35,12 @@ void testSmallEdgeBlock() {
             "Blocked backend partial output selection mismatch.");
 
     fillTensor(d, untouchedValue);
-    problem.outputSelection = IndexSelection(std::vector<size_t>({}), LastDimensionFastest{});
+    roc::hostnumerics::detail::bindIndices(problem, problem.d.shape(), std::set<size_t>({}),
+                                           LastDimensionFastest{});
     const GemmTestRunInfo empty = referenceGemm(problem, GemmBackend::Blocked);
     require(empty.outputElementsWritten == 0 && empty.outputElementsCovered == 0,
             "Empty blocked output selection reported output work.");
-    requireOnlySelectedOutputsStored(
-        d, IndexSelection(std::vector<size_t>({}), LastDimensionFastest{}));
+    requireOnlySelectedOutputsStored(d, std::set<size_t>({}));
 }
 
 void testExplicitSelectionBlockPlan() {
@@ -50,18 +51,19 @@ void testExplicitSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 1);
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection = IndexSelection(std::vector<size_t>({
-                                                        44 * columns + 69,
-                                                        2 * columns + 3,
-                                                        10 * columns + 15,
-                                                        40 * columns + 5,
-                                                        2 * columns + 3,
-                                                    }),
-                                                    LastDimensionFastest{});
+    const auto selection = std::set<size_t>({
+        44 * columns + 69,
+        2 * columns + 3,
+        10 * columns + 15,
+        40 * columns + 5,
+        2 * columns + 3,
+    });
+    const auto selectionOrder = LastDimensionFastest{};
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
-    blockedProblem.outputSelection = selection;
+    roc::hostnumerics::detail::bindIndices(blockedProblem, blockedProblem.d.shape(), selection,
+                                           selectionOrder);
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Explicit blocked selection result mismatch.");
     require(run.outputElementsWritten == 4 && run.outputElementsCovered == 4,
@@ -77,12 +79,13 @@ void testStridedSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 5);
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection = IndexSelection(
-        IndexRange(3, 509, std::numeric_limits<size_t>::max()), LastDimensionFastest{});
+    const auto selection = IndexRange(3, 509, std::numeric_limits<size_t>::max());
+    const auto selectionOrder = LastDimensionFastest{};
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
-    blockedProblem.outputSelection = selection;
+    roc::hostnumerics::detail::bindIndices(blockedProblem, blockedProblem.d.shape(), selection,
+                                           selectionOrder);
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Strided blocked selection result mismatch.");
     require(run.outputElementsWritten == 6 && run.outputElementsCovered == 6,
@@ -112,8 +115,8 @@ void testBlockScaledSelectionBlockPlan() {
     }
 
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const IndexSelection selection = IndexSelection(
-        std::vector<size_t>({0, 32 * columns + 32, 32 * columns + 34}), LastDimensionFastest{});
+    const auto selection = std::set<size_t>({0, 32 * columns + 32, 32 * columns + 34});
+    const auto selectionOrder = LastDimensionFastest{};
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
@@ -127,7 +130,8 @@ void testBlockScaledSelectionBlockPlan() {
     blockedProblem.blockSizeA = 8;
     blockedProblem.blockScaleB = blockScaleB;
     blockedProblem.blockSizeB = 8;
-    blockedProblem.outputSelection = selection;
+    roc::hostnumerics::detail::bindIndices(blockedProblem, blockedProblem.d.shape(), selection,
+                                           selectionOrder);
 
     const GemmTestRunInfo run = runAndCheck(blockedProblem, blockedOutput,
                                             "Block-scaled blocked selection result mismatch.");

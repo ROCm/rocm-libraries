@@ -203,14 +203,14 @@ void testReferenceEpilogue() {
     const Tensor ownedInput = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(input));
     EpilogueOptions ownedOptions = options;
-    ownedOptions.outputSelection =
-        IndexSelection(std::vector<size_t>({1, 2}), LastDimensionFastest{});
-    const EpilogueOutputs owned = referenceEpilogue(ownedInput,
-                                                    {.output = ScalarType::Float16,
-                                                     .rawOutput = ScalarType::Float32,
-                                                     .auxiliaryOutput = ScalarType::BFloat16,
-                                                     .amax = ScalarType::Float32},
-                                                    ownedOptions);
+
+    const EpilogueOutputs owned =
+        referenceEpilogue(ownedInput,
+                          {.output = ScalarType::Float16,
+                           .rawOutput = ScalarType::Float32,
+                           .auxiliaryOutput = ScalarType::BFloat16,
+                           .amax = ScalarType::Float32},
+                          ownedOptions, std::set<size_t>({1, 2}), LastDimensionFastest{});
     require(owned.output.layout() == Layout::contiguousLastDimensionFastest(Shape{2, 2}) &&
                 owned.rawOutput && owned.auxiliaryOutput && owned.amax,
             "Owning reference epilogue result contract mismatch.");
@@ -225,14 +225,14 @@ void testReferenceEpilogue() {
             "Owning reference epilogue did not zero unselected values.");
 
     EpilogueOptions emptyOptions = ownedOptions;
-    emptyOptions.outputSelection = IndexSelection(
-        IndexRange(4, 1, std::numeric_limits<size_t>::max()), LastDimensionFastest{});
-    const EpilogueOutputs empty = referenceEpilogue(ownedInput,
-                                                    {.output = ScalarType::Float16,
-                                                     .rawOutput = ScalarType::Float32,
-                                                     .auxiliaryOutput = ScalarType::BFloat16,
-                                                     .amax = ScalarType::Float32},
-                                                    emptyOptions);
+
+    const EpilogueOutputs empty = referenceEpilogue(
+        ownedInput,
+        {.output = ScalarType::Float16,
+         .rawOutput = ScalarType::Float32,
+         .auxiliaryOutput = ScalarType::BFloat16,
+         .amax = ScalarType::Float32},
+        emptyOptions, IndexRange(4, 1, std::numeric_limits<size_t>::max()), LastDimensionFastest{});
     require(empty.output.loadAs<float>({0, 0}) == 0 && empty.rawOutput &&
                 empty.rawOutput->loadAs<float>({0, 0}) == 0 && empty.auxiliaryOutput &&
                 empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 && empty.amax &&
@@ -254,15 +254,14 @@ void testReferenceEpilogue() {
     Tensor preservedAuxiliary = preservedOutput.deepCopy();
     Tensor accumulatedAmax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{100});
     EpilogueOptions preservedOptions(ScalarType::Float32);
-    preservedOptions.outputSelection =
-        IndexSelection(std::vector<size_t>({0, 3}), LastDimensionFastest{});
+
     preservedOptions.accumulateAmax = true;
     referenceEpilogueInto(ownedInput,
                           {.output = preservedOutput,
                            .rawOutput = preservedRaw,
                            .auxiliaryOutput = preservedAuxiliary,
                            .amax = accumulatedAmax},
-                          preservedOptions);
+                          preservedOptions, std::set<size_t>({0, 3}), LastDimensionFastest{});
     require(preservedOutput.loadAs<float>({0, 1}) == -99 &&
                 preservedOutput.loadAs<float>({1, 0}) == -99 &&
                 preservedRaw.loadAs<float>({0, 1}) == -99 &&
