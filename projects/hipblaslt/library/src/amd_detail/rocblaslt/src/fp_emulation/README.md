@@ -59,6 +59,58 @@ instantiated by the host-side launch helpers in `emulation.cpp`; they all live
 in `namespace FixedPointEmulation` and are `__global__ static` (internal
 linkage) to keep the symbols hidden.
 
+## Adding support for a new device
+
+Emulation is enabled only on devices listed in `hw_params_by_pci_id` in
+`get_perf_model_params()` (`emulation.cpp`). There is no other device gate:
+adding a row enables emulation and the performance model for that device.
+
+1. **PCI device ID.** Read it with
+   `hipDeviceGetAttribute(&id, hipDeviceAttributePciChipId, dev)`. Only the
+   low 16 bits are used. Add one row per SKU variant.
+2. **Measure on the target device:**
+   - `BW`: achievable HBM bandwidth in bytes/s, from a large streaming copy.
+   - `F64`, `F32`: peak native DGEMM and SGEMM throughput in flop/s, from
+     large square `hipblaslt-bench` runs.
+   - `I8`: peak INT8 GEMM throughput in op/s (INT8 inputs, INT32 output,
+     `TN` layout, matching what the emulation path calls).
+   - Overheads in seconds:
+     - `L_kernel`: empty kernel launch.
+     - `L_matmul`: launch overhead of a small `hipblasLtMatmul`.
+     - `L_memset`: `hipMemsetAsync`.
+     - `L_sync`: `hipStreamSynchronize` round trip.
+     - `L_host`: per-call host overhead of the emulation path.
+3. **Compute the table row** (field order `ai_fp64, ai_fp32, ai_int8,
+   ovh_kernel, ovh_matmul, ovh_memset, ovh_sync, ovh_host`):
+   - `ai_fp64 = F64 / BW`, `ai_fp32 = F32 / BW`, `ai_int8 = I8 / BW`.
+   - `ovh_X = L_X * BW` for each overhead.
+
+   Two significant digits are enough. Only ratios between fields affect the
+   emulate-vs-native and split decisions, so all values share one scale.
+4. **Kernel efficiencies.** The `eff_*` factors in `PerfModelKernelEffs` are
+   shared by all devices and were calibrated on gfx950. On a different
+   architecture, re-check them: each factor is the phase's raw model time
+   (bandwidth-limited time, without the efficiency divisor) divided by its
+   measured time from the `t_*_ms` columns of the profiling CSV.
+5. **Validate.** Run a size sweep with `HIPBLASLT_EMULATION_PROFILE=<file>`
+   and `HIPBLAS_EMULATION_STRATEGY=eager`, and time the same sizes with native
+   GEMM. `pred_total_rel` should track the measured emulated/native time
+   ratio, especially near 1.0, where the decision flips.
+6. **Update docs and tests.** Add the device to "Supported hardware" above
+   and in `docs/how-to/fp-emulation.rst`. The emulation gtests detect support
+   through the same table, so run
+   `hipblaslt-test --gtest_filter='*FixedPointEmulation*'` on the new device.
+
+## Profiling CSV
+
+With `HIPBLASLT_EMULATION_PROFILE=<file>`, each emulated call appends one row:
+
+- `t_*_ms` and `cpu_*_ms`: measured GPU-event and host wall-clock times in
+  milliseconds, summed over all sub-GEMMs when the problem is split.
+- `pred_*_rel`: performance-model predictions, as a fraction of the
+  predicted native GEMM cost. `pred_total_rel < 1` means emulation is
+  predicted to be faster than native.
+
 ## Build
 
 This code is built as a standalone `hipblaslt-fixed-point-emulation` **OBJECT**

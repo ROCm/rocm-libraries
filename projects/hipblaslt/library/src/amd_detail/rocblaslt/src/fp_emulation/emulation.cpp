@@ -77,7 +77,7 @@ namespace FixedPointEmulation
     /* Compute the effective INT8 workspace budget for the monolithic path given
      * workspace_bytes, sub-problem dimensions (m, n), and the moduli count s.
      * Mirrors the two-step budget derivation in emulated_gemm_impl so that
-     * effective_time_ms accurately models the available budget at each recursive
+     * effective_time accurately models the available budget at each recursive
      * split level.                                                              */
     static size_t
         compute_budget_from_ws(int64_t m, int64_t n, int64_t k, unsigned s, size_t workspace_bytes)
@@ -105,33 +105,33 @@ namespace FixedPointEmulation
                                                     {0.683, 0.583}}; /* [T][N], [T][T] */
         static constexpr double eff_refine       = 0.586;
         static constexpr double eff_accum        = 0.938;
-        static constexpr double host_overhead_s = 1.0e-4; /* host overhead (s) = 0.1 ms           */
-        static constexpr double latency_kernel_s
-            = 5.0e-6; /* GPU kernel scheduling overhead (s)   */
-        static constexpr double latency_matmul_s
-            = 10.0e-6; /* hipBLASLt matmul launch overhead (s) */
-        static constexpr double latency_memset_s
-            = 2.0e-6; /* hipMemsetAsync overhead (s)          */
-        static constexpr double latency_sync_s = 50.0e-6; /* hipStreamSynchronize cost (s)        */
     };
 
     struct PerfModelDeviceParams
     {
-        double bw;
         double ai_fp64;
         double ai_fp32;
         double ai_int8;
+        double ovh_kernel;
+        double ovh_matmul;
+        double ovh_memset;
+        double ovh_sync;
+        double ovh_host;
     };
 
     /* Returns the perf-model parameters for the given HIP device, or nullopt if
-     * the device is not in the table (in which case emulation should not run). */
+     * the device is not in the table (in which case emulation should not run).
+     * The table is keyed by PCI device ID.  Values are relative (only ratios
+     * matter).  Field order: ai_fp64, ai_fp32, ai_int8, ovh_kernel, ovh_matmul,
+     * ovh_memset, ovh_sync, ovh_host.
+     * See fp_emulation/README.md, "Adding support for a new device".           */
     static std::optional<PerfModelDeviceParams> get_perf_model_params(int device)
     {
         static const std::unordered_map<uint32_t, PerfModelDeviceParams> hw_params_by_pci_id = {
-            {0x75a0u, {6.08e12,    11.22,   22.04,   521.7}}, // gfx950-mi350x
-            {0x75b0u, {6.08e12,    11.22,   22.04,   521.7}}, // gfx950-mi350x
-            {0x75a3u, {6.82e12,    11.33,   22.58,   484.0}}, // gfx950-mi355x
-            {0x75b3u, {6.82e12,    11.33,   22.58,   484.0}}, // gfx950-mi355x
+            {0x75a0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
+            {0x75b0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
+            {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
+            {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
         };
         static std::optional<std::optional<PerfModelDeviceParams>> device_params_cache[64];
 
@@ -168,23 +168,24 @@ namespace FixedPointEmulation
     }
 
     /* =========================================================================
-     * Performance-model predicted times
-     * Returns all sub-times in milliseconds.  Used both for the profiling CSV
-     * and (via comparison of t_total_ms vs t_native_ms) for the performance
-     * heuristic in fixedPointEmulationPerformanceCheck.
+     * Performance-model predicted costs
+     * Costs are in device-relative units; only ratios between them are
+     * meaningful.  Used both for the profiling CSV (reported relative to the
+     * native GEMM cost) and (via comparison of t_total vs t_native) for the
+     * performance heuristic in fixedPointEmulationPerformanceCheck.
      * ========================================================================= */
     struct PerfModelTimes
     {
-        double t_prelim_ms; /* prelim kernel (shift + extraction)  */
-        double t_prelim_gemm_ms; /* preliminary INT8 GEMM               */
-        double t_refine_ms; /* sft-refinement kernels              */
-        double t_adp_ms; /* ADP reduce kernels + hipStreamSynchronize (dynamic mode only) */
-        double t_scale_ms; /* multi-modulus scaling kernels       */
-        double t_int8_gemms_ms; /* all INT8 GEMMs                      */
-        double t_accum_ms; /* CRT accumulation / finalize kernels */
-        double t_host_ms; /* per-call host overhead              */
-        double t_total_ms; /* total predicted emulation time      */
-        double t_native_ms; /* predicted native DGEMM/SGEMM time    */
+        double t_prelim; /* prelim kernel (shift + extraction)  */
+        double t_prelim_gemm; /* preliminary INT8 GEMM               */
+        double t_refine; /* sft-refinement kernels              */
+        double t_adp; /* ADP reduce kernels + hipStreamSynchronize */
+        double t_scale; /* multi-modulus scaling kernels       */
+        double t_int8_gemms; /* all INT8 GEMMs                      */
+        double t_accum; /* CRT accumulation / finalize kernels */
+        double t_host; /* per-call host overhead              */
+        double t_total; /* total predicted emulation cost      */
+        double t_native; /* predicted native DGEMM/SGEMM cost   */
     };
 
     static PerfModelTimes perf_model_times(bool        tA,
@@ -204,9 +205,9 @@ namespace FixedPointEmulation
         const PerfModelDeviceParams& hw = *hw_opt;
 
         const bool   is_fp32        = (type_a == HIP_R_32F);
-        const double c0             = hw.bw;
-        const double c1             = hw.bw * (is_fp32 ? hw.ai_fp32 : hw.ai_fp64);
-        const double c2             = hw.bw * hw.ai_int8;
+        const double c0             = 1.0;
+        const double c1             = is_fp32 ? hw.ai_fp32 : hw.ai_fp64;
+        const double c2             = hw.ai_int8;
         const double bytes_per_elem = is_fp32 ? 4.0 : 8.0;
         const double s              = static_cast<double>(num_moduli);
         const double mn             = static_cast<double>(m) * static_cast<double>(n);
@@ -221,49 +222,48 @@ namespace FixedPointEmulation
 
         const double t_int8_bw = (mk + kn + 4.0 * mn) / c0;
         const double t_prelim_kern
-            = ((mk + kn) * 17.0 / c0 + 2.0 * K::latency_kernel_s) / K::eff_prelim[tA][tB];
-        const double t_prelim_gemm = std::max(2.0 * mnk / c2, t_int8_bw) + K::latency_matmul_s;
+            = ((mk + kn) * 17.0 / c0 + 2.0 * hw.ovh_kernel) / K::eff_prelim[tA][tB];
+        const double t_prelim_gemm = std::max(2.0 * mnk / c2, t_int8_bw) + hw.ovh_matmul;
         const double t_refine_kern
-            = (mn * 8.0 / c0 + 3.0 * K::latency_kernel_s + K::latency_memset_s) / K::eff_refine;
+            = (mn * 8.0 / c0 + 3.0 * hw.ovh_kernel + hw.ovh_memset) / K::eff_refine;
         const double t_scale_kern = ((mk + kn) * (8.0 * n_scale_chunks + s) / c0
-                                     + 2.0 * n_scale_chunks * K::latency_kernel_s)
+                                     + 2.0 * n_scale_chunks * hw.ovh_kernel)
                                     / K::eff_scale[tA][tB];
         const double t_int8_gemms
-            = s * std::max(2.0 * mnk / c2, t_int8_bw) + n_chunks * K::latency_matmul_s;
+            = s * std::max(2.0 * mnk / c2, t_int8_bw) + n_chunks * hw.ovh_matmul;
         const double t_accum_kern
-            = (mn * (4.0 * s + 32.0 * n_chunks - 16.0) / c0 + n_chunks * K::latency_kernel_s)
+            = (mn * (4.0 * s + 32.0 * n_chunks - 16.0) / c0 + n_chunks * hw.ovh_kernel)
               / K::eff_accum;
-        const double t_host       = K::host_overhead_s;
+        const double t_host       = hw.ovh_host;
         const double t_gemm_accum = t_int8_gemms + t_accum_kern;
         const double t_adp
-            = 2.0 * K::latency_kernel_s /* adp_reduce_A_kernel + adp_reduce_B_kernel */
-              + K::latency_sync_s; /* hipStreamSynchronize — dominant cost */
+            = 2.0 * hw.ovh_kernel /* adp_reduce_A_kernel + adp_reduce_B_kernel */
+              + hw.ovh_sync; /* hipStreamSynchronize — dominant cost */
         const double t_total = t_prelim_kern + t_prelim_gemm + t_refine_kern + t_scale_kern
                                + t_gemm_accum + t_host + t_adp;
         const double t_native
-            = std::max(2.0 * mnk / c1, bytes_per_elem * (mk + kn + mn) / c0) + K::latency_matmul_s;
+            = std::max(2.0 * mnk / c1, bytes_per_elem * (mk + kn + mn) / c0) + hw.ovh_matmul;
 
-        constexpr double s2ms = 1000.0;
-        return {t_prelim_kern * s2ms,
-                t_prelim_gemm * s2ms,
-                t_refine_kern * s2ms,
-                t_adp * s2ms,
-                t_scale_kern * s2ms,
-                t_int8_gemms * s2ms,
-                t_accum_kern * s2ms,
-                t_host * s2ms,
-                t_total * s2ms,
-                t_native * s2ms};
+        return {t_prelim_kern,
+                t_prelim_gemm,
+                t_refine_kern,
+                t_adp,
+                t_scale_kern,
+                t_int8_gemms,
+                t_accum_kern,
+                t_host,
+                t_total,
+                t_native};
     }
 
     /* Minimum problem size for efficient INT8 tensor core execution.
      * Below this threshold MFMA tiles are under-utilised and native DGEMM wins.
-     * Both effective_time_ms and emulated_gemm_impl fall back immediately.      */
+     * Both effective_time and emulated_gemm_impl fall back immediately.         */
     static constexpr int64_t FIXED_POINT_EMUL_MIN_MN = 16;
 
-    /* Returns the minimum achievable emulation time in ms, accounting for the
+    /* Returns the minimum achievable predicted emulation cost, accounting for the
      * recursive binary-halving that fp64EmulatedGemm applies when n_chunks > 1.
-     * Both halves execute sequentially so the effective time is additive.
+     * Both halves execute sequentially so the effective cost is additive.
      *
      * The gate comparison uses the RECURSIVE effective times of each half
      * (not the flat perf-model times).  This correctly handles the case where
@@ -274,25 +274,25 @@ namespace FixedPointEmulation
      * level recomputes its own budget from the current sub-problem dimensions —
      * mirroring the behaviour of emulated_gemm_impl, where smaller sub-problems
      * have smaller Zhi/Zlo requirements and thus a larger effective budget.    */
-    static double effective_time_ms(bool        tA,
-                                    bool        tB,
-                                    int64_t     m,
-                                    int64_t     n,
-                                    int64_t     k,
-                                    unsigned    s,
-                                    int         device,
-                                    size_t      workspace_bytes,
-                                    hipDataType type_a)
+    static double effective_time(bool        tA,
+                                 bool        tB,
+                                 int64_t     m,
+                                 int64_t     n,
+                                 int64_t     k,
+                                 unsigned    s,
+                                 int         device,
+                                 size_t      workspace_bytes,
+                                 hipDataType type_a)
     {
         if(m < FIXED_POINT_EMUL_MIN_MN || n < FIXED_POINT_EMUL_MIN_MN)
         {
             const double t_nat
-                = perf_model_times(tA, tB, m, n, k, s, device, ~size_t{0}, type_a).t_native_ms;
+                = perf_model_times(tA, tB, m, n, k, s, device, ~size_t{0}, type_a).t_native;
             return t_nat * (1.0 + 1e-6);
         }
         const size_t budget = compute_budget_from_ws(m, n, k, s, workspace_bytes);
         const double t_mono
-            = perf_model_times(tA, tB, m, n, k, s, device, budget, type_a).t_total_ms;
+            = perf_model_times(tA, tB, m, n, k, s, device, budget, type_a).t_total;
 
         const unsigned chunk_sz = compute_chunk_size(m, n, k, s, budget);
         const unsigned n_chunks = (s + chunk_sz - 1u) / chunk_sz;
@@ -304,7 +304,7 @@ namespace FixedPointEmulation
 
             const double t_split
                 = 2.
-                  * effective_time_ms(
+                  * effective_time(
                       tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
             if(t_split < t_mono)
                 return t_split;
@@ -312,9 +312,9 @@ namespace FixedPointEmulation
         return t_mono;
     }
 
-    /* Returns per-component predicted times summed across ALL leaf sub-GEMMs,
-     * mirroring the recursive binary-halving of effective_time_ms.
-     * t_native_ms is always set to the top-level (m,n,k) native GEMM time
+    /* Returns per-component predicted costs summed across ALL leaf sub-GEMMs,
+     * mirroring the recursive binary-halving of effective_time.
+     * t_native is always set to the top-level (m,n,k) native GEMM cost
      * because native GEMM does not split.                                    */
     static PerfModelTimes effective_perf_model_times(bool        tA,
                                                      bool        tB,
@@ -339,23 +339,23 @@ namespace FixedPointEmulation
 
             const double t_split
                 = 2.
-                  * effective_time_ms(
+                  * effective_time(
                       tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
-            if(t_split < mono.t_total_ms)
+            if(t_split < mono.t_total)
             {
                 PerfModelTimes half = effective_perf_model_times(
                     tA, tB, half_m, half_n, k, s, device, workspace_bytes, type_a);
-                half.t_prelim_ms *= 2.0;
-                half.t_prelim_gemm_ms *= 2.0;
-                half.t_refine_ms *= 2.0;
-                half.t_adp_ms *= 2.0;
-                half.t_scale_ms *= 2.0;
-                half.t_int8_gemms_ms *= 2.0;
-                half.t_accum_ms *= 2.0;
-                half.t_host_ms *= 2.0;
-                half.t_total_ms *= 2.0;
+                half.t_prelim *= 2.0;
+                half.t_prelim_gemm *= 2.0;
+                half.t_refine *= 2.0;
+                half.t_adp *= 2.0;
+                half.t_scale *= 2.0;
+                half.t_int8_gemms *= 2.0;
+                half.t_accum *= 2.0;
+                half.t_host *= 2.0;
+                half.t_total *= 2.0;
                 /* Native DGEMM does not split: keep the top-level prediction. */
-                half.t_native_ms = mono.t_native_ms;
+                half.t_native = mono.t_native;
                 return half;
             }
         }
@@ -1072,13 +1072,13 @@ namespace FixedPointEmulation
                     = force_split ? 0.0
                                   : perf_model_times(
                                         tA, tB, m, n, k, pm_s_impl, device, ws_budget, type_a_perf)
-                                        .t_total_ms;
+                                        .t_total;
                 /* Pass workspace_bytes so the sub-call recomputes its own budget
                  * from the smaller (half_m, half_n) dimensions.                  */
                 const double t_split = force_split
                                            ? 0.0
                                            : 2.
-                                                 * effective_time_ms(tA,
+                                                 * effective_time(tA,
                                                                      tB,
                                                                      half_m,
                                                                      half_n,
@@ -2074,16 +2074,16 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
 
         const double t_emul_W
             = is_eager_g ? 0.0
-                         : effective_time_ms(tA_g, tB_g, m, n, k, pm_s_g, device, W, HIP_R_64F);
+                         : effective_time(tA_g, tB_g, m, n, k, pm_s_g, device, W, HIP_R_64F);
         const double t_native_g
             = is_eager_g
                   ? 1.0
                   : perf_model_times(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_64F)
-                        .t_native_ms;
+                        .t_native;
         if(!is_eager_g && t_emul_W > t_native_g)
         {
             const double t_emul_opt
-                = effective_time_ms(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_64F);
+                = effective_time(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_64F);
             if(t_emul_opt <= t_native_g
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
@@ -2171,15 +2171,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                     "t_adp_ms,t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
                     "t_total_ms,"
                     "cpu_ctx_create_ms,cpu_layout_ms,cpu_svmask_sync_ms,cpu_batch_attr_ms,"
-                    "pred_prelim_ms,pred_prelim_gemm_ms,pred_refine_ms,pred_adp_ms,"
-                    "pred_scale_ms,pred_int8_gemm_ms,pred_accum_ms,"
-                    "pred_host_ms,pred_total_ms,pred_native_dgemm_ms\n");
+                    "pred_prelim_rel,pred_prelim_gemm_rel,pred_refine_rel,pred_adp_rel,"
+                    "pred_scale_rel,pred_int8_gemm_rel,pred_accum_rel,"
+                    "pred_host_rel,pred_total_rel\n");
+            /* pred_*_rel: predicted cost relative to the predicted native DGEMM cost
+             * (pred_total_rel < 1 means emulation is predicted to be faster). */
             std::fprintf(_f,
                          "%lld,%lld,%lld,%c,%c,%u,%u,%u,%u,"
                          "%llu,%u,"
                          "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
                          "%.4f,%.4f,%.4f,%.4f,"
-                         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+                         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
                          (long long)m,
                          (long long)n,
                          (long long)k,
@@ -2203,16 +2205,15 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                          accum.t_layout_ms,
                          accum.t_svmask_sync_ms,
                          accum.t_batch_attr_ms,
-                         pm.t_prelim_ms,
-                         pm.t_prelim_gemm_ms,
-                         pm.t_refine_ms,
-                         pm.t_adp_ms,
-                         pm.t_scale_ms,
-                         pm.t_int8_gemms_ms,
-                         pm.t_accum_ms,
-                         pm.t_host_ms,
-                         pm.t_total_ms,
-                         pm.t_native_ms);
+                         pm.t_prelim / pm.t_native,
+                         pm.t_prelim_gemm / pm.t_native,
+                         pm.t_refine / pm.t_native,
+                         pm.t_adp / pm.t_native,
+                         pm.t_scale / pm.t_native,
+                         pm.t_int8_gemms / pm.t_native,
+                         pm.t_accum / pm.t_native,
+                         pm.t_host / pm.t_native,
+                         pm.t_total / pm.t_native);
             std::fclose(_f);
         }
         (void)hipEventDestroy(ev_end);
@@ -2310,8 +2311,8 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
 }
 
 /* Unified performance check — dispatches on type_a.
- * Uses FP32-specific ai_fp32/ratio_fp32 for HIP_R_32F (Step 7),
- * and FP64-specific ai/ratio for HIP_R_64F.                              */
+ * Compares the predicted emulation cost against native SGEMM (HIP_R_32F)
+ * or native DGEMM (HIP_R_64F).                                           */
 bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
                                          const _rocblaslt_matmul_desc* desc,
                                          hipDataType                   type_a,
@@ -2331,9 +2332,9 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
     const int      adp_bits_pc = fixedPointEmulationAdpMantissaBits(type_a);
     const unsigned pm_num      = adp_expected_num_moduli(adp_bits_pc, max_num_moduli(type_a));
     const double   t_emul
-        = effective_time_ms(tA, tB, m, n, k, pm_num, device, workspace_bytes, type_a);
+        = effective_time(tA, tB, m, n, k, pm_num, device, workspace_bytes, type_a);
     const double t_native
-        = perf_model_times(tA, tB, m, n, k, pm_num, device, ~size_t{0}, type_a).t_native_ms;
+        = perf_model_times(tA, tB, m, n, k, pm_num, device, ~size_t{0}, type_a).t_native;
     return t_emul <= t_native;
 }
 
@@ -2441,16 +2442,16 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
         /* FP32 performance model: compare against native SGEMM, not DGEMM. */
         const double t_emul_W
             = is_eager_g ? 0.0
-                         : effective_time_ms(tA_g, tB_g, m, n, k, pm_s_g, device, W, HIP_R_32F);
+                         : effective_time(tA_g, tB_g, m, n, k, pm_s_g, device, W, HIP_R_32F);
         const double t_native_g
             = is_eager_g
                   ? 1.0
                   : perf_model_times(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_32F)
-                        .t_native_ms;
+                        .t_native;
         if(!is_eager_g && t_emul_W > t_native_g)
         {
             const double t_emul_opt
-                = effective_time_ms(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_32F);
+                = effective_time(tA_g, tB_g, m, n, k, pm_s_g, device, ~size_t{0}, HIP_R_32F);
             if(t_emul_opt <= t_native_g
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
@@ -2541,15 +2542,17 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                     "t_adp_ms,t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
                     "t_total_ms,"
                     "cpu_ctx_create_ms,cpu_layout_ms,cpu_svmask_sync_ms,cpu_batch_attr_ms,"
-                    "pred_prelim_ms,pred_prelim_gemm_ms,pred_refine_ms,pred_adp_ms,"
-                    "pred_scale_ms,pred_int8_gemm_ms,pred_accum_ms,"
-                    "pred_host_ms,pred_total_ms,pred_native_sgemm_ms\n");
+                    "pred_prelim_rel,pred_prelim_gemm_rel,pred_refine_rel,pred_adp_rel,"
+                    "pred_scale_rel,pred_int8_gemm_rel,pred_accum_rel,"
+                    "pred_host_rel,pred_total_rel\n");
+            /* pred_*_rel: predicted cost relative to the predicted native SGEMM cost
+             * (pred_total_rel < 1 means emulation is predicted to be faster). */
             std::fprintf(_f,
                          "%lld,%lld,%lld,%c,%c,%u,%u,%u,%u,"
                          "%llu,%u,"
                          "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
                          "%.4f,%.4f,%.4f,%.4f,"
-                         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+                         "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
                          (long long)m,
                          (long long)n,
                          (long long)k,
@@ -2573,16 +2576,15 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                          accum.t_layout_ms,
                          accum.t_svmask_sync_ms,
                          accum.t_batch_attr_ms,
-                         pm.t_prelim_ms,
-                         pm.t_prelim_gemm_ms,
-                         pm.t_refine_ms,
-                         pm.t_adp_ms,
-                         pm.t_scale_ms,
-                         pm.t_int8_gemms_ms,
-                         pm.t_accum_ms,
-                         pm.t_host_ms,
-                         pm.t_total_ms,
-                         pm.t_native_ms);
+                         pm.t_prelim / pm.t_native,
+                         pm.t_prelim_gemm / pm.t_native,
+                         pm.t_refine / pm.t_native,
+                         pm.t_adp / pm.t_native,
+                         pm.t_scale / pm.t_native,
+                         pm.t_int8_gemms / pm.t_native,
+                         pm.t_accum / pm.t_native,
+                         pm.t_host / pm.t_native,
+                         pm.t_total / pm.t_native);
             std::fclose(_f);
         }
         (void)hipEventDestroy(ev_end);
