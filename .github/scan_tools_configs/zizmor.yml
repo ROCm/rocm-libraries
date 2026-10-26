@@ -12,4 +12,9 @@
 #
 # Add rule-specific settings and suppressions under `rules:`.
 
-rules: {}
+rules:
+  # `$/` references make the runner download this repository as a remote
+  # action archive, which exceeds the runner's 100s download timeout for this
+  # monorepo. Local actions and reusable workflows are referenced with `./`.
+  self-repository:
+    disable: true

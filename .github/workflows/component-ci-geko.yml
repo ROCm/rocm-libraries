@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm-linux
+        uses: ./.github/actions/setup-rocm-linux
         with:
           amdgpu_family: gfx94X-dcgpu
 
@@ -56,7 +56,7 @@ jobs:
           python -m tox -e coverage
 
       - name: Test pip install
-        uses: $/.github/actions/pip-install-test
+        uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests
@@ -84,7 +84,7 @@ jobs:
           python-version: "3.12"
 
       - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm-windows
+        uses: ./.github/actions/setup-rocm-windows
         with:
           amdgpu_family: gfx1151
 
@@ -103,7 +103,7 @@ jobs:
           python -m tox -e coverage
 
       - name: Test pip install
-        uses: $/.github/actions/pip-install-test
+        uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests

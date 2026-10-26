@@ -30,12 +30,12 @@ jobs:
           persist-credentials: false
 
       - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm-linux
+        uses: ./.github/actions/setup-rocm-linux
         with:
           amdgpu_family: gfx94X-dcgpu
 
       - name: Test pip install
-        uses: $/.github/actions/pip-install-test
+        uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/tensilelite/rocisa
           test_path: test
@@ -77,12 +77,12 @@ jobs:
           persist-credentials: false
 
       - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm-linux
+        uses: ./.github/actions/setup-rocm-linux
         with:
           amdgpu_family: gfx94X-dcgpu
 
       - name: Test pip install
-        uses: $/.github/actions/pip-install-test
+        uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/tensilelite/rocisa
           test_path: test
@@ -108,12 +108,12 @@ jobs:
           python-version: "3.12"
 
       - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm-windows
+        uses: ./.github/actions/setup-rocm-windows
         with:
           amdgpu_family: gfx1151
 
       - name: Test pip install
-        uses: $/.github/actions/pip-install-test
+        uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/tensilelite/rocisa
           test_path: test

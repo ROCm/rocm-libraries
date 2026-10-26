@@ -21,10 +21,7 @@ updates:
       rocm-security-gh:
         patterns: ["ROCm/rocm-security-gh*"]
       github-actions:
-        patterns:
-          - "*"
-    cooldown:
-      default-days: 7
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "projects/hipcub/docs/sphinx" # Location of package manifests
@@ -253,4 +250,3 @@ updates:
           - "*"
     cooldown:
       default-days: 7
-        patterns: ["*"]

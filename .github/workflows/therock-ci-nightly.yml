@@ -40,7 +40,7 @@ jobs:
 
       - name: Load CI environment
         id: ci-env
-        uses: $/.github/actions/ci-env
+        uses: ./.github/actions/ci-env
 
       # Resolve the TheRock ref to build against exactly once here. By default
       # this uses the pinned TheRock ref; the checkout records the concrete SHA
@@ -146,7 +146,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
-    uses: $/.github/workflows/therock-ci-linux.yml
+    uses: ./.github/workflows/therock-ci-linux.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
@@ -173,7 +173,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
-    uses: $/.github/workflows/therock-ci-windows.yml
+    uses: ./.github/workflows/therock-ci-windows.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

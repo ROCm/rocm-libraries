@@ -43,7 +43,7 @@ jobs:
 
       - name: Load CI environment
         id: ci-env
-        uses: $/.github/actions/ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Select locked TheRock revision
         id: therock-ref

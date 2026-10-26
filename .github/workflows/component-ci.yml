@@ -38,7 +38,7 @@ jobs:
             .github/scripts/component_ci.py
           fetch-depth: 2
           persist-credentials: false
-      - uses: $/.github/actions/ci-env
+      - uses: ./.github/actions/ci-env
         id: env
       - name: Detect changed components
         id: configure
@@ -48,7 +48,7 @@ jobs:
     name: "StinkyTofu"
     needs: changes
     if: needs.changes.outputs.stinkytofu == 'true'
-    uses: $/.github/workflows/component-ci-stinkytofu.yml
+    uses: ./.github/workflows/component-ci-stinkytofu.yml
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
@@ -58,7 +58,7 @@ jobs:
     name: "rocISA"
     needs: changes
     if: needs.changes.outputs.rocisa == 'true'
-    uses: $/.github/workflows/component-ci-rocisa.yml
+    uses: ./.github/workflows/component-ci-rocisa.yml
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
@@ -68,7 +68,7 @@ jobs:
     name: "GEKO"
     needs: changes
     if: needs.changes.outputs.geko == 'true'
-    uses: $/.github/workflows/component-ci-geko.yml
+    uses: ./.github/workflows/component-ci-geko.yml
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
@@ -78,13 +78,13 @@ jobs:
     name: "MIOpen"
     needs: changes
     if: needs.changes.outputs.miopen == 'true'
-    uses: $/.github/workflows/component-ci-miopen.yml
+    uses: ./.github/workflows/component-ci-miopen.yml
 
   tensilelite-coverage:
     name: "TensileLite coverage"
     needs: changes
     if: needs.changes.outputs.tensilelite-coverage == 'true'
-    uses: $/.github/workflows/component-ci-tensilelite-coverage.yml
+    uses: ./.github/workflows/component-ci-tensilelite-coverage.yml
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}

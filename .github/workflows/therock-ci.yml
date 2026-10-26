@@ -80,7 +80,7 @@ jobs:
       # from the ci-env composite action so they are defined in one place.
       - name: Load CI environment
         id: ci-env
-        uses: $/.github/actions/ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -170,7 +170,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
-    uses: $/.github/workflows/therock-ci-linux.yml
+    uses: ./.github/workflows/therock-ci-linux.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
@@ -197,7 +197,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
-    uses: $/.github/workflows/therock-ci-windows.yml
+    uses: ./.github/workflows/therock-ci-windows.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

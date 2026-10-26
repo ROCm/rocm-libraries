@@ -76,7 +76,7 @@ jobs:
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
         id: ci-env
-        uses: $/.github/actions/ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Set environment
         run: |
@@ -288,7 +288,7 @@ jobs:
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
         id: ci-env
-        uses: $/.github/actions/ci-env
+        uses: ./.github/actions/ci-env
 
       - name: Set environment
         run: |
