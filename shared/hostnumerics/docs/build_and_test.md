@@ -11,7 +11,7 @@ installed and fetched dependency options.
 
 Test numerical behavior primarily through the Python API, using independent
 expected results. Native tests cover contracts that Python cannot exercise,
-such as C++ construction, ownership, and native scalar conversion templates.
+such as C++ construction, ownership, and integer conversion templates.
 
 ## Standalone build
 
