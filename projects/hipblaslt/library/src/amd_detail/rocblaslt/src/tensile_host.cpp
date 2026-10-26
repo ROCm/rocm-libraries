@@ -4136,6 +4136,13 @@ void initTensileGemmData(rocblaslt_handle       handle,
 
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Do not use rocRoller for a fused all-to-all
+    RocblasltFusedEpilogueInfo fusedInfo;
+    if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
+        return false;
+#endif
+
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));

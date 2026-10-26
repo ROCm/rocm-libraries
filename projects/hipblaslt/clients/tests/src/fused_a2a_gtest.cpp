@@ -16,8 +16,10 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -725,6 +727,42 @@ namespace
         ASSERT_EQ(heuristic(&afterDetach, &returned), HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(returned, 1);
         EXPECT_EQ(memcmp(afterDetach.algo.data, plain.algo.data, sizeof(plain.algo.data)), 0);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, ForcedRocRollerKeepsTheFusedSolution)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        int                              returned    = 0;
+        ASSERT_EQ(heuristic(&fusedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+
+        ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        handle                  = nullptr;
+        const char*       env   = "HIPBLASLT_USE_ROCROLLER";
+        const char*       saved = std::getenv(env);
+        const std::string savedValue(saved ? saved : "");
+        setenv(env, "1", 1);
+        const hipblasStatus_t created = hipblasLtCreate(&handle);
+        if(saved)
+            setenv(env, savedValue.c_str(), 1);
+        else
+            unsetenv(env);
+        ASSERT_EQ(created, HIPBLAS_STATUS_SUCCESS);
+        registerOneRank();
+
+        hipblasLtMatmulHeuristicResult_t forcedResult = {};
+        returned                                      = 0;
+        ASSERT_EQ(heuristic(&forcedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(returned, 1);
+        EXPECT_EQ(
+            memcmp(forcedResult.algo.data, fusedResult.algo.data, sizeof(fusedResult.algo.data)),
+            0);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)
