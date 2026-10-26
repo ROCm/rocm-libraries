@@ -373,8 +373,18 @@ namespace TensileLite
                     kind = hipMemcpyHostToDevice;
                 }
 
+                // Inputs are unchanged when:
+                //  - non-MX: data is problem-independent (!m_problemDependentData)
+                //  - gfx1250 MX: scale layout is geometry-based, so the descriptor
+                //    caches added in #11963 make every per-solution regeneration a
+                //    no-op. (gfx950 is excluded because its preswizzle depends on
+                //    the solution's matrix-instruction shape.)
+                bool inputsUnchanged
+                    = (!m_problemDependentData && !needMXSwizzle)
+                      || (needMXSwizzle && m_mxScaleLayout == MXScaleLayout::GFX1250);
+
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+                   && !needSwizzle && inputsUnchanged)
                 {
                     if(m_elementsToValidate)
                     {
