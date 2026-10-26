@@ -218,6 +218,17 @@ identically.
    `traits/test_mma_catalog_integrity.py` checks the invariants above,
    `traits/test_mma_catalog_layouts.py` checks every row's strings against the encoder and the
    arbiters, and the loader names any data error.
+4. Run the compiler cross-check with the newest clang available:
+   `python tools/check_mma_catalog.py` (from `platform/`; `ROCKE_LLVM_BIN=<llvm>/bin` picks the
+   clang). It probes every row's builtin, and every matrix builtin in that clang's builtin table,
+   on every backend target, and reports each disagreement: a target where the builtin compiles but
+   the row does not list it or the reverse, an `llvm_intrinsic` the builtin does not lower to, a
+   scale-format set that differs from what the scale-format operands accept, and a builtin that
+   compiles on a backend target but has no row. It exits 1 on any of them. It also names what that
+   clang cannot judge (a target it cannot compile for, a builtin it does not know) without failing,
+   so an older clang can only check part of the catalog; it can also disagree where the
+   compiler's own checks have changed since, and the newest clang is the one the catalog follows.
+   Run it again whenever the compiler, the LLVM flavor or rocke's backend targets change.
 
 The catalog has no C++ counterpart: the tiling layer is Python only, and the C++ engine does not
 read this file.
