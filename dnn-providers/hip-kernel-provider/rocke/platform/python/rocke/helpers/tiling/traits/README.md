@@ -231,5 +231,86 @@ identically.
    compiler's own checks have changed since, and the newest clang is the one the catalog follows.
    Run it again whenever the compiler, the LLVM flavor or rocke's backend targets change.
 
+5. Re-run the backend coverage test (`traits/test_mma_backend_coverage.py`, see Backend
+   coverage). A changed row can change what the backend issues; regenerate the record when it
+   reports a change.
+
 The catalog has no C++ counterpart: the tiling layer is Python only, and the C++ engine does not
 read this file.
+
+## Backend coverage (`data/backend_coverage.json`)
+
+The catalog lists every instruction; the backend coverage record says which of them rocke's
+backend issues. For every (row, target) pair it holds one class and the backend op (`core.arch`
+`MmaOp.op_id`) the row was matched to, read through `load_backend_coverage()`
+(`backend_coverage.py`): `status(op_id, target)` and `backend_op(op_id, target)`. Only `issuable`
+means the backend issues the row's instruction on that target; it is the one fact a layer that
+issues MMA instructions reads, and `backend_op` is the op it emits.
+
+`tests/helpers/tiling/traits/test_mma_backend_coverage.py` measures the record and requires it to
+equal the committed file exactly, so a backend op that is added, removed or rewired fails the test
+until the record is regenerated:
+`python -m rocke.tests.helpers.tiling.traits.test_mma_backend_coverage --write` (from
+`platform/`, with a clang that targets every catalog target, `ROCKE_LLVM_BIN=<llvm>/bin`).
+
+### How a pair is matched
+
+1. Candidates: the backend ops on the target with the row's operand key -- A, B, C and result
+   dtypes, M, N, K and the scale contract (a scaled row's block size and scale formats; a dense or
+   sparse row matches only ops with no scale fields). The intrinsic alone does not separate a
+   gfx950 scaled row from the dense op of the same formats, so the scale contract is part of the
+   key. A `selectable` integer row also matches ops on the unsigned twins of its operands.
+2. Each candidate is lowered alone with the operand form the tiling layer feeds it: the row's
+   logical elements per lane (`fragment_length` of its encodings, never core's `*_frag_len`,
+   which counts register words for some ops), spelled by `helpers/mma_io.mma_operand_ir_type`
+   (packed 32-bit words for a sub-byte dtype, the logical vector otherwise). A lowering that
+   raises anything other than `NotImplementedError` fails the test: the operand contract and the
+   backend disagree.
+3. The candidate whose module calls the row's `llvm_intrinsic` is the backend op. Two such
+   candidates fail the test.
+
+A scaled row and a `selectable` integer row have one backend op per *variant*: per scale format
+(the A and B scale dtypes, e.g. gfx1250 holds an `fp4e2m1` operand's ops for `e8m0`, `e4m3` and
+`e5m3`) and per operand dtype pair (`i8` / `u8`). The record holds one entry per variant the row
+accepts. A lookup of a scaled pair names its scale format -- `scale_format=("e8m0", "e5m3")` --
+when the pair has more than one. A lookup of a `selectable` integer pair without a variant answers
+for the row's own operand dtypes (the signed `i8` / `i4`), so `(op_id, target)` alone looks up
+every dense and sparse row; `operand_dtypes=("u8", "i8")` names an unsigned twin.
+
+### Classes (the first that holds wins)
+
+| Class | Meaning |
+|---|---|
+| `no_backend_op` | No candidate. E.g. gfx950's `16x16x128` scaled MFMA rows: the backend has their dense twins but no scaled op. |
+| `other_instruction` | Every candidate lowers to another intrinsic, e.g. a sparse row whose operand key a dense op shares, or a multi-block row beside a single-block op. The record names that op. |
+| `multi_block` | A multi-block row (`B > 1`) with a backend op. The encoder does not lay such a row out, so it is lowered at the op's own counts. |
+| `lowering_not_wired` | The matching op's lowering raises `NotImplementedError` (its message is recorded). |
+| `operand_form_words_only` | The op issues the row's instruction, but takes A and B only as register words, which the tiling layer does not feed: gfx950's `32x32x64` scaled MFMA. |
+| `lane_map_differs` | Core's lane maps (`MmaOp.a/b/c_layout()`) and the catalog's disagree beyond one K order shared by A and B, compared in logical elements. |
+| `invalid_ir` | The op's module fails the arbiter for the target. |
+| `issuable` | None of the above. |
+
+A class is a backend fact only. A row whose result dtype differs from its accumulator is
+`issuable` when the backend issues it; whether a kernel layer drives such a row is that layer's
+rule. `backend_ops_without_row` lists, per target, the ops no row was matched to (the gfx950
+emulated TF32 ops, for example). It is read from each target's registered ops
+(`ArchTarget.mma.ops`), so an op known only to core's fragment table is not seen.
+
+**Ops without a core lane map.** For some ops core's lane-map accessor raises
+`NotImplementedError`; their pairs skip the `lane_map_differs` comparison. A missing description
+is not a backend fact: the catalog is the layout the tiling layer uses, and those rows are listed
+in Unverified layouts as compile-verified only.
+
+### LLVM flavor and the arbiter
+
+The classes are measured at one LLVM flavor, the record's `_meta.llvm_flavor` (`llvm23`): the
+newest flavor expresses every catalog target's ops, and the flavor of the host's compiler must
+not change a committed record. The test passes it explicitly and also checks, in fresh processes
+with `ROCKE_LLVM_FLAVOR` set to `llvm20` and to `llvm23`, that the measurement does not move.
+
+`invalid_ir` and `issuable` are told apart by the arbiter of `tools/check_ir_validity.py`: the
+module must compile and link for the target (only the link proves an intrinsic exists). A module
+must match the clang that judges it, so the compile test lowers at that clang's flavor, not the
+record's. A target the clang cannot compile for is a named skip (`host clang cannot target
+<target>`), never a pass; the record itself is produced with a clang that targets every catalog
+target. gfx1250 pairs are compile-verified only: no gfx1250 hardware has run them.
