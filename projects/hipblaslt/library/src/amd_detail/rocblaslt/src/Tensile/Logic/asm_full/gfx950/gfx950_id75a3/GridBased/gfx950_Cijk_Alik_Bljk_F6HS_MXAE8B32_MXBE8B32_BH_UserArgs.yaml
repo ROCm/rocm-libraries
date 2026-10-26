@@ -1316,8 +1316,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
   - {tag: SizeLessThan, index: 0, value: 33}
-  - {tag: SizeGreaterThan, index: 1, value: 31}
-  - {tag: SizeLessThan, index: 1, value: 33}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -1572,8 +1570,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
   - {tag: SizeLessThan, index: 0, value: 33}
-  - {tag: SizeGreaterThan, index: 1, value: 63}
-  - {tag: SizeLessThan, index: 1, value: 65}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -1739,8 +1735,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 63}
   - {tag: SizeLessThan, index: 0, value: 65}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -1984,8 +1978,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 63}
   - {tag: SizeLessThan, index: 0, value: 65}
-  - {tag: SizeGreaterThan, index: 1, value: 31}
-  - {tag: SizeLessThan, index: 1, value: 33}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -2062,8 +2054,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 127}
   - {tag: SizeLessThan, index: 0, value: 129}
-  - {tag: SizeGreaterThan, index: 1, value: 127}
-  - {tag: SizeLessThan, index: 1, value: 129}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -2385,8 +2375,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -2552,8 +2540,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 255}
-  - {tag: SizeLessThan, index: 1, value: 257}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -2719,8 +2705,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 31}
-  - {tag: SizeLessThan, index: 1, value: 33}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -2886,8 +2870,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 63}
-  - {tag: SizeLessThan, index: 1, value: 65}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -3131,8 +3113,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 255}
   - {tag: SizeLessThan, index: 0, value: 257}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -3209,8 +3189,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 255}
   - {tag: SizeLessThan, index: 0, value: 257}
-  - {tag: SizeGreaterThan, index: 1, value: 255}
-  - {tag: SizeLessThan, index: 1, value: 257}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -3610,8 +3588,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
   - {tag: SizeLessThan, index: 0, value: 33}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -3794,6 +3770,30 @@ ExactLogic:
   - [24, 28.248275862068965]
 - - [32, 32, 1, 64, 32, 32, 64, 64]
   - [13, 22.755555555555556]
+- - [256, 257, 1, 128, 256, 256, 128, 128]
+  - [35, 1165.0844444444444]
+- - [128, 129, 1, 128, 128, 128, 128, 128]
+  - [21, 609.63720930232557]
+- - [256, 17, 1, 128, 256, 256, 128, 128]
+  - [34, 141.69945945945946]
+- - [16, 257, 1, 128, 16, 16, 128, 128]
+  - [27, 117.02857142857142]
+- - [32, 65, 1, 128, 32, 32, 128, 128]
+  - [15, 79.921951219512195]
+- - [64, 33, 1, 128, 64, 64, 128, 128]
+  - [20, 79.921951219512195]
+- - [16, 65, 1, 128, 16, 16, 128, 128]
+  - [31, 55.072268907563029]
+- - [32, 33, 1, 128, 32, 32, 128, 128]
+  - [12, 42.281290322580645]
+- - [64, 17, 1, 128, 64, 64, 128, 128]
+  - [17, 39.960975609756098]
+- - [32, 17, 1, 128, 32, 32, 128, 128]
+  - [40, 24.094117647058823]
+- - [16, 33, 1, 128, 16, 16, 128, 128]
+  - [29, 22.291156462585032]
+- - [16, 17, 1, 128, 16, 16, 128, 128]
+  - [25, 16.549494949494949]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

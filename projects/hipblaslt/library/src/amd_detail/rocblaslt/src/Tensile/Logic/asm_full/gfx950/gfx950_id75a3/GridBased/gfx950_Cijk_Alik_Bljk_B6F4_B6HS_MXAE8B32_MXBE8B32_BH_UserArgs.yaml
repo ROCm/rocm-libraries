@@ -475,8 +475,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -523,6 +521,8 @@ ExactLogic:
   - [0, 1000]
 - - [16, 16, 1, 128, 16, 16, 128, 128]
   - [1, 17.066666666666666]
+- - [16, 17, 1, 128, 16, 16, 128, 128]
+  - [2, 11.78705035971223]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
