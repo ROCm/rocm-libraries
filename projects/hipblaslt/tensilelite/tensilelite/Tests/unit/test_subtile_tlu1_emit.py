@@ -248,6 +248,53 @@ def test_gr_edge_mask_covers_the_split_k_row_layout(tc):
     assert "past-M/N lane" in text
 
 
+@pytest.mark.parametrize("mt,wg", [(192, (2, 2)), (192, (1, 1)), (320, (2, 2)), (384, (1, 1))])
+def test_gr_edge_mask_handles_non_power_of_two_wave_strides(mt, wg):
+    """MT192 at [2,2] gives three 32-element strips per wave, so elemsPerId is 96.
+
+    A shift-only wave offset cannot express that, and asserting on it aborts
+    kernel generation for every one of these shapes.
+    """
+    from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+    from tensilelite.Components.Subtile.SubtileGeometry import GRTag_TLU1
+    emitted = 0
+    for geo in AB_GEOMETRY_MAP.values():
+        for tc in ("A", "B"):
+            kernel = _kernel(miWaveGroup=wg)
+            for key in ("MacroTile0", "MacroTile1", "MacroTileA", "MacroTileB"):
+                kernel[key] = mt
+            writer = _Writer()
+            try:
+                ti = TileInfo(geo, tc, writer, kernel)
+            except Exception:
+                continue
+            if not isinstance(ti.gr.config.tag, GRTag_TLU1):
+                continue
+            GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+            before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+            assert GR._graTileAssignment_tlu(writer, kernel, ti).items()
+            assert writer.vgprPool.outstanding == before[0]
+            assert writer.sgprPool.outstanding == before[1]
+            emitted += 1
+    assert emitted, "no TLU=1 geometry emitted for MT%u %s" % (mt, wg)
+
+
+@pytest.mark.parametrize("stack", [_XOR_STACK, _COL_SCATTER_STACK])
+def test_gr_edge_mask_is_dropped_under_prefetch_across_persistent(stack):
+    """PAP reuses these offsets for the next tile after rebuilding the
+
+    descriptors, so a mask built from this workgroup's M/N bound would keep
+    lanes at BufferOOB that the next tile needs.
+    """
+    kernel = _kernel()
+    kernel["PrefetchAcrossPersistent"] = 1
+    writer, ti = _tile(stack, "A", kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    text = str(GR._graTileAssignment_tlu(writer, kernel, ti))
+    assert "drop GR lanes past the real M/N" not in text
+    assert "lane inside the real M/N?" not in text
+
+
 def test_gr_edge_mask_split_k_row_does_not_leak_registers():
     writer, _, _, (vbefore, sbefore) = _emitGRNamed("AB_B4_TLU1_4x1")
     assert writer.vgprPool.outstanding == vbefore
