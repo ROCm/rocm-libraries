@@ -10,7 +10,6 @@ set(core_headers
     "${CORE_INCLUDE_DIR}/scalar.hpp"
     "${CORE_INCLUDE_DIR}/scalar_binary_float.hpp"
     "${CORE_INCLUDE_DIR}/scalar_codec.hpp"
-    "${CORE_INCLUDE_DIR}/scalar_conversion.hpp"
     "${CORE_INCLUDE_DIR}/scalar_storage.hpp"
     "${CORE_INCLUDE_DIR}/scalar_type.hpp"
     "${CORE_INCLUDE_DIR}/shape.hpp"
@@ -55,7 +54,6 @@ string(APPEND scalar_contents "\n${scalar_type_contents}")
 file(READ "${CORE_INCLUDE_DIR}/scalar_codec.hpp" codec_contents)
 foreach(codec_header
         scalar_binary_float.hpp
-        scalar_conversion.hpp
         scalar_storage.hpp)
     file(READ "${CORE_INCLUDE_DIR}/${codec_header}" codec_header_contents)
     string(APPEND codec_contents "\n${codec_header_contents}")

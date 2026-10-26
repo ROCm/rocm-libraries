@@ -7,8 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <roc/hostnumerics/scalar.hpp>
 #include <roc/hostnumerics/scalar_binary_float.hpp>
-#include <roc/hostnumerics/scalar_conversion.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <span>
 #include <stdexcept>
