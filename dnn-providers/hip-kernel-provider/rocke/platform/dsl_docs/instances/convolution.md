@@ -727,7 +727,17 @@ class DirectDepthwiseSpec:
     block_w: int = 8       # output W positions per workgroup
     block_waves: int = 1
     wave_size: int = 64
+    cpl: int = 1           # channels per lane: 1, 2 or 4
 ```
+
+`cpl > 1` (channel packing) gives every lane `cpl` adjacent channels: input
+rows load and output rows store as one `cpl`-wide vector per lane, and every
+tap is `cpl / 2` packed `<2 x f32>` FMAs over channel pairs. `groups` must be a
+multiple of `cpl`, `block_ch` grows by `cpl`, and the validator bounds the
+packed weights (`cpl * KH * KW <= 200`) and accumulator slots
+(`cpl * block_w * KH <= 192`). The kernel name gains `cpl{N}`. Both engines
+build it (`conv_direct_grouped_build_depthwise_packed.cpp`); the AOT grid
+emits the cpl knobs for wave32 targets only.
 
 Constraints (Python `is_valid_depthwise_spec` / C++ `rocke_direct_depthwise_is_valid_spec`):
 
@@ -812,6 +822,7 @@ class DirectDepthwiseTiledSpec:
     block_waves: int = 1    # waves per block (64 channels each)
     unroll_rows: bool = False
     wave_size: int = 64
+    cpl: int = 1            # channels per lane: 1, 2 or 4 (see DirectDepthwiseSpec)
 ```
 
 The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
@@ -832,15 +843,18 @@ and compiles slowly. This kernel is linear in the filter width:
 Outputs are indexed directly, so it is not tied to "same" padding. Constraints
 (`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
 `cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
-and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
-(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+and `live_regs = cpl * (block_h*block_w + block_h*n_cols + 2*KW) <= 256`
+(`n_cols = (block_w-1)*stride + KW`); with `cpl > 1`, `groups` must be a
+multiple of `cpl`. The register budget and the unroll cap
 keep both rolled and unrolled configurations within a bounded register and
 code-size footprint.
 
 The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
 
-Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`;
+the wave32 configs 151-163 cover both depthwise forward kernels at wave size
+32, including their channel-packed (`cpl` 2 and 4) forms.
 
 ### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
 

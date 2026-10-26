@@ -1154,6 +1154,7 @@ def build_direct_depthwise(
     block_w=16,
     block_waves=2,
     wave_size=64,
+    cpl=1,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1179,6 +1180,7 @@ def build_direct_depthwise(
             block_w=block_w,
             block_waves=block_waves,
             wave_size=wave_size,
+            cpl=cpl,
         )
         return _build_dw(spec, arch=arch)
 
@@ -4859,6 +4861,46 @@ def cases():
             block_h=2,
             block_waves=2,
             wave_size=32,
+        ),
+    )
+    # Channel-packed (cpl > 1) depthwise forward on the wave32 gfx1250:
+    # cpl-wide vector loads / stores and packed <2 x f32> FMAs. Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 156+).
+    add(
+        "conv_direct",
+        "conv_direct/gfx1250/dw_n4h16_cpl2_w32",
+        "gfx1250",
+        build_direct_depthwise(
+            "irhash_directdw_1250_cpl2",
+            "gfx1250",
+            N=4,
+            H=16,
+            W=16,
+            groups=64,
+            block_w=8,
+            block_waves=1,
+            wave_size=32,
+            cpl=2,
+        ),
+    )
+    add(
+        "conv_direct_depthwise_tiled",
+        "conv_direct_depthwise_tiled/gfx1250/bf16_k3_cpl4_w32",
+        "gfx1250",
+        build_direct_depthwise_tiled(
+            "irhash_direct_dw_tiled_1250_bf16_k3_cpl4",
+            "gfx1250",
+            N=2,
+            H=16,
+            W=16,
+            groups=96,
+            KH=3,
+            PAD=1,
+            block_w=8,
+            block_h=2,
+            block_waves=1,
+            wave_size=32,
+            cpl=4,
         ),
     )
 
