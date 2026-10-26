@@ -40,7 +40,7 @@ _STYLE = InterleavedStyle()
 
 
 def _c_store_desc(atom, wave_m, wave_n, m_sub, n_sub):
-    """The C-shuffle TARGET (row-major store order): register order `(mna, m_local, n_local)` with the
+    """The C-shuffle TARGET (N-contiguous store order): register order `(mna, m_local, n_local)` with the
     n_sub-wide N run contiguous. The lane's `P` disjoint M runs are a `block_repeat` on M above the lane
     level, so `make_tile_desc` expresses it directly; at `P == 1` it is the single-rectangle desc.
     """

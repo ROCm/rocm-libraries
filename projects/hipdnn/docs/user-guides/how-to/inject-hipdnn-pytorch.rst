@@ -24,14 +24,16 @@ What it does
 ============
 
 ``hipdnn_torch`` replaces a small set of ``torch.nn.functional`` entry points —
-``F.linear``, ``F.rms_norm``, and ``F.scaled_dot_product_attention`` — with wrappers
+``F.linear``, ``F.rms_norm``, ``F.scaled_dot_product_attention``, ``F.layer_norm``,
+``F.silu``, ``F.gelu``, ``F.conv2d``, and ``F.conv3d`` — with wrappers
 that route to a hipDNN engine when the call meets the engine's constraints, and fall
 back to stock PyTorch otherwise. The fallback is transparent (nothing breaks), counted,
 and logged with a reason, so you get a ranked list of the operations and shapes hipDNN
 still needs to serve.
 
 Because the patch is applied to the functional entry points, no model code changes are
-required: every ``nn.Linear``, ``nn.RMSNorm``, and ``F.scaled_dot_product_attention``
+required: every ``nn.Linear``, ``nn.RMSNorm``, ``nn.LayerNorm``, ``nn.SiLU``/``nn.GELU``,
+``nn.Conv2d``/``nn.Conv3d``, and ``F.scaled_dot_product_attention``
 that resolves through ``torch.nn.functional`` at call time is intercepted.
 
 Basic usage
@@ -42,7 +44,8 @@ Basic usage
     import hipdnn_torch
 
     hipdnn_torch.enable_logging()   # optional: print each native fallback
-    hipdnn_torch.install()          # patch F.linear / F.rms_norm / F.scaled_dot_product_attention
+    hipdnn_torch.install()          # patch F.linear / F.rms_norm / F.scaled_dot_product_attention /
+                                    #       F.layer_norm / F.silu / F.gelu / F.conv2d / F.conv3d
 
     model(inputs)                   # your unmodified model
 
@@ -83,7 +86,7 @@ Verify the environment is wired up without running a model:
   ``provider_ready()`` can return ``True`` while nothing routes, simply because the loaded
   build doesn't yet cover these operations. Turning that coverage on takes a custom build;
   the ``hipdnn_torch`` README's "Getting a provider with the operations this layer needs"
-  section has the recipe and links to a worked example.
+  section describes what the provider must supply.
 
 Applicability and limitations
 =============================
@@ -91,8 +94,8 @@ Applicability and limitations
 The injection only intercepts calls that go through ``torch.nn.functional``. Models
 bypass it when they use ``torch.compile``/TorchInductor, custom fused attention
 (FlashAttention, xformers, Triton, AITER), direct ``torch.ops.aten.*`` calls, quantized
-paths, or non-PyTorch frameworks. Current engine coverage is limited to f16/bf16 on
-constrained shapes (for example, SDPA requires ``B=1``, ``H=32``, ``D=64``).
+paths, or non-PyTorch frameworks. Whether a given shape or dtype is served depends on
+the loaded engines; the report shows which calls routed to hipDNN.
 
 Full reference
 ==============

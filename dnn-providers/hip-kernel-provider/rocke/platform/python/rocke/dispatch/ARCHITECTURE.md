@@ -2093,7 +2093,7 @@ signature of every family, so it waits for a family that needs it.
 
 **Build through the C++ builder from dispatch.** The `build` hook in section 5.2
 calls the Python builder. The C++ engine has builders of its own for most
-families — `rocke_build_wmma_fmha_fwd`, `rocke_build_gemm_multi_d`,
+families — `rocke_build_wmma_fmha_fwd_v2`, `rocke_build_gemm_multi_d`,
 `rocke_build_deep_fused_conv_pool`, and the rest of the `rocke_build_*` surface —
 and they emit byte-identical IR from the same spec. Dispatch should be able to
 drive either engine through a binding it owns, rather than through the

@@ -9,10 +9,10 @@ import json
 import pytest
 import yaml
 
-from Tensile.Contractions import SizeMapping
-from Tensile.CustomKernels import getCustomKernelConfig, validateCustomPersistentArgs
-from Tensile.ExecutionPolicy import normalize_execution_policy
-from Tensile.SolutionStructs.Naming import getKernelFileBase
+from tensilelite.Contractions import SizeMapping
+from tensilelite.CustomKernels import getCustomKernelConfig, validateCustomPersistentArgs
+from tensilelite.ExecutionPolicy import normalize_execution_policy
+from tensilelite.SolutionStructs.Naming import getKernelFileBase
 
 pytestmark = pytest.mark.unit
 
@@ -165,9 +165,9 @@ def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
 def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path, record_property, use_beta, initial_strides):
     from config_harness import _emit_one, _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from test_persistent_config_generation import _config
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     config["BenchmarkProblems"][0][0].update(UseBeta=use_beta, UseInitialStridesAB=initial_strides,
@@ -210,8 +210,8 @@ def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path,
     if use_beta and not initial_strides:
         # Exercise a packed C1 group at the signature boundary without asking
         # solution derivation to accept a fabricated contraction geometry.
-        from Tensile.Components.Signature import SignatureDefault
-        from Tensile.CustomKernels import _metadataArgToCustomArg
+        from tensilelite.Components.Signature import SignatureDefault
+        from tensilelite.CustomKernels import _metadataArgToCustomArg
 
         packed = writer.states.kernel
         packed["PackedC1IdxChars"] = ["J", "K"]
@@ -233,9 +233,9 @@ def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path,
 def test_codegen_rejects_invalid_data_parallel_descriptor(monkeypatch, tmp_path):
     from config_harness import _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from test_persistent_config_generation import _config
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
 
     config = _config({"TileProcessingStrategy": ["DataParallel"], "WorkAssignment": ["StaticGrid"]})
     path = tmp_path / "data_parallel.yaml"

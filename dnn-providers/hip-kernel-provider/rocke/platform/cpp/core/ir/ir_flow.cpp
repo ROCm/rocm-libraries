@@ -1460,6 +1460,45 @@ void rocke_b_s_barrier_bare(rocke_ir_builder_t* b)
     rocke_i_op0(b, ROCKE_OP_TILE_S_BARRIER_BARE, NULL, 0, NULL);
 }
 
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): the same op with
+ * the string attr fence=mode ("compiler" or "workgroup"; NULL or "none" is the
+ * plain barrier). */
+static void rocke_i_fenced_barrier(rocke_ir_builder_t* b, rocke_opcode_t opcode, const char* mode)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!mode || strcmp(mode, "none") == 0)
+    {
+        rocke_i_op0(b, opcode, NULL, 0, NULL);
+        return;
+    }
+    if(strcmp(mode, "compiler") != 0 && strcmp(mode, "workgroup") != 0)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "barrier fence '%s' not in ('compiler', 'workgroup')", mode);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "fence", mode);
+    rocke_i_op0(b, opcode, NULL, 0, &attrs);
+}
+
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_SYNC, mode);
+}
+
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_SYNC_LDS_ONLY, mode);
+}
+
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_S_BARRIER_BARE, mode);
+}
+
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector)
 {
     if(!rocke_i_live(b))
@@ -2180,6 +2219,18 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_for_iter: NULL iter_args");
         return out;
     }
+    for(i = 0; i < num_iter_args; ++i)
+    {
+        if(rocke_i_is_buffer_descriptor(iter_args[i].init))
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "%s",
+                            rocke_i_loop_carried_descriptor_message(i, msg, sizeof msg));
+            return out;
+        }
+    }
 
     body = rocke_i_new_region(b, "body");
     if(!body)
@@ -2339,9 +2390,28 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
     return out;
 }
 
+/* Python IRBuilder._current_region_is_loop_body: true while `b` is emitting
+ * into an scf.for body. The loop op is the last op of the region enclosing its
+ * body: it was emitted there before its body was entered, and every op since
+ * went into the body. */
+static bool current_region_is_loop_body(const rocke_ir_builder_t* b)
+{
+    const rocke_region_t* enclosing;
+    const rocke_op_t* loop;
+    if(b->region_depth < 2)
+        return false;
+    enclosing = b->region_stack[b->region_depth - 2];
+    if(enclosing->num_ops == 0)
+        return false;
+    loop = enclosing->ops[enclosing->num_ops - 1];
+    return loop->opcode == ROCKE_OP_SCF_FOR && loop->num_regions >= 1
+           && loop->regions[0] == b->region_stack[b->region_depth - 1];
+}
+
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values)
 {
     rocke_attr_map_t attrs;
+    int i;
     if(!rocke_i_live(b))
         return;
     if(num_values < 0)
@@ -2350,6 +2420,22 @@ void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int 
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_yield: NULL values");
         return;
+    }
+    /* Yielded values become the next iteration's iter_args in a loop body. */
+    if(current_region_is_loop_body(b))
+    {
+        for(i = 0; i < num_values; ++i)
+        {
+            if(rocke_i_is_buffer_descriptor(values[i]))
+            {
+                char msg[ROCKE_ERR_MSG_CAP];
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "%s",
+                                rocke_i_loop_carried_descriptor_message(i, msg, sizeof msg));
+                return;
+            }
+        }
     }
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "num", (int64_t)num_values);

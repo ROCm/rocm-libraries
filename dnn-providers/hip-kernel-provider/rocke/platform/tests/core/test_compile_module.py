@@ -170,6 +170,18 @@ def test_compile_module_refuses_kernels_needing_different_codegen_options() -> N
     lower.assert_not_called()
 
 
+def test_compile_module_refuses_a_fresh_process_kernel() -> None:
+    fresh = _empty("m")
+    fresh.attrs[compile_impl.COMGR_FRESH_PROCESS_ATTR] = True
+    module = KernelModule(primary=_empty("p"), companions={"merge": fresh})
+    with (
+        mock.patch.object(compile_impl, "_lower_llvm_via_backend") as lower,
+        pytest.raises(ValueError, match="fresh-process compile"),
+    ):
+        compile_module(module, arch="gfx950")
+    lower.assert_not_called()
+
+
 def test_link_entry_point_needs_two_modules() -> None:
     with pytest.raises(ValueError, match="two or more"):
         comgr_impl.build_hsaco_from_llvm_modules(["only"])

@@ -65,7 +65,7 @@ try:
     import yaml
 except ImportError:
     printExit(
-        "You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
+        "You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
     )
 
 try:
@@ -438,7 +438,7 @@ def parseSolutionsData(
 
     versionString = data[0]["MinimumRequiredVersion"]
     if not versionIsCompatible(versionString):
-        printWarning("Version = {} in solution file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in solution file {} does not match TensileLite version = {}" \
                 .format(srcFile, versionString, __version__) )
 
     if "ProblemSizes" not in data[1]:
@@ -705,7 +705,7 @@ def parseLibraryLogicData(
     normalizeLogicProblemType(data["ProblemType"])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
-        printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in library logic file {} does not match TensileLite version = {}" \
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
@@ -759,6 +759,10 @@ def parseLibraryLogicData(
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
+        if len(problemType.get("ScaleBlockSizesA", [])) > 1:
+            args = solutionState.get("CustomKernel", {}).get("args", [])
+            if not any(a.get("semantic") == "ScaleBlockSizeA" for a in args):
+                raise ValueError("ScaleBlockSizesA requires a custom runtime group-size argument")
         # overwrite problemType if any
         solutionState["ProblemType"] = problemType
         if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
@@ -976,7 +980,7 @@ def createLibraryLogic(
     Args:
         schedulePrefix: Schedule name string (e.g. ``"tensilelite"``).
         architectureName: Lowercase GPU architecture tag (e.g. ``"gfx950"``).
-        deviceNames: ROCm / Tensile device name strings for this logic file.
+        deviceNames: ROCm / TensileLite device name strings for this logic file.
         libraryType: Library tuning mode (e.g. ``"GridBased"``, ``"Equality"``).
         logicTuple: ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,
             optional tileSelectionSolutions, optional tileSelectionIndices,

@@ -3205,6 +3205,114 @@ namespace TensileLite
                 }
             };
 
+            // W4A16 group-scale predicates.
+            struct ScaleBlockSizeA
+                : public Predicate_CRTP<ScaleBlockSizeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                ScaleBlockSizeA() = default;
+                ScaleBlockSizeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleBlockSizeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleBlockSizeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleBlockSizeA(), "==", "sol", value);
+                }
+            };
+
+            struct Int4EncodingA : public Predicate_CRTP<Int4EncodingA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                using Encoding = ContractionProblemGemm::Int4Encoding;
+                Encoding value = Encoding::Signed;
+
+                Int4EncodingA() = default;
+                explicit Int4EncodingA(Encoding value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "Int4EncodingA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.int4EncodingA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.int4EncodingA(),
+                                        "==",
+                                        "sol",
+                                        value);
+                }
+            };
+
+            struct ScaleZeroPointA
+                : public Predicate_CRTP<ScaleZeroPointA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                ScaleZeroPointA() = default;
+                ScaleZeroPointA(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "ScaleZeroPointA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.scaleZeroPointA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.scaleZeroPointA(), "==", "sol", value);
+                }
+            };
+
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {

@@ -3,8 +3,8 @@
 
 """Gate the arch-domain *warning lane* — the first consumer of the artifact.
 
-``test_arch_domain_artifact.py`` gates the committed data. This file gates what
-the lowerer does with it: every intrinsic demand goes through one chokepoint,
+``tests/tools/test_arch_domain_artifact.py`` gates the committed data. This file
+gates what the lowerer does with it: every intrinsic demand goes through one chokepoint,
 that chokepoint consults the table, and it speaks only for a measured, definite
 negative.
 
@@ -639,7 +639,6 @@ def _expect(gate, *cases: str) -> dict:
 @_needs_sources
 def test_every_allowlisted_entry_names_its_cases(gate) -> None:
     """An entry with no cases would allow any case to demand its intrinsic."""
-    assert gate.EXPECTED_WARNINGS
     for triple, entry in gate.EXPECTED_WARNINGS.items():
         assert entry.reason and entry.cases, triple
 

@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrilu0_kernel_binsearch.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -219,7 +220,8 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_kernel_binsearch(J m,
+    void csrilu0_kernel_binsearch(J       m,
+                                  int64_t batch_count,
                                   const I* __restrict__ csr_row_ptr,
                                   const J* __restrict__ csr_col_ind,
                                   T*      csr_val,
@@ -245,8 +247,6 @@ namespace rocsparse
                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
                                   bool is_val_host_mode)
     {
-        const auto i = hipBlockIdx_y;
-
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
 
@@ -261,21 +261,25 @@ namespace rocsparse
 
         const double boost_tol = (boost_tol_size == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
-        rocsparse::csrilu0_device_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + i * csr_val_stride,
-            csr_diag_ind,
-            done + i * done_stride,
-            map,
-            zero_pivot + i * zero_pivot_stride,
-            singular_pivot + i * singular_pivot_stride,
-            tolerance,
-            idx_base,
-            boost_enable,
-            boost_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrilu0_device_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_diag_ind,
+                rocsparse::load_pointer(done, batch_index, done_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
+                tolerance,
+                idx_base,
+                boost_enable,
+                boost_tol,
+                boost_val);
+        }
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
@@ -316,7 +320,13 @@ namespace rocsparse
                                          : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
-        dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
+        // A zero batch stride aliases every instance onto the same values, so the
+        // done array is sized for one instance; grid.y and the kernel batch count
+        // must use that collapsed count, matching the hash launch.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
+
+        dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
+                            rocsparse::get_grid_size_y(handle, A_batch_count));
         dim3 csrilu0_threads(BLOCKSIZE);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -326,6 +336,7 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
