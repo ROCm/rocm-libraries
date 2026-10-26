@@ -2898,7 +2898,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     .family = "cdna",
     .target_family = "gfx12_cdna",
     .wave_size = 32,
-    .lds_capacity_bytes = 163840,
+    .lds_capacity_bytes = 327680,
     .vmcnt_bits = 6,
     .mma = {.ops = k_mma_gfx1250.ops, .num_ops = K_NUM(k_mma_gfx1250.ops)},
     .memory = {
