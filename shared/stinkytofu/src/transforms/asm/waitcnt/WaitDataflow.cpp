@@ -740,6 +740,16 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
     };
 
+    // A barrier may carry a fixed pipeline completion contract. In a loop
+    // whose physical LDS banks rotate, entry producers can already be drained
+    // while later trips still require this partial wait. Static token SSA and
+    // the sweep-0 tensor snapshot cannot reconstruct that requirement alone.
+    // Inferred dependencies below may strengthen the contract, never weaken it.
+    if (isBarrier(*inst)) {
+        if (const auto* tensorWait = inst->getModifier<SWaitTensorCntData>())
+            tightenRequired(CK_Tensor, tensorWait->tlcnt);
+    }
+
     // For each src dep on counter `c` that appears in some per-pred
     // queue, contribute its (countFrom - 1) wait via tightenRequired.
     // The final required[c] is min over all (dep, pred) hits because
@@ -1147,6 +1157,18 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // and the queues here are exactly those the wait drains.
                 if (applySpec.tensorCount != WaitCountSpec::kUnused) {
                     applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                    // The explicit contract also names loop-carried producers
+                    // absent from the first-trip queue. Preserve their token
+                    // provenance for downstream wave/cluster synchronization.
+                    const auto* contract = inst->getModifier<SWaitTensorCntData>();
+                    const auto* tokens = inst->getModifier<MemTokenData>();
+                    if (isBarrier(*inst) && contract != nullptr && contract->tlcnt >= 0 &&
+                        tokens != nullptr) {
+                        auto& drained = applySpec.tensorTokens;
+                        drained.insert(drained.end(), tokens->tokens.begin(), tokens->tokens.end());
+                        std::sort(drained.begin(), drained.end());
+                        drained.erase(std::unique(drained.begin(), drained.end()), drained.end());
+                    }
                 }
 
                 for (int c = 0; c < CK_Count; ++c) {
