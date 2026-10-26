@@ -126,8 +126,6 @@ constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
 constexpr std::string_view BLOCK_Q_FIELD = "block_q";
 /// dq: -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
 constexpr std::string_view STORE_DB_FIELD = "store_db";
-/// dq: `direct` loads the bias without staging it in LDS; `auto` stages it.
-constexpr std::string_view BIAS_STAGE_FIELD = "bias_stage";
 /// dq: the dBias reduce kernel's symbol in the same object; empty on an object without one.
 constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 /// The launch geometry of the build: threads per block, the key tile height of dkdv and the
@@ -144,7 +142,6 @@ constexpr std::string_view HEAD_DIM_V_TOKEN = "flydsl_sdpa_bwd_split.head_dim_v"
 constexpr std::string_view DROPOUT_TOKEN = "flydsl_sdpa_bwd_split.dropout";
 constexpr std::string_view DBIAS_TOKEN = "flydsl_sdpa_bwd_split.dbias";
 constexpr std::string_view GQA_PACK_TOKEN = "flydsl_sdpa_bwd_split.gqa_pack";
-constexpr std::string_view BIAS_STAGING_TOKEN = "flydsl_sdpa_bwd_split.bias_staging";
 constexpr std::string_view BATCH_TOKEN = "flydsl_sdpa_bwd_split.batch";
 constexpr std::string_view HEADS_TOKEN = "flydsl_sdpa_bwd_split.heads";
 constexpr std::string_view KV_HEADS_TOKEN = "flydsl_sdpa_bwd_split.kv_heads";
@@ -411,6 +408,16 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
+    // BI-8: the 16-bit bias dQ objects stage the bias through LDS (one dropout row loads it
+    // directly; it serves staged layouts as an alternative). fp32 dQ objects load it directly.
+    if(problem.biasUid != bwd::NO_UID && problem.elementBytes == 2 && !native::stagesBias(problem))
+    {
+        logDecline("bias",
+                   "the bias layout is outside the LDS staging contract the 16-bit dQ objects "
+                   "need (16-byte base, strides multiples of 16 bytes, last row padded to a "
+                   "whole 16-byte chunk)");
+        return std::nullopt;
+    }
 
     // SP-WS: every region of the shared workspace and the dBias scratch is sized by checked
     // arithmetic and proven to lie within the workspace the runtime will allocate.
@@ -444,7 +451,6 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     // graph is served by the non-pack objects, which rebase per head.
     bound[std::string(GQA_PACK_TOKEN)]
         = int64_t{native::packedSpansFit(problem, PACK_MAX_BLOCK_Q) ? 1 : 0};
-    bound[std::string(BIAS_STAGING_TOKEN)] = int64_t{native::stagesBias(problem) ? 1 : 0};
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
@@ -483,7 +489,6 @@ struct Row
     int64_t gqaPack = -1;
     int64_t blockQ = -1;
     int64_t storeDb = -1;
-    std::string biasStage;
     std::string reduceSymbol;
     int64_t blockThreads = 0;
     int64_t blockKv = 0;
@@ -588,14 +593,12 @@ std::optional<Row> readRow(const KernelDefinition& kernel, Slot slot)
     }
 
     const auto storeDb = integerMetadata(kernel, STORE_DB_FIELD);
-    const auto biasStage = stringMetadata(kernel, BIAS_STAGE_FIELD);
     const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
-    if(!storeDb || !biasStage || !blockM)
+    if(!storeDb || !blockM)
     {
         return std::nullopt;
     }
     row.storeDb = *storeDb;
-    row.biasStage = *biasStage;
     row.blockM = *blockM;
     // Read where the graph reduces; an object without a broadcast dBias never names one.
     row.reduceSymbol = stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
@@ -630,7 +633,6 @@ struct GraphFacts
     bool dropout = false;
     bool dbias = false;
     bool gqaPack = false;
-    bool biasStaging = false;
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
@@ -652,15 +654,14 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto dropout = tryGetBoundInt(bound, DROPOUT_TOKEN);
     const auto dbias = tryGetBoundInt(bound, DBIAS_TOKEN);
     const auto gqaPack = tryGetBoundInt(bound, GQA_PACK_TOKEN);
-    const auto biasStaging = tryGetBoundInt(bound, BIAS_STAGING_TOKEN);
     const auto batch = tryGetBoundInt(bound, BATCH_TOKEN);
     const auto numHeads = tryGetBoundInt(bound, HEADS_TOKEN);
     const auto numKvHeads = tryGetBoundInt(bound, KV_HEADS_TOKEN);
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
-    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !biasStaging
-       || !batch || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
+    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !batch
+       || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
     {
         return std::nullopt;
     }
@@ -671,7 +672,6 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *dropout != 0,
                       *dbias != 0,
                       *gqaPack != 0,
-                      *biasStaging != 0,
                       *batch,
                       *numHeads,
                       *numKvHeads,
@@ -803,11 +803,6 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     }
     if constexpr(SLOT == Slot::DQ)
     {
-        // An object that stages the bias through LDS needs the staging contract.
-        if(row->hasBias != 0 && row->biasStage != "direct" && !facts->biasStaging)
-        {
-            return false;
-        }
         // store_db 0 builds the dQ role without its dB store.
         if(facts->dbias && row->storeDb == 0)
         {
