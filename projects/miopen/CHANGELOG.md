@@ -3,6 +3,18 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.3 for ROCm 10.3.0
+
+### Resolved Issues
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
+  `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
+  the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
+  applicable CK instance was never tuned.
+* [Conv] Fixed deterministic-mode tuning of the 3D grouped backward-weights CK xdlops solver, which
+  used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
+  first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
+  one applicable CK instance the enumeration never terminated.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues

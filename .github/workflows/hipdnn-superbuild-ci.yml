@@ -11,6 +11,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
+      - '.github/requirements-hipdnn-superbuild-ci.txt'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -208,11 +209,10 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
-      # DVC the way the other Windows lane installs it (therock-ci-windows.yml),
-      # pinned to the same release. The action drops in the self-contained DVC
-      # installer, so no Python interpreter on this persistent self-hosted runner is
-      # mutated, and the lane does not silently move to a new DVC major. The Linux
-      # job below installs it the same way, for the same reasons.
+      # DVC pinned to an explicit release. The action drops in the self-contained
+      # DVC installer, so no Python interpreter on this persistent self-hosted
+      # runner is mutated, and the lane does not silently move to a new DVC
+      # major. The Linux job below installs it the same way, for the same reasons.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
@@ -273,6 +273,8 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
@@ -280,7 +282,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
             -DPython3_EXECUTABLE="$VENV_PYTHON" \
-            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
@@ -299,25 +302,8 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
-        id: run-tests
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
-
-      # ctest counts a disabled or not-run test as success. Read the junit
-      # "Run tests" wrote and fail if a declared packaging probe (listed in the
-      # manifest configure wrote) did not run or failed. Runs whenever "Run
-      # tests" ran, pass or fail, so a probe failure is reported by name.
-      # --min-probes 1: this lane never builds every architecture the descriptors
-      # name, so a manifest with no probe means discovery broke. Drop the flag if
-      # the lane starts building them all.
-      - name: Check packaging probes ran
-        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
-        run: |
-          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
-            --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt \
-            --min-probes 1
+        run: ctest --test-dir build --output-on-failure --no-tests=error
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -491,10 +477,10 @@ jobs:
       # the .deb on Linux, so no Python interpreter is touched and the version does
       # not drift.
       #
-      # The other Linux lanes in this repo (therock-ci-linux.yml,
-      # component-ci-miopen.yml) call `dvc pull` with no install step, but both run
-      # inside a container image that ships DVC. This job runs on a bare
-      # azure-linux-scale-rocm runner, which does not.
+      # The other Linux lane in this repo (component-ci-miopen.yml) calls
+      # `dvc pull` with no install step, but it runs inside a container image
+      # that ships DVC. This job runs on a bare azure-linux-scale-rocm runner,
+      # which does not.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
@@ -513,6 +499,21 @@ jobs:
           count=$(find dnn-providers/integration-tests/integration-test-bundles -name '*.bin' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
+
+      # test_registry_regeneration.py regenerates the gfx950 attention catalog and
+      # diffs it against the shipped KDP. The rocKE KDPs are DVC-managed (each pointer
+      # names the `ingestor` remote), and this lane packs the example descriptors
+      # rather than the production tree, so nothing else fetches them. Without them
+      # both tests skip, and the tooling suite fails skips inside pytest. Same pull as
+      # the Windows lane, which packs the production tree.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
+          echo "Fetched $count rocKE KDP(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
@@ -535,6 +536,8 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
@@ -544,10 +547,20 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
             -DPython3_EXECUTABLE="$VENV_PYTHON" \
-            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
+
+      # The touch makes the build run flatc again, also when the checkout gives the committed
+      # header a newer timestamp than the schema.
+      - name: Check the committed ingestor plan header matches its schema
+        run: |
+          set -euo pipefail
+          touch dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs
+          cmake --build build --target hkp_generate_ingestor_plan_header
+          git diff --exit-code -- dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
@@ -559,28 +572,35 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
-      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
-        id: run-tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+        run: ctest --test-dir build --output-on-failure --no-tests=error
 
-      # ctest counts a disabled or not-run test as success. Read the junit
-      # "Run tests" wrote and fail if a declared packaging probe (listed in the
-      # manifest configure wrote) did not run or failed. Runs whenever "Run
-      # tests" ran, pass or fail, so a probe failure is reported by name.
-      # --min-probes 1: this lane never builds every architecture the descriptors
-      # name, so a manifest with no probe means discovery broke. Drop the flag if
-      # the lane starts building them all.
-      - name: Check packaging probes ran
-        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+      # The full support matrix is too large to commit (only its overview is,
+      # in dnn-providers/integration-tests/), so publish it from every run.
+      # Both renderers read the committed support-claim sidecars, not the
+      # build, so this runs even when the build or tests failed.
+      - name: Render support matrix
+        if: ${{ !cancelled() }}
         run: |
-          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
-            --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt \
-            --min-probes 1
+          set -euo pipefail
+          scripts=dnn-providers/integration-tests/scripts
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX.md
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" --overview-only \
+            --output build/support-matrix/SUPPORT_MATRIX_GRAPH_OVERVIEW.md
+          "$VENV_PYTHON" "$scripts/support_features/feature_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
+
+      - name: Upload support matrix
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hipdnn-support-matrix
+          path: build/support-matrix/
+          if-no-files-found: error
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.

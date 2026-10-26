@@ -283,6 +283,8 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "page_table_k tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
+    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
 
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
     // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
