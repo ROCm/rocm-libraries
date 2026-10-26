@@ -142,6 +142,26 @@ Tests:
   api_method: 3
   gpu_arch_exclude: '11\d{2}|120\d{1}'
 
+# MXFP8 and MXFP4 grouped GEMM through the grouped C API, with pre-swizzled scales
+# (1001 = Block_32_UE8M0_32_8_EXT), the layout of every gfx950 MX grouped kernel.
+- name: grouped_gemm_c_api_mx_smoke
+  category: smoke
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64, 128]
+  N: [48, 96]
+  K: [256, 512]
+  transA: T
+  transB: N
+  grouped_gemm: 8
+  alpha: 1.0
+  beta: [ 0.0, 1.0 ]
+  norm_check: 1
+  api_method: 3
+  gpu_arch: '950'
+
 # Preserve conjugation independently for A and B during extension setup.
 - name: matmul_ext_complex_support_smoke
   category: smoke

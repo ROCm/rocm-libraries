@@ -5282,6 +5282,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else if(arg.api_method == kApiMethodGroupedC)
         {
+            const bool                      mx = arg.scaleA != hipblaslt_scaling_format::none;
+            std::vector<std::vector<void*>> sa(mx ? block_count : 0,
+                                               std::vector<void*>(gemm_count));
+            std::vector<std::vector<void*>> sb(sa);
+            for(int32_t b = 0; b < int32_t(sa.size()); b++)
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                {
+                    sa[b][gemmIdx] = dScaleA[gemmIdx].as<char>() + b * size_scaleAVec[gemmIdx];
+                    sb[b][gemmIdx] = dScaleB[gemmIdx].as<char>() + b * size_scaleBVec[gemmIdx];
+                }
             groupedC = std::make_unique<GroupedCApiProblem>(handle,
                                                             arg,
                                                             transA,
@@ -5297,6 +5307,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                             db,
                                                             dc,
                                                             dd,
+                                                            sa,
+                                                            sb,
                                                             max_workspace_size);
             EXPECT_HIPBLAS_STATUS(groupedC->status(), HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(groupedC->heuristic(requestAlgoCount, heuristicResult),
