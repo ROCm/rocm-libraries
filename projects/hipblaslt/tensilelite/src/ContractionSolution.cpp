@@ -3958,6 +3958,14 @@ namespace TensileLite
                 case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
                     rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
                     break;
+                // ceil(size / tile) as int64. Every other RR_* kernarg is 32-bit;
+                // appendCustomType would follow a 32-bit declaration and truncate.
+                case CustomArgSemantic::RR_NumTilesM:
+                    rv.args.template append<int64_t>("RR_NumTilesM", wgmKernarg().numTilesM);
+                    break;
+                case CustomArgSemantic::RR_NumTilesN:
+                    rv.args.template append<int64_t>("RR_NumTilesN", wgmKernarg().numTilesN);
+                    break;
 
                 // rocRoller Stream-K. The work decomposition is hoisted into
                 // kernargs; see RocRollerStreamKKernargs.hpp.
