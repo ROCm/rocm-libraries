@@ -57,6 +57,7 @@ function(miopen_apply_ck_compile_definitions target)
     if("${_ck_arch}" MATCHES "gfx950")
         target_compile_definitions(${target} PRIVATE CK_USE_GFX950)
     endif()
+
     if("${_ck_arch}" MATCHES "gfx1250")
         target_compile_definitions(${target} PRIVATE CK_USE_GFX1250)
     endif()

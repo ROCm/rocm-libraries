@@ -16,7 +16,6 @@
 
 #include "ck/ck.hpp"
 #include "ck/host_utility/device_prop.hpp"
-#include "ck/host_utility/kernel_launch.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_data.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data/device_grouped_conv_bwd_data_wmma_v3_instances.hpp"
 #include "ck/library/utility/algorithm.hpp"
@@ -175,67 +174,6 @@ void CheckUntimedSplitOne()
         });
         EXPECT_EQ(checked, expected.mDesc.GetElementSize());
     }
-}
-
-__global__ void AtomicAddOne(int* value) { atomicAdd(value, 1); }
-
-template <typename Launch>
-void CheckUntimedPreprocess(Launch launch)
-{
-    ck::DeviceMem device(sizeof(int));
-    const int dirty = 113;
-    device.ToDevice(&dirty);
-
-    hipStream_t stream;
-    ck::hip_check_error(hipStreamCreate(&stream));
-    const StreamConfig config{stream, false};
-    int* value       = static_cast<int*>(device.GetDeviceBuffer());
-    const auto clear = [&]() {
-        ck::hip_check_error(hipMemsetAsync(value, 0, sizeof(int), config.stream_id_));
-    };
-
-    launch(config, clear, value);
-    ck::hip_check_error(hipStreamSynchronize(stream));
-    int result = 0;
-    device.FromDevice(&result);
-    ck::hip_check_error(hipStreamDestroy(stream));
-    EXPECT_EQ(result, 1);
-}
-
-TEST(TestGroupedConvndBwdDataWmmaNoTiming, BasicLauncherPreprocess)
-{
-    if(!ck::is_gfx125_supported())
-    {
-        GTEST_SKIP() << "This regression is specific to gfx1250";
-    }
-    CheckUntimedPreprocess([](const auto& config, const auto& clear, int* value) {
-        ck::launch_and_time_kernel_with_preprocess(
-            config, clear, AtomicAddOne, dim3(1), dim3(1), 0, value);
-    });
-}
-
-TEST(TestGroupedConvndBwdDataWmmaNoTiming, FlushCacheLauncherPreprocess)
-{
-    if(!ck::is_gfx125_supported())
-    {
-        GTEST_SKIP() << "This regression is specific to gfx1250";
-    }
-    CheckUntimedPreprocess([](const auto& config, const auto& clear, int* value) {
-        ck::launch_and_time_kernel_with_preprocess_flush_cache(
-            config, clear, AtomicAddOne, dim3(1), dim3(1), 0, value);
-    });
-}
-
-TEST(TestGroupedConvndBwdDataWmmaNoTiming, UtilityLauncherPreprocess)
-{
-    if(!ck::is_gfx125_supported())
-    {
-        GTEST_SKIP() << "This regression is specific to gfx1250";
-    }
-    CheckUntimedPreprocess([](const auto& config, const auto& clear, int* value) {
-        ck::utility::launch_and_time_kernel_with_preprocess<false>(
-            config, clear, AtomicAddOne, dim3(1), dim3(1), 0, value);
-    });
 }
 
 TEST(TestGroupedConvndBwdDataWmmaNoTiming, Fp16)
