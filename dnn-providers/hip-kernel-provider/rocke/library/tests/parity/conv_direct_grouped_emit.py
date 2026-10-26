@@ -19,7 +19,8 @@
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
 # DwWgradLdsSpec and WgradGatherSpec, from index 148 the bf16
 # DirectConv4cSpec, and from index 151 the depthwise forward kernels
-# on the wave32 gfx1250), builds the kernel
+# on the wave32 gfx1250, from index 156 their channel-packed cpl > 1
+# forms), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -453,6 +454,86 @@ def _wave32_spec(idx: int):
         return (
             "dw",
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx1250",
+        )
+    # Channel-packed (cpl > 1) depthwise forward: row-streaming and tiled.
+    if idx == 5:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 6:
+        p = _dwp_fwd(2, 15, 15, 96, 5, 2, 2, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=4, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 7:
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 8:
+        p = _dwp_fwd(2, 17, 17, 128, 7, 3, 2, "fp16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p,
+                block_w=4,
+                block_h=2,
+                block_waves=1,
+                unroll_rows=True,
+                wave_size=32,
+                cpl=4,
+            ),
+            "gfx1250",
+        )
+    if idx == 9:
+        p = _dwp_fwd(2, 12, 12, 64, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=1, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 10:
+        # wave64 target.
+        p = _dwp_fwd(2, 14, 14, 128, 3, 1, 1, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1, cpl=2),
+            "gfx950",
+        )
+    if idx == 11:
+        # Both engines reject: 98 channels are not a multiple of cpl 4.
+        p = _dwp_fwd(2, 14, 14, 98, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 12:
+        # Both engines reject: cpl must be 1, 2 or 4.
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=1, wave_size=32, cpl=3
+            ),
             "gfx1250",
         )
     return None
