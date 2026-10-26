@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipblaslt/client/MatmulPreparation.hpp>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 
 #include "hipblaslt_datatype2string.hpp"
 #include "utility.hpp"
 #include "w4a16_datagen.hpp"
 
+#include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 
 namespace hipblaslt::client
@@ -360,8 +363,8 @@ namespace hipblaslt::client
                     else if(arguments.bias_source == hipblaslt_bias_source::b)
                         preparedProblem.biasElements = problem.n;
 
-                    if(arguments.bias_stride > 0)
-                        preparedProblem.biasElements = arguments.bias_stride * problem.batchCount;
+                    preparedProblem.biasElements = hipblaslt_bench::rotating_bias_elements(
+                        preparedProblem.biasElements, arguments.bias_stride, problem.batchCount);
                 }
 
                 preparedProblem.epilogue = matmulEpilogue(arguments);
@@ -377,49 +380,36 @@ namespace hipblaslt::client
                     preparedProblem.b.scaleElements = 1;
             }
 
-            const size_t biasBytes
-                = preparedProblem.biasElements * realDataTypeSize(dataTypes.biasStorage);
-            const size_t inputCBytes
-                = compute_type_value_as_double(preparedProblem.beta, dataTypes.computeScalar) == 0
-                      ? 0
-                      : problem.c.allocationElements * realDataTypeSize(problem.c.apiType);
-            const auto scaleBytes
-                = [&](const PreparedMatmulOperand& operand, hipblaslt_scaling_format format) {
-                      return isBlockScaling(format) || isW4A16Scaling(format)
-                                 ? operand.scaleElements * static_cast<size_t>(problem.batchCount)
-                                 : operand.scaleElements * realDataTypeSize(dataTypes.coefficient);
-                  };
-            if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
-            {
-                preparation.rotatingBytes
-                    += preparedProblem.a.elements * realDataTypeSize(problem.a.apiType)
-                       + preparedProblem.b.elements * realDataTypeSize(problem.b.apiType)
-                       + inputCBytes
-                       + problem.d.allocationElements * realDataTypeSize(problem.d.apiType)
-                       + problem.auxiliaryAllocationElements()
-                             * realDataTypeSize(dataTypes.auxiliary)
-                       + biasBytes
-                       + preparedProblem.scaleAlphaElements
-                             * realDataTypeSize(dataTypes.coefficient)
-                       + scaleBytes(preparedProblem.a, arguments.scaleA)
-                       + scaleBytes(preparedProblem.b, arguments.scaleB);
-            }
-            else
-            {
-                preparation.rotatingBytes
-                    += preparedProblem.a.elements * realDataTypeSize(problem.a.apiType)
-                           * problem.batchCount
-                       + preparedProblem.b.elements * realDataTypeSize(problem.b.apiType)
-                             * problem.batchCount
-                       + inputCBytes * problem.batchCount
-                       + problem.d.allocationElements * realDataTypeSize(problem.d.apiType)
-                             * problem.batchCount
-                       + biasBytes
-                       + preparedProblem.scaleAlphaElements
-                             * realDataTypeSize(dataTypes.coefficient)
-                       + scaleBytes(preparedProblem.a, arguments.scaleA)
-                       + scaleBytes(preparedProblem.b, arguments.scaleB);
-            }
+            const auto bytes = [](size_t elements, size_t elementBytes) {
+                const auto boundedElements
+                    = std::min(elements, static_cast<size_t>(std::numeric_limits<int64_t>::max()));
+                return hipblaslt_bench::size_mul(boundedElements, elementBytes);
+            };
+            const auto scaleBytes = [&](const PreparedMatmulOperand& operand,
+                                        hipblaslt_scaling_format     format) {
+                return isBlockScaling(format) || isW4A16Scaling(format)
+                           ? bytes(operand.scaleElements, problem.batchCount)
+                           : bytes(operand.scaleElements, realDataTypeSize(dataTypes.coefficient));
+            };
+            hipblaslt_bench::RotatingTensors tensors;
+            tensors.a = bytes(preparedProblem.a.elements, realDataTypeSize(problem.a.apiType));
+            tensors.b = bytes(preparedProblem.b.elements, realDataTypeSize(problem.b.apiType));
+            tensors.c = bytes(problem.c.allocationElements, realDataTypeSize(problem.c.apiType));
+            tensors.d = bytes(problem.d.allocationElements, realDataTypeSize(problem.d.apiType));
+            tensors.e = bytes(problem.auxiliaryAllocationElements(),
+                              realDataTypeSize(dataTypes.auxiliary));
+            tensors.bias
+                = bytes(preparedProblem.biasElements, realDataTypeSize(dataTypes.biasStorage));
+            tensors.scale_alpha_vec = bytes(preparedProblem.scaleAlphaElements,
+                                            realDataTypeSize(dataTypes.coefficient));
+            tensors.scale_a         = scaleBytes(preparedProblem.a, arguments.scaleA);
+            tensors.scale_b         = scaleBytes(preparedProblem.b, arguments.scaleB);
+            tensors.reads_c
+                = compute_type_value_as_double(preparedProblem.beta, dataTypes.computeScalar) != 0;
+            tensors.general_batched   = problem.batchMode != HIPBLASLT_BATCH_MODE_STRIDED;
+            tensors.num_batches       = problem.batchCount;
+            preparation.rotatingBytes = hipblaslt_bench::size_add(
+                preparation.rotatingBytes, hipblaslt_bench::rotating_block_bytes(tensors));
         }
 
         return preparation;

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <limits>
 #include <stdexcept>
 
 namespace
@@ -303,6 +304,22 @@ TEST(MatmulPreparation, CountsPointerArrayStoragePerBatch)
     EXPECT_EQ(preparation.problems.front().a.elements, 28);
     EXPECT_EQ(preparation.problems.front().b.elements, 40);
     EXPECT_EQ(preparation.rotatingBytes, 948);
+}
+
+TEST(MatmulPreparation, SaturatesUnrepresentableRotatingFootprint)
+{
+    auto arguments   = baseArguments();
+    arguments.M[0]   = int64_t{1} << 62;
+    arguments.N[0]   = 1;
+    arguments.K[0]   = 1;
+    arguments.lda[0] = arguments.M[0];
+    arguments.ldb[0] = 1;
+    arguments.ldc[0] = arguments.M[0];
+    arguments.ldd[0] = arguments.M[0];
+
+    const auto preparation = prepare(arguments);
+
+    EXPECT_EQ(preparation.rotatingBytes, std::numeric_limits<int64_t>::max());
 }
 
 TEST(MatmulPreparation, CountsDistinctCAndDStorageTypes)
