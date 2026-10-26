@@ -81,9 +81,11 @@ namespace TensileLite
                     else
                         lib.libraryDirectory = '.';
 
-                    //Extract file extension
+                    // Extract the file extension. An in-memory library has no
+                    // filename, and rfind then returns npos.
                     size_t periodPos = ctx->filename.rfind('.');
-                    lib.suffix       = ctx->filename.substr(periodPos);
+                    if(periodPos != std::string::npos)
+                        lib.suffix = ctx->filename.substr(periodPos);
 
                     for(auto condition : ctx->preloaded)
                     {
