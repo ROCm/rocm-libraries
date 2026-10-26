@@ -1210,12 +1210,11 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             }
             // Ask the concrete operation about this actual, workspace-bound
             // argument. Its complete invocation must define every logical output.
-            const bool skip_output_init = [&] {
+            const bool skip_output_init = can_skip_output_init2 && safe_to_borrow && [&] {
                 if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> ||
                              std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
                 {
-                    return can_skip_output_init2 && safe_to_borrow &&
-                           ck::tensor_operation::device::IsOutputFullyDefined(*sh_conv_ptr2,
+                    return ck::tensor_operation::device::IsOutputFullyDefined(*sh_conv_ptr2,
                                                                               argument_ptr.get());
                 }
                 else
