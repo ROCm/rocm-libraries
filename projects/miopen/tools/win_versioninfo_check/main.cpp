@@ -1,5 +1,5 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 // Windows-only build-time check (ROCM-20937): verifies that each DLL named on the command line
 // has an embedded PE VERSIONINFO resource whose FILEVERSION matches the configured project
@@ -49,7 +49,9 @@ bool CheckNonEmptyStringField(void* block,
     return true;
 }
 
-bool CheckOneDll(const std::wstring& dll_path, const std::wstring& expected_version, bool& any_failed)
+bool CheckOneDll(const std::wstring& dll_path,
+                 const std::wstring& expected_version,
+                 bool& any_failed)
 {
     DWORD handle    = 0;
     DWORD info_size = GetFileVersionInfoSizeW(dll_path.c_str(), &handle);
