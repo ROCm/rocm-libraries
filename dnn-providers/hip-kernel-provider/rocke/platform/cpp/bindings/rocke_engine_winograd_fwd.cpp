@@ -57,8 +57,9 @@ WfwdSel wfwd_build(const py::dict& d, std::deque<std::string>& store)
     s.tiles_per_thread = dict_int(d, "tiles_per_thread", s.tiles_per_thread);
     if(dict_str(d, "prescale_mode", v))
         s.prescale_mode = keep(store, v);
-    if(d.contains("input_block_tiles") && !d["input_block_tiles"].is_none())
+    if(d.contains("input_block_tiles"))
     {
+        reject_none(d, "input_block_tiles");
         auto t = d["input_block_tiles"].cast<std::vector<int>>();
         if(t.size() != 2)
             throw py::value_error("input_block_tiles must have two entries");

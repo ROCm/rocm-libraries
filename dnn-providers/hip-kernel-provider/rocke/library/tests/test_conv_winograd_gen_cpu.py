@@ -321,3 +321,72 @@ def test_driver_rejected_variant_fails_verify(driver, monkeypatch):
     argv = ["--miopen-cmd", cmd, "--variant", "4", "--arch", "gfx1250"]
     assert B.main(argv + ["--verify"]) == 1
     assert B.main(argv) == 0
+
+
+def _binding_cases():
+    """``(name, serialize_ir, good dict)`` for each Winograd binding."""
+    from rocke.core import backend as BE
+    from kernels.common.conv_winograd_fwd import WinogradFwdSpec
+    from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
+
+    eng = pytest.importorskip("rocke_engine")
+    p3 = ConvProblem(N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1)
+    p1 = ConvProblem(N=1, Hi=1, Wi=64, C=32, K=32, Y=1, X=3, pW=1)
+    gen = WG.WinogradGenSpec(problem=p1, ax_y=WG.WinoAxis(1, 1), ax_x=WG.WinoAxis(4, 3))
+    return [
+        (
+            "fwd",
+            eng.conv_winograd_fwd_serialize_ir,
+            BE.conv_winograd_fwd_spec_to_dict(WinogradFwdSpec(problem=p3), "K2"),
+        ),
+        (
+            "gemm",
+            eng.conv_winograd_gemm_wmma_serialize_ir,
+            BE.conv_winograd_gemm_wmma_spec_to_dict(WinogradGemmWmmaSpec()),
+        ),
+        (
+            "gen",
+            eng.conv_winograd_gen_serialize_ir,
+            BE.conv_winograd_gen_spec_to_dict(gen, "K2"),
+        ),
+        (
+            "fused",
+            eng.conv_winograd_fused_1d_wmma_serialize_ir,
+            BE.conv_winograd_fused_1d_spec_to_dict(
+                _fspec(problem=p1, ax=WG.WinoAxis(4, 3))
+            ),
+        ),
+    ]
+
+
+def test_bindings_default_only_absent_keys():
+    """The C++ Winograd bindings default a key only when it is absent: a
+    present ``None`` (``m``, ``io_dtype``, ``nt_stores``, ...) is refused
+    rather than read as the default, and the axis ``m`` / ``r`` the Python
+    ``WinoAxis`` requires are required (absent or ``None``)."""
+    for name, ser, good in _binding_cases():
+        assert ser(good, "gfx1250")
+        nested = [k for k, v in good.items() if isinstance(v, dict)]
+        for key, val in good.items():
+            if key in nested or val is None or key == "sched":
+                continue
+            bad = dict(good, **{key: None})
+            with pytest.raises(ValueError, match=f"{key} must not be None"):
+                ser(bad, "gfx1250")
+        for nk in nested:
+            for key in good[nk]:
+                if good[nk][key] is None:
+                    continue
+                bad = dict(good, **{nk: dict(good[nk], **{key: None})})
+                with pytest.raises(ValueError, match=f"{key}"):
+                    ser(bad, "gfx1250")
+        for nk in ("ax", "ax_y", "ax_x"):
+            if nk not in good:
+                continue
+            for key in ("m", "r"):
+                ax = {k: v for k, v in good[nk].items() if k != key}
+                with pytest.raises(ValueError, match=f"{nk} requires {key}"):
+                    ser(dict(good, **{nk: ax}), "gfx1250")
+    # sched=None is a value of the GEMM spec (no scheduler strategy).
+    _, ser, good = _binding_cases()[1]
+    assert ser(dict(good, sched=None), "gfx1250")

@@ -29,8 +29,9 @@ rocke_wino_axis_t axis_from(const py::dict& d, const char* key)
     if(a.contains("pts") && !a["pts"].is_none())
         throw py::value_error("the C++ engine supports the default Winograd points only");
     rocke_wino_axis_t ax;
-    ax.m = dict_int(a, "m", 0);
-    ax.r = dict_int(a, "r", 0);
+    const std::string what = std::string("WinogradGenSpec.") + key;
+    ax.m = dict_required_int(a, "m", what.c_str());
+    ax.r = dict_required_int(a, "r", what.c_str());
     ax.seg = dict_int(a, "seg", 1);
     return ax;
 }

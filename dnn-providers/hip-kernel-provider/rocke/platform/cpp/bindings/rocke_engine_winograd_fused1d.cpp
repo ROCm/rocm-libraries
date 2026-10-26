@@ -37,8 +37,8 @@ rocke_winograd_fused_1d_spec_t fu_build_spec(const py::dict& d, std::deque<std::
         if(ax.contains("pts") && !ax["pts"].is_none())
             throw py::value_error("FusedWino1DSpec: the C++ engine supports the default "
                                   "interpolation points only (ax.pts must be None)");
-        s.ax_m = dict_int(ax, "m", s.ax_m);
-        s.ax_r = dict_int(ax, "r", s.ax_r);
+        s.ax_m = dict_required_int(ax, "m", "FusedWino1DSpec.ax");
+        s.ax_r = dict_required_int(ax, "r", "FusedWino1DSpec.ax");
         s.ax_seg = dict_int(ax, "seg", s.ax_seg);
     }
     s.q = dict_int(d, "q", s.q);

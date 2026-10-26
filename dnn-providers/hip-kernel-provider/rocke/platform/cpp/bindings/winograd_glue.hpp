@@ -33,28 +33,47 @@ namespace rocke_wino_bind
 {
 namespace py = pybind11;
 
+/* The dict readers default only an absent key: a key present with None is
+ * malformed input (the Python specs take no None for these fields) and is
+ * refused rather than read as the default. */
+inline void reject_none(const py::dict& d, const char* key)
+{
+    if(d[key].is_none())
+        throw py::value_error(std::string(key) + " must not be None");
+}
+
 inline int dict_int(const py::dict& d, const char* key, int dflt)
 {
-    if(d.contains(key) && !d[key].is_none())
-        return d[key].cast<int>();
-    return dflt;
+    if(!d.contains(key))
+        return dflt;
+    reject_none(d, key);
+    return d[key].cast<int>();
+}
+
+/* A field the Python spec requires: absent or None is refused. */
+inline int dict_required_int(const py::dict& d, const char* key, const char* what)
+{
+    if(!d.contains(key))
+        throw py::value_error(std::string(what) + " requires " + key);
+    reject_none(d, key);
+    return d[key].cast<int>();
 }
 
 inline bool dict_bool(const py::dict& d, const char* key, bool dflt)
 {
-    if(d.contains(key) && !d[key].is_none())
-        return d[key].cast<bool>();
-    return dflt;
+    if(!d.contains(key))
+        return dflt;
+    reject_none(d, key);
+    return d[key].cast<bool>();
 }
 
 inline bool dict_str(const py::dict& d, const char* key, std::string& out)
 {
-    if(d.contains(key) && !d[key].is_none())
-    {
-        out = d[key].cast<std::string>();
-        return true;
-    }
-    return false;
+    if(!d.contains(key))
+        return false;
+    reject_none(d, key);
+    out = d[key].cast<std::string>();
+    return true;
 }
 
 /* A string field kept alive for the lifetime of the spec. */
