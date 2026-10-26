@@ -5,6 +5,8 @@
 
 #include <string>
 
+#include "harness/bundle/CaseOutcome.hpp"
+#include "harness/bundle/OutcomeReportLog.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
@@ -57,6 +59,14 @@ public:
     /// compared. Called once per verification body, including one that throws
     /// before it reaches an outcome. Support-claim authoring runs do not call it.
     virtual void recordVerifier(const std::string& bundlePath, Verifier verifier) = 0;
+
+    /// A bundle test began. Published first thing in SetUp(), so a test the process dies
+    /// in is on the report as a `started` with no `finished`.
+    virtual void recordCaseStarted(const CaseIdentity& identity) = 0;
+
+    /// A bundle test ended. Exactly once per test that published a start, whichever way
+    /// it ended: a SetUp() skip, a thrown exception and an authoring run included.
+    virtual void recordCaseOutcome(const CaseOutcomeRecord& record) = 0;
 };
 
 /// The production sinks: the run's coverage counters, verdict table,
@@ -109,6 +119,16 @@ public:
     void recordVerifier(const std::string& bundlePath, Verifier verifier) override
     {
         VerifierTally::get().record(bundlePath, verifier);
+    }
+
+    void recordCaseStarted(const CaseIdentity& identity) override
+    {
+        OutcomeReportLog::get().append(startedRecordJson(identity));
+    }
+
+    void recordCaseOutcome(const CaseOutcomeRecord& record) override
+    {
+        OutcomeReportLog::get().append(finishedRecordJson(record));
     }
 };
 

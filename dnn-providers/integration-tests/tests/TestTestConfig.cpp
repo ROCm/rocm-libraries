@@ -177,6 +177,39 @@ TEST(TestResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
     EXPECT_FALSE(result.has_value());
 }
 
+TEST(TestResolveOutcomeReportPath, CliValueWinsOverEnv)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT", "/from/env.jsonl");
+    const std::filesystem::path cliPath = "/from/cli.jsonl";
+    const auto result = resolveOutcomeReportPath(cliPath);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, cliPath);
+}
+
+TEST(TestResolveOutcomeReportPath, EnvIsUsedWhenThereIsNoCliValue)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT", "/from/env.jsonl");
+    const auto result = resolveOutcomeReportPath(std::nullopt);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, std::filesystem::path("/from/env.jsonl"));
+}
+
+TEST(TestResolveOutcomeReportPath, NulloptCliWithoutEnvReturnsNullopt)
+{
+    using hipdnn_integration_tests::resolveOutcomeReportPath;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_OUTCOME_REPORT");
+    const auto result = resolveOutcomeReportPath(std::nullopt);
+    EXPECT_FALSE(result.has_value());
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
@@ -258,6 +291,16 @@ TEST_F(TestConfigInitialized, HasGoldenDataDirReturnsFalseWhenNotProvided)
 TEST_F(TestConfigInitialized, GetGoldenDataDirThrowsWhenNotProvided)
 {
     EXPECT_THROW(TestConfig::get().getGoldenDataDir(), std::runtime_error);
+}
+
+TEST_F(TestConfigInitialized, HasOutcomeReportReturnsFalseWhenNotProvided)
+{
+    EXPECT_FALSE(TestConfig::get().hasOutcomeReport());
+}
+
+TEST_F(TestConfigInitialized, GetOutcomeReportThrowsWhenNotProvided)
+{
+    EXPECT_THROW(TestConfig::get().getOutcomeReport(), std::runtime_error);
 }
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)

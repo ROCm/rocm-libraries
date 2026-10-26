@@ -72,18 +72,34 @@ GraphSession IntegrationBundleVerificationHarness::openGraph()
     return _deps.engineRunner->openGraph(*_bundle, _engineUnderTest);
 }
 
-void IntegrationBundleVerificationHarness::applyMetadataGuards() const
+void IntegrationBundleVerificationHarness::applyMetadataGuards()
 {
     if(auto reason = checkVramRequirement(_bundle->metadata, _deps.policy.deviceVramMb))
     {
-        noteSkipBeforeObservation();
+        noteSetupSkip(*reason);
         GTEST_SKIP() << *reason;
     }
 
     if(auto reason = checkArchCompatibility(_bundle->metadata, _deps.policy.arch))
     {
-        noteSkipBeforeObservation();
+        noteSetupSkip(*reason);
         GTEST_SKIP() << *reason;
+    }
+}
+
+std::string IntegrationBundleVerificationHarness::describeCurrentException()
+{
+    try
+    {
+        throw;
+    }
+    catch(const std::exception& e)
+    {
+        return e.what();
+    }
+    catch(...)
+    {
+        return "an exception that is not a std::exception";
     }
 }
 
@@ -131,9 +147,10 @@ ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSessio
     return phase;
 }
 
-void IntegrationBundleVerificationHarness::raiseComplaints(
+bool IntegrationBundleVerificationHarness::raiseComplaints(
     std::initializer_list<std::optional<HarnessComplaint>> complaints)
 {
+    bool raised = false;
     for(const auto& complaint : complaints)
     {
         if(!complaint.has_value())
@@ -144,7 +161,9 @@ void IntegrationBundleVerificationHarness::raiseComplaints(
         // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
         // an outcome to report and possibly a second complaint to raise.
         ADD_FAILURE() << complaint->message;
+        raised = true;
     }
+    return raised;
 }
 
 // The decision is finalizeClaims(); this only publishes what it returns. results is
@@ -201,9 +220,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     if(level == EnforcementLevel::FULL)
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED,
-            FailureOrigin::HARNESS,
-            "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal path");
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "enforceAtLevel() handles APPLICABILITY/BUILDABLE only; FULL uses the normal "
+                   "path")
+            .atStage(OutcomeStage::SETUP);
     }
 
     // The rung itself needs a named engine to check applicability against; claim
@@ -225,8 +246,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     // Same applicability answer the claim verdict and the executor read.
     if(!session.engines.accepted)
     {
-        return unverifiable("Engine " + _engineUnderTest->name + " does not support this graph ("
-                            + asked + ")");
+        // A decline only when the query resolved: an unresolved one leaves "does the
+        // engine take it" unknown, and unknown is not declined.
+        auto outcome = unverifiable("Engine " + _engineUnderTest->name
+                                    + " does not support this graph (" + asked + ")")
+                           .atStage(OutcomeStage::QUERY);
+        outcome.declined = isResolved(session.engines.status.get_code());
+        return outcome;
     }
 
     if(level == EnforcementLevel::APPLICABILITY)
@@ -245,13 +271,16 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     {
         return unverifiable("Engine " + _engineUnderTest->name
                             + " declined this graph while compiling plans (enforcement_level="
-                            + rung + "): " + built.message);
+                            + rung + "): " + built.message)
+            .atStage(OutcomeStage::BUILD)
+            .asDecline();
     }
     if(!built.ok)
     {
         return VerificationOutcome::failed(VerificationDepth::APPLICABLE,
                                            FailureOrigin::ENGINE,
-                                           "[rung=buildable] " + built.message);
+                                           "[rung=buildable] " + built.message)
+            .atStage(OutcomeStage::BUILD);
     }
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
@@ -320,7 +349,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     {
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::ENGINE,
-                                           "from_binary failed: " + session.buildError);
+                                           "from_binary failed: " + session.buildError)
+            .atStage(OutcomeStage::GRAPH);
     }
 
     // --skip-graph-validation caps every bundle at the applicability rung, the same one
@@ -362,8 +392,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     case VerificationMode::AUTO:
         return runReferenceMode(session);
     default:
-        return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, "Unknown verification mode");
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "Unknown verification mode")
+            .atStage(OutcomeStage::SETUP);
     }
 }
 
@@ -454,7 +486,9 @@ VerificationOutcome
         {
             msg << ": " << run.message;
         }
-        return VerificationOutcome::skipped(reached, msg.str());
+        auto skipped = VerificationOutcome::skipped(reached, msg.str()).atStage(run.stage);
+        skipped.declined = run.decline;
+        return skipped;
     }
 
     // ERRORED: the engine broke while compiling or executing, and the runner handed
@@ -469,7 +503,8 @@ VerificationOutcome
     {
         msg << ": " << run.message;
     }
-    return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, msg.str());
+    return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, msg.str())
+        .atStage(run.stage);
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSession& session)
@@ -481,10 +516,11 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     if(!_bundle->hasGoldenOutputs)
     {
         return VerificationOutcome::failed(
-            VerificationDepth::NOT_REACHED,
-            FailureOrigin::HARNESS,
-            "verification-mode=golden was requested but this bundle has no golden "
-            "data; run `dvc pull` for it, or use --verification-mode=auto");
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "verification-mode=golden was requested but this bundle has no golden "
+                   "data; run `dvc pull` for it, or use --verification-mode=auto")
+            .atStage(OutcomeStage::SETUP);
     }
 
     auto engine = runEngine(session);
@@ -575,10 +611,12 @@ VerificationOutcome
             // goes in the reference-error report.
             return VerificationOutcome::failed(VerificationDepth::EXECUTED,
                                                FailureOrigin::HARNESS,
-                                               label + " was not run: " + result.message);
+                                               label + " was not run: " + result.message)
+                .atStage(OutcomeStage::ORACLE);
         default:
             return VerificationOutcome::failed(
-                VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
+                       VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus")
+                .atStage(OutcomeStage::ORACLE);
         }
     }
 
@@ -601,7 +639,8 @@ VerificationOutcome
     message.append("; ").append(describeTried(chain));
     message.append(" (").append(_bundlePath.string()).append(")");
     return VerificationOutcome::failed(
-        VerificationDepth::EXECUTED, FailureOrigin::ORACLE, std::move(message));
+               VerificationDepth::EXECUTED, FailureOrigin::ORACLE, std::move(message))
+        .atStage(OutcomeStage::ORACLE);
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleChain& chain)
@@ -620,7 +659,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleC
 
     return VerificationOutcome::failed(VerificationDepth::EXECUTED,
                                        refErrored ? FailureOrigin::ORACLE : FailureOrigin::HARNESS,
-                                       recordUnverifiable(reason));
+                                       recordUnverifiable(reason))
+        .atStage(OutcomeStage::ORACLE);
 }
 
 std::string IntegrationBundleVerificationHarness::describeTried(const OracleChain& chain) const
@@ -676,7 +716,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::HARNESS,
                                            std::string("tensor data failed to load: ") + e.what()
-                                               + " (" + _bundlePath.string() + ")");
+                                               + " (" + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
     }
     return std::nullopt;
 }
@@ -733,7 +774,8 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
                                            FailureOrigin::HARNESS,
                                            std::string(e.what()) + " (" + _bundlePath.string()
                                                + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on "
-                                                 "the host");
+                                                 "the host")
+            .atStage(OutcomeStage::SETUP);
     }
     if(!fillResult.filled)
     {
@@ -799,6 +841,10 @@ IntegrationBundleVerificationHarness::EngineRunResult
                           ? "Engine " + _engineUnderTest->name + " does not support this graph ("
                                 + summary + ")"
                           : "No engine supports this graph (" + summary + ")";
+        run.stage = OutcomeStage::QUERY;
+        // Nobody can say an engine declined when the query did not resolve, or when no
+        // engine was named to be absent from the list.
+        run.decline = _engineUnderTest.has_value() && isResolved(session.engines.status.get_code());
         return run;
     }
 
@@ -813,16 +859,25 @@ IntegrationBundleVerificationHarness::EngineRunResult
 
     run.plansBuilt = result.plansBuilt;
 
+    // Plans compile before anything executes, so where the engine stopped follows from
+    // how far it got.
+    const OutcomeStage stoppedAt = result.plansBuilt ? OutcomeStage::EXECUTE : OutcomeStage::BUILD;
+
     if(result.declined)
     {
+        // A decline after the engine was handed the graph is still the engine saying
+        // "not mine"; it is the late NOT_SUPPORTED, which is not this.
         run.status = EngineStatus::DECLINED;
         run.message = result.message;
+        run.stage = stoppedAt;
+        run.decline = true;
         return run;
     }
     if(!result.ok)
     {
         run.status = EngineStatus::ERRORED;
         run.message = result.message;
+        run.stage = stoppedAt;
         return run;
     }
 
@@ -942,7 +997,8 @@ std::string IntegrationBundleVerificationHarness::recordUnverifiable(const std::
 VerificationOutcome IntegrationBundleVerificationHarness::unverifiable(const std::string& reason,
                                                                        VerificationDepth reached)
 {
-    return VerificationOutcome::skipped(reached, recordUnverifiable(reason));
+    return VerificationOutcome::skipped(reached, recordUnverifiable(reason))
+        .atStage(OutcomeStage::SETUP);
 }
 
 void IntegrationBundleVerificationHarness::recordRefError(const std::string& reason)

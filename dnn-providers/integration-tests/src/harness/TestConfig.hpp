@@ -145,6 +145,23 @@ inline std::optional<std::filesystem::path>
     return std::nullopt;
 }
 
+// Resolve the outcome-report path: CLI value wins, then HIPDNN_TEST_OUTCOME_REPORT,
+// then nullopt (no report).
+inline std::optional<std::filesystem::path>
+    resolveOutcomeReportPath(std::optional<std::filesystem::path> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_OUTCOME_REPORT");
+    if(!envVal.empty())
+    {
+        return std::filesystem::path(envVal);
+    }
+    return std::nullopt;
+}
+
 struct TestConfigOptions
 {
     std::optional<std::filesystem::path> articlePath;
@@ -158,6 +175,7 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
+    std::optional<std::filesystem::path> outcomeReport;
     // Off here, on at the command line: main.cpp resolves --enforce-support-claims
     // (default true) and its opt-out into this field before initializing. In-process
     // callers get the inert value, so a test that never mentions claims cannot be
@@ -259,6 +277,7 @@ public:
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._validatorDevice = resolveValidatorDevice(opts.validatorDevice);
         instance._captureDir = std::move(opts.captureDir);
+        instance._outcomeReport = resolveOutcomeReportPath(std::move(opts.outcomeReport));
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -445,6 +464,25 @@ public:
         return _goldenDataDir.value();
     }
 
+    // Where the per-case outcome report (JSON Lines) is appended. Resolved once at
+    // init: CLI flag > HIPDNN_TEST_OUTCOME_REPORT env var > none.
+    bool hasOutcomeReport() const
+    {
+        throwIfNotInitialized();
+        return _outcomeReport.has_value();
+    }
+
+    const std::filesystem::path& getOutcomeReport() const
+    {
+        throwIfNotInitialized();
+        if(!_outcomeReport.has_value())
+        {
+            throw std::runtime_error(
+                "getOutcomeReport() called but --outcome-report was not provided");
+        }
+        return _outcomeReport.value();
+    }
+
     // Bundle verification mode. Resolved once at init: CLI flag >
     // HIPDNN_TEST_VERIFICATION_MODE env var > AUTO default.
     VerificationMode getVerificationMode() const
@@ -509,6 +547,7 @@ private:
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
+    std::optional<std::filesystem::path> _outcomeReport;
     std::optional<VerificationMode> _verificationMode;
     std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;

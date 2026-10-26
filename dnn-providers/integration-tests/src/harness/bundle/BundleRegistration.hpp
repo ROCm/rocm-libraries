@@ -81,6 +81,11 @@ enum class SyntheticOutcome
 // result attributed to that bundle's suite/test name instead of only a log line
 // that nothing in CI asserts on.
 //
+// It also owes the outcome report its `started` and `finished` records: a bundle that
+// failed to load is a case that was written and never ran, and a report that skipped it
+// would read as a case that was never there. Always UNEXERCISED -- nothing about the
+// engine was learned.
+//
 // TestBody() is public (rather than the usual protected/private override) so
 // tests can invoke it directly to verify what it records; GTest's own dispatch
 // through Test::Run() works the same regardless of access, since that call
@@ -88,14 +93,24 @@ enum class SyntheticOutcome
 class SyntheticBundleTest : public ::testing::Test
 {
 public:
-    SyntheticBundleTest(SyntheticOutcome outcome, std::string message)
+    SyntheticBundleTest(SyntheticOutcome outcome,
+                        std::string message,
+                        CaseIdentity identity = {},
+                        std::shared_ptr<IVerificationReporter> reporter
+                        = std::make_shared<GlobalVerificationReporter>())
         : _outcome(outcome)
         , _message(std::move(message))
+        , _identity(std::move(identity))
+        , _reporter(std::move(reporter))
     {
     }
 
     void TestBody() override
     {
+        _reporter->recordCaseStarted(_identity);
+        _reporter->recordCaseOutcome(
+            makeUnexercisedRecord(_identity, OutcomeStage::SETUP, _message));
+
         if(_outcome == SyntheticOutcome::SKIP)
         {
             GTEST_SKIP() << _message;
@@ -106,7 +121,32 @@ public:
 private:
     SyntheticOutcome _outcome;
     std::string _message;
+    CaseIdentity _identity;
+    std::shared_ptr<IVerificationReporter> _reporter;
 };
+
+// Who a synthetic test's records are about. Known at registration, when the suite and
+// test name are, so the test body needs no GTest state to say it. `bundle` is the path
+// the load diagnostic names, empty when there is none.
+inline CaseIdentity syntheticIdentity(const std::string& suiteName,
+                                      const std::string& testName,
+                                      const std::string& bundle)
+{
+    CaseIdentity identity;
+    identity.test = suiteName + "." + testName;
+    identity.bundle = bundle;
+    if(TestConfig::isInitialized())
+    {
+        const auto& config = TestConfig::get();
+        if(config.hasEngineName())
+        {
+            identity.engine = config.getEngineName();
+        }
+        identity.arch = config.getCurrentArch();
+        identity.platform = config.getCurrentPlatform();
+    }
+    return identity;
+}
 
 // Registers a synthetic test under a bundle's suite/test name. Registration of
 // other, unrelated bundles is unaffected: this only replaces what would otherwise
@@ -114,16 +154,18 @@ private:
 inline void registerSyntheticBundleTest(const std::string& suiteName,
                                         const std::string& testName,
                                         SyntheticOutcome outcome,
-                                        const std::string& message)
+                                        const std::string& message,
+                                        const std::string& bundle = {})
 {
+    const auto identity = syntheticIdentity(suiteName, testName, bundle);
     ::testing::RegisterTest(suiteName.c_str(),
                             testName.c_str(),
                             nullptr,
                             nullptr,
                             __FILE__,
                             __LINE__,
-                            [outcome, message]() -> ::testing::Test* {
-                                return new SyntheticBundleTest(outcome, message);
+                            [outcome, message, identity]() -> ::testing::Test* {
+                                return new SyntheticBundleTest(outcome, message, identity);
                             });
 }
 
@@ -135,6 +177,8 @@ struct FailedLoad
     std::string suiteName;
     std::string testName;
     std::string message;
+    /// The path the load diagnostic names, for the outcome report.
+    std::string bundle;
 };
 
 // A bundle that failed to load for an ordinary reason (malformed graph JSON, an
@@ -172,7 +216,8 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc, SweepManifestCac
     {
         return FailedLoad{disc.suiteName,
                           disc.testName,
-                          "Failed to load bundle " + diagnosticPath.string() + ": " + e.what()};
+                          "Failed to load bundle " + diagnosticPath.string() + ": " + e.what(),
+                          diagnosticPath.string()};
     }
     catch(const hipdnn_integration_tests::BundleMetadataError& e)
     {
@@ -181,7 +226,8 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc, SweepManifestCac
         // the parser's detail tells the author exactly what to fix.
         return FailedLoad{disc.suiteName,
                           disc.testName,
-                          "Failed to load bundle " + diagnosticPath.string() + ": " + e.what()};
+                          "Failed to load bundle " + diagnosticPath.string() + ": " + e.what(),
+                          diagnosticPath.string()};
     }
     catch(const std::exception& e)
     {
@@ -199,7 +245,8 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc, SweepManifestCac
             return FailedLoad{disc.suiteName,
                               disc.testName,
                               "Failed to load bundle " + diagnosticPath.string() + ": "
-                                  + toString(*error)};
+                                  + toString(*error),
+                              diagnosticPath.string()};
         }
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
@@ -389,8 +436,11 @@ inline std::optional<std::vector<LoadedBundle>>
         if(auto* failed = std::get_if<FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);
-            registerSyntheticBundleTest(
-                failed->suiteName, failed->testName, SyntheticOutcome::FAIL, failed->message);
+            registerSyntheticBundleTest(failed->suiteName,
+                                        failed->testName,
+                                        SyntheticOutcome::FAIL,
+                                        failed->message,
+                                        failed->bundle);
             continue;
         }
         if(auto* skipped = std::get_if<SkippedLoad>(&outcome))

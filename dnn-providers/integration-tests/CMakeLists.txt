@@ -224,10 +224,12 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/CaseOutcome.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/bundle/OutcomeReportLog.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ProductionPolicy.cpp
     src/harness/bundle/SupportClaimReport.cpp
@@ -255,7 +257,9 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/CaseOutcome.cpp
     src/harness/bundle/GraphSession.cpp
+    src/harness/bundle/OutcomeReportLog.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp

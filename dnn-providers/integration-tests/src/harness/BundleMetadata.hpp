@@ -31,6 +31,30 @@ enum class EnforcementLevel
     FULL ///< engine must additionally execute and numeric-verify (default)
 };
 
+/// Why a case exists (RFC 0022 §9). A tag only: it changes no verdict, and a report
+/// reads it to say whether a decline was an expected answer.
+enum class CasePurpose
+{
+    CLAIM, ///< the engine claims this graph; a decline is a broken claim
+    PROBE, ///< legal graph whose expected outcome is decline-or-correct
+    REGRESSION ///< a frozen finding
+};
+
+inline const char* toString(CasePurpose purpose)
+{
+    switch(purpose)
+    {
+    case CasePurpose::CLAIM:
+        return "claim";
+    case CasePurpose::PROBE:
+        return "probe";
+    case CasePurpose::REGRESSION:
+        return "regression";
+    default:
+        return "unknown";
+    }
+}
+
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
 /// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
 ///
@@ -53,13 +77,14 @@ struct BundleMetadata
     std::optional<std::string> generationCommand;
     std::optional<std::string> notes;
     std::optional<int64_t> seed;
+    std::optional<CasePurpose> purpose;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 };
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
-/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
+/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level` or `purpose`,
 /// a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
 /// valid JSON. An authoring error,
 /// never a "metadata not recorded" case, so it must not degrade to defaults.
@@ -74,7 +99,7 @@ public:
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries an unsupported format version, has an invalid
-/// `enforcement_level`, or has an `inputs` key that is not a tensor UID.
+/// `enforcement_level` or `purpose`, or has an `inputs` key that is not a tensor UID.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -162,6 +187,35 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         else
         {
             throw BundleMetadataError(where + " has invalid enforcement_level \"" + level + "\"");
+        }
+    }
+
+    // purpose: absent leaves it unset. Present but not claim, probe or regression
+    // throws, for the same reason enforcement_level does: a typo must not silently
+    // retag a case.
+    if(json.contains("purpose"))
+    {
+        if(!json["purpose"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid purpose (not a string)");
+        }
+
+        const auto purpose = json["purpose"].get<std::string>();
+        if(purpose == "claim")
+        {
+            meta.purpose = CasePurpose::CLAIM;
+        }
+        else if(purpose == "probe")
+        {
+            meta.purpose = CasePurpose::PROBE;
+        }
+        else if(purpose == "regression")
+        {
+            meta.purpose = CasePurpose::REGRESSION;
+        }
+        else
+        {
+            throw BundleMetadataError(where + " has invalid purpose \"" + purpose + "\"");
         }
     }
 

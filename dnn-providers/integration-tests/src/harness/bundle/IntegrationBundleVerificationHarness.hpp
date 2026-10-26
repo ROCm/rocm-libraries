@@ -27,6 +27,7 @@
 #include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/CaseOutcome.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -126,6 +127,12 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
+        // Ahead of every exit below, the skips included: the report promises one
+        // `finished` for every `started`, and a test the process dies in is read off the
+        // gap between them.
+        _caseFinished = false;
+        _deps.reporter->recordCaseStarted(caseIdentity());
+
         // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
         // counted as selected. That is the whole point of the counter: the gap between it
         // and the bodies that ran is exactly what SetUp() skipped, and the gap above it is
@@ -144,20 +151,21 @@ public:
 
         if(_deps.policy.useDevice() && noHipDevicesAvailable())
         {
-            noteSkipBeforeObservation();
+            noteSetupSkip("No devices available. Skipping test.");
             GTEST_SKIP() << "No devices available. Skipping test.";
         }
 
         if(_bundle == nullptr)
         {
-            noteSkipBeforeObservation();
+            noteSetupSkip("No bundle set");
             GTEST_SKIP() << "No bundle set";
         }
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
-            noteSkipBeforeObservation();
-            GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
+            const std::string message = "[arch " + _deps.policy.arch + "] " + *reason;
+            noteSetupSkip(message);
+            GTEST_SKIP() << message;
         }
 
         applyMetadataGuards();
@@ -166,74 +174,21 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        // First line of the body, ahead of everything that can throw. The fact is
-        // already true here, and both openGraph() below and the sidecar read inside
-        // the try can throw -- either would otherwise lose it and leave the summary
-        // blaming SetUp() for a skip that never happened. Same predicate as the
-        // selected counter above, so the two subtract cleanly.
-        if(shouldObserveClaims())
-        {
-            _deps.reporter->recordReachedBody();
-        }
-
-        // One from_binary, one ranked query, one applicability answer. Everything
-        // below takes the session as an argument, so nothing re-derives it and
-        // nothing caches it on the harness.
-        //
-        // A throw here leaves before any outcome exists. GTest still fails the test,
-        // so it gets its verifier line too (NONE: nothing was compared), or the
-        // summary tally would be short a body that failed.
-        GraphSession session = [this] {
-            try
-            {
-                return openGraph();
-            }
-            catch(...)
-            {
-                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
-                throw;
-            }
-        }();
-
-        if(TestConfig::get().writeSupportClaims())
-        {
-            observeAndRecordSupport(session);
-            GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
-        }
-
-        // Declared out here so the tail below still sees it when the read throws: a
-        // default-constructed ClaimPhase commits nothing and complains about nothing.
-        ClaimPhase claims;
-
-        VerificationOutcome outcome;
+        // Whatever leaves the body, the test still owes the report its `finished`. Most
+        // exits publish their own, with the stage they know; this one is for a throw
+        // nothing below classified. publishFinished() is a no-op once one went out.
         try
         {
-            // Inside the try because a hand-edited sidecar that does not parse
-            // throws, and that is the class of fault the catch exists for.
-            claims = observeClaims(session);
-
-            auto claimOutcome = enforcedClaimFailure(claims.observation);
-            outcome = claimOutcome ? *claimOutcome : runComparison(session);
+            runBody();
         }
-        catch(const std::exception& e)
+        catch(...)
         {
-            // Every throw still produces an outcome, or the summary is short a row
-            // and reconciles against nothing. A throw from the claim read lands here
-            // before the graph is counted as queried, keeping withClaims >= queried
-            // true. HARNESS at NOT_REACHED: a throw is our bug, not the engine's.
-            outcome = VerificationOutcome::failed(
-                VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
+            publishFinished(
+                makeUnexercisedRecord(caseIdentity(),
+                                      OutcomeStage::SETUP,
+                                      "the test body threw: " + describeCurrentException()));
+            throw;
         }
-
-        commitClaims(claims.observation.results, outcome);
-        // Unconditional: both rules are self-guarding, so neither needs a surrounding
-        // condition here.
-        raiseComplaints({claims.complaint,
-                         shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
-        // Before the disposition, which returns: a pass must say what it was compared
-        // against, or "auto" landing on a reference is indistinguishable from a skip.
-        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
-        reportOutcome(outcome);
     }
 
     /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
@@ -266,10 +221,155 @@ public:
                                                          const std::vector<LoadedEngine>& engines);
 
 private:
+    // The test body proper. TestBody() wraps it so that a throw nothing below classified
+    // still leaves a `finished` record.
+    void runBody()
+    {
+        // First line of the body, ahead of everything that can throw. The fact is
+        // already true here, and both openGraph() below and the sidecar read inside
+        // the try can throw -- either would otherwise lose it and leave the summary
+        // blaming SetUp() for a skip that never happened. Same predicate as the
+        // selected counter above, so the two subtract cleanly.
+        if(shouldObserveClaims())
+        {
+            _deps.reporter->recordReachedBody();
+        }
+
+        // One from_binary, one ranked query, one applicability answer. Everything
+        // below takes the session as an argument, so nothing re-derives it and
+        // nothing caches it on the harness.
+        //
+        // A throw here leaves before any outcome exists. GTest still fails the test,
+        // so it gets its verifier line too (NONE: nothing was compared), or the
+        // summary tally would be short a body that failed. It gets its `finished` line
+        // for the same reason, here because this is the one throw whose stage is known.
+        GraphSession session = [this] {
+            try
+            {
+                return openGraph();
+            }
+            catch(...)
+            {
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                publishFinished(makeUnexercisedRecord(caseIdentity(),
+                                                      OutcomeStage::GRAPH,
+                                                      "opening the graph threw: "
+                                                          + describeCurrentException()));
+                throw;
+            }
+        }();
+
+        if(TestConfig::get().writeSupportClaims())
+        {
+            observeAndRecordSupport(session);
+            publishFinished(
+                makeUnexercisedRecord(caseIdentity(),
+                                      OutcomeStage::SETUP,
+                                      "support-claim authoring run (--write-support-claims)"));
+            GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
+        }
+
+        // Declared out here so the tail below still sees it when the read throws: a
+        // default-constructed ClaimPhase commits nothing and complains about nothing.
+        ClaimPhase claims;
+
+        VerificationOutcome outcome;
+        try
+        {
+            // Inside the try because a hand-edited sidecar that does not parse
+            // throws, and that is the class of fault the catch exists for.
+            claims = observeClaims(session);
+
+            auto claimOutcome = enforcedClaimFailure(claims.observation);
+            outcome = claimOutcome ? *claimOutcome : runComparison(session);
+        }
+        catch(const std::exception& e)
+        {
+            // Every throw still produces an outcome, or the summary is short a row
+            // and reconciles against nothing. A throw from the claim read lands here
+            // before the graph is counted as queried, keeping withClaims >= queried
+            // true. HARNESS at NOT_REACHED: a throw is our bug, not the engine's.
+            outcome = VerificationOutcome::failed(
+                          VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what())
+                          .atStage(OutcomeStage::SETUP);
+        }
+
+        commitClaims(claims.observation.results, outcome);
+        // Unconditional: both rules are self-guarding, so neither needs a surrounding
+        // condition here.
+        const bool complained = raiseComplaints(
+            {claims.complaint,
+             shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
+        // Before the disposition, which returns: a pass must say what it was compared
+        // against, or "auto" landing on a reference is indistinguishable from a skip.
+        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
+        // Before the disposition for the same reason. HasFailure() sees what the test
+        // recorded itself; `complained` is what this body raised, which a fake reporter
+        // in a unit test would otherwise swallow.
+        publishOutcome(outcome, claims.observation.results, complained || HasFailure());
+        reportOutcome(outcome);
+    }
+
+    CaseIdentity caseIdentity() const
+    {
+        CaseIdentity identity;
+        identity.test = currentTestName();
+        identity.bundle = _bundlePath.string();
+        if(_engineUnderTest.has_value())
+        {
+            identity.engine = _engineUnderTest->name;
+        }
+        identity.arch = _deps.policy.arch;
+        identity.platform = _deps.policy.platform;
+        if(_bundle != nullptr)
+        {
+            identity.purpose = _bundle->metadata.purpose;
+        }
+        return identity;
+    }
+
+    // At most one `finished` per SetUp(): the first exit to get here wins, so the
+    // catch-all in TestBody() cannot double-report a test that already said how it ended.
+    void publishFinished(const CaseOutcomeRecord& record)
+    {
+        if(_caseFinished)
+        {
+            return;
+        }
+        _caseFinished = true;
+        _deps.reporter->recordCaseOutcome(record);
+    }
+
+    void publishOutcome(const VerificationOutcome& outcome,
+                        const std::vector<SupportResult>& claimResults,
+                        bool hadOtherFailure)
+    {
+        const CaseOutcome classified
+            = classifyCaseOutcome(outcome,
+                                  claimResults,
+                                  _engineUnderTest.has_value() ? _engineUnderTest->name : "",
+                                  depthOwedByPass(),
+                                  hadOtherFailure);
+        publishFinished(
+            makeCaseOutcomeRecord(caseIdentity(), outcome, classified, hadOtherFailure));
+    }
+
+    // A SetUp() skip: the test never reaches a body, so this is its whole record. Also
+    // counts the skip for the claim summary, which every such exit owes.
+    void noteSetupSkip(const std::string& reason)
+    {
+        noteSkipBeforeObservation();
+        publishFinished(makeUnexercisedRecord(caseIdentity(), OutcomeStage::SETUP, reason));
+    }
+
+    // "what()" of the exception being handled, or a stock sentence for one that is not a
+    // std::exception. Only valid inside a catch block.
+    static std::string describeCurrentException();
+
     // The one place a graph is built and the ranked list is asked for.
     GraphSession openGraph();
 
-    void applyMetadataGuards() const;
+    void applyMetadataGuards();
 
     // Called at every SetUp() exit that returns before TestBody(). Must run before
     // the GTEST_SKIP() beside it, because GTEST_SKIP() expands to a return.
@@ -307,7 +407,9 @@ private:
 
     // The one place a HarnessComplaint turns into a gtest failure. nullopts are
     // skipped, which is what lets the call site pass every rule unconditionally.
-    static void raiseComplaints(std::initializer_list<std::optional<HarnessComplaint>> complaints);
+    // Returns whether it raised any, so the caller can tell a test that complained from
+    // one that did not without reading GTest's own result state.
+    static bool raiseComplaints(std::initializer_list<std::optional<HarnessComplaint>> complaints);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
     // what the run actually achieved. Called exactly once per test.
@@ -402,6 +504,13 @@ private:
         bool plansBuilt = false;
         std::string message;
         OutputTensors outputs;
+        /// The step that answered when the engine did not run, for the outcome report.
+        OutcomeStage stage = OutcomeStage::NONE;
+        /// The answer was "the engine does not take this graph" and it is a decline in
+        /// the RFC 0023 sense: the support query resolved and the engine was absent, or
+        /// the engine declined later, while building or running. False for an
+        /// unresolved query, where nobody can say.
+        bool decline = false;
     };
 
     // Verifies the bundle at the depth its enforcement_level asks for. Only
@@ -515,7 +624,8 @@ private:
     {
         auto outcome = allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
                                   : VerificationOutcome::alreadyReportedFailure(
-                                        VerificationDepth::VERIFIED, FailureOrigin::COMPARISON);
+                                        VerificationDepth::VERIFIED, FailureOrigin::COMPARISON)
+                                        .atStage(OutcomeStage::COMPARE);
         outcome.verifier = verifier;
         return outcome;
     }
@@ -545,6 +655,8 @@ private:
     // generated by prepareInputs() and owned here rather than by the shared bundle, so
     // they live exactly as long as the test.
     TensorMap _inputs;
+    // Set when this SetUp() cycle has published its `finished` record.
+    bool _caseFinished = false;
 };
 
 } // namespace hipdnn_integration_tests::bundle

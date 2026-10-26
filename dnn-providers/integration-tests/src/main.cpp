@@ -29,6 +29,7 @@
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/OutcomeReportLog.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
@@ -141,6 +142,12 @@ int main(int argc, char** argv) noexcept
             .help("Path to the integration test bundle data directory. "
                   "Defaults to <exe>/../lib/integration-test-bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
+        parser.add_argument("--outcome-report")
+            .help("Append one JSON object per line to this file: a `started` record before "
+                  "each bundle test and a `finished` record (PASS, DECLINED, WRONG, CRASH, "
+                  "UNCLAIMED_PASS or UNEXERCISED, with its reason) when it ends. Flushed per "
+                  "record, so a crash keeps every earlier line. Can also be set via "
+                  "HIPDNN_TEST_OUTCOME_REPORT env var.");
         // --verification-mode governs BUNDLE tests (how the engine's output is
         // verified). It is independent of --reference-executor, which governs the
         // parameterized tests (which ref executor is exercised as the SUT).
@@ -312,6 +319,12 @@ int main(int argc, char** argv) noexcept
             captureDir = parser.get<std::string>("--capture-bundles");
         }
 
+        std::optional<std::filesystem::path> outcomeReport;
+        if(parser.is_used("--outcome-report"))
+        {
+            outcomeReport = parser.get<std::string>("--outcome-report");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -399,11 +412,23 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
+        opts.outcomeReport = std::move(outcomeReport);
         opts.writeSupportClaims = writeSupportClaims;
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        if(hipdnn_integration_tests::TestConfig::get().hasOutcomeReport())
+        {
+            const auto& reportPath = hipdnn_integration_tests::TestConfig::get().getOutcomeReport();
+            if(!hipdnn_integration_tests::bundle::OutcomeReportLog::get().open(reportPath))
+            {
+                std::cerr << "Error: cannot open the outcome report for writing: " << reportPath
+                          << "\n";
+                return 1;
+            }
+        }
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.

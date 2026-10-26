@@ -14,6 +14,7 @@
 
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::BundleMetadataError;
+using hipdnn_integration_tests::CasePurpose;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
@@ -565,6 +566,69 @@ TEST(TestLoadBundleMetadata, EnforcementLevelNonStringThrows)
 {
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": 1})");
     EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, PurposeIsUnsetWhenAbsent)
+{
+    const TempBundle bundle(R"({"format_version": 1})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_FALSE(meta->purpose.has_value());
+}
+
+TEST(TestLoadBundleMetadata, PurposeParsesEachValue)
+{
+    const std::pair<const char*, CasePurpose> cases[]
+        = {{R"({"format_version": 1, "purpose": "claim"})", CasePurpose::CLAIM},
+           {R"({"format_version": 1, "purpose": "probe"})", CasePurpose::PROBE},
+           {R"({"format_version": 1, "purpose": "regression"})", CasePurpose::REGRESSION}};
+    for(const auto& [text, expected] : cases)
+    {
+        const TempBundle bundle(text);
+        const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+        ASSERT_TRUE(meta.has_value()) << text;
+        ASSERT_TRUE(meta->purpose.has_value()) << text;
+        EXPECT_EQ(*meta->purpose, expected) << text;
+    }
+}
+
+TEST(TestLoadBundleMetadata, PurposeInvalidTokenThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "purpose": "probes"})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, PurposeNonStringThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "purpose": 1})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, PurposeSpellingIsExact)
+{
+    EXPECT_STREQ(toString(CasePurpose::CLAIM), "claim");
+    EXPECT_STREQ(toString(CasePurpose::PROBE), "probe");
+    EXPECT_STREQ(toString(CasePurpose::REGRESSION), "regression");
+}
+
+TEST(TestParseBundleMetadataJson, PurposeIsRejectedWhenInvalidInASweepCase)
+{
+    for(const auto* text : {R"({"format_version": 1, "purpose": "PROBE"})",
+                            R"({"format_version": 1, "purpose": null})",
+                            R"({"format_version": 1, "purpose": ""})"})
+    {
+        EXPECT_THROW(parseBundleMetadataJson(nlohmann::json::parse(text), "case_0"),
+                     BundleMetadataError)
+            << text;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, PurposeParsesInASweepCase)
+{
+    const auto meta = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "purpose": "regression"})"), "case_0");
+    ASSERT_TRUE(meta.purpose.has_value());
+    EXPECT_EQ(*meta.purpose, CasePurpose::REGRESSION);
 }
 
 TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)

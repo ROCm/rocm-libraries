@@ -33,6 +33,8 @@ public:
                 recordVerifier,
                 (const std::string& bundlePath, Verifier verifier),
                 (override));
+    MOCK_METHOD(void, recordCaseStarted, (const CaseIdentity& identity), (override));
+    MOCK_METHOD(void, recordCaseOutcome, (const CaseOutcomeRecord& record), (override));
 };
 
 } // namespace hipdnn_integration_tests::bundle
