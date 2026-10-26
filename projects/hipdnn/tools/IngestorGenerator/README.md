@@ -5,9 +5,11 @@ KMD/UED/UMD/UHD/UDD/KDP JSON, a native-symbol stub, a complete pack-shape census
 matcher-test stub, and five CMake/registration text fragments. It follows
 `projects/hipdnn/tools/DescriptorGenerator`'s conventions with two deviations:
 `undefined=StrictUndefined`, so an unset UUID cross-reference fails at generation time,
-and a required `--force` to overwrite a non-empty output directory. Generate into scratch
-space, including when extending an engine, and splice addition-only with
-`tools/splice_additions.py` (see [Extending a live engine](#extending-a-live-engine)).
+and a required `--force` to overwrite a non-empty output directory. Descriptor ids stay
+stable across regenerations (see [Descriptor ids](#descriptor-ids)), but the C++ files are
+regenerated from scratch: generate into scratch space, including when extending an engine,
+and splice addition-only with `tools/splice_additions.py` (see
+[Extending a live engine](#extending-a-live-engine)).
 
 Generation is toolchain-free and issues **no compiler evidence**: a complete integration
 also needs artifact agreement, real native loading and engine-attributed numerical device
@@ -74,12 +76,40 @@ a request to run the class. See the
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle
 
-# Regenerate a disposable output directory, never a live engine directory.
-# --force is REQUIRED for a non-empty output directory.
+# Regenerate into a disposable output directory, never a live engine directory: --force
+# overwrites every file, hand-filled C++ included. --force is REQUIRED for a non-empty
+# output directory.
 .venv/bin/python generate.py \
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle \
     --force
+
+# Do not generate. Report unfilled stub markers in the files this config's
+# engine emits. --emitted-root is repeatable and defaults to --output-dir.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle \
+    --check-placeholders \
+    --emitted-root <provider-engine-dir> \
+    --emitted-root <provider-tests-dir>
+
+# Regenerate an engine that is already installed in the provider tree: its descriptor
+# ids are reused automatically ("Reusing ids from the installed bundle <path>").
+.venv/bin/python generate.py \
+    --config configs/gfx1151_wmma_attention.yaml \
+    --output-dir /tmp/gfx1151-bundle
+
+# Continue from a previous scratch directory instead (the next pass of a new engine).
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle-2 \
+    --ids-from /tmp/scale-add-bundle/test_descriptors/unit/<slug>
+
+# Give every descriptor a new id: an engine that is being replaced or renamed.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle-3 \
+    --new-ids
 ```
 
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
@@ -87,14 +117,208 @@ arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
 error; `2` unusable input: a missing or invalid config, a non-existent `--emitted-root`, an
 `--output-dir` that is not a directory, a non-empty output directory without `--force`,
-a config the renderer rejects, or a bad flag (argparse).
+a config the renderer rejects, an `--ids-from` or `--engine-ids-from` that does not exist,
+is not a directory or does not yield usable ids (ambiguous, wrong bundle, missing KDP),
+`--new-ids` together with `--ids-from` or `--engine-ids-from`, or a bad flag (argparse).
+`--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. A default run
+and `--dry-run` read the previous version, so on a checkout where the previous version's KDP
+is a DVC output that has not been pulled they exit 2, for a home and a satellite bundle
+alike. The message names the `.dvc` pointer: run `dvc pull` first, or pass `--new-ids`.
+`--check-placeholders` resolves ids only when sibling bundles are found or
+`--engine-ids-from` is given, and then exits 2 the same way. Otherwise it reads no ids, and
+the unpulled KDP is reported as a missing file, so it exits 1 (the gfx950 config does).
+
+## Descriptor ids
+
+Every descriptor (the UED, KMD, UHD, UDD, each UMD and KDP, and every kernel) carries a
+UUID. A UUID is never derived from content: a new descriptor gets a random one, and a
+regeneration reuses the id of every descriptor it can match in the previous version of the
+bundle. Reuse is the default. The previous version is the first of these that holds a
+bundle (a UED or a KDP):
+
+1. `--ids-from DIR`, the previous version of this bundle;
+2. the bundle installed in the provider tree,
+   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/<descriptor-dir>`
+   (the generator prints `Reusing ids from the installed bundle <path>`);
+3. `<output-dir>/<descriptor-dir>`, when it already holds a bundle. When a bundle is
+   installed, this one is also read as a second, gap-filling source (below).
+
+`--new-ids` reads nothing and gives every descriptor a new id; use it for an engine that is
+being replaced or renamed. It contradicts `--ids-from` and `--engine-ids-from`, and it
+turns off sibling discovery (below).
+
+An installed or `--ids-from` bundle is read strictly: an unusable one is an error. When the
+installed bundle is used by default and the output directory also holds a bundle (a previous
+scratch pass), that bundle is read as a second, gap-filling source (`Also reading <dir> for
+the ids of descriptors added since installation; installed ids win wherever both have
+one.`). A scratch bundle made with different engine ids (say a `--new-ids` run), or one that
+cannot be read, is ignored with a stderr warning. An explicit `--ids-from` replaces the
+default, and the installed bundle is then not consulted. Regenerating an
+unchanged config rewrites every descriptor byte for byte, and adding a kernel adds only
+that kernel's id. JSON is written with LF on every OS, so it matches the git blobs and the
+DVC-stored KDP.
+
+| Descriptor | Matched on |
+|---|---|
+| UED, KMD, UHD, UDD, kernel-scoped UMD | present in the previous bundle (UHD only when the config still declares a heuristic; the UED references it as `sort_kernel_catalog.default`) |
+| KDP (pack) | `<namespace>:<kdp stem>` |
+| Operation UMD (multi-pack) | the matched KDP's operation matcher |
+| Kernel | the kernel's metadata, completed with the **current** KMD defaults, plus its effective arch (`kernel.arch`, else the pack's); the new `kernel_source` (a multi-launch kernel's `sources`) must still say what the prior one said |
+
+Kernels are matched on the whole key (completed metadata tuple plus effective arch) first.
+A kernel left over then takes a left-over prior id when each side has exactly one kernel
+with that tuple, so widening or narrowing a kernel's arch keeps its id. A tuple shipped at
+several arch tiers is told apart by arch alone. Names and positions play no part, so
+inserting, reordering, renaming or moving a kernel between packs keeps its id, and so does
+a priority-only change (only the source counts: `kernel_source`, or a multi-launch kernel's
+`sources`). A metadata (tuple) change or an ambiguous tuple gets a new id.
+
+A reused id also requires the new source to still say everything the prior one said, at the
+same values (compared recursively, the spec included). A multi-launch kernel (one carrying
+`sources`, a map of launch name to `kernel_source`) is compared launch by launch, and the
+two sources must name the same launches. A value the prior stated that the new source
+changes or drops is a **retune**: the same completed tuple built from different compiled
+bytes gets a new id (the old id is retired, so the summary shows the name once under
+retired and once as minted), because RFC 0017 (Identity collisions) leaves open whether an
+id may stay with changed compiled bytes, and a plan that records only which kernel was
+picked would resolve a reused id to different code on replay. An arch move combined with
+such a change also gets a new id. A field only the new source carries is tolerated only
+inside `spec` (inside each launch's `spec` for a multi-launch kernel), the convention
+`catalog_diff.py` uses by default but applied per kernel: the spec is keyed on the previous
+kernel's own fields, not on every field the shipped KDP states. A new spec field is
+tolerated because it cannot be told from a knob newly stated at its default (the enumerated
+registry states `lds_k_row_pad` where the shipped specs omit
+it). Any other field the new source adds or changes, such as a newly stated `target`,
+changes the compiled bytes and is a retune. The limitation: a spec knob newly stated at a
+**non-default** value under an unchanged tuple is not detected and keeps the id. To force
+new ids for a deliberate retune, change the metadata tuple or use `--new-ids`. Retuning
+retained kernels is therefore not reliably detected, and `tools/splice_additions.py`
+refuses it as a changed retained kernel.
+
+A retuned kernel keeps the id minted for its new source across reruns: when the
+scratch pass already holds the kernel's key with the new source, its id is used even though
+the installed bundle holds that key with the old source. The installed id still wins
+whenever the installed source covers the new one.
+
+An id that is no longer used (a removed or changed kernel, a dropped pack) is not given to
+an unrelated descriptor. One case follows the tuple instead: a kernel removed and a
+different kernel added with the same tuple at another arch are paired by the second pass,
+because an arch move cannot be told from a removal plus an addition, so the new kernel
+takes the old id (the summary's arch clause, below, names it). Prior kernels that share one
+tuple and one effective arch are all dropped from reuse rather than guessed.
+
+The command prints the outcome after generation:
+`Ids: reused T from <src> (engine E, packs P[, operation UMDs O], kernels K), minted M,
+retired R[: name, name (+N more)][; engine ids from <dir>][; X kept an id across an arch
+change: a, b (+N more)]`. The retired names follow `retired R` directly; `; engine ids
+from <dir>` appears when the engine-level ids came from a different bundle than `<src>`
+(a satellite reading its home); the arch clause is always last. `--dry-run` prints the same
+account as `Ids (would be): ...` after its file list. A first run for a brand-new engine
+prints `Ids: none found to reuse; minted N (new bundle)`, and `--new-ids` prints
+`Ids: --new-ids; every id is new (minted N)`.
+
+- A directory with a UED but no KDP is an error, not an empty history. The shipped gfx950
+  KDP is stored with DVC (`artifacts.dvc` in its descriptor directory): fetch it into
+  `artifacts/` before regenerating, or generation refuses rather than give every kernel a
+  new id.
+- A document id that appears twice under the previous bundle is an error (exit 2), usually
+  a stale KDP left beside a renamed pack's new one. The message names both files: delete
+  the stale one.
+- A kernel id held by both this bundle's previous KDP and a sibling's KDP is an error
+  (exit 2) that names both KDP paths (`also in`): ids must be unique across the engine's
+  bundles, so remove the duplicate from the one that should not own it.
+- A run that would write a top-level KDP for a pack whose KDP the target bundle already
+  holds as a DVC artifact under `artifacts/` is refused (exit 2) before anything is
+  written: the next run would find the pack id twice. Generate into scratch and splice
+  (see [Extending a live engine](#extending-a-live-engine)).
+- `--ids-from` must be this bundle's own directory (its path, taken as given and not
+  resolved through symlinks, ends with the config's descriptor directory); a sibling
+  bundle is found automatically when installed, and otherwise goes to `--engine-ids-from`.
+- Anything in a live KDP that is not in the config (a hand-appended kernel) is reported as
+  retired and dropped.
+- Warnings on stderr, none fatal: a DVC pointer whose tracked output does not hash to the
+  recorded md5 (a stale or edited local artifact: `dvc pull` to restore it, `dvc add` to
+  record it); a previous KDP that holds no kernels while the config has some (`Warning: ...
+  holds no kernels`: a truncated or placeholder artifact would remint every kernel); a
+  directory beside the bundle that holds no UED and no KDP but does hold a
+  `*.dvc` pointer whose artifact is absent (an unpulled satellite KDP is invisible to
+  sibling discovery and to the duplicate check: `dvc pull`; a directory already identified
+  by a UED or KDP is not repeated, and a home whose KDP is unfetched is an error when read);
+  with `--engine-ids-from`, another bundle of the same engine in the
+  same family folder that is not named; and, before anything is written, descriptor files
+  in the output descriptor directory that this run will not write and that stay there,
+  usually a removed pack's KDP. Delete that file: the next run would read it as part of the
+  previous bundle.
+- The summary line ends with `; N kept an id across an arch change: <names>` when a kernel
+  kept its id although its effective arch changed. The tuple-only second matching pass can
+  also pair two different kernels this way, so that clause is the place to look.
+- An engine renamed since the output directory was generated is an error for the output
+  directory fallback, with a hint: use `--new-ids` or clear the directory.
+
+### Iterating within a ticket
+
+**An extension of an installed engine.** Regenerating into the **same** output directory
+with `--force` keeps the ids of both the installed kernels and the kernels added since
+(see the gap-filling source above). Generating into a **new** directory on each pass has
+nothing to read for the added kernels, so they are reminted (the generator warns when
+descriptors got new ids and a directory beside `--output-dir` holds an earlier generation
+of this engine that was not read: `Warning: N descriptor(s) got new ids, and <dir> holds
+an earlier generation of this engine that was not read. If it is the previous pass, run
+again with --ids-from <dir>.`): pass `--ids-from <previous
+scratch>/descriptors/rocKE/<slug>` instead (an explicit `--ids-from` replaces the default,
+so the installed bundle is not consulted).
+
+**A new engine, nothing installed yet.** Each pass generates into a **new** scratch
+directory with `--ids-from <previous scratch>/descriptors/rocKE/<slug>`
+(`test_descriptors/<set>/<slug>` for a direct-load bundle). The **same** directory needs
+`--force` and also keeps the ids, since the output tree is the previous version.
+
+Either way, regenerating into the same directory regenerates the C++ stubs from scratch and
+overwrites hand-filled bodies. Hand-fill and splice only once the descriptors settle, or
+keep the hand-filled C++ outside the scratch directory.
+
+### More than one bundle for one engine
+
+Several bundles of one engine are a **home** (it holds the UED, KMD, UHD, UDD and
+kernel-scoped UMD) and **satellites** (each holds only its KDP). For a packaged config the
+other bundles installed beside this bundle's installed directory (the same family folder
+under `.../kernel_ingestor_engine/descriptors/`) are **found automatically**: a directory
+counts when it holds the engine's UED (by name) or a KDP naming that UED's id. A home finds
+its satellites, and a brand-new satellite, whose own directory is not installed yet, finds
+its home. The generator prints `Reusing the engine's ids from the installed bundle(s)
+<dirs>`. A satellite then reuses the home's engine-level ids, so the loader sees one
+engine, and the kernels of the other bundles seed the engine-wide de-dup, so an equal kernel
+at an equal arch is dropped and a competing one is refused. A satellite's own KDP and
+kernel ids are always its own. Two UEDs with one name and different ids make the loader
+drop both.
+
+`--engine-ids-from DIR` (repeatable) is the **override**, for bundles outside the provider
+tree such as scratch directories. Naming any turns discovery off, so name **every** other
+bundle of the engine, the home included; a bundle left out drops out of the duplicate check,
+and a stderr warning names an unnamed sibling in the same family folder. `--new-ids` turns
+discovery off as well. If discovered siblings sit beside a config that cannot be a satellite
+(multi-pack), the error says the installed bundles were picked up
+automatically. `--check-placeholders` resolves ids when siblings are found, and a
+satellite's placeholder check expects its KDP alone (`Located 1 of this engine's 1
+shippable files`).
+
+- Sibling mode is for **packaged**, **single-pack** bundles whose descriptor directories
+  share the home's first component under `descriptors/`.
+- A satellite needs its own `authored_subpath`; it must not write into the home's folder.
+- The engine block of a satellite's config must equal the home's. A mismatch is an error:
+  change the engine block in the home and regenerate every satellite after it.
+- A satellite writes only its KDP. Its C++ and fragments name the engine's existing classes
+  and are not spliced.
 
 ### Extending a live engine
 
-Generation mints fresh UUIDs on every run, so never copy a scratch descriptor directory
-over a live one: that replaces every retained identity, which
-[extend.md](../ai/skills/hipdnn-ingestor-engine/extend.md) forbids. Render the edited
-config into an empty scratch directory, then splice only the additions:
+A scratch render also holds the engine-level files and hand-fillable stubs, so never copy a
+scratch descriptor directory over a live one: that replaces shared objects and hand-filled
+bodies, which [extend.md](../ai/skills/hipdnn-ingestor-engine/extend.md) forbids. Ids are
+reused by default (see [Descriptor ids](#descriptor-ids)), so the render already carries
+the retained ids. Render the edited config into an empty scratch directory (generating in
+place over a bundle whose KDP is a DVC artifact is refused), then splice
+only the additions:
 
 ```bash
 .venv/bin/python tools/splice_additions.py \
@@ -104,11 +328,17 @@ config into an empty scratch directory, then splice only the additions:
 ```
 
 The tool pairs documents by file name and kernel entries by `name`, maps every scratch UUID
-to its live twin, and refuses (exit 1, nothing written) if a live file or kernel is missing
+to its live twin (the identity for everything retained when the installed ids were reused), and refuses (exit 1, nothing written) if a live file or kernel is missing
 from scratch, or if any retained document or kernel differs beyond that UUID map. New
 kernel entries are appended after the live ones with their new ids; a scratch-only file
 (for example a new pack's KDP) is written whole with its references remapped. Retained
 bytes and line endings are kept, so the KDP change is a pure insertion.
+
+A KDP stored with DVC (gfx950: `<bundle>/artifacts/`) is not in the bundle directory, so
+`--live <bundle>` does not see it and would write a second whole KDP beside `artifacts/`.
+Splice that KDP by hand, or with the tool on the KDP alone: copy the scratch KDP into an
+otherwise empty directory, pass that as `--scratch`, and pass `--live <bundle>/artifacts`.
+Then record the new bytes with `dvc add artifacts` there, not `git add`.
 
 The generated census test (`tests/Test<Name>Packs.cpp`) carries no UUIDs and is emitted in
 the provider's clang-format form, so copy it over the live one. The native and matcher
@@ -303,6 +533,14 @@ to the binary meant to read it. Authors repoint only
 `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` and
 `HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT`.
 
+A **satellite** bundle (a further bundle of an engine another bundle already installed;
+the home is found automatically, or named with `--engine-ids-from`) installs only its KDP, under its own folder within the
+home's family folder. The packer rejects a repeated descriptor id even when the content is
+identical, so the engine-level files are never installed twice. The satellite's native stub,
+tests and fragments name the engine's existing classes and are not spliced; the engine's
+census test (`Test<Name>Packs.cpp`) asserts its own emitted kernel and pack names, so merge
+the satellite's names into it by hand.
+
 An `embedded_source` engine additionally needs an
 `add_kernels_for_embedding(TARGET … FILES … KEYS …)` entry in
 `.../src/tests/CMakeLists.txt`, each `KEYS` value equal to the `source_file` string its
@@ -383,25 +621,36 @@ SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_i
 SCRATCH=$(mktemp -d)
 D="descriptors/rocKE/$SLUG/$SLUG"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
+# Both generate runs below reuse the installed bundle's ids (the gfx950 KDP is a DVC
+# object: fetch it into artifacts/ first, or generation refuses).
 "$PY" generate.py --config "configs/$SLUG.yaml" --output-dir "$SCRATCH/selection"
 # --strict-spec compares the FULL spec dict of every entry (not just the
 # intersection of keys in the shipped catalog), catching new spec fields that
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
-Splice the reviewed change into `$SHIPPED` by hand, keeping the UUID of every kernel that
-stays, and check it against the pre-splice KDP with `catalog_diff.py --expect-ids`. Ship
+To splice the reviewed change into `$SHIPPED`, follow [Extending a live
+engine](#extending-a-live-engine): the gfx950 KDP is a DVC artifact, so splice it into
+`$SHIPPED/artifacts/$SLUG.kdp.json` and run `dvc add artifacts`; copy nothing else over.
+Because generation reused the installed bundle's ids, every id that stays is unchanged;
+`catalog_diff.py --expect-ids` against the pre-splice KDP proves it. The gates above keep
+`--ignore-ids`, which is harmless with reused ids and still required for a scratch made
+with `--new-ids` or with nothing installed to reuse, which carries new ids. A metadata
+change or a retune (a changed or dropped value in `kernel_source` or `sources`, or a field
+added outside the spec) gives that kernel a new id; a rename or an arch change alone keeps it. A
+hand-edited splice still keeps the UUID of every kernel that stays and is
+checked the same way. Ship
 any manifest change with it (raise `max_kernels` only deliberately), then rerun the gates.
 Adding, removing or renaming kernels is also a heuristic-retraining decision.
 
@@ -414,12 +663,12 @@ on the verifying machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode. Checks every launch of a multi-launch (`sources`) descriptor: a binary's identity is its launches' `(name, builder, spec, role)` tuple, a failure names its launch, and a descriptor with `sources` never nests in a single-launch one | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? It never compares what the two halves compute | `launch_surface.py MANIFEST --check [--allow-unguarded]` |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--manifest MANIFEST] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. `--manifest` is forwarded to rung 1 as above. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. This tool cannot run rung 3, so `--min-served N` with N > 0 fails the gate (`serving-not-run`); `tools/sweep.py`'s `min_served` is the device gate. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
 | `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells (by cell axes; it does not check that a sequence length can be served); prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]` (`--plan-space` with `--out` or `--shapes` is a usage error). Exit 2 is unusable input, naming the field: a malformed manifest, a duplicate key, a `ground_truth.value_map` whose keys differ from a cell field's values, or a builder value with no `specialization.vocabulary` mapping; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
 | `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
-| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids`; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below), `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
+| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids` (needed only for output generated with `--new-ids` or with nothing to reuse); `--expect-ids` requires the shipped ids to be reused, as after a splice or a `generate.py` run that reused the installed bundle's ids; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below), `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
 | `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
 | `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6. `graphs` records each graph's semantic identity and its row's digest; `compare` exits 2 when a row or a swept graph no longer matches that record (rerun `graphs`), and otherwise 0 whatever it finds (the report is for review; an accepted exception is a normal outcome); `compare --strict` exits 1 unless every row is within `--margin`, not declined in any timing round, and has a passing correctness verdict (a timing-only sweep, or a row with no usable reference, refuses) |
 | `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
@@ -521,6 +770,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
+| `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/gfx950_attention_dense.profile.yaml` | Not a generator config: the gfx950 dense attention profile that the `tools/` scripts read through `--profile` |
 
 ## Generated variant sets: `variants`
 
@@ -563,7 +814,8 @@ carry four arms and 63 carry six.
 with each shape first axis outermost (`shape_axes: {dtype: [fp16, bf16], head_size: [64,
 128]}` with one shape `{knobs: rt}` expands to four shapes). An axis must name a spec field
 of the group, and a shape may not restate an axis field.
-`configs/gfx1151_wmma_attention.yaml` keeps its head-size bucket list there.
+`configs/gfx1151_wmma_attention.yaml` and `configs/gfx1151_wmma_attention_decode.yaml` keep
+their dtype list there.
 
 **The tri-state.** An omitted or null policy knob retains the builder's policy intent, not
 an explicit false. `resolved` supplies an authored metadata projection, not compiler
@@ -579,8 +831,9 @@ each arm shifts it with `ordinal_offset:`.
 **Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
 UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
 absent one inherits the pack's. Use it for kernels only some of the pack's architectures
-can run -- `configs/gfx1151_wmma_attention.yaml` restricts its transposed-QK group to the
-gfx11 shards of a gfx11+gfx12 pack.
+can run, or that differ per architecture -- `configs/gfx1151_wmma_attention.yaml` gives its
+gfx11 and gfx12 shards their own wide-Q prefill geometries, and
+`configs/gfx1151_wmma_attention_decode.yaml` their own D256 decode geometries.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
 the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;
@@ -705,6 +958,36 @@ processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole
 Any other value is a `ConfigError`; the key is rejected for every other kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
+A packaged `rocke` `kernel_source` (or `kernel_defaults`) may also set
+`launches: {<name>: {<overrides>}}` to declare the launches of a multi-stage kernel
+([RFC 0017 §15.1](../../docs/rfcs/0017_UniversalKernelDescriptor.md)). Each value is merged
+onto the base `kernel_source`: `{role: merge}` selects a companion kernel of the same
+builder's `KernelModule`, and a different `builder` and `spec` name another builder
+entirely. The generator then emits the authored descriptor with a `sources` map keyed by
+launch name, in place of `kernel_source`, and the descriptor declares UKD 1.1. Launch names
+are lowercase identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else
+is a `ConfigError`, and so is the key on any kind but `rocke`. Two launch names may name
+one kernel (a stage that runs one kernel twice with different arguments), so equal
+launches are valid config. A kernel's launches are part
+of its candidate identity, so two entries that differ only in their launches are not
+de-duplicated. A config with no `launches` key generates exactly what it did before.
+
+A launch's `spec` override **replaces** the spec for that launch and is never varied by
+`variants`, `axes` or `shape_axes`: it is the same static spec in every expanded kernel. It
+may not state a metadata field at a value that differs from the variant being generated,
+which is a `ConfigError` naming the variant and the field, so a launch whose spec depends
+on an expanded axis cannot be spelled this way. A launch with no `spec` override takes the
+variant's own expanded spec. The packer checks each declared consumer field against the
+launches that report it (see the packaging reference).
+
+The descriptor only lists the launches: the pack's native dispatch handler declares the
+names it launches and owns their order, and the provider drops a kernel whose launch names
+differ from the handler's when it builds its catalog. One engine has one handler, so every
+kernel of an engine must name the same set of launches: a config mixing single- and
+multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
+engines by launch set). See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
 ## The five pre-mint config-loader checks
 
 Run, in this order, **before any UUID is minted**:
@@ -726,17 +1009,20 @@ Run, in this order, **before any UUID is minted**:
 Configs accept generic `arch` targets under the
 [packaging rules](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#generic-gpu-targets).
 `build_kdp` refuses a tuple shared by two kernels only at the same arch tier
-([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate)). The generated census gives every member of
+([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine)). The generated census gives every member of
 a generic row the generic's descriptors.
 
 ## Source adapters (`codegen/sources/`)
 
-One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
+One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), three
 implementations:
 
 - `InteractiveAdapter` -- no inference; a human or the driving skill fills every field.
 - `HiprtcAdapter` -- scans `.cpp`/`.hip` files for `extern "C" __global__` entry points and
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
+- `RockeAdapter` -- introspects a rocKE builder (`source`/`builder` pair) and reports its
+  spec dataclass fields as candidate KMD fields. rocKE is imported lazily; an
+  unreadable builder raises `RockeIntrospectionError`.
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
 producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
@@ -751,7 +1037,10 @@ prerequisite on `IKernelDispatchHandler`.
 
 ## Tests
 
-This suite is **developer-run**, not registered with CTest or run by superbuild CI. Cases
+CTest registers this suite as `hipdnn_ingestor_generator_pytest` when hipDNN is configured
+with `HIPDNN_ENABLE_TOOLING_TESTS=ON` (which also needs `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`),
+and superbuild CI turns that option on. That run sets `HIPDNN_VALIDATE_DESCRIPTORS` and
+deselects `tests/test_coverage_gate.py::TestAgainstTheRealBuild`. Run by hand, cases
 needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) skip when it is unset; the
 real-archive class above skips only when `HIPKERNELPROVIDER_ROCM_KPACK_DIR` is unset and
 `rocm_kpack` is not importable.
@@ -792,7 +1081,19 @@ matcher-test stubs with `g++`/`clang++`, plus an intentionally broken source con
 plugin/data/flatbuffers SDK and provider sources beside this checkout plus
 `flatbuffers/array.h` under `/opt/rocm/include`, and generates stand-ins for the
 CMake-configured `version.h`/`CacheRootDefaults.h` headers. Missing prerequisites skip
-explicitly.
+explicitly, so a checkout with no compiler or ROCm headers still runs green. Setting
+`HIPDNN_INGESTOR_STUB_INCLUDE_FILE` to a file of include directories (one per line,
+containing `flatbuffers/array.h` and `hip/hip_runtime.h`) replaces the
+`/opt/rocm/include` probe, and a bad value then fails rather than skips.
+
+Under `HIPDNN_ENABLE_TOOLING_TESTS` the hipDNN build runs this suite with the
+`tools/pytest_plugins/hipdnn_strict_skips.py` plugin (`-p hipdnn_strict_skips`), which turns
+every skip into a failure, so a missing compiler, validator binary, `hkp_pack` or
+`rocm_kpack` fails CI instead of passing by not running. A skip that is correct by design
+(an author-supplied input such as `HIPDNN_INGESTOR_SHAPES` or an authoring profile, or the
+POSIX-only sweep tests on Windows) carries `@pytest.mark.allow_skip(reason="...")` beside the
+skip. Run by hand, the plugin is not loaded: `python -m pytest -p hipdnn_strict_skips` (with
+`tools/pytest_plugins` on `PYTHONPATH`) reproduces the CI behavior.
 
 ### Fragment contracts (`tests/test_fragment_contracts.py`)
 

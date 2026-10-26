@@ -17,7 +17,7 @@ identical across member folders and separate per-arch builds, and the loader col
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
 Kernels sharing a metadata tuple are ranked per device by arch tier; see
-[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate).
+[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine).
 
 Authoring rules. Each violation fails the packer, raises a generator ConfigError, and makes the
 loader log an ERROR and drop the pack:
@@ -70,8 +70,9 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires six roots: production, plus five over the four authored test sets
-(`shared` packs twice, once into each test binary's discovery root).
+The provider wires seven roots: production, plus six over the four authored test sets.
+`shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
+twice, once for each test binary, so each binary reads its own archive.
 
 | Root | Source | Ships |
 |---|---|---|
@@ -305,6 +306,76 @@ argument list back out of the compiled object — sniffing a clang offload bundl
 ELF, and dropping compiler-appended `hidden_` arguments — catching a kernel whose
 parameters changed while its bytes stayed internally consistent.
 
+### Multi-launch kernels: `sources`
+
+A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (several), as
+[RFC 0017 §15.1](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md) describes. A
+packed `sources` is a JSON object keyed by launch name with at least two entries, each a
+complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
+Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
+single entry, a bad name, a `sources` under version 1.0 and an entry that is not `kpack`
+are all refused, by the packer and by the loader. Two launch names may name one kernel (a
+stage that runs one kernel twice with different arguments): such entries carry equal
+`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
+`sources` only; every other UKD packs byte for byte as before, and a runtime that predates
+the key skips a 1.1 file at its version gate.
+
+```json
+"sources": {
+  "decode": {"kind": "kpack", "library": "...", "toc_key": "k", "symbol": "decode_k",
+             "sha256": "...", "signature": [...]},
+  "merge":  {"kind": "kpack", "library": "...", "toc_key": "k", "symbol": "merge_k",
+             "sha256": "...", "signature": [...]}
+}
+```
+
+The authored form is the same map, each value a full `rocke` source (`kind`, `source`,
+`builder`, `spec`, optional `target`) plus an optional `role`. Authored entries are `rocke`
+only. A `hip` or `hsaco` entry is refused as not yet supported as a `sources` entry, an
+`embedded_source` entry because it is not packed into a code object, and a `kpack` entry
+because already-packed entries are not pack input. The packer still validates a packed
+`sources`, so a shipped tree can be checked.
+
+- **One builder, several kernels.** A builder may return a `rocke.helpers.KernelModule`: a
+  primary kernel plus role-keyed companions in **one code object**. An entry without `role`
+  takes the builder's primary kernel; an entry with `role` takes that companion, and the
+  builder must return a module that has it. Entries with the same `source`, `builder`,
+  `spec` and `target` compile once, so they share `library`, `toc_key` and `sha256` and
+  differ in `symbol`; at runtime they resolve out of one loaded module.
+- **Two builders.** Entries naming different builders (a split-KV segment kernel and its
+  reduce kernel, say) are two entries with no `role`, and two code objects. No wrapper
+  builder is needed.
+- **Claim check.** For each compiled variant a UKD uses, the kernels its entries claim
+  must equal the kernels the compile produced: the primary plus every companion role. Entries
+  that name one kernel under different launch names make one claim. A compiled companion
+  that no entry claims, or a claimed role the module lacks, fails the pack and the message
+  names both lists.
+- **Never authored.** `role` exists only in the authored form. The packed `symbol` and
+  `signature` are read out of the compiled object, so they cannot disagree with what was
+  built.
+- **Provenance.** For a `sources` UKD `provenance.effective_spec` is an object keyed by
+  launch name; entries that share a compile carry identical evidence.
+  `agreement.verify` binds each entry's `symbol` and code object to its own evidence.
+- **Consumer agreement.** A UKD carries one consumer metadata declaration. For a `sources`
+  UKD each declared `metadata_fields` entry must be reported by **at least one** launch,
+  and every launch that does report it must match the metadata. A launch whose spec lacks
+  the attribute just does not report that field, so a segment kernel can report
+  `block_size` while its reduce kernel, which has none, reports nothing. A field no launch
+  reports still fails, and so does one reported with a value that differs from the
+  metadata on any launch. There is no per-launch declaration and no exemption list. A
+  misspelled binding still fails, because a binding is shared and the misspelled attribute
+  is then missing on every launch. A single-launch UKD is unchanged: its fields must be
+  observable.
+
+The packer lists the entries and nothing more: launch order, workspace and the hand-off
+between stages belong to the native dispatch handler of the pack. That handler declares the
+launch names it launches (`IKernelDispatchHandler::launchNames`, empty by default, which is
+a single-launch handler reading `kernel_source`). The state manager drops a kernel whose
+launch names differ from that set, before applicability, so an accepted kernel is always
+launchable. A variant with a different launch set therefore belongs in its own pack. The
+handler reaches one launch's definition with `launchKernelDefinition(kernel, "merge")` and
+hands it to `buildIngestorKernelCode`.
+
 ## Emitted-bundle census
 
 Native proof executes typed provider registration/loading plus a finalized census;
@@ -462,7 +533,8 @@ configure.
   (prebuilt `.co` files) and C++/runtime paths, and install staging.
 - Device behavior: no kernel is launched, no numerics are checked.
 - Wildcard descriptors on architectures no lane builds (see below for why none ship).
-- That the CI job runs: that is the job of the junit check below.
+- That the CI job runs: a lane that must always have a probe sets
+  `HIPKERNELPROVIDER_MIN_PACKAGING_PROBES` (below).
 
 ### Which architectures are probed
 
@@ -482,9 +554,10 @@ hkp: probe gfx950: derived root <build>/hkp-probes/gfx950/root (17 UKD(s) for gf
 
 A new architecture, or a new pack under one, is therefore probed with no edit anywhere. A
 lane whose `GPU_TARGETS` cover every named architecture declares no probe; that is valid,
-and the manifest then lists `hkp-probe-tools` alone. A lane that must always have a probe
-passes `--min-probes N` to `check_probe_junit.py`, which fails when the manifest names fewer
-than N probes; without it, a tools-only manifest is accepted.
+and only `hkp-probe-tools` is registered. A lane that must always have a probe configures
+with `-DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=N`, which fails configure when fewer than N
+probes are declared, so broken probe discovery cannot pass as a lane with nothing to probe;
+the default, 0, accepts no probe.
 
 **Wildcards are excluded.** A descriptor with no `arch` (absent or empty) names no
 architecture and gets no automatic probe. That is safe: a wildcard ships for whatever the
@@ -610,16 +683,20 @@ attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
   a combination is caught only if a UKD with it is listed in `UKDS`.
-- **The key is the UKD `name`, not its `id`.** Ids are `uuid4` values regenerated on every
-  ingestor run; names encode the specialization and are unique.
+- **The key is the UKD `name`, not its `id`.** Ids are random UUIDs, kept across
+  regenerations of an installed bundle but not derived from content; names encode the
+  specialization and are unique.
 - **Derive reads the root with the packer's own loader** (`load_flat_input`): it sees
   the descriptors the packer sees (hidden paths skipped) and refuses what the packer
   refuses. Which KDPs ship is the packer's `kdp_survives`, which UKDs ship its
   `arch_matches`: an empty or absent `arch` list is a wildcard. Standalone UKDs are out of
   probe scope by policy.
 - Derive also writes `expect.json` (kept KDP, UKD name and kind; pass-through kinds also
-  carry the authored `kernel_source`) beside the root; the assertion expects exactly that
-  set.
+  carry the authored `kernel_source`; a UKD that authors [`sources`](#multi-launch-kernels-sources)
+  carries `launches`, a map from each launch name to its authored `role` or `null`) beside
+  the root; the assertion expects exactly that set. A multi-launch UKD is one compile
+  group keyed by every launch's group fields, and the sweep covers the values of each
+  launch's `spec`, keyed `<launch>.<field>`.
 - The derive step re-runs when any file under the root changes, and rewrites only files
   whose content differs, so a reconfigure leaves the pack stamp fresh.
 
@@ -640,10 +717,7 @@ cmake --preset hipdnn-dev-all -GNinja -B build-probe \
     -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
     -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 cmake --build build-probe --target hkp_packaging_probes   # or the full build
-ctest --test-dir build-probe -R '^hkp-probe-' --no-tests=error --output-on-failure \
-    --output-junit probe-junit.xml
-python3 .github/scripts/check_probe_junit.py \
-    --junit build-probe/probe-junit.xml --manifest build-probe/hkp-probes/manifest.txt
+ctest --test-dir build-probe -R '^hkp-probe-' --no-tests=error --output-on-failure
 ```
 
 The selector is `^hkp-probe-`, anchored: `-R` is an unanchored regex. It matches every
@@ -651,18 +725,14 @@ probe (`hkp-probe-<NAME>`) and `hkp-probe-tools`, the pytest suite of the probe 
 (`probes/tests/`; the tests that pack rocKE content live in `probes/tests/rocke/` and
 nowhere else, which a build with `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` never collects).
 `--no-tests=error` makes an empty selection a failure instead of a
-green run that proved nothing. `manifest.txt` is written at configure and lists the ctest
-names that must run; the junit check fails unless every one ran and passed (a skipped,
-disabled or missing entry fails), and ignores testcases not in the manifest, so it also
-accepts the junit of a full ctest run. Configuring without the option and running the same
+green run that proved nothing. Configuring without the option and running the same
 build and ctest lines fails (unknown target, then "No tests were found").
 
 In CI both superbuild lanes configure with the option `ON`. The probe packs run in the
 Build step as part of `all`; the probe ctest entries run once, inside the lane's normal
-"Run tests" ctest, which writes `build/ctest-junit.xml`. The "Check packaging probes ran"
-step then runs only `check_probe_junit.py` on that junit against the manifest, with
-`--min-probes 1` because neither lane builds every architecture the production root names
-(drop the flag from a lane that does). It runs whenever "Run tests" ran, pass or fail.
+"Run tests" ctest (`--no-tests=error`). Both lanes configure with
+`HIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1` because neither builds every architecture the
+production root names (drop it from a lane that does).
 
 Locally on Linux the build is quick (the wheel environment plus the probed UKDs) and each
 probe ctest entry takes a few seconds; `hkp-probe-tools` takes longer, since it really
@@ -680,14 +750,16 @@ compiles hip and rocke fixtures. There is no local Windows reproduction.
 | `arch-dir-missing` / `extra-arch-dir` | `<out>/<arch>/` is absent, or another `gfx*` directory is present. |
 | `kpack-missing` / `kpack-empty` | Kpack output is expected and `<out>/<arch>/kpack/hip_kernel_provider_<arch>.kpack` is absent or empty. |
 | `no-kdp` | No `*.kdp.json` under `<out>/<arch>`, or one is unreadable or not a JSON object. |
-| `ukd-kind` | A shipped UKD's `kernel_source.kind` differs from what its expected kind's output type requires: `kpack` for kpack output, the authored kind for pass-through output. |
+| `ukd-kind` | A shipped UKD's `kernel_source.kind` (for a UKD with `sources`, a launch entry's `kind`) differs from what its expected kind's output type requires: `kpack` for kpack output, the authored kind for pass-through output. |
 | `arch-field` | A shipped UKD's `arch` is not exactly `[<arch>]` (an absent `arch` fails too), or a KDP's `arch`, when present, is not exactly `[<arch>]`. |
 | `passthrough-source` | A pass-through UKD's `kernel_source` differs from the authored one recorded in `expect.json`. |
 | `passthrough-provenance` | A pass-through UKD's `provenance.source_label` is empty, or `provenance.source_file` differs from `kernel_source.source_file`. |
-| `kpack-toc` | The archive is unreadable, or has no entry for a UKD's `toc_key` and architecture. |
-| `sha256` | The blob's sha256 differs from `kernel_source.sha256`. |
-| `signature` | A kpack UKD's `kernel_source.signature` is empty or not a list. |
-| `symbol` | A UKD's `symbol` does not appear in its blob. |
+| `kpack-toc` | The archive is unreadable, or has no entry for an entry's `toc_key` and architecture (checked per launch for `sources`). |
+| `sha256` | The blob's sha256 differs from the entry's `sha256` (`kernel_source`, or each launch entry of `sources`). |
+| `signature` | A kpack entry's `signature` is empty or not a list (checked per launch for `sources`). |
+| `symbol` | An entry's `symbol` does not appear in its blob (checked per launch for `sources`). |
+| `launches` | A kpack UKD ships `kernel_source` where `expect.json` lists `launches`, or `sources` where it lists none, or both keys, or a `sources` that is not an object; the shipped launch names differ from the expected ones; or a launch's shipped `symbol` differs from the compiler's recorded one for that launch in `provenance.effective_spec` (the primary `symbol`, or `companions[<role>]` for an authored role), or the record is missing. |
+| `launch-signature` | A shipped launch's `signature` differs from the argument list its `symbol` has in the archive blob, or the blob has no such kernel. |
 | `provenance-origin` | `origin_kind` differs from the UKD's expected kind (the authored `kernel_source.kind`). |
 | `no-rules-for-kind` | A UKD's expected kind has no entry in `tools/hkp_probe_kinds.py`: a new producer kind must add its entry. |
 | `provenance-wheel` | `rocke_wheel_sha256` is missing or empty: the packer recorded no rocKE wheel. |
@@ -716,7 +788,7 @@ does not build it, with the default sample; nothing needs declaring.
   archive rule). This is a design decision, not an entry.
 
 After adding an architecture or a probe line, reconfigure and run the local block above:
-the new `hkp-probe-<NAME>` entry and its manifest line must appear. Then run the
+the new `hkp-probe-<NAME>` ctest entry must appear. Then run the
 mutation checks below.
 
 ### Mutation checks when adding a probe

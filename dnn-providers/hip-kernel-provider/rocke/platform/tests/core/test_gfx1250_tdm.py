@@ -202,8 +202,8 @@ class TestGfx1250Tdm(unittest.TestCase):
 
     def test_transfers_are_gated(self):
         for arch, flavor, message in (
-            ("gfx950", "llvm22", "requires gfx1250"),
-            ("gfx1201", "llvm23", "requires gfx1250"),
+            ("gfx950", "llvm22", "requires a target with memory.has_tdm, got gfx950"),
+            ("gfx1201", "llvm23", "requires a target with memory.has_tdm, got gfx1201"),
             ("gfx1250", "llvm22", "requires LLVM flavor llvm23"),
         ):
             with self.subTest(arch=arch, flavor=flavor):
