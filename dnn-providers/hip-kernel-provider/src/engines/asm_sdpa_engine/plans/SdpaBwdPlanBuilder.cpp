@@ -616,15 +616,17 @@ bool SdpaBwdPlanBuilder::isApplicable(
         const TensorAttributes* tensor;
         // Outermost axis whose offset is in the record index (3: none).
         flatbuffers::uoffset_t firstIndexedAxis;
+        // Written by the kernels (dQ, dK, dV).
+        bool isOutput;
     };
-    const std::array<IoTensor, 8> ioTensors{{{"q", qTensor, 2},
-                                             {"k", kTensor, 2},
-                                             {"v", vTensor, 2},
-                                             {"o", oTensor, 3},
-                                             {"do", doTensor, 2},
-                                             {"dq", dqTensor, 3},
-                                             {"dk", dkTensor, 1},
-                                             {"dv", dvTensor, 1}}};
+    const std::array<IoTensor, 8> ioTensors{{{"q", qTensor, 2, false},
+                                             {"k", kTensor, 2, false},
+                                             {"v", vTensor, 2, false},
+                                             {"o", oTensor, 3, false},
+                                             {"do", doTensor, 2, false},
+                                             {"dq", dqTensor, 3, true},
+                                             {"dk", dkTensor, 1, true},
+                                             {"dv", dvTensor, 1, true}}};
     for(const auto& io : ioTensors)
     {
         const auto* dims = io.tensor->dims();
@@ -650,6 +652,25 @@ bool SdpaBwdPlanBuilder::isApplicable(
         }
         HIP_KERNEL_RETURN_FALSE_IF(oddIndexedStride,
                                    "4-byte-indexed stride must be even for " + describe());
+
+        // A zero batch or head stride on an output axis longer than 1 makes the
+        // (batch, head) slices of dQ, dK or dV share memory. Each slice is written
+        // by its own workgroups (grid y and z are head and batch), so the slices
+        // overwrite each other: on gfx942 such dQ, dK and dV were wrong and changed
+        // between runs with identical inputs. A zero stride on an input (a
+        // broadcast) just re-reads one slice and stays accepted.
+        // Only this overlap is checked, deliberately: a zero stride is how a
+        // broadcast is written, so an output gets one when it is given the strides
+        // of a broadcast input. Nonzero strides that make an output overlap itself,
+        // such as equal batch and head strides, have to be built by hand; they are
+        // not checked here, although on gfx942 they also gave wrong dK and dV.
+        const bool zeroOutputStride = io.isOutput
+                                      && ((dims->Get(0) > 1 && strides->Get(0) == 0)
+                                          || (dims->Get(1) > 1 && strides->Get(1) == 0));
+        HIP_KERNEL_RETURN_FALSE_IF(
+            zeroOutputStride,
+            "batch and head strides must be nonzero on axes longer than 1 for output "
+                + describe());
     }
 
     // The AITER dqdkdv kernel indexes dK/dV by q-head: workgroup.y spans nhead_q and

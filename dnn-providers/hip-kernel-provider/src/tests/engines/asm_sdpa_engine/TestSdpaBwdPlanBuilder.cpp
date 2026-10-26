@@ -959,8 +959,9 @@ std::vector<LayoutOverride> onAllIoTensors(const std::vector<int64_t>& strides)
 }
 
 // Layouts the kernels address correctly, all GPU-verified on gfx942: BSHD, padded
-// row strides, dO strides that differ from O, and odd strides on every axis whose
-// offset the kernels do not put in a 4-byte record index.
+// row strides, dO strides that differ from O, odd strides on every axis whose
+// offset the kernels do not put in a 4-byte record index, and zero batch or head
+// strides on the inputs (broadcasts) and on length-1 output axes.
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
 {
     SKIP_IF_NO_DEVICES();
@@ -1028,6 +1029,42 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
                                         {int64_t{256} * 128, int64_t{256} * 128 + 1, 128, 1})),
                   "odd dK and dV head stride with H=1"},
         true);
+    // A zero batch or head stride on an input (a broadcast) only re-reads one
+    // slice.
+    const std::vector<int64_t> zeroBatch = {0, int64_t{256} * 128, 128, 1};
+    const std::vector<int64_t> zeroHead = {int64_t{256} * 128, 0, 128, 1};
+    const std::vector<int64_t> zeroBatchAndHead = {0, 0, 128, 1};
+    const std::vector<int64_t> threeHeads = {2, 3, 256, 128};
+    applicabilityTests.emplace_back(
+        GraphTest{
+            withLayouts(createSdpaBwdGraph(dims), onTensors({"q", "k", "v", "o", "do"}, zeroBatch)),
+            "batch stride 0 on Q, K, V, O and dO"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(threeHeads), onTensors({"k", "v"}, zeroHead)),
+                  "head stride 0 on K and V, H=3"},
+        true);
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph(threeHeads),
+                                                          onTensors({"k", "v"}, zeroBatchAndHead)),
+                                              "batch and head stride 0 on K and V, H=3"},
+                                    true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(threeHeads), {{"do", zeroBatchAndHead, {}}}),
+                  "batch and head stride 0 on dO, H=3"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(threeHeads), onTensors({"q", "o"}, zeroHead)),
+                  "head stride 0 on Q and O, H=3"},
+        true);
+    // On a length-1 axis a zero stride does not alias, also on an output.
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({1, 2, 256, 128}),
+                                                          onTensors({"dq", "dk", "dv"}, zeroBatch)),
+                                              "batch stride 0 on dQ, dK and dV with B=1"},
+                                    true);
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({2, 1, 256, 128}),
+                                                          onTensors({"dq", "dk", "dv"}, zeroHead)),
+                                              "head stride 0 on dQ, dK and dV with H=1"},
+                                    true);
     applicabilityTests.emplace_back(
         GraphTest{withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1}, {2, 2, 256}}}),
                   "rank-3 packed stats"},
@@ -1262,6 +1299,50 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMismatchedTensorDims)
                                            {"dk", oneBatchStrides, oneBatch},
                                            {"dv", oneBatchStrides, oneBatch}}),
                               "K, V, dK and dV with batch 1, Q with 2");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// A zero batch or head stride on a dQ, dK or dV axis longer than 1 makes (batch,
+// head) slices share memory, and the workgroups that write them overwrite each
+// other. On gfx942 such dQ, dK and dV were wrong and changed between runs with
+// identical inputs. Nonzero strides that make an output overlap itself are not
+// checked.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsZeroStrideOutputs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    const std::vector<int64_t> zeroBatch = {0, int64_t{256} * 128, 128, 1};
+    const std::vector<int64_t> zeroHead = {int64_t{256} * 128, 0, 128, 1};
+
+    std::vector<GraphTest> declineTests;
+    // Only one tensor aliases along one axis in each of these.
+    for(const char* name : {"dq", "dk", "dv"})
+    {
+        declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{name, zeroBatch, {}}}),
+                                  std::string(name) + " batch stride 0");
+        declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{name, zeroHead, {}}}),
+                                  std::string(name) + " head stride 0");
+    }
+    // The layouts that failed on gfx942 were dQ batch stride 0 (above) and these.
+    const std::vector<int64_t> threeHeads = {2, 3, 256, 128};
+    declineTests.emplace_back(withLayouts(createSdpaBwdGraph(threeHeads), {{"dq", zeroHead, {}}}),
+                              "dQ head stride 0, H=3");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), onTensors({"dk", "dv"}, zeroBatch)),
+        "dK and dV batch stride 0");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(threeHeads), onTensors({"dk", "dv"}, zeroHead)),
+        "dK and dV head stride 0, H=3");
 
     for(const auto& test : declineTests)
     {
