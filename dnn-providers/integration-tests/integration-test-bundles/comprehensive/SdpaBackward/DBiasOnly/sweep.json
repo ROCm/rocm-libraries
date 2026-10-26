@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "prbb15n_b1h2k2v2_64x96_d128_fp16_brnone_dbias_dbiasonly_told",
+      "values": {
+        "io_data_type": "half",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.08838834764831843,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "BOTTOM_RIGHT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              96,
+              128
+            ],
+            "strides": [
+              24576,
+              12288,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              16384,
+              8192,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              16384,
+              8192,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              96,
+              128
+            ],
+            "strides": [
+              24576,
+              12288,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              16384,
+              8192,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              96,
+              128
+            ],
+            "strides": [
+              24576,
+              12288,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              96,
+              128
+            ],
+            "strides": [
+              24576,
+              12288,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              16384,
+              8192,
+              128,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              2,
+              64,
+              1
+            ],
+            "strides": [
+              128,
+              64,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          },
+          {
+            "uid": 15,
+            "dims": [
+              1,
+              2,
+              64,
+              96
+            ],
+            "strides": [
+              12288,
+              6144,
+              96,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward+DBiasOnly",
+        "plan_items": [
+          "A11",
+          "DT3",
+          "IVP4",
+          "PRB-B15n",
+          "T1",
+          "T11",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "H",
+        "seed": 0,
+        "tol_class": "D",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "rejection probe (layer U): dBias without matching bias; expected: typed rejection"
+      }
+    }
+  ]
+}

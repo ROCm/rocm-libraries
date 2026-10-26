@@ -315,6 +315,10 @@ python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_
 - It writes `{quick,standard,comprehensive,full}/SdpaBackward/<Topology>/` with
   `graph.template.json`, `sweep.json` and `support.json`. It keeps harvested
   claims and drops only the claims of case ids that no longer exist.
+- Independent PyTorch golden sweeps live under
+  `quick/SdpaBackward/Golden/{Default,AdditiveMask}/`. Regenerate those with
+  `quick/SdpaBackward/generate_golden_data.sh`; the plan generator leaves them
+  and their paired forward bundles intact.
 - A case whose oracle is not ready stays declared in the generator (level
   `notrun`) and is not written. The report lists these cases by gate.
 - `--toml` rewrites the generated `[[tolerance_overrides]]` block of an engine
