@@ -112,6 +112,145 @@ class TestSmallSpecs(unittest.TestCase):
                     n_ok += validate_direct_spec(variant, spec, "gfx1250")[0]
                 self.assertGreater(n_ok, 0, (variant, caps))
 
+    def test_engines_agree_on_specs(self):
+        """The C++ engine's validator, kernel name, grid and LDS size match
+        Python's over the AOT grid and a few rejected specs (the byte-identity
+        gate only covers the IR of specs both engines build)."""
+        import pytest
+
+        eng = pytest.importorskip("rocke_engine")
+        from kernels.conv.direct_aot_jobs import (
+            DIRECT_CAPABILITIES,
+            _knob_grid,
+            probe_problem,
+        )
+        from kernels.conv.direct_variants import make_direct_spec
+        from rocke.core.backend import (
+            conv_direct_fwd_smallc_wmma_spec_to_dict,
+            conv_direct_fwd_smallk_wmma_spec_to_dict,
+        )
+
+        sides = {
+            "direct_fwd_smallc_wmma": (
+                eng.conv_direct_fwd_smallc_wmma_describe,
+                conv_direct_fwd_smallc_wmma_spec_to_dict,
+                fwd_smallc_reason,
+            ),
+            "direct_fwd_smallk_wmma": (
+                eng.conv_direct_fwd_smallk_wmma_describe,
+                conv_direct_fwd_smallk_wmma_spec_to_dict,
+                fwd_smallk_reason,
+            ),
+        }
+        specs = []
+        for variant in sides:
+            _, caps_list = DIRECT_CAPABILITIES[variant]
+            for dtype in ("bf16", "fp16"):
+                for caps in caps_list:
+                    probe = probe_problem(caps, dtype, variant)
+                    for knobs in _knob_grid(variant, "gfx1250", dtype, caps):
+                        specs.append((variant, make_direct_spec(variant, probe, knobs)))
+        pk = _problem(C=64, K=4)
+        for problem, knobs in (
+            (_problem(C=8), {}),
+            (_problem(K=60), {}),
+            (_problem(C=4, K=32, groups=2), {}),
+            (_problem(dtype="fp32"), {}),
+            (_problem(KH=3, PAD=3), {}),
+            (_problem(N=64, H=1024, W=1024), {}),
+            (_problem(), dict(out_h=4)),
+            (_problem(), dict(tiles_k=8, tiles_p=8, out_h=16)),
+            (_problem(), dict(tiles_per_block=0)),
+            (_problem(), dict(waves_k=0)),
+            (_problem(), dict(sched="bogus")),
+            (_problem(), dict(tiles_per_block=3, tdm_store=True, sched="max-ilp")),
+        ):
+            specs.append(
+                (
+                    "direct_fwd_smallc_wmma",
+                    FwdSmallcWmmaSpec(problem=problem, **knobs),
+                )
+            )
+        for problem, knobs in (
+            (_problem(C=64, K=16), {}),
+            (_problem(C=64, K=3), {}),
+            (_problem(C=60, K=4), {}),
+            (pk, dict(tiles_c=4)),
+            (pk, dict(out_h=32, out_w=32)),
+            (pk, dict(ck=48)),
+            (pk, dict(stages=1)),
+            (pk, dict(waves_p=1)),
+            (pk, dict(tiles_p=12, prefetch=True)),
+            (pk, dict(stages=4, prefetch=True, sched="iterative-ilp")),
+        ):
+            specs.append(
+                (
+                    "direct_fwd_smallk_wmma",
+                    FwdSmallkWmmaSpec(problem=problem, **knobs),
+                )
+            )
+        for arch in ("gfx1250", "gfx950"):
+            for variant, spec in specs:
+                describe, to_dict, reason = sides[variant]
+                ok, why_cpp, name, grid, lds = describe(to_dict(spec), arch)
+                why = reason(spec, arch)
+                self.assertEqual(ok, why is None, (arch, spec, why, why_cpp))
+                if why is not None and "scheduler" not in why:
+                    self.assertEqual(why_cpp, why, (arch, spec))
+                self.assertEqual(name, spec.kernel_name())
+                self.assertEqual(lds, spec.lds_bytes())
+                if why is None:
+                    self.assertEqual(tuple(grid), spec.grid())
+
+    def test_binding_rejects_bad_input(self):
+        """A rejected spec returns the rejection (no grid is computed); a
+        missing, mistyped or partial problem raises."""
+        import pytest
+
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import (
+            conv_direct_fwd_smallc_wmma_spec_to_dict,
+            conv_direct_fwd_smallk_wmma_spec_to_dict,
+        )
+
+        for prefix, spec, to_dict in (
+            (
+                "conv_direct_fwd_smallc_wmma",
+                FwdSmallcWmmaSpec(problem=_problem(), waves_k=0),
+                conv_direct_fwd_smallc_wmma_spec_to_dict,
+            ),
+            (
+                "conv_direct_fwd_smallk_wmma",
+                FwdSmallkWmmaSpec(problem=_problem(C=64, K=4), waves_c=0),
+                conv_direct_fwd_smallk_wmma_spec_to_dict,
+            ),
+        ):
+            describe = getattr(eng, f"{prefix}_describe")
+            lower = getattr(eng, f"{prefix}_lower_llvm")
+            bad = to_dict(spec)
+            ok, why, _, grid, _ = describe(bad, "gfx1250")
+            self.assertFalse(ok)
+            self.assertIn("waves and tiles", why)
+            self.assertEqual(tuple(grid), (0, 0, 0))
+            with self.assertRaises(Exception):
+                lower(bad, arch="gfx1250")
+            good = dict(bad)
+            good.pop("waves_k", None)
+            good.pop("waves_c", None)
+            partial = dict(good["problem"])
+            del partial["kpg"]
+            for problem in (None, "N2H13", partial):
+                sd = dict(good)
+                if problem is None:
+                    del sd["problem"]
+                else:
+                    sd["problem"] = problem
+                with self.subTest(prefix=prefix, problem=problem):
+                    with self.assertRaises(ValueError):
+                        describe(sd, "gfx1250")
+                    with self.assertRaises(ValueError):
+                        lower(sd, arch="gfx1250")
+
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":

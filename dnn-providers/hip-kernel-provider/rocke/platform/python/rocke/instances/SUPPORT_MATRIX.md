@@ -108,6 +108,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, stride-1 dgrad, dense and grouped (`cpg`, `kpg` multiples of 8), `PAD` in 0..K-1. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | `conv_direct_fwd_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward, dense and grouped (`cpg`, `kpg` multiples of 8, or small groups packed block-diagonally), square filters, stride 1 or 2, per-axis dilation. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| `conv_direct_fwd_smallc_wmma` / `conv_direct_fwd_smallk_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM forward of tiny channel counts, ungrouped and undilated, square filters: `C <= 4` stems (`K` a multiple of 8) and `K` in (1, 2, 4, 8) layers (`C` a multiple of 8). Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 
 ---
 

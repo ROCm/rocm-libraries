@@ -4662,6 +4662,94 @@ def cases():
             ),
         )
 
+    # --- conv_direct_fwd_small{c,k}_wmma: wave32 WMMA forward of tiny channel
+    # counts (gfx1250). TDM window / channel-chunk staging; every case needs
+    # llvm23 (TDM), so the other flavors record them as expected failures. The
+    # C++ twin is gated by library/tests/parity/conv_fwd_small_wmma_emit.*.
+    def build_fwd_small_wmma_case(kind, prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_fwd_small_wmma import (
+                FwdSmallcWmmaSpec,
+                FwdSmallkWmmaSpec,
+                build_fwd_smallc_wmma,
+                build_fwd_smallk_wmma,
+            )
+
+            p = DirectConvProblem(N=2, H=32, W=40, groups=1, **prob_kw)
+            if kind == "smallc":
+                return build_fwd_smallc_wmma(
+                    FwdSmallcWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+                )
+            return build_fwd_smallk_wmma(
+                FwdSmallkWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _kind, _case_id, _prob, _over in (
+        (
+            "smallc",
+            "bf16_c3_default",
+            dict(cpg=3, kpg=64, dtype="bf16"),
+            {},
+        ),
+        (
+            "smallc",
+            "fp16_c3_s2_tb4_ts",
+            dict(cpg=3, kpg=64, stride=2, dtype="fp16"),
+            dict(
+                waves_p=2,
+                tiles_k=4,
+                out_h=8,
+                out_w=16,
+                tiles_per_block=4,
+                tdm_store=True,
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_c3_k4s4_tb4_ts",
+            dict(cpg=3, kpg=64, KH=4, KW=4, PAD=0, stride=4, dtype="bf16"),
+            dict(
+                waves_p=2,
+                tiles_k=8,
+                out_h=4,
+                out_w=32,
+                tiles_per_block=4,
+                tdm_store=True,
+            ),
+        ),
+        (
+            "smallk",
+            "bf16_k4_pf",
+            dict(cpg=128, kpg=4, dtype="bf16"),
+            dict(tiles_c=3, tiles_p=3, out_h=6, out_w=16, ck=64, prefetch=True),
+        ),
+        (
+            "smallk",
+            "fp16_k4_st3_pf",
+            dict(cpg=128, kpg=4, dtype="fp16"),
+            dict(
+                waves_c=3,
+                waves_p=2,
+                tiles_c=1,
+                tiles_p=5,
+                out_h=10,
+                out_w=10,
+                ck=64,
+                stages=3,
+                prefetch=True,
+            ),
+        ),
+    ):
+        add(
+            f"conv_direct_fwd_{_kind}_wmma",
+            f"conv_direct_fwd_{_kind}_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_fwd_small_wmma_case(_kind, _prob, **_over),
+        )
+
     # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
     # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
     # Every case needs llvm23 (TDM), so the other flavors record them as

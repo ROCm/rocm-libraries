@@ -1117,6 +1117,33 @@ tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
 within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant
 `direct_fwd_wmma`), filtered per problem by tile efficiency.
 
+### Tiny channel counts (`FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec`)
+
+`library/kernels/common/conv_fwd_small_wmma.py` (C++ twin
+`instance_conv_fwd_small_wmma.h`) serves the ungrouped, undilated forward
+layers where implicit GEMM leaves most of every WMMA tile empty:
+
+- `build_fwd_smallc_wmma` -- `C <= 4` input channels (stems). The reduction
+  `(r, s, c)` is flattened over the whole filter, so a 3x3x3 stem is one
+  16x16x32 WMMA step. A block stages its output tile's input window with one
+  2-D TDM transfer and each lane gathers its im2col fragment from it; the
+  weights stay in registers for the `tiles_per_block` tiles a block walks
+  (double-buffered window). `tdm_store` stores the output tile through LDS
+  with one TDM transfer. `K` must be a multiple of 8.
+- `build_fwd_smallk_wmma` -- `K` in (1, 2, 4, 8) output channels. A 1x1 GEMM
+  over the window's input pixels with the taps and output channels as its M
+  dimension (`Z[q, (r, s, k)]`), then the overlap-add into `Y` in fp32 LDS;
+  input channel chunks of `ck` stream through a TDM ring of `stages` slots.
+  `C` must be a multiple of 8.
+
+Both: square filters, `PAD` in 0..K-1, every tensor below 2 GiB. Batch,
+extents and the other channel count are kernargs; the filter, stride,
+padding, the small channel count and the tile geometry are baked. The AOT
+grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
+the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
+`FWD_SMALLK_LAYERS` (variants `direct_fwd_smallc_wmma` /
+`direct_fwd_smallk_wmma`).
+
 ## Direct Wgrad Kernels
 
 Sources: `library/kernels/common/conv_direct_wgrad_tiled.py`,
