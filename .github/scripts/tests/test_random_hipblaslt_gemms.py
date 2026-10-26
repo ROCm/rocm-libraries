@@ -3,6 +3,8 @@
 
 import json
 import random
+import signal
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -225,7 +227,7 @@ class RandomGemmTests(unittest.TestCase):
             emulator = root / "rocjitsu"
             emulator.write_text(
                 f"#!{sys.executable}\n"
-                "import json, sys, time\nfrom pathlib import Path\n"
+                "import json, os, signal, sys, time\nfrom pathlib import Path\n"
                 "p = {k: json.loads(v) for k, v in (line.lstrip('- ').split(': ', 1) "
                 "for line in Path(sys.argv[-1]).read_text().splitlines())}\n"
                 "config = json.loads(Path(sys.argv[2]).read_text())\n"
@@ -238,6 +240,8 @@ class RandomGemmTests(unittest.TestCase):
                 "from test_random_hipblaslt_gemms import bench_result\n"
                 "if d.name == 'case-0002':\n"
                 "    mode = config.get('failure', 'race')\n"
+                "    if mode == 'terminate-runner':\n"
+                "        os.kill(os.getppid(), signal.SIGTERM); sys.exit(0)\n"
                 "    if mode == 'numerical-exit': sys.exit(1)\n"
                 "    if mode == 'emulator-exit': sys.exit(7)\n"
                 "    if mode == 'no-solution':\n"
@@ -389,6 +393,46 @@ class RandomGemmTests(unittest.TestCase):
                                 (output / "case-0003/result.json").read_text()
                             )
                             self.assertEqual(result["outcome"], "passed")
+
+            config.write_text(
+                json.dumps(
+                    {
+                        "failure": "terminate-runner",
+                        "vm": {"gpu": {"device": {"gfx_target_version": 90500}}},
+                    }
+                )
+            )
+            output = root / "interrupted"
+            interrupted = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    runner.__file__,
+                    "--count",
+                    "3",
+                    "--bench",
+                    str(bench),
+                    "--rocjitsu",
+                    str(emulator),
+                    "--config",
+                    str(config),
+                    "--output",
+                    str(output),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+            )
+            self.assertEqual(interrupted.returncode, -signal.SIGTERM)
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertFalse(summary["complete"])
+            self.assertEqual(summary["sampled"], 2)
+            self.assertEqual(summary["passed"], 1)
+            self.assertEqual(summary["failed"] + summary["unsupported"], 0)
+            self.assertEqual(
+                json.loads((output / "case-0001/result.json").read_text())["outcome"],
+                "passed",
+            )
 
     def test_threads_do_not_change_generated_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
