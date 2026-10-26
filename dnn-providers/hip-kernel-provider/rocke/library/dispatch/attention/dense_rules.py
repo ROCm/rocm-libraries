@@ -403,7 +403,9 @@ class DenseSpace(WavesPerEuSpace):
         return axis_knob_names(tuning_axes(self.arch, "dense"))
 
     def defaults(self, base, kernel):
-        return dict(_dense_defaults(base, self.recorded_fields))
+        # The fields recorded per problem carry their value in the knobs, so the
+        # fingerprint must not also hash this problem's default for them.
+        return dict(_dense_defaults(base, self.recorded(base)))
 
     def build(self, base, knobs):
         extra = self.derived(base, knobs) if self.derived is not None else {}
