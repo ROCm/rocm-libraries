@@ -221,12 +221,25 @@ TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
-    // The schema id is what a manager exposes of the set it was built from, so a slot
-    // serving another set's manager shows up only between sets whose schemas differ.
-    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    // The schema ids are what a manager exposes of the set it was built from (one per kernel
+    // slot of a slotted engine), so a container slot serving another set's manager shows up
+    // only between sets whose schemas differ.
+    const auto schemaIdsOfSet = [](const hipdnn_plugin_sdk::ingestor::DescriptorSet& set) {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+        if(set.slots.empty())
+        {
+            ids.push_back(set.schema.id);
+        }
+        for(const auto& slot : set.slots)
+        {
+            ids.push_back(slot.schema.id);
+        }
+        return ids;
+    };
+    std::set<std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId>> schemaIds;
     for(const auto& set : sets)
     {
-        schemaIds.insert(set.schema.id);
+        schemaIds.insert(schemaIdsOfSet(set));
     }
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
@@ -238,7 +251,13 @@ TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
         const auto stateManager = takeDiscoveredStateManager(set.engine.id);
         ASSERT_NE(stateManager.get(), nullptr)
             << "no state manager handed off for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(stateManager->metadataSchema().id, set.schema.id)
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> managerIds;
+        managerIds.reserve(stateManager->slotCount());
+        for(size_t slot = 0; slot < stateManager->slotCount(); ++slot)
+        {
+            managerIds.push_back(stateManager->slotSchema(slot).id);
+        }
+        EXPECT_EQ(managerIds, schemaIdsOfSet(set))
             << "the id of '" << set.engine.name << "' took the state manager of another set";
         EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
             << "'" << set.engine.name << "' handed out a second state manager";
