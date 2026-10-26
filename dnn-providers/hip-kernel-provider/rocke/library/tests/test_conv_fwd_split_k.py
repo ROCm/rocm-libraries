@@ -306,6 +306,10 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
     )
     ref = conv_reference_gfx1250(A, B, problem, out_dtype=tdt).float().cpu()
     D = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
+    # Host <-> device copies go through pinned buffers only: a pageable copy
+    # registers the host range with the driver, which must not overlap a
+    # kernel in flight.
+    A, B = A.pin_memory(), B.pin_memory()
 
     rt = Runtime()
     bufs = [rt.alloc(A.nbytes), rt.alloc(B.nbytes), rt.alloc(D.nbytes)]
@@ -344,7 +348,7 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
                 # One launch: the cluster folds the slabs into D itself. Run
                 # it through bind() too, the path the benchmark times.
                 s1(values, config=s1_cfg)
-                out = torch.empty_like(D)
+                out = torch.empty_like(D).pin_memory()
                 rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
                 errs[degree] = float(
                     (out.float() - ref).abs().max() / ref.abs().max().clamp(min=1.0)
@@ -375,7 +379,7 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
                     fence=True,
                 ),
             )
-            out = torch.empty_like(D)
+            out = torch.empty_like(D).pin_memory()
             rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
             rt.free(ws)
             diff = (out.float() - ref).abs().max()
