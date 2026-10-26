@@ -14,6 +14,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
   first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
   one applicable CK instance the enumeration never terminated.
+* [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
+  one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

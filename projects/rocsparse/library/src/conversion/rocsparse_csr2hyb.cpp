@@ -32,6 +32,9 @@
 
 #include "rocsparse_primitives.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace rocsparse
 {
     template <typename T>
@@ -43,12 +46,13 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        hyb->m         = m;
-        hyb->n         = n;
-        hyb->partition = partition_type;
-        hyb->ell_nnz   = 0;
-        hyb->ell_width = 0;
-        hyb->coo_nnz   = 0;
+        hyb->m              = m;
+        hyb->n              = n;
+        hyb->partition      = partition_type;
+        hyb->ell_nnz        = 0;
+        hyb->ell_nnz_legacy = 0;
+        hyb->ell_width      = 0;
+        hyb->coo_nnz        = 0;
 
         if(std::is_same<T, float>{})
         {
@@ -174,8 +178,10 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     // Correct by index base
     csr_nnz -= descr->base;
 
-    // Maximum ELL row width allowed
-    rocsparse_int max_row_nnz = 2 * (csr_nnz - 1) / m + 1;
+    // Maximum ELL row width allowed. 2 * (csr_nnz - 1) overflows a 32-bit
+    // rocsparse_int once csr_nnz exceeds 2^30, which flips max_row_nnz negative
+    // and rejects every ell_width, so evaluate it in 64-bit.
+    int64_t max_row_nnz = 2 * (static_cast<int64_t>(csr_nnz) - 1) / m + 1;
 
     // Check user_ell_width
     if(partition_type == rocsparse_hyb_partition_user)
@@ -258,7 +264,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     }
 
     // Compute ELL non-zeros
-    hyb->ell_nnz = hyb->ell_width * m;
+    hyb->ell_nnz        = static_cast<int64_t>(hyb->ell_width) * m;
+    hyb->ell_nnz_legacy = static_cast<rocsparse_int>(
+        std::min<int64_t>(hyb->ell_nnz, std::numeric_limits<rocsparse_int>::max()));
 
     // Allocate ELL part
     if(hyb->ell_nnz > 0)

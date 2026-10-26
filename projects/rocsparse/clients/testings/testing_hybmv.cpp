@@ -149,7 +149,7 @@ void testing_hybmv(const Arguments& arg)
             const rocsparse_hyb_fields dhyb(hyb);
 
             rocsparse_int ell_width = dhyb.ell_width;
-            rocsparse_int ell_nnz   = dhyb.ell_nnz;
+            int64_t       ell_nnz   = dhyb.ell_nnz;
             rocsparse_int coo_nnz   = dhyb.coo_nnz;
 
             host_ell_matrix<T> hA_ell;

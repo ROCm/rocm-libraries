@@ -719,17 +719,37 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoInvalidArguments)
     EXPECT_EQ(set_with([](set_info_args& a) { a.ell_width = -1; }), rocsparse_status_invalid_size);
     EXPECT_EQ(set_with([](set_info_args& a) { a.coo_nnz = -1; }), rocsparse_status_invalid_size);
 
-    // An ELL nnz that does not fit the internal field is rejected, not truncated.
-    // A later widening PR will update this assertion.
-    if(sizeof(rocsparse_int) < sizeof(int64_t))
+    // An ELL nnz above INT32_MAX is stored without narrowing. set_info only
+    // stores the array pointers, so the small arrays below are never read.
     {
+        const rocsparse_int m         = 65536;
+        const rocsparse_int ell_width = 32768;
+        const int64_t       ell_nnz   = static_cast<int64_t>(m) * ell_width;
+        ASSERT_GT(ell_nnz, static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
+
+        rocsparse_hyb_mat wide;
+        ASSERT_EQ(rocsparse_create_hyb_mat(&wide), rocsparse_status_success);
+        rocsparse_int* ell_col_ind = nullptr;
+        float*         ell_val     = nullptr;
+        ASSERT_EQ(hipMalloc(&ell_col_ind, sizeof(rocsparse_int)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&ell_val, sizeof(float)), hipSuccess);
+
+        EXPECT_EQ(rocsparse_hyb_mat_set_info(wide,
+                                             m,
+                                             m,
+                                             rocsparse_hyb_partition_user,
+                                             ell_nnz,
+                                             ell_width,
+                                             ell_col_ind,
+                                             ell_val,
+                                             0,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
         int64_t get_ell_nnz = -1;
-        EXPECT_EQ(set_with([](set_info_args& a) {
-                      a.ell_nnz
-                          = static_cast<int64_t>(std::numeric_limits<rocsparse_int>::max()) + 1;
-                  }),
-                  rocsparse_status_invalid_size);
-        ASSERT_EQ(rocsparse_hyb_mat_get_info(hyb,
+        ASSERT_EQ(rocsparse_hyb_mat_get_info(wide,
                                              nullptr,
                                              nullptr,
                                              nullptr,
@@ -743,7 +763,11 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoInvalidArguments)
                                              nullptr,
                                              nullptr),
                   rocsparse_status_success);
-        EXPECT_EQ(get_ell_nnz, 0);
+        EXPECT_EQ(get_ell_nnz, ell_nnz);
+
+        EXPECT_EQ(rocsparse_destroy_hyb_mat(wide), rocsparse_status_success);
+        EXPECT_EQ(hipFree(ell_col_ind), hipSuccess);
+        EXPECT_EQ(hipFree(ell_val), hipSuccess);
     }
 
     // Invalid enums.

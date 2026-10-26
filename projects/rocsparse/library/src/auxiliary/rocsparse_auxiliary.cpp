@@ -25,6 +25,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
+#include <algorithm>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -1318,13 +1319,14 @@ try
             dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
-    dest->m           = src->m;
-    dest->n           = src->n;
-    dest->partition   = src->partition;
-    dest->ell_width   = src->ell_width;
-    dest->ell_nnz     = src->ell_nnz;
-    dest->coo_nnz     = src->coo_nnz;
-    dest->data_type_T = src->data_type_T;
+    dest->m              = src->m;
+    dest->n              = src->n;
+    dest->partition      = src->partition;
+    dest->ell_width      = src->ell_width;
+    dest->ell_nnz        = src->ell_nnz;
+    dest->ell_nnz_legacy = src->ell_nnz_legacy;
+    dest->coo_nnz        = src->coo_nnz;
+    dest->data_type_T    = src->data_type_T;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1494,11 +1496,6 @@ try
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG_ENUM(3, partition);
     ROCSPARSE_CHECKARG_SIZE(4, ell_nnz);
-    ROCSPARSE_CHECKARG(4,
-                       ell_nnz,
-                       (static_cast<uint64_t>(ell_nnz) > static_cast<uint64_t>(
-                            std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
-                       rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(5, ell_width);
     ROCSPARSE_CHECKARG_SIZE(8, coo_nnz);
     ROCSPARSE_CHECKARG_ENUM(12, data_type);
@@ -1539,7 +1536,9 @@ try
     hyb->m           = m;
     hyb->n           = n;
     hyb->partition   = partition;
-    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(ell_nnz);
+    hyb->ell_nnz        = ell_nnz;
+    hyb->ell_nnz_legacy = static_cast<rocsparse_int>(
+        std::min<int64_t>(ell_nnz, std::numeric_limits<rocsparse_int>::max()));
     hyb->ell_width   = ell_width;
     hyb->coo_nnz     = coo_nnz;
     hyb->data_type_T = data_type;
@@ -5102,10 +5101,7 @@ catch(...)
  * scalar, recording whether the scalar lives in host or device memory. It is a
  * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
  * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
- *
- * Gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
  *******************************************************************************/
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
                                                      rocsparse_pointer_mode pointer_mode,
@@ -5143,7 +5139,6 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif /* ROCSPARSE_WITH_SPMAT_SCALE */
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.

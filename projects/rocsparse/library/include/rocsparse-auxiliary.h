@@ -733,8 +733,7 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  partition   the \p HYB partitioning type.
  *  @param[in]
  *  ell_nnz     stored ELL entry count, including structural padding. It must
- *              be non-negative, representable by the internal ELL entry count,
- *              and equal to \p m times \p ell_width.
+ *              be non-negative and equal to \p m times \p ell_width.
  *  @param[in]
  *  ell_width   width of the ELL part.
  *  @param[in]
@@ -756,8 +755,7 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  \retval rocsparse_status_invalid_pointer \p hyb is invalid, or an ELL or
  *          COO array is null while its entry count is positive.
  *  \retval rocsparse_status_invalid_size \p m, \p n, \p ell_nnz, \p ell_width or
- *          \p coo_nnz is negative, \p ell_nnz does not fit the internal ELL
- *          entry count, or \p ell_nnz is not \p m times \p ell_width.
+ *          \p coo_nnz is negative, or \p ell_nnz is not \p m times \p ell_width.
  *  \retval rocsparse_status_invalid_value \p partition or \p data_type is invalid.
  *  \retval rocsparse_status_not_implemented \p data_type is not
  *          \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
@@ -3420,7 +3418,6 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p const_values is invalid.
  *  \retval rocsparse_status_invalid_value if \p data_type or \p pointer_mode is invalid.
  */
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
@@ -3429,7 +3426,6 @@ rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       hand
                                                      const void*            const_values,
                                                      void*                  values,
                                                      rocsparse_error*       p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a dense vector descriptor.

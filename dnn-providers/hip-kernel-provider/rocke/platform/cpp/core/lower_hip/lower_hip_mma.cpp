@@ -255,6 +255,20 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
+    /* Batched 4x4x4 atoms. No legacy opcode either; Python reaches them as the
+     * tile.mfma_f32_4x4x4_{f16,bf16} handlers, which pass the operands as they are. */
+    if(strcmp(op_id, "mfma_f32_4x4x4_f16") == 0 || strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0)
+    {
+        bool bf16 = strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0;
+        rocke_h_emitf(lw,
+                      "f32x4 %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      bf16 ? "mfma_f32_4x4x4bf16_1k" : "mfma_f32_4x4x4f16",
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
     /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
     {
