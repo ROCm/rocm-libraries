@@ -143,27 +143,43 @@ class TestDgradWmmaSpec(unittest.TestCase):
 
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
-        Python's over the AOT grid and a few rejected specs (the byte-identity
-        gate only covers the IR of specs both engines build)."""
+        Python's over every cell of the AOT grid (stride 2, dilation, packed
+        groups, the split barrier and the per-wave epilogue included) and a
+        set of rejected specs (the byte-identity gate only covers the IR of
+        specs both engines build)."""
         eng = pytest.importorskip("rocke_engine")
-        from kernels.conv.direct_aot_jobs import DGRAD_WMMA_KNOBS
+        from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _knob_grid
         from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
 
-        specs = []
-        for wc, wp, tc, tp, tw, tn, ck, st, pf in DGRAD_WMMA_KNOBS:
-            knobs = dict(
-                waves_c=wc,
-                waves_p=wp,
-                tiles_c=tc,
-                tiles_p=tp,
-                tile_w=tw,
-                tile_n=tn,
-                ck=ck,
-                stages=st,
+        def caps_problem(caps, dtype):
+            # A packed cell bakes cpg = kpg; 32 groups cover every pack size.
+            if caps.cpg:
+                ch = dict(groups=32, C=32 * caps.cpg, K=32 * caps.kpg)
+            else:
+                ch = {}
+            return _problem(
+                N=3,
+                H=29,
+                W=37,
+                KH=caps.KH,
+                PAD=caps.PAD,
+                stride=caps.stride,
+                dil_h=caps.dil_h,
+                dil_w=caps.dil_w,
+                dtype=dtype,
+                **ch,
             )
-            if pf:
-                knobs.update(prefetch=True, sched="iterative-ilp")
-            specs.append(DirectDgradWmmaSpec(problem=_problem(), **knobs))
+
+        specs = []
+        _, caps_list = DIRECT_CAPABILITIES["direct_dgrad_wmma"]
+        for dtype in ("bf16", "fp16"):
+            for caps in caps_list:
+                for knobs in _knob_grid("direct_dgrad_wmma", "gfx1250", dtype, caps):
+                    specs.append(
+                        DirectDgradWmmaSpec(problem=caps_problem(caps, dtype), **knobs)
+                    )
+        n_grid = len(specs)
+        self.assertGreater(n_grid, 300)
         for pkw, knobs in (
             ({}, dict(ck=48)),
             ({}, dict(tile_n=0)),
@@ -171,8 +187,27 @@ class TestDgradWmmaSpec(unittest.TestCase):
             (dict(C=36), {}),
             (dict(N=8, H=768, W=768, C=256, K=256), {}),
             (dict(KH=3, PAD=3), {}),
+            # Stride / dilation.
+            (dict(stride=3), {}),
+            (dict(stride=2), {}),  # four phases of 4x4 tiles: VGPRs
+            (dict(stride=2, PAD=2, dil_h=2, dil_w=2), dict(tiles_c=2)),
+            (dict(dil_h=2, dil_w=2, PAD=5), {}),
+            (dict(dil_h=0), {}),
+            (dict(N=8, H=768, W=768, C=256, K=256, stride=2), dict(tiles_c=2)),
+            # Packed groups.
+            (dict(C=32, K=32, groups=8), dict(pack_groups=3)),
+            (dict(C=24, K=24, groups=8), dict(pack_groups=8)),
+            (dict(C=64, K=64, groups=8), dict(pack_groups=8)),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=8, tiles_c=1, waves_c=1)),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=0)),
+            # Split barrier / per-wave epilogue.
+            (dict(stride=2), dict(tiles_c=2, split_barrier=True)),
+            (dict(C=32, K=32, groups=8), dict(pack_groups=4, wave_epilogue=True)),
+            ({}, dict(tiles_p=1, waves_p=4, tile_w=32, wave_epilogue=True)),
+            ({}, dict(tile_w=12)),
         ):
             specs.append(DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs))
+        n_rejected = 0
         for arch in ("gfx1250", "gfx950"):
             for spec in specs:
                 ok, _, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
@@ -184,6 +219,10 @@ class TestDgradWmmaSpec(unittest.TestCase):
                 self.assertEqual(lds, spec.lds_bytes())
                 if why is None:
                     self.assertEqual(tuple(grid), spec.grid())
+                elif arch == "gfx1250":
+                    n_rejected += 1
+        # Every AOT knob builds on gfx1250; every extra spec is a reject.
+        self.assertEqual(n_rejected, len(specs) - n_grid)
 
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
