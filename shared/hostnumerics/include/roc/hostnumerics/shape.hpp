@@ -9,7 +9,8 @@
 #include <limits>
 #include <numeric>
 #include <optional>
-#include <roc/hostnumerics/index_selection.hpp>
+#include <roc/hostnumerics/index_range.hpp>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -137,82 +138,85 @@ class Shape {
         return m_dimensions == other.m_dimensions;
     }
 
-    std::vector<size_t> indexOrder(const IndexSelection& selection) const {
-        validateSelectionOrder(selection);
-        if (const auto* order = std::get_if<std::vector<size_t>>(&selection.order())) return *order;
+    std::vector<size_t> indexOrderLastDimensionFastest() const {
         std::vector<size_t> order(rank());
         std::iota(order.begin(), order.end(), size_t{0});
         return order;
     }
 
-    size_t selectedCount(const IndexSelection& selection) const {
-        validateSelectionOrder(selection);
-        if (auto error = detail::indexSelectionError(selection, elementCount()))
-            throw std::runtime_error(std::string(detail::message(*error)));
-        if (const auto* range = std::get_if<IndexRange>(&selection.flatIndices())) {
-            if (range->first >= elementCount()) return 0;
-            return std::min(1 + (elementCount() - 1 - range->first) / range->stride,
-                            range->maxElements);
-        }
-        return std::get<std::vector<size_t>>(selection.flatIndices()).size();
+    size_t selectedCount(const IndexRange& range) const {
+        if (range.stride == 0) throw std::runtime_error("Index range stride must be nonzero.");
+        if (range.first >= elementCount()) return 0;
+        return std::min(1 + (elementCount() - 1 - range.first) / range.stride, range.maxElements);
     }
 
-    bool selectsAll(const IndexSelection& selection) const {
-        return selectedCount(selection) == elementCount();
+    size_t selectedCount(const std::set<size_t>& indices) const {
+        if (!indices.empty() && *indices.rbegin() >= elementCount())
+            throw std::runtime_error("Explicit index exceeds logical element count.");
+        return indices.size();
     }
 
-    // Materialization is explicit. Operation consumers can stream coordinates instead.
-    std::vector<size_t> selectedIndices(const IndexSelection& selection) const {
-        const size_t count = selectedCount(selection);
-        if (const auto* list = std::get_if<std::vector<size_t>>(&selection.flatIndices()))
-            return *list;
-        const auto& range = std::get<IndexRange>(selection.flatIndices());
-        std::vector<size_t> result(count);
-        for (size_t ordinal = 0; ordinal < count; ++ordinal)
+    bool selectsAll(const IndexRange& range) const {
+        return selectedCount(range) == elementCount();
+    }
+    bool selectsAll(const std::set<size_t>& indices) const {
+        return selectedCount(indices) == elementCount();
+    }
+
+    // Materialize the range only when the caller needs an explicit list.
+    std::vector<size_t> selectedIndices(const IndexRange& range) const {
+        std::vector<size_t> result(selectedCount(range));
+        for (size_t ordinal = 0; ordinal < result.size(); ++ordinal)
             result[ordinal] = range.first + ordinal * range.stride;
         return result;
     }
 
-    // Defines an ordered set of coordinates to visit. The coordinate span is reused
+    // Order lists all axes from slowest to fastest. The coordinate span is reused
     // and remains valid only during the callback. No flat-index list is allocated.
     template <typename Function>
-    void forEachCoordinate(const IndexSelection& selection, Function&& function) const {
-        const size_t count = selectedCount(selection);
-        const auto order = indexOrder(selection);
+    void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
+                           Function&& function) const {
+        validateOrder(order);
+        const size_t count = selectedCount(range);
+        if (count == 0) return;
         std::vector<size_t> coordinates(rank());
-        const auto visit = [&](size_t index) {
-            computeCoordinates(index, order, coordinates);
+        computeCoordinates(range.first, order, coordinates);
+        for (size_t ordinal = 0; ordinal < count; ++ordinal) {
+            const size_t index = range.first + ordinal * range.stride;
+            if (range.stride != 1) computeCoordinates(index, order, coordinates);
             function(index, std::span<const size_t>(coordinates));
-        };
-        if (const auto* range = std::get_if<IndexRange>(&selection.flatIndices())) {
-            if (range->stride == 1 && count != 0) {
-                computeCoordinates(range->first, order, coordinates);
-                for (size_t ordinal = 0; ordinal < count; ++ordinal) {
-                    function(range->first + ordinal, std::span<const size_t>(coordinates));
-                    if (ordinal + 1 == count) break;
-                    for (size_t position = rank(); position > 0; --position) {
-                        const size_t axis = order[position - 1];
-                        if (++coordinates[axis] < m_dimensions[axis]) break;
-                        coordinates[axis] = 0;
-                    }
+            if (ordinal + 1 == count) break;
+            if (range.stride == 1) {
+                for (size_t position = rank(); position > 0; --position) {
+                    const size_t axis = order[position - 1];
+                    if (++coordinates[axis] < m_dimensions[axis]) break;
+                    coordinates[axis] = 0;
                 }
-            } else {
-                for (size_t ordinal = 0; ordinal < count; ++ordinal)
-                    visit(range->first + ordinal * range->stride);
             }
-        } else {
-            for (size_t index : std::get<std::vector<size_t>>(selection.flatIndices()))
-                visit(index);
         }
     }
 
-   private:
-    void validateSelectionOrder(const IndexSelection& selection) const {
-        if (const auto* order = std::get_if<std::vector<size_t>>(&selection.order());
-            order && order->size() != rank())
-            throw std::runtime_error("Index selection order rank does not match tensor rank.");
+    // The set supplies ascending unique flat indices; Shape supplies their coordinates.
+    // Bounds and order are checked before the first callback, including empty work.
+    template <typename Function>
+    void forEachCoordinate(const std::set<size_t>& indices, std::span<const size_t> order,
+                           Function&& function) const {
+        validateOrder(order);
+        (void)selectedCount(indices);
+        std::vector<size_t> coordinates(rank());
+        for (size_t index : indices) {
+            computeCoordinates(index, order, coordinates);
+            function(index, std::span<const size_t>(coordinates));
+        }
     }
 
+    template <typename Indices, typename Function>
+    void forEachCoordinateLastDimensionFastest(const Indices& indices, Function&& function) const {
+        forEachCoordinate(indices, indexOrderLastDimensionFastest(),
+                          std::forward<Function>(function));
+    }
+
+   private:
     void validateDimension(size_t dimension) const {
         if (dimension >= rank())
             throw std::runtime_error("Tensor shape dimension " + std::to_string(dimension) +
