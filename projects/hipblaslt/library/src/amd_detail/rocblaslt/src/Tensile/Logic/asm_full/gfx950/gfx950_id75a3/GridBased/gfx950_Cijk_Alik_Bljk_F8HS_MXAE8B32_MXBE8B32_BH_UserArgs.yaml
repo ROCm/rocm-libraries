@@ -4228,6 +4228,93 @@ Solutions:
   _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
+- SolutionIndex: 48
+  KernelNameMin: RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideC0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: uint32, semantic: RR_SKNumSKTilesPerWG}
+    - {type: uint32, semantic: RR_SKNumSKTiles}
+    - {type: int32, semantic: RR_SKMagicShiftsNumTiles1}
+    - {type: int32, semantic: RR_SKMagicShiftsIters}
+    - {type: uint32, semantic: RR_SKMagicMultipleNumTiles1}
+    - {type: uint32, semantic: RR_SKMagicMultipleIters}
+    - {type: uint32, semantic: RR_SKNumTiles1}
+    - {type: uint32, semantic: RR_SKNumWGs}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: address, semantic: RR_SKAddressPartials}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: address, semantic: RR_SKAddressFlags}
+    - {type: uint32, semantic: RR_SKNumDPTilesPerWG}
+    - {type: uint32, semantic: RR_SKNumDPTiles}
+    grid: [RocRollerStreamK, One, One]
+    macrotile: [128, 64, 128]
+    name: RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+    occupancy: 3
+    threads: [256, 1, 1]
+    workspaceSizePerElemBias: 0
+    workspaceSizePerElemC: 4
+    workspaceType: RocRollerStreamK
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 2]
+  MacroTile0: 128
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 4
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [64, 64, 1, 128, 64, 64, 128, 128]
@@ -4346,6 +4433,8 @@ ExactLogic:
   - [4, 25.206153846153846]
 - - [32, 17, 1, 128, 32, 32, 128, 128]
   - [18, 23.07605633802817]
+- - [128, 67, 1, 128, 128, 128, 128, 128]
+  - [48, 215.7563786008230409]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

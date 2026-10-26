@@ -1026,6 +1026,12 @@ RR_GEMM_TN_BF8_BF6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -1314,6 +1320,12 @@ RR_GEMM_TN_BF8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 64]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -1601,6 +1613,12 @@ RR_GEMM_TN_BF8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_
 - [BoundSizeMultiple, -1, 128]
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 64]
+- [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
 - [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
@@ -2070,6 +2088,12 @@ RR_GEMM_TN_BF8_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -2112,6 +2136,12 @@ RR_GEMM_TN_BF8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -2153,6 +2183,12 @@ RR_GEMM_TN_BF8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BoundSizeMultiple, -1, 64]
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
+- [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_BF8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
 - [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_BF8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
@@ -4662,6 +4698,12 @@ RR_GEMM_TN_FP8_BF6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -4704,6 +4746,12 @@ RR_GEMM_TN_FP8_BF8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -4745,6 +4793,12 @@ RR_GEMM_TN_FP8_BF8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BoundSizeMultiple, -1, 64]
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
+- [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
 - [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2:
 - [BatchSizeEqual, 0, 1]
@@ -5021,6 +5075,12 @@ RR_GEMM_TN_FP8_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2:
 - [BoundSizeMultiple, -1, 64]
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 32]
+- [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
 - [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
@@ -5310,6 +5370,12 @@ RR_GEMM_TN_FP8_FP8_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 64]
 - [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
+- [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
 - [BoundSizeMultiple, -1, 128]
@@ -5597,6 +5663,12 @@ RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_
 - [BoundSizeMultiple, -1, 128]
 - [BufferAddressingLimitCheck, null, null]
 - [Free0SizeMultiple, 0, 64]
+- [MXScaleHostPreSwizzle, null, false]
+RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2:
+- [BatchSizeEqual, 0, 1]
+- [BoundSizeMultiple, -1, 128]
+- [BufferAddressingLimitCheck, null, null]
+- [Free0SizeMultiple, 0, 128]
 - [MXScaleHostPreSwizzle, null, false]
 RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:
 - [BatchSizeEqual, 0, 1]
