@@ -797,11 +797,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // precedes.
     std::unordered_map<const StinkyInstruction*, StinkyInstruction*> prefetchStageBarrier_;
     std::unordered_set<const StinkyInstruction*> prefetchIssued_;
-    // Single-stage loop: the tensor_loads each prefetch group goes with, and those issued so far.
-    // The group is released after its loads, as develop's hazard gate did.
-    std::unordered_map<const StinkyInstruction*, std::vector<const StinkyInstruction*>>
-        prefetchLoads_;
-    std::unordered_set<const StinkyInstruction*> scheduledLoads_;
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
@@ -811,12 +806,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         auto it = prefetchEarliestWmma_.find(node->inst);
         if (it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second)
             return true;
-        // Single-stage loop: the group follows its tensor_load.
-        auto loads = prefetchLoads_.find(node->inst);
-        if (!singleStageLoop() || loads == prefetchLoads_.end()) return false;
-        for (const StinkyInstruction* tl : loads->second)
-            if (!scheduledLoads_.count(tl)) return true;
-        return false;
+        // Single-stage loop: the group waits until its address VALUs' va_vdst is hidden, as
+        // develop's hazard gate did. A group not ready by the stage barrier then lands after its
+        // tensor_load (the barrier no longer waits for it); a ready one still goes before it.
+        return singleStageLoop() && waitAlu_ && isGlobalPrefetch(*node->inst) &&
+               waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
     }
     // A prefetch or VMEM load no level placed (no prefetch lead) whose va_vdst the WMMAs still
     // ready to issue would hide: it waits for them, as far as the scoreboard needs and no further.
@@ -1010,7 +1004,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 std::cerr << "[CDNA5 barrierCover] wmmaIssued=" << wmmaIssuedCountThisRegion_
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
-        if (isTensorLoad(inst)) scheduledLoads_.insert(&inst);
         if (waitAlu_) waitAlu_->commit(inst);
     }
 };
@@ -1841,9 +1834,10 @@ bool CDNA5ReadyQueue::promoteDuePrefetchProducer() {
     for (int kind : {kValu, kOther}) {
         for (DAGNode* n : kind == kValu ? valuQueue : otherQueue) {
             if (n->id >= needByWindow_.size() || needByWindow_[n->id] == INT_MAX) continue;
-            // A window below 0 can no longer be met. Promoting then only takes the slot of a ds
-            // the pacer has released, with nothing gained.
-            if (needByWindow_[n->id] < 0) continue;
+            // A window below 0 can no longer be met. In a single-stage loop the whole prefetch
+            // group is planned early, and promoting then only takes the slot of a ds the pacer
+            // has released, with nothing gained. A multi-stage loop gains by it.
+            if (needByWindow_[n->id] < 0 && singleStageLoop()) continue;
             if (wmmaIssuedCountThisRegion_ < needByWindow_[n->id]) continue;
             if (best && needByWindow_[n->id] >= needByWindow_[best->id]) continue;
             if (!feedsPrefetch(n, 2) || !issuableNow(n)) continue;
@@ -3304,8 +3298,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     prefetchEarliestWmma_.clear();
     prefetchStageBarrier_.clear();
     prefetchIssued_.clear();
-    prefetchLoads_.clear();
-    scheduledLoads_.clear();
     barrierWaitWindows_.clear();
     for (const auto& [barrier, window] : barrierWmmaThresholds_)
         if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
@@ -3349,10 +3341,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 if (groupTop) prefetchStageBarrier_[inst] = groupTop;
             }
         }
-        for (const auto& [window, prefetches] : byLoad)
-            for (const StinkyInstruction* pf : prefetches)
-                for (const auto& [tl, tlWindow] : loadPlannedWindow)
-                    if (tlWindow == window) prefetchLoads_[pf].push_back(tl);
         for (auto& [window, prefetches] : byLoad) {
             std::reverse(prefetches.begin(), prefetches.end());  // back to original order
             const int n = static_cast<int>(prefetches.size());

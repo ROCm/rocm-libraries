@@ -2,15 +2,28 @@
 #
 # Single-stage lead on a stage shorter than PrefetchLeadMinStageWmmas (64 by default).
 # Grouping the prefetches at the tensor_load needs no room, so the lead is kept: same
-# schedule as dag_prefetch_lead.stir (the group after its tensor_load). A multi-stage lead is
-# dropped here (dag_prefetch_lead_short_stage.stir).
+# schedule as dag_prefetch_lead.stir. A multi-stage lead is dropped here
+# (dag_prefetch_lead_short_stage.stir).
 
 # CHECK-LABEL: @prefetch_lead
 # CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: v_wmma_scale
+# CHECK-NOT: global_prefetch_b8
+# CHECK: "st.global_prefetch_b8"(v[300:301]
 # CHECK: "st.s_barrier_signal"
-# CHECK-NEXT: "st.s_barrier_wait"
-# CHECK-NEXT: "st.tensor_load_to_lds"
-# CHECK-NEXT: "st.global_prefetch_b8"(v[300:301]
+# CHECK: "st.tensor_load_to_lds"
 st.func @prefetch_lead() {
 ^entry:
   v300 = "st.v_add_f32"(v310, v311) { issueCycles = 1, latencyCycles = 5 }
