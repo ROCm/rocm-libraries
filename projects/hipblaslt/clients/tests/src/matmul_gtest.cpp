@@ -214,17 +214,17 @@ namespace
     // fail, and a 2% error fails, which the bf16 limit would pass. Allclose passes both.
     TEST(BenchVerify, smoke_HalfOutputNormUsesHalfTolerance)
     {
-        BenchVerifyD<hipblasLtHalf> close(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
-        BenchVerifyD<hipblasLtHalf> far(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        BenchVerifyD<hipblasLtHalf> within_limit(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        BenchVerifyD<hipblasLtHalf> beyond_limit(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
         for(int64_t b = 0; b < 2; b++)
             for(int64_t i = 0; i < 32; i++)
             {
-                close.at(close.result, b, i) *= hipblasLtHalf(1.004f);
-                far.at(far.result, b, i) *= hipblasLtHalf(1.02f);
+                within_limit.at(within_limit.result, b, i) *= hipblasLtHalf(1.004f);
+                beyond_limit.at(beyond_limit.result, b, i) *= hipblasLtHalf(1.02f);
             }
-        EXPECT_EQ(close.run(), 0);
-        EXPECT_GT(close.norm_error, norm_tolerance(HIP_R_32F));
-        EXPECT_EQ(far.run(), 1);
+        EXPECT_EQ(within_limit.run(), 0);
+        EXPECT_GT(within_limit.norm_error, norm_tolerance(HIP_R_32F));
+        EXPECT_EQ(beyond_limit.run(), 1);
     }
 
     // A D type that norm_check_general cannot compare is counted as a failure, so exit 0
