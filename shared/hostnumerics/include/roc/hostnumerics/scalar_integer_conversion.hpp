@@ -24,27 +24,20 @@ inline constexpr bool RuntimeIsComplexV = RuntimeIsComplex<T>::value;
 template <typename>
 inline constexpr bool AlwaysFalseV = false;
 
-// Low-bit mask for a width in [1, 64]: integerMask(8) is 0xff; integerMask(64)
-// is UINT64_MAX. The 64-bit case avoids shifting by the type's width.
+// Integer widths below must be in [1, 64]. The mask avoids shifting by 64.
 inline constexpr uint64_t integerMask(uint32_t bits) {
     return bits == 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << bits) - 1;
 }
 
-// Two's-complement bits for the signed minimum of a width in [1, 64].
-// signedIntegerMinimumRaw(8) is 0x80, representing -128.
+// Two's-complement bits for the signed minimum.
 inline constexpr uint64_t signedIntegerMinimumRaw(uint32_t bits) {
     return uint64_t{1} << (bits - 1);
 }
 
-// Bits for the maximum value of a width in [1, 64]. For eight bits, signed
-// destinations return 0x7f (127), and unsigned destinations return 0xff (255).
 inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestination) noexcept {
     return signedDestination ? signedIntegerMinimumRaw(bits) - 1 : integerMask(bits);
 }
 
-// Round without choosing an integer width. The rounding policy must be valid.
-// TowardZero maps -3.75 to -3; NearestEven maps 2.5 to 2 and 3.5 to 4 regardless
-// of the host rounding mode.
 template <typename Floating>
 Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) noexcept {
     static_assert(std::is_floating_point_v<Floating>);
@@ -62,65 +55,23 @@ Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) noe
     return parity == Floating{0} ? integral : integral + direction;
 }
 
-// Test representability before applying an overflow policy. Width is in [1, 64].
-// For value 255 and eight bits, an unsigned destination fits and a signed one does not.
-template <typename Integral>
-bool integralFitsIntegerDestination(Integral value, uint32_t bits,
-                                    bool signedDestination) noexcept {
-    static_assert(std::is_integral_v<Integral>);
-    if (signedDestination) {
-        if (bits == 64) return std::in_range<int64_t>(value);
-        const int64_t minimum = -(int64_t{1} << (bits - 1));
-        const int64_t maximum = (int64_t{1} << (bits - 1)) - 1;
-        return !std::cmp_less(value, minimum) && !std::cmp_greater(value, maximum);
-    }
-
-    if (std::cmp_less(value, 0)) return false;
-    if (bits == 64) return std::in_range<uint64_t>(value);
-    return !std::cmp_greater(value, integerMask(bits));
-}
-
-// Test whether a value is below the destination's minimum. Width is in [1, 64].
-// With eight bits, -1 is below an unsigned minimum; -128 equals a signed minimum.
-template <typename Integral>
-bool integralIsBelowIntegerDestination(Integral value, uint32_t bits,
-                                       bool signedDestination) noexcept {
-    static_assert(std::is_integral_v<Integral>);
-    if (!signedDestination) return std::cmp_less(value, 0);
-    if (bits == 64) return std::cmp_less(value, std::numeric_limits<int64_t>::min());
-    const int64_t minimum = -(int64_t{1} << (bits - 1));
-    return std::cmp_less(value, minimum);
-}
-
-// Interpret the low destination-width bits as a native integer. For raw 0xff,
-// integerFromBits<int8_t> returns -1 and integerFromBits<uint8_t> returns 255.
-template <typename Target>
-Target integerFromBits(uint64_t raw) noexcept {
-    using Value = std::remove_cv_t<Target>;
-    static_assert(std::is_integral_v<Value> && !std::is_same_v<Value, bool>);
-    // C++20 integral conversion is modulo 2^N, including signed destinations.
-    return static_cast<Value>(raw);
-}
-
-// Convert to bits without a failure result. Width and overflow policy must be
-// valid; under Identity, the input must fit. For signed eight-bit output,
-// ModuloWrap maps 128 to 0x80 and Saturate maps it to 0x7f.
 template <typename Integral>
 uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signedDestination,
                                       const ScalarConversionOptions& options) noexcept {
     static_assert(std::is_integral_v<Integral>);
-    if (options.integerOverflow == IntegerOverflow::Saturate &&
-        !integralFitsIntegerDestination(value, bits, signedDestination)) {
-        return integralIsBelowIntegerDestination(value, bits, signedDestination)
-                   ? (signedDestination ? signedIntegerMinimumRaw(bits) : 0)
-                   : integerMaximumRaw(bits, signedDestination);
+    if (options.integerOverflow == IntegerOverflow::Saturate) {
+        const uint64_t maximum = integerMaximumRaw(bits, signedDestination);
+        if (signedDestination) {
+            const int64_t minimum = -static_cast<int64_t>(maximum) - 1;
+            if (std::cmp_less(value, minimum)) return signedIntegerMinimumRaw(bits);
+        } else if (std::cmp_less(value, 0)) {
+            return 0;
+        }
+        if (std::cmp_greater(value, maximum)) return maximum;
     }
     return static_cast<uint64_t>(value) & integerMask(bits);
 }
 
-// Round and convert without a failure result. Width and policies must be valid.
-// NaN is outside the domain; infinity is permitted only under Saturate. Identity
-// requires the rounded value to fit. NearestEven maps 2.5 to 2 and 3.5 to 4.
 template <typename Floating>
 uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signedDestination,
                                       const ScalarConversionOptions& options) noexcept {
@@ -146,20 +97,15 @@ uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signed
     return static_cast<uint64_t>(rounded) & integerMask(bits);
 }
 
-// Numeric-source adapter for value-returning integer conversion. Complex inputs
-// must be real: (2, 0) converts like 2; (2, 1) violates the precondition.
+// Complex sources must have a zero imaginary part.
 template <typename Source>
 uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestination,
                               const ScalarConversionOptions& options) noexcept {
     using Value = std::remove_cvref_t<Source>;
     if constexpr (RuntimeIsComplexV<Value>) {
         return convertToIntegerBits(source.real(), bits, signedDestination, options);
-    } else if constexpr (std::is_same_v<Value, bool>) {
-        return convertIntegralToIntegerBits(static_cast<uint8_t>(source), bits, signedDestination,
-                                            options);
     } else if constexpr (std::is_integral_v<Value>) {
-        // Standard integer comparisons exclude character types. Widen integral
-        // sources without changing their values or signedness.
+        // Standard integer comparisons exclude character types; widen with signedness preserved.
         using Integer = std::conditional_t<std::is_signed_v<Value>, int64_t, uint64_t>;
         static_assert(std::numeric_limits<Value>::digits <= std::numeric_limits<Integer>::digits);
         return convertIntegralToIntegerBits(static_cast<Integer>(source), bits, signedDestination,
