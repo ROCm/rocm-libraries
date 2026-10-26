@@ -44,6 +44,8 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MTGP32, T>
             case target_arch::gfx908: return 256;
             case target_arch::gfx906: return 256;
             case target_arch::gfx1150: return 256;
+            case target_arch::gfx1170: return 256;
+            case target_arch::gfx1171: return 256;
             case target_arch::gfx1201: return 256;
             case target_arch::gfx950: return 256;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MTGP32, T>::threads;
@@ -64,6 +66,8 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MTGP32, T>
             case target_arch::gfx908: return 480;
             case target_arch::gfx906: return 448;
             case target_arch::gfx1150: return 512;
+            case target_arch::gfx1170: return 512;
+            case target_arch::gfx1171: return 512;
             case target_arch::gfx1201: return 512;
             case target_arch::gfx950: return 512;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MTGP32, T>::blocks;
