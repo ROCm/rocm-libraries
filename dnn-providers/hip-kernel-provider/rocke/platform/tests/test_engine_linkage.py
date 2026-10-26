@@ -222,6 +222,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert len(names) == len(set(names))
         return dict(pairs)
 
+    # library/tests/ctest_lists.cmake enrols the library suites only when the
+    # library tree sits beside platform/; a platform-only copy has none.
+    has_library = (
+        PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
+    ).is_file()
+
     for rocm_path in (None, tmp_path / "synthetic-rocm"):
         ctest_env = dict(os.environ)
         if rocm_path is None:
@@ -234,19 +240,27 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             for test in tests
             if test["name"] == "rocke_optimization_barrier_hip_pair"
         )
-        # A mixed private-variable spelling can configure successfully while
-        # appending this incoming registration to an unused CMake string.
-        sdpa = next(
-            test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
-        )
-        assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
-        assert environment_for(tests, "rocke_library_sdpa_pytest") == {
-            "PYTHONPATH": f"{test_ctest_rel}tests/library"
-        }
-        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-            install_script = (build / "cmake_install.cmake").read_text()
-            assert "attention_sdpa_fwd.graph.json" in install_script
-            assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        if has_library:
+            # A mixed private-variable spelling can configure successfully while
+            # appending this incoming registration to an unused CMake string.
+            sdpa = next(
+                test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
+            )
+            assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
+            assert environment_for(tests, "rocke_library_sdpa_pytest") == {
+                "PYTHONPATH": f"{test_ctest_rel}tests/library"
+            }
+            if "--rocke-require-hipdnn-assets" in sdpa["command"]:
+                install_script = (build / "cmake_install.cmake").read_text()
+                assert "attention_sdpa_fwd.graph.json" in install_script
+                assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        else:
+            # A platform-only tree enrols no library suite.
+            assert not [
+                test["name"]
+                for test in tests
+                if test["name"].startswith("rocke_library_")
+            ]
         command = pair["command"]
         native = command[command.index("--native") + 1]
         assert native == native_artifact("rocke_optimization_barrier_emit")
@@ -303,10 +317,11 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, part) == expected_platform_environment
         for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
-        assert (
-            environment_for(tests, "rocke_library_mla_pytest")
-            == expected_mla_environment
-        )
+        if has_library:
+            assert (
+                environment_for(tests, "rocke_library_mla_pytest")
+                == expected_mla_environment
+            )
 
 
 def split_ignored_files(selection):
