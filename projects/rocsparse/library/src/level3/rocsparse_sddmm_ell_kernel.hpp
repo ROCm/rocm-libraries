@@ -81,7 +81,8 @@ namespace rocsparse
             return;
         }
 
-        const J i = innz % M;
+        // innz < nnz here, so it fits in I and the remainder stays in index width.
+        const J i = static_cast<I>(innz) % M;
         const J j = ind[innz] - base;
         if(j < 0)
         {
