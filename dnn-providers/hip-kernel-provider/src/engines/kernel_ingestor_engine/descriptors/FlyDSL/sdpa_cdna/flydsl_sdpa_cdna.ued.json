@@ -7,7 +7,9 @@
     "native": "hipkernel.flydsl_sdpa_cdna.graph_match"
   },
   "sort_kernel_catalog": {
-    "default": "9a0b0973-0c1c-57e4-bdd5-4fb6f2c5d25e"
+    "default": "9a0b0973-0c1c-57e4-bdd5-4fb6f2c5d25e",
+    "gfx942": "5f8efe9d-f04e-431e-9b2b-cf2ee805a69b",
+    "gfx950": "cfb96307-3712-4908-a389-363f4b412115"
   },
   "metadata": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
   "knobs": [
