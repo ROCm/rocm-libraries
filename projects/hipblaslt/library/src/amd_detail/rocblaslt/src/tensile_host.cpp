@@ -732,6 +732,8 @@ namespace
         {
         case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
             return TensileLite::FusedA2A::GemmA2A;
+        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+            return TensileLite::FusedA2A::A2AGemm;
         case RocblasltFusedEpilogueInfo::Mode::Disabled:
             break;
         }
@@ -2374,7 +2376,7 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, fusedInfo)
            && fusedInfo.mode != RocblasltFusedEpilogueInfo::Mode::Disabled)
         {
             tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
@@ -2678,7 +2680,7 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, fusedInfo)
            && fusedInfo.mode != RocblasltFusedEpilogueInfo::Mode::Disabled)
         {
             tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
@@ -2983,7 +2985,7 @@ namespace
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
         RocblasltFusedEpilogueInfo fusedInfo;
-        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, fusedInfo)
            && fusedInfo.mode != RocblasltFusedEpilogueInfo::Mode::Disabled)
         {
             inputs.fusedA2ACounter = prob.Synchronizer;
@@ -3864,7 +3866,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Do not use rocRoller for a fused all-to-all
     RocblasltFusedEpilogueInfo fusedInfo;
-    if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+    if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, fusedInfo)
        && fusedInfo.mode != RocblasltFusedEpilogueInfo::Mode::Disabled)
         return false;
 #endif
@@ -4730,7 +4732,7 @@ namespace
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo info;
-        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, info)
+        return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, info)
                && info.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
 #else
         static_cast<void>(prob);

@@ -1313,4 +1313,558 @@ namespace
         makeD(HIP_R_16BF, kWideM, kWideM);
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
     }
+
+    /************************************************************************
+     * Prologue dispatch: B is gathered across ranks before the main loop.
+     ***********************************************************************/
+
+    class FusedA2APrologueDispatch_pre_checkin : public ::testing::Test
+    {
+    protected:
+        static constexpr int64_t kM = 256;
+        static constexpr int64_t kN = 256;
+        static constexpr int64_t kK = 512;
+
+        void SetUp() override
+        {
+            if(!gpuAvailable())
+                GTEST_SKIP() << "No GPU available";
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            const hipblasOperation_t opA = HIPBLAS_OP_T;
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                          matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusedPrologueAdd(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kK, kM, kK),
+                      HIPBLAS_STATUS_SUCCESS);
+            makeB();
+            makeD();
+        }
+
+        void TearDown() override
+        {
+            for(hipblasLtMatrixLayout_t layout : {Adesc, Bdesc, Ddesc})
+                if(layout)
+                    EXPECT_EQ(hipblasLtMatrixLayoutDestroy(layout), HIPBLAS_STATUS_SUCCESS);
+            for(hipblasLtFusedEpilogueDescriptor_t desc : {prologue, epilogue})
+                if(desc)
+                    EXPECT_EQ(hipblasLtFusedEpilogueDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+            if(pref)
+                EXPECT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
+            if(matmulDesc)
+                EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void makeB(int64_t k = kK, int64_t n = kN, int64_t ldb = kK)
+        {
+            if(Bdesc)
+                ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Bdesc), HIPBLAS_STATUS_SUCCESS);
+            Bdesc = nullptr;
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Bdesc, HIP_R_16BF, k, n, ldb),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void makeD(hipDataType type = HIP_R_16BF, int64_t m = kM, int64_t n = kN)
+        {
+            if(Ddesc)
+                ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Ddesc), HIPBLAS_STATUS_SUCCESS);
+            Ddesc = nullptr;
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Ddesc, type, m, n, m), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void registerOneRank(uint32_t channels = 1)
+        {
+            ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, channels, memcpyAllgather, nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+
+        hipblasStatus_t setPeerBPtrs(const std::vector<void*>& ptrs)
+        {
+            return hipblasLtFusedEpilogueSetAttribute(
+                prologue,
+                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
+                ptrs.data(),
+                ptrs.size() * sizeof(void*));
+        }
+
+        hipblasStatus_t setGatherBuffer(void* buffer)
+        {
+            return hipblasLtFusedEpilogueSetAttribute(
+                prologue,
+                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER,
+                &buffer,
+                sizeof(buffer));
+        }
+
+        hipblasStatus_t setQueues(const std::vector<hipblasLtSdmaQueue_t>& queues)
+        {
+            return hipblasLtFusedEpilogueSetAttribute(
+                prologue,
+                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
+                queues.data(),
+                queues.size() * sizeof(hipblasLtSdmaQueue_t));
+        }
+
+        hipblasStatus_t setExtent(int64_t extent)
+        {
+            return hipblasLtFusedEpilogueSetAttribute(
+                prologue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &extent, sizeof(extent));
+        }
+
+        hipblasStatus_t attach(hipblasLtMatmulDescAttributes_t    attr,
+                               hipblasLtFusedEpilogueDescriptor_t desc)
+        {
+            return hipblasLtMatmulDescSetAttribute(matmulDesc, attr, &desc, sizeof(desc));
+        }
+
+        // A descriptor a one-rank group can run.
+        void completeAndAttach(void* b      = reinterpret_cast<void*>(0x100000),
+                               void* gather = reinterpret_cast<void*>(0x200000))
+        {
+            ASSERT_EQ(setPeerBPtrs({b}), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(setGatherBuffer(gather), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(setQueues({fakeQueue(0x2000)}), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+
+        // A complete epilogue all-to-all for a one-rank group.
+        void makeEpilogue()
+        {
+            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&epilogue), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusedEpilogueAdd(epilogue, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
+                      HIPBLAS_STATUS_SUCCESS);
+            const int64_t am = kM;
+            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                          epilogue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
+                      HIPBLAS_STATUS_SUCCESS);
+            void* recv = reinterpret_cast<void*>(0x1000);
+            ASSERT_EQ(
+                hipblasLtFusedEpilogueSetAttribute(
+                    epilogue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
+                HIPBLAS_STATUS_SUCCESS);
+            hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
+            ASSERT_EQ(
+                hipblasLtFusedEpilogueSetAttribute(epilogue,
+                                                   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
+                                                   &queue,
+                                                   sizeof(queue)),
+                HIPBLAS_STATUS_SUCCESS);
+        }
+
+        hipblasStatus_t heuristic(int* returned = nullptr)
+        {
+            hipblasLtMatmulHeuristicResult_t result[1] = {};
+            int                              count     = 0;
+            return hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                   matmulDesc,
+                                                   Adesc,
+                                                   Bdesc,
+                                                   Ddesc,
+                                                   Ddesc,
+                                                   pref,
+                                                   1,
+                                                   result,
+                                                   returned ? returned : &count);
+        }
+
+        bool firstAlgo(hipblasLtMatmulAlgo_t& algo)
+        {
+            hipblasLtMatmulHeuristicResult_t result   = {};
+            int                              returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(
+                   handle, matmulDesc, Adesc, Bdesc, Ddesc, Ddesc, pref, 1, &result, &returned)
+                   != HIPBLAS_STATUS_SUCCESS
+               || returned == 0)
+                return false;
+            algo = result.algo;
+            return true;
+        }
+
+        hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t& algo)
+        {
+            const float alpha     = 1.f;
+            const float beta      = 0.f;
+            size_t      workspace = 0;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                handle, matmulDesc, &alpha, Adesc, Bdesc, &beta, Ddesc, Ddesc, algo, workspace);
+        }
+
+        hipblasStatus_t matmul(const void* a, const void* b, void* d)
+        {
+            const float alpha = 1.f;
+            const float beta  = 0.f;
+            return hipblasLtMatmul(handle,
+                                   matmulDesc,
+                                   &alpha,
+                                   a,
+                                   Adesc,
+                                   b,
+                                   Bdesc,
+                                   &beta,
+                                   d,
+                                   Ddesc,
+                                   d,
+                                   Ddesc,
+                                   nullptr,
+                                   nullptr,
+                                   0,
+                                   nullptr);
+        }
+
+        hipblasLtHandle_t                  handle     = nullptr;
+        hipblasLtMatmulDesc_t              matmulDesc = nullptr;
+        hipblasLtMatmulPreference_t        pref       = nullptr;
+        hipblasLtFusedEpilogueDescriptor_t prologue   = nullptr;
+        hipblasLtFusedEpilogueDescriptor_t epilogue   = nullptr;
+        hipblasLtMatrixLayout_t            Adesc      = nullptr;
+        hipblasLtMatrixLayout_t            Bdesc      = nullptr;
+        hipblasLtMatrixLayout_t            Ddesc      = nullptr;
+    };
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, CompleteDescriptorPassesTheHeuristicGate)
+    {
+        registerOneRank();
+        completeAndAttach();
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, ExtentEqualToKIsAccepted)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(setExtent(kK), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, ExtentOtherThanKIsRejected)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(setExtent(kK / 2), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MissingQueuesReturnNoAlgo)
+    {
+        registerOneRank();
+        ASSERT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x100000)}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setGatherBuffer(reinterpret_cast<void*>(0x200000)), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+
+        int returned = -1;
+        EXPECT_EQ(heuristic(&returned), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(returned, 0);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, OwnQueueEntryMayBeEmpty)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(setQueues({hipblasLtSdmaQueue_t{}}), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsQueuesThatDoNotMatchWorld)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(setQueues({fakeQueue(0x2000), fakeQueue(0x3000)}), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, IsAlgoSupportedRejectsQueuesThatDoNotMatchWorld)
+    {
+        registerOneRank();
+        completeAndAttach();
+        hipblasLtMatmulAlgo_t algo;
+        if(!firstAlgo(algo))
+            GTEST_SKIP() << "no A2AGemm solution in the loaded library";
+        ASSERT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(setQueues({fakeQueue(0x2000), fakeQueue(0x3000)}), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, IsAlgoSupportedRejectsMissingQueues)
+    {
+        registerOneRank();
+        completeAndAttach();
+        hipblasLtMatmulAlgo_t algo;
+        if(!firstAlgo(algo))
+            GTEST_SKIP() << "no A2AGemm solution in the loaded library";
+
+        hipblasLtFusedEpilogueDescriptor_t noQueues = nullptr;
+        ASSERT_EQ(hipblasLtFusedEpilogueCreate(&noQueues), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtFusedPrologueAdd(noQueues, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+                  HIPBLAS_STATUS_SUCCESS);
+        std::swap(prologue, noQueues);
+        ASSERT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x100000)}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setGatherBuffer(reinterpret_cast<void*>(0x200000)), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtFusedEpilogueDestroy(noQueues), HIPBLAS_STATUS_SUCCESS);
+
+        EXPECT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsMissingPeerBPtrs)
+    {
+        registerOneRank();
+        ASSERT_EQ(setGatherBuffer(reinterpret_cast<void*>(0x200000)), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setQueues({fakeQueue(0x2000)}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsPeerBPtrsThatDoNotMatchWorld)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(
+            setPeerBPtrs({reinterpret_cast<void*>(0x100000), reinterpret_cast<void*>(0x110000)}),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsNullPeerBEntry)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(setPeerBPtrs({nullptr}), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsMissingGatherBuffer)
+    {
+        registerOneRank();
+        ASSERT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x100000)}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setQueues({fakeQueue(0x2000)}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsMissingCommunicator)
+    {
+        completeAndAttach();
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsChannelOutsideTheCommunicator)
+    {
+        registerOneRank();
+        completeAndAttach();
+        const uint32_t channel = 1;
+        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      prologue, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsBothSidesAttached)
+    {
+        registerOneRank();
+        completeAndAttach();
+        makeEpilogue();
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, epilogue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsAPrologueOnTheEpilogueAttribute)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsAnEpilogueOnThePrologueAttribute)
+    {
+        registerOneRank();
+        makeEpilogue();
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, epilogue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsTransposedB)
+    {
+        registerOneRank();
+        completeAndAttach();
+        const hipblasOperation_t opB = HIPBLAS_OP_T;
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB)),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeB(kN, kK, kK);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsAnEmptyBound)
+    {
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+        Adesc = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, 0, kM, 1),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeB(0, kN, 0);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsLdbOtherThanK)
+    {
+        registerOneRank();
+        completeAndAttach();
+        makeB(kK, kN, kK + 64);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsBatchedGemm)
+    {
+        registerOneRank();
+        completeAndAttach();
+        const int32_t batchCount = 2;
+        for(hipblasLtMatrixLayout_t layout : {Adesc, Bdesc, Ddesc})
+            ASSERT_EQ(
+                hipblasLtMatrixLayoutSetAttribute(
+                    layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(batchCount)),
+                HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, ReportsMissingCapabilityForNonBf16B)
+    {
+        registerOneRank();
+        completeAndAttach();
+        for(hipblasLtMatrixLayout_t* layout : {&Adesc, &Bdesc})
+        {
+            ASSERT_EQ(hipblasLtMatrixLayoutDestroy(*layout), HIPBLAS_STATUS_SUCCESS);
+            *layout = nullptr;
+        }
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16F, kK, kM, kK),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Bdesc, HIP_R_16F, kK, kN, kK),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeD(HIP_R_16F);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
+    }
+
+    // The gathered row is one copy of K / world elements, whose width field is
+    // 14 bits in 16-byte units.
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsRowBeyondTheCopyDescriptor)
+    {
+        constexpr int64_t kWideK = 8 * 16384 + 8;
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+        Adesc = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kWideK, kM, kWideK),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeB(kWideK, kN, kWideK);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, RejectsABlockThatIsNotA128ByteMultiple)
+    {
+        constexpr int64_t kNarrowK = 8;
+        constexpr int64_t kNarrowN = 4;
+        registerOneRank();
+        completeAndAttach();
+        ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+        Adesc = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kNarrowK, kM, kNarrowK),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeB(kNarrowK, kNarrowN, kNarrowK);
+        makeD(HIP_R_16BF, kM, kNarrowN);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, EpilogueShapeRulesDoNotApply)
+    {
+        registerOneRank();
+        completeAndAttach();
+        makeD(HIP_R_32F, 64, kN);
+        ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+        Adesc = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kK, 64, kK),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsMissingQueues)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kM * kN * 2), gather(kK * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr && gather.ptr);
+        ASSERT_EQ(setPeerBPtrs({b.ptr}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setGatherBuffer(gather.ptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsBOtherThanItsPeerEntry)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), other(kK * kN * 2), d(kM * kN * 2),
+            gather(kK * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && other.ptr && d.ptr && gather.ptr);
+        completeAndAttach(other.ptr, gather.ptr);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsAGatherBufferOverlappingD)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kK * kN * 2 + kM * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr);
+        completeAndAttach(b.ptr, d.ptr);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsAGatherBufferOverlappingB)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(2 * kK * kN * 2), d(kM * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr);
+        completeAndAttach(b.ptr, static_cast<char*>(b.ptr) + 128);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, MatmulRejectsAGatherBufferOverlappingA)
+    {
+        registerOneRank();
+        DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kM * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr);
+        completeAndAttach(b.ptr, a.ptr);
+        EXPECT_EQ(matmul(a.ptr, b.ptr, d.ptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, ExtGemmRejectsAPrologueDescriptor)
+    {
+        registerOneRank();
+        completeAndAttach();
+
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
+        DeviceBuffer        a(kK * kM * 2), b(kK * kN * 2), d(kM * kN * 2);
+        ASSERT_TRUE(a.ptr && b.ptr && d.ptr);
+        const float alpha = 1.f;
+        const float beta  = 0.f;
+        EXPECT_EQ(
+            gemm.setProblem(
+                matmulDesc, &alpha, a.ptr, Adesc, b.ptr, Bdesc, &beta, d.ptr, Ddesc, d.ptr, Ddesc),
+            HIPBLAS_STATUS_INVALID_VALUE);
+    }
 }

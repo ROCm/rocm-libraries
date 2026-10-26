@@ -753,23 +753,32 @@ struct RocblasltFusedEpilogueInfo
     {
         Disabled,
         GemmA2A,
+        A2AGemm,
     };
 
-    Mode                         mode              = Mode::Disabled;
+    Mode mode = Mode::Disabled;
+    // A descriptor carries stages of the side it is not attached to, or both
+    // sides carry an all-to-all.
+    bool                         misattached       = false;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
+    void* const*                 a2aPeerBPtrs      = nullptr;
+    size_t                       a2aPeerBCount     = 0;
+    void*                        a2aGatherBuffer   = nullptr;
     int64_t                      a2aExtent         = 0;
     hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
     uint32_t                     commChannel       = 0;
 };
 
-// Returns false when desc is nullptr.
-bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+// Returns false when both descriptors are nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* epilogue,
+                                      const struct hipblasLtFusedEpilogueDescriptor* prologue,
                                       RocblasltFusedEpilogueInfo&                    out);
 
 // Every rejection is reported as rocblaslt_status_invalid_value.
 rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
                                                             rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matB,
                                                             rocblaslt_matrix_layout matD);
 #endif
 
