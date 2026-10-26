@@ -196,6 +196,12 @@ def main() -> int:
     ap.add_argument(
         "--verbose", action="store_true", help="list every expected warning too"
     )
+    ap.add_argument(
+        "--cases",
+        default="",
+        help="corpus module file exposing cases() (default: the platform "
+        "representative-IR harness)",
+    )
     args = ap.parse_args()
 
     # Pin the lane on before anything imports the lowerer: an exported
@@ -206,9 +212,9 @@ def main() -> int:
     _bootstrap_sys_path()
     from rocke.core.arch import domain as arch_domain
     from rocke.core.lower_llvm import LLVM_FLAVORS
-    from rocke_ir_parity_harness import cases
+    from _corpus import load_corpus
 
-    keep = list(cases())
+    keep = list(load_corpus(args.cases).cases())
     known_cases = {c["case_id"] for c in keep}
     if args.only:
         wanted = [s for s in args.only.split(",") if s]

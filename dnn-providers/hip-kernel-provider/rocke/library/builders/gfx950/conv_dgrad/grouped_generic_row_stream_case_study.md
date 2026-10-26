@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT
 Measured numbers are deliberately absent — see `platform/AGENTS.md` §Compliance.
 
 **Kernel.** `build_direct_conv` (`DirectConvSpec`) in
-[`library/kernels/common/conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py),
+[`library/kernels/common/conv_direct_grouped.py`](../../../kernels/common/conv_direct_grouped.py),
 the generic row stream the cached variant `direct_grouped_dgrad_fused` runs
 over the transposed problem for the grouped dgrad shapes it covers (see
 [`dgrad_fused_weights_case_study.md`](dgrad_fused_weights_case_study.md)).
@@ -18,7 +18,7 @@ C++ mirror: `rocke_build_direct_conv`
 **Knobs.** `prefetch_rows`, `lds_only_sync`, `waves_m`, `lds_pad`,
 `stage_out`, `xcd_tiles`, and the AOT-only `row_guard` / `row_exit`. Their
 semantics, validator rules and name tags are in
-[Generic Kernel dgrad: fused weights](../../../../../dsl_docs/instances/convolution.md#generic-kernel-dgrad-fused-weights-directconvspec-aot-variant-direct_grouped_dgrad_fused);
+[Generic Kernel dgrad: fused weights](../../../kernels/conv/docs/convolution.md#generic-kernel-dgrad-fused-weights-directconvspec-aot-variant-direct_grouped_dgrad_fused);
 this study records why they exist and which of them the AOT cache builds.
 
 ## What limited the kernel

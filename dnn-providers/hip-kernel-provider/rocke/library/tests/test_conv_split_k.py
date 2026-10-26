@@ -26,9 +26,9 @@ from kernels.common.conv_split_k import (
     MAX_WGRAD_WS_BYTES,
     parse_split_k_override,
     resolve_conv_split_k,
+    select_split_k_wgrad,
 )
-from rocke.helpers.split_k import select_split_k_wgrad
-from rocke.helpers.split_k_planner import MAX_GRID_DIM_Z
+from kernels.conv.split_k_planner import MAX_GRID_DIM_Z
 
 # Long reduction into a tiny dW, odd row (no packed atomic): a stem conv, the
 # class a 128-degree ceiling under-splits.
@@ -466,7 +466,7 @@ def test_auto_never_plans_a_workspace_its_replicas_overflow():
 
 
 def test_planner_rejects_a_batch_beyond_grid_z():
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         select_split_k_plan,
@@ -515,7 +515,7 @@ def test_cost_fit_keeps_each_workspace_replica_count_its_own_option():
     # Two workspace binaries of one main loop that differ only in replica
     # count: each time must stay paired with its own setup traffic.
     from benchmarks.common.split_k_cost_fit import _decisions, _Kernel
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         SplitKReduction,
@@ -563,7 +563,7 @@ def test_cost_fit_degree_list_parses_ranges():
 def test_cost_fit_round_trip_keeps_the_unsearched_fields():
     # The literal the fit prints must not drop the XCD count or the margin.
     from benchmarks.common.split_k_cost_fit import _model_of, _x_of
-    from rocke.helpers.split_k_planner import split_k_cost_model
+    from kernels.conv.split_k_planner import split_k_cost_model
 
     for cost in (
         split_k_cost_model("gfx950"),

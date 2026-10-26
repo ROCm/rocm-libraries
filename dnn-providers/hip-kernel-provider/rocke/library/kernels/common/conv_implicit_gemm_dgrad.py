@@ -68,7 +68,7 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
-from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
+from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.magic_division import (
     calculate_magic_numbers,
@@ -87,6 +87,7 @@ from rocke.helpers.transforms import (
     unmerge_magic_dynamic,
 )
 from kernels.common.conv_abi import conv_arg_names
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,

@@ -80,7 +80,7 @@ the filter rows with one weight row and a sliding window of input rows in
 registers, an output tile of `block_h x block_w`, and a grid split over output
 rows too. Its footprint is linear in the filter width, so it avoids the
 register spills and the steep compile cost the row-streaming kernel has at these
-sizes. See `platform/dsl_docs/instances/convolution.md`.
+sizes. See [`../conv/docs/convolution.md`](../conv/docs/convolution.md).
 
 ### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
 
@@ -291,7 +291,7 @@ dgrad --variants <variant> --verify` runs them on a shape.
 
 The weight pre-pass pipeline (`direct_grouped_dgrad_mfma`) stays in the
 cache next to them. The case studies are in
-`platform/python/rocke/examples/gfx950/conv_dgrad/`.
+`library/builders/gfx950/conv_dgrad/`.
 
 For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`
 (backward data: `DirectDepthwiseDgradWindowedSpec` /

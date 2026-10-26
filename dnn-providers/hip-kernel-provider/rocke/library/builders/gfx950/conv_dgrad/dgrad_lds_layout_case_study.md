@@ -149,17 +149,17 @@ tests above do it in-process, and the single-config driver below does it for a
 traced run. Keep `--csv` output outside the git work tree.
 
 Single-config run, for a trace or a focused A/B —
-[`run_one_dgrad.py`](run_one_dgrad.py) builds and launches exactly one
+[`run_one_dgrad.py`](../../../benchmarks/gfx950/conv_dgrad/run_one_dgrad.py) builds and launches exactly one
 `DgradConvSpec`. It is dgrad-only, so it does not serve the wgrad study:
 
 ```bash
-python3 python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+python3 ../library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py \
     --kouter on --stride 2 --print-name-only    # kernel name, no GPU touched
 
 export ROCPROF_TRACE_DECODER_LIB=<dir containing librocprof-trace-decoder.so>
 python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
     --output-dir ./att_out --kernel-regex "rocke_trace_dgrad.*kouter" \
-    -- python3 python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+    -- python3 ../library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py \
        --kouter on --stride 2 --warmup 1 --iters 2
 ```
 

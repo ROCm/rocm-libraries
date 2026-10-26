@@ -99,7 +99,14 @@ class TestIrParityCoverage(unittest.TestCase):
             arch_counts[arch] = arch_counts.get(arch, 0) + 1
             family_by_arch.setdefault(arch, set()).add(family)
 
-        expected_arches = set(known_arches()) | {"gfx1201"}
+        # The generic targets' only representative cases are the deep fused
+        # conv shims, which live with the other conv families in the library's
+        # own golden (library/tests/test_conv_ir_golden.py checks that it
+        # covers them).
+        expected_arches = (set(known_arches()) | {"gfx1201"}) - {
+            "gfx11-generic",
+            "gfx12-generic",
+        }
         self.assertLessEqual(expected_arches, set(arch_counts))
         for arch in expected_arches:
             self.assertGreater(arch_counts[arch], 0, f"{arch} has no IR cases")
@@ -107,7 +114,6 @@ class TestIrParityCoverage(unittest.TestCase):
             self.assertIn("gemm", family_by_arch[arch])
 
         self.assertIn("moe", family_by_arch["gfx950"])
-        self.assertIn("deep_fused_conv", family_by_arch["gfx950"])
         self.assertIn("kda_chunkwise", family_by_arch["gfx950"])
         self.assertIn("kda_chunkwise", family_by_arch["gfx942"])
 

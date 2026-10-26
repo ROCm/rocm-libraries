@@ -150,7 +150,7 @@ _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 # physical unit -- only ratios between degrees are compared -- so a constant's
 # absolute magnitude says nothing about its influence. Scope: gfx950, forward;
 # refit before relying on it elsewhere. Method and fitting tooling are described
-# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+# in library/builders/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
 _FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
 _FWD_MERGE_CONSTS = (
     # Cost of issuing the A load per K step, divided by the achieved vector

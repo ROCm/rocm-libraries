@@ -205,7 +205,7 @@ requires `K` a multiple of `tile_k`.
 
 ---
 
-## 5. Deep-fused conv + maxpool (`deep_fused_conv_pool_verify.py`)
+## 5. Deep-fused conv + maxpool (`library/builders/gfx1201/deep_fused_conv_pool_verify.py`)
 
 This is the **same fused dataflow as the gfx950 prototype**, re-targeted to the
 gfx12 WMMA atom on wave32. One kernel computes, with **no HBM round-trip for the
@@ -224,7 +224,7 @@ maxpooled inline and only the **pooled** result is written to HBM. Both convs
 run as **implicit GEMM** — the conv is reshaped into a matmul over the WMMA atom
 — so this kernel is a third consumer of the §2 fragment layout.
 
-The kernel *body* is the arch-parametric one in `instances/common`; the gfx1201
+The kernel *body* is the arch-parametric one in `library/kernels/common`; the gfx1201
 driver only pins the WMMA geometry (`warp_tile_m/n/k = atom.m/n/k`,
 `wave_size`) and reuses the **gfx950 harness's numpy reference and verify/bench
 helpers** verbatim, because those are spec-generic (they read only
@@ -279,4 +279,4 @@ verifies.
   `MatMulNBits` body and per-arch fragment branch. The `--opt` body is the
   separate `instances/common/_matmul_nbits_large_n_opt.py`; the scalar GEMV is
   `instances/common/_matmul_nbits_decode_gemv.py`.
-- `instances/gfx1201/deep_fused_conv_pool.py` — the gfx1201 conv-pool spec.
+- `library/kernels/gfx1201/deep_fused_conv_pool.py` — the gfx1201 conv-pool spec.

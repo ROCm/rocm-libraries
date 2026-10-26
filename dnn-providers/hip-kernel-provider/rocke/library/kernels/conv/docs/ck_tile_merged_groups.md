@@ -475,7 +475,7 @@ not end up a transplant**: fwd's stride-1 axis already sits inside the reduction
 axis, so it puts `Gm` on GemmN and GemmK rather than CK/wgrad's GemmM and GemmN,
 and spends the diagonal on the **B load** rather than the C store. The store is
 therefore dense and `vec_c` is free to widen — see
-`examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md`.
+`library/builders/gfx950/conv_fwd/fwd_merged_groups_case_study.md`.
 
 Engine coverage differs by direction. **Forward** is implemented in both the
 Python and the C++ engine (`group_merge` is a field on

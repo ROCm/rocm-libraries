@@ -14,11 +14,13 @@ breach):
                                              layernorm, rmsnorm, transpose2d,
                                              batched + grouped GEMM  (BOTH arches)
   - rocke.examples.common.universal_gemm_verify : Universal GEMM vs A@B.T (BOTH)
-  - builders.common.bake_off_implicit_gemm + run_manifest --verify : conv (BOTH)
   - rocke.examples.common.parity_extended_kernels: fmha/attention/sage/sparse/streamk/
                                              mfma/block_scale/mx  (gfx950 today;
                                              see test_extended_parity for the
                                              gfx942 status)
+
+The conv numeric gate (bake_off_implicit_gemm + run_manifest --verify) is in
+library/tests/test_conv_implicit_gemm_numeric.py.
 
 Requires a ROCm GPU and torch (e.g. a dedicated ~/.venv); skipped otherwise.
 Run:  PYTHONPATH=python <torch-python> tests/instances/test_rocke_numeric.py
@@ -26,13 +28,11 @@ Run:  PYTHONPATH=python <torch-python> tests/instances/test_rocke_numeric.py
 
 from __future__ import annotations
 
-import glob
 import importlib.util
 import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
@@ -105,32 +105,6 @@ class TestNumericVerification(unittest.TestCase):
         )
         self.assertEqual(rc, 0, f"gemm verify failed on {ARCH}:\n{out[-2500:]}")
         self.assertIn("bad=0", out)
-
-    def test_conv_numeric(self):
-        """Implicit-GEMM convolution vs numpy fp32 reference."""
-        if not _CDNA:
-            self.skipTest(f"CDNA MFMA conv; running on {ARCH} (RDNA)")
-        d = tempfile.mkdtemp(prefix=f"rocke_conv_{ARCH}_")
-        rc, out = self._run(
-            "-m",
-            "builders.common.bake_off_implicit_gemm",
-            "--arch",
-            ARCH,
-            "--output-dir",
-            d,
-        )
-        self.assertEqual(rc, 0, f"conv build failed on {ARCH}:\n{out[-2500:]}")
-        hsaco = glob.glob(os.path.join(d, "*.hsaco"))
-        self.assertTrue(hsaco, f"no hsaco produced in {d}")
-        rc2, out2 = self._run(
-            "-m",
-            "rocke.run_manifest",
-            hsaco[0],
-            os.path.join(d, "manifest.json"),
-            "--verify",
-        )
-        self.assertEqual(rc2, 0, f"conv verify failed on {ARCH}:\n{out2[-2500:]}")
-        self.assertIn("bad=0", out2)
 
     def test_extended_parity(self):
         """fmha/attention/sage/sparse/streamk/mfma/block_scale/mx vs torch.

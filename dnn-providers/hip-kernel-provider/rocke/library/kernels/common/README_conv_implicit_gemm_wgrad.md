@@ -94,10 +94,10 @@ parameters are required.
 through the packed atomic or the two-stage f32 workspace, is chosen by
 `kernels.common.conv_split_k.resolve_conv_split_k` -- the one resolver the
 dispatcher, the builders and the benchmark share. On arches with a fitted
-split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
+split-K cost model (`kernels.conv.split_k_planner`) it picks the cheapest
 (degree, reduction) under that model; elsewhere it uses the CK formula
-(`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
-clamped to `[1, wg_K]`). The resolver's `override` argument forces it (the
+(`select_split_k_wgrad`, in the same module:
+`floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`). The resolver's `override` argument forces it (the
 benchmark sets it from `ROCKE_CONV_SPLIT_K`); the resolver itself reads no
 environment.
 

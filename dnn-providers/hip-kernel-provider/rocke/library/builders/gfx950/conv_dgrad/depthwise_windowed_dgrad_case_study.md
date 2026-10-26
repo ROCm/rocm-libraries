@@ -9,18 +9,18 @@ Measured numbers are deliberately absent — see `platform/AGENTS.md` §Complian
 What is recorded here is mechanism, instruction-count evidence, the levers that
 were tried (kept and reverted), what the AOT port changed, and the replay path.
 The knob reference is in
-[`dsl_docs/instances/convolution.md`](../../../../../dsl_docs/instances/convolution.md),
+[`dsl_docs/instances/convolution.md`](../../../kernels/conv/docs/convolution.md),
 section "Windowed Depthwise Dgrad Kernel".
 
 ## Kernel and where it lives
 
 `DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
 (VALU and `dot2` forms) and `_build_dw_dgrad_win_mfma` (Toeplitz MFMA form) in
-[`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
-C++ mirror [`conv_direct_grouped_build_depthwise_dgrad_win.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_depthwise_dgrad_win.cpp).
+[`conv_direct_grouped.py`](../../../kernels/common/conv_direct_grouped.py);
+C++ mirror [`conv_direct_grouped_build_depthwise_dgrad_win.cpp`](../../../cpp/instances/common/conv_direct_grouped_build_depthwise_dgrad_win.cpp).
 AOT cache variant `direct_depthwise_dgrad_win` (`DW_WIN_*`,
 `_dw_win_policy_reason` in
-[`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py));
+[`direct_aot_jobs.py`](../../../kernels/conv/direct_aot_jobs.py));
 not dispatched yet (the grouped-convolution dispatcher is being reworked
 separately), so it is reached through the cache (`--run-from-cache`).
 Scope: `cpg = kpg = 1`, stride 1, fp16 / bf16 (implicit GEMM declines

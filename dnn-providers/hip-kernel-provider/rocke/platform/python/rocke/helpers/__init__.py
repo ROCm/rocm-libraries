@@ -250,7 +250,7 @@ from .io import (
     store_vec,
     vector_row_copy,
 )
-from .layouts import ConvKOuterFragmentReader, LdsLayout, TransposeLdsReader
+from .layouts import LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncPingPongLoader,
     AsyncTileLoader,
@@ -489,7 +489,6 @@ __all__ = [
     "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
-    "ConvKOuterFragmentReader",
     "TransposeLdsReader",
     "AsyncPingPongLoader",
     "AsyncTileLoader",

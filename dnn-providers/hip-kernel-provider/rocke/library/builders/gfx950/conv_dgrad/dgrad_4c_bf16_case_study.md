@@ -11,7 +11,7 @@ decisions, what the AOT port changed, and the commands to replay them.
 
 Knob reference (`dgrad_fused_weights`, `dgrad_weights_lds`, `stage_rows`,
 `waves_q`, name flags, the cached image):
-[`dsl_docs/instances/convolution.md`](../../../../../dsl_docs/instances/convolution.md),
+[`dsl_docs/instances/convolution.md`](../../../kernels/conv/docs/convolution.md),
 section "4c dgrad". The fused weight transform:
 [`dgrad_fused_weights_case_study.md`](dgrad_fused_weights_case_study.md).
 
@@ -21,11 +21,11 @@ section "4c dgrad". The fused weight transform:
 (`make_dgrad_4c_spec`, `dgrad_4c_transposed_problem`,
 `is_valid_dgrad_4c_problem`, `build_direct_4c_dgrad`, `direct_4c_dgrad_launch`;
 `dgrad_4c_spec_for_problem` is a kernel-level helper)
-in [`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
-C++ mirror in [`conv_direct_grouped_build_4c_phases_and_loop.cpp`](../../../../../../library/cpp/instances/common/conv_direct_grouped_build_4c_phases_and_loop.cpp)
+in [`conv_direct_grouped.py`](../../../kernels/common/conv_direct_grouped.py);
+C++ mirror in [`conv_direct_grouped_build_4c_phases_and_loop.cpp`](../../../cpp/instances/common/conv_direct_grouped_build_4c_phases_and_loop.cpp)
 and `conv_direct_grouped_spec_and_validate.cpp`. AOT cache variant
 `direct_grouped_dgrad_4c` (`DGRAD_4C_*` in
-[`direct_aot_jobs.py`](../../../../../../library/kernels/conv/direct_aot_jobs.py));
+[`direct_aot_jobs.py`](../../../kernels/conv/direct_aot_jobs.py));
 not dispatched yet (the grouped-convolution dispatcher is being reworked
 separately), so it is reached through the cache (`--run-from-cache`). Scope: `cpg = kpg = 4`, fp16 /
 bf16, stride 1, "same"-padded 1x1 or 3x3, `groups % 16 == 0`.

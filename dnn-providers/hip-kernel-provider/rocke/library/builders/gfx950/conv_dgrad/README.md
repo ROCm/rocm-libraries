@@ -83,5 +83,5 @@ python3 -m benchmarks.common.benchmark_direct_conv \
 `--variants` takes a comma-separated list of `DIRECT_CAPABILITIES` keys
 (`direct_depthwise_dgrad_win`, `direct_grouped_dgrad_4c`,
 `direct_grouped_dgrad_fused`, ...). The standalone implicit-GEMM driver for
-traces is `run_one_dgrad.py` in this folder (`--kouter`, `--tap-outer`,
+traces is [`run_one_dgrad.py`](../../../benchmarks/gfx950/conv_dgrad/run_one_dgrad.py) (`--kouter`, `--tap-outer`,
 `--uniform-k` default to what the AOT cache builds for the shape).

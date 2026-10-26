@@ -3397,11 +3397,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     }
 
     /* split_k=-1 (auto) is not supported in this port: Python resolves it via
-     * select_split_k_wgrad which picks a degree > 1 for most shapes.  Silently
-     * collapsing to 1 would mismatch the Python source of truth (wrong kernel
-     * name, wrong grid) and could cause races if the host launches with the
-     * degree Python's formula implies.  Callers must resolve -1 before calling
-     * this function or pass an explicit degree. */
+     * resolve_conv_split_k / select_split_k_wgrad
+     * (library/kernels/common/conv_split_k.py), which picks a degree > 1 for
+     * most shapes.  Silently collapsing to 1 would mismatch the Python source
+     * of truth (wrong kernel name, wrong grid) and could cause races if the
+     * host launches with the degree Python's formula implies.  Callers must
+     * resolve -1 before calling this function or pass an explicit degree. */
     int split_k = spec->split_k;
     if(split_k == -1)
     {

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Measure split-K degree curves and fit the split-K cost model to them.
 
-The constants of :class:`rocke.helpers.split_k_planner.SplitKCostModel` are
+The constants of :class:`kernels.conv.split_k_planner.SplitKCostModel` are
 fitted, not derived. This tool is how they are produced, so they can be
 refreshed after a kernel change and fitted for a new arch:
 
@@ -42,7 +42,7 @@ refreshed after a kernel change and fitted for a new arch:
     ``SplitKCostModel(...)`` literal are then fitted on every shape.
 
 ``margin``
-    Measures :attr:`~rocke.helpers.split_k_planner.SplitKCostModel.ladder_margin`
+    Measures :attr:`~kernels.conv.split_k_planner.SplitKCostModel.ladder_margin`
     on a sweep that also timed degrees off the power-of-two ladder
     (``sweep --degrees 2-160,...``)::
 
@@ -71,7 +71,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
-from rocke.helpers.split_k_planner import (
+from kernels.conv.split_k_planner import (
     MAX_GRID_DIM_Z,
     SplitKKernel,
     SplitKProblem,
@@ -463,7 +463,7 @@ def _feasible_times(m: _Kernel, max_degree: int) -> dict:
 
 def _decisions(kernels: list[_Kernel], cost, max_degree: int = 1024) -> list[_Decision]:
     """One :class:`_Decision` per main loop with more than one reduction."""
-    from rocke.helpers.split_k_planner import predict_split_k_cost
+    from kernels.conv.split_k_planner import predict_split_k_cost
 
     groups: dict[tuple, list] = {}
     for k in kernels:
@@ -528,7 +528,7 @@ def _legacy_decision_regret(decisions_kernels, max_degree: int = 1024) -> np.nda
     """The previous rule: the packed atomic whenever built, else the workspace,
     at the CK degree -- timed at the best binary of that kind. A CK degree of 1
     is the unsplit kernel; a decision without a timed unsplit one is skipped."""
-    from rocke.helpers.split_k import select_split_k_wgrad
+    from kernels.common.conv_split_k import select_split_k_wgrad
 
     r = []
     for members in decisions_kernels:
@@ -601,7 +601,7 @@ def _sig(v: float) -> float:
 
 
 def _model_of(x: dict, max_degree: int = 1024):
-    from rocke.helpers.split_k_planner import SplitKCostModel
+    from kernels.conv.split_k_planner import SplitKCostModel
 
     return SplitKCostModel(
         num_cus=int(x["num_cus"]),
@@ -620,8 +620,9 @@ def _model_of(x: dict, max_degree: int = 1024):
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
-    from rocke.helpers.split_k import _ARCH_NUM_CUS, select_split_k_wgrad
-    from rocke.helpers.split_k_planner import predict_split_k_cost, split_k_cost_model
+    from kernels.common.conv_split_k import select_split_k_wgrad
+    from kernels.conv.split_k_planner import predict_split_k_cost, split_k_cost_model
+    from rocke.helpers.split_k import _ARCH_NUM_CUS
 
     kernels = _load(args.logs, args.fill_logs)
     if not kernels:
@@ -793,7 +794,7 @@ def cmd_margin(args: argparse.Namespace) -> int:
     best binary at its chosen degree). The recommendation is the margin with
     the best shape geomean whose worst shape loses at most ``--max-worse``.
     """
-    from rocke.helpers.split_k_planner import select_split_k_plan, split_k_cost_model
+    from kernels.conv.split_k_planner import select_split_k_plan, split_k_cost_model
 
     cost = split_k_cost_model(args.arch)
     if cost is None:

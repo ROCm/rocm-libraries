@@ -18,12 +18,12 @@ mechanism, instruction-level evidence, keep/revert decisions, correctness
 evidence and replay commands.
 
 The knob reference (fields, validator rules, name tags) lives in
-[`README_conv_implicit_gemm_dgrad.md`](../../../../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md):
-[Stride-1 record from kernargs](../../../../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#stride-1-record-from-kernargs),
-[Tap-outer K loop](../../../../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#tap-outer-k-loop-tap_outer_k),
-[dY halo reuse](../../../../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#dy-halo-reuse-dy_halo)
+[`README_conv_implicit_gemm_dgrad.md`](../../../kernels/common/README_conv_implicit_gemm_dgrad.md):
+[Stride-1 record from kernargs](../../../kernels/common/README_conv_implicit_gemm_dgrad.md#stride-1-record-from-kernargs),
+[Tap-outer K loop](../../../kernels/common/README_conv_implicit_gemm_dgrad.md#tap-outer-k-loop-tap_outer_k),
+[dY halo reuse](../../../kernels/common/README_conv_implicit_gemm_dgrad.md#dy-halo-reuse-dy_halo)
 and
-[XCD-contiguous tile order](../../../../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#xcd-contiguous-tile-order-xcd_tile_order).
+[XCD-contiguous tile order](../../../kernels/common/README_conv_implicit_gemm_dgrad.md#xcd-contiguous-tile-order-xcd_tile_order).
 This document does not repeat it.
 
 ## Where it lives
@@ -516,16 +516,16 @@ python3 -m benchmarks.common.benchmark_implicit_gemm_conv --run-from-cache <igem
 # 3. One kernel of the same problem, built and timed on its own (no verify),
 #    for a trace. --kouter / --tap-outer / --uniform-k default to what the AOT
 #    cache builds for the shape.
-python3 ../platform/python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+python3 ../library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 2 -c 192 -k 192 -H 12 -W 12 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 3 -F 2 -in_layout=NHWC"
 rocprofv3 --kernel-trace -d prof -o run -- \
-    python3 ../platform/python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+    python3 ../library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 2 -c 192 -k 192 -H 12 -W 12 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 3 -F 2 -in_layout=NHWC" \
     --iters 20
 
 # 4. One JIT config: A/B of the K loops on the same tile (the kernel name differs
 #    per variant, so the compile cache cannot alias them). auto = what the AOT cache builds.
-python3 ../platform/python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+python3 ../library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 2 -c 96 -k 128 -H 12 -W 12 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 1 -F 2 -in_layout=NHWC" \
     --tile-m 128 --tile-n 64 --warp-m 4 --warp-n 2 --warp-tile-mn 32 \
     --tap-outer off --uniform-k off   # plain flat loop (folded record)
@@ -546,7 +546,7 @@ compare the cached halo variants of one shape in step 2. Evidence counters:
 `MeanOccupancyPerActiveCU` for the halo tiles. Main-loop opcode mix: dump the
 HSACO with `llvm-objdump -d --mcpu=gfx950` and count opcodes between the backward
 branch and its target, as described in
-[`isa-inspection-rocke.md`](../../../../../dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md).
+[`isa-inspection-rocke.md`](../../../../platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md).
 The speed-of-light split is a temporary edit around `emit_load_phase` /
 `emit_mfma_phase`; do not commit it.
 

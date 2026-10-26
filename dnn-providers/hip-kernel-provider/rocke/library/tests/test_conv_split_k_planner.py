@@ -13,7 +13,7 @@ import dataclasses
 import math
 
 import pytest
-from rocke.helpers.split_k_planner import (
+from kernels.conv.split_k_planner import (
     MAX_GRID_DIM_Z,
     SplitKKernel,
     SplitKProblem,
