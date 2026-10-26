@@ -806,6 +806,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/"
+        DESTINATION "${_tensilelite_install_dest}/rocjitsu"
+        COMPONENT tests
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.md" PATTERN "requirements.txt"
+        PATTERN "known_failures.yaml" PATTERN "known_failures_regular.yaml"
+        PATTERN "__pycache__" EXCLUDE
+    )
+
     # Scripts used by unit tests
     install(
         FILES
