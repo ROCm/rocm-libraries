@@ -9,8 +9,9 @@
 #include <utility>
 
 namespace roc::hostnumerics::detail {
-ComparisonAccumulator::ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape)
-    : m_options(options), m_shape(&shape), m_indexOrder(shape.indexOrder(options.selection)) {
+ComparisonAccumulator::ComparisonAccumulator(const ComparisonInvocation& options,
+                                             const Shape& shape)
+    : m_options(options), m_shape(&shape), m_indexOrder(options.indicesOrder) {
     m_result.allCloseEvaluated = m_options.allClose;
     m_result.frobeniusEvaluated = m_options.relativeFrobeniusTolerance.has_value();
     m_result.ulpEvaluated = m_options.maximumUlpTolerance.has_value();

@@ -25,8 +25,10 @@ struct BinaryInvocation {
     const Tensor& right;
     Tensor output;
     ScalarType computeType;
-    IndexSelection selection =
-        IndexSelection(roc::hostnumerics::IndexRange::all(), LastDimensionFastest{});
+    size_t indicesCount = 0;
+    std::vector<size_t> indicesOrder;
+    std::function<size_t(size_t)> indexAt;
+    std::optional<size_t> firstContiguousIndex;
 };
 
 struct ActivationInvocation {
@@ -34,15 +36,18 @@ struct ActivationInvocation {
     Tensor output;
     ActivationFunction function;
     ScalarType computeType;
-    IndexSelection selection =
-        IndexSelection(roc::hostnumerics::IndexRange::all(), LastDimensionFastest{});
+    size_t indicesCount = 0;
+    std::vector<size_t> indicesOrder;
+    std::function<size_t(size_t)> indexAt;
+    std::optional<size_t> firstContiguousIndex;
 };
 
-template <typename Function>
-void forEachSelectedCoordinate(const Shape& shape, const IndexSelection& selection,
+template <typename Invocation, typename Function>
+void forEachSelectedCoordinate(const Shape& shape, const Invocation& invocation,
                                Function&& function) {
-    shape.forEachCoordinate(
-        selection, [&](size_t, std::span<const size_t> coordinates) { function(coordinates); });
+    forEachBoundCoordinate(shape, invocation, [&](size_t, std::span<const size_t> coordinates) {
+        function(coordinates);
+    });
 }
 
 inline Shape binaryOutputShape(const Tensor& left, const Tensor& right) {
@@ -64,7 +69,6 @@ inline void validateBinaryInvocation(const BinaryInvocation& invocation) {
     rejectOverlappingTensorStorageUnlessIdenticallyMapped(
         invocation.output, invocation.right,
         "Elementwise output overlaps the right operand with a different storage mapping.");
-    (void)outputShape.selectedCount(invocation.selection);
 }
 
 template <typename Accumulator, bool QuantizeResult>
@@ -78,7 +82,7 @@ void binaryTyped(const BinaryInvocation& invocation, BinaryOperation operation) 
         QuantizeResult ? std::optional<ScalarType>(invocation.computeType) : std::nullopt);
 
     forEachSelectedCoordinate(
-        invocation.output.shape(), invocation.selection, [&](std::span<const size_t> coordinates) {
+        invocation.output.shape(), invocation, [&](std::span<const size_t> coordinates) {
             const Accumulator leftValue = leftReader(coordinates);
             const Accumulator rightValue = rightReader(coordinates);
             const Accumulator value = [&] {
@@ -155,7 +159,6 @@ inline void validateActivationInvocation(const ActivationInvocation& invocation)
         if (!integerActivation)
             throw std::runtime_error("Int32 activation does not support floating-point functions.");
     }
-    (void)invocation.output.shape().selectedCount(invocation.selection);
 }
 
 template <typename Accumulator, bool QuantizeResult>
@@ -168,7 +171,7 @@ void activationTyped(const ActivationInvocation& invocation) {
         runtimeActivation<Accumulator>(invocation.function);
 
     forEachSelectedCoordinate(
-        invocation.output.shape(), invocation.selection, [&](std::span<const size_t> coordinates) {
+        invocation.output.shape(), invocation, [&](std::span<const size_t> coordinates) {
             output.store(coordinates,
                          quantize(applyActivation(function.kind, input(coordinates),
                                                   function.parameter0, function.parameter1)));

@@ -23,9 +23,9 @@
 
 namespace roc::hostnumerics::detail {
 template <typename Function>
-void forEachSelectedIndex(const Shape& shape, const IndexSelection& selection,
+void forEachSelectedIndex(const Shape& shape, const ComparisonInvocation& invocation,
                           Function&& function) {
-    shape.forEachCoordinate(selection, std::forward<Function>(function));
+    forEachBoundCoordinate(shape, invocation, std::forward<Function>(function));
 }
 
 ComparisonValue loadComparisonValue(const Tensor& view, ptrdiff_t logicalOffset);

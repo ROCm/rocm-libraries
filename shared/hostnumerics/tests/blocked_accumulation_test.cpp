@@ -44,8 +44,8 @@ void testSelectedBlockAccumulatorFamilies() {
     constexpr size_t rows = 32;
     constexpr size_t columns = 32;
     constexpr size_t reductions = 64;
-    const IndexSelection selection =
-        IndexSelection(std::vector<size_t>({0}), LastDimensionFastest{});
+    const auto selection = std::set<size_t>({0});
+    const auto selectionOrder = LastDimensionFastest{};
 
     const std::vector<float> reducedA(rows * reductions, 0.1f);
     const std::vector<float> reducedB(reductions * columns, 0.1f);
@@ -53,7 +53,8 @@ void testSelectedBlockAccumulatorFamilies() {
         Tensor output = makeOutput(rows, columns, untouchedValue);
         GemmTestCase problem = makeProblem(reducedA, reducedB, output, rows, reductions, columns);
         problem.accumulatorType = accumulatorType;
-        problem.outputSelection = selection;
+        roc::hostnumerics::detail::bindIndices(problem, problem.d.shape(), selection,
+                                               selectionOrder);
 
         float expected = 0.0f;
         for (size_t reduction = 0; reduction < reductions; ++reduction) {
@@ -74,7 +75,8 @@ void testSelectedBlockAccumulatorFamilies() {
     GemmTestCase integerProblem(Tensor::copyNativeValues<int32_t>(Shape{rows, 2}, integerA),
                                 Tensor::copyNativeValues<int32_t>(Shape{2, columns}, integerB),
                                 integerOutput, ScalarType::Int32);
-    integerProblem.outputSelection = selection;
+    roc::hostnumerics::detail::bindIndices(integerProblem, integerProblem.d.shape(), selection,
+                                           selectionOrder);
     const GemmTestRunInfo integerRun = referenceGemm(integerProblem, GemmBackend::Blocked);
     const int32_t wrappedProduct =
         std::bit_cast<int32_t>(static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) * 2U);
@@ -92,25 +94,13 @@ void testSelectedBlockAccumulatorFamilies() {
     GemmTestCase complexProblem(Tensor::copyNativeValues<Complex>(Shape{rows, 2}, complexA),
                                 Tensor::copyNativeValues<Complex>(Shape{2, columns}, complexB),
                                 complexOutput, ScalarType::ComplexFloat32);
-    complexProblem.outputSelection = selection;
+    roc::hostnumerics::detail::bindIndices(complexProblem, complexProblem.d.shape(), selection,
+                                           selectionOrder);
     const GemmTestRunInfo complexRun = referenceGemm(complexProblem, GemmBackend::Blocked);
     require(complexRun.outputElementsCovered == 1 &&
                 complexOutput.loadAs<Complex>({0, 0}) == Complex(-10.0f, 20.0f) &&
                 complexOutput.loadAs<Complex>({0, 1}) == Complex(-99.0f, -99.0f),
             "Selected blocked GEMM mishandled complex accumulation.");
-}
-
-void requireOnlySelectedOutputsStored(const roc::hostnumerics::Tensor& output,
-                                      const IndexSelection& selection) {
-    std::vector<size_t> selected = output.shape().selectedIndices(selection);
-    std::sort(selected.begin(), selected.end());
-    selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
-    for (size_t index = 0; index < output.elementCount(); ++index) {
-        if (!std::binary_search(selected.begin(), selected.end(), index))
-            require(output.loadAs<float>({index / output.shape()[1], index % output.shape()[1]}) ==
-                        untouchedValue,
-                    "Blocked backend modified an unselected output element.");
-    }
 }
 
 }  // namespace blocked_backend_test

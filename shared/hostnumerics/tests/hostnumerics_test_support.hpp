@@ -49,7 +49,7 @@ void testRuntimeMixedAndBlockScaledGemm();
 void testBlockedUnalignedScaleSegments();
 void testExactIntegerGemm();
 void testRuntimeComplexAndExplicitAxisGemm();
-void testIndexSelection();
+void testShapeVisitation();
 void testReferenceEpilogue();
 void testReferenceReduction();
 void testStructuredSparsity();

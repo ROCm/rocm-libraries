@@ -42,7 +42,7 @@ add_executable(
     generation_test.cpp
     hostnumerics_test.cpp
     operation_aliasing_test.cpp
-    index_selection_test.cpp
+    shape_visitation_test.cpp
     reduction_test.cpp
     reference_gemm_test.cpp
     softmax_layer_norm_test.cpp

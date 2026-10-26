@@ -87,7 +87,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     using roc::hostnumerics::compare;
     using roc::hostnumerics::ComparisonOptions;
     using roc::hostnumerics::generate;
-    using roc::hostnumerics::IndexSelection;
+
     using roc::hostnumerics::Layout;
     using roc::hostnumerics::MatmulOptions;
     using roc::hostnumerics::multiply;
@@ -315,8 +315,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 scaledC,
                 result,
                 computeType,
-                roc::hostnumerics::IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                  roc::hostnumerics::LastDimensionFastest{}));
+                roc::hostnumerics::IndexRange::all(),
+                roc::hostnumerics::LastDimensionFastest{});
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;
@@ -365,11 +365,12 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .absoluteTolerance     = std::nextafter(tolerance, 0.0),
                 .maxReportedMismatches = 0,
             };
-            options.selection
-                = IndexSelection(roc::hostnumerics::IndexRange::all(), std::vector<size_t>{1, 0});
+
             const auto comparison = compare(observedD.shareStorageWithLayout(observedLayout),
                                             expectedD.shareStorageWithLayout(expectedLayout),
-                                            options);
+                                            options,
+                                            roc::hostnumerics::IndexRange::all(),
+                                            std::vector<size_t>{1, 0});
             matched &= comparison.passed();
             maximumDifference = std::max(maximumDifference, comparison.maxAbsoluteDifference);
         }

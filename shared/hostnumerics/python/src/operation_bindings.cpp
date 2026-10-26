@@ -3,6 +3,7 @@
 
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/set.h>
 #include <nanobind/stl/vector.h>
 
 #include <complex>
@@ -29,7 +30,7 @@ Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> 
 
 void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
     addInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-            IndexSelection(IndexRange::all(), LastDimensionFastest{}));
+            IndexRange::all(), LastDimensionFastest{});
 }
 
 Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -44,7 +45,7 @@ Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 IndexSelection(IndexRange::all(), LastDimensionFastest{}));
+                 IndexRange::all(), LastDimensionFastest{});
 }
 
 Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
@@ -59,7 +60,7 @@ Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarT
 void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
                        ScalarType computeType) {
     multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType,
-                 IndexSelection(IndexRange::all(), LastDimensionFastest{}));
+                 IndexRange::all(), LastDimensionFastest{});
 }
 
 ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
@@ -116,16 +117,15 @@ LayerNormOutputs referenceLayerNormOwned(Tensor input, ScalarType outputType,
         {.output = outputType, .mean = statisticsType, .inverseVariance = statisticsType}, options);
 }
 
-EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, ScalarType computeType,
-                                       std::optional<Tensor> bias, Activation activation,
-                                       ActivationApplication activationApplication,
-                                       std::optional<Tensor> auxiliaryInput,
-                                       std::optional<ScalarType> auxiliaryOutputType,
-                                       std::optional<Tensor> gateResidual, nb::object outputScale,
-                                       nb::object auxiliaryScale, nb::object activationParameter0,
-                                       nb::object activationParameter1,
-                                       OutputConversion outputConversion, bool includeRawOutput,
-                                       bool includeAmax, IndexSelection outputSelection) {
+template <typename Indices, typename Order>
+EpilogueOutputs referenceEpilogueOwned(
+    Tensor input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
+    Activation activation, ActivationApplication activationApplication,
+    std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
+    std::optional<Tensor> gateResidual, nb::object outputScale, nb::object auxiliaryScale,
+    nb::object activationParameter0, nb::object activationParameter1,
+    OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
+    const Indices& indices, const Order& order) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
@@ -136,16 +136,16 @@ EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, Scal
     options.activation = activationFunction(activation, nb::cast<double>(activationParameter0),
                                             nb::cast<double>(activationParameter1));
     options.activationApplication = activationApplication;
-    options.outputSelection = std::move(outputSelection);
     return referenceEpilogue(
         std::move(input),
         {.output = outputType,
          .rawOutput = includeRawOutput ? std::optional(computeType) : std::nullopt,
          .auxiliaryOutput = auxiliaryOutputType,
          .amax = includeAmax ? std::optional(computeType) : std::nullopt},
-        options);
+        options, indices, order);
 }
 
+template <typename Indices, typename Order>
 void referenceEpilogueIntoBound(
     Tensor input, Tensor output, ScalarType computeType, std::optional<Tensor> bias,
     Activation activation, ActivationApplication activationApplication,
@@ -153,7 +153,7 @@ void referenceEpilogueIntoBound(
     std::optional<Tensor> auxiliaryOutput, std::optional<Tensor> gateResidual,
     nb::object outputScale, nb::object auxiliaryScale, nb::object activationParameter0,
     nb::object activationParameter1, OutputConversion outputConversion, std::optional<Tensor> amax,
-    bool accumulateAmax, IndexSelection outputSelection) {
+    bool accumulateAmax, const Indices& indices, const Order& order) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
@@ -164,14 +164,13 @@ void referenceEpilogueIntoBound(
     options.activation = activationFunction(activation, nb::cast<double>(activationParameter0),
                                             nb::cast<double>(activationParameter1));
     options.activationApplication = activationApplication;
-    options.outputSelection = std::move(outputSelection);
     options.accumulateAmax = accumulateAmax;
     referenceEpilogueInto(std::move(input),
                           {.output = std::move(output),
                            .rawOutput = std::move(rawOutput),
                            .auxiliaryOutput = std::move(auxiliaryOutput),
                            .amax = std::move(amax)},
-                          options);
+                          options, indices, order);
 }
 
 Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType accumulatorType,
@@ -324,21 +323,75 @@ void registerOperationBindings(nb::module_& module) {
     module.def("reference_maximum_absolute_into", &referenceMaximumAbsoluteInto, "input"_a,
                "output"_a, "accumulator_type"_a);
 
-    module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
-               "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
-               "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, std::vector<size_t>>,
+               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
                "auxiliary_output_type"_a = std::optional<ScalarType>{},
                "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
                "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
-               "include_raw_output"_a, "include_amax"_a, "output_selection"_a);
-    module.def("reference_epilogue_into", &referenceEpilogueIntoBound, "input"_a, "output"_a,
-               "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
-               "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
-               "raw_output"_a = std::optional<Tensor>{},
-               "auxiliary_output"_a = std::optional<Tensor>{},
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, std::vector<size_t>>,
+        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, LastDimensionFastest>,
+               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
                "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
                "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
-               "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "output_selection"_a);
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, LastDimensionFastest>,
+        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def("reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, std::vector<size_t>>,
+               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into",
+        &referenceEpilogueIntoBound<std::set<size_t>, std::vector<size_t>>, "input"_a, "output"_a,
+        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def(
+        "reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, LastDimensionFastest>,
+        "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+        "activation"_a, "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "auxiliary_output_type"_a = std::optional<ScalarType>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into",
+        &referenceEpilogueIntoBound<std::set<size_t>, LastDimensionFastest>, "input"_a, "output"_a,
+        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
 
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a);

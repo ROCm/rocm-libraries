@@ -15,11 +15,11 @@ void testComparisonProgram() {
     emptyOptions.computeElementwiseStatistics = false;
     emptyOptions.computeFrobenius = false;
     emptyOptions.maxReportedMismatches = 0;
-    emptyOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
+
     const auto compareEmpty = [&](const ComparisonOptions& options) {
         return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
-                       options);
+                       options, IndexRange::all(), std::vector<size_t>{1, 0});
     };
     const ComparisonReport emptyResult = compareEmpty(emptyOptions);
     require(emptyResult.compared == 0 && emptyResult.allCloseEvaluated &&
@@ -32,13 +32,13 @@ void testComparisonProgram() {
     encodedEquality.computeElementwiseStatistics = false;
     encodedEquality.computeFrobenius = false;
     encodedEquality.maxReportedMismatches = 0;
-    encodedEquality.selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
 
     const float quietNaN = std::numeric_limits<float>::quiet_NaN();
     const std::array<float, 4> identicalValues{quietNaN, -0.0f, 1.0f, -2.0f};
-    const ComparisonReport identicalResult = compare(
-        Tensor::copyNativeStorage(std::span<const float>(identicalValues)),
-        Tensor::copyNativeStorage(std::span<const float>(identicalValues)), encodedEquality);
+    const ComparisonReport identicalResult =
+        compare(Tensor::copyNativeStorage(std::span<const float>(identicalValues)),
+                Tensor::copyNativeStorage(std::span<const float>(identicalValues)), encodedEquality,
+                IndexRange::all(), LastDimensionFastest{});
     require(identicalResult.passed() && identicalResult.compared == identicalValues.size() &&
                 identicalResult.matchedNaNs == 0 && identicalResult.matchedInfinities == 0,
             "Encoded-equality comparison changed all-close-only report semantics.");
@@ -95,7 +95,8 @@ void testComparisonProgram() {
         const ScalarType type = static_cast<ScalarType>(typeIndex);
         Tensor expected(type, Shape{16});
         const Tensor observed = expected.deepCopy();
-        const ComparisonReport result = compare(observed, expected, encodedEquality);
+        const ComparisonReport result =
+            compare(observed, expected, encodedEquality, IndexRange::all(), LastDimensionFastest{});
         require(result.passed() && result.compared == expected.elementCount(),
                 "Encoded-equality comparison failed for a supported scalar type.");
     }
@@ -110,11 +111,11 @@ void testComparisonProgram() {
 
     const std::array<float, 1> positiveZero{0.0f};
     const std::array<float, 1> negativeZero{-0.0f};
-    require(
-        compare(Tensor::copyNativeStorage(std::span<const float>(positiveZero)),
-                Tensor::copyNativeStorage(std::span<const float>(negativeZero)), encodedEquality)
-            .passed(),
-        "Encoded-equality fallback distinguished signed zeros.");
+    require(compare(Tensor::copyNativeStorage(std::span<const float>(positiveZero)),
+                    Tensor::copyNativeStorage(std::span<const float>(negativeZero)),
+                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
+                .passed(),
+            "Encoded-equality fallback distinguished signed zeros.");
 
     const std::array<std::byte, 2> packedExpected{std::byte{0xa5}, std::byte{0xbc}};
     const std::array<std::byte, 2> packedObserved{std::byte{0xa6}, std::byte{0xbc}};
@@ -123,7 +124,7 @@ void testComparisonProgram() {
                                                       packedObserved),
                     Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
                                                       packedExpected),
-                    encodedEquality)
+                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
                 .passed(),
             "Encoded-equality optimization compared packed bits outside the logical tensor.");
     const std::array<std::byte, 2> packedMismatch{std::byte{0xa5}, std::byte{0xac}};
@@ -131,7 +132,7 @@ void testComparisonProgram() {
                                                        packedMismatch),
                      Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
                                                        packedExpected),
-                     encodedEquality)
+                     encodedEquality, IndexRange::all(), LastDimensionFastest{})
                  .passed(),
             "Encoded-equality optimization ignored a packed logical mismatch.");
 
@@ -140,7 +141,7 @@ void testComparisonProgram() {
     const Layout paddedLayout(Shape{2, 2}, {1, 3}, 0);
     require(compare(Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedObserved)),
                     Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedExpected)),
-                    encodedEquality)
+                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
                 .passed(),
             "Encoded-equality optimization compared padding outside the logical tensor.");
 
@@ -186,8 +187,7 @@ void testComparisonProgram() {
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
     bool rejectedZeroSelectionStride = false;
     try {
-        (void)IndexSelection(IndexRange(0, 0, std::numeric_limits<size_t>::max()),
-                             LastDimensionFastest{});
+        (void)IndexRange(0, 0, std::numeric_limits<size_t>::max()), LastDimensionFastest{};
     } catch (const std::runtime_error&) {
         rejectedZeroSelectionStride = true;
     }
@@ -228,22 +228,23 @@ void testComparisonProgram() {
     const Layout layout(Shape{2, 3}, {1, 3}, 0);
 
     ComparisonOptions selected;
-    selected.selection = IndexSelection(IndexRange(0, 2, std::numeric_limits<size_t>::max()),
-                                        std::vector<size_t>{1, 0});
+
     selected.computeFrobenius = false;
     const auto selectedResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected);
+        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected,
+        IndexRange(0, 2, std::numeric_limits<size_t>::max()), std::vector<size_t>{1, 0});
     require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
             "Selected comparison visited the wrong logical elements.");
     require(selectedResult.reportedMismatches[0].index == 4 &&
                 selectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}) &&
                 selectedResult.reportedMismatches[0].observedOffset == 6,
             "Selected comparison reported the wrong logical location.");
-    selected.selection = IndexSelection(std::vector<size_t>({4}), std::vector<size_t>{1, 0});
-    const auto explicitSelectedResult = compare(
-        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected);
+
+    const auto explicitSelectedResult =
+        compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+                Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
+                selected, std::set<size_t>({4}), std::vector<size_t>{1, 0});
     require(
         explicitSelectedResult.compared == 1 && explicitSelectedResult.mismatches == 1 &&
             explicitSelectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}),
@@ -253,10 +254,11 @@ void testComparisonProgram() {
     paddedMetrics.computeElementwiseStatistics = false;
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
-    paddedMetrics.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
-    const auto paddedMetricResult = compare(
-        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics);
+
+    const auto paddedMetricResult =
+        compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+                Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
+                paddedMetrics, IndexRange::all(), std::vector<size_t>{1, 0});
     require(paddedMetricResult.compared == 6 && paddedMetricResult.frobeniusDifference > 0.0,
             "Regular strided comparison produced incorrect evidence.");
 
@@ -421,15 +423,16 @@ void testComparisonProgram() {
     parallelOptions.computeUlp = true;
     parallelOptions.ulpType = ScalarType::Float32;
     parallelOptions.maxReportedMismatches = 3;
-    parallelOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
+
     const ComparisonReport parallelResult =
-        compare(largeObservedTensor, largeExpectedTensor, parallelOptions);
+        compare(largeObservedTensor, largeExpectedTensor, parallelOptions, IndexRange::all(),
+                std::vector<size_t>{1, 0});
 
     ComparisonOptions serialOptions = parallelOptions;
-    serialOptions.selection = IndexSelection(IndexRange(0, 1, std::numeric_limits<size_t>::max()),
-                                             std::vector<size_t>{1, 0});
+
     const ComparisonReport serialResult =
-        compare(largeObservedTensor, largeExpectedTensor, serialOptions);
+        compare(largeObservedTensor, largeExpectedTensor, serialOptions,
+                IndexRange(0, 1, std::numeric_limits<size_t>::max()), std::vector<size_t>{1, 0});
     require(parallelResult.compared == serialResult.compared &&
                 parallelResult.mismatches == serialResult.mismatches &&
                 parallelResult.matchedNaNs == serialResult.matchedNaNs &&
@@ -465,9 +468,10 @@ void testComparisonProgram() {
         Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeObserved));
     const Tensor largeLastDimensionExpected =
         Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeExpected));
-    allCloseOnly.selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
+
     const ComparisonReport lastDimensionParallelResult =
-        compare(largeLastDimensionObserved, largeLastDimensionExpected, allCloseOnly);
+        compare(largeLastDimensionObserved, largeLastDimensionExpected, allCloseOnly,
+                IndexRange::all(), LastDimensionFastest{});
     require(!lastDimensionParallelResult.passed() &&
                 lastDimensionParallelResult.compared == largeComparisonElements &&
                 lastDimensionParallelResult.mismatches == 3,
@@ -475,11 +479,11 @@ void testComparisonProgram() {
 
     const std::array<float, 4> explicitlySelectedObserved{9.0f, 1.0f, 2.0f, 3.0f};
     const std::array<float, 4> explicitlySelectedExpected{0.0f, 1.0f, 2.0f, 3.0f};
-    allCloseOnly.selection = IndexSelection(std::vector<size_t>({1, 2}), std::vector<size_t>{0});
+
     const ComparisonReport explicitSelectionResult =
         compare(Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedObserved)),
                 Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedExpected)),
-                allCloseOnly);
+                allCloseOnly, std::set<size_t>({1, 2}), std::vector<size_t>{0});
     require(explicitSelectionResult.passed() && explicitSelectionResult.compared == 2,
             "All-close comparison treated explicit indices as a contiguous prefix.");
 }

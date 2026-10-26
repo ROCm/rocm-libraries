@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 
+#include "index_iteration.hpp"
+
 namespace roc::hostnumerics::detail {
 struct GemmSupportInfo {
     bool supported = false;
@@ -22,19 +24,27 @@ struct GemmSupportInfo {
 // implementations. Epilogue inputs are intentionally absent: callers compose
 // coefficient, addend, bias, activation, and output conversion operations.
 struct GemmInvocation : MatmulOptions {
+    template <typename Indices>
     GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor, const MatmulOptions& options,
-                   IndexSelection selection)
+                   const Indices& indices, std::span<const size_t> order)
         : MatmulOptions(options),
           a(std::move(aTensor)),
           b(std::move(bTensor)),
-          d(std::move(dTensor)),
-          outputSelection(std::move(selection)) {}
+          d(std::move(dTensor)) {
+        bindIndices(*this, d.shape(), indices, order);
+    }
+
+    template <typename Indices>
+    GemmInvocation(Tensor a, Tensor b, Tensor d, const MatmulOptions& options,
+                   const Indices& indices, LastDimensionFastest)
+        : GemmInvocation(a, b, d, options, indices, d.shape().indexOrderLastDimensionFastest()) {}
 
     Tensor a;
     Tensor b;
     Tensor d;
-    IndexSelection outputSelection =
-        IndexSelection(roc::hostnumerics::IndexRange::all(), LastDimensionFastest{});
+    size_t indicesCount = 0;
+    std::vector<size_t> indicesOrder;
+    std::function<size_t(size_t)> indexAt;
 };
 
 struct GemmExecutionInfo {

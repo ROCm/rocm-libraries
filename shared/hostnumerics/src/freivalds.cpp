@@ -312,7 +312,6 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
         (operation.accumulationRounding != AccumulationRounding::TypeDefault &&
          operation.accumulationRounding != AccumulationRounding::FullPrecision) ||
         epilogue.auxiliaryInput || epilogue.gateResidual || epilogue.accumulateAmax ||
-        !shape.selectsAll(epilogue.outputSelection) ||
         !std::holds_alternative<IdentityActivation>(epilogue.activation) ||
         epilogue.activationApplication != ActivationApplication::Forward ||
         (epilogue.outputConversion != OutputConversion::Default &&

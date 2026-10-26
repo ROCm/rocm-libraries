@@ -17,13 +17,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             hv.GenerationRecipeSettings(seed=37)
         with self.assertRaises(TypeError):
-            hv.IndexSelection(hv.IndexRange.all())
-        with self.assertRaises(TypeError):
-            hv.IndexSelection(hv.IndexRange(0, 2), hv.LastDimensionFastest())
-        with self.assertRaises(TypeError):
-            hv.IndexSelection([1])
-        with self.assertRaises(TypeError):
-            hv.IndexSelection(hv.prime_index_range(10, 10, 3))
+            hv.IndexRange(0, 2)
 
     def test_strict_and_named_recipe_orders(self):
         component = hv.GenerationRecipe.uniform_integer(
@@ -61,7 +55,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 named.with_index_order([0, 0])
 
-    def test_recipes_and_selections_copy_order_sequences(self):
+    def test_recipes_copy_order_sequences(self):
         for source in ([2, 1, 0], (2, 1, 0)):
             settings = hv.GenerationRecipeSettings(index_order=source, seed=0)
             base = hv.GenerationRecipe.real_only_last_dimension_fastest(
@@ -69,21 +63,10 @@ class GenerationRecipeApiTests(unittest.TestCase):
                 seed=0,
             )
             recipe = base.with_index_order(source)
-            selections = (
-                hv.IndexSelection(hv.IndexRange.all(), source),
-                hv.IndexSelection(hv.IndexRange(0, 2, sys.maxsize * 2 + 1), source),
-                hv.IndexSelection([1, 7], source),
-                hv.IndexSelection(hv.prime_index_range(24, 24, 5), source),
-            )
             if isinstance(source, list):
                 source[:] = [0, 1, 2]
             self.assertEqual(settings.index_order, [2, 1, 0])
             self.assertEqual(recipe.index_order(3), [2, 1, 0])
-            for selection in selections:
-                self.assertEqual(hv.Shape([2, 3, 4]).index_order(selection), [2, 1, 0])
-                returned_order = hv.Shape([2, 3, 4]).index_order(selection)
-                returned_order[:] = [0, 1, 2]
-                self.assertEqual(hv.Shape([2, 3, 4]).index_order(selection), [2, 1, 0])
             returned_order = recipe.index_order(3)
             returned_order[:] = [0, 1, 2]
             self.assertEqual(recipe.index_order(3), [2, 1, 0])

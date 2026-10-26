@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -42,8 +43,7 @@ void registerComparisonBindings(nb::module_& module) {
         .def_rw("relative_frobenius_tolerance", &ComparisonOptions::relativeFrobeniusTolerance)
         .def_rw("maximum_ulp_tolerance", &ComparisonOptions::maximumUlpTolerance)
         .def_rw("report_matching_elements", &ComparisonOptions::reportMatchingElements)
-        .def_rw("max_reported_mismatches", &ComparisonOptions::maxReportedMismatches)
-        .def_rw("selection", &ComparisonOptions::selection);
+        .def_rw("max_reported_mismatches", &ComparisonOptions::maxReportedMismatches);
 
     nb::class_<ComparisonValue>(module, "ComparisonValue")
         .def_ro("real", &ComparisonValue::real)
@@ -117,6 +117,34 @@ void registerComparisonBindings(nb::module_& module) {
             return compare(observed, expected, options);
         },
         "observed"_a, "expected"_a, "options"_a);
+    module.def(
+        "compare",
+        [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
+           const IndexRange& indices, const std::vector<size_t>& order) {
+            return compare(observed, expected, options, indices, order);
+        },
+        "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "compare",
+        [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
+           const IndexRange& indices, const LastDimensionFastest& order) {
+            return compare(observed, expected, options, indices, order);
+        },
+        "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "compare",
+        [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
+           const std::set<size_t>& indices, const std::vector<size_t>& order) {
+            return compare(observed, expected, options, indices, order);
+        },
+        "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "compare",
+        [](const Tensor& observed, const Tensor& expected, const ComparisonOptions& options,
+           const std::set<size_t>& indices, const LastDimensionFastest& order) {
+            return compare(observed, expected, options, indices, order);
+        },
+        "observed"_a, "expected"_a, "options"_a, "indices"_a, "index_order"_a);
     module.def("near_comparison_options", &nearComparisonOptions, "absolute_tolerance"_a);
     module.def("allclose_comparison_options", &allCloseComparisonOptions, "absolute_tolerance"_a,
                "relative_tolerance"_a, "equal_nans"_a);

@@ -57,26 +57,31 @@ int main(int argc, char** argv) {
     options.computeElementwiseStatistics = false;
     options.computeFrobenius = false;
     options.maxReportedMismatches = 0;
-    options.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
 
     ComparisonReport report;
-    const double componentSeconds =
-        bestSeconds([&] { report = compare(observedView, expectedView, options); });
+    const double componentSeconds = bestSeconds([&] {
+        report = compare(observedView, expectedView, options, IndexRange::all(),
+                         std::vector<size_t>{1, 0});
+    });
     if (!report.passed() || report.compared != elements) return 1;
 
     ComparisonOptions statisticsOptions = options;
     statisticsOptions.computeFrobenius = false;
-    statisticsOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
+
     ComparisonReport statisticsReport;
-    const double statisticsComponentSeconds = bestSeconds(
-        [&] { statisticsReport = compare(observedView, expectedView, statisticsOptions); });
+    const double statisticsComponentSeconds = bestSeconds([&] {
+        statisticsReport = compare(observedView, expectedView, statisticsOptions, IndexRange::all(),
+                                   std::vector<size_t>{1, 0});
+    });
     if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
 
     ComparisonOptions detailedOptions = options;
-    detailedOptions.selection = IndexSelection(IndexRange::all(), std::vector<size_t>{1, 0});
+
     ComparisonReport detailedReport;
-    const double detailedComponentSeconds =
-        bestSeconds([&] { detailedReport = compare(observedView, expectedView, detailedOptions); });
+    const double detailedComponentSeconds = bestSeconds([&] {
+        detailedReport = compare(observedView, expectedView, detailedOptions, IndexRange::all(),
+                                 std::vector<size_t>{1, 0});
+    });
     if (!detailedReport.passed() || detailedReport.compared != elements) return 1;
 
     size_t baselineMismatches = 0;

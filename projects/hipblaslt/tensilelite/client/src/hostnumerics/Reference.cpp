@@ -21,7 +21,7 @@ namespace TensileLite
         using Client::hostnumerics::GemmInvocationAdapter;
         using Client::hostnumerics::TranslationFailure;
         using roc::hostnumerics::GemmBackend;
-        using roc::hostnumerics::IndexSelection;
+        using roc::hostnumerics::IndexRange;
 
         [[noreturn]] void throwTranslationFailure(const TranslationFailure& failure)
         {
@@ -29,13 +29,15 @@ namespace TensileLite
                                      + failure.reason);
         }
 
+        template <typename Indices>
         void executeTranslatedGemm(ContractionProblemGemm const& problem,
                                    ContractionInputs const&      inputs,
-                                   IndexSelection                outputSelection,
+                                   const Indices&                indices,
+                                   std::span<const size_t>       order,
                                    GemmBackend                   backend)
         {
-            auto translation = Client::hostnumerics::translateGemmInvocation(
-                problem, inputs, std::move(outputSelection));
+            auto translation
+                = Client::hostnumerics::translateGemmInvocation(problem, inputs, indices, order);
             if(std::holds_alternative<TranslationFailure>(translation))
                 throwTranslationFailure(std::get<TranslationFailure>(translation));
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
@@ -45,12 +47,31 @@ namespace TensileLite
 
     namespace Client
     {
-        void executeReferenceGemm(ContractionProblemGemm const&     problem,
-                                  ContractionInputs const&          inputs,
-                                  roc::hostnumerics::IndexSelection outputSelection,
-                                  roc::hostnumerics::GemmBackend    backend)
+        void executeReferenceGemm(const ContractionProblemGemm&        problem,
+                                  const ContractionInputs&             inputs,
+                                  const roc::hostnumerics::IndexRange& indices,
+                                  std::span<const size_t>              order,
+                                  roc::hostnumerics::GemmBackend       backend)
         {
-            executeTranslatedGemm(problem, inputs, std::move(outputSelection), backend);
+            executeTranslatedGemm(problem, inputs, indices, order, backend);
+        }
+
+        void executeReferenceGemm(const ContractionProblemGemm&  problem,
+                                  const ContractionInputs&       inputs,
+                                  const std::set<size_t>&        indices,
+                                  std::span<const size_t>        order,
+                                  roc::hostnumerics::GemmBackend backend)
+        {
+            executeTranslatedGemm(problem, inputs, indices, order, backend);
+        }
+
+        void executeReferenceGemm(ContractionProblemGemm const&  problem,
+                                  ContractionInputs const&       inputs,
+                                  roc::hostnumerics::IndexRange  outputSelection,
+                                  roc::hostnumerics::GemmBackend backend)
+        {
+            executeTranslatedGemm(
+                problem, inputs, outputSelection, referenceIndexOrder(problem.d()), backend);
         }
 
         void executeReferenceGemm(ContractionProblemGemm const&  problem,
@@ -59,12 +80,12 @@ namespace TensileLite
                                   roc::hostnumerics::GemmBackend backend)
         {
             executeReferenceGemm(
-                problem, inputs, referenceIndexSelection(problem.d(), elementsToValidate), backend);
+                problem, inputs, referenceIndexRange(problem.d(), elementsToValidate), backend);
         }
 
-        void SolveGemmCPU(ContractionProblemGemm const&     problem,
-                          ContractionInputs const&          inputs,
-                          roc::hostnumerics::IndexSelection outputSelection)
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          roc::hostnumerics::IndexRange outputSelection)
         {
             ScopedTimer timer("solve_cpu_reference");
             executeReferenceGemm(problem,
@@ -77,12 +98,12 @@ namespace TensileLite
                           ContractionInputs const&      inputs,
                           size_t                        elementsToValidate)
         {
-            SolveGemmCPU(problem, inputs, referenceIndexSelection(problem.d(), elementsToValidate));
+            SolveGemmCPU(problem, inputs, referenceIndexRange(problem.d(), elementsToValidate));
         }
 
-        void SolveCPU(ContractionProblem const*                          problem,
-                      ProblemInputs const*                               inputs,
-                      std::span<const roc::hostnumerics::IndexSelection> outputSelections)
+        void SolveCPU(ContractionProblem const*                      problem,
+                      ProblemInputs const*                           inputs,
+                      std::span<const roc::hostnumerics::IndexRange> outputSelections)
         {
             if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
             {

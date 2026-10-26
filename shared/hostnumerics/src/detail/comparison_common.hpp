@@ -21,6 +21,19 @@
 
 namespace roc::hostnumerics {
 namespace detail {
+struct ComparisonInvocation : ComparisonOptions {
+    template <typename Indices>
+    ComparisonInvocation(const ComparisonOptions& options, const Shape& shape,
+                         const Indices& indices, std::span<const size_t> order)
+        : ComparisonOptions(options) {
+        bindIndices(*this, shape, indices, order);
+    }
+    size_t indicesCount = 0;
+    std::vector<size_t> indicesOrder;
+    std::function<size_t(size_t)> indexAt;
+    std::optional<size_t> firstContiguousIndex;
+};
+
 void validateComparisonOptions(const ComparisonOptions& options);
 bool allCloseOnlyComparison(const ComparisonOptions& options);
 
@@ -140,23 +153,23 @@ bool elementwiseStatisticsOnlyComparison(const ComparisonOptions& options);
 
 template <typename Function>
 void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
-                               const IndexSelection& selection, Function&& function) {
+                               const ComparisonInvocation& invocation, Function&& function) {
     if (observedLayout.shape() != expectedLayout.shape())
         throw std::runtime_error("Comparison offset traversal shape mismatch.");
     const Shape& shape = observedLayout.shape();
-    const size_t count = shape.selectedCount(selection);
+    const size_t count = invocation.indicesCount;
     if (count == 0) return;
-    const auto* range = std::get_if<roc::hostnumerics::IndexRange>(&selection.flatIndices());
-    if (range && range->stride == 1) {
-        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, shape.indexOrder(selection),
-                                     range->first, range->first + count,
-                                     std::forward<Function>(function));
+    if (invocation.firstContiguousIndex) {
+        const size_t first = *invocation.firstContiguousIndex;
+        forEachLayoutOffsetPairRange(observedLayout, expectedLayout, invocation.indicesOrder, first,
+                                     first + count, std::forward<Function>(function));
         return;
     }
-    shape.forEachCoordinate(selection, [&](size_t index, std::span<const size_t> coordinates) {
-        function(index, preparedElementOffset(observedLayout, coordinates),
-                 preparedElementOffset(expectedLayout, coordinates));
-    });
+    forEachBoundCoordinate(shape, invocation,
+                           [&](size_t index, std::span<const size_t> coordinates) {
+                               function(index, preparedElementOffset(observedLayout, coordinates),
+                                        preparedElementOffset(expectedLayout, coordinates));
+                           });
 }
 
 template <typename Observed, typename Expected>

@@ -36,7 +36,6 @@ struct EpilogueOptions {
     OutputConversion outputConversion = OutputConversion::Default;
     ActivationFunction activation;
     ActivationApplication activationApplication = ActivationApplication::Forward;
-    IndexSelection outputSelection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
     bool accumulateAmax = false;
 };
 
@@ -59,9 +58,36 @@ struct EpilogueOutputs {
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
                                   const EpilogueOptions& options);
 
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options, const IndexRange& range,
+                                  std::span<const size_t> order);
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options, const std::set<size_t>& indices,
+                                  std::span<const size_t> order);
+
 // Writes selected coordinates into caller-owned destinations. The primary
 // output may exactly alias input; other overlapping input/output or
 // output/output storage is rejected.
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options);
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const IndexRange& range,
+                           std::span<const size_t> order);
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const std::set<size_t>& indices,
+                           std::span<const size_t> order);
+template <typename Indices>
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
+                                  const EpilogueOptions& options, const Indices& indices,
+                                  LastDimensionFastest) {
+    return referenceEpilogue(input, types, options, indices,
+                             input.shape().indexOrderLastDimensionFastest());
+}
+template <typename Indices>
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const Indices& indices,
+                           LastDimensionFastest) {
+    referenceEpilogueInto(input, std::move(outputs), options, indices,
+                          input.shape().indexOrderLastDimensionFastest());
+}
 }  // namespace roc::hostnumerics

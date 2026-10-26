@@ -26,9 +26,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
                     compute_type_a=None,
                     compute_type_b=None,
                     math_mode=hv.MathMode.Default,
-                    output_selection=hv.IndexSelection(
-                        hv.IndexRange.all(), hv.LastDimensionFastest()
-                    ),
+                    indices=hv.IndexRange.all(),
+                    index_order=hv.LastDimensionFastest(),
                     output_conversion=hv.OutputConversion.Default,
                     accumulation_rounding=hv.AccumulationRounding.TypeDefault,
                     conjugate_a=False,
@@ -77,9 +76,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
                     affine_tensor(initial, hv.ScalarType.Float32, [5, 2], 1),
                     hv.ScalarType.Float32,
                     accumulator_type,
-                    output_selection=hv.IndexSelection(
-                        selected, hv.LastDimensionFastest()
-                    ),
+                    indices=set(selected),
+                    index_order=hv.LastDimensionFastest(),
                     output_layout=output_layout,
                     backend=hv.GemmBackend.Blocked,
                     alpha=1.0,
@@ -101,7 +99,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
 
     def test_selected_affine_zero_coefficients_suppress_poisoned_inputs(self):
         selected = [0, 3]
-        selection = hv.IndexSelection(selected, hv.LastDimensionFastest())
+        selection = set(selected)
+        selection_order = hv.LastDimensionFastest()
         output_layout = hv.Layout(hv.Shape([2, 2]), [7, 2], 1)
         finite_left = np.asarray([[1.0, 2.0, -3.0], [4.0, -5.0, 6.0]], dtype=np.float32)
         finite_right = np.asarray(
@@ -127,7 +126,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             alpha=0.0,
             beta=2.0,
-            output_selection=selection,
+            indices=selection,
+            index_order=selection_order,
             output_layout=output_layout,
             backend=hv.GemmBackend.Blocked,
             compute_type_a=None,
@@ -156,7 +156,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
             alpha=1.0,
             beta=0.0,
-            output_selection=selection,
+            indices=selection,
+            index_order=selection_order,
             output_layout=output_layout,
             backend=hv.GemmBackend.Blocked,
             compute_type_a=None,
@@ -195,9 +196,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            output_selection=hv.IndexSelection(
-                hv.IndexRange.all(), hv.LastDimensionFastest()
-            ),
+            indices=hv.IndexRange.all(),
+            index_order=hv.LastDimensionFastest(),
             output_conversion=hv.OutputConversion.Default,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
             conjugate_a=False,
@@ -238,7 +238,8 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             alpha=alpha,
             beta=beta,
             output_scale=output_scale,
-            output_selection=hv.IndexSelection(selected, hv.LastDimensionFastest()),
+            indices=set(selected),
+            index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Blocked,
             compute_type_a=None,
             compute_type_b=None,

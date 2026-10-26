@@ -353,11 +353,19 @@ namespace TensileLite::Client
         return options;
     }
 
-    inline hostnumerics::detail::Expected<roc::hostnumerics::IndexSelection,
-                                          hostnumerics::detail::DescriptorFailure>
-        getReferenceIndexSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
+    inline std::vector<size_t> referenceIndexOrder(const TensorDescriptor& descriptor)
     {
-        using roc::hostnumerics::IndexSelection;
+        std::vector<size_t> order(descriptor.dimensions());
+        for(size_t axis = 0; axis < order.size(); ++axis)
+            order[axis] = order.size() - 1 - axis;
+        return order;
+    }
+
+    inline hostnumerics::detail::Expected<roc::hostnumerics::IndexRange,
+                                          hostnumerics::detail::DescriptorFailure>
+        getReferenceIndexRange(TensorDescriptor const& descriptor, size_t elementsToValidate)
+    {
+        using roc::hostnumerics::IndexRange;
         const auto logicalCount
             = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
         if(!logicalCount)
@@ -365,11 +373,8 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
-        std::vector<size_t> order(descriptor.dimensions());
-        for(size_t axis = 0; axis < order.size(); ++axis)
-            order[axis] = order.size() - 1 - axis;
         if(elementsToValidate == 0 || elementsToValidate >= *logicalCount)
-            return IndexSelection(roc::hostnumerics::IndexRange::all(), order);
+            return IndexRange::all();
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
         const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
@@ -378,14 +383,13 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::PrimeStrideOverflow));
         }
-        return IndexSelection(
-            roc::hostnumerics::IndexRange(0, *stride, std::numeric_limits<size_t>::max()), order);
+        return IndexRange(0, *stride, std::numeric_limits<size_t>::max());
     }
 
-    inline roc::hostnumerics::IndexSelection
-        referenceIndexSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
+    inline roc::hostnumerics::IndexRange referenceIndexRange(TensorDescriptor const& descriptor,
+                                                             size_t elementsToValidate)
     {
-        auto selection = getReferenceIndexSelection(descriptor, elementsToValidate);
+        auto selection = getReferenceIndexRange(descriptor, elementsToValidate);
         if(!selection)
             throw std::runtime_error(std::string(hostnumerics::detail::message(selection.error())));
         return std::move(*selection);

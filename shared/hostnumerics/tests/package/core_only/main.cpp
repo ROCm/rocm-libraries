@@ -10,6 +10,7 @@
 #include <vector>
 
 TEST(Package, CoreOnly) {
+    using roc::hostnumerics::Shape;
     const roc::hostnumerics::Tensor scalar{std::complex<float>{1.5f, -2.0f}};
     roc::hostnumerics::Tensor tensor(roc::hostnumerics::ScalarType::Float32, Shape{2, 3});
     roc::hostnumerics::Tensor mxTensor(roc::hostnumerics::ScalarType::Float4E2M1, Shape{8});

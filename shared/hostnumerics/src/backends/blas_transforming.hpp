@@ -47,7 +47,7 @@ GemmSupportInfo checkTransforming(const GemmInvocation& problem) {
     if (problem.blockScaleA || problem.blockScaleB)
         return {.reason =
                     "Transforming BLAS backend cannot preserve block-scale reduction boundaries."};
-    if (!problem.d.shape().selectsAll(problem.outputSelection))
+    if (!(problem.indicesCount == problem.d.elementCount()))
         return {.reason = "Transforming BLAS backend requires complete output selection."};
 
     const size_t m = problem.a.shape()[0];
@@ -179,9 +179,9 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         MatmulOptions stagedOptions(nativeScalarType<Accumulator>);
         stagedOptions.conjugateA = conjugateA;
         stagedOptions.conjugateB = conjugateB;
-        GemmInvocation stagedProblem(
-            std::move(stagedA), std::move(stagedB), stagedOutput, stagedOptions,
-            IndexSelection(roc::hostnumerics::IndexRange::all(), LastDimensionFastest{}));
+        GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
+                                     stagedOptions, roc::hostnumerics::IndexRange::all(),
+                                     stagedOutput.shape().indexOrderLastDimensionFastest());
 
         blas.run(stagedProblem);
     }

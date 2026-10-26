@@ -60,10 +60,10 @@ inline bool encodedBitRangesAreIdentical(std::span<const std::byte> observed,
 }
 
 inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expected,
-                                      const ComparisonOptions& options) {
+                                      const ComparisonInvocation& options) {
     // This is only an early success test. A byte mismatch falls through to the numerical
     // comparison because different encodings can still compare equal (for example, signed zero).
-    if (!observed.shape().selectsAll(options.selection) || observed.type() != expected.type() ||
+    if (options.indicesCount != observed.elementCount() || observed.type() != expected.type() ||
         observed.layout() != expected.layout() ||
         (!options.equalNaNs && scalarTypeInfo(observed.type()).supportsNaN))
         return false;
@@ -124,7 +124,7 @@ inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expe
 }
 
 inline std::optional<ComparisonReport> exactEncodedComparisonReport(
-    const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {
+    const Tensor& observed, const Tensor& expected, const ComparisonInvocation& options) {
     // Exact encoded equality determines all-close and zero-distance ULP evidence without decoding.
     // Statistics, norms, and matching-element reports still require visiting the logical values.
     if (options.computeElementwiseStatistics || options.computeFrobenius ||
@@ -145,19 +145,17 @@ inline std::optional<ComparisonReport> exactEncodedComparisonReport(
 
 template <typename Tag>
 ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& expected,
-                                          const ComparisonOptions& options) {
+                                          const ComparisonInvocation& options) {
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonReport result;
         result.allCloseEvaluated = true;
-        const auto* range =
-            std::get_if<roc::hostnumerics::IndexRange>(&options.selection.flatIndices());
-        const bool selectsContiguousPrefix = range && range->first == 0 && range->stride == 1;
-        if ((observed.shape().selectsAll(options.selection) || selectsContiguousPrefix) &&
+        const bool selectsContiguousPrefix = options.firstContiguousIndex == size_t{0};
+        if ((options.indicesCount == observed.elementCount() || selectsContiguousPrefix) &&
             observed.shape().rank() != 0) {
             const Shape& shape = observed.shape();
-            const size_t selectedTotal = shape.selectedCount(options.selection);
+            const size_t selectedTotal = options.indicesCount;
             if (selectedTotal == 0) return result;
             constexpr size_t minimumElementsPerThread = 500'000;
             const size_t partitionCount = static_cast<size_t>(
@@ -169,8 +167,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                     const auto [first, pastLast] =
                         evenlyPartitionedRange(selectedTotal, partitionCount, partition);
                     forEachLayoutOffsetPairRange(
-                        observed.layout(), expected.layout(),
-                        observed.shape().indexOrder(options.selection), first, pastLast,
+                        observed.layout(), expected.layout(), options.indicesOrder, first, pastLast,
                         [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                             bool close = false;
                             if constexpr (scalarTypeInfo(Tag::type).category ==
@@ -205,7 +202,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
         }
 
         forEachSelectedOffsetPair(
-            observed.layout(), expected.layout(), options.selection,
+            observed.layout(), expected.layout(), options,
             [&](size_t, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                 ++result.compared;
                 bool close = false;

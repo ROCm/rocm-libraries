@@ -91,10 +91,13 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         )
 
         selected = hv.ComparisonOptions()
-        selected.selection = hv.IndexSelection(
-            hv.IndexRange(0, 2, sys.maxsize * 2 + 1), [1, 0]
+        selected_report = hv.compare(
+            observed,
+            expected,
+            selected,
+            hv.IndexRange(0, 2, sys.maxsize * 2 + 1),
+            [1, 0],
         )
-        selected_report = hv.compare(observed, expected, selected)
         expected_flat_fortran = expected_values.reshape(-1, order="F")
         observed_flat_fortran = observed_values.reshape(-1, order="F")
         selected_indices = np.arange(0, expected_values.size, 2)

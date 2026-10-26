@@ -473,8 +473,7 @@ class PermutationGenerationTests(unittest.TestCase):
         observed_values[tuple(point)] = 9
         observed = hv.from_numpy(observed_values)
         options = hv.ComparisonOptions()
-        options.selection = hv.IndexSelection([13], order)
-        report = hv.compare(observed, expected, options)
+        report = hv.compare(observed, expected, options, {13}, order)
         self.assertFalse(report.passed)
         self.assertEqual(report.reported_mismatches[0].coordinates, point)
         for invalid in ([0, 1], [0, 0, 2], [0, 1, 3]):
@@ -485,8 +484,7 @@ class PermutationGenerationTests(unittest.TestCase):
                 ).with_index_order(invalid)
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
             with self.assertRaises(RuntimeError):
-                options.selection = hv.IndexSelection(hv.IndexRange.all(), invalid)
-                hv.compare(observed, expected, options)
+                hv.compare(observed, expected, options, hv.IndexRange.all(), invalid)
 
     def test_contiguous_axis_order_conversion_and_selections(self):
         dimensions = (2, 3, 4)
@@ -502,13 +500,12 @@ class PermutationGenerationTests(unittest.TestCase):
         converted = source.to(hv.ScalarType.Float64)
         np.testing.assert_array_equal(hv.to_numpy(converted, dtype=None), expected)
         for selection in (
-            hv.IndexSelection(hv.IndexRange.all(), order),
-            hv.IndexSelection(hv.IndexRange(2, 3, sys.maxsize * 2 + 1), order),
-            hv.IndexSelection([1, 13, 23], order),
+            hv.IndexRange.all(),
+            hv.IndexRange(2, 3, sys.maxsize * 2 + 1),
+            {1, 13, 23},
         ):
             options = hv.ComparisonOptions()
-            options.selection = selection
-            report = hv.compare(source, converted, options)
+            report = hv.compare(source, converted, options, selection, order)
             self.assertTrue(report.passed)
             self.assertEqual(
                 report.compared, hv.Shape([2, 3, 4]).selected_count(selection)
@@ -519,12 +516,11 @@ class PermutationGenerationTests(unittest.TestCase):
             tensor = hv.Tensor(hv.ScalarType.Float32, hv.Shape(dimensions))
             options = hv.ComparisonOptions()
             for factory in (
-                lambda: hv.IndexSelection(hv.IndexRange.all(), [0, 0, 2]),
-                lambda: hv.IndexSelection([], [0, 0, 2]),
+                lambda: hv.IndexRange.all(),
+                lambda: set(),
             ):
                 with self.assertRaises(RuntimeError):
-                    options.selection = factory()
-                    hv.compare(tensor, tensor, options)
+                    hv.compare(tensor, tensor, options, factory(), [0, 0, 2])
 
     def test_prepared_type_generation_matches_checked_pointwise(self):
         dimensions = (2, 3)

@@ -72,7 +72,7 @@ void testTransformingBlockScaleFallsBack(roc::hostnumerics::ScalarType accumulat
             "Transforming BLAS block-scale fallback differs from the built-in reference.");
 }
 
-void testPartialIndexSelection() {
+void testPartialIndices() {
     using namespace roc::hostnumerics;
 
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
@@ -84,7 +84,8 @@ void testPartialIndexSelection() {
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}, 0), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}, 0), std::span<const float>(b)),
         d, ScalarType::Float32);
-    problem.outputSelection = IndexSelection(std::vector<size_t>({0, 3}), LastDimensionFastest{});
+    roc::hostnumerics::detail::bindIndices(problem, problem.d.shape(), std::set<size_t>({0, 3}),
+                                           LastDimensionFastest{});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
     require(!support.supported &&
@@ -288,7 +289,7 @@ TEST(BlasBackend, Behavior) {
                 d.loadAs<float>({1, 1}) == 154,
             "Automatic runtime backend selection mismatch.");
 
-    testPartialIndexSelection();
+    testPartialIndices();
     testTransformingAutomaticCostPolicy();
     testZeroExtentsDoNotInvokeBlas();
     const size_t huge = std::numeric_limits<size_t>::max();

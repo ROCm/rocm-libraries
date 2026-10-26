@@ -95,7 +95,6 @@ struct ComparisonOptions {
     // `reportedComparisons`. `maxReportedMismatches` caps each reported vector independently.
     bool reportMatchingElements = false;
     size_t maxReportedMismatches = 10;
-    IndexSelection selection = IndexSelection(IndexRange::all(), LastDimensionFastest{});
 };
 
 struct ComparisonValue {
@@ -105,7 +104,7 @@ struct ComparisonValue {
 };
 
 /// One reported logical tensor element. `index` is the selected element's linear logical index in
-/// `Shape::indexOrder(ComparisonOptions::selection)`; `coordinates` are tensor coordinates; offsets
+/// the supplied traversal order; `coordinates` are tensor coordinates; offsets
 /// are element offsets from the start of each tensor's storage, not byte offsets. Reported values
 /// are normalized to double and can round wide integers, while integer `absoluteDifference` is
 /// computed exactly before conversion to double. For a complex value, `absoluteDifference` is the
@@ -244,6 +243,20 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type);
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options);
 
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const IndexRange& range,
+                         std::span<const size_t> order);
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const std::set<size_t>& indices,
+                         std::span<const size_t> order);
+
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const IndexRange& indices,
+                         LastDimensionFastest);
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const std::set<size_t>& indices,
+                         LastDimensionFastest);
+
 /// Formats aggregate comparison evidence and any recorded mismatch samples.
 /// Callers may prepend product-specific context to the returned text.
 std::string formatComparisonReport(const ComparisonReport& report);
@@ -256,6 +269,15 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options);
+
+std::optional<ComparisonTolerance> findAllCloseTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates, ComparisonOptions options,
+    const IndexRange& indices, std::span<const size_t> order);
+std::optional<ComparisonTolerance> findAllCloseTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates, ComparisonOptions options,
+    const std::set<size_t>& indices, std::span<const size_t> order);
 
 /// Checks `[firstElement, firstElement + elementCount)` for the type's unwritten sentinel and
 /// reports absolute storage element indices. Signed integers use the lowest value; unsigned

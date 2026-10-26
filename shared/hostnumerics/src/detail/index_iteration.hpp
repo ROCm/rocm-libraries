@@ -4,9 +4,11 @@
 #pragma once
 
 #include <cassert>
+#include <functional>
 #include <numeric>
 #include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/layout.hpp>
+#include <set>
 #include <type_traits>
 #include <vector>
 
@@ -30,6 +32,36 @@ inline std::vector<size_t> reverseIndexOrder(size_t rank) {
     std::vector<size_t> axes(rank);
     for (size_t i = 0; i < rank; ++i) axes[i] = rank - 1 - i;
     return axes;
+}
+
+inline std::function<size_t(size_t)> indexFunction(const IndexRange& range) {
+    return [first = range.first, stride = range.stride](size_t ordinal) {
+        return first + ordinal * stride;
+    };
+}
+inline std::function<size_t(size_t)> indexFunction(const std::set<size_t>& indices) {
+    return [list = std::vector<size_t>(indices.begin(), indices.end())](size_t ordinal) {
+        return list[ordinal];
+    };
+}
+inline std::optional<size_t> contiguousFirst(const IndexRange& range) {
+    return range.stride == 1 ? std::optional<size_t>{range.first} : std::nullopt;
+}
+inline std::optional<size_t> contiguousFirst(const std::set<size_t>& indices) {
+    if (indices.empty()) return std::nullopt;
+    return *indices.rbegin() - *indices.begin() == indices.size() - 1
+               ? std::optional<size_t>{*indices.begin()}
+               : std::nullopt;
+}
+
+template <typename Invocation, typename Indices>
+void bindIndices(Invocation& invocation, const Shape& shape, const Indices& indices,
+                 std::span<const size_t> order) {
+    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
+    invocation.indicesCount = shape.selectedCount(indices);
+    invocation.indexAt = indexFunction(indices);
+    if constexpr (requires { invocation.firstContiguousIndex; })
+        invocation.firstContiguousIndex = contiguousFirst(indices);
 }
 
 inline Shape projectWithoutAxis(const Shape& shape, size_t excluded) {
@@ -93,6 +125,23 @@ class IndexIteration {
     std::vector<size_t> m_axes;
     size_t m_count;
 };
+
+template <typename Invocation, typename Indices>
+void bindIndices(Invocation& invocation, const Shape& shape, const Indices& indices,
+                 LastDimensionFastest) {
+    bindIndices(invocation, shape, indices, shape.indexOrderLastDimensionFastest());
+}
+
+template <typename Invocation, typename Function>
+void forEachBoundCoordinate(const Shape& shape, const Invocation& invocation, Function&& function) {
+    const IndexIteration iteration(shape, invocation.indicesOrder);
+    std::vector<size_t> coordinates(shape.rank());
+    for (size_t ordinal = 0; ordinal < invocation.indicesCount; ++ordinal) {
+        const size_t index = invocation.indexAt(ordinal);
+        iteration.coordinates(index, coordinates);
+        function(index, std::span<const size_t>(coordinates));
+    }
+}
 
 // Tensor construction validates elementBounds and storage once. Unsigned
 // arithmetic avoids signed intermediate overflow, including zero-stride axes

@@ -5,10 +5,16 @@
 
 namespace roc::hostnumerics {
 void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
-                               const MatmulOptions& options, IndexSelection selection) {
-    (void)detail::executeBlasGemm(
-        GemmInvocation(a, b, std::move(output), options, std::move(selection)),
-        GemmBackend::Automatic);
+                               const MatmulOptions& options, const IndexRange& indices,
+                               std::span<const size_t> order) {
+    (void)detail::executeBlasGemm(GemmInvocation(a, b, std::move(output), options, indices, order),
+                                  GemmBackend::Automatic);
+}
+void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
+                               const MatmulOptions& options, const std::set<size_t>& indices,
+                               std::span<const size_t> order) {
+    (void)detail::executeBlasGemm(GemmInvocation(a, b, std::move(output), options, indices, order),
+                                  GemmBackend::Automatic);
 }
 
 Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType outputType,
@@ -26,8 +32,8 @@ Tensor matmulWithBlasBackend(const Tensor& a, const Tensor& b, ScalarType output
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulIntoWithBlasBackend(a, b, output, options,
-                              IndexSelection(IndexRange::all(), LastDimensionFastest{}));
+    matmulIntoWithBlasBackend(a, b, output, options, IndexRange::all(),
+                              output.shape().indexOrderLastDimensionFastest());
     return output;
 }
 
