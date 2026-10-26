@@ -475,8 +475,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 15}
   - {tag: SizeLessThan, index: 0, value: 17}
-  - {tag: SizeGreaterThan, index: 1, value: 15}
-  - {tag: SizeLessThan, index: 1, value: 17}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -642,8 +640,6 @@ Solutions:
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 255}
   - {tag: SizeLessThan, index: 0, value: 257}
-  - {tag: SizeGreaterThan, index: 1, value: 255}
-  - {tag: SizeLessThan, index: 1, value: 257}
   - {tag: SizeGreaterThan, index: 3, value: 127}
   - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
@@ -692,6 +688,10 @@ ExactLogic:
   - [3, 1130.4639849066775]
 - - [16, 16, 1, 128, 16, 16, 128, 128]
   - [1, 16.890721649484536]
+- - [256, 257, 1, 128, 256, 256, 128, 128]
+  - [4, 936.2285714285714]
+- - [16, 17, 1, 128, 16, 16, 128, 128]
+  - [2, 12.047058823529412]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
