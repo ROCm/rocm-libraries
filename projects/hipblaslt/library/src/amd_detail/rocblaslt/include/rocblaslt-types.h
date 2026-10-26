@@ -762,6 +762,11 @@ struct RocblasltFusedEpilogueInfo
 // Returns false when desc is nullptr.
 bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
                                       RocblasltFusedEpilogueInfo&                    out);
+
+// Every rejection is reported as rocblaslt_status_invalid_value.
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt

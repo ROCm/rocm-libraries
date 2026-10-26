@@ -859,6 +859,100 @@ namespace
         EXPECT_EQ(hipblasLtMatmulDescDestroy(plainDesc), HIPBLAS_STATUS_SUCCESS);
     }
 
+    TEST_F(FusedA2ADispatch_pre_checkin, IsAlgoSupportedRejectsChannelOutsideTheCommunicator)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        int                              returned    = 0;
+        ASSERT_EQ(heuristic(&fusedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+
+        const float alpha     = 1.f;
+        const float beta      = 0.f;
+        size_t      workspace = 0;
+        ASSERT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                       matmulDesc,
+                                                       &alpha,
+                                                       Adesc,
+                                                       Bdesc,
+                                                       &beta,
+                                                       Ddesc,
+                                                       Ddesc,
+                                                       fusedResult.algo,
+                                                       workspace),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        const uint32_t channel = 1;
+        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                       matmulDesc,
+                                                       &alpha,
+                                                       Adesc,
+                                                       Bdesc,
+                                                       &beta,
+                                                       Ddesc,
+                                                       Ddesc,
+                                                       fusedResult.algo,
+                                                       workspace),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, IsAlgoSupportedRejectsPerRankArraysNotOfWorldLength)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        int                              returned    = 0;
+        ASSERT_EQ(heuristic(&fusedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+
+        void* recv[2] = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1100)};
+        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, recv, sizeof(recv)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        const float alpha     = 1.f;
+        const float beta      = 0.f;
+        size_t      workspace = 0;
+        EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                       matmulDesc,
+                                                       &alpha,
+                                                       Adesc,
+                                                       Bdesc,
+                                                       &beta,
+                                                       Ddesc,
+                                                       Ddesc,
+                                                       fusedResult.algo,
+                                                       workspace),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+
+        int supported = 0;
+        EXPECT_NE(hipblaslt_ext::isSolutionSupported(&fusedResult,
+                                                     handle,
+                                                     matmulDesc,
+                                                     &alpha,
+                                                     Adesc,
+                                                     Bdesc,
+                                                     &beta,
+                                                     Ddesc,
+                                                     Ddesc,
+                                                     &workspace,
+                                                     &supported),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(supported, 0);
+    }
+
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)
     {
         registerOneRank();

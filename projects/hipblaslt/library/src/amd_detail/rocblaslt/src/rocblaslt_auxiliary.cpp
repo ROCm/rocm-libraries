@@ -3015,6 +3015,13 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         void* betaf  = (void*)beta;
         auto  prob   = construct_rocblaslt_problem(
             handle, matmul_descr, matA, matB, matC, matD, alphaf, betaf, algo->max_workspace_bytes);
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+            return gate;
+        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+           gate != rocblaslt_status_success)
+            return gate;
+#endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
         if(status != rocblaslt_status_success)

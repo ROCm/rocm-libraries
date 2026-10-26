@@ -352,6 +352,18 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* de
     out.commChannel       = desc->comm_channel;
     return true;
 }
+
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD)
+{
+    return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
+                                            (hipblasLtMatmulDesc_t)matmulDesc,
+                                            (hipblasLtMatrixLayout_t)matD)
+                   == HIPBLAS_STATUS_SUCCESS
+               ? rocblaslt_status_success
+               : rocblaslt_status_invalid_value;
+}
 #endif
 
 #ifdef __cplusplus
