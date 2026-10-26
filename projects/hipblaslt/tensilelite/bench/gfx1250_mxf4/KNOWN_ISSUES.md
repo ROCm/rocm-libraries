@@ -130,6 +130,26 @@ Cluster shape matters: [2,4] (B shared by 2 M-peers, A by 4 N-peers) is best at 
 with StreamK 0, then [2,2] 166.9, [4,4] 167.6, [4,2] 168.8, [1,4] 169.6; [8,1] is slower than
 no cluster (207 us). StreamK 3 is within 1 us of StreamK 0 for the same shape.
 
+### MXSB issue Idle follow-ups (2026-10-23 … 2026-10-26)
+
+On the multicast+[2,4]+hoist kernel (`logs/20261014-205500-hoist-sk3_24`), ATT showed
+WMMA at ~63% of the loop and ~289 cycles of **issue Idle** on the 4th `tensor_load_to_lds`
+(MXSB). Levers tried as asm patches (GPU 2, warm client: `num-warmups=5`,
+`num-enqueues-per-sync=20`, 4096²×65536; baseline 164.5 µs / 13.37 PF):
+
+| Patch | Idea | Result |
+| --- | --- | --- |
+| `patch_tdm_cons_hoist.py` | Even-wave A/B consolidation (fewer issues) | Correct, **0.83×** |
+| `patch_scale_iterate.py` (sciter2) | Wave0 MXSA / wave1 MXSB ITERATE×4 K-groups | ~1.01–1.03× |
+| `patch_tdm_scalefirst.py` | Issue SA,SB before A,B (MXSB earlier) | **1.055×** (14.10 PF) |
+| `patch_tdm_scalewave.py` | MXSA/MXSB on waves 2/3 + ITERATE | ~1.02×, noisy |
+| `patch_tdm_unalias.py` | Dedicated MXSA/MXSB descriptor SGPRs | Blocked: needs +24 SGPRs, file at ~98 / cap s105 |
+| **`patch_scale_lds4.py` on sciter2 (sclds4)** | Scale-only LDS ring depth 4; A/B stay 2 | **1.062×** (155.0 µs / **14.19 PF**) |
+
+Best current build: `logs/20261023-211741-sclds4-sclds4` (sciter2 + scale LDS depth 4).
+`alt_timing.py` now forces the warm enqueue settings above so PF matches the 13.4 PF
+baseline methodology. Not yet upstreamed into the Tensile generator.
+
 ### Upstreamed
 
 - `StreamK.py preLoop`: the StreamK multicast prologue arrive is skipped for subtile kernels.
