@@ -28,6 +28,7 @@
 #include "stable_hash.h"
 #include "test_params.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -39,28 +40,46 @@
 // fft_hash.h uses per element.  The element-wise hash there is deliberately
 // layout-aware and skips padding, which this must not do - see the note on
 // input_preservation_check below.
-static inline uint64_t raw_byte_digest(const void* data, const size_t size_bytes)
+//
+// The range may be supplied in pieces, so that a large buffer never has to be
+// staged on the host all at once.  Every piece but the last must be a whole
+// number of 64-bit words, so that no word is split across two pieces.
+class raw_byte_digester
 {
-    const auto* bytes  = static_cast<const unsigned char*>(data);
-    uint64_t    digest = size_bytes;
-
-    const size_t whole_words = size_bytes / sizeof(uint64_t);
-    for(size_t i = 0; i < whole_words; ++i)
+public:
+    explicit raw_byte_digester(const size_t total_size_bytes)
+        : digest(total_size_bytes)
     {
-        uint64_t word;
-        memcpy(&word, bytes + i * sizeof(uint64_t), sizeof(word));
-        digest = stable_hash(digest ^ word);
     }
 
-    if(const size_t tail_bytes = size_bytes % sizeof(uint64_t))
+    void update(const void* data, const size_t size_bytes)
     {
-        uint64_t tail = 0;
-        memcpy(&tail, bytes + whole_words * sizeof(uint64_t), tail_bytes);
-        digest = stable_hash(digest ^ tail);
+        const auto* bytes = static_cast<const unsigned char*>(data);
+
+        const size_t whole_words = size_bytes / sizeof(uint64_t);
+        for(size_t i = 0; i < whole_words; ++i)
+        {
+            uint64_t word;
+            memcpy(&word, bytes + i * sizeof(uint64_t), sizeof(word));
+            digest = stable_hash(digest ^ word);
+        }
+
+        if(const size_t tail_bytes = size_bytes % sizeof(uint64_t))
+        {
+            uint64_t tail = 0;
+            memcpy(&tail, bytes + whole_words * sizeof(uint64_t), tail_bytes);
+            digest = stable_hash(digest ^ tail);
+        }
     }
 
-    return digest;
-}
+    uint64_t value() const
+    {
+        return digest;
+    }
+
+private:
+    uint64_t digest;
+};
 
 // Digests a transform's input buffer(s) before it runs, so that the same
 // digest can be taken afterwards to confirm the transform left the input
@@ -80,7 +99,7 @@ static inline uint64_t raw_byte_digest(const void* data, const size_t size_bytes
 // bricked or multi-device layouts (where the input pointers refer to per-brick
 // staging buffers that the input layout no longer describes), on a params
 // object whose isize has not been computed yet, and when there is not enough
-// host memory to stage a copy.
+// host memory to stage the window the copies go through.
 template <class Tparams>
 class input_preservation_check
 {
@@ -116,24 +135,7 @@ public:
         if(sizes.empty() || sizes.size() != buffers.size())
             return;
 
-        try
-        {
-            staging.resize(sizes.size());
-            for(unsigned int i = 0; i < sizes.size(); ++i)
-                staging[i].alloc(sizes[i]);
-        }
-        catch(const HOSTBUF_MEM_USAGE&)
-        {
-            staging.clear();
-            return;
-        }
-        catch(const std::bad_alloc&)
-        {
-            staging.clear();
-            return;
-        }
-
-        before = digest_device_buffers();
+        before = try_digest_device_buffers();
     }
 
     // Captures the post-transform image of the input.  This has to happen
@@ -142,13 +144,10 @@ public:
     // writes its own output into the forward transform's input buffer.
     void snapshot_after()
     {
-        if(staging.empty())
+        if(before.empty())
             return;
 
-        after = digest_device_buffers();
-        // The staging copies are no longer needed, and releasing them keeps the
-        // harness' host memory accounting honest for whatever runs next.
-        staging.clear();
+        after = try_digest_device_buffers();
     }
 
     // Describes how the input buffer changed, or returns an empty string when
@@ -184,26 +183,74 @@ private:
                || params.transform_type == fft_transform_type_real_forward;
     }
 
+    // Digests the input buffers, or returns an empty vector if the host staging
+    // allocation could not be made.  Being over the host memory budget is a
+    // reason to not check, not a reason to fail the test.
+    std::vector<uint64_t> try_digest_device_buffers()
+    {
+        try
+        {
+            return digest_device_buffers();
+        }
+        catch(const HOSTBUF_MEM_USAGE& e)
+        {
+            if(verbose > 4)
+                std::cout << "Input preservation check skipped: " << e.what() << "\n";
+        }
+        catch(const std::bad_alloc& e)
+        {
+            if(verbose > 4)
+                std::cout << "Input preservation check skipped: " << e.what() << "\n";
+        }
+        return {};
+    }
+
     std::vector<uint64_t> digest_device_buffers()
     {
         auto hip_status = hipDeviceSynchronize();
         if(hip_status != hipSuccess)
             throw hip_runtime_error("hipDeviceSynchronize failure", hip_status);
 
+        // Stage the copies through one bounded window rather than a host-side
+        // mirror of the whole input.  hostbuf allocations are charged against a
+        // budget, so staging a large input whole would push the biggest cases
+        // over it and silently skip exactly the ones worth checking.
+        const size_t window_bytes
+            = std::min(*std::max_element(sizes.begin(), sizes.end()), STAGING_WINDOW_BYTES);
+        hostbuf staging;
+        staging.alloc(window_bytes);
+
         std::vector<uint64_t> digests(sizes.size());
         for(unsigned int i = 0; i < sizes.size(); ++i)
         {
-            hip_status = hipMemcpy(staging[i].data(), buffers[i], sizes[i], hipMemcpyDeviceToHost);
-            if(hip_status != hipSuccess)
-                throw hip_runtime_error("hipMemcpy failure", hip_status);
-            digests[i] = raw_byte_digest(staging[i].data(), sizes[i]);
+            // Either window_bytes is a multiple of 8, or it is large enough to
+            // take any buffer in one piece, so a short piece is always the last
+            // one - which is what raw_byte_digester requires.
+            raw_byte_digester digester(sizes[i]);
+            for(size_t offset = 0; offset < sizes[i]; offset += window_bytes)
+            {
+                const size_t piece_bytes = std::min(window_bytes, sizes[i] - offset);
+
+                hip_status = hipMemcpy(staging.data(),
+                                       static_cast<char*>(buffers[i]) + offset,
+                                       piece_bytes,
+                                       hipMemcpyDeviceToHost);
+                if(hip_status != hipSuccess)
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
+
+                digester.update(staging.data(), piece_bytes);
+            }
+            digests[i] = digester.value();
         }
         return digests;
     }
 
+    static constexpr size_t STAGING_WINDOW_BYTES = 8 * 1024 * 1024;
+    static_assert(STAGING_WINDOW_BYTES % sizeof(uint64_t) == 0,
+                  "staging window must be a whole number of 64-bit words");
+
     std::vector<size_t>   sizes;
     std::vector<void*>    buffers;
-    std::vector<hostbuf>  staging;
     std::vector<uint64_t> before;
     std::vector<uint64_t> after;
 };
