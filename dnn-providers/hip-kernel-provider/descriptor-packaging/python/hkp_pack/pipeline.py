@@ -372,7 +372,8 @@ def _resolve_hsaco_source(ks, where, source_root, rel_dir, variant_co, variant_s
 
 
 def _launch_signature(launch):
-    """What determines a launch's compiled bytes, per producer; see `_units`."""
+    """What determines the compiled bytes of a launch or a single-launch UKD, per
+    producer; see `_units`."""
     if launch.origin_kind == "rocke":
         return (
             launch.source,
@@ -1863,18 +1864,9 @@ def pack_arch(
                 )
                 for name, launch in ukd.launches.items()
             ]
-        if ukd.origin_kind == "rocke":
-            sig = (
-                ukd.source,
-                ukd.builder,
-                json.dumps(ukd.spec, sort_keys=True),
-                ukd.compile_target,
-            )
-        elif ukd.origin_kind == "hsaco":
-            sig = ("hsaco", ukd.rel_file)
-        else:
-            sig = (ukd.source, json.dumps(ukd.build, sort_keys=True))
-        return [(who, ukd.variant_key, ukd.symbol, sig, ukd.rel_file)]
+        return [
+            (who, ukd.variant_key, ukd.symbol, _launch_signature(ukd), ukd.rel_file)
+        ]
 
     variant_bytes = {}
     variant_sha = {}
