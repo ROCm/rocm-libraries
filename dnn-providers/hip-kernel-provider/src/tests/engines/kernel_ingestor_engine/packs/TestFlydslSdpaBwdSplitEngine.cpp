@@ -906,6 +906,9 @@ TEST(TestFlydslSdpaBwdSplitKernel, APackedDkdvObjectServesDenseGqaOnly)
     EXPECT_TRUE(serves(Slot::DKDV, grouped, packed));
     EXPECT_FALSE(serves(Slot::DKDV, baseSpec(), packed));
     EXPECT_TRUE(serves(Slot::DKDV, grouped, plainRow()));
+    // Packing is dense only: padded varlen is served unpacked.
+    EXPECT_FALSE(serves(Slot::DKDV, withPaddedVarlen(grouped), packed));
+    EXPECT_TRUE(serves(Slot::DKDV, withPaddedVarlen(grouped), plainRow()));
     // A query tile past the span bound is not served.
     packed.blockQ = 128;
     EXPECT_FALSE(serves(Slot::DKDV, grouped, packed));
@@ -926,6 +929,24 @@ TEST(TestFlydslSdpaBwdSplitKernel, ADqObjectThatStagesTheBiasNeedsTheStagingCont
     EXPECT_TRUE(serves(Slot::DQ, withBias(baseSpec(), false), staged));
     // dkdv has no staging mode: it reads the bias in place.
     EXPECT_TRUE(serves(Slot::DKDV, unstaged, biasRow()));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ARowBroadcastBiasIsStagedOnlyAtAKeyLengthOfWholeVectors)
+{
+    // A row-broadcast bias has no padding behind its single row, so the staged object's last
+    // 16-byte chunk stays inside the allocation only when Sk is a multiple of 8 elements.
+    const auto rowBroadcast = [](int64_t seqKv) {
+        return dimsSpec(2, 8, 16, seqKv, 64).withEdit([=](SdpaBwdGraph& g) {
+            auto& bias = addBias(g, {2, 8, 1, seqKv});
+            bias.strides = {int64_t{8} * 24, 24, 24, 1};
+        });
+    };
+    const RowSpec staged = biasRow();
+    RowSpec direct = biasRow();
+    direct.biasStage = "direct";
+    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(20), staged));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(20), direct));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(24), staged));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ADbiasGraphNeedsADqObjectThatStoresDb)

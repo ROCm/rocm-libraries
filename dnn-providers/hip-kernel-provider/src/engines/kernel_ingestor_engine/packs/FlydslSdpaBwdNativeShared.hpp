@@ -583,18 +583,22 @@ inline bool hasSdpaBackwardNode(const hipdnn_plugin_sdk::ingestor::MatchContext&
     return false;
 }
 
-/// The bias's LDS staging rule: every non-unit stride a multiple of one 16-byte vector of
-/// elements (the matcher records 0 on a broadcast or unit axis), a row stride of at least the
-/// key length rounded up to a vector (the kernel's bias chunk contract), and a 16-byte
-/// aligned base.
+/// The bias's LDS staging rule (the kernel's bias chunk contract): every non-unit stride a
+/// multiple of one 16-byte vector of elements (the matcher records 0 on a broadcast or unit
+/// axis), a 16-byte aligned base, and a last row whose final vector lies inside the
+/// allocation: a row stride of at least the key length rounded up to a vector, or, for a
+/// single or row-broadcast row (recorded stride 0), which has no padding behind it, a key
+/// length that is itself a whole number of vectors.
 inline bool stagesBias(const bwd::SdpaBwdProblem& problem)
 {
     constexpr int64_t ALIGNMENT_BYTES = 16;
     const int64_t vector = ALIGNMENT_BYTES / static_cast<int64_t>(problem.elementBytes);
+    const bool lastRowFits
+        = problem.biasStrides.seq == 0
+              ? problem.seqLenKv % vector == 0
+              : problem.biasStrides.seq >= bwd::detail::ceilToVector(problem.seqLenKv, vector);
     return problem.biasStrides.batch % vector == 0 && problem.biasStrides.head % vector == 0
-           && problem.biasStrides.seq % vector == 0
-           && (problem.biasStrides.seq == 0
-               || problem.biasStrides.seq >= bwd::detail::ceilToVector(problem.seqLenKv, vector))
+           && problem.biasStrides.seq % vector == 0 && lastRowFits
            && problem.biasAlignmentBytes % ALIGNMENT_BYTES == 0;
 }
 
@@ -603,10 +607,12 @@ inline bool stagesBias(const bwd::SdpaBwdProblem& problem)
 /// the bias; and whether the kernel's pack_split multiply-high is exact for every packed row
 /// it can address: (Sq * G + 2 * block_q) * Sq < 2^31, the rows Sq * G plus the pad to an
 /// even tile count, at the largest query tile @p maxBlockQ of the packed objects. A graph
-/// that is not grouped has no packed span.
+/// that is not grouped has no packed span. Packing is dense only: the packed row index and
+/// the Philox counter assume every sequence is max_seqlen_q long, so padded varlen is never
+/// packed.
 inline bool packedSpansFit(const bwd::SdpaBwdProblem& problem, int64_t maxBlockQ)
 {
-    if(problem.numHeads <= problem.numKvHeads)
+    if(problem.numHeads <= problem.numKvHeads || problem.paddingMask)
     {
         return false;
     }
