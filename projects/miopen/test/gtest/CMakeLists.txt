@@ -161,7 +161,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_BUILD_CK)
       # The include directories also don't propagate correctly when using the
       # non-aliased targets. Manually including them fixes this for inline builds.
-      target_include_directories(${TEST_NAME} SYSTEM PRIVATE
+      target_include_directories(${TEST_NAME} SYSTEM BEFORE PRIVATE
           ${MIOPEN_CK_INCLUDE_DIR}
           ${MIOPEN_CK_BUILD_INCLUDE_DIR}
           ${MIOPEN_CK_LIBRARY_INCLUDE_DIR}
@@ -173,6 +173,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS utility)
       endif()
       target_link_libraries(${TEST_NAME} composable_kernel::utility)
+      # Use the selected CK package before headers bundled with the ROCm SDK.
+      target_include_directories(${TEST_NAME} SYSTEM BEFORE PRIVATE
+          $<TARGET_PROPERTY:composable_kernel::utility,INTERFACE_INCLUDE_DIRECTORIES>
+      )
     endif()
     miopen_apply_ck_compile_definitions(${TEST_NAME})
   endif()
