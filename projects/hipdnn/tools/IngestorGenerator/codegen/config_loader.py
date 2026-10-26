@@ -289,12 +289,15 @@ def load_config(path: Path) -> IngestorConfig:
                 )
             # An embedded_source has no entry a launch could override, so name
             # the key rather than let the closed key set reject it.
-            if "launches" in ks_raw and ks_raw["kind"] not in _KNOWN_LAUNCH_OVERRIDE:
+            kind = ks_raw["kind"]
+            if "launches" in ks_raw and not (
+                isinstance(kind, str) and kind in _KNOWN_LAUNCH_OVERRIDE
+            ):
                 raise ConfigError(
                     f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}': "
                     f"'launches' is only valid on a kernel_source (or "
                     f"kernel_defaults) of kind {sorted(_KNOWN_LAUNCH_OVERRIDE)}, but "
-                    f"the kind is {ks_raw['kind']!r}."
+                    f"the kind is {kind!r}."
                 )
             # The one gate every kernel reaches, hand-authored or expanded.
             # An expanded kernel's `kernel_source` is generated, so it names

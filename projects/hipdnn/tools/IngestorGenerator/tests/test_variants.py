@@ -1321,6 +1321,12 @@ class TestLaunches:
         with pytest.raises(ConfigError, match="only valid on a kernel_source"):
             _load(tmp_path, raw)
 
+    @pytest.mark.parametrize("kind", [["hip"], {"x": 1}], ids=["list", "mapping"])
+    def test_launches_on_a_kind_that_is_not_a_string_are_refused(self, tmp_path, kind):
+        raw = self._hand_authored({"kind": kind, "launches": {"a": {}, "b": {}}})
+        with pytest.raises(ConfigError, match="only valid on a kernel_source"):
+            _load(tmp_path, raw)
+
     @pytest.mark.parametrize(
         "override, match",
         [
