@@ -365,7 +365,7 @@ class TestMaskAxisPerGrouping:
     @pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
     def test_every_wave_uses_its_tensors_axis(self, tdmFuse, clusterDim):
         comp = _c()
-        from Tensile.Components.TDMFuse import tdmWavePartition
+        from tensilelite.Components.TDMFuse import tdmWavePartition
         k = _kernel(clusterDim=clusterDim, tdmFuse=tdmFuse, mx=True)
         for tc in _TENSORS:
             name = comp.maskSgprName(k, tc, waveSeparated=True)

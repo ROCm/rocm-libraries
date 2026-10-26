@@ -17,7 +17,7 @@ PY="$GEN/.venv/bin/python"
 BUILD=/absolute/path/to/build
 INSTALL=/absolute/path/to/future-install
 SWEEP_ROOT=/existing/device-visible/writable/experiment-root
-GENERATED=/absolute/path/to/empty-generation-destination
+GENERATED=/absolute/path/to/empty-generation-destination  # a new one per pass needs --ids-from <previous>/<descriptor dir>; the same one needs --force
 CONFIG=/absolute/path/to/generator-config.yaml  # a registry-backed engine's authored selection, configs/<slug>.yaml
 MANIFEST=/absolute/path/to/<slug>.engine.yaml   # rocKE registry-backed engines
 SHAPES=/absolute/path/to/request-shapes.json
@@ -268,8 +268,11 @@ per the README's *Updating the captured catalog*.
 
 ## 3. Generate, implement and splice
 
-Generate from the selection `$CONFIG` into an empty scratch directory, never over the live
-engine:
+Generate from the selection `$CONFIG` into a scratch directory, never over the live
+engine. Descriptor ids are reused from the installed bundle by default; use `--new-ids`
+only for an engine being replaced or renamed. [extend.md](extend.md) states what an
+extension must keep, and the *Descriptor ids* section of `$GEN/README.md` has the rules
+(lookup order, matching, retunes, the `Ids:` line, warnings, refusals, siblings).
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
@@ -277,7 +280,28 @@ engine:
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
 
-Run both against the revision you are about to splice; a render from an earlier revision
+`--dry-run` resolves ids too, so run it first as the preflight. It and a real run exit 2
+on an unusable previous bundle, including this bundle's DVC-stored KDP left unpulled (run
+`dvc pull`, or pass `--new-ids`); a scripted invocation must do one or the other.
+`--check-placeholders` resolves ids only when sibling bundles are in play, so on its own
+it reports an unpulled KDP as a missing file (exit 1).
+
+Read the `Ids:` line the real run prints. For an extension `minted` is the added kernels;
+investigate a retired name you did not remove, a retune, and any arch clause. Read the
+stderr warnings too: none is fatal, but delete any descriptor file they name that the run
+will not write, or the next run reads it as part of the previous bundle.
+
+**Iterating within a ticket.** Regenerate into the **same** output directory with
+`--force`, or into a **new** one with `--ids-from <previous scratch>/<descriptor dir>`;
+a new directory without it remints every added descriptor. A same-directory run
+overwrites hand-filled C++ stubs: hand-fill and splice only once the descriptors settle,
+or keep hand-filled C++ outside the scratch directory.
+
+**More than one bundle for one engine.** Follow [extend.md](extend.md)'s *Sibling
+bundles*. `--check-placeholders` on a satellite reports `Located 1 of this engine's 1
+shippable files`: its KDP alone.
+
+Run these against the revision you are about to splice; a render from an earlier revision
 is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
 including a repeated `<<`, and reports both source positions.
 
@@ -308,10 +332,10 @@ supplies the matcher vocabulary (`specialization.vocabulary`), never compiler ev
 after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
-Extensions remap scratch references and copy only additions per [extend.md](extend.md),
-including consumer IDs in shared KDP or per-UKD specialization declarations. For
-descriptors, `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` does this and refuses any change to a retained
-entry:
+Extensions copy only additions per [extend.md](extend.md); confirm the reused ids with
+`catalog_diff.py --expect-ids` against the pre-splice KDP. For descriptors,
+`projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` applies the additions
+and refuses any change to a retained entry:
 
 ```bash
 "$PY" "$GEN/tools/splice_additions.py" \
@@ -319,6 +343,11 @@ entry:
   --live "$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>" \
   --report "$EVIDENCE/splice_report.json"
 ```
+
+A KDP stored with DVC (gfx950: `<bundle>/artifacts/`) is not in the bundle directory, so
+`--live <bundle>` does not see it. Splice that KDP by hand, or copy the scratch KDP alone
+into an otherwise empty directory and pass it as `--scratch` with `--live
+<bundle>/artifacts`; then run `dvc add artifacts` there, not `git add`.
 
 Copy the generated census test whole; it carries no UUIDs. Review the KDP diff with
 `git diff --diff-algorithm=histogram`. Never edit packed evidence to match a changed
@@ -337,7 +366,8 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
-A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste.
+A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste. A
+satellite bundle installs only its KDP (see [extend.md](extend.md)'s *Sibling bundles*).
 
 **A new packaged engine shipped from `descriptors/`** with its own device tests needs
 further sites that no generator fragment emits. `hipkernel:Gfx950AttentionDense`
@@ -430,8 +460,9 @@ Three packaging-time constraints:
   it.
 
 **There is no shared stage tree.** Each root packs straight to its own `OUT_ROOT`, so
-"stage the descriptors" means "author them under the right root". Re-emit after every
-regeneration and compare content and identities, not only counts. A fragment file is not
+"stage the descriptors" means "author them under the right root". Regenerate an existing
+engine after every change (ids are reused as in stage 3), then compare content and
+identities, not only counts. A fragment file is not
 evidence that its splice was applied.
 
 Set `SCHEMA` to the operation `.fbs` and `NATIVE_SOURCE` to its implementation; pass all
@@ -935,8 +966,10 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      cp "$SCRATCH/selection.rules.yaml" "$CONFIG"
    ```
 
-6. **Repeat stages 3–6** with a new empty generation destination and a fresh sweep
-   `output_dir`. With ground truth, compare it every iteration; its report lists every row
+6. **Repeat stages 3–6** with a fresh sweep `output_dir`, regenerating into the same
+   destination with `--force`, or into a new empty one with `--ids-from <previous
+   destination>/<descriptor dir>`. With ground truth, compare it every iteration; its
+   report lists every row
    outside the margin, failing correctness, with no usable reference, or missing:
 
    ```bash

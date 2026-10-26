@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -62,8 +63,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpGEAMAlg_t alg       = HIPSPARSE_SPGEAM_ALG1;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
@@ -312,8 +312,7 @@ void testing_spgeam_csr(Arguments argus)
     hipsparseIndexType_t typeJ = HIPSPARSE_INDEX_32I;
     hipDataType          typeT = getDataType<T>();
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;

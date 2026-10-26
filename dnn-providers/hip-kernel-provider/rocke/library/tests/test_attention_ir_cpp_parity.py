@@ -133,7 +133,7 @@ def test_attention_ir_cpp_python_byte_identity():
         )
 
     # gfx942 has one shared epilogue for both grids; cover each grid with and
-    # without keyless rows (the harness has no gfx942 dense builder).
+    # without keyless rows, with LSE on (the harness's gfx942 cases run without it).
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         build_attention_dense as build_gfx942_dense,
