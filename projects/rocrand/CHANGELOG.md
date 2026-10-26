@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.3.0 for ROCm 10.3.0
+
+### Changed
+
+* On Linux, `librocrand.so` now exports only its public API. Applications built against this version and run with an older rocRAND may print a non-fatal "no version information available" warning.
+
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
 ### Optimized
