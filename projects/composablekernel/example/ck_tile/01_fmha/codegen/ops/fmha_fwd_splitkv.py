@@ -935,8 +935,11 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             #             equivalent of qr_ks_vs's keeps_sink rule for deciding
             #             which split publishes a sink-bearing lse_acc, so
             #             SplitKvSinkDoubleCount and SplitKvSinkDroppedSink fail
-            #   bias      split-kv with bias dispatches to nothing today and no
-            #             test covers it, so taking it over cannot be validated
+            #   bias      the BUILD_TESTING instance filter in
+            #             example/ck_tile/01_fmha/CMakeLists.txt keeps only
+            #             *_nbias* split-kv instances in the dispatch api, so
+            #             bias cannot be exercised from the example or the
+            #             gtests and taking it over cannot be validated
             # Like fmha_fwd.py it pads both sequence lengths together and both
             # head dims together; the qr entries padding one side only stay as
             # they are, which is why the dispatch chain still has to put qr_tdm
