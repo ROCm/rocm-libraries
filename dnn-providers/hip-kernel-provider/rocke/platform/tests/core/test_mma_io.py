@@ -22,6 +22,7 @@ from rocke.core.storage import (
 )
 from rocke.helpers.mma_io import (
     load_matrix_fragment,
+    mma_operand_ir_type,
     pack_fragment_bits,
     storage_ir_type,
 )
@@ -459,3 +460,26 @@ def test_96bit_loads_copy_exact_payload(dtype):
     ):
         assert int(size) == 12
         assert int(actual_align) <= max_align
+
+
+@pytest.mark.parametrize(
+    "dtype, count, operand",
+    [
+        ("fp16", 4, "vec<f16x4>"),
+        ("tf32", 2, "vec<tf32x2>"),
+        ("i8", 16, "vec<i8x16>"),
+        ("fp8e4m3", 32, "vec<fp8e4m3x32>"),
+        ("fp4e2m1", 32, "vec<i32x4>"),
+        ("fp6e2m3", 32, "vec<i32x6>"),
+        ("i4", 16, "vec<i32x2>"),
+    ],
+)
+def test_mma_operand_ir_type(dtype, count, operand):
+    # A dtype of a byte or more is the logical vector; a sub-byte dtype has no IR value type, so
+    # its elements are packed into 32-bit words. The count is logical elements either way.
+    assert mma_operand_ir_type(dtype, count).name == operand
+
+
+def test_mma_operand_ir_type_refuses_a_partial_register():
+    with pytest.raises(ValueError, match="not a whole number of 32-bit registers"):
+        mma_operand_ir_type("fp4e2m1", 4)
