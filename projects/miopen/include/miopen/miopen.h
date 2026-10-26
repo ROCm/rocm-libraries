@@ -328,7 +328,7 @@ MIOPEN_DECLARE_OBJECT(miopenDropoutDescriptor);
  */
 MIOPEN_DECLARE_OBJECT(miopenReduceTensorDescriptor);
 
-/*! @ingroup mha
+/*! @ingroup find2
  * @brief Creates the miopenMhaDescriptor_t type
  */
 MIOPEN_DECLARE_OBJECT(miopenMhaDescriptor);
