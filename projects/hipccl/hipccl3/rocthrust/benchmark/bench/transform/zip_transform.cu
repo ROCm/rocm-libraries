@@ -71,7 +71,7 @@ struct nstream_zip_transform_benchmark : public primbench::benchmark_interface
 
     const T scalar = startScalar;
     auto lambda    = _THRUST_LIBCXX::proclaim_copyable_arguments(
-      [scalar] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) -> T {
+      [=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) -> T {
         return ai + bi + scalar * ci;
       });
     _THRUST_LIBCXX::zip_transform_iterator begin{lambda, a.begin(), b.begin(), c.begin()};
