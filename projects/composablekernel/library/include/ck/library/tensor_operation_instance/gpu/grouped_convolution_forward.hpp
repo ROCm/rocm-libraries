@@ -123,7 +123,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                      is_same_v<InDataType, bhalf_t> && is_same_v<WeiDataType, bhalf_t> &&
                      is_same_v<OutDataType, bhalf_t> && is_same_v<AComputeType, bhalf_t> &&
                      is_same_v<BComputeType, bhalf_t>)
-            add_device_grouped_conv3d_fwd_native_output_ndhwgc_gkzyxc_ngkdhw_bf16_instances(op_ptrs);
+            add_device_grouped_conv3d_fwd_native_output_ndhwgc_gkzyxc_ngkdhw_bf16_instances(
+                op_ptrs);
 #endif
 #if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
         if constexpr(NumDimSpatial == 3 && is_same_v<InLayout, NDHWGC> &&
