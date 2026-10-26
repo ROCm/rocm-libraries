@@ -19,8 +19,8 @@ import os
 
 import yaml
 
-from tensilelite.CustomYamlLoader import load_yaml_stream
-from tensilelite.LibraryIO import StrictTypeLoader, _loadMeshTableFromCsvXz
+from ..CustomYamlLoader import load_yaml_stream
+from ..LibraryIO import StrictTypeLoader, _loadMeshTableFromCsvXz
 
 
 def _get_library_type(data):
