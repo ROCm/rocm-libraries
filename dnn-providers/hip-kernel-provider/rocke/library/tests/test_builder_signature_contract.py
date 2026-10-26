@@ -368,6 +368,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
     # Fused 1-D Winograd forward
     "kernels.common.conv_winograd_fused_1d_wmma.FusedWino1DSpec": ("ax", "problem"),
+    # Fused F(2,3) Winograd forward
+    "kernels.common.conv_winograd_fused_wmma.WinogradFusedSpec": ("problem",),
 }
 
 

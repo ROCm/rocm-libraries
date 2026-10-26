@@ -206,6 +206,8 @@ def _assert_safe(plan: WinogradPlan, p: ConvProblem, dt: str) -> None:
     if plan.kind == "unfused2d":
         assert plan.tile in TILES_2D and plan.tile != (6, 6)
         assert not (dt == "bf16" and plan.tile == (4, 6))
+    if plan.kind == "fused2d":
+        assert plan.tile == (2, 2) and p.cpg <= 192 and (p.dH, p.dW) == (1, 1)
     if plan.kind == "fused1d":
         assert plan.variant == {11: "4s3", 7: "4s2", 3: "6"}[p.X]
         assert p.C in (32, 64, 128) and p.Hi == 1 and p.groups == 1
@@ -279,7 +281,7 @@ def test_grid_never_unsafe():
         if sel.kind != "none":
             _assert_safe(sel, p, dt)
     # every implementation is reachable on the grid
-    assert {k for k, _ in seen} == {"unfused2d", "fused1d", "unfused_gen"}
+    assert {k for k, _ in seen} == {"unfused2d", "fused2d", "fused1d", "unfused_gen"}
     assert not seen & UNSAFE
 
 
@@ -308,6 +310,11 @@ def test_reported_unsafe_variants_never_offered(y, x, forbidden):
 def test_unsafe_plans_are_flagged():
     for c in (32, 64, 128, 192):
         p = ConvProblem(N=16, Hi=64, Wi=64, C=c, K=c, Y=3, X=3, pH=1, pW=1)
+        fused = [
+            pl for pl in winograd_plans(p, "fp16", model=MODEL) if pl.kind == "fused2d"
+        ]
+        assert [pl.tile for pl in fused] == [(2, 2)]
+        assert plan_is_unsafe(WinogradPlan(kind="fused2d", tile=(4, 4)), p)
         assert plan_is_unsafe(WinogradPlan(kind="unfused2d", tile=(6, 6)), p)
 
 
@@ -381,9 +388,19 @@ def test_batch_split(shape, dtype, tile, chunks):
         bufs = _buffers(p, _Axis(pl.tile[0], 3), _Axis(pl.tile[1], 3), n // pl.chunks)
         assert max(bufs.values()) < _MAX_BUFFER_BYTES
         assert n % pl.chunks == 0
+    # fused F(2,3) has no batch split: not offered when a buffer exceeds 2 GiB
+    assert all(pl.kind != "fused2d" for pl in winograd_plans(p, dtype, model=MODEL))
 
 
 def test_kernel_limits():
+    big_c = ConvProblem(N=16, Hi=64, Wi=64, C=256, K=256, Y=3, X=3, pH=1, pW=1)
+    assert all(
+        pl.kind != "fused2d" for pl in winograd_plans(big_c, "fp16", model=MODEL)
+    )
+    dil = ConvProblem(
+        N=16, Hi=64, Wi=64, C=128, K=128, Y=3, X=3, pH=2, pW=2, dH=2, dW=2
+    )
+    assert all(pl.kind != "fused2d" for pl in winograd_plans(dil, "fp16", model=MODEL))
     for c, ok in ((32, True), (64, True), (128, True), (256, False), (96, False)):
         p = ConvProblem(N=16, Hi=1, Wi=8192, C=c, K=c, Y=1, X=11, pW=5)
         kinds = {pl.kind for pl in winograd_plans(p, "fp16", model=MODEL)}

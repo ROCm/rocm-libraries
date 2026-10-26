@@ -6,13 +6,15 @@
 Given a :class:`ConvProblem`, an I/O dtype and a :class:`WinogradCostModel`,
 :func:`select_winograd` returns the *safe* Winograd plan with the lowest
 modelled cost.
-There are three plan kinds, one per implementation:
+There are four plan kinds, one per implementation:
 
 * ``unfused2d`` - the 4-kernel pipeline (K1 filter, K2 input, K3 TDM+WMMA
   batched GEMM, K4 output transform) for 3x3 convs, output tile
   ``(mh, mw)`` (``conv_winograd_fwd`` + ``conv_winograd_gemm_wmma``), with
   the merged K2+K1 launch, a recommended K3 configuration and the batch
   split (``chunks``) that keeps every buffer under the 32-bit offsets.
+* ``fused2d`` - the weight-stationary fused F(2,3) kernel
+  (``conv_winograd_fused_wmma``), plus K1.
 * ``fused1d`` - the fused 1-D segmented kernel
   (``conv_winograd_fused_1d_wmma``) for ``1 x r`` convs on ``H = 1``.
 * ``unfused_gen`` - the generalized 4-kernel pipeline
@@ -27,7 +29,7 @@ An analytic roofline sum in byte equivalents (relative units; the model
 ranks plans and predicts no time)::
 
     cost = gemm_flops / occupancy / flops_per_byte      (matrix work)
-         + xform_flops / (flops_per_byte / valu_ratio)  (fused 1-D only)
+         + xform_flops / (flops_per_byte / valu_ratio)  (fused kernels only)
          + bytes moved
          + launches * launch_bytes
 
@@ -38,8 +40,11 @@ ranks plans and predicts no time)::
   re-reads of a segmented (``taps > 1``) K3 (over the occupancy); K1 plus
   K2, K3 and K4 per batch-split chunk as launches (K1 merged into the
   first K2).
-* ``fused1d``: the WMMA flops (C padded to 32, K to the K block); the
-  input transform, repeated for every K block; x and y; one launch.
+* ``fused2d``: the F(2,3) WMMA flops (C/g padded to 32, K/g to the
+  64-channel K block); the input transform, repeated for every K block; x
+  and y; one launch.
+* ``fused1d``: the same terms for the segmented 1-D kernel (K to its K
+  block).
 
 :class:`WinogradCostModel` holds the parameters. ``num_cus`` has no default
 (it is the target's CU count); the other fields are nominal ratios, not a
@@ -53,10 +58,12 @@ Eligibility
 * Numerics (rocke metric max|err|/max(|ref|,1), budget ~1.5e-2):
   F(6,3) in 2-D (6x6 tiles) is never auto-selected (1.4-2.1e-2);
   F(4,11), F(6,11), F(2,11), F(6,7) single-segment and F(4x4,5x5) are
-  refused; the 4x6 tile is refused for bf16 I/O (its fused-prescale K2
+  refused; fused F(4,3) is refused (the transform dominates and the
+  kernel spills); the 4x6 tile is refused for bf16 I/O (its fused-prescale K2
   spills).  6x4 / 4x6 tiles are allowed (1.4-1.9e-2) but lose a near-tie
   to a lower-error tile (``accuracy_margin``).
-* Kernel limits: fused 1-D only
+* Kernel limits: fused F(2,3) only for ``C/g <= 192``, dilation 1 and no
+  batch split; fused 1-D only
   for fp16 I/O, ``H = Y = 1``, groups 1, ``C`` in {32, 64, 128} and ``K % 64 == 0``
   (32 for C = 32), r in {3, 7, 11}.
 * Buffers: x, y, U, V and M must each stay below 2 GiB (32-bit buffer
@@ -87,6 +94,7 @@ _IO_DTYPES = ("fp16", "bf16")
 _MAX_BUFFER_BYTES = 0x7FFF0000  # conv_winograd_fwd._OOB: 32-bit buffer offsets
 _MIN_CPG = 32
 _MAX_DILATION = 35  # dilation >= 36 is not validated
+_FUSED2D_MAX_CPG = 192
 _FUSED1D_C = (32, 64, 128)
 # Plans above this error class lose a near-tie (``accuracy_margin``).
 _ERR_TIEBREAK = 1.5e-2
@@ -113,6 +121,7 @@ _ERR_CLASS = {
     ("unfused2d", (4, 4)): 1.4e-2,
     ("unfused2d", (6, 4)): 1.7e-2,
     ("unfused2d", (4, 6)): 1.7e-2,
+    ("fused2d", (2, 2)): 6.0e-3,
 }
 
 # ``(kind, form)`` pairs marked unsafe (numerics / validation); never emitted
@@ -120,6 +129,10 @@ _ERR_CLASS = {
 UNSAFE = frozenset(
     {
         ("unfused2d", "F(6x6,3x3)"),  # F(6,3) in 2-D: 1.4-2.1e-2, over budget
+        ("fused2d", "F(4x4,3x3)"),  # the transform dominates; spills
+        ("fused2d", "F(6x4,3x3)"),
+        ("fused2d", "F(4x6,3x3)"),
+        ("fused2d", "F(6x6,3x3)"),
         ("unfused_gen", "F(4,11)"),  # >= 5e-2 for every point set
         ("unfused_gen", "F(6,11)"),  # 0.7
         ("unfused_gen", "F(2,11)"),  # 1.36e-2, borderline
@@ -205,7 +218,7 @@ class WinogradPlan:
         generalized plans)."""
         if self.kind == "none":
             return "none"
-        if self.kind == "unfused2d":
+        if self.kind in ("unfused2d", "fused2d"):
             return f"{self.kind}:F({self.tile[0]}x{self.tile[1]},3x3)"
         return f"{self.kind}:{self.variant}"
 
@@ -393,7 +406,7 @@ def _unfused_cost(
 def _fused_cost(
     p: ConvProblem, ay: _Axis, ax: _Axis, kb: int, model: WinogradCostModel
 ) -> Dict[str, float]:
-    """Cost terms (byte equivalents) of the fused 1-D kernel."""
+    """Cost terms (byte equivalents) of the fused kernels (F(2,3) / 1-D)."""
     T = _tiles(p, ay, ax, p.N)
     bins = ay.n * ax.n
     taps = ay.seg * ax.seg
@@ -432,6 +445,12 @@ def recommended_k3(
     if p.cpg <= 384:
         return "256x256x64_w2x4_f8x4_s3_tdm"
     return "256x256x128_w2x4_f8x4_s2_tdm"
+
+
+def _fused2d_cfg(p: ConvProblem) -> Dict[str, object]:
+    if p.cpg <= 128:
+        return dict(m=2, fm=1, fn=4, ks=1, ck=128, stages=2, pipe="early")
+    return dict(m=2, fm=1, fn=1, ks=2, ck=64, stages=3, pipe="early")
 
 
 def _fused1d_cfg(p: ConvProblem) -> Dict[str, object]:
@@ -486,6 +505,23 @@ def winograd_plans(
                     features=tuple(f.items()),
                 )
             )
+        # fused F(2,3) kernel (no batch split)
+        if p.cpg <= _FUSED2D_MAX_CPG and (p.dH, p.dW) == (1, 1):
+            ay = ax = _Axis(2, 3)
+            if _batch_chunks(p, ay, ax) == 1:
+                f = _fused_cost(p, ay, ax, 64, model)
+                out.append(
+                    WinogradPlan(
+                        kind="fused2d",
+                        tile=(2, 2),
+                        variant="2",
+                        fused_cfg=_items(_fused2d_cfg(p)),
+                        cost=sum(f.values()),
+                        err_class=_ERR_CLASS[("fused2d", (2, 2))],
+                        form="F(2x2,3x3)",
+                        features=tuple(f.items()),
+                    )
+                )
     else:
         # fused 1-D segmented kernel (fp16 I/O only)
         if (
@@ -547,6 +583,8 @@ def plan_is_unsafe(plan: WinogradPlan, problem: Optional[ConvProblem] = None) ->
     if (plan.kind, plan.form) in UNSAFE:
         return True
     if plan.kind == "unfused2d" and max(plan.tile) >= 6 and min(plan.tile) >= 6:
+        return True
+    if plan.kind == "fused2d" and plan.tile != (2, 2):
         return True
     if problem is not None:
         if max(problem.dH, problem.dW) > _MAX_DILATION:

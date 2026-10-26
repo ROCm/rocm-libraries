@@ -944,6 +944,274 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
         pipe.free()
 
 
+# ---------------------------------------------------------------------------
+# Fused mode (kernels/common/conv_winograd_fused_wmma.py): K1 + one kernel
+# ---------------------------------------------------------------------------
+
+# Default fused configurations tried per problem (knob dicts of
+# WinogradFusedSpec; invalid ones are skipped with their reason).
+FUSED_CFGS_F2: Tuple[dict, ...] = (
+    dict(fm=1, fn=2, ks=2, ck=32),
+    dict(fm=1, fn=2, ks=2, ck=64),
+    dict(fm=2, fn=1, ks=2, ck=32),
+    dict(fm=1, fn=1, ks=2, ck=32),
+    dict(fm=1, fn=4, ks=1, ck=32),
+)
+FUSED_CFGS_F4: Tuple[dict, ...] = (
+    dict(fm=1, fn=1, ks=1, ck=32),
+    dict(fm=1, fn=2, ks=1, ck=32),
+)
+
+
+def _fused_build_one(item):
+    """``(knobs, spec, artifact, why)`` for one fused config (picklable)."""
+    knobs, problem, m, io, op, arch = item
+    from rocke import compile_kernel
+    from kernels.common.conv_winograd_fused_wmma import (
+        WinogradFusedSpec,
+        build_winograd_fused,
+        fused_reason,
+    )
+
+    try:
+        spec = WinogradFusedSpec(
+            problem=problem, m=m, io_dtype=io, operand_dtype=op, **knobs
+        )
+    except ValueError as e:
+        return knobs, None, None, str(e)
+    why = fused_reason(spec, arch)
+    if why:
+        return knobs, spec, None, why
+    try:
+        art = compile_kernel(build_winograd_fused(spec, arch=arch), arch=arch)
+    except Exception as e:  # noqa: BLE001 -- report and skip
+        return knobs, spec, None, f"compile: {e}"
+    return knobs, spec, (art.hsaco, art.kernel_name), None
+
+
+def _fused_build_all(cfgs, problem, m, io, op, arch, jobs):
+    work = [(dict(k), problem, m, io, op, arch) for k in cfgs]
+    if jobs == 1 or len(work) == 1:
+        return [_fused_build_one(w) for w in work]
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    from benchmarks.common import benchmark_winograd_conv as _self
+
+    with ProcessPoolExecutor(
+        max_workers=jobs, mp_context=multiprocessing.get_context("forkserver")
+    ) as pool:
+        return list(pool.map(_self._fused_build_one, work))
+
+
+def run_case_fused(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
+    """K1 (filter transform) + the fused kernel; every config verified, then
+    timed alone (``fused_us``) and as the K1 -> fused chain (``total_us``).
+
+    ``m`` is a tile (``4`` or ``(mh, mw)``); the fused kernel supports square
+    F(2,3) / F(4,3) only, other tiles raise ValueError (reported as a skip)."""
+    mh, mw = _m_pair(m)
+    if mh != mw or mh not in (2, 4):
+        raise ValueError(f"fused mode supports F(2,3) / F(4,3) only, not {m_label(m)}")
+    m = mh
+
+    from rocke.runtime import time_launches
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from benchmarks.common.winograd_k3_wmma import device_cus
+    from kernels.common import conv_winograd_fwd as W
+    from kernels.common.conv_winograd_fused_wmma import (
+        fused_flops_gemm,
+        fused_launch_values,
+        fused_signature,
+    )
+
+    operand = resolve_operand(args.operand, m, io_dtype)
+    if args.fused_cfgs:
+        cfgs = eval(
+            args.fused_cfgs, {"__builtins__": {}}, {"dict": dict, "range": range}
+        )  # noqa: S307
+    else:
+        cfgs = FUSED_CFGS_F2 if m == 2 else FUSED_CFGS_F4
+    print(
+        f"\n== {problem.short()} fused F({m},3) io={io_dtype} op={operand}", flush=True
+    )
+    import dataclasses
+
+    # K1 depends only on K, C/g and groups; a small N/H/W keeps the unfused
+    # workspace checks of WinogradFwdSpec (V, M < 2 GiB) out of the way.
+    k1_problem = dataclasses.replace(problem, N=1, Hi=8, Wi=8, pH=1, pW=1, dH=1, dW=1)
+    xspec = W.WinogradFwdSpec(
+        problem=k1_problem, m=m, io_dtype=io_dtype, operand_dtype=operand, vec=4
+    )
+    from rocke import compile_kernel
+
+    k1_art = compile_kernel(
+        W.build_winograd_filter_transform(xspec, arch=arch), arch=arch
+    )
+    built = _fused_build_all(cfgs, problem, m, io_dtype, operand, arch, args.jobs)
+    from kernels.common.conv_winograd_fused_wmma import fused_bounds_check
+
+    good = []
+    for knobs, spec, art, why in built:
+        if not why:
+            fused_bounds_check(spec)
+        if why:
+            print(f"  [skip] {knobs}: {why}", flush=True)
+        else:
+            good.append((knobs, spec, art))
+    if not good:
+        return None
+
+    x_t, w_t, y_t = make_inputs(problem, io_dtype, seed=args.seed)
+    ref = None
+    if args.verify:
+        key = (problem, io_dtype)
+        if key not in ref_cache:
+            ref_cache[key] = reference(x_t, w_t, problem, io_dtype)
+        ref = ref_cache[key]
+    rt = Runtime()
+    sz = good[0][1].buffer_bytes()
+    sz["w"] = problem.K * 9 * problem.cpg * 2
+    bufs = {k: int(rt.alloc(max(v, 4))) for k, v in sz.items()}
+    out = []
+    try:
+        rt.sync()
+        for key, t in (("x", x_t), ("w", w_t)):
+            h = t.contiguous().pin_memory()
+            rt.memcpy_h2d(bufs[key], _u8(h), h.nbytes)
+            rt.sync()
+        k1_grid = W.filter_transform_grid(xspec)
+        assert min(k1_grid) > 0
+        k1 = KernelLauncher(
+            hsaco=k1_art.hsaco,
+            kernel_name=k1_art.kernel_name,
+            signature=W.filter_transform_signature(xspec),
+        ).bind(
+            dict(w=bufs["w"], u=bufs["U"], w_bytes=sz["w"], u_bytes=sz["U"]),
+            config=LaunchConfig(
+                grid=k1_grid, block=(W.filter_transform_block(xspec), 1, 1)
+            ),
+        )
+        cus = device_cus()
+        floor_us = (sz["x"] + sz["y"]) / 16.5e6
+        best = None
+        for knobs, spec, (hsaco, kname) in good:
+            P = int(args.fused_wgs) if args.fused_wgs else spec.default_wgs(cus)
+            P = max(1, min(P, spec.num_blocks))
+            grid = spec.grid(P)
+            if min(grid) <= 0:
+                print(f"  [skip] {spec.label()}: grid {grid}", flush=True)
+                continue
+            lau = KernelLauncher(
+                hsaco=hsaco, kernel_name=kname, signature=fused_signature(spec)
+            )
+            fz = lau.bind(
+                fused_launch_values(spec, bufs["x"], bufs["U"], bufs["y"], P),
+                config=LaunchConfig(grid=grid, block=(spec.threads, 1, 1)),
+            )
+
+            def chain(_a=k1, _b=fz):
+                _a()
+                _b()
+
+            err = l2 = float("nan")
+            status = "NA"
+            if args.verify:
+                nfail = 0
+                errs = []
+                for _ in range(max(1, args.verify_reps)):
+                    rt.sync()
+                    rt.memset(bufs["y"], 0x7F, sz["y"])
+                    rt.memset(bufs["U"], 0x7F, sz["U"])
+                    rt.sync()
+                    chain()
+                    rt.sync()
+                    o = torch_empty_pinned(y_t)
+                    rt.memcpy_d2h(_u8(o), bufs["y"], o.nbytes)
+                    rt.sync()
+                    e1, l21 = verify_error(o, ref)
+                    errs.append(e1)
+                    nfail += not e1 < 5e-2
+                    if not err == err or e1 > err:
+                        err, l2 = e1, l21
+                status = "PASS" if nfail == 0 else "FAIL"
+                if args.verify_reps > 1:
+                    print(
+                        f"  {spec.label():40s} verify {len(errs) - nfail}/{len(errs)} "
+                        f"pass, max err {max(errs):.3e}",
+                        flush=True,
+                    )
+                if status == "FAIL":
+                    print(f"  {spec.label():40s} FAIL err={err:.3e}", flush=True)
+                    out.append(
+                        f"WINO_FUSED\tshape={problem.short()}\tcfg={spec.label()}\tverify=FAIL\terr={err:.3e}"
+                    )
+                    continue
+            reps = []
+            for _ in range(args.repeats):
+                # Rule 9: cool down before each repeat, the total first.
+                if args.cooldown_fused > 0:
+                    rt.sync()
+                    time.sleep(args.cooldown_fused)
+                tt = time_launches(chain, warmup=args.warmup, iters=args.iters) * 1e3
+                tf = time_launches(fz, warmup=args.warmup, iters=args.iters) * 1e3
+                tk = time_launches(k1, warmup=args.warmup, iters=args.iters) * 1e3
+                reps.append((tf, tk, tt))
+            tf = max(r[0] for r in reps)
+            tk = max(r[1] for r in reps)
+            tt = max(r[2] for r in reps)
+            gl = " GLITCH" if tf < floor_us else ""
+            tts = [r[2] for r in reps]
+            spread = max(tts) / max(min(tts), 1e-9) - 1.0
+            if spread > 0.10:
+                gl += f" SPREAD{100 * spread:.0f}%"
+            gemm_tf = fused_flops_gemm(spec) / (tf * 1e-6) * 1e-12
+            line = (
+                "\t".join(
+                    [
+                        "WINO_FUSED",
+                        f"shape={problem.short()}",
+                        f"m={m}",
+                        f"io={io_dtype}",
+                        f"op={operand}",
+                        f"cfg={spec.label()}",
+                        f"P={P}",
+                        f"grid={grid[0]}",
+                        f"fused_us={tf:.2f}",
+                        f"k1_us={tk:.2f}",
+                        f"total_us={tt:.2f}",
+                        "reps=" + "/".join(f"{r[2]:.2f}" for r in reps),
+                        f"tflops={problem.flops / (tt * 1e-6) * 1e-12:.1f}",
+                        f"gemm_tf={gemm_tf:.0f}",
+                        f"verify={status}",
+                        f"err={err:.3e}",
+                        f"relL2={l2:.3e}",
+                    ]
+                )
+                + gl
+            )
+            print(line, flush=True)
+            out.append(line)
+            if "GLITCH" not in gl and (best is None or tt < best[0]):
+                best = (tt, line)
+        if best:
+            print("WINO_FUSED_BEST\t" + best[1].split("\t", 1)[1], flush=True)
+        return out
+    finally:
+        from rocke.runtime import synchronize_and_release
+
+        synchronize_and_release(0)
+        for ptr in bufs.values():
+            rt.free(ptr)
+
+
+def torch_empty_pinned(like):
+    import torch
+
+    return torch.empty_like(like, device="cpu").pin_memory()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--miopen-cmd", help="one MIOpenDriver command line")
@@ -1000,6 +1268,20 @@ def main(argv=None) -> int:
         "with a second tile config",
     )
     ap.add_argument(
+        "--mode",
+        default="unfused",
+        choices=("unfused", "fused", "both"),
+        help="unfused 4-kernel pipeline, fused (K1 + one fused kernel), or both",
+    )
+    ap.add_argument(
+        "--fused-cfgs",
+        default="",
+        help="python list of WinogradFusedSpec knob dicts ('' = defaults)",
+    )
+    ap.add_argument(
+        "--fused-wgs", type=int, default=0, help="workgroups per K block (0 = auto)"
+    )
+    ap.add_argument(
         "--batch-split",
         default="auto",
         help="N-chunks run as separate pipelines (U shared): 'auto' = the "
@@ -1026,11 +1308,18 @@ def main(argv=None) -> int:
     )
     ap.add_argument(
         "--cooldown",
+        "--cool",
+        dest="cooldown",
         type=float,
-        default=0.0,
-        help="seconds to sleep before each timing repeat (GPU throttling)",
+        default=None,
+        help="seconds to sleep before each timing repeat (GPU throttling); "
+        "default 0 for the unfused pipeline, 15 for fused mode (--cool is an "
+        "alias)",
     )
     ap.add_argument("--verify", action="store_true")
+    ap.add_argument(
+        "--verify-reps", type=int, default=1, help="fused mode: verify runs per config"
+    )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=50)
     ap.add_argument("--repeats", type=int, default=2)
@@ -1038,6 +1327,11 @@ def main(argv=None) -> int:
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
     args = ap.parse_args(argv)
+    # One cooldown option for both modes; unset keeps each mode's default
+    # (unfused 0 s, fused 15 s).
+    args.cooldown_fused = 15.0 if args.cooldown is None else args.cooldown
+    if args.cooldown is None:
+        args.cooldown = 0.0
 
     import torch  # noqa: F401 -- claim the HIP context first
 
@@ -1081,13 +1375,21 @@ def main(argv=None) -> int:
                 got = [_m_pair(tok)]
             ms += [m for m in got if m not in ms]
         for m in ms:
-            try:
-                res = run_case(problem, dtype, m, args, arch, ref_cache)
-            except ValueError as e:
-                print(f"[skip] {problem.short()} F({m_label(m)},3): {e}", flush=True)
-                continue
-            if not res or any("verify=FAIL" in r for r in res):
-                rc = 1
+            runners = []
+            if args.mode in ("unfused", "both"):
+                runners.append(run_case)
+            if args.mode in ("fused", "both"):
+                runners.append(run_case_fused)
+            for runner in runners:
+                try:
+                    res = runner(problem, dtype, m, args, arch, ref_cache)
+                except ValueError as e:
+                    print(
+                        f"[skip] {problem.short()} F({m_label(m)},3): {e}", flush=True
+                    )
+                    continue
+                if not res or any("verify=FAIL" in r for r in res):
+                    rc = 1
         ref_cache.clear()
     return rc
 
