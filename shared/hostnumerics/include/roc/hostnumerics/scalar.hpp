@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include <roc/hostnumerics/scalar_integer_conversion.hpp>
+#include <roc/hostnumerics/scalar_conversion_options.hpp>
+#include <roc/hostnumerics/scalar_traits.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <span>
 
@@ -49,20 +50,8 @@ Target convertScalar(Source source, const ScalarConversionOptions& options) noex
     } else if constexpr (std::is_same_v<Destination, bool>) {
         return source != Value{0};
     } else if constexpr (std::is_integral_v<Destination>) {
-        if constexpr (std::is_floating_point_v<Value>) {
-            if (options.integerOverflow == IntegerOverflow::Identity) {
-                // A native cast already truncates; only round explicitly for nearest-even.
-                const Value rounded =
-                    options.integerRounding == IntegerRounding::TowardZero
-                        ? source
-                        : detail::roundForIntegerConversion(source, options.integerRounding);
-                return static_cast<Destination>(rounded);
-            }
-        }
-        constexpr uint32_t bits = std::numeric_limits<std::make_unsigned_t<Destination>>::digits;
-        // C++20 integer casts reduce modulo 2^N, including signed destinations.
-        return static_cast<Destination>(
-            detail::convertToIntegerBits(source, bits, std::is_signed_v<Destination>, options));
+        return convertToInteger<Destination>(source, options.integerRounding,
+                                             options.integerOverflow);
     } else {
         static_assert(std::is_floating_point_v<Destination>);
         return static_cast<Destination>(source);

@@ -197,13 +197,18 @@ auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& option
         return options.bfloat16Rounding == BFloat16Rounding::Truncate
                    ? encodeBFloat16Truncated(convertScalar<float>(source, options))
                    : encodeBFloat16(convertScalar<float>(source, options));
-    else if constexpr (Type == ScalarType::Int4)
-        return static_cast<uint32_t>(convertToIntegerBits(source, 4, true, options));
-    else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
-                       Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
-                       Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
-                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
-                       Type == ScalarType::E4M3) {
+    else if constexpr (Type == ScalarType::Int4) {
+        // Complex sources must have a zero imaginary part.
+        if constexpr (RuntimeIsComplexV<Source>)
+            return encodeScalarValueKnown<Tag>(source.real(), options);
+        else
+            return static_cast<uint32_t>(convertToIntegerBits(
+                source, 4, true, options.integerRounding, options.integerOverflow));
+    } else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+                         Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
+                         Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
+                         Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
+                         Type == ScalarType::E4M3) {
         const uint32_t raw = encodeBinaryFloatKnown<Type>(convertScalar<float>(source, options));
         if constexpr (scalarTypeInfo(Type).storageBits == 8)
             return static_cast<uint8_t>(raw);
