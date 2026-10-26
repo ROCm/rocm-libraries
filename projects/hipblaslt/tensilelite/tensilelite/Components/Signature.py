@@ -450,8 +450,8 @@ class SignatureDefault(Signature):
         # signature.offset counts from the very first arg including the common header.
         # The assembly loads these args with KernArgAddress already advanced past
         # that header by commonArgsSize, so subtract it.
+        commonArgsSize = userArgumentsInfo.commonArgsSize
         if not kernel["ProblemType"]["GroupedGemm"]:
-            commonArgsSize = userArgumentsInfo.commonArgsSize
             writer.states.batchOffsetDKernArgOffset = signature.offset - commonArgsSize
             signature.addArg("batchOffsetD", SVK.SIG_VALUE, "u64")
             writer.states.batchOffsetCKernArgOffset = signature.offset - commonArgsSize
@@ -482,6 +482,10 @@ class SignatureDefault(Signature):
             # onto the shifted address. Absolute offset of arg X, relative to
             # that base = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
             writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
+
+        if kernel["ProblemType"]["StochasticRounding"] and not writer.states.asmCaps["v_prng_b32"]:
+            writer.states.rndSeedKernArgOffset = signature.offset - commonArgsSize
+            signature.addArg("RNDSeed", SVK.SIG_VALUE, "u32")
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():

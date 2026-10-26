@@ -1113,9 +1113,6 @@ class KernelWriterAssembly(KernelWriter):
         self.states.nonPostLoopSgpr.append("PackKForV2")
         self.states.nonPostLoopSgpr.append("PackKForV3")
 
-    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
-      module.add(self.defineSgpr("RNDSeed", 1))
-
     if kernel["_UseSgprForGRO"]:
       needFirstSgprOffset = kernel["DirectToLdsA"] and kernel["UseInstOffsetForGRO"]
       numberOfSgpr = self.states.a.numVgprGlobalReadOffsets if needFirstSgprOffset else (self.states.a.numVgprGlobalReadOffsets-1)
@@ -2683,6 +2680,11 @@ class KernelWriterAssembly(KernelWriter):
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
 
+    if self.states.rndSeedKernArgOffset >= 0:
+        kernelArgs.add(self.argLoader.loadKernArg(
+            "RNDSeed", "KernArgAddress",
+            sgprOffset=hex(self.states.rndSeedKernArgOffset), dword=1))
+
     # Batch offset arguments for general batched mode are loaded on-demand from
     # their kernarg byte offsets. Those offsets are recorded accurately by
     # the signature builder (see Signature.py) into self.states.batchOffset*KernArgOffset,
@@ -2966,7 +2968,10 @@ class KernelWriterAssembly(KernelWriter):
             self.sgprPool.checkIn(tmpSgpr)
             break
           self.states.preloadGuard.append(tmpSgpr)
-      
+
+      if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+        module.add(self.defineSgpr("RNDSeed", 1))
+
       ### temp sgpr for groupedgemm ###
       # can be start from sgpr_preload_end
       sgprNumsOfGemm = self.sgprPool.checkOut(1, tag="defineAndResources_sgprNumsOfGemm", preventOverflow=False)
