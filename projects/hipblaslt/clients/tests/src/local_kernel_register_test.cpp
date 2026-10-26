@@ -352,21 +352,16 @@ TEST(LocalKernelRegister, DISABLED_BadPayloadsWorker)
     ScratchDir        scratch;
     const std::string truncated = scratch.file("truncated.co");
     ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
+    const std::string wrongArch = scratch.file("wrong_arch.co");
+    const std::string unrelated = scratch.file("unrelated.co");
+    ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
+    ASSERT_TRUE(
+        compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
     std::vector<std::pair<char const*, std::string>> cases = {
         {"a truncated code object", truncated},
+        {"a code object for another architecture", wrongArch},
+        {"a code object without the shard's kernels", unrelated},
     };
-    if(canCompileCodeObjects)
-    {
-        const std::string wrongArch = scratch.file("wrong_arch.co");
-        const std::string unrelated = scratch.file("unrelated.co");
-        ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
-        ASSERT_TRUE(
-            compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
-        cases.emplace_back("a code object for another architecture", wrongArch);
-        cases.emplace_back("a code object without the shard's kernels", unrelated);
-    }
-    else
-        std::printf("built without hiprtc: only the truncated code object is tried\n");
 
     for(auto const& [what, co] : cases)
     {
@@ -400,8 +395,6 @@ TEST(LocalKernelRegister, RejectsBadPayloads)
 // replacement here is an empty kernel, so it leaves D untouched.
 TEST(LocalKernelRegister, DISABLED_OwnCodeObjectWorker)
 {
-    if(!canCompileCodeObjects)
-        GTEST_SKIP() << "built without hiprtc, which makes the stand-in code object";
     const std::vector<std::string> candidates = candidatePayloads();
     ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
 
@@ -467,8 +460,6 @@ TEST(LocalKernelRegister, DISABLED_OwnCodeObjectWorker)
 
 TEST(LocalKernelRegister, KernelsRunFromTheirOwnCodeObject)
 {
-    if(!canCompileCodeObjects)
-        GTEST_SKIP() << "built without hiprtc, which makes the stand-in code object";
     EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_OwnCodeObjectWorker"), 0)
         << "the worker failed; its output is above";
 }
@@ -495,14 +486,10 @@ TEST(LocalKernelRegister, DISABLED_RegisterWhileLaunchingWorker)
     ScratchDir        scratch;
     const std::string truncated = scratch.file("truncated.co");
     ASSERT_TRUE(writeTruncatedCopy(candidates[0] + ".co", truncated));
-    std::vector<std::string> bad = {truncated};
-    if(canCompileCodeObjects)
-    {
-        const std::string wrongArch = scratch.file("wrong_arch.co");
-        ASSERT_TRUE(compileCodeObject(
-            standInKernels(kernelNames(shardKernels(dat))), otherArch(), wrongArch));
-        bad.push_back(wrongArch);
-    }
+    const std::string wrongArch = scratch.file("wrong_arch.co");
+    ASSERT_TRUE(
+        compileCodeObject(standInKernels(kernelNames(shardKernels(dat))), otherArch(), wrongArch));
+    std::vector<std::string> bad = {truncated, wrongArch};
 
     std::atomic<bool> done{false};
     std::atomic<int>  launches{0};
