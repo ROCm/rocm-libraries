@@ -139,3 +139,42 @@ one it uses:
 `--window-left W` writes `left_bound = W + 1`; it exists for `--validate`, which passes the
 window to AITER. The two flags are mutually exclusive. `left_bound` must be positive or -1
 (unbounded).
+
+## `generate_sdpa_bwd_bundles.py`
+
+Writes the SdpaBackward sweeps from the SDPA backward test plan
+(`docs/test-plans/sdpa-bwd.md`). Nobody edits those bundles by hand.
+
+| File | Holds |
+|---|---|
+| `sdpa_bwd_plan.py` | levels, axes, legality layers, shape catalog (S, L, M, H, X), ceilings, cost model, tolerance classes and their rule, value domains, purpose rule, window semantics switch |
+| `generate_sdpa_bwd_bundles.py` | level rules, graph templates, sweep writer, TOML rows writer, report |
+| `sdpa_bwd_calibration.json` | the NumPy magnitude estimates behind the tolerance classes |
+
+From the `rocm-libraries/` repo root:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_bundles.py \
+  --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+  --toml dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml \
+  --report
+```
+
+- It writes `{quick,standard,comprehensive,full}/SdpaBackward/<Topology>/` with
+  `graph.template.json`, `sweep.json` and `support.json`. It keeps harvested
+  claims and drops only the claims of case ids that no longer exist.
+- A case whose oracle is not ready stays declared in the generator (level
+  `notrun`) and is not written. The report lists these cases by gate.
+- `--toml` rewrites the generated `[[tolerance_overrides]]` block of an engine
+  TOML. Each case id ends with its tolerance class token.
+- A run fails if a case's magnitude estimate is missing or stale. Rerun with
+  `--calibrate` (needs NumPy) after a plan change that moves a case's shape,
+  band, scale or value domain.
+- `--dry-run --report` prints the counts, budgets, all-pairs proof, legality
+  and gates without writing.
+
+`tests/test_generate_sdpa_bwd_bundles.py` (CTest
+`hipdnn_sdpa_bwd_bundle_generator_python_tests`, pytest) fails when the
+checked-in sweeps or the TOML block differ from the generator output. It also
+checks determinism, the legality of every written case, the all-pairs
+coverage, the TOML rows and the traceability of `metadata.plan_items`.
