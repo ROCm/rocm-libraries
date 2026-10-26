@@ -25,6 +25,11 @@ elseif(DL_KERNELS)
    target_link_device_conv_libraries_if_exist(test_grouped_convnd_bwd_weight PRIVATE utility device_conv_operations)
 endif()
 
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx11|gfx12" AND TARGET utility)
+   add_gtest_executable(test_grouped_convnd_bwd_weight_metadata_lifetime test_grouped_convnd_bwd_weight_metadata_lifetime.cpp)
+   target_link_libraries(test_grouped_convnd_bwd_weight_metadata_lifetime PRIVATE utility)
+endif()
+
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA AND TARGET utility)
    add_gtest_executable(test_grouped_convnd_bwd_weight_wmma_overwrite test_grouped_convnd_bwd_weight_wmma_overwrite.cpp)
    target_link_libraries(test_grouped_convnd_bwd_weight_wmma_overwrite PRIVATE utility)
