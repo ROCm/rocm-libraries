@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -330,7 +331,18 @@ class CompareTest(unittest.TestCase):
         )
         calls = []
 
-        def trial(strategy, parent, env, plan, workers, seconds, suite, label):
+        def trial(
+            strategy,
+            parent,
+            env,
+            plan,
+            workers,
+            seconds,
+            suite,
+            label,
+            dispatch_threads,
+        ):
+            self.assertEqual(dispatch_threads, 1)
             calls.append((label, strategy, workers))
             _, report = self.report(label, strategy == "shape")
             report["runtime"].update(
@@ -386,6 +398,134 @@ class CompareTest(unittest.TestCase):
             json.loads((self.root / "experiment.json").read_text())["complete"]
         )
         self.assertIn("shape-96", (self.root / "benchmark.md").read_text())
+
+    def test_allocation_matrix_preserves_work_and_reports_dispatch_widths(self):
+        seed, _ = self.report("seed", True)
+        write_json(
+            self.root / "shape-plan.json",
+            json.loads((seed / "shape-plan.json").read_text()),
+        )
+        calls = []
+
+        def trial(
+            strategy,
+            parent,
+            env,
+            plan,
+            workers,
+            seconds,
+            suite,
+            label,
+            dispatch_threads,
+        ):
+            calls.append((strategy, workers, dispatch_threads))
+            _, report = self.report(label, True)
+            report["runtime"].update(
+                workers=workers,
+                cpu_thread_budget=dispatch_threads,
+                reference_threads=1,
+                config=dict(
+                    num_threads=1,
+                    cpu_dispatch_threads=dispatch_threads,
+                    async_helper_threads=0,
+                ),
+            )
+            report["execution"]["wall_seconds"] = 20 / dispatch_threads
+            return report
+
+        command = [
+            "rocjitsu_experiment",
+            "--report-dir",
+            str(self.root),
+            "--strategy",
+            "allocation",
+            "--workers",
+            "4",
+            "--allocations",
+            "4:1,2:2,1:4",
+            "--per-job-seconds",
+            "300",
+            "--suite-seconds",
+            "500",
+        ]
+        with (
+            patch.object(sys, "argv", command),
+            patch.object(os, "sched_getaffinity", return_value=set(range(8))),
+            patch.dict(os.environ, COHORT_MANIFEST="", GITHUB_STEP_SUMMARY=""),
+            patch.object(rocjitsu_experiment, "trial", side_effect=trial),
+        ):
+            self.assertEqual(rocjitsu_experiment.main(), 0)
+        self.assertEqual(
+            set(calls), {("shape", 4, 1), ("shape", 2, 2), ("shape", 1, 4)}
+        )
+        benchmark = json.loads((self.root / "benchmark.json").read_text())
+        self.assertEqual(
+            {r["dispatch_threads"] for r in benchmark["strategies"]}, {1, 2, 4}
+        )
+        self.assertEqual({r["reference_threads"] for r in benchmark["strategies"]}, {1})
+        self.assertTrue(all(r["coverage_equal"] for r in benchmark["comparisons"]))
+        self.assertFalse(benchmark["statistical_claim"])
+        for invalid in ("", "0:1,1:2", "1:3,1:4", "1:1,1:1", "1:1,", "1:1,2"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                rocjitsu_experiment.trial_specifications(
+                    "allocation", 4, 2, allocations=invalid
+                )
+
+    def test_wider_shape_dispatch_keeps_generation_and_references_serial(self):
+        _, report = self.report("seed", True)
+        parent = self.root / "trials"
+        (parent / "shape-yamls").mkdir(parents=True)
+        write_json(parent / "artifact-config.json", dict(max_ticks=100000))
+        artifact = self.root / "artifact"
+        (artifact / "bin").mkdir(parents=True)
+        for path in (
+            artifact / "bin/mirage",
+            artifact / "bin/amdclang++",
+            artifact / "client",
+            artifact / "rocjitsu",
+        ):
+            path.write_text("frozen artifact")
+        env = self.env | dict(
+            ROCM_PATH=str(artifact),
+            TENSILELITE_CLIENT=str(artifact / "client"),
+            ROCJITSU_EFFECTIVE_LIB=str(artifact / "rocjitsu"),
+            ARTIFACT_RUN_ID="frozen",
+        )
+        captured = {}
+
+        def run(command, **kwargs):
+            captured.update(command=command, env=kwargs["env"])
+            return SimpleNamespace(returncode=0)
+
+        def audit(root):
+            return report | dict(
+                runtime=json.loads((root / "runtime.json").read_text())
+            )
+
+        with (
+            patch.object(os, "sched_getaffinity", return_value=set(range(8))),
+            patch.object(rocjitsu_experiment.subprocess, "run", side_effect=run),
+            patch.object(rocjitsu_experiment, "audit", side_effect=audit),
+        ):
+            result = rocjitsu_experiment.trial(
+                "shape", parent, env, dict(excluded=[]), 2, 300, 500, dispatch_threads=4
+            )
+        self.assertEqual(
+            result["runtime"]["config"],
+            dict(
+                max_ticks=100000,
+                cpu_thread_budget=4,
+                num_threads=1,
+                cpu_dispatch_threads=4,
+                async_helper_threads=0,
+            ),
+        )
+        self.assertEqual(captured["env"]["OMP_NUM_THREADS"], "1")
+        self.assertEqual(captured["env"]["OMP_THREAD_LIMIT"], "1")
+        self.assertEqual(captured["env"]["TOKIO_WORKER_THREADS"], "1")
+        self.assertTrue(
+            any("CpuThreads=1" in argument for argument in captured["command"])
+        )
 
     def test_drift_in_kernel_semantics_and_unknown_metadata_is_not_ignored(self):
         original = self.solutions[0]

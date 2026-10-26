@@ -13,7 +13,7 @@ on:
         required: true
       workers:
         type: string
-        description: "Independent serial shape workers (at most the runner CPU count)"
+        description: "Independent shape workers; allocation mode uses the allocations input"
         default: "96"
       reference_workers:
         type: string
@@ -21,13 +21,17 @@ on:
         default: "16"
       strategy:
         type: choice
-        description: "Matrix compares whole-YAML scheduling with half/full requested shape workers on one runner"
-        options: [shape, reference, paired, safety, matrix]
+        description: "Matrix compares whole-YAML and shape scheduling; allocation compares workers and dispatch widths"
+        options: [shape, reference, paired, safety, matrix, allocation]
         default: shape
       dispatch_threads:
         type: string
-        description: "Inclusive dispatch width; 0 uses the artifact config, 1 is serial"
+        description: "Shape dispatch width: 1, 2 or 4; generation and references stay serial"
         default: "1"
+      allocations:
+        type: string
+        description: "Allocation mode workers:dispatch pairs, compared on the same runner"
+        default: "48:1,32:2,16:4"
       max_work:
         type: string
         description: "Maximum logical GEMM work including batch; default is 4096 cubed"
@@ -61,6 +65,7 @@ jobs:
       workers: ${{ inputs.workers }}
       reference_workers: ${{ inputs.reference_workers }}
       dispatch_threads: ${{ inputs.dispatch_threads }}
+      allocations: ${{ inputs.allocations }}
       max_work: ${{ inputs.max_work }}
       per_job_seconds: ${{ inputs.per_job_seconds }}
       case_filter: ${{ inputs.case_filter }}

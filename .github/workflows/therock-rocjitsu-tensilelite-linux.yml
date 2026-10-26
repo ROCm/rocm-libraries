@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Run a gated shape queue under serial rocjitsu CPU emulation, reusing an
+# Run a gated shape queue under rocjitsu CPU emulation, reusing an
 # existing TheRock artifact set. The minimum emulator ref is checked below.
 
 name: TheRock rocjitsu tensilelite test Linux
@@ -33,6 +33,9 @@ on:
       dispatch_threads:
         type: string
         default: "1"
+      allocations:
+        type: string
+        default: "48:1,32:2,16:4"
       max_work:
         type: string
         default: "68719476736"
@@ -78,6 +81,7 @@ jobs:
       REQUESTED_WORKERS: ${{ inputs.workers }}
       REQUESTED_REFERENCE_WORKERS: ${{ inputs.reference_workers }}
       REQUESTED_DISPATCH_THREADS: ${{ inputs.dispatch_threads }}
+      REQUESTED_ALLOCATIONS: ${{ inputs.allocations }}
       CASE_FILTER: ${{ inputs.case_filter }}
       MAX_WORK: ${{ inputs.max_work }}
       PER_JOB_SECONDS: ${{ inputs.per_job_seconds }}
@@ -97,12 +101,23 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
-          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation)$ ]] || { echo "::error::invalid strategy"; exit 1; }
           trials=1
           [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
           [[ "${STRATEGY}" != matrix ]] || trials=3
+          if [[ "${STRATEGY}" == allocation ]]; then
+            IFS=',' read -ra pairs <<< "${REQUESTED_ALLOCATIONS}"
+            trials=${#pairs[@]}
+            (( trials >= 2 )) || { echo "::error::allocation requires at least two pairs"; exit 1; }
+            for pair in "${pairs[@]}"; do
+              [[ "${pair}" =~ ^[1-9][0-9]*:[124]$ ]] || { echo "::error::allocations must be workers:dispatch pairs with dispatch 1, 2 or 4"; exit 1; }
+              count=${pair%:*}
+              width=${pair#*:}
+              (( count * width <= $(nproc) )) || { echo "::error::allocation exceeds host CPU count"; exit 1; }
+            done
+          fi
           (( trials * SUITE_TIMEOUT_SECONDS <= 1500 )) || { echo "::error::trial execution limits must total at most 1500 seconds"; exit 1; }
-          [[ "${REQUESTED_DISPATCH_THREADS}" == 1 ]] || { echo "::error::shape queue experiments require serial dispatch"; exit 1; }
+          [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[124]$ ]] || { echo "::error::dispatch_threads must be 1, 2 or 4"; exit 1; }
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -215,8 +230,8 @@ jobs:
             [[ -e "${required}" ]] || { echo "::error::Missing from artifacts: ${required}"; exit 1; }
           done
 
-          # Each queue task owns its emulator. Keep generation, references and
-          # emulation serial and vary only the number of independent clients.
+          # Each queue task owns its emulator. Generation and references stay
+          # serial while the experiment varies clients and dispatch width.
           cores="$(nproc)"
           workers="${REQUESTED_WORKERS}"
           [[ "${workers}" =~ ^[0-9]+$ ]] || { echo "::error::workers must be an integer"; exit 1; }
@@ -224,7 +239,7 @@ jobs:
           [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[0-9]+$ ]] || { echo "::error::dispatch_threads must be an integer"; exit 1; }
           (( workers > 0 )) || workers=$(( cores < 16 ? cores : 16 ))
           (( workers <= cores )) || { echo "::error::workers exceeds host CPU count"; exit 1; }
-          budget=1
+          budget="${REQUESTED_DISPATCH_THREADS}"
           mkdir -p "${REPORT_DIR}/junit"
           cp "${config}" "${REPORT_DIR}/artifact-config.json"
           python - "${config}" \
@@ -255,8 +270,8 @@ jobs:
             echo "MIRAGE_PROFILE=${profile}"
             echo "PYTEST_WORKERS=${workers}"
             # The CPU reference explicitly requests threads; enforce the limit.
-            echo "OMP_NUM_THREADS=${budget}"
-            echo "OMP_THREAD_LIMIT=${budget}"
+            echo "OMP_NUM_THREADS=1"
+            echo "OMP_THREAD_LIMIT=1"
             echo "OPENBLAS_NUM_THREADS=1"
             echo "MKL_NUM_THREADS=1"
             echo "TENSILELITE_ROOT=${tensilelite_root}"
@@ -269,7 +284,7 @@ jobs:
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
           echo "target=${target} profile=${profile} config=${config}"
-          echo "host_cores=${cores} queue_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
+          echo "host_cores=${cores} queue_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=1"
           grep MemTotal /proc/meminfo
           "${ROCM_PATH}/bin/mirage" --version
           echo "rocjitsu library: ${rocjitsu_lib}"
@@ -317,6 +332,7 @@ jobs:
           python "${SCRIPTS_DIR}/rocjitsu_experiment.py" \
             --report-dir "${REPORT_DIR}" --strategy "${STRATEGY}" \
             --workers "${PYTEST_WORKERS}" --reference-workers "${REQUESTED_REFERENCE_WORKERS}" \
+            --dispatch-threads "${REQUESTED_DISPATCH_THREADS}" --allocations "${REQUESTED_ALLOCATIONS}" \
             --per-job-seconds "${PER_JOB_SECONDS}" \
             --suite-seconds "${SUITE_TIMEOUT_SECONDS}" \
             2>&1 | tee "${REPORT_DIR}/experiment.log"

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Drain a largest-first shape queue with independent serial emulator clients."""
+"""Drain a largest-first shape queue with independent emulator clients."""
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor

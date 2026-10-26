@@ -146,7 +146,9 @@ def commands(strategy, root, plan, env, workers, seconds, suite):
     ]
 
 
-def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
+def trial(
+    strategy, parent, env, plan, workers, seconds, suite, label=None, dispatch_threads=1
+):
     root = parent / (label or strategy)
     root.mkdir()
     shutil.copytree(parent / "shape-yamls", root / "shape-yamls")
@@ -154,10 +156,15 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
     # each report allow later offline hash verification without the runner.
     write_json(root / "shape-plan.json", plan)
     config = json.loads((parent / "artifact-config.json").read_text())
-    budget = 1 if strategy == "shape" else len(os.sched_getaffinity(0)) // workers
+    budget = (
+        dispatch_threads
+        if strategy == "shape"
+        else len(os.sched_getaffinity(0)) // workers
+    )
+    reference_threads = 1 if strategy == "shape" else budget
     config.update(cpu_thread_budget=budget, num_threads=1)
     if strategy == "shape":
-        config.update(cpu_dispatch_threads=1, async_helper_threads=0)
+        config.update(cpu_dispatch_threads=dispatch_threads, async_helper_threads=0)
     write_json(root / "rocjitsu-config.json", config)
     runtime = dict(
         strategy=strategy,
@@ -166,6 +173,7 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
         runner_name=env.get("RUNNER_NAME"),
         harness_revision=env.get("GITHUB_SHA"),
         cpu_thread_budget=budget,
+        reference_threads=reference_threads,
         seed=261025,
         target=env["ROCJITSU_TARGET"],
         profile=env["MIRAGE_PROFILE"],
@@ -191,8 +199,8 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
     runtime["command"] = command
     write_json(root / "runtime.json", runtime)
     child_env = env | dict(
-        OMP_NUM_THREADS=str(budget),
-        OMP_THREAD_LIMIT=str(budget),
+        OMP_NUM_THREADS=str(reference_threads),
+        OMP_THREAD_LIMIT=str(reference_threads),
         OPENBLAS_NUM_THREADS="1",
         MKL_NUM_THREADS="1",
         TOKIO_WORKER_THREADS="1",
@@ -240,24 +248,57 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
     return report
 
 
-def trial_specifications(strategy, workers, reference_workers):
+def trial_specifications(
+    strategy,
+    workers,
+    reference_workers,
+    dispatch_threads=1,
+    allocations="48:1,32:2,16:4",
+):
+    if strategy == "allocation":
+        result = []
+        for entry in allocations.split(","):
+            fields = entry.split(":")
+            if len(fields) != 2 or any(not field.isdecimal() for field in fields):
+                raise ValueError(
+                    "allocations must be comma-separated workers:dispatch pairs"
+                )
+            count, width = map(int, fields)
+            if count < 1 or width not in (1, 2, 4):
+                raise ValueError(
+                    "allocation workers must be positive and dispatch must be 1, 2 or 4"
+                )
+            result.append((f"shape-{count}-dispatch{width}", "shape", count, width))
+        if len(result) < 2 or len({s[0] for s in result}) != len(result):
+            raise ValueError(
+                "allocation comparison requires at least two distinct allocations"
+            )
+        return result
     if strategy == "matrix":
         if workers < 2:
             raise ValueError("matrix requires at least two requested shape workers")
         return [
-            ("reference", "reference", reference_workers),
-            (f"shape-{workers // 2}", "shape", workers // 2),
-            (f"shape-{workers}", "shape", workers),
+            ("reference", "reference", reference_workers, dispatch_threads),
+            (f"shape-{workers // 2}", "shape", workers // 2, dispatch_threads),
+            (f"shape-{workers}", "shape", workers, dispatch_threads),
         ]
     if strategy == "paired":
         return [
-            ("reference", "reference", reference_workers),
-            ("shape", "shape", workers),
+            ("reference", "reference", reference_workers, dispatch_threads),
+            ("shape", "shape", workers, dispatch_threads),
         ]
     if strategy == "safety":
-        return [("serial", "shape", 1), ("shape", "shape", workers)]
+        return [
+            ("serial", "shape", 1, dispatch_threads),
+            ("shape", "shape", workers, dispatch_threads),
+        ]
     return [
-        (strategy, strategy, reference_workers if strategy == "reference" else workers)
+        (
+            strategy,
+            strategy,
+            reference_workers if strategy == "reference" else workers,
+            dispatch_threads,
+        )
     ]
 
 
@@ -270,6 +311,10 @@ def benchmark_report(parent, reports, comparisons):
                 strategy=name,
                 workers=report["runtime"]["workers"],
                 cpu_thread_budget=report["runtime"]["cpu_thread_budget"],
+                dispatch_threads=report["runtime"]
+                .get("config", {})
+                .get("cpu_dispatch_threads"),
+                reference_threads=report["runtime"].get("reference_threads"),
                 workload_seconds=usage.get(
                     "wall_seconds", report["execution"].get("wall_seconds")
                 ),
@@ -326,14 +371,14 @@ def benchmark_report(parent, reports, comparisons):
         f"Declared work admitted: {coverage['admitted_declared_work']}; excluded: {coverage['excluded_declared_work']}{excluded_share}. {coverage['work_definition']}",
         "",
         "Workload elapsed time includes job startup, compilation, validation and cleanup. Shared artifact/environment setup and initial workload planning are outside each trial. Average CPU use includes child processes and may include host waiters; it is not a measure of useful emulator arithmetic. Container memory peaks span the shared job and are not per-strategy peaks.",
-        "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation, references and dispatch. These are comparisons of complete strategies in a common harness; the shape-worker pair isolates outer concurrency. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
+        "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation and references with the reported dispatch width. These are comparisons of complete strategies in a common harness; shape arms with the same dispatch width isolate outer concurrency. Allocation comparisons vary workers and dispatch together. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
         "",
-        "| Strategy | Workers | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Strategy | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         text.append(
-            f"| {row['strategy']} | {row['workers']} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
+            f"| {row['strategy']} | {row['workers']} | {row['dispatch_threads'] or 'auto'} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
         )
     text += [
         "",
@@ -348,11 +393,13 @@ def main():
     parser.add_argument("--report-dir", type=Path, required=True)
     parser.add_argument(
         "--strategy",
-        choices=("shape", "reference", "paired", "safety", "matrix"),
+        choices=("shape", "reference", "paired", "safety", "matrix", "allocation"),
         default="shape",
     )
     parser.add_argument("--workers", type=int, default=96)
     parser.add_argument("--reference-workers", type=int)
+    parser.add_argument("--dispatch-threads", type=int, choices=(1, 2, 4), default=1)
+    parser.add_argument("--allocations", default="48:1,32:2,16:4")
     parser.add_argument("--per-job-seconds", type=int, required=True)
     parser.add_argument("--suite-seconds", type=int, required=True)
     args = parser.parse_args()
@@ -368,10 +415,17 @@ def main():
         parser.error("reference-workers must be 1..available CPUs")
     try:
         specifications = trial_specifications(
-            args.strategy, args.workers, reference_workers
+            args.strategy,
+            args.workers,
+            reference_workers,
+            args.dispatch_threads,
+            args.allocations,
         )
     except ValueError as error:
         parser.error(str(error))
+    for _, strategy, count, width in specifications:
+        if count > cores or (strategy == "shape" and count * width > cores):
+            parser.error("each allocation must fit within the available CPU count")
     if args.suite_seconds * len(specifications) > 1500:
         parser.error("combined trial execution limits must total at most 1500 seconds")
     parent = args.report_dir.resolve()
@@ -401,7 +455,7 @@ def main():
         dict(order=strategies, independent_blocks=1, statistical_claim=False),
     )
     reports = {}
-    for label, strategy, workers in specifications:
+    for label, strategy, workers, dispatch_threads in specifications:
         reports[label] = trial(
             strategy,
             parent,
@@ -411,6 +465,7 @@ def main():
             args.per_job_seconds,
             args.suite_seconds,
             label=label,
+            dispatch_threads=dispatch_threads,
         )
     failed = any(r["audit_errors"] for r in reports.values())
     comparisons = []
