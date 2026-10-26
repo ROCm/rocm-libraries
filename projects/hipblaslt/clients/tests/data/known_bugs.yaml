@@ -42,10 +42,6 @@ Known bugs:
   # entries in the PR that removes or fixes those kernels. Review by 2026-11-01.
   - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, transA: T, transB: N, known_bug_platforms: gfx950 }
-  # ROCM-31826 (MT16x16 Stream-K kernels leave 256 elements of D unwritten at
-  # 65,536 x 65,552) fails the Stream-K tile case on gfx942 and gfx950. REMOVE this
-  # entry in the PR that fixes ROCM-31826. Review by 2026-11-01.
-  - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
   # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
   # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
   - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }

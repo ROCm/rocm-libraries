@@ -60,14 +60,19 @@ const vector<vector<int>> matrix_sizeA_range = {
 const vector<vector<int>> matrix_sizeB_range = {
     // quick return
     {0, 0},
+    {0, 1},
     // invalid
     {-1, 0},
+    {-1, 1},
     // normal (valid) samples
     {1, 0},
     {1, 1},
     {10, 0},
+    {10, 1},
+    {20, 0},
     {20, 1},
     {30, 0},
+    {30, 1},
 };
 
 // for daily_lapack tests
@@ -77,9 +82,7 @@ const vector<vector<int>> large_matrix_sizeA_range = {
     {600, 700, 645},
 };
 const vector<vector<int>> large_matrix_sizeB_range = {
-    {100, 0},
-    {150, 0},
-    {200, 1},
+    {100, 0}, {100, 1}, {150, 0}, {150, 1}, {200, 0}, {200, 1},
 };
 
 Arguments sytrs2_setup_arguments(sytrs2_tuple tup)

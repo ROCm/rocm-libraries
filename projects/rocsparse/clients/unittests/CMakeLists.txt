@@ -37,8 +37,6 @@ if(BUILD_CLIENTS_ONLY)
   return()
 endif()
 
-find_package(GTest 1.11.0 REQUIRED)
-
 # Unit-test sources (the tests themselves + a minimal gtest main).
 #
 # Subsequent per-area unit-test branches append their host-pure sources here.
@@ -152,6 +150,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
+  # --- check_matrix_ell with m * ell_width above INT32_MAX [AISPARSE-681]
+  unit_test_host_check_matrix_ell_large.cpp
   # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
   # Distinct anchor (right after the conversion group) so this leaf does not
   # conflict with sibling unit-test branches that append after
@@ -292,6 +292,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # sibling branches appending elsewhere. Needs the defining library TU in
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
   unit_test_internal_conversion_csr2ell_batch.cpp
+  # AISPARSE-669: distinct anchor to avoid stacked-branch merge conflicts.
+  # Launches rocsparse::csrsm (csrsm_device.h) directly on an undersized grid;
+  # header-only, so it needs no compile-in library TU.
+  unit_test_internal_level3_csrsm.cpp
   # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
