@@ -9,7 +9,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rocjitsu_shape_queue import Queue
+from rocjitsu_shape_queue import Queue, read_progress
 
 
 CHILD = """
@@ -64,6 +64,7 @@ class ShapeQueueTest(unittest.TestCase):
         queue, root, status = self.run_queue(["ok", "fail", "skip", "missing"])
         self.assertEqual(status, 1)
         progress = json.loads((root / "progress.json").read_text())
+        self.assertEqual(read_progress(root), progress)
         self.assertEqual((progress["selected"], progress["finished"]), (5, 5))
         self.assertEqual(
             (progress["passed"], progress["failed"], progress["skipped"]), (1, 2, 2)
@@ -87,6 +88,22 @@ class ShapeQueueTest(unittest.TestCase):
         result = json.loads((root / "jobs/hang/result.json").read_text())
         self.assertTrue(result["timed_out"])
         self.assertEqual(result["exit_code"], 124)
+
+    def test_claim_is_accounted_for_between_aggregate_snapshots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = dict(jobs=[dict(nodeid="first"), dict(nodeid="second")], excluded=[])
+            queue = Queue(plan, root, [], 5)
+            queue.claim()
+            progress = read_progress(root)
+            self.assertEqual(progress["tests"]["first"]["queue_position"], 0)
+            self.assertIn("started_unix", progress["tests"]["first"])
+            self.assertNotIn("queue_position", progress["tests"]["second"])
+            self.assertEqual(progress["incomplete"], 2)
+            self.assertEqual(
+                json.loads((root / "queue-state.json").read_text()),
+                dict(active=1, peak_active=1),
+            )
 
     def test_successful_queue_completes(self):
         _, root, status = self.run_queue(["ok", "ok2"], workers=1)

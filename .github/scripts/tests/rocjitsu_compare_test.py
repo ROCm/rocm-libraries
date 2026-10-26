@@ -4,6 +4,7 @@
 import copy
 import csv
 import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -270,6 +271,43 @@ class CompareTest(unittest.TestCase):
             log.write_text("\n".join(lines))
             with self.assertRaises(ValueError, msg=mutation):
                 audit_item(root, directory, item)
+
+    def test_queue_journal_recovers_stale_snapshot_and_rejects_truncated_event(self):
+        root, expected = self.report("journal", True)
+        progress = json.loads((root / "progress.json").read_text())
+        journal = "".join(
+            json.dumps(dict(schema=1, nodeid=nodeid, record=record)) + "\n"
+            for nodeid, record in progress["tests"].items()
+        )
+        write_json(
+            root / "progress.json",
+            dict(
+                selected=2,
+                tests={
+                    nodeid: dict(outcome="incomplete", phases={})
+                    for nodeid in progress["tests"]
+                },
+            ),
+        )
+        (root / "queue-events.jsonl").write_text(journal)
+        recovered = audit(root)
+        self.assertEqual(recovered["audit_errors"], [])
+        self.assertEqual(recovered["counts"], expected["counts"])
+        (root / "queue-events.jsonl").write_text(journal[:-5])
+        incomplete = audit(root)
+        self.assertTrue(any("queue event" in e for e in incomplete["audit_errors"]))
+        self.assertFalse(compare(expected, incomplete)["coverage_equal"])
+
+    def test_interrupted_phase_without_final_timing_still_produces_a_failed_audit(self):
+        root, _ = self.report("interrupted", True)
+        metadata = next((root / "jobs").glob("*/evidence/*/item.json"))
+        item = json.loads(metadata.read_text())
+        item["phases"][1] = dict(
+            name="run", completed=False, output_dir=item["phases"][1]["output_dir"]
+        )
+        write_json(metadata, item)
+        report = audit(root)
+        self.assertTrue(any("interrupted" in e for e in report["audit_errors"]))
 
     def test_hidden_verdicts_tampered_ini_and_changed_validation_invalidate_claim(self):
         root, reference = self.report("reference", False)

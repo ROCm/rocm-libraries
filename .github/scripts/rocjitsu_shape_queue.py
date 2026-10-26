@@ -21,6 +21,33 @@ import xml.etree.ElementTree as ET
 from rocjitsu_pytest import descendants, supervise, write_json
 
 
+def read_progress(directory):
+    """Recover events newer than the snapshot, retaining errors from a torn write."""
+    progress = json.loads((directory / "progress.json").read_text())
+    journal = directory / "queue-events.jsonl"
+    if journal.exists():
+        with journal.open() as events:
+            for number, line in enumerate(events, 1):
+                try:
+                    event = json.loads(line)
+                    if (
+                        event["schema"] != 1
+                        or event["nodeid"] not in progress["tests"]
+                        or event["record"]["outcome"]
+                        not in ("passed", "failed", "skipped", "incomplete")
+                    ):
+                        raise ValueError("entry differs from the selected tests")
+                    progress["tests"][event["nodeid"]] = event["record"]
+                except (ValueError, KeyError, TypeError) as error:
+                    progress["queue_journal_error"] = f"queue event {number}: {error}"
+                    break
+        counts = {key: 0 for key in ("passed", "failed", "skipped", "incomplete")}
+        for record in progress["tests"].values():
+            counts[record["outcome"]] += 1
+        progress.update(counts, finished=progress["selected"] - counts["incomplete"])
+    return progress
+
+
 def stop_group(proc):
     if proc.poll() is not None:
         return
@@ -46,6 +73,8 @@ class Queue:
         self.active = 0
         self.peak_active = 0
         self.claimed = 0
+        self.last_snapshot = -math.inf
+        self.journal = directory / "queue-events.jsonl"
         for job in plan["excluded"]:
             self.records[job["nodeid"]] = dict(
                 outcome="skipped",
@@ -60,9 +89,12 @@ class Queue:
             case = ET.SubElement(suite, "testcase", name=job["nodeid"], time="0")
             ET.SubElement(case, "skipped", message=job["reason"])
         (directory / "junit").mkdir(parents=True, exist_ok=True)
+        self.journal.write_text("")
         self.save()
 
-    def save(self):
+    def save(self, force=False):
+        if not force and time.monotonic() - self.last_snapshot < 1:
+            return
         counts = {key: 0 for key in ("passed", "failed", "skipped", "incomplete")}
         for record in self.records.values():
             counts[record["outcome"]] += 1
@@ -85,6 +117,19 @@ class Queue:
             self.directory / "queue-state.json",
             dict(active=self.active, peak_active=self.peak_active),
         )
+        self.last_snapshot = time.monotonic()
+
+    def record_event(self, nodeid):
+        # The journal survives interruption between full aggregate snapshots.
+        with self.journal.open("a") as output:
+            output.write(
+                json.dumps(dict(schema=1, nodeid=nodeid, record=self.records[nodeid]))
+                + "\n"
+            )
+        write_json(
+            self.directory / "queue-state.json",
+            dict(active=self.active, peak_active=self.peak_active),
+        )
 
     def claim(self):
         with self.lock:
@@ -95,6 +140,7 @@ class Queue:
                 self.records[job["nodeid"]]["started_unix"] = time.time()
                 self.records[job["nodeid"]]["queue_position"] = self.claimed
                 self.claimed += 1
+                self.record_event(job["nodeid"])
                 self.save()
             return job
 
@@ -223,6 +269,7 @@ class Queue:
                 **result,
             )
             self.records[job["nodeid"]] = record
+            self.record_event(job["nodeid"])
             self.junit.extend(suites)
             self.save()
             print(
@@ -238,10 +285,16 @@ class Queue:
             self.run_job(job, worker)
 
     def run(self, workers):
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(self.worker, worker) for worker in range(workers)]
-            for future in futures:
-                future.result()
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(self.worker, worker) for worker in range(workers)
+                ]
+                for future in futures:
+                    future.result()
+        finally:
+            with self.lock:
+                self.save(force=True)
         return int(
             any(
                 record["outcome"] in ("failed", "incomplete")

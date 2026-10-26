@@ -231,6 +231,10 @@ def audit(root):
     )
     runtime = json.loads((root / "runtime.json").read_text())
     shape_mode = runtime["strategy"] == "shape"
+    if shape_mode and (root / "queue-events.jsonl").exists():
+        from rocjitsu_shape_queue import read_progress
+
+        progress = read_progress(root)
     admitted = plan["jobs"]
     excluded = plan["excluded"]
     expected = (
@@ -239,6 +243,8 @@ def audit(root):
         else {s["nodeid"] for s in plan["sources"]}
     )
     errors, ledger, inventory, timings = [], [], [], []
+    if progress.get("queue_journal_error"):
+        errors.append(progress["queue_journal_error"])
     if set(progress["tests"]) != expected or progress["selected"] != len(expected):
         errors.append("planned and reported tests differ")
     if not execution.get("complete") or execution["exit_code"]:
@@ -396,9 +402,9 @@ def audit(root):
         if not all(p["completed"] for p in phases):
             errors.append(f"{nodeid}: build/run helper failed or was interrupted")
         timing.update(
-            build_seconds=phases[0]["wall_seconds"],
-            run_seconds=phases[1]["wall_seconds"],
-            evidence_seconds=sum(p["evidence_seconds"] for p in phases),
+            build_seconds=phases[0].get("wall_seconds"),
+            run_seconds=phases[1].get("wall_seconds"),
+            evidence_seconds=sum(p.get("evidence_seconds", 0) for p in phases),
         )
         try:
             inv, rows = audit_item(root, path.parent, item)
