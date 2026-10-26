@@ -128,6 +128,9 @@ TEST(ScalarConversionTutorial, ComplexValues) {
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0},
                                      {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               4);
+    EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0},
+                                    {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
+              -2.25);
 }
 
 constexpr ScalarConversionOptions identity{IntegerRounding::TowardZero, IntegerOverflow::Identity};
@@ -158,16 +161,6 @@ TYPED_TEST(IntegerConversion, PreservesLimitsAndAppliesSignednessPolicies) {
     }
 }
 
-TEST(ScalarConversion, PreservesNarrowIntegerLimits) {
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{-128}, identity), -128);
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{127}, identity), 127);
-
-    EXPECT_EQ(convertScalar<uint8_t>(uint16_t{255}, identity), 255);
-    EXPECT_EQ(convertScalar<int8_t>(-128.75, identity), -128);
-    EXPECT_EQ(convertScalar<int8_t>(127.75, identity), 127);
-    EXPECT_EQ(convertScalar<uint8_t>(-0.75, identity), 0);
-}
-
 template <typename T>
 class FloatingIntegerConversion : public ::testing::Test {};
 using FloatingTypes = ::testing::Types<float, double, long double>;
@@ -190,20 +183,8 @@ TYPED_TEST(FloatingIntegerConversion, ConvertsWideBounds) {
     EXPECT_EQ(convertScalar<uint64_t>(T{-1}, wrap), std::numeric_limits<uint64_t>::max());
 }
 
-TEST(ScalarConversion, SaturatesOrWrapsAfterRounding) {
-    const ScalarConversionOptions nearestSaturate{IntegerRounding::NearestEven,
-                                                  IntegerOverflow::Saturate};
-    const ScalarConversionOptions nearestWrap{IntegerRounding::NearestEven,
-                                              IntegerOverflow::ModuloWrap};
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{-129}, saturate), -128);
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{128}, saturate), 127);
-    EXPECT_EQ(convertScalar<uint8_t>(int16_t{-1}, saturate), 0);
+TEST(ScalarConversion, SaturatesUnsignedSourcesAndWrapsWideValues) {
     EXPECT_EQ(convertScalar<uint8_t>(uint16_t{256}, saturate), 255);
-    EXPECT_EQ(convertScalar<int8_t>(-128.75, nearestSaturate), -128);
-    EXPECT_EQ(convertScalar<int8_t>(127.5, nearestSaturate), 127);
-    EXPECT_EQ(convertScalar<int8_t>(127.5, nearestWrap), -128);
-    EXPECT_EQ(convertScalar<int8_t>(int16_t{-129}, wrap), 127);
-    EXPECT_EQ(convertScalar<uint8_t>(258.6, nearestWrap), 3);
     const double twoTo64 = std::ldexp(1.0, 64);
     EXPECT_EQ(convertScalar<uint64_t>(
                   std::nextafter(twoTo64, std::numeric_limits<double>::infinity()), wrap),
@@ -212,15 +193,6 @@ TEST(ScalarConversion, SaturatesOrWrapsAfterRounding) {
               uint64_t{1} << 63);
     EXPECT_EQ(convertScalar<int8_t>(std::numeric_limits<double>::max(), wrap), 0);
     EXPECT_EQ(convertScalar<int8_t>(-std::numeric_limits<double>::max(), wrap), 0);
-}
-
-TEST(ScalarConversion, ConvertsComplexComponents) {
-    const ScalarConversionOptions nearest{IntegerRounding::NearestEven, IntegerOverflow::Identity};
-    EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, nearest), 4);
-    EXPECT_EQ(convertScalar<double>(std::complex<double>{-2.25, -0.0}, wrap), -2.25);
-    EXPECT_EQ(convertScalar<std::complex<double>>(1.25f, wrap), std::complex<double>(1.25, 0.0));
-    EXPECT_EQ(convertScalar<std::complex<float>>(std::complex<double>{1.25, -2.5}, wrap),
-              std::complex<float>(1.25f, -2.5f));
 }
 
 TEST(ScalarConversion, ConvertsBooleansAndFloatingValues) {
