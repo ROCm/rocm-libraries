@@ -80,6 +80,10 @@ TEST(IntegerConversion, HeaderExamples) {
     static_assert(!Converts<bool, double>);
     static_assert(!Converts<float, int32_t>);
     static_assert(!Converts<char, std::complex<double>>);
+#ifdef __SIZEOF_INT128__
+    static_assert(!Converts<__int128, int64_t>);
+    static_assert(!Converts<int64_t, __int128>);
+#endif
 }
 
 template <typename T>

@@ -95,8 +95,9 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 }  // namespace detail
 
 // Converts an integer or floating value to the integer type Target: rounds it,
-// then handles values outside Target's range. Conversion does not validate its
-// input; the caller must meet the requirements of the chosen IntegerOverflow.
+// then handles values outside Target's range. Integer types are limited to 64
+// bits. Conversion does not validate its input; the caller must meet the
+// requirements of the chosen IntegerOverflow.
 //
 // Examples, after `using enum IntegerRounding; using enum IntegerOverflow;`:
 //   convertToInteger<int8_t>(double{2.5}, NearestEven, Identity) == 2
@@ -115,13 +116,16 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 //   convertToInteger<bool>(double{0.5}, ...)                  Target cannot be bool.
 //   convertToInteger<float>(int32_t{1}, ...)                  Target must be an integer.
 //   convertToInteger<char>(std::complex<double>{65, 0}, ...)  Source must be a real number.
+//   convertToInteger<__int128>(int64_t{1}, ...)               Integers wider than 64 bits.
 //
 // Outside the domain, with an undefined result:
 //   convertToInteger<int8_t>(int32_t{300}, TowardZero, Identity)  Result does not fit.
 //   convertToInteger<int8_t>(infinity, TowardZero, ModuloWrap)    Input is not finite.
 //   convertToInteger<int8_t>(NaN, rounding, overflow)             NaN is never valid.
 template <std::integral Target, typename Source>
-    requires(!std::is_same_v<Target, bool> && std::is_arithmetic_v<Source>)
+    requires(!std::is_same_v<Target, bool> && sizeof(Target) <= sizeof(uint64_t) &&
+             (std::floating_point<Source> ||
+              (std::integral<Source> && sizeof(Source) <= sizeof(uint64_t))))
 Target convertToInteger(Source value, IntegerRounding rounding, IntegerOverflow overflow) noexcept {
     constexpr uint32_t bits = std::numeric_limits<std::make_unsigned_t<Target>>::digits;
     // C++20 integer casts reduce modulo 2^N, including signed destinations.
