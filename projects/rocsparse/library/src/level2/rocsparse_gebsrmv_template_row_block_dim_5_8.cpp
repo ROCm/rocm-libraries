@@ -191,9 +191,11 @@ namespace rocsparse
                 y,
                 idx_base);
 
-            // The device function leaves its last reads of sdata unfenced against
-            // the next iteration's first store. Fence them here.
-            __syncthreads();
+            // Fence this row's last sdata reads against the next row's first store.
+            if(row + hipGridDim_x < mb)
+            {
+                __syncthreads();
+            }
         }
     }
 
@@ -242,9 +244,11 @@ namespace rocsparse
                 y,
                 idx_base);
 
-            // The device function leaves its last reads of sdata unfenced against
-            // the next iteration's first store. Fence them here.
-            __syncthreads();
+            // Fence this row's last sdata reads against the next row's first store.
+            if(row + hipGridDim_x < mb)
+            {
+                __syncthreads();
+            }
         }
     }
 
