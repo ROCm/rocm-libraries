@@ -288,10 +288,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
-  # AISPARSE-702: distinct anchor to avoid stacked-branch merge conflicts.
-  # Drives rocsparse_Xbsrxmv through the public entry point with
-  # handle->properties.maxGridSize[0] shrunk, so the one-block-per-block-row
-  # compute grids are clamped below the block-row count on a tiny matrix.
+  # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
   unit_test_internal_level2_bsrxmv_grid.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with

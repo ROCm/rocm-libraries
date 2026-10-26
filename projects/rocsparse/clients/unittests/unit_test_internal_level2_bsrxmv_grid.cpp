@@ -23,43 +23,19 @@
  * ************************************************************************ */
 
 //
-// Regression tests for the rocsparse_Xbsrxmv one-block-per-block-row compute
-// grids (AISPARSE-702).
+// Tests for the rocsparse_Xbsrxmv one-block-per-block-row compute grids.
 //
-// FOCUS: the bsrxmv specialised kernels launch one block per block row (or per
-// small group of block rows) and used to pass the block-row count straight into
-// dim3. That count is the template parameter J, instantiated as int64_t, so
-// dim3 narrowed it to unsigned int: past 2^32-1 block rows the grid wrapped and
-// the kernels -- which read hipBlockIdx_x with no grid-stride loop -- silently
-// left most of the matrix unprocessed and returned a wrong result with no
-// error. The fix clamps every grid against handle->properties.maxGridSize[0]
-// and adds a grid-stride loop over block rows to each kernel.
+// The bsrxmv kernels launch one block per block row (or per small group of
+// block rows). The launchers size grid.x with rocsparse::get_grid_size_x, which
+// clamps it to min(maxGridSize[0], (2^32 - 1) / blockDim.x), and the kernels
+// grid-stride over the block rows the clamped grid does not reach.
 //
-// HOW THIS IS TESTED CHEAPLY: reproducing the overflow for real needs ~2^31
-// block rows (about 17 GB of row pointers). Instead these tests shrink
-// handle->properties.maxGridSize[0] -- the very limit the new code clamps
-// against -- to a handful of blocks and run a SMALL matrix through the public
-// rocsparse_sbsrxmv entry point. That reproduces the defect's actual mechanism
-// (a launch grid smaller than the work) on a few kilobytes: with mb = 40 block
-// rows and the limit set to 3, block rows 3..39 are reached ONLY by the new
-// grid-stride loop. Drop that loop and the tail of y keeps its input value,
-// which these tests detect.
-//
-// WHAT THESE CASES DO AND DO NOT PROVE. They are load-bearing for the
-// grid-stride loop, which is the half of the fix that can silently corrupt a
-// result at any matrix size: disable the stride and all four cases fail at
-// block row 3, the first row past the clamped grid. They cannot fail on the
-// clamp alone. Removing the clamp only makes the grid larger (40 blocks
-// instead of 3), and a larger grid is still covered correctly by the stride
-// loop, so all four cases still pass. The clamp guards the dim3 narrowing,
-// whose only observable effect needs more than 2^32 block rows -- the 17 GB
-// this file exists to avoid allocating -- so no affordable test can reach it.
-// Both halves of that statement were checked by breaking the source and
-// rebuilding with CCACHE_DISABLE=1.
-//
-// There is deliberately NO device-memory guard and no size-based skip: the
-// footprint is well under a megabyte, so every case below runs on every GPU,
-// including the 15 GB gfx1201.
+// FORCED-LIMIT CASES: these shrink handle->properties.maxGridSize[0] to a
+// handful of blocks and run a small matrix (MB block rows) through the public
+// entry points. Block rows past the first clamped sweep are reached only by the
+// grid-stride loop; drop the loop and the tail of y keeps its input value. A
+// launcher that ignores maxGridSize[0] launches the full grid and still passes,
+// so these cases cover the stride loops, not the clamp.
 //
 // ARCHITECTURE COVERAGE: rocsparse::bsrxmv_template_dispatch routes *every*
 // block_dim through bsrxmvn_general when handle->wavefront_size == 32, so on a
@@ -98,12 +74,15 @@ namespace
         }
     };
 
-    // Number of block rows. Small enough to stay in a few kilobytes, far more
-    // than the clamped grid below so the grid-stride loop does most of the work.
-    constexpr rocsparse_int MB = 40;
+    // Number of block rows, about a megabyte of values at most. Large enough that
+    // every case clamps at CLAMPED_GRID_X, including the masked ones (MB / 2 mask
+    // entries) on the wave64 float half-warp kernels, which cover 8 (5x5) and
+    // 4 (8x8) block rows per block.
+    constexpr rocsparse_int MB = 100;
 
-    // The shrunk grid.x limit. 3 blocks for 40 (or 20 masked) block rows means
-    // ~92% of the block rows are reached only by the grid-stride loop.
+    // The shrunk grid.x limit. Block rows past the first clamped sweep
+    // (CLAMPED_GRID_X blocks times the block rows per block) are reached only by
+    // the grid-stride loop.
     constexpr int CLAMPED_GRID_X = 3;
 
     // y entries of block rows the routine must NOT touch keep this value, and
@@ -459,8 +438,8 @@ protected:
         EXPECT_EQ(bad, -1) << "block_dim=" << block_dim << ": empty mask wrote y entry " << bad;
     }
 
-    // Block dims whose wave64 dispatch target is one of the files AISPARSE-702
-    // fixes (5x5, 8x8, 16x16, 17_32). Safe to assert on every architecture.
+    // Block dims whose wave64 dispatch target clamps its grid (5x5, 8x8, 16x16,
+    // 17_32). Safe to assert on every architecture.
     static std::vector<rocsparse_int> block_dims_in_scope()
     {
         return {5, 8, 16, 17, 32};
@@ -483,7 +462,7 @@ TEST_F(BsrxmvGridClamp, unmasked_grid_smaller_than_block_rows)
 // mask does not select stay untouched.
 TEST_F(BsrxmvGridClamp, masked_grid_smaller_than_mask_size)
 {
-    // Every other block row, so 20 mask entries against a grid of 3.
+    // Every other block row, so MB / 2 mask entries against a grid of 3.
     std::vector<rocsparse_int> mask;
     for(rocsparse_int i = 0; i < MB; i += 2)
     {
@@ -498,11 +477,13 @@ TEST_F(BsrxmvGridClamp, masked_grid_smaller_than_mask_size)
 }
 
 // Hardest case for the grid-stride loop: grid.x == 1, so one single block must
-// sweep all 40 block rows sequentially instead of ~13. On wave64 parts, where
-// these block dims reach the block-dim specialisations, that also puts 40
-// consecutive iterations through each kernel's shared sdata reduction, so a
-// missing __syncthreads() between iterations (one iteration's trailing reads of
-// sdata racing the next one's first store) shows up here as a wrong y entry.
+// sweep all MB block rows sequentially. On wave64 parts, where these block dims
+// reach the block-dim specialisations, that also puts MB consecutive iterations
+// through each kernel's shared sdata reduction, so a missing __syncthreads()
+// between iterations (one iteration's trailing reads of sdata racing the next
+// one's first store) may show up here as a wrong y entry. The race is timing
+// dependent, and the 50-thread 5x5 kernel is a single wave on wave64, so it
+// cannot race there at all.
 TEST_F(BsrxmvGridClamp, single_block_sweeps_every_block_row)
 {
     std::vector<rocsparse_int> mask;
@@ -525,17 +506,15 @@ TEST_F(BsrxmvGridClamp, single_block_sweeps_every_block_row)
 // gated on wavefront_size == 32. block_dim 2/3/4 therefore reach the two small
 // general buckets on a wave32 part, which is the only place they are reachable.
 //
-// These block dims are NOT asserted on wave64, where they dispatch to
-// rocsparse_bsrxmv_spzl_2x2/3x3/4x4.cpp instead. Those three files have the
-// same unclamped-grid defect and are outside the five files AISPARSE-702
-// covers, so asserting here would fail for a defect this change does not fix.
+// These block dims are skipped on wave64, where they dispatch to
+// rocsparse_bsrxmv_spzl_2x2/3x3/4x4.cpp instead. Those launchers do not read
+// maxGridSize[0], so the cases would pass there without testing anything.
 TEST_F(BsrxmvGridClamp, wave32_small_block_dims_reach_the_general_buckets)
 {
     if(device_warp_size() != 32)
     {
-        GTEST_SUCCEED() << "block_dim 2/3/4 dispatch to the (still unfixed) 2x2/3x3/4x4 "
-                           "specialisations on wave64; covered on wave32 parts.";
-        return;
+        GTEST_SKIP() << "block_dim 2/3/4 dispatch to the 2x2/3x3/4x4 kernels on wave64, which "
+                        "do not clamp their grids";
     }
 
     std::vector<rocsparse_int> mask;
