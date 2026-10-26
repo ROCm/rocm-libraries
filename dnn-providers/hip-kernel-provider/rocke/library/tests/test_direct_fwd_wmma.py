@@ -199,6 +199,7 @@ class TestFwdWmmaSpec(unittest.TestCase):
             ({}, dict(sched="no-such-strategy")),
             ({}, dict(sched="")),
             (dict(stride=3), {}),
+            (dict(stride=0), {}),
             (dict(dil_h=2, dil_w=2, PAD=5), {}),
             (dict(dil_h=0), {}),
             (dict(KH=3, PAD=1, H=1, W=1), {}),
@@ -256,7 +257,28 @@ class TestFwdWmmaSpec(unittest.TestCase):
             self.assertFalse(ok, knobs)
             self.assertIn("waves and tiles", why)
             self.assertEqual(tuple(grid), (0, 0, 0))
+        # A zero stride is rejected, not divided by -- also by the phase-split
+        # LDS size describe reports for a rejected spec.
+        sd = conv_direct_fwd_wmma_spec_to_dict(
+            DirectFwdWmmaSpec(problem=_problem(stride=0), phase_split=True)
+        )
+        ok, why, _, grid, lds = eng.conv_direct_fwd_wmma_describe(sd, "gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("stride 0", why)
+        self.assertEqual((tuple(grid), lds), ((0, 0, 0), 0))
+        with self.assertRaises(Exception):
+            eng.conv_direct_fwd_wmma_lower_llvm(sd, arch="gfx1250")
         good = conv_direct_fwd_wmma_spec_to_dict(DirectFwdWmmaSpec(problem=_problem()))
+        # An explicit dtype=None is rejected (Python rejects the spec too),
+        # not read as the fp16 default.
+        self.assertIsNotNone(
+            fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(dtype=None)))
+        )
+        sd = dict(good, problem=dict(good["problem"], dtype=None))
+        with self.assertRaisesRegex(ValueError, "dtype"):
+            eng.conv_direct_fwd_wmma_describe(sd, "gfx1250")
+        with self.assertRaisesRegex(ValueError, "dtype"):
+            eng.conv_direct_fwd_wmma_lower_llvm(sd, arch="gfx1250")
         partial = dict(good["problem"])
         del partial["kpg"]
         for problem in (None, "N2H13", partial):

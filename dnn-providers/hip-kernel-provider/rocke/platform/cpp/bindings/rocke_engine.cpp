@@ -1922,6 +1922,11 @@ void fsw_fill_problem(Spec* s, const py::dict& d, std::deque<std::string>& store
         if(!pd.contains(key))
             throw py::value_error(std::string(who) + ".problem requires " + key);
     }
+    /* An explicit dtype=None is invalid (Python rejects it); only an omitted
+     * key keeps the fp16 default. */
+    if(pd.contains("dtype") && pd["dtype"].is_none())
+        throw py::value_error(std::string(who)
+                              + ".problem.dtype must be 'fp16' or 'bf16', not None");
     std::string v;
     fill_direct_conv_problem(&s->problem, pd);
     if(dict_str(pd, "dtype", v))
@@ -2204,6 +2209,11 @@ rocke_direct_fwd_wmma_spec_t dfww_build_spec(const py::dict& d, std::deque<std::
             if(!pd.contains(key))
                 throw py::value_error(std::string("DirectFwdWmmaSpec.problem requires ") + key);
         }
+        /* An explicit dtype=None is invalid (Python rejects it); only an
+         * omitted key keeps the fp16 default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error(
+                "DirectFwdWmmaSpec.problem.dtype must be 'fp16' or 'bf16', not None");
         std::string v;
         fill_direct_conv_problem(&s.problem, pd);
         if(dict_str(pd, "dtype", v))
@@ -2285,11 +2295,11 @@ py::tuple conv_direct_fwd_wmma_describe(const py::dict& d, const std::string& ar
         name[0] = '\0';
     if(ok) /* a rejected spec may have zero tile extents */
         rocke_direct_fwd_wmma_grid(&s, grid);
-    return py::make_tuple(ok,
-                          std::string(reason),
-                          std::string(name),
-                          py::make_tuple(grid[0], grid[1], grid[2]),
-                          rocke_direct_fwd_wmma_lds_bytes(&s));
+    /* The phase-split halo divides by the stride; a zero stride (rejected
+     * above) reports no LDS rather than dividing by zero. */
+    long lds = (s.phase_split && s.problem.stride == 0) ? 0 : rocke_direct_fwd_wmma_lds_bytes(&s);
+    return py::make_tuple(
+        ok, std::string(reason), std::string(name), py::make_tuple(grid[0], grid[1], grid[2]), lds);
 }
 
 /* ======================== conv_direct_nongrouped ========================== */

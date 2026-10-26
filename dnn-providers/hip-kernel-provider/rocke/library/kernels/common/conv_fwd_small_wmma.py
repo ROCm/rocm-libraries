@@ -152,6 +152,8 @@ def _common_reason(p: DirectConvProblem, arch: str, name: str) -> str | None:
         return "square filters only"
     if not 0 <= p.PAD <= p.KH - 1:
         return f"PAD {p.PAD} outside 0..K-1"
+    if p.stride < 1:  # before Ho / Wo divide by it
+        return f"stride {p.stride} < 1"
     tensor_bytes = (
         2 * p.N * p.H * p.W * p.total_c,
         2 * p.total_k * p.KH * p.KW * p.cpg,

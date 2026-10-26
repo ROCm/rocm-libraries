@@ -67,6 +67,8 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(K=60), {}, "multiple of 8"),
             (_problem(C=4, K=32, groups=2), {}, "ungrouped"),
             (_problem(dtype="fp32"), {}, "dtype"),
+            (_problem(dtype=None), {}, "dtype"),
+            (_problem(S=0), {}, "stride 0 < 1"),
             (_problem(), dict(out_h=4), "GEMM pixels"),
             (_problem(), dict(tiles_k=8, tiles_p=8, out_h=16), "VGPRs"),
         ):
@@ -83,6 +85,7 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=64, K=16), {}, "K 16"),
             (_problem(C=64, K=3), {}, "K 3"),
             (_problem(C=60, K=4), {}, "multiple of 8"),
+            (_problem(C=64, K=4, S=0), {}, "stride 0 < 1"),
             (p, dict(tiles_c=4), "block_c"),
             (p, dict(out_h=32, out_w=32), "input window"),
             (p, dict(ck=48), "ck 48"),
@@ -157,6 +160,8 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=4, K=32, groups=2), {}),
             (_problem(dtype="fp32"), {}),
             (_problem(KH=3, PAD=3), {}),
+            (_problem(S=0), {}),
+            (_problem(S=-1), {}),
             (_problem(N=64, H=1024, W=1024), {}),
             (_problem(), dict(out_h=4)),
             (_problem(), dict(tiles_k=8, tiles_p=8, out_h=16)),
@@ -175,6 +180,7 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=64, K=16), {}),
             (_problem(C=64, K=3), {}),
             (_problem(C=60, K=4), {}),
+            (_problem(C=64, K=4, S=0), {}),
             (pk, dict(tiles_c=4)),
             (pk, dict(out_h=32, out_w=32)),
             (pk, dict(ck=48)),
@@ -237,6 +243,22 @@ class TestSmallSpecs(unittest.TestCase):
             good = dict(bad)
             good.pop("waves_k", None)
             good.pop("waves_c", None)
+            # A zero stride is rejected before the output extents divide by it.
+            sd = dict(good, problem=dict(good["problem"], stride=0))
+            ok, why, _, grid, _ = describe(sd, "gfx1250")
+            self.assertFalse(ok)
+            self.assertEqual(why, "stride 0 < 1")
+            self.assertEqual(tuple(grid), (0, 0, 0))
+            with self.assertRaises(Exception):
+                lower(sd, arch="gfx1250")
+            # An explicit dtype=None is rejected (Python rejects the spec
+            # too), not read as the fp16 default.
+            sd = dict(good, problem=dict(good["problem"], dtype=None))
+            with self.subTest(prefix=prefix, dtype=None):
+                with self.assertRaisesRegex(ValueError, "dtype"):
+                    describe(sd, "gfx1250")
+                with self.assertRaisesRegex(ValueError, "dtype"):
+                    lower(sd, arch="gfx1250")
             partial = dict(good["problem"])
             del partial["kpg"]
             for problem in (None, "N2H13", partial):

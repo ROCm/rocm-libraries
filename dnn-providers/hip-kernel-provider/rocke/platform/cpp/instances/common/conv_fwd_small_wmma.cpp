@@ -147,6 +147,12 @@ bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
         fsw_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(p->stride < 1) /* before fsw_ho / fsw_wo divide by it */
+    {
+        snprintf(msg, sizeof msg, "stride %d < 1", p->stride);
+        fsw_set_reason(reason, reason_cap, msg);
+        return false;
+    }
     {
         long long total_c = (long long)p->groups * p->cpg;
         long long total_k = (long long)p->groups * p->kpg;
