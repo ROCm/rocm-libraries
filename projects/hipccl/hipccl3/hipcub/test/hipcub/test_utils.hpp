@@ -713,7 +713,7 @@ template<class... Types>
 using tuple = ::rocprim::tuple<Types...>;
 
 template<typename... Types>
-auto make_tuple(Types&&... args) -> tuple<Types...>
+auto make_tuple(Types&&... args)
 {
     return ::rocprim::make_tuple<Types...>(::rocprim::detail::custom_forward<Types>(args)...);
 }
@@ -787,7 +787,7 @@ template<class... Ts>
 using tuple = ::cuda::std::tuple<Ts...>;
 
 template<typename... Types>
-auto make_tuple(Types&&... args) -> tuple<Types...>
+auto make_tuple(Types&&... args)
 {
     return ::cuda::std::make_tuple(args...);
 }
