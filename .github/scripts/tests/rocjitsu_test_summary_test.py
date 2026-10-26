@@ -3,7 +3,6 @@
 
 """Check the per-outcome test lists against real pytest outcomes."""
 
-import json
 import os
 from pathlib import Path
 import subprocess
