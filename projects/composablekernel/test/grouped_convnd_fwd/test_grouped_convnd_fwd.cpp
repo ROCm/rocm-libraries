@@ -71,7 +71,7 @@ void CheckQualifiedForwardDirtyOutput()
                                           weight_device.GetDeviceBuffer(), {},
                                           output_device.GetDeviceBuffer(), a, as, b, bs, {}, {},
                                           e, es, stride, dilation, pads, pads, Pass{}, Pass{}, Pass{});
-        if(!op->IsOutputFullyDefined(arg.get()))
+        if(!ck::tensor_operation::device::IsOutputFullyDefined(*op, arg.get()))
             continue;
         ASSERT_TRUE(op->IsSupportedArgument(arg.get()));
         ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));

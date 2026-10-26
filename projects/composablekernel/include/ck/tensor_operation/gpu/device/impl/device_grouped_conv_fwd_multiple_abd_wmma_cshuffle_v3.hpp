@@ -249,6 +249,9 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                              CDEElementwiseOperation,
                                              AComputeDataType,
                                              BComputeDataType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3;
 

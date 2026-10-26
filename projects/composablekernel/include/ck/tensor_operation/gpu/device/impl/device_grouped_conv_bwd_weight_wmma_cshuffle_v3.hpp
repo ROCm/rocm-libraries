@@ -181,6 +181,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                         OutElementwiseOperation,
                                         ComputeTypeA,
                                         ComputeTypeB>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<WeiElementwiseOperation, element_wise::PassThrough>);
@@ -453,11 +456,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
             else
             {
-                // Scalar 16-bit output must not instantiate a packed half/bfloat atomic.
-                constexpr auto occupancy_store_op =
-                    sizeof(WeiDataType) == 2 && CShuffleBlockTransferScalarPerVector_NPerBlock == 1
-                        ? InMemoryDataOperationEnum::Set
-                        : InMemoryDataOperationEnum::AtomicAdd;
                 hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_occupancy,
                     kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
@@ -467,7 +465,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                         remove_reference_t<DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
                         ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                         true,
-                        occupancy_store_op,
+                        InMemoryDataOperationEnum::AtomicAdd,
                         minimum_occupancy>,
                     BlockSize,
                     dynamic_smem_size));
@@ -770,9 +768,10 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
         std::array<ck::index_t, NDimSpatial> input_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> output_spatial_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        // Own metadata retained for support checks after temporary conversion arrays expire.
+        const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
+        const std::array<ck::index_t, NDimSpatial> input_left_pads_;
+        const std::array<ck::index_t, NDimSpatial> input_right_pads_;
         long_index_t c_space_size_bytes;
         bool stride_overflow;
     };
@@ -903,8 +902,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 arg.a_grid_desc_kbatch_k0_m_k1_.GetLength(Number<0>{}) / gemm_arg.KBatch;
 
             const auto clear_workspace = [&]() {
-                hip_check_error(hipMemsetAsync(
-                    p_e_grid, 0, arg.c_space_size_bytes, stream_config.stream_id_));
+                hip_check_error(
+                    hipMemsetAsync(p_e_grid, 0, arg.c_space_size_bytes, stream_config.stream_id_));
             };
 
             const auto Run = [&](const auto& kernel) {
@@ -949,8 +948,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
-            // Split 1 uses Set. Split > 1 requires vector stores for 16-bit atomics;
-            // FP32 output also supports scalar AtomicAdd.
             if(has_main_k_block_loop)
             {
                 // Tail number always full
@@ -959,26 +956,17 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        if constexpr(sizeof(WeiDataType) != 2 ||
-                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
-                        {
-                            const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
-                                GridwiseGemm,
-                                remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
-                                remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
-                                remove_reference_t<
-                                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
-                                true,
-                                InMemoryDataOperationEnum::AtomicAdd,
-                                minimum_occupancy>;
-                            Run(kernel);
-                        }
-                        else
-                        {
-                            throw std::runtime_error(
-                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
-                        }
+                        const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
+                            GridwiseGemm,
+                            remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
+                            remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
+                            remove_reference_t<
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
+                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                            true,
+                            InMemoryDataOperationEnum::AtomicAdd,
+                            minimum_occupancy>;
+                        Run(kernel);
                     }
                     else
                     {
@@ -1007,26 +995,17 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        if constexpr(sizeof(WeiDataType) != 2 ||
-                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
-                        {
-                            const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
-                                GridwiseGemm,
-                                remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
-                                remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
-                                remove_reference_t<
-                                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
-                                false,
-                                InMemoryDataOperationEnum::AtomicAdd,
-                                minimum_occupancy>;
-                            Run(kernel);
-                        }
-                        else
-                        {
-                            throw std::runtime_error(
-                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
-                        }
+                        const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
+                            GridwiseGemm,
+                            remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
+                            remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
+                            remove_reference_t<
+                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
+                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                            false,
+                            InMemoryDataOperationEnum::AtomicAdd,
+                            minimum_occupancy>;
+                        Run(kernel);
                     }
                     else
                     {
@@ -1170,13 +1149,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
             // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
             return false;
-        }
-        // Scalar low-precision output can use Set, but not a packed half/bfloat atomic.
-        if constexpr(sizeof(WeiDataType) == 2 &&
-                     CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
-        {
-            if(gemm_arg.KBatch > 1)
-                return false;
         }
 
         if constexpr(std::is_same_v<ComputeTypeA, f8_t> || std::is_same_v<ComputeTypeA, bf8_t> ||

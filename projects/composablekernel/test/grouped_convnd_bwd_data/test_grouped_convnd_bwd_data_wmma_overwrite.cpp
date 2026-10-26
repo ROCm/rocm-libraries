@@ -145,7 +145,7 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param, bool has_spatial_
                 continue;
             }
 
-            if(!op->IsOutputFullyDefined(arg.get()))
+            if(!ck::tensor_operation::device::IsOutputFullyDefined(*op, arg.get()))
                 continue;
             const std::string name = op->GetTypeString(); // Diagnostics only.
 
@@ -173,7 +173,7 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param, bool has_spatial_
                                                         PassThrough{},
                                                         PassThrough{},
                                                         1);
-            EXPECT_FALSE(op->IsOutputFullyDefined(nonpacked_arg.get()));
+            EXPECT_FALSE(ck::tensor_operation::device::IsOutputFullyDefined(*op, nonpacked_arg.get()));
 
             ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));
             op->SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());

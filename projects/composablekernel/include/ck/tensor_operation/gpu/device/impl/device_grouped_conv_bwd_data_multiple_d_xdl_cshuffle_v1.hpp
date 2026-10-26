@@ -321,6 +321,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                                CDEElementwiseOp,
                                                AComputeType,
                                                BComputeType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     // TODO: Extend support for more spatial dimensions.
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,

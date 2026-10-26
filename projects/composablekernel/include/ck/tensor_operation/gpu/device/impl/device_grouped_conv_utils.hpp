@@ -5,10 +5,28 @@
 
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
+#include "ck/tensor_operation/gpu/device/device_base.hpp"
 
 namespace ck {
 namespace tensor_operation {
 namespace device {
+
+#ifndef CK_CODE_GEN_RTC
+// Optional capability, separate from existing convolution operator vtables.
+// A promise covers the supported invocation's preprocessing, internal clears and
+// final conversion: every logical output is independent of its prior contents.
+struct GroupedConvOutputDefinition
+{
+    virtual ~GroupedConvOutputDefinition() = default;
+    virtual bool IsOutputFullyDefined(const BaseArgument* argument) const = 0;
+};
+
+inline bool IsOutputFullyDefined(const BaseOperator& operation, const BaseArgument* argument)
+{
+    const auto* capability = dynamic_cast<const GroupedConvOutputDefinition*>(&operation);
+    return capability != nullptr && capability->IsOutputFullyDefined(argument);
+}
+#endif
 
 // Packed channel-last image addressing in logical [G, N, C/K, spatial...] order.
 // Deliberately excludes transposed and merged layouts: a contiguous clear and the

@@ -91,11 +91,6 @@ struct DeviceGroupedConvFwdMultipleABD : public BaseOperator
 #endif
 
 #ifndef CK_CODE_GEN_RTC
-    // True only when this supported invocation, including preprocessing and final
-    // conversion, defines every logical output independently of its prior contents.
-    // Unqualified implementations deliberately make no promise.
-    virtual bool IsOutputFullyDefined(const BaseArgument*) const { return false; }
-
 
     /**
      * \brief Make argument pointer for grouped conv fwd.

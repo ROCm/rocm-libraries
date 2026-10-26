@@ -54,9 +54,9 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
 
     void SetUp() override
     {
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported())
         {
-            GTEST_SKIP() << "WMMA backward-weight convolution requires gfx11 or gfx12";
+            GTEST_SKIP();
         }
     }
 

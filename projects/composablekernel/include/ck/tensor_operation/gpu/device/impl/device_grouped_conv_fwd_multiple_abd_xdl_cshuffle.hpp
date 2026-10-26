@@ -328,6 +328,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                                              CDEElementwiseOperation,
                                              AComputeDataType,
                                              BComputeDataType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle;
     GET_MXDL_PER_WAVE_IMPL

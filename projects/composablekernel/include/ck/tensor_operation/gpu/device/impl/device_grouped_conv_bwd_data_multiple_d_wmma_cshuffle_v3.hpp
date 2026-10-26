@@ -291,6 +291,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                                                CDEElementwiseOp,
                                                AComputeType,
                                                BComputeType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     // TODO: Extend support for more spatial dimensions.
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,
@@ -731,23 +734,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                 }
             });
 
-            bool completely_overwrites_e = false;
-            if constexpr(NumDTensor == 0 && is_same_v<ADataType, BDataType> &&
-                         is_same_v<ADataType, EDataType> &&
-                         (is_same_v<ADataType, half_t> || is_same_v<ADataType, bhalf_t>) &&
-                         ConvBackwardDataSpecialization ==
-                             ConvolutionBackwardDataSpecialization::Filter1x1Stride1Pad0 &&
-                         (is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::GNDHWC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
-                          is_same_v<ELayout, tensor_layout::convolution::NDHWGC>))
-            {
-                completely_overwrites_e = k_batch_ == 1 &&
-                                          a_g_n_k_wos_lengths[0] == b_g_k_c_xs_lengths[0] &&
-                                          a_g_n_k_wos_lengths[0] == e_g_n_c_wis_lengths[0] &&
-                                          a_g_n_k_wos_lengths[1] == e_g_n_c_wis_lengths[1] &&
-                                          a_g_n_k_wos_lengths[2] == b_g_k_c_xs_lengths[1] &&
-                                          b_g_k_c_xs_lengths[2] == e_g_n_c_wis_lengths[2];
+            bwd_needs_zero_out = k_batch_ > 1 || !image_covered_dilation || !image_covered_strides;
 
                 for(index_t i = 0; i < NDimSpatial + 3; ++i)
                 {

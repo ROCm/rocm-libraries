@@ -12,6 +12,7 @@
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/numeric_limits.hpp>
+#include <ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_scale.hpp>
@@ -1007,7 +1008,7 @@ template <bool ZeroOutputs,
           typename Input1TposeOp,
           typename Input2TposeOp,
           typename OutputTposeOp,
-          bool PlainFwdSetOutput      = false>
+          bool PlainFwdSetOutput = false>
 ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const miopen::conv::ProblemDescription& problem,
                                     const std::string& kernel_id,
@@ -1082,8 +1083,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         (problem.IsBfp16() || problem.IsFp16() ||
          (problem.IsFp32() && problem.Is3d() &&
           (problem.IsDirectionForward() ||
-           problem.GetDirection() == miopen::conv::Direction::BackwardData) &&
-          ctx.GetStream().GetDeviceName() == "gfx1250")) &&
+           problem.GetDirection() == miopen::conv::Direction::BackwardData))) &&
         !problem.HasNonPackedTensors() && problem.GetAlphaBetaCase() == DEFAULT &&
         problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f;
 
@@ -1213,11 +1213,19 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             }
             // Ask the concrete operation about this actual, workspace-bound
             // argument. Its complete invocation must define every logical output.
-            const bool output_complete =
-                sh_conv_ptr2->IsOutputFullyDefined(argument_ptr.get());
-            const bool skip_output_init =
-                can_skip_output_init2 && safe_to_borrow && output_complete;
-
+            const bool skip_output_init = [&] {
+                if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> ||
+                             std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
+                {
+                    return can_skip_output_init2 && safe_to_borrow &&
+                           ck::tensor_operation::device::IsOutputFullyDefined(
+                               *sh_conv_ptr2, argument_ptr.get());
+                }
+                else
+                {
+                    return false;
+                }
+            }();
 
             // ConvertFrom automatically keeps kernel time and accumulates.
             if(!borrowed_input1)

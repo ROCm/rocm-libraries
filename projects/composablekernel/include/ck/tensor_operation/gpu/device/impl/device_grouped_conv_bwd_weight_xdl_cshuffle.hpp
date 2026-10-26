@@ -884,9 +884,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         std::array<ck::index_t, NDimSpatial> input_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> output_spatial_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
+        const std::array<ck::index_t, NDimSpatial> input_left_pads_;
+        const std::array<ck::index_t, NDimSpatial> input_right_pads_;
         long_index_t c_space_size_bytes;
 
         bool split_k_offset_hack_;

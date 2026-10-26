@@ -404,6 +404,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                                              CDEElementwiseOperation,
                                              AComputeDataType,
                                              BComputeDataType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     using IndexType = std::conditional_t<LargeTensors, ck::long_index_t, ck::index_t>;
 
