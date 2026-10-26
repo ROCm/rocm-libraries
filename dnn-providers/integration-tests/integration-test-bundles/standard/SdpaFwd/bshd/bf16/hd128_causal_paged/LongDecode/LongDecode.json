@@ -46,7 +46,7 @@
                 "attn_scale_value": 0.08838834764831843,
                 "left_bound": -1,
                 "right_bound": 0,
-                "max_seq_len_kv": 4096,
+                "max_seq_len_kv": 576,
                 "diagonal_alignment": "BOTTOM_RIGHT",
                 "mma_core_mode": "unset",
                 "implementation": "AUTO"
@@ -59,14 +59,14 @@
             "name": "Q",
             "dims": [
                 4,
-                32,
+                8,
                 1,
                 128
             ],
             "strides": [
-                4096,
+                1024,
                 128,
-                4096,
+                1024,
                 1
             ],
             "data_type": "bfloat16",
@@ -76,15 +76,15 @@
             "uid": 1,
             "name": "K",
             "dims": [
-                480,
-                8,
+                54,
+                2,
                 16,
                 128
             ],
             "strides": [
-                16384,
+                4096,
                 128,
-                1024,
+                256,
                 1
             ],
             "data_type": "bfloat16",
@@ -94,15 +94,15 @@
             "uid": 2,
             "name": "V",
             "dims": [
-                480,
-                8,
+                54,
+                2,
                 16,
                 128
             ],
             "strides": [
-                16384,
+                4096,
                 128,
-                1024,
+                256,
                 1
             ],
             "data_type": "bfloat16",
@@ -113,14 +113,14 @@
             "name": "O",
             "dims": [
                 4,
-                32,
+                8,
                 1,
                 128
             ],
             "strides": [
-                4096,
+                1024,
                 128,
-                4096,
+                1024,
                 1
             ],
             "data_type": "bfloat16",
@@ -131,12 +131,12 @@
             "name": "LSE",
             "dims": [
                 4,
-                32,
+                8,
                 1,
                 1
             ],
             "strides": [
-                32,
+                8,
                 1,
                 1,
                 1
@@ -186,12 +186,12 @@
             "dims": [
                 4,
                 1,
-                256,
+                36,
                 1
             ],
             "strides": [
-                256,
-                256,
+                36,
+                36,
                 1,
                 1
             ],
@@ -204,12 +204,12 @@
             "dims": [
                 4,
                 1,
-                256,
+                36,
                 1
             ],
             "strides": [
-                256,
-                256,
+                36,
+                36,
                 1,
                 1
             ],

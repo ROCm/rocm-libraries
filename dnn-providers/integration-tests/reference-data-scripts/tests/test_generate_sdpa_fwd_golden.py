@@ -331,5 +331,152 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
         )
 
 
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestGenerateSdpaFwdGoldenGraphOnly(unittest.TestCase):
+    """--graph-only writes the golden run's graph, no tensors, and input recipes that
+    give every graph input a valid value (RFC 0011 bundle size budget)."""
+
+    def run_generator(self, base: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--base-filename", str(base), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def generate_both(self, *args: str) -> tuple[Path, dict, dict, dict]:
+        """Golden and graph-only runs of the same arguments, into the same directory."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bundle_dir = Path(tmp.name) / "quick/SdpaFwd/bhsd/x/case/Small"
+        bundle_dir.mkdir(parents=True)
+        base = bundle_dir / "Small"
+        golden = self.run_generator(base, *args)
+        self.assertEqual(golden.returncode, 0, golden.stderr)
+        golden_graph = json.loads(base.with_suffix(".json").read_text())
+        (bundle_dir / "Small.tensors.dvc").write_text("outs: []\n")
+        graph_only = self.run_generator(base, *args, "--graph-only")
+        self.assertEqual(graph_only.returncode, 0, graph_only.stderr)
+        graph = json.loads(base.with_suffix(".json").read_text())
+        meta = json.loads(Path(f"{base}.meta.json").read_text())
+        return bundle_dir, golden_graph, graph, meta
+
+    def assert_graph_only(self, bundle_dir, golden_graph, graph, meta):
+        self.assertEqual(graph, golden_graph)
+        self.assertEqual(
+            sorted(p.name for p in bundle_dir.iterdir()),
+            ["Small.json", "Small.meta.json"],
+        )
+        self.assertEqual(meta["format_version"], 1)
+        self.assertEqual(meta["generator"], "generate_sdpa_fwd_golden.py")
+        self.assertTrue(meta["reference_source"].strip())
+        self.assertNotIn("input_range", meta)
+        verified = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), "--require-data", str(bundle_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        # Every non-output tensor of the graph has a recipe.
+        node = graph["nodes"][0]
+        input_uids = {v for v in node["inputs"].values() if v is not None}
+        self.assertEqual({int(uid) for uid in meta["inputs"]}, input_uids)
+
+    def test_fp8_codes_span_the_format_with_positive_fixed_descales(self):
+        args = (
+            "--dtype",
+            "fp8",
+            "--q-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--v-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--causal",
+            "bottom_right",
+            "--stats",
+            "--seed",
+            "3",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        for uid in ("0", "1", "2"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "free", "lo": -448.0, "hi": 448.0}
+            )
+        for uid in ("7", "8", "9"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "fixed", "value": 1.0 / 448.0}
+            )
+        self.assertEqual(meta["seed"], 3)
+
+    def test_block_mask_bytes_keep_bit_seven(self):
+        args = (
+            "--block-mask",
+            "--q-dims",
+            "1",
+            "2",
+            "128",
+            "16",
+            "--v-dims",
+            "1",
+            "1",
+            "1024",
+            "16",
+            "--stats",
+            "--seed",
+            "5",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        self.assertEqual(
+            meta["inputs"]["17"], {"kind": "free", "lo": 128.0, "hi": 255.0}
+        )
+        for uid in ("0", "1", "2"):
+            self.assertEqual(
+                meta["inputs"][uid], {"kind": "free", "lo": -1.0, "hi": 1.0}
+            )
+
+    def test_alibi_has_no_extra_inputs(self):
+        args = (
+            "--alibi",
+            "--causal",
+            "top_left",
+            "--q-dims",
+            "1",
+            "2",
+            "8",
+            "16",
+            "--v-dims",
+            "1",
+            "1",
+            "8",
+            "16",
+            "--stats",
+        )
+        bundle_dir, golden_graph, graph, meta = self.generate_both(*args)
+        self.assert_graph_only(bundle_dir, golden_graph, graph, meta)
+        self.assertEqual(sorted(meta["inputs"]), ["0", "1", "2"])
+
+    def test_rejects_inputs_a_recipe_cannot_express(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp) / "Small"
+            dims = ("--q-dims", "2", "1", "8", "16", "--v-dims", "2", "1", "8", "16")
+            for extra in (
+                ("--seq-lens-q", "8", "4", "--seq-lens-kv", "8", "4"),
+                ("--dtype", "fp8", "--fp8-scaling"),
+                ("--block-mask",),  # fewer than 8 key tiles
+            ):
+                with self.subTest(extra=extra):
+                    completed = self.run_generator(base, *dims, *extra, "--graph-only")
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("--graph-only", completed.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

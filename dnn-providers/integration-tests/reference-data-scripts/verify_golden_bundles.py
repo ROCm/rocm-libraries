@@ -38,6 +38,16 @@ FLAT_OUTPUT_UID_FIELDS: dict[str, tuple[str, ...]] = {
     "ReductionAttributes": ("out_tensor_uid",),
 }
 
+# SDPA stats (LSE) tensors, as (uid map, field) per node type: the forward node's
+# stats output and the backward node's stats input. A padded or fully masked row
+# has LSE = -inf by contract (SEM-010 in projects/hipdnn/docs/SdpaSemanticsRegister.md,
+# and the harness accepts a matching -inf), so -inf is a valid value in these
+# tensors only; NaN and +inf stay defects.
+SDPA_STATS_UID_FIELDS: dict[str, tuple[str, str]] = {
+    "SdpaAttributes": ("outputs", "stats_tensor_uid"),
+    "SdpaBackwardAttributes": ("inputs", "stats_tensor_uid"),
+}
+
 
 DTYPE_BYTE_SIZE = {
     "float": 4,
@@ -493,6 +503,51 @@ def extract_output_tensor_uids(
     return output_tensor_uids
 
 
+def extract_sdpa_stats_tensor_uids(nodes: list[object]) -> set[int]:
+    """Uids of the SDPA stats (LSE) tensors, where -inf is allowed (SEM-010)."""
+    stats_tensor_uids: set[int] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        location = SDPA_STATS_UID_FIELDS.get(node.get("type"))
+        if location is None:
+            continue
+        uid_map_name, field_name = location
+        uid_map = node.get(uid_map_name)
+        if not isinstance(uid_map, dict):
+            continue
+        value = uid_map.get(field_name)
+        if is_integer(value):
+            stats_tensor_uids.add(value)
+    return stats_tensor_uids
+
+
+def iter_float_values(dtype_key: str, data: bytes):
+    """Decoded values of a float tensor payload; nothing for other dtypes."""
+    if dtype_key in {"float", "float32", "fp32"}:
+        return (value for (value,) in struct.iter_unpack("<f", data))
+    if dtype_key in {"double", "float64", "fp64"}:
+        return (value for (value,) in struct.iter_unpack("<d", data))
+    if dtype_key in {"half", "float16", "fp16"}:
+        return (value for (value,) in struct.iter_unpack("<e", data))
+    if dtype_key in {"bfloat16", "bf16", "bfp16"}:
+        return (
+            struct.unpack("<f", struct.pack("<I", word << 16))[0]
+            for (word,) in struct.iter_unpack("<H", data)
+        )
+    return iter(())
+
+
+def find_invalid_stats_index(
+    dtype_key: str, data: bytes, allow_nan: bool
+) -> int | None:
+    """First +inf (or NaN, unless allowed) in an SDPA stats tensor; -inf is valid."""
+    for index, value in enumerate(iter_float_values(dtype_key, data)):
+        if value == math.inf or (math.isnan(value) and not allow_nan):
+            return index
+    return None
+
+
 def find_nonfinite_index(dtype_key: str, data: bytes) -> int | None:
     if dtype_key in {"float", "float32", "fp32"}:
         for index, (value,) in enumerate(struct.iter_unpack("<f", data)):
@@ -648,7 +703,9 @@ def validate_tensor_payloads(
     output_tensor_uids: set[int],
     report_path: Path,
     result: VerificationResult,
+    stats_tensor_uids: set[int] | None = None,
 ) -> None:
+    stats_tensor_uids = stats_tensor_uids or set()
     for uid, tensor_spec in tensor_specs.items():
         dims = tensor_spec["dims"]
         strides = tensor_spec["strides"]
@@ -716,6 +773,21 @@ def validate_tensor_payloads(
             continue
 
         is_output = uid in output_tensor_uids
+        if uid in stats_tensor_uids:
+            # Padded and fully masked rows carry LSE = -inf (SEM-010); a ragged
+            # stats output may also carry the NaN pad sentinel (RFC 0014 §4.11.4).
+            allow_nan = is_ragged and is_output
+            bad_index = find_invalid_stats_index(dtype_key, data, allow_nan)
+            if bad_index is not None:
+                rejected = "+Inf" if allow_nan else "NaN/+Inf"
+                result.error(
+                    tensor_path,
+                    f"SDPA stats tensor contains {rejected} at element index "
+                    f"{bad_index} (only -inf is allowed, SEM-010)",
+                    uid,
+                )
+            continue
+
         if is_ragged and is_output:
             # Ragged outputs carry the NaN sentinel in in-block pad rows
             # (RFC 0014 §4.11.4), so only Inf is a defect there.
@@ -938,6 +1010,7 @@ def validate_graph_bundle(
         output_tensor_uids,
         path,
         result,
+        extract_sdpa_stats_tensor_uids(nodes),
     )
 
     for output_tensor_uid in output_tensor_uids:
@@ -1182,6 +1255,7 @@ def validate_sweep_case(
     default_tier: str,
     require_data: bool,
     result: VerificationResult,
+    stats_tensor_uids: set[int] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
@@ -1319,6 +1393,7 @@ def validate_sweep_case(
             output_tensor_uids,
             sweep_path,
             result,
+            stats_tensor_uids,
         )
 
 
@@ -1360,6 +1435,7 @@ def validate_sweep_bundle(
         return
 
     output_tensor_uids = extract_output_tensor_uids(nodes, template_path, result)
+    stats_tensor_uids = extract_sdpa_stats_tensor_uids(nodes)
     tensor_placeholder_fields, literal_tensor_specs = parse_template_tensors(
         tensors, template_path, result
     )
@@ -1401,6 +1477,7 @@ def validate_sweep_bundle(
             default_tier,
             require_data,
             result,
+            stats_tensor_uids,
         )
 
 

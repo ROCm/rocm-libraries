@@ -1,20 +1,12 @@
 {
     "format_version": 1,
     "generator": "generate_sdpa_fwd_golden.py",
-    "generator_sha256": "0059dc287ab815881959846ef5ed4fae7d4a51604bf3597c8f9bc9dbc8b6e232",
-    "generated_at": "2026-10-24T16:19:55Z",
-    "reference_source": "PyTorch 2.14.1+cpu",
-    "reference_backend": "pytorch_math_backend",
-    "rocm_version": "",
-    "generator_version": "1.10.0",
-    "generation_precision": "fp8: FP8_E4M3 inputs (per-tensor descale), FP32 intermediates, BF16 output",
+    "generator_sha256": "90c2741e38af83194c5f3782dc700230d3ed79a14f99a3696affdf7f44b612e7",
+    "generated_at": "2026-10-26T15:52:20Z",
+    "reference_source": "hipDNN reference executor (graph-only bundle, no golden data)",
+    "generator_version": "1.11.0",
     "direction": "forward",
     "seed": 95,
-    "input_range": [
-        -1.0,
-        1.0
-    ],
-    "deterministic": true,
     "config": {
         "batch": 1,
         "num_heads_q": 8,
@@ -41,5 +33,34 @@
         "fp8_format": "e4m3",
         "alibi": false,
         "row_stats": false
+    },
+    "inputs": {
+        "0": {
+            "kind": "free",
+            "lo": -448.0,
+            "hi": 448.0
+        },
+        "1": {
+            "kind": "free",
+            "lo": -448.0,
+            "hi": 448.0
+        },
+        "2": {
+            "kind": "free",
+            "lo": -448.0,
+            "hi": 448.0
+        },
+        "7": {
+            "kind": "fixed",
+            "value": 0.002232142857142857
+        },
+        "8": {
+            "kind": "fixed",
+            "value": 0.002232142857142857
+        },
+        "9": {
+            "kind": "fixed",
+            "value": 0.002232142857142857
+        }
     }
 }

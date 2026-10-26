@@ -1,28 +1,38 @@
 outs:
 - path: LongDecode.tensor0.bin
   remote: golden-data
-  md5: 176150cbe9e756aecd8f3a8f32f23a0c
-  size: 32768
+  md5: e44d7f3fa262fe90bd48394e2f5be0a4
+  size: 8192
   hash: md5
 - path: LongDecode.tensor1.bin
   remote: golden-data
-  md5: 5c9a1272b1cbda3e61afc202f693a175
-  size: 15728640
+  md5: ec2209f8c41c666fc6c3cf4976cd916b
+  size: 442368
+  hash: md5
+- path: LongDecode.tensor12.bin
+  remote: golden-data
+  md5: aca6b569150283bbb74191447fd7d28b
+  size: 576
+  hash: md5
+- path: LongDecode.tensor13.bin
+  remote: golden-data
+  md5: 0e2497ae810dc3a4098dbb36ea1545fd
+  size: 576
   hash: md5
 - path: LongDecode.tensor2.bin
   remote: golden-data
-  md5: 71af074a634085d55a6a55c2462bb947
-  size: 15728640
+  md5: ee7a762337c61121b5ee7e86d33c99b8
+  size: 442368
   hash: md5
 - path: LongDecode.tensor3.bin
   remote: golden-data
-  md5: e1209183b16ac8024efae8690bfc7178
-  size: 32768
+  md5: 367829c6bb97e71c3095fcbb6f2d6019
+  size: 8192
   hash: md5
 - path: LongDecode.tensor4.bin
   remote: golden-data
-  md5: ca95c898f25d1abbe954da218a5c26ce
-  size: 512
+  md5: 7194e24085693ac329526f4ec48bf1d1
+  size: 128
   hash: md5
 - path: LongDecode.tensor5.bin
   remote: golden-data
@@ -31,16 +41,6 @@ outs:
   hash: md5
 - path: LongDecode.tensor6.bin
   remote: golden-data
-  md5: cedc96805b4dd4ef7f293cd6914701ed
+  md5: 84e37e2623714d9409f03b7ceaeccab4
   size: 16
-  hash: md5
-- path: LongDecode.tensor12.bin
-  remote: golden-data
-  md5: c29731ceeff382302e29c298f8d3e897
-  size: 4096
-  hash: md5
-- path: LongDecode.tensor13.bin
-  remote: golden-data
-  md5: e186db52da87e72f8f91e38426c09618
-  size: 4096
   hash: md5

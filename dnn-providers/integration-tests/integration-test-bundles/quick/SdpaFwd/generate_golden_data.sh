@@ -81,6 +81,20 @@ generate_bundle() {
     } > "$dvc_file"
 }
 
+# Graph-only bundles (RFC 0011 "Bundle size considerations": golden data above the size
+# budget, inputs reproducible): the generator writes the graph and a .meta.json whose
+# `inputs` recipes tell the harness how to fill every input, and removes golden data
+# (.bin files and the .tensors.dvc pointer) an earlier run left. The harness verifies these
+# bundles against its GPU or CPU reference executor. `git rm` a removed pointer.
+generate_graph_only_bundle() {
+    local outdir="$1"
+    local name="$2"
+    shift 2
+    outdir="$(resolve_tier_outdir "$outdir" "$name")"
+    mkdir -p "$outdir/$name"
+    python3 "$GENERATOR" --base-filename "$outdir/$name/$name" --graph-only "$@"
+}
+
 # Paged bundles: the paged generator writes the complete .tensors.dvc pointer
 # (golden-data remote, md5 and size) and an empty .support.json itself.
 generate_paged_bundle() {
@@ -381,24 +395,30 @@ if [[ "${GENERATE_REFERENCE_FEATURES:-0}" == "1" ]]; then
     generate_bundle "$BF16/row_stats_gqa_causal_br" "Small" --dtype bf16 --row-stats --stats \
         --causal bottom_right --q-dims 2 4 96 64 --v-dims 2 2 160 64 --attn-scale 0.125 --seed 92
 
-    # Standard tier (GPU lane): the same features at longer sequences.
+    # Standard tier (GPU lane): the same features at longer sequences. Each golden bundle
+    # stays within RFC 0011's 1 MiB budget; the dense ones are larger, so they are
+    # graph-only (inputs filled by the harness, verified by the reference executor).
     STD="$GOLDEN_ROOT/standard/SdpaFwd"
-    generate_bundle "$STD/bhsd/bf16/block_mask_gqa" "Medium" --dtype bf16 --block-mask \
-        --q-dims 1 8 1024 64 --v-dims 1 2 2048 64 --attn-scale 0.125 --stats --seed 93
-    generate_bundle "$STD/bhsd/bf16/alibi_causal_tl" "Medium" --dtype bf16 --alibi \
+    generate_graph_only_bundle "$STD/bhsd/bf16/block_mask_gqa" "Medium" --dtype bf16 \
+        --block-mask --q-dims 1 8 1024 64 --v-dims 1 2 2048 64 --attn-scale 0.125 --stats \
+        --seed 93
+    generate_graph_only_bundle "$STD/bhsd/bf16/alibi_causal_tl" "Medium" --dtype bf16 --alibi \
         --causal top_left --q-dims 1 12 1024 64 --v-dims 1 4 1024 64 --attn-scale 0.125 \
         --stats --seed 94
-    generate_bundle "$STD/bhsd/fp8/hd128_causal_batch" "Medium" --dtype fp8 \
+    generate_graph_only_bundle "$STD/bhsd/fp8/hd128_causal_batch" "Medium" --dtype fp8 \
         --q-dims 1 8 1024 128 --v-dims 1 8 1536 128 --causal bottom_right --stats --seed 95 \
         --attn-scale "$SCALE_D128"
+    # Paged decode at 4.5x the quick Decode's context (36 pages of 16 tokens), GQA 4.
     generate_paged_bundle "$STD/bshd/bf16/hd128_causal_paged" "LongDecode" --dtype bf16 \
-        --num-heads-q 32 --num-heads-kv 8 --head-dim 128 --seq-q 1 \
-        --block-size 16 --max-seq-len-kv 4096 --seq-lens-kv 4096 1000 2500 17 \
+        --num-heads-q 8 --num-heads-kv 2 --head-dim 128 --seq-q 1 \
+        --block-size 16 --max-seq-len-kv 576 --seq-lens-kv 576 165 40 17 \
         --stats --causal bottom_right --seed 96 --attn-scale "$SCALE_D128"
+    # Chunked prefill + decode under gpt-oss's 128-token window: 96 query rows over
+    # 832 keys (26 pages of 32), so the window binds across several pages.
     generate_paged_bundle "$STD/bshd/bf16/hd64_window_ragged_paged_sinks" "Long" --dtype bf16 \
-        --num-heads-q 16 --num-heads-kv 2 --head-dim 64 \
-        --ragged-q --seq-lens-q 300 1 64 \
-        --block-size 32 --max-seq-len-kv 2048 --seq-lens-kv 2048 700 64 \
+        --num-heads-q 8 --num-heads-kv 2 --head-dim 64 \
+        --ragged-q --seq-lens-q 96 1 32 \
+        --block-size 32 --max-seq-len-kv 832 --seq-lens-kv 832 300 32 \
         --sinks --stats --causal bottom_right --window-left 128 --seed 97 \
         --attn-scale "$SCALE_D64"
 
