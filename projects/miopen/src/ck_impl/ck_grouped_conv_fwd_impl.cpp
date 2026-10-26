@@ -463,8 +463,8 @@ extern "C" ck_impl_status_t ck_impl_fwd_get_all_kernel_type_strings(CKKernelList
 
         auto ptrs = DeviceOpGFwdPtrs<float>::GetInstances();
         auto native_output = DeviceOpGFwdNativeOutputPtrs<float>::GetInstances();
-        std::vector<std::unique_ptr<
-            ck::tensor_operation::device::instance::DeviceNCHWPointwiseFwd>> pointwise;
+        std::vector<std::unique_ptr<ck::tensor_operation::device::instance::DeviceNCHWPointwiseFwd>>
+            pointwise;
         pointwise.reserve(1);
         ck::tensor_operation::device::instance::
             add_device_grouped_conv2d_fwd_nchw_pointwise_f16_instances(pointwise);
