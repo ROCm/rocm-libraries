@@ -722,7 +722,7 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, SPWSDeclinesSharedRegionsWhoseEndOverflows
     EXPECT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
         matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true})));
     EXPECT_FALSE(graphMatch(spec).has_value());
-    // One bit less ends at 2^62 + 2^61, inside int64.
+    // One bit less: each is 2^61 bytes and the second ends at 2^62, inside int64.
     EXPECT_TRUE(graphMatch(dimsSpec(int64_t{1} << 59, 1, 1, 1, 1)).has_value());
 }
 

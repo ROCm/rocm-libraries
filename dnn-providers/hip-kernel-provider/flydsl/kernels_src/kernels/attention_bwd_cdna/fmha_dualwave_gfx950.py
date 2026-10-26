@@ -1176,7 +1176,7 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         # Published, because the dK/dV group loop's trip count is this same
         # quantity and `q_head_idx` -- the head that loop walks from -- is
         # derived from it two lines down. Recomputing it at the loop is how a
-        # trait and a kernarg drifted apart in the first place (issue 9); one
+        # trait and a kernarg drifted apart in the first place; one
         # source is what stops them disagreeing again.
         self.gqa_group = gqa_group
         self.h_kv_idx = self.h_idx % num_head_k

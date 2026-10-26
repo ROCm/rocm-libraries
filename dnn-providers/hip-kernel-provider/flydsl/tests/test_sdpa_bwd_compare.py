@@ -189,7 +189,7 @@ def test_red_rows_exit_nonzero(tmp_path, capsys, row, patch, line) -> None:
 DUAL = {"build_status": "dual_object", "file": "", "detail": "dual"}
 
 
-def test_a_dq_causal_dual_object_outside_the_flaky_list_is_known_t2(
+def test_a_dq_causal_dual_object_outside_the_flaky_list_is_known_nondeterministic(
     tmp_path, capsys
 ) -> None:
     argv = _build_fixture(tmp_path)

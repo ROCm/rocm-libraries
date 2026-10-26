@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 FlyDSL Project Contributors
-# Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
+# Vendored from AOTriton (https://github.com/ROCm/aotriton, MIT; this file's Apache-2.0 header is
+# FlyDSL Project Contributors'): `modules/flash/flyc/fmha_common_gfx1201.py`, as the FlyDSL SDPA backward
+# sweep carries it (the AOTriton revision is not recorded; `../attention_rdna4/README.md` pins the
+# one that copy follows). Differs from `../attention_rdna4/fmha_common_gfx1201.py` in the package imports
+# (`attention_bwd_cdna`) and in entering `scf.if` blocks through `kernels_common._if_then`.
+
 
 """Hardware detail for the gfx1201 (RDNA4) attention kernels.
 

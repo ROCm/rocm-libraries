@@ -23,8 +23,10 @@ file per engine:
 [`FlydslSdpaAiwNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaAiwNative.cpp),
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
 [`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
-and
 [`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
+[`FlydslSdpaBwdMergedNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdMergedNative.cpp)
+and
+[`FlydslSdpaBwdSplitNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSplitNative.cpp),
 with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`,
 and the rules RDNA and CDNA apply alike (the mask's bounds, the sink, the scale tensor,
 output aliasing) in `FlydslSdpaShared.hpp`.
@@ -158,6 +160,15 @@ these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
+**SDPA backward on CDNA** (**gfx950** only, 2,729 objects): two engines over one graph
+matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
+computing dK, dV, dQ and, on a bias graph, dBias. `hipkernel:flydsl_sdpa_bwd_split` is
+slotted, three launches in order -- prep, dK/dV, dQ -- and so is not plan-serializable. The
+split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
+`sdpa_bwd_split` is descriptor-only (no objects). The dBias and dSink reduce kernels ship
+as ops of their own and ride inside the objects that launch them. bf16, f16 and f32 data;
+what a graph must be, and the declines, are in [COVERAGE.md §9](COVERAGE.md).
+
 ## How it reaches hipDNN
 
 The objects and their descriptors are a **bundle of the provider's production
@@ -260,15 +271,15 @@ provider tree; everything else is relative to this directory.
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
 | `<content>/<op>/<target>/manifest.json` | per-object SHA256 + knobs + argument layout + the toolchain and input digest that built them |
-| `kernels_src/kernels/**` | vendored kernel sources, each with its upstream's SPDX and copyright lines. A modified file carries a header naming its upstream (FlyDSL or AITER), commit, path and modifications; the `attention_rdna4/` modules inherit their package's (AOTriton), and a file written for this provider says so in its own. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
+| `kernels_src/kernels/**` | vendored kernel sources, each with its upstream's SPDX and copyright lines. A modified file carries a header naming its upstream (FlyDSL or AITER), commit, path and modifications; the `attention_rdna4/` modules inherit their package's (AOTriton), the two `fmha_*_gfx1201.py` modules of `attention_bwd_cdna/` are copies of AOTriton's files (their headers say so), and a file written for this provider says so in its own. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
 | `generators/_instances.py` | **the instance table** — one row per shipped object, every op |
 | `generators/_flydsl_env.py` | the pins: wheel version, upstream commits, ROCm recording |
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce`, `gen_sdpa_bwd_rdna_dbias_reduce` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
-| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
+| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py`, `_sdpa_bwd_cdna_build.py`, `_sdpa_bwd_rdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |

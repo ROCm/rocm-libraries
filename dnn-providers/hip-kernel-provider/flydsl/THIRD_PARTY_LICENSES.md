@@ -275,7 +275,10 @@ SOFTWARE.
 - **Use:** The gfx12 attention kernel sources under
   `flydsl/kernels_src/kernels/attention_rdna4/` are vendored from AOTriton's
   `modules/flash/flyc/`, with the modifications that directory's `README.md` lists. The
-  `hipkernel:flydsl_sdpa_aiw` code objects are compiled from them.
+  `hipkernel:flydsl_sdpa_aiw` code objects are compiled from them. Two modules there,
+  `fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py`, are also copied into
+  `flydsl/kernels_src/kernels/attention_bwd_cdna/` (differences in that directory's
+  `README.md`); the `hipkernel:flydsl_sdpa_bwd_*` code objects are compiled from the copies.
 
 ```
 Copyright (C) 2024-2025 Advanced Micro Devices, Inc.

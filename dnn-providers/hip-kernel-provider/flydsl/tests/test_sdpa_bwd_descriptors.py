@@ -5,7 +5,7 @@
 
 The engine reads only the KMD metadata the manifest's knobs spell, and autotune sees
 only the UED ``knobs`` list. These tests run ``collect`` and ``build_documents`` over a
-synthetic merged manifest: the schema is the 4A contract, the UED knobs are exactly the
+synthetic merged manifest: the schema is the one the engine reads (slot metadata), the UED knobs are exactly the
 tuning fields (schedule and launch geometry), and the op-level documents have the keys of a sibling op's.
 Host-only: no object is compiled and no content tree is needed.
 """

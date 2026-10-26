@@ -14,7 +14,7 @@ RDNA families **SDPA forward**, prefill and decode engines (156 per family, §5)
 `gfx12-generic` also **AOTriton's gfx1201 kernel** as an engine of its own (72, §5.6).
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels. Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,729 objects). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -246,7 +246,7 @@ do not compute, declined rather than approximated.
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
 | **Multi-node graphs, fused add+RMSNorm** | One node per kernel. Fusion would be its own pack. |
 | **Architectures outside gfx11-generic, gfx12-generic, gfx90a, gfx942 and gfx950** | Objects ship for the gfx11 generic family (gfx1100–gfx1103, gfx1150–gfx1153), the gfx12 one (gfx1200, gfx1201), and the CDNA targets gfx90a, gfx942 and gfx950. gfx1170/gfx1171 belong to `gfx11-7-generic`. With `GPU_TARGETS` naming no arch we ship kernels for, the integration reports dormant at configure time and stages nothing — it does not fail, and it does not silently produce an empty shard. Adding a family is a regeneration ([REGEN.md](REGEN.md) §3), not a code change. |
-| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward and the SDPA forward families (§5, §7), each an engine of its own. |
+| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward, the SDPA forward families (§5, §7) and the SDPA backward ops (§9), each engine its own. |
 
 ---
 
@@ -1031,3 +1031,27 @@ Approved for this integration.
 | Deviation | What FlyDSL does instead | Status |
 |---|---|---|
 | **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
+
+---
+
+## 9. SDPA backward on CDNA — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
+
+gfx950 only. Both engines share one graph matcher
+([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
+a pure function of the graph that either computes the problem or says why it declines; what
+belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
+
+| Engine | Launches | Ops (objects) |
+|---|---|---|
+| `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (309) |
+| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,319), `sdpa_bwd_dq` (1,010); `sdpa_bwd_split` carries the descriptors only |
+
+The split engine is slotted (RFC 0021), so a plan that uses it cannot be serialized. A
+broadcast dBias is summed by the dBias reduce kernel, a second symbol of the code object
+that launches it (`sdpa_bwd_dbias_reduce`, 3 objects; the fp32 family has its own); the
+dSink reduce is `sdpa_bwd_dsink_reduce` (2). The 16-bit families cover bf16 and f16;
+fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute is
+declined with a named cause (data type, operand layout, mask, workspace overflow), so
+another engine gets the plan. The kernels and how the shipped objects are pinned are in
+[`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
+a gfx11-generic dBias-reduce smoke object (`sdpa_bwd_rdna_dbias_reduce`) has no engine.
