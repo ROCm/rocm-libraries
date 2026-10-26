@@ -448,33 +448,36 @@ TEST(PrimeCpp, InclusiveSearchAndPrimality) {
 TEST(IndexSelectionCpp, StrictAndNamedOrders) {
     static_assert(!std::is_default_constructible_v<IndexSelection>);
     const Shape shape{2, 3};
-    const auto ascending = IndexSelection::explicitIndices({1}, std::vector<size_t>{0, 1});
-    const auto descending = IndexSelection::explicitIndices({1}, std::vector<size_t>{1, 0});
-    EXPECT_EQ(shape.coordinates(ascending.indices(6).front(), ascending.indexOrder(2)),
-              (std::vector<size_t>{0, 1}));
-    EXPECT_EQ(shape.coordinates(descending.indices(6).front(), descending.indexOrder(2)),
-              (std::vector<size_t>{1, 0}));
-    const auto scalar = IndexSelection::all({});
-    EXPECT_TRUE(scalar.indexOrder(0).empty());
-    EXPECT_THROW(scalar.indexOrder(2), std::runtime_error);
-    EXPECT_THROW(ascending.indexOrder(1), std::runtime_error);
+    const auto ascending = IndexSelection(std::vector<size_t>({1}), std::vector<size_t>{0, 1});
+    const auto descending = IndexSelection(std::vector<size_t>({1}), std::vector<size_t>{1, 0});
+    EXPECT_EQ(
+        shape.coordinates(shape.selectedIndices(ascending).front(), shape.indexOrder(ascending)),
+        (std::vector<size_t>{0, 1}));
+    EXPECT_EQ(
+        shape.coordinates(shape.selectedIndices(descending).front(), shape.indexOrder(descending)),
+        (std::vector<size_t>{1, 0}));
+    const auto scalar = IndexSelection(IndexRange::all(), std::vector<size_t>{});
+    EXPECT_TRUE(Shape{}.indexOrder(scalar).empty());
+    EXPECT_THROW(shape.indexOrder(scalar), std::runtime_error);
+    EXPECT_THROW(Shape{6}.indexOrder(ascending), std::runtime_error);
     for (const auto& order :
          {std::vector<size_t>{0, 0}, std::vector<size_t>{1}, std::vector<size_t>{0, 2}}) {
-        EXPECT_THROW(IndexSelection::all(order), std::runtime_error);
-        EXPECT_THROW(IndexSelection::strided(0, 2, 3, order), std::runtime_error);
-        EXPECT_THROW(IndexSelection::explicitIndices({1}, order), std::runtime_error);
-        EXPECT_THROW(IndexSelection::primeStride(6, 6, 0, order), std::runtime_error);
+        EXPECT_THROW(IndexSelection(IndexRange::all(), order), std::runtime_error);
+        EXPECT_THROW(IndexSelection(IndexRange(0, 2, 3), order), std::runtime_error);
+        EXPECT_THROW(IndexSelection(std::vector<size_t>({1}), order), std::runtime_error);
+        EXPECT_THROW(IndexSelection(primeIndexRange(6, 6, 0), order), std::runtime_error);
     }
     const std::array<IndexSelection, 4> named{
-        IndexSelection::allLastDimensionFastest(),
-        IndexSelection::stridedLastDimensionFastest(0, 2, 3),
-        IndexSelection::explicitIndicesLastDimensionFastest({1}),
-        IndexSelection::primeStrideLastDimensionFastest(6, 6, 2)};
+        IndexSelection(IndexRange::all(), LastDimensionFastest{}),
+        IndexSelection(IndexRange(0, 2, 3), LastDimensionFastest{}),
+        IndexSelection(std::vector<size_t>({1}), LastDimensionFastest{}),
+        IndexSelection(primeIndexRange(6, 6, 2), LastDimensionFastest{})};
     for (const auto& selection : named) {
-        EXPECT_TRUE(selection.indexOrder(0).empty());
-        EXPECT_EQ(selection.indexOrder(2), (std::vector<size_t>{0, 1}));
-        EXPECT_EQ(selection.indexOrder(3), (std::vector<size_t>{0, 1, 2}));
-        EXPECT_EQ(shape.coordinates(1, selection.indexOrder(2)), (std::vector<size_t>{0, 1}));
+        EXPECT_TRUE(Shape{}.indexOrder(selection).empty());
+        EXPECT_EQ(Shape({2, 3}).indexOrder(selection), (std::vector<size_t>{0, 1}));
+        EXPECT_EQ(Shape({2, 3, 4}).indexOrder(selection), (std::vector<size_t>{0, 1, 2}));
+        EXPECT_EQ(shape.coordinates(1, Shape({2, 3}).indexOrder(selection)),
+                  (std::vector<size_t>{0, 1}));
     }
 }
 
@@ -482,35 +485,60 @@ TEST(IndexSelectionCpp, OwnsSpanOrdersAndIndices) {
     auto selections = [] {
         std::array<size_t, 3> order{2, 1, 0};
         std::vector<size_t> indices{7, 1, 7};
-        std::array<IndexSelection, 4> result{IndexSelection::all(order),
-                                             IndexSelection::strided(0, 2, 3, order),
-                                             IndexSelection::explicitIndices(indices, order),
-                                             IndexSelection::primeStride(24, 24, 5, order)};
+        std::array<IndexSelection, 4> result{IndexSelection(IndexRange::all(), order),
+                                             IndexSelection(IndexRange(0, 2, 3), order),
+                                             IndexSelection(std::vector<size_t>(indices), order),
+                                             IndexSelection(primeIndexRange(24, 24, 5), order)};
         order[0] = 9;
         indices[0] = 99;
         return result;
     }();
     for (const auto& selection : selections) {
-        const auto order = selection.indexOrder(3);
+        const auto order = Shape({2, 3, 4}).indexOrder(selection);
         EXPECT_EQ((std::vector<size_t>(order.begin(), order.end())),
                   (std::vector<size_t>{2, 1, 0}));
     }
     auto copied = selections[2];
-    selections[2] = IndexSelection::allLastDimensionFastest();
-    EXPECT_EQ(copied.indices(8), (std::vector<size_t>{1, 7}));
+    selections[2] = IndexSelection(IndexRange::all(), LastDimensionFastest{});
+    EXPECT_EQ(Shape({2, 2, 2}).selectedIndices(copied), (std::vector<size_t>{1, 7}));
     const auto moved = std::move(copied);
-    EXPECT_EQ(moved.indices(8), (std::vector<size_t>{1, 7}));
-    EXPECT_EQ(moved.indexOrder(3), (std::vector<size_t>{2, 1, 0}));
+    EXPECT_EQ(Shape({2, 2, 2}).selectedIndices(moved), (std::vector<size_t>{1, 7}));
+    EXPECT_EQ(Shape({2, 2, 2}).indexOrder(moved), (std::vector<size_t>{2, 1, 0}));
 }
 
 TEST(IndexSelectionCpp, SizeBoundaries) {
     const size_t maximum = std::numeric_limits<size_t>::max();
-    EXPECT_EQ(IndexSelection::strided(0, 1, maximum, {}).selectedCount(maximum), maximum);
-    EXPECT_EQ(IndexSelection::strided(maximum - 2, 3, maximum, {}).indices(maximum),
+    const Shape shape{maximum};
+    EXPECT_EQ(shape.selectedCount(IndexSelection(IndexRange::all(), LastDimensionFastest{})),
+              maximum);
+    EXPECT_EQ(shape.selectedIndices(
+                  IndexSelection(IndexRange(maximum - 2, 3, maximum), LastDimensionFastest{})),
               (std::vector<size_t>{maximum - 2}));
-    EXPECT_EQ(IndexSelection::strided(1, maximum - 2, maximum, {}).indices(maximum),
+    EXPECT_EQ(shape.selectedIndices(
+                  IndexSelection(IndexRange(1, maximum - 2, maximum), LastDimensionFastest{})),
               (std::vector<size_t>{1, maximum - 1}));
-    EXPECT_THROW(IndexSelection::primeStride(2, maximum, 1, {}), std::runtime_error);
+    EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
+}
+
+TEST(IndexSelectionCpp, VisitsCoordinatesAndChecksBoundsBeforeCallbacks) {
+    const Shape shape{2, 4};
+    const std::array<size_t, 2> order{0, 1};
+    for (const auto& selection : {IndexSelection(IndexRange(1, 2, 3), order),
+                                  IndexSelection(std::vector<size_t>{5, 1, 3, 5}, order)}) {
+        std::vector<std::vector<size_t>> visited;
+        shape.forEachCoordinate(selection, [&](size_t, std::span<const size_t> coordinates) {
+            visited.emplace_back(coordinates.begin(), coordinates.end());
+        });
+        EXPECT_EQ(visited, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
+    }
+    EXPECT_TRUE(shape.selectsAll(IndexSelection(IndexRange(0, 1, 8), order)));
+    size_t calls = 0;
+    const IndexSelection invalid(std::vector<size_t>{0, 8}, order);
+    EXPECT_THROW(
+        shape.forEachCoordinate(invalid, [&](size_t, std::span<const size_t>) { ++calls; }),
+        std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    EXPECT_THROW(IndexRange(0, 0, 3), std::runtime_error);
 }
 
 TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {

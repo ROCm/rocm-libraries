@@ -2,221 +2,142 @@
 # SPDX-License-Identifier: MIT
 
 import ctypes
+import itertools
 import unittest
 
+import numpy as np
 import hostnumerics as hn
-
 
 SIZE_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 
 
 class IndexSelectionTests(unittest.TestCase):
-    def assert_selection(self, selection, logical_elements, expected):
-        self.assertEqual(selection.indices(logical_elements), expected)
-        self.assertEqual(selection.selected_count(logical_elements), len(expected))
-
-    def test_factory_choices_are_required(self):
-        for factory in (
-            lambda: hn.IndexSelection.all(),
-            lambda: hn.IndexSelection.strided(0, 2, index_order=[0]),
-            lambda: hn.IndexSelection.strided(0, 2, max_elements=SIZE_MAX),
-            lambda: hn.IndexSelection.explicit_indices([1]),
-            lambda: hn.IndexSelection.prime_stride(10, 10, 3),
+    def test_required_range_fields_and_order(self):
+        for construct in (
+            lambda: hn.IndexRange(0, 2),
+            lambda: hn.IndexSelection(hn.IndexRange.all()),
+            lambda: hn.IndexSelection([1]),
         ):
             with self.assertRaises(TypeError):
-                factory()
-
-    def test_all_and_empty_indices(self):
-        selection = hn.IndexSelection.all(index_order=[0])
-        self.assertEqual(selection.kind, hn.IndexSelectionKind.All)
-        self.assertTrue(selection.selects_all)
-        self.assertEqual(selection.index_order(1), [0])
-        for logical in (0, 1, 7):
-            self.assert_selection(selection, logical, list(range(logical)))
-        self.assertEqual(selection.selected_count(SIZE_MAX), SIZE_MAX)
-
-    def test_strided_and_limited_indices(self):
-        selection = hn.IndexSelection.strided(2, 3, max_elements=2, index_order=[0])
-        self.assertEqual(selection.kind, hn.IndexSelectionKind.Strided)
-        self.assertFalse(selection.selects_all)
-        self.assertEqual(
-            (selection.first, selection.stride, selection.max_elements), (2, 3, 2)
-        )
-        for logical in range(11):
-            for first in (0, 2, logical, logical + 1):
-                for stride in (1, 2, 3, 11):
-                    expected = list(range(first, logical, stride))
-                    self.assert_selection(
-                        hn.IndexSelection.strided(
-                            first, stride, max_elements=SIZE_MAX, index_order=[0]
-                        ),
-                        logical,
-                        expected,
-                    )
-                    for limit in (0, 1, 2, 20):
-                        self.assert_selection(
-                            hn.IndexSelection.strided(
-                                first, stride, limit, index_order=[0]
-                            ),
-                            logical,
-                            expected[:limit],
-                        )
+                construct()
         with self.assertRaisesRegex(RuntimeError, "stride must be nonzero"):
-            hn.IndexSelection.strided(0, 0, max_elements=0, index_order=[0])
+            hn.IndexRange(0, 0, 3)
 
-    def test_explicit_normalization_and_bounds(self):
-        source = [7, 0, 3, 7, 3]
-        selection = hn.IndexSelection.explicit_indices(source, index_order=[0])
-        source[:] = [99]
-        self.assertEqual(selection.kind, hn.IndexSelectionKind.Explicit)
-        self.assertFalse(selection.selects_all)
-        self.assert_selection(selection, 8, [0, 3, 7])
-        returned = selection.indices(8)
-        returned[:] = [99]
-        self.assert_selection(selection, 12, [0, 3, 7])
-        for logical in (0, 3, 7):
-            for query in (selection.indices, selection.selected_count):
-                with self.assertRaisesRegex(
-                    RuntimeError, "index exceeds logical element count"
-                ):
-                    query(logical)
-        empty = hn.IndexSelection.explicit_indices([], index_order=[0])
-        for logical in (0, 1, SIZE_MAX):
-            self.assert_selection(empty, logical, [])
+    def test_coordinates_against_numpy(self):
+        dimensions = (2, 3, 4)
+        shape = hn.Shape(dimensions)
+        for order in itertools.permutations(range(3)):
+            for first, stride, limit in (
+                (0, 1, SIZE_MAX),
+                (1, 3, 5),
+                (2, 5, 0),
+                (24, 1, 2),
+            ):
+                flat = list(range(first, 24, stride))[:limit]
+                expected = []
+                for index in flat:
+                    ordered = np.unravel_index(
+                        index, tuple(dimensions[a] for a in order)
+                    )
+                    point = [0] * 3
+                    for axis, coordinate in zip(order, ordered):
+                        point[axis] = int(coordinate)
+                    expected.append(point)
+                for indices in (hn.IndexRange(first, stride, limit), flat[::-1] + flat):
+                    selection = hn.IndexSelection(indices, order)
+                    self.assertEqual(shape.selected_indices(selection), flat)
+                    self.assertEqual(shape.selected_count(selection), len(flat))
+                    self.assertEqual(shape.selected_coordinates(selection), expected)
 
-    def test_prime_sampling_is_approximate(self):
+    def test_normalization_ownership_and_bounds(self):
+        indices, order = [7, 0, 3, 7], [0, 1]
+        selection = hn.IndexSelection(indices, order)
+        indices[:] = [99]
+        order[:] = [1, 0]
+        shape = hn.Shape([2, 4])
+        self.assertEqual(shape.selected_indices(selection), [0, 3, 7])
+        self.assertEqual(shape.index_order(selection), [0, 1])
+        invalid = hn.IndexSelection([8], [0, 1])
+        for query in (
+            shape.selected_indices,
+            shape.selected_count,
+            shape.selected_coordinates,
+            shape.selects_all,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "index exceeds logical element count"
+            ):
+                query(invalid)
+        for bad in ([0, 0], [1], [0, 2]):
+            with self.assertRaisesRegex(RuntimeError, "permutation"):
+                hn.IndexSelection([], bad)
+        for empty_shape in (hn.Shape(), hn.Shape([2, 0])):
+            wrong_rank = hn.IndexSelection([], [0])
+            with self.assertRaisesRegex(RuntimeError, "rank does not match"):
+                empty_shape.selected_coordinates(wrong_rank)
+
+    def test_all_is_full_coverage(self):
+        shape = hn.Shape([2, 4])
+        for indices in (hn.IndexRange.all(), hn.IndexRange(0, 1, 8), list(range(8))):
+            self.assertTrue(
+                shape.selects_all(hn.IndexSelection(indices, hn.LastDimensionFastest()))
+            )
+        self.assertFalse(
+            shape.selects_all(hn.IndexSelection(hn.IndexRange(0, 1, 7), [0, 1]))
+        )
+        for dimensions, expected in (([], [[]]), ([0], [])):
+            shape = hn.Shape(dimensions)
+            selection = hn.IndexSelection(
+                hn.IndexRange.all(), hn.LastDimensionFastest()
+            )
+            self.assertEqual(shape.selected_coordinates(selection), expected)
+
+    def test_range_counts_and_size_t_boundaries(self):
+        for total in range(11):
+            shape = hn.Shape([total])
+            for first, stride, limit in itertools.product(
+                (0, 2, total, total + 1), (1, 2, 3, 11), (0, 1, 2, 20)
+            ):
+                selection = hn.IndexSelection(hn.IndexRange(first, stride, limit), [0])
+                expected = list(range(first, total, stride))[:limit]
+                self.assertEqual(shape.selected_indices(selection), expected)
+                self.assertEqual(shape.selected_count(selection), len(expected))
+        shape = hn.Shape([SIZE_MAX])
+        selection = hn.IndexSelection(hn.IndexRange(1, SIZE_MAX - 2, 2), [0])
+        self.assertEqual(shape.selected_indices(selection), [1, SIZE_MAX - 1])
+        self.assertEqual(
+            shape.selected_count(hn.IndexSelection(hn.IndexRange.all(), [0])), SIZE_MAX
+        )
+        for value in (-1, SIZE_MAX + 1):
+            with self.assertRaises(TypeError):
+                hn.IndexRange(value, 1, 1)
+            with self.assertRaises(TypeError):
+                hn.IndexSelection([value], [0])
+
+    def test_inherited_prime_sampling(self):
         for logical, allocated, requested, stride in (
             (10, 10, 3, 3),
             (20, 9, 1, 11),
             (60, 49, 1, 53),
             (128, 121, 1, 127),
-            (20, 1, 3, 2),
             (20, 0, 3, 2),
         ):
-            selection = hn.IndexSelection.prime_stride(
-                logical, allocated, requested, index_order=[0]
+            indices = hn.prime_index_range(logical, allocated, requested)
+            self.assertEqual(indices.stride, stride)
+            selection = hn.IndexSelection(indices, [0])
+            self.assertEqual(
+                hn.Shape([logical]).selected_indices(selection),
+                list(range(0, logical, stride)),
             )
-            self.assertEqual(selection.stride, stride)
-            self.assert_selection(selection, logical, list(range(0, logical, stride)))
-        self.assertEqual(
-            hn.IndexSelection.prime_stride(10, 10, 3, index_order=[0]).selected_count(
-                10
-            ),
-            4,
-        )
-
-    def test_prime_zero_request_and_all_indices(self):
-        for logical, requested in ((10, 0), (10, 10), (10, 11), (0, 0), (0, 1)):
-            selection = hn.IndexSelection.prime_stride(
-                logical, SIZE_MAX, requested, index_order=[0]
+        for requested in (0, 10, 11):
+            selection = hn.IndexSelection(
+                hn.prime_index_range(10, SIZE_MAX, requested), [0]
             )
-            self.assertTrue(selection.selects_all)
-            self.assert_selection(selection, logical, list(range(logical)))
-
-    def test_size_t_boundaries_and_overflow(self):
-        self.assert_selection(
-            hn.IndexSelection.strided(
-                SIZE_MAX - 2, 3, max_elements=SIZE_MAX, index_order=[0]
-            ),
-            SIZE_MAX,
-            [SIZE_MAX - 2],
-        )
-        self.assert_selection(
-            hn.IndexSelection.strided(
-                1, SIZE_MAX - 2, max_elements=SIZE_MAX, index_order=[0]
-            ),
-            SIZE_MAX,
-            [1, SIZE_MAX - 1],
-        )
-        self.assert_selection(
-            hn.IndexSelection.strided(
-                SIZE_MAX, 1, max_elements=SIZE_MAX, index_order=[0]
-            ),
-            SIZE_MAX,
-            [],
-        )
-        self.assertEqual(
-            hn.IndexSelection.strided(
-                0, 1, max_elements=SIZE_MAX, index_order=[0]
-            ).selected_count(SIZE_MAX),
-            SIZE_MAX,
-        )
-        invalid = hn.IndexSelection.explicit_indices([SIZE_MAX], index_order=[0])
-        for query in (invalid.indices, invalid.selected_count):
-            with self.assertRaises(RuntimeError):
-                query(SIZE_MAX)
+            self.assertTrue(hn.Shape([10]).selects_all(selection))
         with self.assertRaisesRegex(
             RuntimeError, "Prime-stride index selection overflow"
         ):
-            hn.IndexSelection.prime_stride(2, SIZE_MAX, 1, index_order=[0])
-
-    def test_selections_own_order_sequences(self):
-        for source in ([2, 1, 0], (2, 1, 0)):
-            selections = (
-                hn.IndexSelection.all(source),
-                hn.IndexSelection.strided(
-                    0, 2, index_order=source, max_elements=SIZE_MAX
-                ),
-                hn.IndexSelection.explicit_indices([1, 7], source),
-                hn.IndexSelection.prime_stride(24, 24, 5, source),
-                hn.IndexSelection.prime_stride(24, 24, 0, source),
-            )
-            if isinstance(source, list):
-                source[:] = [0, 1, 2]
-            del source
-            for selection in selections:
-                self.assertEqual(selection.index_order(3), [2, 1, 0])
-                returned_order = selection.index_order(3)
-                returned_order[:] = [0, 1, 2]
-                self.assertEqual(selection.index_order(3), [2, 1, 0])
-
-    def test_strict_and_named_orders(self):
-        with self.assertRaises(TypeError):
-            hn.IndexSelection()
-        scalar = hn.IndexSelection.all([])
-        self.assertEqual(scalar.index_order(0), [])
-        with self.assertRaisesRegex(RuntimeError, "rank does not match"):
-            scalar.index_order(2)
-        for order in ([0, 0], [1], [0, 2]):
-            for factory in (
-                lambda: hn.IndexSelection.all(order),
-                lambda: hn.IndexSelection.strided(0, 2, 3, order),
-                lambda: hn.IndexSelection.explicit_indices([1], order),
-                lambda: hn.IndexSelection.prime_stride(6, 6, 0, order),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "permutation"):
-                    factory()
-        for selection in (
-            hn.IndexSelection.all_last_dimension_fastest(),
-            hn.IndexSelection.strided_last_dimension_fastest(0, 2, 3),
-            hn.IndexSelection.explicit_indices_last_dimension_fastest([1]),
-            hn.IndexSelection.prime_stride_last_dimension_fastest(6, 6, 2),
-        ):
-            self.assertEqual(selection.index_order(0), [])
-            self.assertEqual(selection.index_order(2), [0, 1])
-            self.assertEqual(selection.index_order(3), [0, 1, 2])
-
-    def test_non_size_t_arguments_are_rejected(self):
-        for value in (-1, SIZE_MAX + 1):
-            for factory in (
-                lambda: hn.IndexSelection.strided(
-                    value, 1, max_elements=SIZE_MAX, index_order=[0]
-                ),
-                lambda: hn.IndexSelection.strided(
-                    0, value, max_elements=SIZE_MAX, index_order=[0]
-                ),
-                lambda: hn.IndexSelection.explicit_indices([value], index_order=[0]),
-                lambda: hn.IndexSelection.all([value]),
-                lambda: hn.IndexSelection.prime_stride(10, value, 1, index_order=[0]),
-            ):
-                with self.assertRaises(TypeError):
-                    factory()
-            for query in (
-                hn.IndexSelection.all(index_order=[0]).indices,
-                hn.IndexSelection.all(index_order=[0]).selected_count,
-            ):
-                with self.assertRaises(TypeError):
-                    query(value)
+            hn.prime_index_range(2, SIZE_MAX, 1)
 
 
 if __name__ == "__main__":
