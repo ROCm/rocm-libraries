@@ -75,6 +75,9 @@ class SIA3(SIA):
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, itemsGRToSchedLater)
             writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex
+            # assignLWSchedIndexSIA3 is skipped here; without this the 1LDSBuffer sync point stays -1
+            if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
+                writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=isNGLL)
             startIter = assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEndIter, numWritesToSched)

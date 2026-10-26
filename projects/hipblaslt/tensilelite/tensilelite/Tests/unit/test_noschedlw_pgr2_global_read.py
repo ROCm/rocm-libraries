@@ -1,13 +1,16 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""PGR2 + ScheduleLocalWrite=0 must still prefetch the next tile.
+"""1LDSBuffer + PGR2 + ScheduleLocalWrite=0 main loop (SIA1/2/3).
 
 With PrefetchGlobalRead>=2, prepareGRInstToSched defers the next tile's global
 reads until the local writes have consumed their G2L vgprs. Only schedLocalWrite
 used to issue them, so with ScheduleLocalWrite=0 (the only 1LDSBuffer option for
 SIA1) the unrolled loop had no global reads and the result was wrong for more
 than PGR K-tiles.
+
+SIA3 additionally never set sync1LdsMfmaIndex without ScheduleLocalWrite, so
+kernel generation failed with the 1LDSBuffer read/write overlap error.
 """
 
 from pathlib import Path
@@ -24,7 +27,7 @@ _CONFIG = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx11"
            / "fp16_tn_1lds_noslw_gfx11.yaml").resolve()
 
 
-@pytest.mark.parametrize("sia", [1, 2])
+@pytest.mark.parametrize("sia", [1, 2, 3])
 def test_noschedlw_pgr2_main_loop_has_global_reads(tmp_path, sia):
     config = yaml.safe_load(_CONFIG.read_text())
     params = config["BenchmarkProblems"][0][1]["ForkParameters"]
@@ -47,5 +50,8 @@ def test_noschedlw_pgr2_main_loop_has_global_reads(tmp_path, sia):
     assert numLocalWrites > 0
     assert body.count("buffer_load") == numLocalWrites, \
         "unrolled loop does not prefetch the next tile"
-    assert body.index("buffer_load") > body.index("ds_store"), \
+    firstLocalWrite = body.index("ds_store")
+    assert body.index("buffer_load") > firstLocalWrite, \
         "deferred global reads must follow the local writes that free their vgprs"
+    assert body.rindex("ds_load") < firstLocalWrite, \
+        "1LDSBuffer: all local reads must precede the local writes"

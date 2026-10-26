@@ -42,7 +42,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [16]
-        - ScheduleIterAlg: [1, 2]
+        - ScheduleIterAlg: [1, 2, 3]
         - ScheduleLocalWrite: [0]
         - 1LDSBuffer: [1]
         - TransposeLDS: [1]
