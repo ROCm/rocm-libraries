@@ -19,7 +19,6 @@ enum class IntegerRounding : uint8_t {
 // domain for every policy. N is the destination's bit width.
 enum class IntegerOverflow : uint8_t {
     // Leave the rounded value unchanged; it must already fit in the destination.
-    // For int8_t, 127 is valid and 128 violates the caller precondition.
     Identity,
     // Clamp the rounded value to the destination's range.
     // For int8_t, 128 and positive infinity become 127; negative infinity becomes -128.
