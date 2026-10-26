@@ -295,6 +295,43 @@ def test_gr_edge_mask_is_dropped_under_prefetch_across_persistent(stack):
     assert "lane inside the real M/N?" not in text
 
 
+def _emitSubtileOffsets(stack, tc="A", kernel=None):
+    kernel = kernel or _kernel()
+    writer, ti = _tile(stack, tc, kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+    module = Module()
+    GR._grComputeSubtileOffsets_tlu(writer, module, ti, kernel)
+    return writer, ti, module, before
+
+
+def test_subtile_rows_wholly_past_the_size_are_dropped():
+    """Rows share the GR offset VGPR and differ only by a scalar soffset, so a
+    per-lane mask cannot vary by row. A row that is entirely past M/N needs no
+    per-lane test: its start is scalar, so its soffset can go out of bounds."""
+    _, ti, module, _ = _emitSubtileOffsets(_XOR_STACK)
+    nonEmptyRows = sum(1 for rl in ti.localSubtilesRegister if len(rl))
+    assert nonEmptyRows > 1, "fixture no longer has multiple subtile rows"
+    text = str(module)
+    assert text.count("wholly past the real M/N") == nonEmptyRows
+    assert "BufferOOB" in text
+
+
+def test_subtile_row_drop_is_scalar_only_and_leaks_nothing():
+    """It must not cost an offset VGPR per row; that is why it is not per lane."""
+    writer, _, module, (vbefore, sbefore) = _emitSubtileOffsets(_XOR_STACK)
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
+    assert "v_cmp" not in str(module)
+
+
+def test_subtile_row_drop_is_skipped_under_prefetch_across_persistent():
+    kernel = _kernel()
+    kernel["PrefetchAcrossPersistent"] = 1
+    _, _, module, _ = _emitSubtileOffsets(_XOR_STACK, kernel=kernel)
+    assert "wholly past the real M/N" not in str(module)
+
+
 def test_gr_edge_mask_split_k_row_does_not_leak_registers():
     writer, _, _, (vbefore, sbefore) = _emitGRNamed("AB_B4_TLU1_4x1")
     assert writer.vgprPool.outstanding == vbefore
