@@ -181,6 +181,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                         OutElementwiseOperation,
                                         ComputeTypeA,
                                         ComputeTypeB>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<WeiElementwiseOperation, element_wise::PassThrough>);
@@ -597,15 +600,27 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             // spatial stride and C stride 1. Only a dense, nonoverlapping weight tensor
             // gives each logical weight (and each group) a distinct Set destination.
             long_index_t packed_weight_stride = Conv_C_;
-            is_packed_weight_                 = e_g_k_c_xs_lengths[0] == Conv_G_ &&
+            is_packed_weight_ = Conv_G_ > 0 && Conv_N_ > 0 && Conv_K_ > 0 && Conv_C_ > 0 &&
+                                e_g_k_c_xs_lengths[0] == Conv_G_ &&
                                 e_g_k_c_xs_lengths[2] == Conv_C_ &&
+                                a_g_n_k_wos_lengths[0] == Conv_G_ &&
+                                a_g_n_k_wos_lengths[1] == Conv_N_ &&
+                                a_g_n_k_wos_lengths[2] == Conv_K_ &&
                                 e_g_k_c_xs_strides_transposed[2] == 1;
             for(index_t i = NDimSpatial + 2; i >= 3; --i)
             {
+                if(e_g_k_c_xs_lengths[i] <= 0 || packed_weight_stride <= 0 ||
+                   e_g_k_c_xs_lengths[i] > 0x7fffffffffffffffLL / packed_weight_stride)
+                {
+                    is_packed_weight_ = false;
+                    break;
+                }
                 is_packed_weight_ &= e_g_k_c_xs_strides_transposed[i] == packed_weight_stride;
                 packed_weight_stride *= e_g_k_c_xs_lengths[i];
             }
-            is_packed_weight_ &= e_g_k_c_xs_strides_transposed[1] == packed_weight_stride &&
+            is_packed_weight_ &= packed_weight_stride > 0 && Conv_K_ > 0 &&
+                                 Conv_K_ <= 0x7fffffffffffffffLL / packed_weight_stride &&
+                                 e_g_k_c_xs_strides_transposed[1] == packed_weight_stride &&
                                  e_g_k_c_xs_strides_transposed[0] == packed_weight_stride * Conv_K_;
 
             const auto descs =
@@ -1371,6 +1386,25 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
     bool IsSupportedArgument(const BaseArgument* p_arg) override
     {
         return IsSupportedArgument(*dynamic_cast<const Argument*>(p_arg));
+    }
+
+    bool IsOutputFullyDefined(const BaseArgument* p_arg) const override
+    {
+        constexpr bool direct_packed_weight_layout =
+            is_GNWC_GKXC_GNWK<InLayout, WeiLayout, OutLayout>() ||
+            is_NHWGC_GKYXC_NHWGK<InLayout, WeiLayout, OutLayout>() ||
+            is_GNHWC_GKYXC_GNHWK<InLayout, WeiLayout, OutLayout>() ||
+            is_NDHWGC_GKZYXC_NDHWGK<InLayout, WeiLayout, OutLayout>() ||
+            is_GNDHWC_GKZYXC_GNDHWK<InLayout, WeiLayout, OutLayout>();
+        if constexpr(!direct_packed_weight_layout ||
+                     !is_same_v<WeiElementwiseOperation, element_wise::PassThrough>)
+            return false;
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        // Direct, packed split-one Set stores cover every valid weight, including
+        // tile tails, whether or not the invocation needs an internal clear.
+        // Transpose conversions and atomic split reductions are not promised.
+        return arg != nullptr && arg->is_packed_weight_ && arg->k_batch_ == 1 &&
+               IsSupportedArgument(*arg);
     }
 
     static auto

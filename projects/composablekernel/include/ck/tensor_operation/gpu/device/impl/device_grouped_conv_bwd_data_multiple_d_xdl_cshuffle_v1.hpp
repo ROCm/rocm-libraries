@@ -321,6 +321,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                                CDEElementwiseOp,
                                                AComputeType,
                                                BComputeType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     // TODO: Extend support for more spatial dimensions.
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,
@@ -840,6 +843,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
               k_batch_{split_k}
         {
             stride_overflow             = stride_overflow_in;
+            is_packed_output_ = is_packed_grouped_conv_output<NDimSpatial, ELayout>(
+                e_g_n_c_wis_lengths, e_g_n_c_wis_strides);
             bool image_covered_dilation = true;
             bool image_covered_strides  = true;
             for(index_t d = 0; d < NDimSpatial; d++)
@@ -1304,6 +1309,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         std::vector<std::array<GemmArgs, MaxGroupedGemmGroupsNum>> gemm_kernel_args_;
 
         bool bwd_needs_zero_out;
+        bool is_packed_output_;
         long_index_t e_space_size_bytes;
         bool stride_overflow;
     };
@@ -2132,6 +2138,23 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
     bool IsSupportedArgument(const BaseArgument* p_arg) override
     {
         return IsSupportedArgument(*dynamic_cast<const Argument*>(p_arg));
+    }
+
+    bool IsOutputFullyDefined(const BaseArgument* p_arg) const override
+    {
+        if constexpr(NumDTensor != 0 || !is_same_v<CDEElementwiseOp, element_wise::PassThrough>)
+            return false;
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        // Retain the internal clear: it defines cells outside the sub-GEMMs and
+        // initializes any atomic split reduction.
+        return arg != nullptr && arg->gemms_count_ > 0 &&
+               arg->is_packed_output_ && arg->bwd_needs_zero_out &&
+               arg->a_g_n_k_wos_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->a_g_n_k_wos_lengths_[1] == arg->e_g_n_c_wis_lengths_[1] &&
+               arg->a_g_n_k_wos_lengths_[2] == arg->b_g_k_c_xs_lengths_[1] &&
+               arg->b_g_k_c_xs_lengths_[2] == arg->e_g_n_c_wis_lengths_[2] &&
+               IsSupportedArgument(*arg);
     }
 
     static auto

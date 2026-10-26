@@ -7,8 +7,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Added
 
-* [Conv] Expose bounded gfx1250 native NCHW exact-FP32 pointwise backward-data CK candidates with default scalars; selected calls omit staging, clearing, and scratch and reject overlapping outputs. Existing converted candidates and solver-wide workspace reservations remain available.
-* [Conv] Expose bounded gfx1250 native NCHW FP16 pointwise forward CK candidates using the existing batched WMMA arithmetic, default scalars, and zero selected workspace; retain existing converted candidates.
+* [Conv] Added gfx1250 CK pointwise kernels that can process supported NCHW FP32 input gradients and
+  FP16 forward convolutions without layout conversion.
+
+### Optimized
+
+* [Conv] Reduced redundant layout copies and output initialization for qualified gfx1250 CK
+  convolutions. Other devices and unsupported layouts or scalars retain existing staging.
+* [Conv] Output initialization is omitted only when the selected CK operation advertises full output
+  coverage for the actual invocation argument.
 
 ## MIOpen 3.6.3 for ROCm 10.3.0
 

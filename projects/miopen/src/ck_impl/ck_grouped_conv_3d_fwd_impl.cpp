@@ -714,8 +714,8 @@ ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                      false,
                                                      DeviceOpGFwdDefaultPtrs<T, TCompute>,
                                                      CKArgs<T, TCompute>,
-                                                     miopen::conv::DataInvokeParams>(
-                        *ctx, *problem, kid);
+                                                     miopen::conv::DataInvokeParams,
+                                                     true>(*ctx, *problem, kid);
                 }
 
                 MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");

@@ -291,6 +291,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                                                CDEElementwiseOp,
                                                AComputeType,
                                                BComputeType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     // TODO: Extend support for more spatial dimensions.
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,
@@ -719,17 +722,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
-            stride_overflow             = stride_overflow_in;
-            bool image_covered_dilation = true;
-            bool image_covered_strides  = true;
-            for(index_t d = 0; d < NDimSpatial; d++)
-            {
-                // If dilation and stride is not equal we will have some empty places
-                image_covered_dilation &=
-                    conv_filter_dilations[d] == 1 || conv_filter_strides[d] == 1;
-                // If stride is larger than windows size then we will have some empty places
-                image_covered_strides &= conv_filter_strides[d] <= b_g_k_c_xs_lengths[d + I3];
-            }
+            stride_overflow          = stride_overflow_in;
+            is_packed_output_ = is_packed_grouped_conv_output<NDimSpatial, ELayout>(
+                e_g_n_c_wis_lengths, e_g_n_c_wis_strides);
             bool if_d_is_output_mem  = false;
             const void* out_mem_void = static_cast<const void*>(p_e);
             static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -741,8 +736,29 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
 
             bwd_needs_zero_out = k_batch_ > 1 || !image_covered_dilation || !image_covered_strides;
 
-            // Temporary workaround untill prove/fix above conditions.
-            bwd_needs_zero_out = !if_d_is_output_mem;
+                for(index_t i = 0; i < NDimSpatial + 3; ++i)
+                {
+                    completely_overwrites_e &= a_g_n_k_wos_lengths[i] > 0 &&
+                                               b_g_k_c_xs_lengths[i] > 0 &&
+                                               e_g_n_c_wis_lengths[i] > 0;
+                }
+
+                for(index_t d = 0; d < NDimSpatial; ++d)
+                {
+                    completely_overwrites_e &=
+                        a_g_n_k_wos_lengths[d + 3] == e_g_n_c_wis_lengths[d + 3] &&
+                        b_g_k_c_xs_lengths[d + 3] == 1 && conv_filter_strides[d] == 1 &&
+                        input_left_pads[d] == 0 && input_right_pads[d] == 0;
+                }
+
+                // The 1x1 transform covers (N, spatial) x C; packed addressing
+                // makes those stores and the group offsets distinct.
+                completely_overwrites_e &= is_packed_output_;
+            }
+
+            // An aliased D must not be zeroed before its value is read by the epilogue.
+            // Otherwise only the proved split-1, no-D case can omit initialization.
+            bwd_needs_zero_out = !if_d_is_output_mem && !completely_overwrites_e;
             e_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
                     e_g_n_c_wis_lengths_.begin(), NDimSpatial + I3, 1, std::multiplies<>()) *
@@ -1165,6 +1181,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
         std::vector<std::array<GemmArgs, MaxGroupedGemmGroupsNum>> gemm_kernel_args_;
 
         bool bwd_needs_zero_out;
+        bool is_packed_output_;
         long_index_t e_space_size_bytes;
         bool stride_overflow;
     };
@@ -1921,6 +1938,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
     bool IsSupportedArgument(const BaseArgument* p_arg) override
     {
         return IsSupportedArgument(*dynamic_cast<const Argument*>(p_arg));
+    }
+
+    bool IsOutputFullyDefined(const BaseArgument* p_arg) const override
+    {
+        if constexpr(NumDTensor != 0 || !is_same_v<CDEElementwiseOp, element_wise::PassThrough>)
+            return false;
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        // Spatial holes and split reductions are defined by the invocation's
+        // internal clear. Only the proved 1x1 split-one case may omit that clear.
+        return arg != nullptr && arg->gemms_count_ > 0 && arg->is_packed_output_ &&
+               arg->a_g_n_k_wos_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->a_g_n_k_wos_lengths_[1] == arg->e_g_n_c_wis_lengths_[1] &&
+               arg->a_g_n_k_wos_lengths_[2] == arg->b_g_k_c_xs_lengths_[1] &&
+               arg->b_g_k_c_xs_lengths_[2] == arg->e_g_n_c_wis_lengths_[2] &&
+               IsSupportedArgument(*arg);
     }
 
     static auto

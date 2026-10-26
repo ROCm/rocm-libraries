@@ -301,6 +301,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                CDEElementwiseOp,
                                                AComputeType,
                                                BComputeType>
+#ifndef CK_CODE_GEN_RTC
+    , public GroupedConvOutputDefinition
+#endif
 {
     // TODO: Extend support for more spatial dimensions.
     static_assert(NDimSpatial == 2 || NDimSpatial == 3,
@@ -1272,6 +1275,23 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     bool IsSupportedArgument(const BaseArgument* p_arg) override
     {
         return IsSupportedArgument(*dynamic_cast<const Argument*>(p_arg));
+    }
+
+    bool IsOutputFullyDefined(const BaseArgument* p_arg) const override
+    {
+        if constexpr(NumDTensor != 0 || !is_same_v<CDEElementwiseOp, element_wise::PassThrough>)
+            return false;
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        // The retained internal clear covers spatial holes as well as all groups.
+        return arg != nullptr && arg->gemms_count_ > 0 && arg->bwd_needs_zero_out &&
+               is_packed_grouped_conv_output<NDimSpatial, ELayout>(
+                   arg->e_g_n_c_wis_lengths_, arg->e_g_n_c_wis_strides_) &&
+               arg->a_g_n_k_wos_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->a_g_n_k_wos_lengths_[1] == arg->e_g_n_c_wis_lengths_[1] &&
+               arg->a_g_n_k_wos_lengths_[2] == arg->b_g_k_c_xs_lengths_[1] &&
+               arg->b_g_k_c_xs_lengths_[2] == arg->e_g_n_c_wis_lengths_[2] &&
+               IsSupportedArgument(*arg);
     }
 
     static auto

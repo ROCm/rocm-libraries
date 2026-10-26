@@ -38,6 +38,15 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA AND TARGET utility)
     target_link_libraries(test_grouped_convnd_bwd_data_wmma_no_timing PRIVATE utility)
 endif()
 
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA
+   AND TARGET device_grouped_conv2d_bwd_data_nhwgc_instance
+   AND TARGET device_grouped_conv3d_bwd_data_ndhwgc_instance)
+    add_gtest_executable(test_grouped_convnd_bwd_data_wmma_overwrite test_grouped_convnd_bwd_data_wmma_overwrite.cpp)
+    target_link_libraries(test_grouped_convnd_bwd_data_wmma_overwrite PRIVATE utility
+        device_grouped_conv2d_bwd_data_nhwgc_instance
+        device_grouped_conv3d_bwd_data_ndhwgc_instance)
+endif()
+
 if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   if(CK_EXPERIMENTAL_BUILDER AND NOT CK_TILE_DISPATCHER)
     add_gtest_executable(test_grouped_convnd_bwd_data_tile test_grouped_convnd_bwd_data_tile.cpp)
