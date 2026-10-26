@@ -5,25 +5,31 @@
 #include <array>
 #include <cmath>
 #include <memory>
-#include <tuple>
 
 #include <gtest/gtest.h>
 
 #include "ck/ck.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_weight.hpp"
-#include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight/device_grouped_conv_bwd_weight_two_stage_wmma_instance.hpp"
-#include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight/device_exp_gemm_wmma_universal_km_kn_mn_instance.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/device_memory.hpp"
 #include "ck/library/utility/host_tensor.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_dl.hpp"
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+#include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_multiple_d_wmma_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_explicit.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_two_stage_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_wmma_cshuffle.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_wmma_cshuffle_v3.hpp"
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_xdl_cshuffle.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_xdl_cshuffle_v3.hpp"
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP16)
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_two_stage_xdl_cshuffle.hpp"
+#endif
 
 namespace {
 
@@ -37,23 +43,29 @@ constexpr auto Pointwise = ConvolutionBackwardWeightSpecialization::Filter1x1Str
 constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
 constexpr auto PipeV1    = ck::BlockGemmPipelineVersion::v1;
 
-// Reuse ordinary instance configurations; no scalar split-one registration is needed.
+// Concrete configurations keep lifetime coverage independent of instance catalogs.
 // clang-format off
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
 using SingleStage = DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<
     2, NHWGC, GKYXC, NHWGK, F16, F16, F16, float, PassThrough, PassThrough, PassThrough,
     Pointwise, 64, 32, 32, 32, 8, 16, 16, 2, 1,
     S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 2, 2, 0,
     S<4, 16, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 2, 2, 0,
     1, 1, S<1, 8, 1, 8>, 2, Intrawave, PipeV1>;
-using TwoStage = std::tuple_element_t<0,
-    ck::tensor_operation::device::instance::device_grouped_conv_bwd_weight_two_stage_nhwgc_wmma_c_shuffle_instances<
-        2, NHWGC, GKYXC, NHWGK, F16, Pointwise, Intrawave, PipeV1>>;
+using TwoStage = DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<
+    2, NHWGC, GKYXC, NHWGK, F16, F16, F16, float, PassThrough, PassThrough, PassThrough,
+    Pointwise, 32, 16, 16, 32, 8, 16, 16, 1, 1,
+    S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+    S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+    1, 1, S<1, 4, 1, 8>, 1, Intrawave, PipeV1, 1>;
 using LegacyWmma = DeviceGroupedConvBwdWeight_Wmma_CShuffle<
     3, NDHWGC, GKZYXC, NDHWGK, F16, F16, F16, float, PassThrough, PassThrough, PassThrough,
     Pointwise, 128, 128, 128, 8, 8, 16, 16, 4, 4,
     S<8, 16, 1>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 8, 1,
     S<8, 16, 1>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 8, 1,
     1, 1, S<1, 32, 1, 4>, 8>;
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
 using Xdl = DeviceGroupedConvBwdWeight_Xdl_CShuffle<
     2, NHWGC, GKYXC, NHWGK, float, float, float, float, PassThrough, PassThrough, PassThrough,
     Pointwise, 64, 64, 64, 4, 4, 32, 32, 2, 2,
@@ -69,6 +81,8 @@ using XdlV3 = DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<
     S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, false,
     S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, false,
     1, 1, S<1, 8, 1, 8>, 2, Intrawave, PipeV1, float, float, false, 1, LargeTensors>;
+#endif
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP16)
 // gfx1250 FP16 requires K1 divisible by 16. KPerBlock=64 keeps K0=4
 // compatible with the four-way K0 transfer cluster.
 template <bool LargeTensors>
@@ -78,6 +92,8 @@ using TwoStageXdl = DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<
     S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, false,
     S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, false,
     1, 1, S<1, 8, 1, 8>, 1, Intrawave, PipeV1, 1, F16, F16, 1, 1, LargeTensors>;
+#endif
+#if defined(CK_ENABLE_FP32)
 using Dl = DeviceGroupedConvBwdWeight_Dl<
     2, NHWGC, GKYXC, NHWGK, float, float, float, float, PassThrough, PassThrough, PassThrough,
     Pointwise, 256, 128, 128, 16, 1, 4, 4, 1, S<8, 2>, S<8, 2>,
@@ -85,12 +101,20 @@ using Dl = DeviceGroupedConvBwdWeight_Dl<
     S<1, 1, 1, 1, 1>, S<0, 2, 3, 1, 4>, S<1, 1, 1, 1, 1>,
     S<1, 1, 1, 8, 1>, S<1, 16, 1, 16, 1>, S<0, 1, 4, 2, 3>, S<0, 1, 4, 2, 3>,
     S<1, 1, 1, 1, 1>, S<0, 1, 4, 2, 3>, S<1, 1, 1, 1, 1>, S<0, 1, 2, 3, 4, 5>, 5, 1>;
-// Row 1 uses eight-element source vectors for both operands; row 0's
-// six-element B vector rejects the fixture's C=128.
-using ExplicitGemm = std::tuple_element_t<1,
-    ck::tensor_operation::device::instance::device_gemm_wmma_universal_km_kn_mn_GemmMNKPadding_f16_instances>;
+#endif
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
+// Eight-element destination vectors and four-element source vectors divide C=128.
+using ExplicitGemm = DeviceBatchedGemmMultiD_Wmma_CShuffleV3<
+    ck::tensor_layout::gemm::ColumnMajor, ck::tensor_layout::gemm::RowMajor, ck::Tuple<>,
+    ck::tensor_layout::gemm::RowMajor, F16, F16, ck::Tuple<>, F16, float, F16,
+    PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding,
+    64, 64, 64, 64, 8, 8, 16, 16, 4, 2,
+    S<8, 8, 1>, S<0, 2, 1>, S<0, 2, 1>, 1, 4, 8, 0,
+    S<8, 8, 1>, S<0, 2, 1>, S<0, 2, 1>, 1, 4, 8, 0,
+    1, 1, S<1, 16, 1, 4>, S<8, 8, 8>, Intrawave, PipeV1>;
 using Explicit = DeviceGroupedConvBwdWeight_Explicit<
     2, NHWGC, GKYXC, NHWGK, F16, F16, F16, PassThrough, PassThrough, PassThrough, ExplicitGemm>;
+#endif
 // clang-format on
 
 template <typename Index, ck::index_t NDimSpatial = 2>
@@ -242,6 +266,7 @@ void CheckSupportMetadataLifetime()
     }
 }
 
+#if defined(CK_USE_WMMA) && defined(CK_ENABLE_FP16)
 template <typename Op>
 void CheckTemporaryMetadataConsumer()
 {
@@ -359,24 +384,38 @@ TEST(TestGroupedConvndBwdWeightMetadataLifetime, ExplicitOwnsConvertedMetadata)
         GTEST_SKIP() << "WMMA architecture required";
     CheckSupportMetadataLifetime<Explicit, F16>();
 }
+#endif
 
+#if defined(CK_ENABLE_FP32)
 TEST(TestGroupedConvndBwdWeightMetadataLifetime, DlOwnsConvertedMetadata)
 {
     CheckSupportMetadataLifetime<Dl, float>();
 }
+#endif
 
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP32)
 TEST(TestGroupedConvndBwdWeightMetadataLifetime, XdlOwnsConvertedMetadata)
 {
     if(!ck::is_xdl_wmma_supported<float, float, 32, 32, 16, 16>())
         GTEST_SKIP() << "FP32 XDL/WMMA architecture required";
     CheckSupportMetadataLifetime<Xdl, float>();
     CheckSupportMetadataLifetime<XdlV3<false>, float>();
-    CheckSupportMetadataLifetime<TwoStageXdl<false>, F16>();
     if(!ck::is_gfx125_supported())
     {
         CheckSupportMetadataLifetime<XdlV3<true>, float>();
-        CheckSupportMetadataLifetime<TwoStageXdl<true>, F16>();
     }
 }
+#endif
+
+#if defined(CK_USE_XDL) && defined(CK_ENABLE_FP16)
+TEST(TestGroupedConvndBwdWeightMetadataLifetime, TwoStageXdlOwnsConvertedMetadata)
+{
+    if(!ck::is_xdl_wmma_supported<F16, F16, 16, 16, 16, 16>())
+        GTEST_SKIP() << "FP16 XDL/WMMA architecture required";
+    CheckSupportMetadataLifetime<TwoStageXdl<false>, F16>();
+    if(!ck::is_gfx125_supported())
+        CheckSupportMetadataLifetime<TwoStageXdl<true>, F16>();
+}
+#endif
 
 } // namespace
