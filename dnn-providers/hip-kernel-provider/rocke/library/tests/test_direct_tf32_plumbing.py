@@ -455,20 +455,20 @@ def test_tf32_narrow_reason_mfma_dgrad():
 # ---------------------------------------------------------------------------
 
 
-def test_a_variant_that_refuses_the_dtype_is_skipped(monkeypatch):
-    """A spec that raises on construction (a variant with no kernel for the
-    dtype) drops out of the cell instead of crashing the enumeration."""
+def test_a_spec_construction_error_is_not_swallowed(monkeypatch):
+    """Every direct variant builds fp32/tf32 specs, so the grid never needs to
+    skip one that raises on construction -- and must not: a knob bug in any
+    dtype has to stop the enumeration, not silently drop a cache entry."""
 
-    def refuse(variant, problem, knobs, *_):
-        raise ValueError(f"{variant}: unsupported dtype {problem.dtype!r}")
+    def broken(variant, problem, knobs, *_):
+        raise ValueError(f"{variant}: a knob bug")
 
     # _caps_jobs lives in (and calls make_spec through) direct_aot_jobs.
-    monkeypatch.setattr(daj, "make_spec", refuse)
+    monkeypatch.setattr(daj, "make_spec", broken)
     caps = dks.DIRECT_CAPABILITIES["direct_grouped_dgrad"][1][0]
-    n_raw, out = dks._caps_jobs(
-        _ARCH, _WAVE, "direct_grouped_dgrad", "dgrad", caps, "tf32"
-    )
-    assert n_raw > 0 and out == []
+    for dtype in ("fp16", "tf32"):
+        with pytest.raises(ValueError, match="a knob bug"):
+            dks._caps_jobs(_ARCH, _WAVE, "direct_grouped_dgrad", "dgrad", caps, dtype)
 
 
 @pytest.fixture(scope="module")

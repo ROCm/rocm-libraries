@@ -156,6 +156,13 @@ class ConvDataSpec:
                 "mma_dtype='tf32' needs fp32 A and B storage, got "
                 f"dtype_a={self.dtype_a!r}, dtype_b={self.dtype_b!r}"
             )
+        # TF32 is a compute mode for fp32 convolutions (as in cuDNN and
+        # MIOpen): one rule for fwd, dgrad and wgrad, so they cannot drift.
+        if self.dtype_d != "fp32":
+            return (
+                "mma_dtype='tf32' is an fp32-convolution compute mode and needs "
+                f"an fp32 output (dtype_d='fp32'), got dtype_d={self.dtype_d!r}"
+            )
         return None
 
 
@@ -678,6 +685,113 @@ def _tf32_reason(spec, target, family: str, arch: str) -> Optional[str]:
         k=spec.warp_tile_k,
     )
     return _tf32_register_reason(spec, _op)
+
+
+def _tf32_any_arch_frag_len(spec) -> Optional[int]:
+    """Per-lane fragment of the TF32 atom ``spec``'s warp tile names, any arch.
+
+    Read from the arch-agnostic ``MfmaAtom`` table, keyed by ``(m, n, k)``
+    alone. That is only sound while no ``(m, n, k)`` is a TF32 atom on two
+    arches with different fragment widths -- true today (gfx942's native atoms
+    are K=8/4, gfx950's emulated ones K=32/16). ``test_conv_tf32_register_guard``
+    asserts it against every arch catalog, so an atom that breaks it fails a
+    test instead of letting an arch-free check validate the wrong width. With
+    an arch in hand, :func:`_tf32_conv_spec_reason` uses the arch's own op.
+    """
+    from rocke.helpers.atoms import mfma_atom
+
+    try:
+        return mfma_atom(
+            "tf32", spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k
+        ).a_per_lane
+    except (KeyError, ValueError):
+        return None
+
+
+def _tf32_conv_spec_reason(
+    spec, arch: Optional[str] = None, *, async_needs_k_outer: bool = False
+) -> str:
+    """Why ``spec``'s dtypes cannot build (on ``arch``, if given), or ``""``.
+
+    The one TF32 gate for the dgrad and wgrad kernels, used by both their
+    ``validate`` (``arch=None``) and their ``is_valid_*_spec`` (with the arch),
+    so no family's rules or messages can drift from another's. Every non-TF32
+    spec returns ``""`` unless it spells TF32 as a storage dtype.
+
+    TF32 keeps fp32 tiles in LDS and reads each operand fragment as plain
+    contiguous fp32 vectors before reinterpreting it as ``vec<tf32xN>``. That
+    rules out:
+
+    * ``lds_k_outer``: its fetch is the 16-bit transpose read
+      (``ds_read_b64_tr_b16``), which has no 32-bit form;
+    * ``async_dma`` where the kernel's direct load needs the K-outer tile
+      (``async_needs_k_outer``, wgrad);
+    * a swizzled ``lds_layout``: the fragment read is not swizzle-aware;
+    * WMMA (wave32) targets and arches without a TF32 atom (:func:`_tf32_reason`);
+
+    and requires an LDS row stride the fragment read stays aligned on
+    (:func:`_tf32_lds_stride_reason`) and, for the emulated atom, a warp tile
+    below the register ceiling (:func:`_tf32_register_reason`).
+    """
+    data = spec.data
+    why = data.mma_dtype_reason()
+    if why:
+        return why
+    if not data.is_tf32:
+        return ""
+    if spec.lds_k_outer:
+        return (
+            "mma_dtype='tf32': lds_k_outer is not supported -- the K-outer "
+            "operand fetch is a 16-bit transpose read (ds_read_b64_tr_b16) with "
+            "no 32-bit form, and TF32 keeps fp32 tiles in LDS"
+        )
+    if async_needs_k_outer and spec.async_dma:
+        return (
+            "mma_dtype='tf32': async_dma is not supported -- this kernel's "
+            "direct global->LDS load needs the K-outer tile, which TF32 cannot use"
+        )
+    layout = spec.lds_layout
+    if layout is not None and layout.swizzle is not None:
+        return (
+            "mma_dtype='tf32': a swizzled lds_layout is not supported -- the "
+            "fragment is read as contiguous fp32 vectors"
+        )
+    if spec.wave_size != 64:
+        return (
+            f"mma_dtype='tf32' is MFMA-only; wave_size={spec.wave_size} is a "
+            "WMMA target"
+        )
+    if arch is None:
+        frag = _tf32_any_arch_frag_len(spec)
+        if frag is None:
+            return (
+                f"mma_dtype='tf32': warp_tile "
+                f"{(spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)} is "
+                "not a TF32 atom on any arch"
+            )
+    else:
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(arch)
+        family = "wmma" if target.wave_size == 32 else "mma"
+        why = _tf32_reason(spec, target, family, arch)
+        if why:
+            return why
+        frag = target.mma.op_for_shape(
+            family="mma",
+            a_dtype="tf32",
+            b_dtype="tf32",
+            c_dtype="fp32",
+            m=spec.warp_tile_m,
+            n=spec.warp_tile_n,
+            k=spec.warp_tile_k,
+        ).a_frag_len
+    try:
+        row = spec.effective_lds_layout().row_stride
+    except ValueError as e:
+        return str(e)
+    # A and B share the layout, so one stride covers both tiles.
+    return _tf32_lds_stride_reason(row, frag) or ""
 
 
 # Emulated (BF16x3) TF32 warp tiles at or above this many fp32 accumulators per
