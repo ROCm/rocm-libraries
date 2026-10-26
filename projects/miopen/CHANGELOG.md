@@ -17,6 +17,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
   one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
 
+### Added
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
@@ -75,9 +80,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
   stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
   including a 3x3 112x112 tile.
-* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
-  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
-  filters up to 7x7 and is selected through Find mode.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
