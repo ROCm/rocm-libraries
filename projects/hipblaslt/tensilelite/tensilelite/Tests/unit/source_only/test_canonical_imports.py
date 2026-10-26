@@ -54,6 +54,16 @@ def test_unit_modules_do_not_import_the_legacy_tensile_package():
     assert _legacy_imports(unit_modules) == []
 
 
+def test_non_unit_test_modules_do_not_import_the_legacy_tensile_package():
+    """Shared test helpers and suites outside Tests/unit use the canonical package name too."""
+    tests_root = _PACKAGE_ROOT / "Tests"
+    unit_root = tests_root / "unit"
+    non_unit_modules = (
+        path for path in tests_root.rglob("*.py") if unit_root not in path.parents
+    )
+    assert _legacy_imports(non_unit_modules) == []
+
+
 def test_installed_artifacts_exclude_source_only_tests():
     cmake = (_PACKAGE_ROOT.parent.parent / "CMakeLists.txt").read_text(encoding="utf-8")
     package_install = cmake.split('DIRECTORY "${_tensilelite_src}/tensilelite/"', 1)[1].split(
