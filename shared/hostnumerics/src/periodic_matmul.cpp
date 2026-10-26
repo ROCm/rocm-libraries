@@ -274,7 +274,7 @@ PeriodicMatmulCheck PeriodicMatmulPlan::checkRegion(const Tensor& observed,
         epilogue.outputConversion != OutputConversion::Default ||
         !std::holds_alternative<IdentityActivation>(epilogue.activation) ||
         epilogue.activationApplication != ActivationApplication::Forward ||
-        !epilogue.outputSelection.selectsAll() || epilogue.accumulateAmax ||
+        !observed.shape().selectsAll(epilogue.outputSelection) || epilogue.accumulateAmax ||
         epilogue.outputScale.shape().rank() != 0 || epilogue.outputScale.item<double>() != 1 ||
         epilogue.auxiliaryScale.shape().rank() != 0 || epilogue.auxiliaryScale.item<double>() != 1)
         return fail(VerificationStatus::Unsupported,

@@ -25,8 +25,11 @@ using Clock = std::chrono::steady_clock;
 using roc::hostnumerics::GemmBackend;
 using roc::hostnumerics::GemmTestCase;
 using roc::hostnumerics::GemmTestRunInfo;
+using roc::hostnumerics::IndexRange;
 using roc::hostnumerics::IndexSelection;
+using roc::hostnumerics::LastDimensionFastest;
 using roc::hostnumerics::Layout;
+using roc::hostnumerics::primeIndexRange;
 using roc::hostnumerics::ScalarType;
 using roc::hostnumerics::Shape;
 using roc::hostnumerics::Tensor;
@@ -158,9 +161,8 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     const Shape outputShape{rows, columns};
-    const auto indexOrder = problem.outputSelection.indexOrder(problem.d.shape().rank());
-    for (const size_t logicalIndex :
-         problem.outputSelection.indices(problem.d.shape().elementCount())) {
+    const auto indexOrder = problem.d.shape().indexOrder(problem.outputSelection);
+    for (const size_t logicalIndex : problem.d.shape().selectedIndices(problem.outputSelection)) {
         const auto coordinates = problem.d.shape().coordinates(logicalIndex, indexOrder);
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
@@ -236,9 +238,10 @@ int main(int argc, char** argv) {
         const size_t outputElements = options.rows * options.columns;
         const IndexSelection selection =
             options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? IndexSelection::allLastDimensionFastest()
-                : IndexSelection::primeStrideLastDimensionFastest(outputElements, outputElements,
-                                                                  options.selectedOutputs);
+                ? IndexSelection(IndexRange::all(), LastDimensionFastest{})
+                : IndexSelection(
+                      primeIndexRange(outputElements, outputElements, options.selectedOutputs),
+                      LastDimensionFastest{});
 
         const ptrdiff_t aLeadingDimension =
             static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));
@@ -286,9 +289,9 @@ int main(int argc, char** argv) {
         }
 
         const IndexSelection validationSelection =
-            selection.selectsAll() && outputElements > 128
-                ? IndexSelection::primeStrideLastDimensionFastest(outputElements, outputElements,
-                                                                  128)
+            Shape{outputElements}.selectsAll(selection) && outputElements > 128
+                ? IndexSelection(primeIndexRange(outputElements, outputElements, 128),
+                                 LastDimensionFastest{})
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;
@@ -296,7 +299,8 @@ int main(int argc, char** argv) {
         GemmTestCase expectedRequest(a, b, expected, expectedOptions);
         runScalarOracle(expectedRequest, expected);
 
-        const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
+        const std::vector<size_t> validationIndices =
+            Shape{outputElements}.selectedIndices(validationSelection);
         const double tolerance = comparisonTolerance(profile.outputType);
         ComparisonOptions comparisonOptions =
             allCloseComparisonOptions(tolerance, 2.0 * tolerance, false);

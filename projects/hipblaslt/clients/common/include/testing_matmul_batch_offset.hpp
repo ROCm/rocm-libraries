@@ -286,7 +286,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? ldb : 1;
         Tensor          result        = expectedD.shareStorageWithLayout(
             Layout(Shape{size_t(M), size_t(N)},
-                   {1, ldd},
+                                   {1, ldd},
                    ptrdiff_t(batch) * ptrdiff_t(dPlan.matrixElements)));
         Tensor a = hostA.shareStorageWithLayout(
             Layout(Shape{size_t(M), size_t(K)},
@@ -315,7 +315,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 scaledC,
                 result,
                 computeType,
-                roc::hostnumerics::IndexSelection::allLastDimensionFastest());
+                roc::hostnumerics::IndexSelection(roc::hostnumerics::IndexRange::all(),
+                                                  roc::hostnumerics::LastDimensionFastest{}));
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;
@@ -364,7 +365,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .absoluteTolerance     = std::nextafter(tolerance, 0.0),
                 .maxReportedMismatches = 0,
             };
-            options.selection     = IndexSelection::all(std::vector<size_t>{1, 0});
+            options.selection
+                = IndexSelection(roc::hostnumerics::IndexRange::all(), std::vector<size_t>{1, 0});
             const auto comparison = compare(observedD.shareStorageWithLayout(observedLayout),
                                             expectedD.shareStorageWithLayout(expectedLayout),
                                             options);

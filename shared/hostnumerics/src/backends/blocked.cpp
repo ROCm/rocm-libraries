@@ -45,15 +45,10 @@ struct SelectedOutputBlockPlan {
 
 SelectedOutputBlockPlan planSelectedOutputBlocks(const IndexSelection& selection,
                                                  const Shape& outputShape) {
-    const detail::IndexIteration iteration(outputShape, selection.indexOrder(outputShape.rank()));
-    const size_t logicalElements = iteration.count();
-    const std::vector<size_t> selectedIndices = selection.indices(logicalElements);
     std::vector<SelectedOutputLocation> locations;
-    locations.reserve(selectedIndices.size());
-    for (size_t selectedIndex = 0; selectedIndex < selectedIndices.size(); ++selectedIndex) {
-        const size_t logicalIndex = selectedIndices[selectedIndex];
-        std::array<size_t, 2> coordinates{};
-        iteration.coordinates(logicalIndex, coordinates);
+    locations.reserve(outputShape.selectedCount(selection));
+    size_t selectedIndex = 0;
+    outputShape.forEachCoordinate(selection, [&](size_t, std::span<const size_t> coordinates) {
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         locations.push_back({
@@ -61,9 +56,9 @@ SelectedOutputBlockPlan planSelectedOutputBlocks(const IndexSelection& selection
             .blockColumn = column / outputBlockColumns,
             .localIndex =
                 (row % outputBlockRows) * outputBlockColumns + column % outputBlockColumns,
-            .selectedIndex = selectedIndex,
+            .selectedIndex = selectedIndex++,
         });
-    }
+    });
 
     // Group unique requests in the same block-major, row-major order as the full path.
     std::sort(locations.begin(), locations.end(),
@@ -125,11 +120,10 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     const size_t m = problem.a.shape()[0];
     const size_t k = problem.a.shape()[1];
     const size_t n = problem.b.shape()[1];
-    const size_t outputElementsWritten =
-        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    const size_t outputElementsWritten = problem.d.shape().selectedCount(problem.outputSelection);
     size_t outputElementsCovered = 0;
     std::optional<SelectedOutputBlockPlan> selectedPlan;
-    if (!problem.outputSelection.selectsAll()) {
+    if (!problem.d.shape().selectsAll(problem.outputSelection)) {
         selectedPlan = planSelectedOutputBlocks(problem.outputSelection, problem.d.shape());
         for (const PlannedOutputBlock& block : selectedPlan->blocks)
             outputElementsCovered += std::min(outputBlockRows, m - block.rowBase) *
@@ -412,7 +406,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
 
     const bool parallelOutput = detail::canParallelizeGemmOutput(problem);
     const size_t reductionWork = k;
-    if (problem.outputSelection.selectsAll()) {
+    if (problem.d.shape().selectsAll(problem.outputSelection)) {
         const size_t rowBlockCount = (m + outputBlockRows - 1) / outputBlockRows;
         const size_t columnBlockCount = (n + outputBlockColumns - 1) / outputBlockColumns;
         const size_t blockCount = rowBlockCount * columnBlockCount;
@@ -499,10 +493,9 @@ GemmExecutionInfo detail::runBlockedGemm(const GemmInvocation& problem) {
 GemmExecutionInfo detail::runBlockedGemmToSelectedOutput(const GemmInvocation& problem,
                                                          Tensor& selectedOutput) {
     validateBlocked(problem);
-    if (problem.outputSelection.selectsAll())
+    if (problem.d.shape().selectsAll(problem.outputSelection))
         throw std::runtime_error("Streaming blocked GEMM requires a partial selection.");
-    const size_t selectedCount =
-        problem.outputSelection.selectedCount(problem.d.shape().elementCount());
+    const size_t selectedCount = problem.d.shape().selectedCount(problem.outputSelection);
     if (selectedOutput.type() != problem.d.type() ||
         selectedOutput.shape() != Shape{1, selectedCount})
         throw std::runtime_error("Streaming blocked GEMM output shape or type mismatch.");

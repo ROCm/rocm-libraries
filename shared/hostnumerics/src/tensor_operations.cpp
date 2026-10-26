@@ -15,7 +15,8 @@ Tensor binary(detail::BinaryOperation operation, const Tensor& left, const Tenso
     if (layout.shape() != outputShape)
         throw std::runtime_error("Elementwise output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runBinary({left, right, output, computeType, IndexSelection::allLastDimensionFastest()},
+    detail::runBinary({left, right, output, computeType,
+                       IndexSelection(IndexRange::all(), LastDimensionFastest{})},
                       operation);
     return output;
 }
@@ -98,7 +99,7 @@ Tensor activate(const Tensor& input, ActivationFunction function, ScalarType out
         throw std::runtime_error("Activation output layout shape mismatch.");
     Tensor output(outputType, layout);
     detail::runActivation({input, output, std::move(function), computeType,
-                           IndexSelection::allLastDimensionFastest()});
+                           IndexSelection(IndexRange::all(), LastDimensionFastest{})});
     return output;
 }
 

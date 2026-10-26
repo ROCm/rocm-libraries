@@ -140,21 +140,20 @@ void Tensor::copyLogicalElementsToEncodedStorage(std::span<std::byte> destinatio
 }
 
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
-                                                  std::span<const size_t> linearIndices,
-                                                  std::span<const size_t> indexOrder) const {
+                                                  const IndexSelection& selection) const {
+    (void)shape().selectedCount(selection);
     const size_t required = storageBytesForLayout(m_type, m_layout);
     if (destination.size() < required)
         throw std::runtime_error("Tensor copy destination storage is too small.");
     if (detail::byteRangesOverlap(rawEncodedBackingStorage(), destination)) {
         Tensor staged(m_type, m_layout);
-        copySelectedElementsToEncodedStorage(staged.rawEncodedBackingStorage(), linearIndices,
-                                             indexOrder);
-        staged.copySelectedElementsToEncodedStorage(destination, linearIndices, indexOrder);
+        copySelectedElementsToEncodedStorage(staged.rawEncodedBackingStorage(), selection);
+        staged.copySelectedElementsToEncodedStorage(destination, selection);
         return;
     }
 
     const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-    forEachLinearIndex(*this, linearIndices, indexOrder, [&](std::span<const size_t> indices) {
+    shape().forEachCoordinate(selection, [&](size_t, std::span<const size_t> indices) {
         const uint64_t offset =
             detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices));
         detail::preparedCopyBitRange(rawEncodedBackingStorage(), offset, destination, offset, bits);

@@ -28,10 +28,10 @@ TEST(Package, Operations) {
     const Tensor operandB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const float>(b));
     matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32},
-               IndexSelection::allLastDimensionFastest(), GemmBackend::Automatic);
+               IndexSelection(IndexRange::all(), LastDimensionFastest{}), GemmBackend::Automatic);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
     matmulInto(operandA, operandB, d, MatmulOptions{ScalarType::Float32},
-               IndexSelection::allLastDimensionFastest(), GemmBackend::Blocked);
+               IndexSelection(IndexRange::all(), LastDimensionFastest{}), GemmBackend::Blocked);
     ASSERT_FALSE((d.loadAs<float>({0, 0}) != 6));
 
     const Tensor ownedGemm =

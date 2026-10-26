@@ -13,13 +13,12 @@ void testTensorEncodedCopies() {
     packedCopySource.storeFrom({1}, -3);
     packedCopySource.storeFrom({2}, 2);
     packedCopySource.storeFrom({3}, 7);
-    const std::array<size_t, 2> selectedCopyIndices{1, 3};
     std::array<std::byte, 2> packedCopyBytes{
         static_cast<std::byte>(0x11),
         static_cast<std::byte>(0x11),
     };
-    packedCopySource.copySelectedElementsToEncodedStorage(packedCopyBytes, selectedCopyIndices,
-                                                          std::vector<size_t>{0});
+    packedCopySource.copySelectedElementsToEncodedStorage(
+        packedCopyBytes, IndexSelection(IndexRange(1, 2, 2), std::vector<size_t>{0}));
     const Tensor selectedPackedCopy = Tensor::copyEncodedBackingStorage(
         ScalarType::Int4, Layout::contiguousLastDimensionFastest(Shape{4}),
         std::span<std::byte>(packedCopyBytes.data(), packedCopyBytes.size()));
@@ -82,7 +81,8 @@ void testTensorEncodedCopies() {
     requireError(
         [&] {
             packedCopySource.copySelectedElementsToEncodedStorage(
-                undersizedCopyDestination, selectedCopyIndices, std::vector<size_t>{0});
+                undersizedCopyDestination,
+                IndexSelection(IndexRange(1, 2, 2), std::vector<size_t>{0}));
         },
         "Selected Tensor copy-to accepted undersized storage.");
 
@@ -103,10 +103,9 @@ void testTensorEncodedCopies() {
         Tensor::copyNativeStorage(std::span<const int32_t>(overlappingCopyOutValues));
     const Tensor overlappingSelectedCopyOutSource =
         overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
-    const std::array<size_t, 2> overlappingSelectedIndices{0, 1};
     overlappingSelectedCopyOutSource.copySelectedElementsToEncodedStorage(
         overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)),
-        overlappingSelectedIndices, std::vector<size_t>{0});
+        IndexSelection(IndexRange(0, 1, 2), std::vector<size_t>{0}));
     require(overlappingCopyOut.loadAs<int32_t>({0}) == 1 &&
                 overlappingCopyOut.loadAs<int32_t>({1}) == 1 &&
                 overlappingCopyOut.loadAs<int32_t>({2}) == 2 &&
@@ -128,10 +127,9 @@ void testTensorEncodedCopies() {
     Tensor orderedCopySource(ScalarType::Int32, Shape{2, 2});
     orderedCopySource.storeFrom({1, 0}, 7);
     std::array<int32_t, 4> orderedCopyDestination{};
-    const std::array<size_t, 1> orderedCopyIndices{1};
     orderedCopySource.copySelectedElementsToEncodedStorage(
-        std::as_writable_bytes(std::span(orderedCopyDestination)), orderedCopyIndices,
-        std::vector<size_t>{1, 0});
+        std::as_writable_bytes(std::span(orderedCopyDestination)),
+        IndexSelection(std::vector<size_t>{1}, std::vector<size_t>{1, 0}));
     require(orderedCopyDestination == std::array<int32_t, 4>{0, 0, 7, 0},
             "Selected Tensor copy-out ignored the requested logical index order.");
 }

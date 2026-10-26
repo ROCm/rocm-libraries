@@ -55,9 +55,7 @@ class GemmComplexOracleTests(unittest.TestCase):  # noqa: F405
             alpha=complex(alpha),
             beta=complex(beta),
             conjugate_a=True,
-            output_selection=hv.IndexSelection.explicit_indices_last_dimension_fastest(
-                selected
-            ),
+            output_selection=hv.IndexSelection(selected, hv.LastDimensionFastest()),
             backend=hv.GemmBackend.Blocked,
             compute_type_a=None,
             compute_type_b=None,
