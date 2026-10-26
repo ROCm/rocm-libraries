@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""GPU tests (gfx1250) of the generalized unfused Winograd pipeline: small
-shapes with dilation, padding, W tails,
+"""GPU tests (gfx1250) of the generalized unfused Winograd pipeline and the
+fused 1-D Winograd kernel: small shapes with dilation, padding, W tails,
 segmented long filters, 2-D 5x5 and 7x1 filters. Each case runs the
 benchmark driver with ``--verify`` (poisoned outputs, rocke metric < 5e-2)
 and one short timing repeat."""
@@ -68,6 +68,59 @@ def test_gen_pipeline(case):
             variants,
             "--k3-sweep",
             "tiny",
+            "--jobs",
+            "1",
+        ]
+        + _COMMON
+    )
+    assert rc == 0
+
+
+FUSED_CASES = [
+    (
+        _cmd(2, 32, 32, 1, 203, 1, 11, 0, 15, 1, 3),
+        "4s3",
+        "dict(q=2, fk=2, grid_blocks=4)",
+    ),
+    (
+        _cmd(2, 64, 64, 1, 517, 1, 11, 0, 25, 1, 5),
+        "4s3,6s2",
+        "dict(q=2, fk=2, grid_blocks=6, xf='wmma', prefetch=True, m_f16=True,"
+        " xf_batch=8, merge=True)",
+    ),
+    (
+        _cmd(3, 128, 64, 1, 333, 1, 7, 0, 3, 1, 1),
+        "4s2,4,6",
+        "dict(q=2, fk=2, grid_blocks=5, prefetch=True, m_f16=True, merge=True)",
+    ),
+    (
+        _cmd(2, 32, 96, 1, 250, 1, 3, 0, 1, 1, 1),
+        "4,6",
+        "dict(q=1, fk=1, grid_blocks=6, xf='wmma', prefetch=True, m_f16=True,"
+        " merge=True, waves=4)",
+    ),
+    (
+        _cmd(2, 128, 64, 1, 517, 1, 11, 0, 25, 1, 5),
+        "4s3",
+        "dict(q=2, fk=2, grid_blocks=10, xf='wmma', prefetch=True, m_f16=True,"
+        " xf_batch=4, merge=True, waves=4, waves_per_eu=2)",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", range(len(FUSED_CASES)))
+def test_fused_1d(case):
+    from benchmarks.common import benchmark_winograd_fused_1d as B
+
+    cmd, variants, cfg = FUSED_CASES[case]
+    rc = B.main(
+        [
+            "--miopen-cmd",
+            cmd,
+            "--variant",
+            variants,
+            "--cfgs",
+            f"[{cfg}]",
             "--jobs",
             "1",
         ]
