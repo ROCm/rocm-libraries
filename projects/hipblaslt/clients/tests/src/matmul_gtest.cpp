@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 #include <gtest/gtest-spi.h>
 
@@ -231,10 +232,29 @@ namespace
     // under --verify_strict always means D was checked.
     TEST(BenchVerify, smoke_UncomparableOutputTypeCountsAsFailure)
     {
-        BenchVerifyD d(8, 4, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
         EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
         EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
-        EXPECT_EQ(d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false), 1);
+        struct RestoreErrorStream
+        {
+            hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
+            ~RestoreErrorStream()
+            {
+                hipblaslt_cerr = std::move(saved);
+            }
+        } restore_error_stream;
+        hipblaslt_cerr        = hipblaslt_internal_ostream{};
+        const auto failures   = d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false);
+        const auto diagnostic = hipblaslt_cerr.str();
+        EXPECT_EQ(failures, 1);
+        EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
+        EXPECT_NE(diagnostic.find("so D was not verified"), std::string::npos);
+    }
+
+    TEST(BenchVerify, smoke_UnknownOutputTypeCountsAsFailure)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        EXPECT_EQ(d.run(HIP_R_32F, static_cast<hipDataType>(-1), false), 1);
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
