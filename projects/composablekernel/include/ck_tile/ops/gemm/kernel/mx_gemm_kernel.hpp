@@ -56,8 +56,9 @@ struct MxGemmKernelArgs : public UniversalGemmKernelArgs<NumATensor, NumBTensor,
 
 /**
  * @brief Host shape checks for MX GEMM on the gfx125 TDM pipelines.
- * @details UniversalGemmKernel::IsSupportedArgument returns true for every TDM argument, so
- *          MxGemmKernel applies these checks instead. They reject:
+ * @details For TDM pipelines UniversalGemmKernel::IsSupportedArgument checks only tensor size and
+ *          split-K and skips its shape checks, so MxGemmKernel applies these checks instead. They
+ *          reject:
  *          - K <= 0;
  *          - K not a multiple of ScaleBlockSize * KXdlPack: the kernel sizes the packed scale view
  *            as K / ScaleBlockSize / KXdlPack and drops the remainder;
@@ -357,9 +358,9 @@ struct MxGemmKernel
 
         if constexpr(BaseKernel::kIsTdmPipeline)
         {
-            // UniversalGemmKernel::IsSupportedArgument returns true for every TDM argument. The
-            // device check comes last so that the argument checks also run on a host without a
-            // gfx125 device.
+            // UniversalGemmKernel::IsSupportedArgument skips its shape checks for TDM pipelines.
+            // The device check comes last so that the argument checks also run on a host without
+            // a gfx125 device.
             if(!BaseKernel::IsTdmArgumentSupported("MX GEMM",
                                                    kargs.k_batch,
                                                    kargs.K,

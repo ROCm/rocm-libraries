@@ -6,6 +6,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
 * Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
