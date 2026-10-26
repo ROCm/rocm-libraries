@@ -72,13 +72,9 @@
 //
 #include "unit_test_utils.hpp"
 
-#include "rocsparse.h"
+#include "unit_test_grid_clamp.hpp"
 
-// Internal handle definition. These tests need the complete _rocsparse_handle
-// type to shrink handle->properties.maxGridSize[0]; that field is what the
-// bsrxmv launch paths clamp their grids against, and shrinking it is the only
-// way to put the grid below the work without allocating a 17 GB matrix.
-#include "rocsparse_handle.hpp"
+#include "rocsparse.h"
 
 #include <vector>
 
@@ -99,26 +95,6 @@ namespace
         {
             if(d)
                 (void)rocsparse_destroy_mat_descr(d);
-        }
-    };
-
-    // Temporarily shrink the grid.x limit the bsrxmv launch paths clamp against,
-    // and restore it on scope exit so a failed assertion cannot leak the
-    // override into another assertion in the same test.
-    struct ScopedMaxGridSizeX
-    {
-        rocsparse_handle handle;
-        int              saved;
-
-        ScopedMaxGridSizeX(rocsparse_handle h, int limit)
-            : handle(h)
-            , saved(h->properties.maxGridSize[0])
-        {
-            handle->properties.maxGridSize[0] = limit;
-        }
-        ~ScopedMaxGridSizeX()
-        {
-            handle->properties.maxGridSize[0] = saved;
         }
     };
 
