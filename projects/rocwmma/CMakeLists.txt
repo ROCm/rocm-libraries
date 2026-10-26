@@ -180,22 +180,24 @@ message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 find_package( hip REQUIRED )
 find_package( hiprtc REQUIRED )
-find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
-   # Fall-back to module mode.
-   find_package(OpenMP MODULE REQUIRED)
-endif()
 
-if(TARGET OpenMP::omp)
-  set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
-  set(ROCWMMA_OPENMP_DEPENDENCY openmp CONFIG PATHS "\"\${PACKAGE_PREFIX_DIR}/lib/llvm/lib/cmake/openmp\"")
-  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
-  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
-else()
-  set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
-  set(ROCWMMA_OPENMP_DEPENDENCY OpenMP MODULE COMPONENTS CXX)
-  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
-  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+# OpenMP is used by client-side reference implementations, not the public headers.
+if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS OR ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
+     # Fall-back to module mode.
+     find_package(OpenMP MODULE REQUIRED)
+  endif()
+
+  if(TARGET OpenMP::omp)
+    set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+    set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
+    set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
+  else()
+    set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+    set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+  endif()
 endif()
 
 if (ROCWMMA_BUILD_BENCHMARK_TESTS)
@@ -211,7 +213,7 @@ if (ROCWMMA_BUILD_BENCHMARK_TESTS)
 endif()
 
 add_library(rocwmma INTERFACE)
-target_link_libraries(rocwmma INTERFACE hip::device hip::host ${ROCWMMA_OPENMP_LIBRARY} ${AMD_SMI_LIBRARY})
+target_link_libraries(rocwmma INTERFACE hip::device hip::host ${AMD_SMI_LIBRARY})
 
 rocm_install_targets(
   TARGETS rocwmma
@@ -234,6 +236,17 @@ endif()
 
 if(ROCWMMA_BUILD_TESTS)
   rocm_package_setup_component(tests PARENT clients)
+  # Install consumer test sources for downstream validation of the packaged SDK.
+  rocm_install(
+    DIRECTORY test/cmake/package_consumer
+    DESTINATION share/rocwmma/tests
+    COMPONENT tests
+    FILES_MATCHING
+      PATTERN "CMakeLists.txt"
+      PATTERN "*.hip"
+      PATTERN "*.cpp"
+      PATTERN "README.md"
+  )
   add_subdirectory(test)
 endif()
 
@@ -251,9 +264,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 rocm_export_targets(
   TARGETS roc::rocwmma
   NAMESPACE roc::
-  # Discover OpenMP before HIP, which can change PACKAGE_PREFIX_DIR in older CMake versions.
   DEPENDS
-    PACKAGE ${ROCWMMA_OPENMP_DEPENDENCY}
     PACKAGE hip
 )
 

@@ -3,6 +3,12 @@
 Documentation for rocWMMA is available at
 [https://rocm.docs.amd.com/projects/rocWMMA/en/latest](https://rocm.docs.amd.com/projects/rocWMMA/en/latest).
 
+## Unreleased
+
+### Resolved issues
+
+* Removed the OpenMP requirement from the public CMake target and installed CMake package. OpenMP remains a build dependency for samples and tests.
+
 ## rocWMMA 2.2.2 for ROCm 10.2
 
 ### Added
