@@ -278,7 +278,12 @@ def main(argv=None) -> int:
             try:
                 res = run_case(problem, dtype, variant, args, arch, ref_cache)
             except ValueError as e:
-                print(f"[skip] {problem.short()} {variant}: {e}", flush=True)
+                # A requested variant that cannot run is a failure under
+                # --verify (no numeric check ran), a skip otherwise.
+                tag = "fail" if args.verify else "skip"
+                print(f"[{tag}] {problem.short()} {variant}: {e}", flush=True)
+                if args.verify:
+                    rc = 1
                 continue
             if not res or any("verify=FAIL" in r for r in res):
                 rc = 1

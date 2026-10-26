@@ -294,3 +294,30 @@ def test_fused_f47_builds():
     k = build_fused_wino_1d(s)
     assert any("async" in nm for nm in _op_names(k.body))
     compile_kernel(k, arch="gfx1250")
+
+
+@pytest.mark.parametrize(
+    "driver", ["benchmark_winograd_gen", "benchmark_winograd_fused_1d"]
+)
+def test_driver_rejected_variant_fails_verify(driver, monkeypatch):
+    """A variant the driver rejects (``ValueError``) fails ``--verify``: no
+    numeric check ran. Without ``--verify`` it stays a skip."""
+    import importlib
+    import sys
+    import types
+
+    B = importlib.import_module(f"benchmarks.common.{driver}")
+    # main() claims the HIP context through torch first; nothing runs here.
+    monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
+
+    def rejected(*_a, **_k):
+        raise ValueError("variant rejected")
+
+    monkeypatch.setattr(B, "run_case", rejected)
+    cmd = (
+        "convfp16 -n 1 -c 32 -k 32 -H 1 -W 64 -y 1 -x 3 -p 0 -q 1 -u 1 -v 1 "
+        "-l 1 -j 1 -g 1 -F 1 -m conv -I NHWC -O NHWC -f NHWC"
+    )
+    argv = ["--miopen-cmd", cmd, "--variant", "4", "--arch", "gfx1250"]
+    assert B.main(argv + ["--verify"]) == 1
+    assert B.main(argv) == 0
