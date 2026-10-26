@@ -58,10 +58,13 @@ namespace
         }
     }
 
-    // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on f32 host
-    // buffers, M x N per batch, and counts the checks that failed.
+    // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on host
+    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed.
+    template <typename T = float>
     struct BenchVerifyD
     {
+        static constexpr hipDataType type = std::is_same_v<T, float> ? HIP_R_32F : HIP_R_16F;
+
         int64_t                    m, n, batches;
         hipblasLtBatchMode_t       mode;
         std::vector<HipHostBuffer> gold, result;
@@ -77,28 +80,30 @@ namespace
             const size_t count   = strided ? 1 : batches;
             for(size_t i = 0; i < count; i++)
             {
-                gold.emplace_back(HIP_R_32F, m * n * (strided ? batches : 1));
-                result.emplace_back(HIP_R_32F, m * n * (strided ? batches : 1));
+                gold.emplace_back(type, m * n * (strided ? batches : 1));
+                result.emplace_back(type, m * n * (strided ? batches : 1));
             }
             for(int64_t b = 0; b < batches; b++)
                 for(int64_t i = 0; i < m * n; i++)
-                    at(gold, b, i) = at(result, b, i) = float(1 + (i + b) % 3);
+                    at(gold, b, i) = at(result, b, i) = T(1 + (i + b) % 3);
         }
 
-        float& at(std::vector<HipHostBuffer>& buffers, int64_t batch, int64_t i)
+        T& at(std::vector<HipHostBuffer>& buffers, int64_t batch, int64_t i)
         {
             if(mode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-                return static_cast<float*>(buffers[batch].buf())[i];
-            return static_cast<float*>(buffers[0].buf())[batch * m * n + i];
+                return static_cast<T*>(buffers[batch].buf())[i];
+            return static_cast<T*>(buffers[0].buf())[batch * m * n + i];
         }
 
-        int64_t run(hipDataType input_type = HIP_R_32F)
+        // output_type overrides the type check() is told D has, for a type it cannot compare.
+        int64_t
+            run(hipDataType input_type = type, hipDataType output_type = type, bool allclose = true)
         {
             Arguments arg{};
             arg.init();
             arg.unit_check        = 0;
             arg.norm_check        = 1;
-            arg.allclose_check    = 1;
+            arg.allclose_check    = allclose;
             arg.norm_check_assert = false;
             arg.compute_type      = HIPBLAS_COMPUTE_32F;
             arg.a_type = arg.b_type = input_type;
@@ -138,7 +143,7 @@ namespace
                   rtol,
                   max_ulp,
                   avg_ulp,
-                  HIP_R_32F,
+                  output_type,
                   HIP_R_32F,
                   HIP_R_32F,
                   HIP_R_32F,
@@ -203,6 +208,33 @@ namespace
         EXPECT_DOUBLE_EQ(
             norm_tolerance(HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_16BF, HIP_R_32F, HIP_R_32F),
             0.5);
+    }
+
+    // f16 output uses the f16 limit of 0.01: a 0.4% error passes, which the f32 limit would
+    // fail, and a 2% error fails, which the bf16 limit would pass. Allclose passes both.
+    TEST(BenchVerify, smoke_HalfOutputNormUsesHalfTolerance)
+    {
+        BenchVerifyD<hipblasLtHalf> close(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        BenchVerifyD<hipblasLtHalf> far(8, 4, 2, HIPBLASLT_BATCH_MODE_STRIDED);
+        for(int64_t b = 0; b < 2; b++)
+            for(int64_t i = 0; i < 32; i++)
+            {
+                close.at(close.result, b, i) *= hipblasLtHalf(1.004f);
+                far.at(far.result, b, i) *= hipblasLtHalf(1.02f);
+            }
+        EXPECT_EQ(close.run(), 0);
+        EXPECT_GT(close.norm_error, norm_tolerance(HIP_R_32F));
+        EXPECT_EQ(far.run(), 1);
+    }
+
+    // A D type that norm_check_general cannot compare is counted as a failure, so exit 0
+    // under --verify_strict always means D was checked.
+    TEST(BenchVerify, smoke_UncomparableOutputTypeCountsAsFailure)
+    {
+        BenchVerifyD d(8, 4, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+        EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
+        EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
+        EXPECT_EQ(d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false), 1);
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)

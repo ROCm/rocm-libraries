@@ -491,7 +491,7 @@ try
         ("verify_strict",
          value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
          "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
-         "failed). Implies --verify.")
+         "failed). Checks D only. Implies --verify.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),

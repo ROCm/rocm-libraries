@@ -1213,6 +1213,18 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
     return s.str();
 }
 
+// After check(), names the solution that the failure lines it printed were for.
+inline void report_failed_solution(int64_t                failures_before,
+                                   hipblasLtHandle_t      handle,
+                                   hipblasLtMatmulAlgo_t& algo,
+                                   size_t                 sol,
+                                   size_t                 count)
+{
+    if(hipblaslt_bench_options::verification_failures() > failures_before)
+        hipblaslt_cerr << "the failed checks above are for "
+                       << solution_description(handle, algo, sol, count, true) << std::endl;
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -1484,7 +1496,15 @@ void check(hipStream_t                   stream,
                     norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
             }
             const double limit = norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type);
-            if(limit > 0.0 && !(worst_error < limit))
+            if(limit <= 0.0 || !norm_check_general_supports(To))
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check of D of gemm " << gemmIdx
+                               << " not done: no norm limit or comparison for "
+                               << hip_datatype_to_string(To) << ", so D was not verified"
+                               << std::endl;
+            }
+            else if(!(worst_error < limit))
             {
                 hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
@@ -6108,6 +6128,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6142,6 +6163,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
             }
             if(arg.fast_check)
             {
@@ -6581,6 +6607,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
                     }
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6615,6 +6642,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
             }
 
 #define argument_param                                                                            \

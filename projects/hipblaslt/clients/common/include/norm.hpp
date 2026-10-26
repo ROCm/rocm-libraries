@@ -624,6 +624,29 @@ inline double norm_check_general(char        norm_type,
     }
 }
 
+// The types the norm_check_general overloads above compare; for any other they return 0.
+inline bool norm_check_general_supports(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_C_32F:
+    case HIP_C_64F:
+    case HIP_R_16F:
+    case HIP_R_16BF:
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
+    case HIP_R_32I:
+    case HIP_R_8I:
+        return true;
+    default:
+        return false;
+    }
+}
+
 template <typename T>
 bool norm_check(double norm_error)
 {
