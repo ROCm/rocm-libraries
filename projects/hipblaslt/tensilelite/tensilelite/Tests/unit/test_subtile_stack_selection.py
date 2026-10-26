@@ -39,8 +39,8 @@ both are pinned here against an executable statement of the rejected form.
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Validators.Subtile import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Validators.Subtile import (
     SUBTILE_STACK_SIZES_B16,
     _SUBTILE_STACK_SIZES,
     _subtileStackForTile,

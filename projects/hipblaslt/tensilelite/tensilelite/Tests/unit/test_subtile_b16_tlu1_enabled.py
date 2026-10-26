@@ -25,9 +25,9 @@ coverage.
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
-from Tensile.SolutionStructs.Validators.Subtile import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+from tensilelite.SolutionStructs.Validators.Subtile import (
     SUBTILE_STACK_SIZES_B16,
     subtileStackForB16TLU1,
     subtileTLU1StackReason,

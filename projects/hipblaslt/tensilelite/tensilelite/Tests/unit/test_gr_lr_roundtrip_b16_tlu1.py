@@ -136,13 +136,13 @@ def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch,
     from rocisa.container import RegisterContainer, sgpr
     from rocisa.instruction import SBarrier, SWaitCnt
 
-    from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
-    from Tensile.Components.Subtile.SubtileGREmit import (
+    from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+    from tensilelite.Components.Subtile.SubtileGREmit import (
         globalReadDTLInitCommonSgpr,
         globalReadDoSubtile,
         graTileAssignment,
     )
-    from Tensile.Components.Subtile.SubtileLREmit import (
+    from tensilelite.Components.Subtile.SubtileLREmit import (
         emitSingleDsRead,
         localReadDoSubtile,
         lraTileAssignment,

@@ -44,9 +44,9 @@ from rocisa.container import sgpr
 
 from gpu_test_helpers import TileConfig, create_writer, init_rocisa
 
-from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
-from Tensile.Components.Subtile.SubtileGREmit import _graTileAssignment_tlu
-from Tensile.Components.Subtile.SubtileTLUSwizzle import selectTLUColScatter
+from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+from tensilelite.Components.Subtile.SubtileGREmit import _graTileAssignment_tlu
+from tensilelite.Components.Subtile.SubtileTLUSwizzle import selectTLUColScatter
 
 WAVE_SIZE = 64
 CHUNK_BYTES = 16

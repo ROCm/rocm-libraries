@@ -231,7 +231,7 @@ def _subtileLRDsImmediateReason(tileInfo):
   MT 256/288/320/352/384 on the B operand of an NN bf16 subtile kernel.
   """
   # Lazy import: see validateSubtileGRKPartition.
-  from Tensile.Components.Subtile.Kernel import LRTag_TLU1
+  from ...Components.Subtile.Kernel import LRTag_TLU1
   lr = getattr(tileInfo, "lr", None)
   if lr is not None and isinstance(lr.config.tag, LRTag_TLU1):
     return None   # TLU=1: staged through sharedVgprLRBigOffset (bf16) or fits (fp4)

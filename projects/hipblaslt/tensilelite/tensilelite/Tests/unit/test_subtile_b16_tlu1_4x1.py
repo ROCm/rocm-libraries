@@ -20,10 +20,10 @@ import pytest
 
 from gpu_test_helpers import TileConfig, create_writer
 
-from Tensile.Components.Subtile.Kernel import AB_GEOMETRY_MAP
-from Tensile.Components.Subtile.SubtileGREmit import _tluKWaveSlots
-from Tensile.Components.Subtile.SubtileLREmit import _tlu1LRGeom, _tlu1TrLoadInst
-from Tensile.Components.Subtile.SubtileTLUSwizzle import selectTLU1B16SwizzleBits
+from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+from tensilelite.Components.Subtile.SubtileGREmit import _tluKWaveSlots
+from tensilelite.Components.Subtile.SubtileLREmit import _tlu1LRGeom, _tlu1TrLoadInst
+from tensilelite.Components.Subtile.SubtileTLUSwizzle import selectTLU1B16SwizzleBits
 
 GEOMETRY = AB_GEOMETRY_MAP["AB_B16_TLU1_4x1"]
 WAVE_SIZE = 64
