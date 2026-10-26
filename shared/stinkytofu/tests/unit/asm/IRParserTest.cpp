@@ -132,6 +132,36 @@ TEST_F(IRParserTest, ParsesLabelReference) {
     EXPECT_EQ(instructions[0].srcRegs[0].literalValue, "label_LoopEndL");
 }
 
+TEST_F(IRParserTest, ParsesSymbolicLiteralOperand) {
+    // DumpStinkyModulePass prints .set symbols and special registers bare.
+    const std::string input = R"(
+        s2 = "st.s_mov_b32"(ttmp9)
+        s82 = "st.s_mul_i32"(MT1, s3)
+        s18 = "st.s_mov_b32"(BufferOOB)
+    )";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+    ASSERT_FALSE(result.hasErrors());
+    auto instructions = result.getInstructions();
+    ASSERT_EQ(instructions.size(), 3);
+
+    EXPECT_EQ(instructions[0].srcRegs[0].dataType, StinkyRegister::Type::LiteralString);
+    EXPECT_EQ(instructions[0].srcRegs[0].getLiteralString(), "ttmp9");
+    EXPECT_EQ(instructions[1].srcRegs[0].getLiteralString(), "MT1");
+    EXPECT_EQ(instructions[1].srcRegs[1].reg.type, RegType::S);
+    EXPECT_EQ(instructions[1].srcRegs[1].reg.idx, 3u);
+    EXPECT_EQ(instructions[2].srcRegs[0].getLiteralString(), "BufferOOB");
+}
+
+TEST_F(IRParserTest, RejectsUnknownRegisterTypeWithIndex) {
+    const std::string input = R"(s0 = "st.s_mov_b32"(Foo[1]))";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+    ASSERT_TRUE(result.hasErrors());
+    ASSERT_FALSE(result.diagnostics.empty());
+    EXPECT_NE(result.diagnostics[0].getMessage().find("Unknown register type"), std::string::npos);
+}
+
 TEST_F(IRParserTest, ParsesMemoryInstruction) {
     const std::string input = R"(v[0] = "st.buffer_load_b32"(v[1:2]))";
 

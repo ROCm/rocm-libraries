@@ -28,9 +28,19 @@ def test_physical_round_trip():
     assert stinkytofu.load_stir(printed).serialize() == printed
     assert "st.v_mov_b32" in printed
     again = stinkytofu.load_stir(printed)
-    opcodes = [inst.opcode for fn in again.functions() for block in fn.blocks() for inst in block.instructions()]
+    opcodes = [
+        inst.opcode
+        for fn in again.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
+    ]
     assert opcodes == ["st.v_mov_b32", "st.v_add_f32"]
-    mov = next(inst for fn in again.functions() for block in fn.blocks() for inst in block.instructions())
+    mov = next(
+        inst
+        for fn in again.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
+    )
     assert mov.defs == [("v", 0, 1)]
     assert ("v", 1, 1) in mov.uses
 
@@ -84,14 +94,19 @@ st.func @k() {
 }
 """
     module = stinkytofu.load_stir(text)
-    with pytest.raises(RuntimeError, match="HazardGapAnalysisPass reported an analysis failure"):
+    with pytest.raises(
+        RuntimeError, match="HazardGapAnalysisPass reported an analysis failure"
+    ):
         module.run_passes(["HazardGapAnalysisPass"])
 
 
 def test_view_survives_removal():
     module = stinkytofu.load_stir(KERNEL)
     mov = next(
-        inst for fn in module.functions() for block in fn.blocks() for inst in block.instructions()
+        inst
+        for fn in module.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
     )
     module.run_passes(["RemoveInstructionPass=v_mov_b32"])
     assert mov.opcode == "st.v_mov_b32"
@@ -105,6 +120,30 @@ def test_view_survives_removal():
     assert opcodes == ["st.v_add_f32"]
 
 
+def test_symbolic_literal_operand():
+    text = """\
+st.func @k() {
+^entry:
+  s2 = "st.s_mov_b32"(ttmp9) { issueCycles = 1, latencyCycles = 2 }
+  s82 = "st.s_mul_i32"(MT1, s3) { issueCycles = 1, latencyCycles = 2 }
+}
+"""
+    module = stinkytofu.load_stir(text)
+    mov, mul = [
+        inst
+        for fn in module.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
+    ]
+    assert mov.uses == ["ttmp9"]
+    assert mul.uses == ["MT1", ("s", 3, 1)]
+    assert stinkytofu.load_stir(module.serialize()).serialize() == module.serialize()
+    with pytest.raises(ValueError, match="Unknown register type"):
+        stinkytofu.load_stir(
+            'st.func @k() {\n^entry:\n  s0 = "st.s_mov_b32"(Foo[1])\n}\n'
+        )
+
+
 def test_hwreg_operand():
     text = """\
 st.func @k() {
@@ -114,7 +153,10 @@ st.func @k() {
 """
     module = stinkytofu.load_stir(text)
     inst = next(
-        inst for fn in module.functions() for block in fn.blocks() for inst in block.instructions()
+        inst
+        for fn in module.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
     )
     assert inst.defs == [("hwreg", 26, 0, 2)]
     assert 2 in inst.uses
@@ -187,4 +229,6 @@ def test_launcher_finds_build_and_install_layouts(tmp_path):
     (prefix / "lib" / "stinkytofu").mkdir()
     (prefix / "lib" / "stinkytofu" / "intrinsics.st.bc").write_text("")
     (prefix / "bin").mkdir()
-    assert launcher.module_dir(str(prefix / "bin" / "stinkytofu")) == str(package.parent)
+    assert launcher.module_dir(str(prefix / "bin" / "stinkytofu")) == str(
+        package.parent
+    )

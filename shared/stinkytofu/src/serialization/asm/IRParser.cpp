@@ -1006,10 +1006,16 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
 
     RegType regType = stringToRegType(regTypeStr);
 
-    // Validate register type
+    // A bare name that is not a register type is a literal symbol. The printer
+    // emits .set names and special registers that way (MT1, ttmp9, BufferOOB).
+    // A following '[' is still a malformed register and stays an error.
     if (!isValidRegType(regType)) {
-        emitError("Unknown register type: " + regTypeStr);
-        return std::nullopt;
+        if (peek().kind == TokenKind::LeftBracket) {
+            emitError("Unknown register type: " + regTypeStr);
+            return std::nullopt;
+        }
+        if (isMinus) regTypeStr.insert(regTypeStr.begin(), '-');
+        return StinkyRegister(regTypeStr);
     }
 
     // Check for format: v 12 (separate tokens - reg type then integer)
