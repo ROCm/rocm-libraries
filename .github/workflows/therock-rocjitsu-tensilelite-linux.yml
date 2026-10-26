@@ -27,6 +27,9 @@ on:
       workers:
         type: string
         default: "96"
+      reference_workers:
+        type: string
+        default: "16"
       dispatch_threads:
         type: string
         default: "1"
@@ -74,6 +77,7 @@ jobs:
       SUITE_TIMEOUT_SECONDS: ${{ inputs.suite_seconds }}
       STRATEGY: ${{ inputs.strategy }}
       REQUESTED_WORKERS: ${{ inputs.workers }}
+      REQUESTED_REFERENCE_WORKERS: ${{ inputs.reference_workers }}
       REQUESTED_DISPATCH_THREADS: ${{ inputs.dispatch_threads }}
       CASE_FILTER: ${{ inputs.case_filter }}
       MAX_WORK: ${{ inputs.max_work }}
@@ -94,9 +98,10 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
-          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix)$ ]] || { echo "::error::invalid strategy"; exit 1; }
           trials=1
           [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
+          [[ "${STRATEGY}" != matrix ]] || trials=3
           (( trials * SUITE_TIMEOUT_SECONDS <= 1500 )) || { echo "::error::trial execution limits must total at most 1500 seconds"; exit 1; }
           [[ "${REQUESTED_DISPATCH_THREADS}" == 1 ]] || { echo "::error::shape queue experiments require serial dispatch"; exit 1; }
 
@@ -217,6 +222,7 @@ jobs:
           cores="$(nproc)"
           workers="${REQUESTED_WORKERS}"
           [[ "${workers}" =~ ^[0-9]+$ ]] || { echo "::error::workers must be an integer"; exit 1; }
+          [[ "${REQUESTED_REFERENCE_WORKERS}" =~ ^[0-9]+$ ]] && (( REQUESTED_REFERENCE_WORKERS > 0 && REQUESTED_REFERENCE_WORKERS <= cores )) || { echo "::error::reference_workers must be 1..host CPU count"; exit 1; }
           [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[0-9]+$ ]] || { echo "::error::dispatch_threads must be an integer"; exit 1; }
           (( workers > 0 )) || workers=$(( cores < 16 ? cores : 16 ))
           (( workers <= cores )) || { echo "::error::workers exceeds host CPU count"; exit 1; }
@@ -312,7 +318,8 @@ jobs:
           set -o pipefail
           python "${SCRIPTS_DIR}/rocjitsu_experiment.py" \
             --report-dir "${REPORT_DIR}" --strategy "${STRATEGY}" \
-            --workers "${PYTEST_WORKERS}" --per-job-seconds "${PER_JOB_SECONDS}" \
+            --workers "${PYTEST_WORKERS}" --reference-workers "${REQUESTED_REFERENCE_WORKERS}" \
+            --per-job-seconds "${PER_JOB_SECONDS}" \
             --suite-seconds "${SUITE_TIMEOUT_SECONDS}" \
             2>&1 | tee "${REPORT_DIR}/experiment.log"
 

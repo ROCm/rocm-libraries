@@ -15,10 +15,14 @@ on:
         type: string
         description: "Independent serial shape workers (at most the runner CPU count)"
         default: "96"
+      reference_workers:
+        type: string
+        description: "Whole-YAML workers for reference/paired/matrix; 16 follows the current baseline, 12 is another allocation control"
+        default: "16"
       strategy:
         type: choice
-        description: "Shape queue, whole-YAML comparison, or serial/concurrent safety check"
-        options: [shape, reference, paired, safety]
+        description: "Matrix compares whole-YAML scheduling with half/full requested shape workers on one runner"
+        options: [shape, reference, paired, safety, matrix]
         default: shape
       dispatch_threads:
         type: string
@@ -55,6 +59,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       strategy: ${{ inputs.strategy }}
       workers: ${{ inputs.workers }}
+      reference_workers: ${{ inputs.reference_workers }}
       dispatch_threads: ${{ inputs.dispatch_threads }}
       max_work: ${{ inputs.max_work }}
       per_job_seconds: ${{ inputs.per_job_seconds }}

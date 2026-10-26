@@ -5,16 +5,26 @@ import copy
 import csv
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rocjitsu_compare import audit, audit_item, compare, solution_digest
+from rocjitsu_compare import (
+    audit,
+    audit_item,
+    compare,
+    resource_statistics,
+    solution_digest,
+    workload_coverage,
+)
 from rocjitsu_evidence import digest, retain
+import rocjitsu_experiment
 from rocjitsu_experiment import commands
 from rocjitsu_pytest import write_json
 
@@ -196,7 +206,7 @@ class CompareTest(unittest.TestCase):
             )
         write_json(
             root / "shape-plan.json",
-            dict(version=1, sources=[source], jobs=jobs, excluded=[]),
+            dict(version=1, ceiling=4096**3, sources=[source], jobs=jobs, excluded=[]),
         )
         write_json(root / "progress.json", dict(selected=len(tests), tests=tests))
         write_json(
@@ -236,6 +246,146 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(
             candidate["client_verdicts"], {"PASSED": 2, "DID_NOT_SATISFY_ASSERTS": 2}
         )
+
+    def test_coverage_counts_partial_files_and_arithmetic_separately(self):
+        def job(name, source, work, problems):
+            return dict(
+                nodeid=name,
+                source=f"tensilelite/Tests/common/{source}.yaml",
+                source_sha256="frozen",
+                work=work,
+                problems=[dict(sizes=[n, 1, 1, 1]) for n in problems],
+                reason="logical work exceeds 10",
+            )
+
+        coverage = workload_coverage(
+            dict(
+                ceiling=10,
+                jobs=[
+                    job("small", "partial", 2, [2]),
+                    job("grouped", "kept", 8, [3, 5]),
+                ],
+                excluded=[
+                    job("large", "partial", 45, [45]),
+                    job("only", "removed", 45, [45]),
+                ],
+            )
+        )
+        self.assertEqual(coverage["selected_yaml_files"], 3)
+        self.assertEqual(coverage["admitted_queue_jobs"], 2)
+        self.assertEqual(coverage["admitted_problem_descriptors"], 3)
+        self.assertEqual(coverage["threshold_excluded_queue_jobs"], 2)
+        self.assertEqual(coverage["threshold_affected_yaml_files"], 2)
+        self.assertEqual(coverage["fully_excluded_yaml_files"], 1)
+        self.assertEqual(coverage["excluded_declared_work_fraction"], 0.9)
+        self.assertEqual(len(coverage["exclusions"]), 2)
+
+    def test_changed_gate_or_emulator_model_prevents_an_elapsed_ratio(self):
+        _, reference = self.report("reference", False)
+        _, candidate = self.report("candidate", True)
+        for field in ("gate", "model", "capacity"):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(candidate)
+                if field == "gate":
+                    changed["coverage"]["ceiling"] *= 2
+                elif field == "model":
+                    changed["runtime"]["config"] = {"max_ticks": 10}
+                else:
+                    changed["runtime"]["available_cpus"] = 48
+                result = compare(reference, changed)
+                self.assertFalse(result["coverage_equal"])
+                self.assertIsNone(result["reference_over_candidate_ratio"])
+
+    def test_child_cpu_accounting_and_missing_resource_evidence(self):
+        runtime = dict(available_cpus=4)
+        self.assertIsNone(resource_statistics(self.root, runtime))
+        usage = dict(wall_seconds=20, user_seconds=8, system_seconds=2, exit_code=0)
+        write_json(self.root / "resource-time.json", usage)
+        stats = resource_statistics(self.root, runtime)
+        self.assertEqual(stats["mean_cpu_cores"], 0.5)
+        self.assertEqual(stats["cpu_capacity_fraction"], 0.125)
+        _, reference = self.report("reference", False)
+        _, candidate = self.report("candidate", True)
+        reference["resource_time"] = stats
+        self.assertIsNone(
+            compare(reference, candidate)["reference_over_candidate_ratio"]
+        )
+        candidate["resource_time"] = dict(stats, wall_seconds=5)
+        self.assertEqual(
+            compare(reference, candidate)["reference_over_candidate_ratio"], 4
+        )
+        for wall in (0, -1, float("nan")):
+            with self.subTest(wall=wall):
+                write_json(
+                    self.root / "resource-time.json", dict(usage, wall_seconds=wall)
+                )
+                with self.assertRaises(ValueError):
+                    resource_statistics(self.root, runtime)
+
+    def test_matrix_retains_failed_arm_and_only_reports_audited_ratios(self):
+        seed, _ = self.report("seed", False)
+        write_json(
+            self.root / "shape-plan.json",
+            json.loads((seed / "shape-plan.json").read_text()),
+        )
+        calls = []
+
+        def trial(strategy, parent, env, plan, workers, seconds, suite, label):
+            calls.append((label, strategy, workers))
+            _, report = self.report(label, strategy == "shape")
+            report["runtime"].update(
+                workers=workers, cpu_thread_budget=1 if strategy == "shape" else 6
+            )
+            if label == "shape-96":
+                report["audit_errors"].append("interrupted numerical verdict sweep")
+                report["counts"]["job_timeout"] = 1
+                report["ledger"].pop()
+            return report
+
+        command = [
+            "rocjitsu_experiment",
+            "--report-dir",
+            str(self.root),
+            "--strategy",
+            "matrix",
+            "--workers",
+            "96",
+            "--per-job-seconds",
+            "300",
+            "--suite-seconds",
+            "500",
+        ]
+        with (
+            patch.object(sys, "argv", command),
+            patch.object(os, "sched_getaffinity", return_value=set(range(96))),
+            patch.dict(os.environ, COHORT_MANIFEST="", GITHUB_STEP_SUMMARY=""),
+            patch.object(rocjitsu_experiment, "trial", side_effect=trial),
+        ):
+            self.assertEqual(rocjitsu_experiment.main(), 1)
+        self.assertEqual(
+            set(calls),
+            {
+                ("reference", "reference", 16),
+                ("shape-48", "shape", 48),
+                ("shape-96", "shape", 96),
+            },
+        )
+        benchmark = json.loads((self.root / "benchmark.json").read_text())
+        self.assertEqual(len(benchmark["strategies"]), 3)
+        self.assertEqual(len(benchmark["comparisons"]), 3)
+        self.assertFalse(benchmark["statistical_claim"])
+        self.assertTrue(
+            all(r["mean_cpu_cores"] is None for r in benchmark["strategies"])
+        )
+        for pair in benchmark["comparisons"]:
+            if "shape-96" in (pair["left"], pair["right"]):
+                self.assertIsNone(pair["reference_over_candidate_ratio"])
+            else:
+                self.assertEqual(pair["reference_over_candidate_ratio"], 2)
+        self.assertFalse(
+            json.loads((self.root / "experiment.json").read_text())["complete"]
+        )
+        self.assertIn("shape-96", (self.root / "benchmark.md").read_text())
 
     def test_drift_in_kernel_semantics_and_unknown_metadata_is_not_ignored(self):
         original = self.solutions[0]

@@ -4,6 +4,8 @@
 """Run bounded reference/shape trials against one frozen artifact workload."""
 
 import argparse
+import csv
+import itertools
 import json
 import os
 from pathlib import Path
@@ -160,6 +162,9 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
     runtime = dict(
         strategy=strategy,
         workers=workers,
+        available_cpus=len(os.sched_getaffinity(0)),
+        runner_name=env.get("RUNNER_NAME"),
+        harness_revision=env.get("GITHUB_SHA"),
         cpu_thread_budget=budget,
         seed=261025,
         target=env["ROCJITSU_TARGET"],
@@ -235,15 +240,119 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
     return report
 
 
+def trial_specifications(strategy, workers, reference_workers):
+    if strategy == "matrix":
+        if workers < 2:
+            raise ValueError("matrix requires at least two requested shape workers")
+        return [
+            ("reference", "reference", reference_workers),
+            (f"shape-{workers // 2}", "shape", workers // 2),
+            (f"shape-{workers}", "shape", workers),
+        ]
+    if strategy == "paired":
+        return [
+            ("reference", "reference", reference_workers),
+            ("shape", "shape", workers),
+        ]
+    if strategy == "safety":
+        return [("serial", "shape", 1), ("shape", "shape", workers)]
+    return [
+        (strategy, strategy, reference_workers if strategy == "reference" else workers)
+    ]
+
+
+def benchmark_report(parent, reports, comparisons):
+    rows = []
+    for name, report in reports.items():
+        usage = report.get("resource_time") or {}
+        rows.append(
+            dict(
+                strategy=name,
+                workers=report["runtime"]["workers"],
+                cpu_thread_budget=report["runtime"]["cpu_thread_budget"],
+                workload_seconds=usage.get(
+                    "wall_seconds", report["execution"].get("wall_seconds")
+                ),
+                mean_cpu_cores=usage.get("mean_cpu_cores"),
+                cpu_capacity_fraction=usage.get("cpu_capacity_fraction"),
+                numerical_passed=report["client_verdicts"].get("PASSED", 0),
+                applicability_rejections=report["client_verdicts"].get(
+                    "DID_NOT_SATISFY_ASSERTS", 0
+                ),
+                timeouts=report["counts"].get("job_timeout", 0),
+                incomplete=sum(
+                    report["counts"].get(field, 0)
+                    for field in (
+                        "claimed_without_result",
+                        "unstarted",
+                        "incomplete",
+                        "missing_result",
+                    )
+                ),
+                audit_errors=len(report["audit_errors"]),
+                counts=json.dumps(report["counts"], sort_keys=True),
+                verdicts=json.dumps(report["client_verdicts"], sort_keys=True),
+            )
+        )
+    coverage = next(iter(reports.values()))["coverage"]
+    excluded_fraction = coverage["excluded_declared_work_fraction"]
+    excluded_share = (
+        f" ({100 * excluded_fraction:.3f}% of declared work)"
+        if excluded_fraction is not None
+        else ""
+    )
+    result = dict(
+        schema=1,
+        coverage=coverage,
+        strategies=rows,
+        comparisons=comparisons,
+        independent_blocks=1,
+        statistical_claim=False,
+    )
+    write_json(parent / "benchmark.json", result)
+    with (parent / "benchmark.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    def display(value):
+        return f"{value:.3f}" if value is not None else "unavailable"
+
+    text = [
+        "RocJITsu strategy calibration. One randomized block does not establish a repeatable speedup.",
+        "",
+        f"Selected {coverage['selected_yaml_files']} YAML files; admitted {coverage['admitted_queue_jobs']} queue jobs ({coverage['admitted_problem_descriptors']} normalized problem descriptors).",
+        f"Threshold excluded {coverage['threshold_excluded_queue_jobs']} jobs across {coverage['threshold_affected_yaml_files']} YAML files; {coverage['fully_excluded_yaml_files']} whole YAML files were excluded.",
+        f"Declared work admitted: {coverage['admitted_declared_work']}; excluded: {coverage['excluded_declared_work']}{excluded_share}. {coverage['work_definition']}",
+        "",
+        "Workload elapsed time includes job startup, compilation, validation and cleanup. Shared artifact/environment setup and initial workload planning are outside each trial. Average CPU use includes child processes and may include host waiters; it is not a measure of useful emulator arithmetic. Container memory peaks span the shared job and are not per-strategy peaks.",
+        "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation, references and dispatch. These are comparisons of complete strategies in a common harness; the shape-worker pair isolates outer concurrency. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
+        "",
+        "| Strategy | Workers | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in rows:
+        text.append(
+            f"| {row['strategy']} | {row['workers']} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
+        )
+    text += [
+        "",
+        "Elapsed ratios are available in benchmark.json only when the pair's runtime, requested work, accepted solutions and verdicts pass the equivalence audit. Failures and incomplete work remain in the report.",
+    ]
+    (parent / "benchmark.md").write_text("\n".join(text) + "\n")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-dir", type=Path, required=True)
     parser.add_argument(
         "--strategy",
-        choices=("shape", "reference", "paired", "safety"),
+        choices=("shape", "reference", "paired", "safety", "matrix"),
         default="shape",
     )
     parser.add_argument("--workers", type=int, default=96)
+    parser.add_argument("--reference-workers", type=int)
     parser.add_argument("--per-job-seconds", type=int, required=True)
     parser.add_argument("--suite-seconds", type=int, required=True)
     args = parser.parse_args()
@@ -252,6 +361,19 @@ def main():
         parser.error("workers must be 1..available CPUs")
     if not 0 < args.per_job_seconds <= args.suite_seconds:
         parser.error("per-job-seconds must be 1..suite-seconds")
+    reference_workers = (
+        args.reference_workers if args.reference_workers is not None else min(cores, 16)
+    )
+    if not 1 <= reference_workers <= cores:
+        parser.error("reference-workers must be 1..available CPUs")
+    try:
+        specifications = trial_specifications(
+            args.strategy, args.workers, reference_workers
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    if args.suite_seconds * len(specifications) > 1500:
+        parser.error("combined trial execution limits must total at most 1500 seconds")
     parent = args.report_dir.resolve()
     plan = json.loads((parent / "shape-plan.json").read_text())
     manifest = os.environ.get("COHORT_MANIFEST")
@@ -268,63 +390,53 @@ def main():
         ):
             parser.error("frozen calibration workload differs from its manifest")
         shutil.copyfile(manifest, parent / "cohort.json")
-    strategies = (
-        ["reference", "shape"] if args.strategy == "paired" else [args.strategy]
-    )
-    if args.strategy == "safety":
-        strategies = ["serial", "shape"]
-    if "reference" in strategies and plan["excluded"]:
-        parser.error("reference/paired requires a cohort with zero gate exclusions")
-    random.SystemRandom().shuffle(strategies)
+    if any(s[1] == "reference" for s in specifications) and plan["excluded"]:
+        parser.error(
+            "whole-YAML comparisons require a cohort with zero gate exclusions"
+        )
+    random.SystemRandom().shuffle(specifications)
+    strategies = [s[0] for s in specifications]
     write_json(
         parent / "trial-order.json",
         dict(order=strategies, independent_blocks=1, statistical_claim=False),
     )
     reports = {}
-    for strategy in strategies:
-        reports[strategy] = trial(
-            "shape" if strategy == "serial" else strategy,
+    for label, strategy, workers in specifications:
+        reports[label] = trial(
+            strategy,
             parent,
             dict(os.environ),
             plan,
-            (
-                args.workers
-                if strategy == "shape"
-                else 1 if strategy == "serial" else min(cores, 16)
-            ),
+            workers,
             args.per_job_seconds,
             args.suite_seconds,
-            label=strategy,
+            label=label,
         )
     failed = any(r["audit_errors"] for r in reports.values())
-    if len(reports) == 2:
-        comparison = compare(
-            reports["reference" if "reference" in reports else "serial"],
-            reports["shape"],
+    comparisons = []
+    for left, right in itertools.combinations(sorted(reports), 2):
+        comparison = dict(
+            left=left, right=right, **compare(reports[left], reports[right])
         )
-        write_json(parent / "comparison.json", comparison)
+        comparisons.append(comparison)
         print(
             json.dumps({k: v for k, v in comparison.items() if k != "differences"}),
             flush=True,
         )
         failed |= bool(comparison["audit_errors"])
+    if len(comparisons) == 1:
+        write_json(parent / "comparison.json", comparisons[0])
+    elif comparisons:
+        write_json(parent / "comparisons.json", comparisons)
+    benchmark_report(parent, reports, comparisons)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as stream:
-            stream.write(
-                "\nRocJITsu audited calibration; one block does not establish a speedup.\n\n"
-            )
-            stream.write(
-                "| Strategy | Wall(s) | Pytest pass | Numerical PASSED rows | Applicability rejections | Timeouts | Audit errors |\n|---|---:|---:|---:|---:|---:|---:|\n"
-            )
-            for name, report in reports.items():
-                stream.write(
-                    f"| {name} | {report['execution'].get('wall_seconds', 0):.3f} | {report['counts'].get('passed', 0)} | {report['client_verdicts'].get('PASSED', 0)} | {report['client_verdicts'].get('DID_NOT_SATISFY_ASSERTS', 0)} | {report['counts'].get('job_timeout', 0)} | {len(report['audit_errors'])} |\n"
-                )
+            stream.write("\n" + (parent / "benchmark.md").read_text())
     write_json(
         parent / "experiment.json",
         dict(
-            complete=True,
+            complete=not failed,
             exit_code=int(failed),
             strategies=strategies,
             independent_blocks=1,

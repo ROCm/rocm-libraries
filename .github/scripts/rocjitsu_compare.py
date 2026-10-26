@@ -10,6 +10,7 @@ import copy
 import csv
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import statistics
@@ -48,6 +49,77 @@ def percentiles(values):
         median=statistics.median(values),
         p95=percentile(0.95),
         max=max(values),
+    )
+
+
+def workload_coverage(plan):
+    admitted, excluded = plan["jobs"], plan["excluded"]
+    admitted_sources = {source_name(Path(j["source"])) for j in admitted}
+    excluded_sources = {source_name(Path(j["source"])) for j in excluded}
+    selected_sources = (
+        {source_name(Path(s["path"])) for s in plan.get("sources", [])}
+        | admitted_sources
+        | excluded_sources
+    )
+    admitted_work = sum(j["work"] for j in admitted)
+    excluded_work = sum(j["work"] for j in excluded)
+    total_work = admitted_work + excluded_work
+    return dict(
+        ceiling=plan.get("ceiling"),
+        selected_yaml_files=len(selected_sources),
+        admitted_queue_jobs=len(admitted),
+        admitted_problem_descriptors=sum(len(j["problems"]) for j in admitted),
+        threshold_excluded_queue_jobs=len(excluded),
+        threshold_excluded_problem_descriptors=sum(
+            len(j["problems"]) for j in excluded
+        ),
+        threshold_affected_yaml_files=len(excluded_sources),
+        fully_excluded_yaml_files=len(excluded_sources - admitted_sources),
+        admitted_declared_work=admitted_work,
+        excluded_declared_work=excluded_work,
+        excluded_declared_work_fraction=(
+            excluded_work / total_work if total_work else None
+        ),
+        exclusions=sorted(
+            [
+                dict(
+                    nodeid=j["nodeid"],
+                    source=source_name(Path(j["source"])),
+                    source_sha256=j["source_sha256"],
+                    work=j["work"],
+                    problems=j["problems"],
+                    reason=j["reason"],
+                )
+                for j in excluded
+            ],
+            key=lambda j: j["nodeid"],
+        ),
+        work_definition="Batch/count times logical GEMM dimensions; excludes solution, variant and repetition multipliers. This is not a runtime estimate.",
+    )
+
+
+def resource_statistics(root, runtime):
+    path = root / "resource-time.json"
+    if not path.exists():
+        return None
+    usage = json.loads(path.read_text())
+    wall = usage["wall_seconds"]
+    user, system = usage["user_seconds"], usage["system_seconds"]
+    if (
+        not all(math.isfinite(v) for v in (wall, user, system))
+        or wall <= 0
+        or min(user, system) < 0
+    ):
+        raise ValueError("invalid elapsed/CPU time in resource-time.json")
+    mean_cores = (user + system) / wall
+    cores = runtime.get("available_cpus")
+    if cores is not None and (type(cores) is not int or cores <= 0):
+        raise ValueError("available_cpus must be a positive integer")
+    return dict(
+        **usage,
+        mean_cpu_cores=mean_cores,
+        cpu_capacity_fraction=mean_cores / cores if cores else None,
+        timing_scope="Workload phase including job startup, build, run and cleanup; excludes shared artifact/environment setup and initial workload planning.",
     )
 
 
@@ -243,6 +315,11 @@ def audit(root):
         else {s["nodeid"] for s in plan["sources"]}
     )
     errors, ledger, inventory, timings = [], [], [], []
+    try:
+        resource_time = resource_statistics(root, runtime)
+    except (ValueError, KeyError, TypeError, OSError) as error:
+        resource_time = None
+        errors.append(f"resource accounting: {error}")
     if progress.get("queue_journal_error"):
         errors.append(progress["queue_journal_error"])
     if set(progress["tests"]) != expected or progress["selected"] != len(expected):
@@ -442,6 +519,8 @@ def audit(root):
     summary = dict(
         schema=1,
         runtime=runtime,
+        coverage=workload_coverage(plan),
+        resource_time=resource_time,
         test_code=test_code,
         sources=plan["sources"],
         execution=execution,
@@ -668,6 +747,24 @@ def compare(left, right):
     ):
         if left["runtime"][field] != right["runtime"][field]:
             errors.append(f"runtime identity differs: {field}")
+    for field in ("available_cpus", "runner_name"):
+        if left["runtime"].get(field) != right["runtime"].get(field):
+            errors.append(f"runtime identity differs: {field}")
+    model_configs = []
+    for report in (left, right):
+        config = copy.deepcopy(report["runtime"].get("config", {}))
+        for field in (
+            "cpu_thread_budget",
+            "num_threads",
+            "cpu_dispatch_threads",
+            "async_helper_threads",
+        ):
+            config.pop(field, None)
+        model_configs.append(config)
+    if model_configs[0] != model_configs[1]:
+        errors.append("emulator model/configuration differs beyond thread allocation")
+    if left.get("coverage") != right.get("coverage"):
+        errors.append("threshold policy or workload accounting differs")
     differences = {}
     if left["test_code"] != right["test_code"]:
         errors.append("executed test/helper code differs")
@@ -717,7 +814,12 @@ def compare(left, right):
     ):
         if left["counts"].get(field) or right["counts"].get(field):
             errors.append(f"equivalence unresolved with {field} work")
-    a, b = left["execution"].get("wall_seconds"), right["execution"].get("wall_seconds")
+    if bool(left.get("resource_time")) != bool(right.get("resource_time")):
+        errors.append("elapsed timing scope differs")
+    a, b = (
+        (report.get("resource_time") or report["execution"]).get("wall_seconds")
+        for report in (left, right)
+    )
     return dict(
         schema=1,
         coverage_equal=not errors,
@@ -725,6 +827,9 @@ def compare(left, right):
         differences=differences,
         reference_seconds=a,
         candidate_seconds=b,
+        elapsed_time_source=(
+            "resource-time.json" if left.get("resource_time") else "execution"
+        ),
         reference_over_candidate_ratio=a / b if a and b and not errors else None,
         statistical_claim=False,
     )
