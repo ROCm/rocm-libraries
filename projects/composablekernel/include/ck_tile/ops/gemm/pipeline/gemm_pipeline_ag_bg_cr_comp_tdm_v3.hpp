@@ -31,10 +31,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
-    // The pipeline body hardcodes four wave roles (warp_id 0-3); extra waves would skip the
-    // per-wave TDM issue and wait.
-    static_assert(Problem::BlockGemmShape::NumWarps == 4,
-                  "comp_tdm_v3 requires exactly 4 waves per workgroup");
+    // Waves 0-3 hold the TDM issuer roles (see wave_specialized_func); with 16 waves the other
+    // twelve only read LDS and run WMMAs. Warp layouts 2x2x1 and 4x4x1.
+    static_assert(Problem::BlockGemmShape::NumWarps == 4 || Problem::BlockGemmShape::NumWarps == 16,
+                  "comp_tdm_v3 supports 4 or 16 waves per workgroup");
+
+    // TENSORcnt allowed to stay outstanding when an issuer waits for LDS stage p: with
+    // alternating issuers each wave fills one stage only (0); with fixed issuers waves 0/1 fill
+    // both stages, and the other stage's newer fill may stay in flight (1).
+    static constexpr index_t kNewerFillsOnWait = Policy::kAlternateIssuers ? 0 : 1;
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
@@ -109,10 +114,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         {
             auto&& [a_lds_block_views, b_lds_block_views] =
                 this->template GetABLdsTensorViews<num_lds_buffers>(static_cast<char*>(p_smem));
-            bool is_warp0 = (warp_id == 0);
-            bool is_warp1 = (warp_id == 1);
-            bool is_warp2 = (warp_id == 2);
-            bool is_warp3 = (warp_id == 3);
+            // TDM issuer roles. LDS stage p is filled by wave 2p (A) and 2p+1 (B) with
+            // alternating issuers, by waves 0 (A) and 1 (B) otherwise.
+            constexpr index_t a1_issuer = Policy::kAlternateIssuers ? 2 : 0;
+            constexpr index_t b1_issuer = Policy::kAlternateIssuers ? 3 : 1;
+            const bool is_a_issuer0     = (warp_id == 0);
+            const bool is_b_issuer0     = (warp_id == 1);
+            const bool is_a_issuer1     = (warp_id == a1_issuer);
+            const bool is_b_issuer1     = (warp_id == b1_issuer);
 
             TDMConfig tdm_config_a[2];
             TDMConfig tdm_config_b[2];
@@ -236,32 +245,43 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             constexpr BDramTileWindowStep b_dram_tile_window_step_stride =
                 is_b_row_major ? make_array(KPerBlock * 2, 0) : make_array(0, KPerBlock * 2);
 
+            // DRAM windows of the stage-1 fills: the issuer's own window with alternating issuers;
+            // a separate copy when waves 0/1 fill both stages.
+            auto a_copy_dram_window_s1 = a_copy_dram_window;
+            auto b_copy_dram_window_s1 = b_copy_dram_window;
+            auto& a_dram_window1       = std::get < Policy::kAlternateIssuers
+                                             ? 0
+                                             : 1 > (std::tie(a_copy_dram_window, a_copy_dram_window_s1));
+            auto& b_dram_window1       = std::get < Policy::kAlternateIssuers
+                                             ? 0
+                                             : 1 > (std::tie(b_copy_dram_window, b_copy_dram_window_s1));
+
             using ALdsTile =
                 decltype(make_static_distributed_tensor<ADataType>(a_lds_load_tile_distr));
             using BLdsTile =
                 decltype(make_static_distributed_tensor<BDataType>(b_lds_load_tile_distr));
 
-            if(is_warp0)
+            if(is_a_issuer0)
             {
                 Base::GlobalPrefetchTDM(
                     tdm_config_a[0], a_copy_lds_windows[number<0>{}], a_copy_dram_window);
             }
-            if(is_warp1)
+            if(is_b_issuer0)
             {
                 Base::GlobalPrefetchTDM(
                     tdm_config_b[0], b_copy_lds_windows[number<0>{}], b_copy_dram_window);
             }
-            if(is_warp2)
+            if(is_a_issuer1)
             {
-                move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
+                move_tile_window(a_dram_window1, a_dram_tile_window_step);
                 Base::GlobalPrefetchTDM(
-                    tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_copy_dram_window);
+                    tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
             }
-            if(is_warp3)
+            if(is_b_issuer1)
             {
-                move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
+                move_tile_window(b_dram_window1, b_dram_tile_window_step);
                 Base::GlobalPrefetchTDM(
-                    tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_copy_dram_window);
+                    tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
             }
 
             // initialize C block tile
@@ -285,7 +305,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             if constexpr(UseDataCachePrefetch && HasHotLoop)
             {
                 __builtin_amdgcn_sched_barrier(0);
-                if(is_warp0)
+                if(is_a_issuer0)
                 {
                     if constexpr(Policy::DataCachePrefetchA != DataCachePrefetchKind::None)
                     {
@@ -294,7 +314,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             tdm_config_a[0]);
                     }
                 }
-                if(is_warp1)
+                if(is_b_issuer0)
                 {
                     if constexpr(Policy::DataCachePrefetchB != DataCachePrefetchKind::None)
                     {
@@ -306,9 +326,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 __builtin_amdgcn_sched_barrier(0);
             }
 
-            if(is_warp0 || is_warp1)
+            if(is_a_issuer0 || is_b_issuer0)
             {
-                s_wait_tensorcnt();
+                s_wait_tensorcnt<kNewerFillsOnWait>();
             }
 
             __builtin_amdgcn_s_barrier_signal(-1);
@@ -335,7 +355,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         {
                             // NOTE: found out that this place for prefetch give best performance
                             // when swizzled with block_gemm
-                            if(is_warp2)
+                            if(is_a_issuer1)
                             {
                                 if constexpr(Policy::DataCachePrefetchA !=
                                              DataCachePrefetchKind::None)
@@ -353,7 +373,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                                 tdm_config_a[1]);
                                 }
                             }
-                            if(is_warp3)
+                            if(is_b_issuer1)
                             {
                                 if constexpr(Policy::DataCachePrefetchB !=
                                              DataCachePrefetchKind::None)
@@ -393,23 +413,23 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
                         block_sync_lds();
 
-                        if(is_warp0)
+                        if(is_a_issuer0)
                         {
                             move_tile_window(a_copy_dram_window, a_dram_tile_window_step_stride);
                             Base::GlobalPrefetchTDM(tdm_config_a[0],
                                                     a_copy_lds_windows[number<0>{}],
                                                     a_copy_dram_window);
                         }
-                        if(is_warp1)
+                        if(is_b_issuer0)
                         {
                             move_tile_window(b_copy_dram_window, b_dram_tile_window_step_stride);
                             Base::GlobalPrefetchTDM(tdm_config_b[0],
                                                     b_copy_lds_windows[number<0>{}],
                                                     b_copy_dram_window);
                         }
-                        if(is_warp2 || is_warp3)
+                        if(is_a_issuer1 || is_b_issuer1)
                         {
-                            s_wait_tensorcnt();
+                            s_wait_tensorcnt<kNewerFillsOnWait>();
                         }
 
                         __builtin_amdgcn_s_barrier_signal(-1);
@@ -419,7 +439,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         {
                             // NOTE: found out that this place for prefetch give best performance
                             // when swizzled with block_gemm
-                            if(is_warp0)
+                            if(is_a_issuer0)
                             {
                                 if constexpr(Policy::DataCachePrefetchA !=
                                              DataCachePrefetchKind::None)
@@ -432,7 +452,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                             tdm_config_a[0]);
                                 }
                             }
-                            if(is_warp1)
+                            if(is_b_issuer0)
                             {
                                 if constexpr(Policy::DataCachePrefetchB !=
                                              DataCachePrefetchKind::None)
@@ -487,24 +507,22 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
                         block_sync_lds();
 
-                        if(is_warp2)
+                        if(is_a_issuer1)
                         {
-                            move_tile_window(a_copy_dram_window, a_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(tdm_config_a[1],
-                                                    a_copy_lds_windows[number<1>{}],
-                                                    a_copy_dram_window);
+                            move_tile_window(a_dram_window1, a_dram_tile_window_step_stride);
+                            Base::GlobalPrefetchTDM(
+                                tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
                         }
-                        if(is_warp3)
+                        if(is_b_issuer1)
                         {
-                            move_tile_window(b_copy_dram_window, b_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(tdm_config_b[1],
-                                                    b_copy_lds_windows[number<1>{}],
-                                                    b_copy_dram_window);
+                            move_tile_window(b_dram_window1, b_dram_tile_window_step_stride);
+                            Base::GlobalPrefetchTDM(
+                                tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
                         }
 
-                        if(is_warp0 || is_warp1)
+                        if(is_a_issuer0 || is_b_issuer0)
                         {
-                            s_wait_tensorcnt();
+                            s_wait_tensorcnt<kNewerFillsOnWait>();
                         }
 
                         __builtin_amdgcn_s_barrier_signal(-1);
@@ -551,7 +569,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             c_block_tile, a_block_tile[compute_idx], b_block_tile[compute_idx]);
                         HotLoopScheduler();
                     });
-                    if(is_warp2 || is_warp3)
+                    if(is_a_issuer1 || is_b_issuer1)
                     {
                         s_wait_tensorcnt();
                     }
