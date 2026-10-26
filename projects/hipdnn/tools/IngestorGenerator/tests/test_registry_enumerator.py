@@ -458,8 +458,9 @@ def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registr
     config = re_.build_config(_one_head_config(manifest), registry)
     kernels = [k for pack in config["packs"] for k in pack["kernels"]]
     assert kernels
+    pinned = manifest["enumerate"]["pin"]["spec_id"]
     for kernel in kernels:
-        assert kernel["provenance"]["rocke_spec_id"] == "gfx950_dense_grid"
+        assert kernel["provenance"]["rocke_spec_id"] == pinned
         assert kernel["provenance"]["rocke_tuning_id"]
 
 
