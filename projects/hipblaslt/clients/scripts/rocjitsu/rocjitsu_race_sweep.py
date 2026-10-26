@@ -31,6 +31,7 @@ from rocjitsu_sweep_plan import (
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
+MAX_WORKERS = 64
 
 
 def write_text(path, value):
@@ -1272,7 +1273,12 @@ def main():
         help="Replay wholly unexecuted indices once, individually, retaining original process failures",
     )
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help=f"Concurrent native processes on distinct physical CPU cores (1–{MAX_WORKERS}; default: 4)",
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -1346,7 +1352,7 @@ def main():
     if args.policy == REGULAR_POLICY and args.backend != "bench":
         parser.error("regular-v1 requires the bench backend")
     if (
-        not 1 <= args.workers <= 16
+        not 1 <= args.workers <= MAX_WORKERS
         or not 0 <= args.solution_index_range_begin < (1 << 31)
         or (
             args.solution_index_range_end is not None
@@ -1360,7 +1366,7 @@ def main():
         )
     ):
         parser.error(
-            "Require 1–16 workers, 0 <= range begin < range end <= 2**31, "
+            f"Require 1–{MAX_WORKERS} workers, 0 <= range begin < range end <= 2**31, "
             "and finite positive timeouts"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports"):
