@@ -9,12 +9,11 @@ keeps demanding the evidence.
 """
 
 import hashlib
-import sys
 from types import SimpleNamespace
 
 import pytest
 
-from probe_support import PROBE_ASSERT
+from probe_support import StandInArchive, tool_module
 
 PASS_ARCH = "gfx950"
 TOC_KEY = "module"
@@ -26,23 +25,7 @@ MERGE_SIG = [{"kind": "by_value", "size": 4, "offset": 0}]
 SIGNATURES = {DECODE: DECODE_SIG, MERGE: MERGE_SIG}
 
 
-def _assert_tool():
-    sys.path.insert(0, str(PROBE_ASSERT.parent))
-    try:
-        return __import__("hkp_probe_assert")
-    finally:
-        sys.path.pop(0)
-
-
-tool = _assert_tool()
-
-
-class _Archive:
-    def __init__(self, blobs):
-        self._blobs = blobs
-
-    def get_kernel(self, toc_key, arch):
-        return self._blobs.get(toc_key)
+tool = tool_module("hkp_probe_assert")
 
 
 def _source(symbol, signature=None, **extra):
@@ -99,7 +82,7 @@ def _signatures(monkeypatch):
 
 def _run_lines(ukd, kind="hip", expected=None):
     failures = tool._Failures()
-    archives = {PASS_ARCH: _Archive({TOC_KEY: BLOB})}
+    archives = {PASS_ARCH: StandInArchive({TOC_KEY: BLOB})}
     args = SimpleNamespace(expect_comgr=None)
     tool._check_kpack_ukd(
         args,

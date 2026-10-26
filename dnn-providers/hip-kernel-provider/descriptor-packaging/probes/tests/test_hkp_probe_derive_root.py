@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from probe_support import GENERIC_TARGETS_JSON, MAIN_FIXTURE, PROBE_DERIVE, run_derive
+from probe_support import (
+    GENERIC_TARGETS_JSON,
+    MAIN_FIXTURE,
+    PROBE_DERIVE,
+    run_derive,
+    tool_module,
+)
 
 
 def _derive(src: Path, arch: str, out: Path, ukds=()):
@@ -891,17 +897,9 @@ def test_excluded_folder_alone_removes_its_ukds_from_the_expectation(tmp_path):
 
 
 # --- the kinds registry -----------------------------------------------------
-def _tool_module(name):
-    sys.path.insert(0, str(PROBE_DERIVE.parent))
-    try:
-        return __import__(name)
-    finally:
-        sys.path.pop(0)
-
-
 def test_kinds_registry_is_complete():
-    kinds = _tool_module("hkp_probe_kinds").KINDS
-    checks = _tool_module("hkp_probe_assert")._PROVENANCE_CHECKS
+    kinds = tool_module("hkp_probe_kinds").KINDS
+    checks = tool_module("hkp_probe_assert")._PROVENANCE_CHECKS
     assert kinds
     used = set()
     for kind, entry in kinds.items():
@@ -914,8 +912,8 @@ def test_kinds_registry_is_complete():
 
 
 def test_every_registered_output_type_has_checks():
-    kinds = _tool_module("hkp_probe_kinds").KINDS
-    outputs = _tool_module("hkp_probe_assert")._OUTPUT_CHECKS
+    kinds = tool_module("hkp_probe_kinds").KINDS
+    outputs = tool_module("hkp_probe_assert")._OUTPUT_CHECKS
     assert {k.output for k in kinds.values()} <= set(outputs)
     # ... and no check set is dead.
     assert set(outputs) <= {k.output for k in kinds.values()}
