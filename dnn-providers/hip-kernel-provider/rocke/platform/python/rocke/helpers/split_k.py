@@ -83,10 +83,10 @@ class WgradSplitPolicy:
       dtype. A packed 16-bit atomic rounds the running sum in dW on every add,
       so with same-sign partials the relative error grows with the degree, up
       to about ``degree * 2**-(mantissa bits + 1)``. A 16-bit dtype's cap keeps
-      that bound under the 5e-2 tolerance the wgrad suite verifies against;
-      fp16's is lower still because its packed atomic loses throughput under
-      contention. The general cap is for fp32 dW, whose atomic rounding is
-      negligible at any degree here.
+      that bound under the 5e-2 tolerance the wgrad suite verifies against.
+      A cap of 1 turns the automatic split off for that dtype; an explicit
+      degree still launches it. The general cap is for fp32 dW, whose atomic
+      rounding is negligible at any degree here.
     """
 
     target_ctas: int
@@ -108,13 +108,18 @@ class WgradSplitPolicy:
 # exact sum, under the 5e-2 tolerance. Higher degrees are faster on
 # small-channel shapes with a deep reduction, but all-positive inputs then
 # exceed that tolerance.
+#
+# fp16 is not split automatically (cap 1). Its packed atomic does not scale
+# like bf16's here: the best degree ranges from 16 on a tiny dW down to no
+# split at all, where every degree is slower than split_k=1 on a mid-size
+# dW, and no single cap avoids that loss. An explicit split_k still uses it.
 _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     "gfx1250": WgradSplitPolicy(
         target_ctas=2048,
         grouped_target_ctas=4096,
         min_slice_k=2048,
         max_degree=128,
-        max_degree_by_dtype=(("bf16", 16), ("fp16", 8)),
+        max_degree_by_dtype=(("bf16", 16), ("fp16", 1)),
     ),
 }
 

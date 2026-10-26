@@ -66,8 +66,14 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
   error grows with the degree, up to about `degree * 2**-9` for bf16. bf16 is
   capped at 16, which keeps that bound under the suite's 5e-2 tolerance; higher
-  degrees miss it on all-positive inputs. fp16 is capped at 8 because its packed
-  atomic loses throughput under contention. fp32 takes the general cap of 128.
+  degrees miss it on all-positive inputs. fp32 takes the general cap of 128.
+- fp16 is not split automatically: its cap is 1, so `--split-k -1` (and every
+  auto caller) runs it unsplit. The fp16 packed atomic does not scale like
+  bf16's on gfx1250. In a degree sweep the best fp16 degree ranged from 16 on
+  a tiny dW down to none at all, where every degree was slower than
+  `split_k=1`. No single cap avoids that loss. The split-K binaries are still
+  built, and an explicit degree launches them for callers whose shape gains.
+  The two-stage f32 path is the planned fp16 reduction.
 - Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
   served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
   one split-K binary per geometry, and the degree is resolved at launch by
@@ -77,6 +83,29 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   on, so such problems run at `split_k=1`.
 - Results are not bit-reproducible across runs once `split_k > 1` (atomic
   ordering), and the caller must zero `dW` before launch.
+- Runbook mapping (`platform/dsl_docs/optimization/optimization_runbook.md`)
+  for the WMMA split-K epilogue:
+  - §6.2 and §9.2 (global stores, direct epilogue): it writes straight from the
+    WMMA accumulators, with no LDS. Each `buffer_store_b16` of the `split_k=1`
+    epilogue becomes one atomic: `global_atomic_add_f32`, or
+    `global_atomic_pk_add_bf16`/`_f16` with a zero partner. Within one atomic
+    instruction, 16 lanes cover 16 adjacent columns of each of 2 rows, so a
+    16-bit atomic touches 16 distinct dwords, each from 2 lanes. Combining
+    the two lanes of a pair into one packed atomic would halve the 16-bit
+    atomic count.
+  - §6.5 (registers): the split-K epilogue adds no spills or scratch. VGPRs
+    are unchanged on most geometries; 64x64x64 with 2x2 warps adds 8.
+  - §7.3 (split-K accumulator strategy): each K-slice accumulates in f32
+    registers and reduces into dW with atomics; there is no workspace.
+  - §9.4 (output validation): the GPU tests check every group's channel rows,
+    grouped and ungrouped, at the bf16 degree cap with all-positive inputs.
+  - §13.1 and §13.2 (checklists): "Is split-K needed?" is the policy's
+    CTA-fill term against the reduction length (`wg_K`) and the dW tile grid
+    (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
+    alongside the K-slice. Output store mapping is the WMMA C layout above.
+  - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
+    validator rule scoped to the wrong epilogue, and a 16-bit atomic whose
+    throughput collapses with the degree (fp16 here).
 
 ### Initial implementation
 

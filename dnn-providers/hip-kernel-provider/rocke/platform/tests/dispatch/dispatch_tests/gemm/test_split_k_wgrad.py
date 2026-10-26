@@ -233,10 +233,11 @@ class TestGfx1250Policy(unittest.TestCase):
 
     def test_dtype_caps(self):
         # A 4-tile grid on a long reduction asks for far more than any cap:
-        # each 16-bit dtype takes its own cap, and fp32 the general one.
+        # each 16-bit dtype takes its own cap, and fp32 the general one. fp16's
+        # cap of 1 keeps it unsplit even here, where the demand is highest.
         args = (24, 9 * 24, 42 * 240 * 320)
         self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 16)
-        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 8)
+        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 1)
         self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
 
     def test_bf16_degree_stays_within_tolerance(self):
