@@ -107,10 +107,20 @@ struct find_if_impl_kernels
 
             unsigned int thread_first_index = identity;
 
+            // Necessary for non-default-constructible input types support
+            alignas(type) unsigned char raw[sizeof(type) * items_per_thread];
+            auto*                       items = reinterpret_cast<type*>(raw);
+
             if(block_offset + items_per_block <= size)
             {
-                type items[items_per_thread];
-                block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
+                // Not using block_load_direct_striped because it doesn't support non-static items array
+                auto block_input = input + block_offset + thread_id;
+                ROCPRIM_UNROLL
+                for(unsigned int item = 0; item < items_per_thread; item++)
+                {
+                    items[item] = block_input[item * block_size];
+                }
+
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < items_per_thread; ++i)
                 {
@@ -124,17 +134,24 @@ struct find_if_impl_kernels
             {
                 const unsigned int valid = size - block_offset;
 
-                type items[items_per_thread];
-                block_load_direct_striped<block_size>(thread_id,
-                                                      input + block_offset,
-                                                      items,
-                                                      valid);
+                // Not using block_load_direct_striped because it doesn't support non-static items array
+                auto block_input = input + block_offset + thread_id;
+                ROCPRIM_UNROLL
+                for(unsigned int item = 0; item < items_per_thread; item++)
+                {
+                    const unsigned int offset = item * block_size;
+                    if(thread_id + offset < valid)
+                    {
+                        items[item] = block_input[offset];
+                    }
+                }
+
                 ROCPRIM_UNROLL
                 for(unsigned int i = 0; i < items_per_thread; ++i)
                 {
                     if(i * block_size + thread_id < valid)
                     {
-                        if(predicate(items.items[i]))
+                        if(predicate(items[i]))
                         {
                             thread_first_index = min(thread_first_index, i);
                         }
