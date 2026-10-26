@@ -31,7 +31,11 @@
 #include <thrust/system/cpp/memory.h>
 #include <thrust/system/tbb/detail/execution_policy.h>
 
-#include <cuda/std/__algorithm/min.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#else
+#  include <thrust/detail/algorithm_wrapper.h>
+#endif
 
 #include <cassert>
 #include <type_traits>
@@ -77,7 +81,7 @@ struct body
     Size interval_idx = r.begin();
 
     Size offset_to_first = interval_size * interval_idx;
-    Size offset_to_last  = (::cuda::std::min)(n, offset_to_first + interval_size);
+    Size offset_to_last  = (_THRUST_STD::min)(n, offset_to_first + interval_size);
 
     RandomAccessIterator1 my_first = first + offset_to_first;
     RandomAccessIterator1 my_last  = first + offset_to_last;

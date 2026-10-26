@@ -137,6 +137,33 @@ The kernel must then be at code object version 4, the version hipBLASLt builds
 its libraries at: either strip its `.amdhsa_code_object_version` directive so the
 assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
+A kernel captured from rocRoller arrives carrying rocRoller's internal view of
+the kernel, in two forms that nothing here reads:
+
+- a dump of the kernel representation inside `.amdgpu_metadata`, under the keys
+  `.kernel_graph`, `.kernel_graph_dot` and `.command`;
+- whole-line `//` comments narrating codegen -- register allocation, expression
+  lowering, liveness -- which outnumber the instructions by better than ten to
+  one.
+
+Both dominate the file, and the graph dump also dominates the assembled object,
+so remove them before committing the kernel:
+
+```bash
+python -m tensilelite.StripKernelGraphs tensilelite/CustomKernels/rocroller/<kernel>.s
+```
+
+The comment strip runs only where `custom.config` says `Origin: rocroller`, and
+keeps any comment carrying a licence or an annotation marker (`TODO`, `FIXME`,
+`XXX`, `HACK`, `NOTE`, `WARNING`); the hand-written kernels elsewhere in this
+tree are left alone. Instructions keep their trailing `// (op N)` tags, so the
+assembled `.text` is unchanged -- only the metadata note shrinks, by exactly the
+three deleted keys.
+
+Pass `--check` instead to report without writing; it exits non-zero when
+provenance is still present, which suits a pre-commit or continuous-integration
+gate.
+
 ## Validation
 
 Two ways to validate:

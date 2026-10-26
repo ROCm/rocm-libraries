@@ -63,9 +63,9 @@ INFRA_PATHS = [
 ]
 
 
-# detect_changed_components is not shared with therock_configure_ci.py because
-# TheRock uses prefix-based subtree matching (via repos-config.json) while
-# component CI uses fnmatch glob patterns with cross-component triggers
+# detect_changed_components is deliberately separate from TheRock's own change
+# detection: TheRock uses prefix-based subtree matching (via repos-config.json)
+# while component CI uses fnmatch glob patterns with cross-component triggers
 # (e.g. rocisa triggers when stinkytofu changes because it depends on it).
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     results = {}

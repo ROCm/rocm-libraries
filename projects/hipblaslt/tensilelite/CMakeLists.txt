@@ -1,8 +1,82 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.25.2)
+    set(TENSILELITE_STANDALONE ON)
+    cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+    include("${ROCM_LIBRARIES_ROOT}/cmake/modules/default_amdclang.cmake")
+else()
+    set(TENSILELITE_STANDALONE OFF)
+endif()
+
+set(TENSILELITE_PROJECT_VERSION "1.5.0" CACHE STRING "Semantic version string.")
+project(tensilelite VERSION "${TENSILELITE_PROJECT_VERSION}" LANGUAGES CXX)
+include(GNUInstallDirs)
+include(CMakeDependentOption)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+if(TENSILELITE_STANDALONE)
+    list(APPEND CMAKE_MODULE_PATH "${ROCM_LIBRARIES_ROOT}/cmake/modules")
+    include(fetch_rocm_cmake)
+
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        if(WIN32)
+            set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path prefix." FORCE)
+        else()
+            set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix." FORCE)
+        endif()
+    endif()
+
+    set(TENSILELITE_RUNTIME_COMPONENT runtime)
+    set(TENSILELITE_DEVEL_COMPONENT devel)
+else()
+    set(TENSILELITE_RUNTIME_COMPONENT tensilelite)
+    set(TENSILELITE_DEVEL_COMPONENT tensilelite-devel)
+endif()
+
+# project() clears PROJECT_VERSION_TWEAK when the semantic version has no fourth component.
+# rocm-cmake uses this value as the package release, so restore the source commit tag.
+rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
+
+option(TENSILELITE_ENABLE_HOST "Build the TensileLite host library." ON)
 option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
+option(TENSILELITE_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
+cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
+    "Use mxDataGenerator for pre-swizzled MX scale strides." ON "NOT WIN32" OFF)
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+
+if(TENSILELITE_STANDALONE)
+    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR TENSILELITE_ENABLE_AUTOBUILD OR BUILD_TESTING)
+        message(FATAL_ERROR "The TensileLite client, tests, and autobuild scripts require the hipBLASLt build.")
+    endif()
+
+    find_package(hip REQUIRED)
+    find_package(origami CONFIG REQUIRED)
+    if(TENSILELITE_ENABLE_MXDATAGENERATOR)
+        find_package(mxDataGenerator CONFIG REQUIRED)
+    endif()
+endif()
+
+if(NOT TENSILELITE_ENABLE_YAML)
+    find_package(msgpack-cxx CONFIG)
+    if(msgpack-cxx_FOUND)
+        message(STATUS "Found msgpack-cxx (>=6.x)")
+        set(tensilelite_msgpack_target "msgpack-cxx")
+    else()
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        set(tensilelite_msgpack_target "msgpackc-cxx")
+        message(STATUS "Found msgpack (<=5.x)")
+    endif()
+endif()
+
+if(TENSILELITE_ENABLE_YAML AND TENSILELITE_STANDALONE)
+    find_package(LLVM REQUIRED)
+endif()
+
+if(TENSILELITE_ENABLE_MXDATAGENERATOR AND NOT TARGET roc::mxDataGeneratorPreSwizzle)
+    message(FATAL_ERROR "TENSILELITE_ENABLE_MXDATAGENERATOR requires roc::mxDataGeneratorPreSwizzle")
+endif()
 
 option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
 option(TENSILELITE_ENABLE_HOST_TSAN "Enable ThreadSanitizer for host code" OFF)
@@ -53,15 +127,21 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
+    # PUBLIC because it changes the layout of MasterSolutionLibrary: every target
+    # that includes the TensileLite headers has to agree on it.
+    if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+        target_compile_definitions(tensilelite-host PUBLIC TENSILELITE_ENABLE_LOCAL_KERNELS)
+    endif()
+
     if(TENSILELITE_ENABLE_HOST_ASAN)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=address>
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fno-omit-frame-pointer>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=address>>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fno-omit-frame-pointer>>
         )
         target_link_options(tensilelite-host PUBLIC
-            SHELL:-Xarch_host -fsanitize=address
+            $<BUILD_INTERFACE:SHELL:-Xarch_host -fsanitize=address>
         )
     endif()
 
@@ -69,19 +149,19 @@ if(TENSILELITE_ENABLE_HOST)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
-            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=thread>
+            $<BUILD_INTERFACE:$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=thread>>
         )
         target_link_options(tensilelite-host PUBLIC
-            SHELL:-Xarch_host -fsanitize=thread
+            $<BUILD_INTERFACE:SHELL:-Xarch_host -fsanitize=thread>
         )
     endif()
 
-    if(HIPBLASLT_ENABLE_YAML)
+    if(TENSILELITE_ENABLE_YAML)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_YAML>)
     else()
-        target_link_libraries(tensilelite-host PRIVATE ${hipblaslt_msgpack_target})
+        target_link_libraries(tensilelite-host PRIVATE ${tensilelite_msgpack_target})
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
@@ -91,53 +171,6 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
-
-    # mxDataGenerator supplies the gfx950 pre-swizzled MX scale padding helper behind
-    # the StrideScaleA1/StrideScaleB1 custom-kernel semantics. Treat it as optional:
-    # HIPBLASLT_ENABLE_MXDATAGENERATOR is OFF on Windows, and shared/mxdatagenerator
-    # is absent from checkouts that vendor only projects/hipblaslt, so probe for it
-    # instead of hard-requiring it.
-    set(TENSILELITE_HOST_MXDATAGENERATOR ${HIPBLASLT_ENABLE_MXDATAGENERATOR})
-    set(_mxdatagen_target roc::mxDataGenerator)
-    if(TENSILELITE_HOST_MXDATAGENERATOR AND NOT TARGET roc::mxDataGenerator)
-        set(_mxdatagen_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator")
-        if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator QUIET)
-            if(NOT mxDataGenerator_FOUND)
-                set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
-            endif()
-        elseif(EXISTS "${_mxdatagen_src}/lib/include/mxDataGenerator/PreSwizzle.hpp")
-            # Consume the header-only helper directly rather than add_subdirectory()ing
-            # mxDataGenerator: its CMakeLists emits install() rules unconditionally and
-            # EXCLUDE_FROM_ALL does not suppress them, so vendoring it here republishes
-            # its 25 headers and 3 package files from whatever install tree embeds this
-            # subdirectory. hipSPARSELt embeds it, which put those files in TheRock's
-            # blas artifact alongside support's own copy (rocm-libraries#11105).
-            find_package(OpenMP REQUIRED)
-            add_library(tensilelite-mxdatagenerator-headers INTERFACE)
-            target_include_directories(tensilelite-mxdatagenerator-headers
-                INTERFACE $<BUILD_INTERFACE:${_mxdatagen_src}/lib/include>)
-            # LINK_ONLY: OpenMP::OpenMP_CXX carries -fopenmp in its INTERFACE_COMPILE_OPTIONS.
-            # Propagating that into tensilelite-host's compiles is not merely unnecessary
-            # (the pre-swizzle helper is correct serially) -- it is actively harmful. On the
-            # CI image, -fopenmp re-adds ${ROCM_PATH}/lib/llvm/include as an *implicit system*
-            # include dir to locate omp.h. That demotes the explicit -I for the same directory,
-            # and <llvm/...> includes then fall through to the system LLVM 18 tree in
-            # /usr/include/llvm. tensilelite-host would compile LLVM YAMLIO against LLVM 18
-            # headers while linking ROCm's LLVM 24 libraries -- an ABI mismatch that silently
-            # corrupts llvm::yaml::Input, making TensileLibrary.yaml fail to parse with
-            # "unknown key 'solutions'". Keep the link requirement, drop the compile options.
-            target_link_libraries(tensilelite-mxdatagenerator-headers
-                INTERFACE $<LINK_ONLY:OpenMP::OpenMP_CXX>)
-            set(_mxdatagen_target tensilelite-mxdatagenerator-headers)
-        else()
-            set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
-        endif()
-    endif()
-    if(NOT TENSILELITE_HOST_MXDATAGENERATOR)
-        message(STATUS "tensilelite-host: mxDataGenerator not available; "
-                       "pre-swizzled MX scale strides (StrideScaleA1/B1) are disabled")
-    endif()
 
     target_link_libraries(tensilelite-host
         PUBLIC
@@ -149,23 +182,9 @@ if(TENSILELITE_ENABLE_HOST)
             ZLIB::ZLIB
     )
 
-    if(TENSILELITE_HOST_MXDATAGENERATOR)
-        # Consume mxDataGenerator's include directories, but take the target itself as a
-        # LINK_ONLY dependency so its INTERFACE_COMPILE_OPTIONS do not reach our compiles.
-        # roc::mxDataGenerator links OpenMP::OpenMP_CXX (shared/mxdatagenerator/CMakeLists.txt),
-        # which carries -fopenmp. On the CI image -fopenmp makes clang re-add
-        # ${ROCM_PATH}/lib/llvm/include as an *implicit system* include dir (to find omp.h).
-        # That demotes the explicit -I for the same directory, and <llvm/...> includes then
-        # fall through to the system LLVM 18 tree under /usr/include/llvm. tensilelite-host
-        # would compile llvm::yaml against LLVM 18 headers while linking ROCm's LLVM 24
-        # libraries: an ABI mismatch that silently corrupts llvm::yaml::Input, so every
-        # TensileLibrary.yaml fails to load with "unknown key 'solutions'".
-        # The pre-swizzle helper is correct serially, so dropping -fopenmp here is safe.
-        get_target_property(_mxdatagen_incs ${_mxdatagen_target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_mxdatagen_incs)
-            target_include_directories(tensilelite-host PRIVATE ${_mxdatagen_incs})
-        endif()
-        target_link_libraries(tensilelite-host PRIVATE $<LINK_ONLY:${_mxdatagen_target}>)
+    if(TENSILELITE_ENABLE_MXDATAGENERATOR)
+        target_link_libraries(tensilelite-host
+            PRIVATE $<BUILD_INTERFACE:roc::mxDataGeneratorPreSwizzle>)
         target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
     endif()
 
@@ -186,34 +205,65 @@ if(TENSILELITE_ENABLE_HOST)
     if(TENSILELITE_ENABLE_COVERAGE)
         message(STATUS "Enabling C++ code coverage instrumentation for tensilelite-host")
         target_compile_options(tensilelite-host PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-        target_link_options(tensilelite-host PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(tensilelite-host PUBLIC $<BUILD_INTERFACE:-fprofile-instr-generate -fcoverage-mapping>)
     endif()
 
     add_subdirectory(src)
     add_subdirectory(include)
 
     install(TARGETS tensilelite-host
-        EXPORT hipblaslt-targets
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+        EXPORT tensilelite-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT ${TENSILELITE_RUNTIME_COMPONENT}
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT ${TENSILELITE_RUNTIME_COMPONENT}
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET tensilelite_public_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET tensilelite_generated_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
         FILE_SET rocisa_public_headers
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
     )
 
-    if(BUILD_SHARED_LIBS)
-        set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
+    set(_tensilelite_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/tensilelite")
+    install(EXPORT tensilelite-targets
+        NAMESPACE roc::
+        DESTINATION "${_tensilelite_config_dir}"
+        COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
+        INSTALL_DESTINATION "${_tensilelite_config_dir}"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-config-version.cmake"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
+        DESTINATION "${_tensilelite_config_dir}"
+        COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+    )
+    unset(_tensilelite_config_dir)
+
+    if(TENSILELITE_BUILD_SHARED_LIBS AND NOT WIN32)
+        set_property(TARGET tensilelite-host PROPERTY
+            INSTALL_RPATH "$ORIGIN;$ORIGIN/../llvm/lib")
     endif()
 
     if(TENSILELITE_ENABLE_CLIENT)
         add_subdirectory(client)
     endif()
 
-    if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    if(NOT TENSILELITE_STANDALONE AND (TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
         add_subdirectory(tests)
     endif()
 endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")

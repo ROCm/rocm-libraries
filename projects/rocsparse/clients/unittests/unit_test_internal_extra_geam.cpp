@@ -71,19 +71,19 @@ TEST_F(BsrGeam, full_pipeline)
     const rocsparse_int       nb        = 2;
     const rocsparse_int       block_dim = 1;
 
-    device_vector<int32_t> row_ptr_A{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind_A{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val_A{std::vector<float>{1.0f, 1.0f}};
-    device_vector<int32_t> row_ptr_B{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind_B{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val_B{std::vector<float>{2.0f, 2.0f}};
+    device_vector<rocsparse_int> row_ptr_A{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind_A{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val_A{std::vector<float>{1.0f, 1.0f}};
+    device_vector<rocsparse_int> row_ptr_B{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind_B{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val_B{std::vector<float>{2.0f, 2.0f}};
     ASSERT_TRUE(row_ptr_A.ptr && col_ind_A.ptr && val_A.ptr);
     ASSERT_TRUE(row_ptr_B.ptr && col_ind_B.ptr && val_B.ptr);
 
     MatDescr descr_A, descr_B, descr_C;
     ASSERT_TRUE(descr_A.d && descr_B.d && descr_C.d);
 
-    device_vector<int32_t> row_ptr_C{size_t(3)};
+    device_vector<rocsparse_int> row_ptr_C{size_t(3)};
     ASSERT_TRUE(row_ptr_C.ptr);
 
     rocsparse_int nnzb_C = 0;
@@ -106,8 +106,8 @@ TEST_F(BsrGeam, full_pipeline)
               rocsparse_status_success);
     EXPECT_EQ(nnzb_C, 2);
 
-    device_vector<int32_t> col_ind_C{size_t(2)};
-    device_vector<float>   val_C{size_t(2)};
+    device_vector<rocsparse_int> col_ind_C{size_t(2)};
+    device_vector<float>         val_C{size_t(2)};
     ASSERT_TRUE(col_ind_C.ptr && val_C.ptr);
 
     const float alpha = 1.0f, beta = 1.0f;
@@ -143,13 +143,13 @@ TEST_F(BsrGeam, full_pipeline)
 
 TEST_F(BsrGeam, bad_args)
 {
-    const rocsparse_direction dir = rocsparse_direction_row;
-    device_vector<int32_t>    row_ptr{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t>    col_ind{std::vector<int32_t>{0, 1}};
-    device_vector<float>      val{std::vector<float>{1.0f, 1.0f}};
-    MatDescr                  descr_A, descr_B, descr_C;
-    device_vector<int32_t>    row_ptr_C{size_t(3)};
-    rocsparse_int             nnzb_C = 0;
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val{std::vector<float>{1.0f, 1.0f}};
+    MatDescr                     descr_A, descr_B, descr_C;
+    device_vector<rocsparse_int> row_ptr_C{size_t(3)};
+    rocsparse_int                nnzb_C = 0;
 
     EXPECT_EQ(rocsparse_bsrgeam_nnzb(nullptr,
                                      dir,
@@ -188,9 +188,9 @@ TEST_F(BsrGeam, bad_args)
                                      &nnzb_C),
               rocsparse_status_invalid_size);
 
-    const float            alpha = 1.0f, beta = 1.0f;
-    device_vector<int32_t> col_ind_C{size_t(2)};
-    device_vector<float>   val_C{size_t(2)};
+    const float                  alpha = 1.0f, beta = 1.0f;
+    device_vector<rocsparse_int> col_ind_C{size_t(2)};
+    device_vector<float>         val_C{size_t(2)};
     EXPECT_EQ(rocsparse_sbsrgeam(nullptr,
                                  dir,
                                  2,

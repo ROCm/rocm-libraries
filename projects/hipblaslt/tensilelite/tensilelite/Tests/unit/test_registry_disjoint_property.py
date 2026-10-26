@@ -30,18 +30,18 @@ explicit and fails if a future commit accidentally lands a duplicate
 that breaks the ownership contract.
 """
 
-from Tensile.Common.GlobalParameters import (
+from tensilelite.Common.GlobalParameters import (
     globalParameters,
     globalParameterTypeOverrides,
     defaultAnalysisParameters,
     libraryLogicTypeOverrides,
 )
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.ValidParameters import (
     validParameters,
     _expectedParamTypes,
     _skipTypeCheck,
 )
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.SolutionStructs.Problem import (
     _defaultProblemType,
     _expectedProblemTypeParamTypes,
 )
