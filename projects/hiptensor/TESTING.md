@@ -49,16 +49,19 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exception is `plan_lifetime_test`, noted below). The test binaries are:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** launch kernels (the exceptions are `plan_lifetime_test` and `elementwise_broadcast_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
 | `logger_test` | Logger singleton identity, callback registration, log-level filtering, file-sink behavior |
 | `yaml_test` | YAML config parsing and round-trip correctness |
 | `elementwise_op_test` | CPU-side elementwise operator type traits and identity/scale op correctness |
-| `util_test` | Utility helpers (type conversion, index math, stride calculation) |
+| `util_test` | Utility helpers (type conversion, scalar reads per compute type, index math, stride calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
+| `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
+| `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`. No kernel launch |
+| `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -135,18 +138,19 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
-| Elementwise — permute | `rank{2-6}_elementwise_permute_test` | All rank/type combinations |
-| Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | Binary elementwise ops |
-| Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | Trinary elementwise ops |
-| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary) |
+| Elementwise — permute | `rank{2-6}_elementwise_permute_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
+| Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | FP16/FP32/FP64; ranks 2–6 (BF16 is accepted by the API but not tested — see Known Gaps) |
+| Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | FP16/FP32/FP64; ranks 2–6 |
+| Elementwise — output strides | `elementwise_output_strides_test` | User-supplied (gapped and packed) output strides for permute, binary, and trinary (FP32); launches kernels |
+| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation against fixed expected values (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary). Permute: FP32/FP16/BF16/FP64; binary and trinary: FP32/FP16 |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
 
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`).
+**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`). `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors.
 
 **Test tiers (CTest labels):**
 
@@ -268,6 +272,8 @@ llvm-profdata merge -sparse default.profraw -o coverage.profdata
 llvm-cov report ./bin/<test_binary> -instr-profile=coverage.profdata
 ```
 
+**Coverage test configs:** the `codecoverage` set in `rtest.xml` reads its YAML configs from `<build_dir>/code_coverage_config/`, which the build populates (`copy_code_coverage_config_files` in `cmake/Functions/CopyYamlFolder.cmake`). Contraction and reduction copy from their `configs/code_coverage/` directories; elementwise copies from `configs/emulation/quick/` (permutation, binary_op, trinary_op). `test/02_elementwise/configs/code_coverage/` is not used — edit `emulation/quick` to change elementwise coverage.
+
 **Coverage targets:**
 
 | Scope | Target | Notes |
@@ -355,7 +361,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | New CPU-side logic (logging, YAML, option parsing, utility math) | Unit test in `test/00_unit/` using GoogleTest |
 | New or changed GPU operation behavior | Integration test: add a YAML config entry in the appropriate `validation/` tier |
 | Bug fix | A regression test (unit if CPU-side, integration config entry if GPU-side) that fails before the fix |
-| New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered |
+| New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered. Also add entries to `emulation/quick` **and** `emulation/full` (the FFM tiers do not nest, so `ffm-full` does not inherit `ffm-quick`), to `bench`, and a case in the op's host CPU-reference test (e.g. `elementwise_cpu_test`) where one exists |
 | Performance-sensitive change | Run `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
 | New GPU architecture | Validate on that target; update the Supported Configurations table |
 
@@ -374,6 +380,9 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | Trinary/unary-ops variants have no bench configs | Low | Low | Not performance-gated |
 | `clang-format` and static analysis not enforced in CI | Low | Low | Manual enforcement in code review |
 | No sanitizer (ASAN/TSAN) gate in CI | Low | High if hit | None; ASAN can be built manually |
+| Elementwise binary op accepts BF16 but the binary test harness has no BF16 support | Medium | Medium | BF16 scalar reads covered by `util_test`; no end-to-end binary BF16 test |
+| Permute `bench` configs exceed device memory on smaller GPUs (e.g. gfx908, gfx1100): the binary aborts with a HIP out-of-memory error partway through | Low | Medium | Bench results on those targets are incomplete; run bench on MI300-class GPUs |
+| `test/02_elementwise/configs/code_coverage/` is unused (elementwise coverage reads `emulation/quick`) | Low | Low | Documented in the Coverage section |
 
 ---
 

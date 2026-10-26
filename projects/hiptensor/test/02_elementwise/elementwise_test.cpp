@@ -58,7 +58,7 @@ namespace hiptensor
     // False = skip test
     bool PermutationTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
+        return (isF16Supported() && (datatype == HIPTENSOR_R_16F || datatype == HIPTENSOR_R_16BF))
                || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
                || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
     }
@@ -178,10 +178,10 @@ namespace hiptensor
         auto op = operators[0];
         EXPECT_TRUE((op == HIPTENSOR_OP_IDENTITY) || (op == HIPTENSOR_OP_NEG));
 
-        EXPECT_EQ(dataTypes.size(), 2); // HIPTENSOR_R_16F, HIPTENSOR_R_32F or HIPTENSOR_R_64F
+        EXPECT_EQ(dataTypes.size(), 2); // {data type, compute type}
         auto abDataType = dataTypes[0];
-        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F)
-                    || (abDataType == HIPTENSOR_R_64F));
+        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_16BF)
+                    || (abDataType == HIPTENSOR_R_32F) || (abDataType == HIPTENSOR_R_64F));
 
         mRunFlag &= checkDevice(abDataType);
 
@@ -240,6 +240,23 @@ namespace hiptensor
                     stream << "Tensor ref elements (" << elementsRef << "):\n";
                     hiptensorPrintArrayElements<float>(
                         stream, (float*)resource->hostReference().get(), elementsRef);
+                    stream << std::endl;
+                }
+                else if(dataType == HIPTENSOR_R_16BF)
+                {
+                    stream << "Tensor A elements (" << elementsA << "):\n";
+                    hiptensorPrintArrayElements<hip_bfloat16>(
+                        stream, (hip_bfloat16*)resource->hostInput1().get(), elementsA);
+                    stream << std::endl;
+
+                    stream << "Tensor B elements (" << elementsB << "):\n";
+                    hiptensorPrintArrayElements<hip_bfloat16>(
+                        stream, (hip_bfloat16*)resource->hostOutput().get(), elementsB);
+                    stream << std::endl;
+
+                    stream << "Tensor ref elements (" << elementsRef << "):\n";
+                    hiptensorPrintArrayElements<hip_bfloat16>(
+                        stream, (hip_bfloat16*)resource->hostReference().get(), elementsRef);
                     stream << std::endl;
                 }
                 else
@@ -389,6 +406,11 @@ namespace hiptensor
             {
                 *(reinterpret_cast<_Float16*>(&alphaValue)) = static_cast<_Float16>(alpha);
             }
+            else if(computeDataType == HIPTENSOR_R_16BF)
+            {
+                *(reinterpret_cast<hip_bfloat16*>(&alphaValue))
+                    = static_cast<hip_bfloat16>(static_cast<float>(alpha));
+            }
             else if(computeDataType == HIPTENSOR_R_32F)
             {
                 *(reinterpret_cast<float*>(&alphaValue)) = static_cast<float>(alpha);
@@ -499,6 +521,29 @@ namespace hiptensor
                         = compareEqualLaunchKernel<_Float16>(
                             (_Float16*)resource->deviceOutput().get(),
                             (_Float16*)resource->deviceReference().get(),
+                            resource->getCurrentMatrixElement(),
+                            convertToComputeType(computeDataType));
+                }
+                else if(abDataType == HIPTENSOR_R_16BF)
+                {
+                    CHECK_HIPTENSOR_ERROR(hiptensorElementwisePermuteReference(
+                        &alphaValue,
+                        (const hip_bfloat16*)resource->hostInput1().get(),
+                        descA,
+                        modeA.data(),
+                        Aop,
+                        (hip_bfloat16*)resource->hostReference().get(),
+                        descB,
+                        modeB.data(),
+                        computeDataType,
+                        0 /* stream */));
+
+                    resource->copyReferenceToDevice();
+
+                    std::tie(mValidationResult, mMaxRelativeError)
+                        = compareEqualLaunchKernel<hip_bfloat16>(
+                            (hip_bfloat16*)resource->deviceOutput().get(),
+                            (hip_bfloat16*)resource->deviceReference().get(),
                             resource->getCurrentMatrixElement(),
                             convertToComputeType(computeDataType));
                 }
