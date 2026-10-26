@@ -201,7 +201,8 @@ TEST(ReferenceInvocationAdapter, RejectsUnrepresentableContiguousReferenceOutput
     ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translated));
     const auto& error = std::get<hostnumerics::TranslationFailure>(translated);
     EXPECT_EQ(error.code, hostnumerics::TranslationFailureCode::InvalidDescriptor);
-    EXPECT_NE(error.reason.find("extent exceeds ptrdiff_t"), std::string::npos);
+    EXPECT_EQ(error.reason,
+              "Tensor extent " + std::to_string(m) + " in dimension 0 exceeds ptrdiff_t.");
     EXPECT_EQ(d, -99);
 }
 
