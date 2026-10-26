@@ -15,7 +15,16 @@ default only in ``free_fields``. ``space: full`` keeps those matching the defaul
 in ``reduction.fields.feature``, projects varying ``performance`` knobs into the
 spec, KMD, metadata, bindings and name, and holds any other varying field at the
 registry default (with a WARN unless ``ignored``). The default spec carries
-``default: true``.
+``default: true``. A ``feature_fields`` entry names a boolean spec field a cell
+can turn on. It is unrelated to ``reduction.fields.feature`` (the cell-defining
+fields of variant reduction), where it should also be listed, or reduction treats
+the feature's on and off kernels as one cell. A kernel holding it at a value other than
+its dataclass default (turned on) inserts the entry's ``name_token`` after the
+name template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields``
+it sweeps only those, and given ``select`` only the specs with those values;
+the cell's default is then the kept spec equal to the registry default outside
+the selected fields. The selects of two features a cell turns on must agree. The name check refuses any two kernels
+with one name, in both spaces.
 
 Exit 0 on success; 2 on unusable input. ``--strict`` makes exit 1 mean a gate refusal:
 kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classification) or a
@@ -130,6 +139,87 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             path,
             f"enumerate.{key}",
             "a list of field names",
+        )
+    features = decl.get("feature_fields")
+    _require(
+        features is None
+        or (
+            isinstance(features, dict)
+            and all(isinstance(entry, dict) for entry in features.values())
+        ),
+        path,
+        "enumerate.feature_fields",
+        "a mapping of spec field name to {name_token, free_fields, select}",
+    )
+    for name, entry in (features or {}).items():
+        where = f"enumerate.feature_fields.{name}"
+        _require(
+            set(entry) <= {"name_token", "free_fields", "select"},
+            path,
+            where,
+            "a mapping with only 'name_token', 'free_fields' and 'select'",
+        )
+        token = entry.get("name_token")
+        _require(
+            isinstance(token, str) and bool(token),
+            path,
+            f"{where}.name_token",
+            "a non-empty string",
+        )
+        _require(
+            entry.get("free_fields") is None or _is_names(entry["free_fields"]),
+            path,
+            f"{where}.free_fields",
+            "a list of field names",
+        )
+        # The spec the KDP builds from (spec_fields) and the catalog key the matcher
+        # compares (metadata_fields) must both carry the field.
+        _require(
+            decl.get("spec_fields") is None or name in decl["spec_fields"],
+            path,
+            where,
+            "listed in enumerate.spec_fields",
+        )
+        _require(
+            name in specialization["metadata_fields"],
+            path,
+            where,
+            "listed in specialization.metadata_fields",
+        )
+        narrowed = entry.get("free_fields")
+        _require(
+            narrowed is None
+            or (
+                decl.get("space", "slice") == "slice"
+                and set(narrowed) <= set(decl.get("free_fields") or [])
+            ),
+            path,
+            f"{where}.free_fields",
+            "slice only, and a subset of enumerate.free_fields (it narrows the "
+            "cell's sweep; it cannot widen it)",
+        )
+        _require(
+            name not in (decl.get("free_fields") or []),
+            path,
+            where,
+            "not in enumerate.free_fields (a feature is a cell field, not a "
+            "swept one)",
+        )
+        select = entry.get("select")
+        swept = narrowed if narrowed is not None else (decl.get("free_fields") or [])
+        _require(
+            select is None
+            or (
+                isinstance(select, dict)
+                and bool(select)
+                and decl.get("space", "slice") == "slice"
+                and set(select) <= set(swept)
+                and all(isinstance(v, (bool, int, float, str)) for v in select.values())
+            ),
+            path,
+            f"{where}.select",
+            "slice only, a non-empty mapping of the fields the feature's cells "
+            "sweep (its free_fields, else enumerate.free_fields) to scalar values",
         )
     limit = decl.get("max_kernels")
     _require(
@@ -363,6 +453,7 @@ class Registry:
 
         self.pin = _mapping(decl, "pin")
         self.fixed = _mapping(decl, "fixed")
+        self.features = _mapping(decl, "feature_fields")
         arch = manifest.get("arch")
         if "arch" in self.fixed and self.fixed["arch"] != arch:
             raise EnumerationError(
@@ -522,13 +613,84 @@ class Registry:
             )
         return base, specs
 
+    def features_on(self, spec) -> list:
+        """The ``feature_fields`` ``spec`` holds off their dataclass default, in
+        manifest order."""
+        fields = {f.name: f for f in dataclasses.fields(spec)}
+        on = []
+        for name in self.features:
+            if name not in fields:
+                raise EnumerationError(
+                    f"enumerate.feature_fields names '{name}', which the registry "
+                    f"spec {type(spec).__name__} does not have."
+                )
+            default = _field_default(fields[name])
+            if default is dataclasses.MISSING:
+                raise EnumerationError(
+                    f"enumerate.feature_fields names '{name}', which has no "
+                    f"default in {type(spec).__name__} to be off at."
+                )
+            if getattr(spec, name) != default:
+                on.append(name)
+        return on
+
+    def selected(self, base) -> dict:
+        """The ``select`` values of every feature ``base``'s cell turns on. As
+        their free_fields intersect, their selects must agree."""
+        out: dict = {}
+        for name in self.features_on(base):
+            for field, value in (self.features[name].get("select") or {}).items():
+                if field in out and out[field] != value:
+                    raise EnumerationError(
+                        f"enumerate.feature_fields.{name}.select sets {field}="
+                        f"{value!r}, but another feature this cell turns on "
+                        f"selects {out[field]!r}."
+                    )
+                out[field] = value
+        return out
+
+    def cell_default(self, base, kept: list):
+        """The kernel of ``kept`` that carries ``default: true``: ``base``, unless a
+        feature's ``select`` moved the cell off it; then the kept spec equal to
+        ``base`` outside the selected fields, else the first kept spec."""
+        select = self.selected(base)
+        if not select or base in kept:
+            return base
+        moved = [
+            ks
+            for ks in kept
+            if all(
+                getattr(ks, f.name) == getattr(base, f.name)
+                for f in dataclasses.fields(ks)
+                if f.name not in select
+            )
+        ]
+        return moved[0] if moved else kept[0]
+
     def slice_of(self, base, specs: list) -> list:
         free = set(self.decl.get("free_fields") or [])
-        unknown = sorted(free - set(_spec_fields(base)))
+        declared = set(free).union(
+            *(entry.get("free_fields") or () for entry in self.features.values())
+        )
+        unknown = sorted(declared - set(_spec_fields(base)))
         if unknown:
             raise EnumerationError(
-                f"enumerate.free_fields names {unknown}, which the registry spec "
-                f"{type(base).__name__} does not have."
+                f"enumerate.free_fields (or a feature field's free_fields) names "
+                f"{unknown}, which the registry spec {type(base).__name__} does "
+                "not have."
+            )
+        # A cell turning a feature on sweeps only what every such feature frees,
+        # and keeps only the specs with the values those features select.
+        select = self.selected(base)
+        for name in self.features_on(base):
+            narrowed = self.features[name].get("free_fields")
+            if narrowed is not None:
+                free &= set(narrowed)
+        held = sorted(set(select) - free)
+        if held:
+            raise EnumerationError(
+                f"a feature's select names {held}, which another feature's "
+                "free_fields holds at the cell default."
             )
         out = [
             ks
@@ -538,6 +700,7 @@ class Registry:
                 for f in dataclasses.fields(ks)
                 if f.name not in free
             )
+            and all(getattr(ks, n) == value for n, value in select.items())
         ]
         # Default first, then by the free fields, independent of sweep order.
         free_order = sorted(free)
@@ -765,7 +928,8 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
                 f"the registry yields no spec for cell {_show(cell)}, which the "
                 f"manifest's cells promise."
             )
-        rows.extend((cell, ks, ks == base) for ks in kept)
+        default = registry.cell_default(base, kept)
+        rows.extend((cell, ks, ks == default) for ks in kept)
     limit = registry.decl.get("max_kernels")
     if not full and limit is not None and len(rows) > limit:
         raise EnumerationError(
@@ -846,10 +1010,11 @@ def build_config(
                 bindings[n] = (
                     {"method": accessors[n]} if n in accessors else {"field": n}
                 )
+    features = registry.features
     slots = _template_slots(template)
     named = [n for n in projected if n not in slots]
     split = None
-    if named:
+    if named or features:
         last = None
         for last in _LAST_SLOT.finditer(template):
             pass
@@ -889,7 +1054,7 @@ def build_config(
                         else f"_{n}u{_rendered(_resolved(ks, n, accessors[n]))}"
                     )
                     for n in named
-                )
+                ) + "".join(features[n]["name_token"] for n in registry.features_on(ks))
                 name = (
                     template[:split].format(**fields)
                     + suffix
@@ -914,14 +1079,13 @@ def build_config(
             kernel["default"] = True
         kernels.append(kernel)
 
-    if registry.space_kind == "full":
-        repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
-        if repeated:
-            raise EnumerationError(
-                f"space: full renders {len(repeated)} duplicated kernel name(s), e.g. "
-                f"{repeated[:3]}: a varying field reaches neither the name template "
-                f"nor a projected knob."
-            )
+    repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
+    if repeated:
+        raise EnumerationError(
+            f"space: {registry.space_kind} renders {len(repeated)} duplicated kernel "
+            f"name(s), e.g. {repeated[:3]}: a varying field reaches neither the name "
+            "template, a projected knob, nor a feature_fields name_token."
+        )
     budget = enumeration.classification.budget
     if len(kernels) > budget:
         message = (
