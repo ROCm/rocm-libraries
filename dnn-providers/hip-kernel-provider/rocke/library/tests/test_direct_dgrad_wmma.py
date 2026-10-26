@@ -53,6 +53,7 @@ def _problem(
     stride=1,
     dil_h=1,
     dil_w=1,
+    KW=None,
 ):
     return DirectConvProblem(
         N=N,
@@ -62,7 +63,7 @@ def _problem(
         cpg=C // groups,
         kpg=K // groups,
         KH=KH,
-        KW=KH,
+        KW=KH if KW is None else KW,
         PAD=PAD,
         stride=stride,
         dtype=dtype,
@@ -111,6 +112,20 @@ class TestDgradWmmaSpec(unittest.TestCase):
             )
             self.assertIsNotNone(why, (pkw, knobs))
             self.assertIn(needle, why)
+
+    def test_rejects_nonpositive_filter(self):
+        """A zero or negative filter extent is a rejection reason, not an
+        exception from the empty tap plan."""
+        for KH, KW in ((0, 3), (3, 0), (0, 0), (-1, 3), (3, -2)):
+            spec = DirectDgradWmmaSpec(
+                problem=_problem(KH=KH, KW=KW),
+                prefetch=True,
+                sched="iterative-ilp",
+            )
+            why = dgrad_wmma_reason(spec)
+            self.assertEqual(why, f"filter {KH}x{KW} is not positive")
+            with self.assertRaises(ValueError):
+                build_direct_dgrad_wmma(spec)
 
     def test_rejects_bad_knobs_without_raising(self):
         """Bad knobs are reasons, not exceptions (validate_direct_spec only
@@ -193,6 +208,11 @@ class TestDgradWmmaSpec(unittest.TestCase):
             (dict(stride=2, PAD=2, dil_h=2, dil_w=2), dict(tiles_c=2)),
             (dict(dil_h=2, dil_w=2, PAD=5), {}),
             (dict(dil_h=0), {}),
+            # Nonpositive filter extents (an empty tap plan).
+            (dict(KH=0, KW=3), dict(prefetch=True)),
+            (dict(KH=3, KW=0), {}),
+            (dict(KH=-1, KW=3), {}),
+            (dict(KH=3, KW=-2), dict(prefetch=True)),
             (dict(N=8, H=768, W=768, C=256, K=256, stride=2), dict(tiles_c=2)),
             # Packed groups.
             (dict(C=32, K=32, groups=8), dict(pack_groups=3)),
@@ -252,6 +272,23 @@ class TestDgradWmmaSpec(unittest.TestCase):
             with self.subTest(problem=problem), self.assertRaises(ValueError):
                 eng.conv_direct_dgrad_wmma_describe(sd, "gfx1250")
             with self.subTest(problem=problem), self.assertRaises(ValueError):
+                eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch="gfx1250")
+
+    def test_binding_rejects_nonpositive_filter(self):
+        """The C++ engine refuses a zero or negative filter extent with
+        Python's reason, before planning its (empty) taps."""
+        eng = pytest.importorskip("rocke_engine")
+        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+
+        for KH, KW in ((0, 3), (3, 0), (-1, 3), (3, -2)):
+            spec = DirectDgradWmmaSpec(
+                problem=_problem(KH=KH, KW=KW), prefetch=True, sched="iterative-ilp"
+            )
+            sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
+            ok, why, _, _, _ = eng.conv_direct_dgrad_wmma_describe(sd, "gfx1250")
+            self.assertFalse(ok, (KH, KW))
+            self.assertEqual(why, dgrad_wmma_reason(spec))
+            with self.assertRaisesRegex(RuntimeError, "is not positive"):
                 eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch="gfx1250")
 
     def test_ir_is_shape_independent(self):

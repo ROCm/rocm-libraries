@@ -130,6 +130,8 @@ def _axis_plan(K: int, PAD: int, dil: int, S: int):
             if (a + PAD - r * dil) % S == 0:
                 taps.append((a, (a + PAD - r * dil) // S))
                 break
+    if not taps:
+        return [], 0, 0  # K < 1: rejected by dgrad_wmma_reason
     dmin = min(d for _, d in taps)
     dmax = max(d for _, d in taps)
     return [(a, d - dmin) for a, d in taps], dmax - dmin, -dmin
@@ -342,6 +344,8 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         return "a strided dilated dgrad is not supported"
     if p.dil_h < 1 or p.dil_w < 1:
         return f"dilation {p.dil_h}x{p.dil_w} < 1"
+    if p.KH < 1 or p.KW < 1:
+        return f"filter {p.KH}x{p.KW} is not positive"
     if p.PAD < 0 or spec.plan_h[2] < 0 or spec.plan_w[2] < 0:
         return f"PAD {p.PAD} outside 0..(K-1)*dilation"
     G = spec.pack_groups

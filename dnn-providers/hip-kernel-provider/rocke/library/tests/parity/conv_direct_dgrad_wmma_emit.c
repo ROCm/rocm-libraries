@@ -338,6 +338,12 @@ static int make_cfg(int idx, rocke_direct_dgrad_wmma_spec_t* s, const char** arc
         s->tile_w = 32;
         s->wave_epilogue = true;
         return 0;
+    case 31: /* rejected by both engines: a 0x3 filter (no taps), prefetch */
+        s->problem = make_problem_ex(3, 1, "bf16", 1, 1, 64, 96, 1, 1);
+        s->problem.KH = 0;
+        s->prefetch = true;
+        s->sched = "iterative-ilp";
+        return 0;
     default:
         return -1;
     }

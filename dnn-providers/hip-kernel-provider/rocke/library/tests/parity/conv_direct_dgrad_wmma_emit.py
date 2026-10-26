@@ -42,6 +42,9 @@
 #  28  rejected by both engines: split_barrier on a stride-2 tile
 #  29  rejected by both engines: pack_groups 3 does not divide 4 groups
 #  30  rejected by both engines: wave_epilogue without whole rows per wave
+#  31  rejected by both engines: a 0x3 filter (no taps), prefetch
+from dataclasses import replace
+
 from _emit_common import run_emit
 from kernels.common.conv_direct_dgrad_wmma import (
     DirectDgradWmmaSpec,
@@ -423,6 +426,14 @@ def _spec(idx: int):
                 tiles_p=1,
                 tile_w=32,
                 wave_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        31: (
+            S(
+                problem=replace(_p(), KH=0),
+                prefetch=True,
+                sched="iterative-ilp",
             ),
             "gfx1250",
         ),

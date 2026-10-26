@@ -392,6 +392,12 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(p->KH < 1 || p->KW < 1)
+    {
+        snprintf(msg, sizeof msg, "filter %dx%d is not positive", p->KH, p->KW);
+        dgw_set_reason(reason, reason_cap, msg);
+        return false;
+    }
     if(p->PAD < 0 || dgw_plan_h(spec).shift < 0 || dgw_plan_w(spec).shift < 0)
     {
         snprintf(msg, sizeof msg, "PAD %d outside 0..(K-1)*dilation", p->PAD);
