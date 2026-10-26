@@ -109,9 +109,10 @@ struct MhaBwdArgs
     // LSE input (Hs_lsed).
     //
     // In hip-kernel-provider the D buffer is carved from a contiguous
-    // workspace allocation, and the LSE stats tensor is created with
-    // contiguous strides for the same shape — so the stride values are
-    // always identical, preserving AITER's shared-stride convention.
+    // workspace allocation, and SdpaBwdPlanBuilder::buildPlan sets both strides
+    // to the packed [B, H_q, S_q] values. isApplicable declines any stats tensor
+    // that is not packed on every axis of size > 1, so these strides describe
+    // the LSE tensor too, preserving AITER's shared-stride convention.
     unsigned int nhead_stride_lsed;
     unsigned int batch_stride_lsed;
 
