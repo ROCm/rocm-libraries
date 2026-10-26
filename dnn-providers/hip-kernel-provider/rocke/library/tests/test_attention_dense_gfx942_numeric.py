@@ -164,6 +164,11 @@ def _spec(
     shipped path folds in. ``persist_decode`` stays "auto" unless a test pins one
     order to hold it fixed across shapes "auto" would resolve differently; a pinned
     order is set on the spec, since the knob refuses one that restates "auto".
+
+    Pinning the persistent grid also pins ``kv_segments=1``: the KV-segment split
+    runs on the default grid only, and dispatch picks one (dropping persistent) for
+    short bottom-right chunks, so the persistent pin alone would ask for a
+    combination dispatch never produces.
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
@@ -185,7 +190,7 @@ def _spec(
             use_sinks=use_sinks,
         ),
         "gfx942_dense",
-        {"persistent": bool(persistent)},
+        {"persistent": True, "kv_segments": 1} if persistent else {"persistent": False},
     ).kernel_spec
     if persist_decode == "auto":
         return spec
