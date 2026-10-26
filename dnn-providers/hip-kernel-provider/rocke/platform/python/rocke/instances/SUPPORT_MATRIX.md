@@ -107,6 +107,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, stride-1 dgrad, dense and grouped (`cpg`, `kpg` multiples of 8), `PAD` in 0..K-1. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
+| Winograd forward (`conv_winograd_fwd`, `conv_winograd_gemm_wmma`, `conv_winograd_gen`, `conv_winograd_fused_1d_wmma`) | ❌ | ❌ | ❌ | gfx1250 only: fp16 / bf16 I/O, stride 1, 2-D, `C/g` and `K/g` >= 32, dilation up to 35; 3x3 as F(m x n, 3x3) with tiles 2..6 (not 6x6), 1-D / 7x1 / 5x5 and segmented long filters through the generalized pipeline, fused 1-D kernel for `1 x r` with `C` in {32, 64, 128} (fp16). Kernels built per problem (no AOT cache); plan from `conv_winograd_select`; opt-in dispatcher route `algorithm="winograd"` (candidate `conv_winograd_fwd`), never picked by `auto` |
 
 ---
 
