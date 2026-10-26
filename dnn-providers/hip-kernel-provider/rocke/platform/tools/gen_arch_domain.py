@@ -83,6 +83,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import NamedTuple
 
@@ -94,12 +95,18 @@ ROCKE = HERE.parent  # tools -> rocke/platform
 
 
 def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+    """Import rocke from a checkout or a relocated provider test artifact.
+
+    Source execution finds ``python/`` beside ``tools/``. Installed provider
+    tests stage this script below ``tests/arch_domain`` and the package at the
+    artifact root. A standalone install supplies its site-packages directory
+    through the CTest environment. Only existing layouts are added, so normal
+    package resolution remains authoritative everywhere else.
+    """
+    candidates = (ROCKE / "python", HERE.parents[1])
+    for path in candidates:
+        if (path / "rocke").is_dir() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
 # At import time, not in main(): the status vocabulary and the schema string
@@ -110,7 +117,10 @@ _bootstrap_sys_path()
 from rocke.core.arch import domain as _domain
 
 SCHEMA = _domain.SCHEMA
-DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+# The committed columns are package data, not source-tree data. Resolving them
+# through the imported package makes ``--check`` compare the exact payload CI
+# tests after relocation while retaining the same path in a source checkout.
+DATA_DIR = Path(str(resource_files("rocke.core.arch") / "data"))
 
 
 def default_out(flavor: str) -> Path:
@@ -936,6 +946,16 @@ def _prune() -> int:
     return 0
 
 
+def _unvalidated_exit(requested: int | None, legacy: int) -> int:
+    """Map an existing unvalidated result to a scheduler-requested skip code.
+
+    The generator's legacy CLI uses different exits for different conditions.
+    The source CTest asks only that those same conditions be distinguishable
+    from green; it does not redefine which conditions are unvalidated.
+    """
+    return requested if requested is not None else legacy
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -961,7 +981,21 @@ def main() -> int:
     )
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--unvalidated-exit-code",
+        type=int,
+        default=None,
+        help=(
+            "exit with this code when --check cannot validate on this host "
+            "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
+        ),
+    )
     args = ap.parse_args()
+    if args.unvalidated_exit_code is not None:
+        if not args.check:
+            ap.error("--unvalidated-exit-code requires --check")
+        if not 1 <= args.unvalidated_exit_code <= 255:
+            ap.error("--unvalidated-exit-code must be between 1 and 255")
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
@@ -1021,7 +1055,7 @@ def main() -> int:
             "\nRESULT: UNVALIDATED - no clang found under the resolved ROCm "
             "install or on PATH; nothing was probed. Set ROCKE_LLVM_BIN."
         )
-        return 0
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
     # `opt` is not optional: it owns the flavor axis, and without it nothing
     # separates "this LLVM has no such intrinsic" from "this target cannot
@@ -1056,7 +1090,7 @@ def main() -> int:
             "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
             "if the override is intended."
         )
-        return 2
+        return _unvalidated_exit(args.unvalidated_exit_code, 2)
 
     # `opt` and `clang` are found by independent searches, so a prefix that
     # ships clang but not `opt` lets `opt` fall through to another install.
@@ -1397,7 +1431,7 @@ def main() -> int:
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
-            return 0
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
         committed = out.read_text()
         if committed == text:
             print(f"\nOK: {out.name} is up to date.")

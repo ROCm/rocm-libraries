@@ -54,6 +54,17 @@ def _skip_reason() -> str:
 
 
 _SKIP_REASON = _skip_reason()
+# The depthwise forward kernels are scalar FMA with one lane per channel (or
+# per channel and column), so they also run on the wave32 gfx1250.
+_IS_WAVE32_DW = GPU_ARCH == "gfx1250"
+
+
+def _wave_size(arch: str) -> int:
+    """The target's wave size: what a direct depthwise spec must be built with."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size
+
 
 _TOL = 5e-2
 _TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
@@ -644,6 +655,7 @@ def _run_depthwise_one(
     dtype: str = "fp16",
     spatial: bool = False,
     tiled: "dict | None" = None,
+    wave_size: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one depthwise forward kernel.
 
@@ -651,6 +663,7 @@ def _run_depthwise_one(
     ``DirectDepthwiseSpatialSpec`` (lanes split over channels and output
     columns, groups <= wave_size) with ``spatial``, and the output-stationary
     ``DirectDepthwiseTiledSpec`` with the knobs ``tiled``. cpg = kpg = 1.
+    ``wave_size`` defaults to the target's.
 
     Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when a
     spatial shape is architecturally unsupported.
@@ -678,6 +691,8 @@ def _run_depthwise_one(
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     assert shape.cpg == 1, "depthwise path requires cpg=1"
+    if wave_size is None:
+        wave_size = _wave_size(arch)
 
     p = DirectConvProblem(
         N=shape.N,
@@ -695,7 +710,10 @@ def _run_depthwise_one(
 
     if tiled is not None:
         spec = DirectDepthwiseTiledSpec(
-            problem=p, name=f"test_direct_dwt_{shape.id}", **tiled
+            problem=p,
+            name=f"test_direct_dwt_{shape.id}",
+            wave_size=wave_size,
+            **tiled,
         )
         ok, reason = is_valid_depthwise_tiled_spec(spec, arch=arch)
         if not ok:
@@ -703,14 +721,16 @@ def _run_depthwise_one(
         build = build_direct_depthwise_tiled
     elif spatial:
         spec = DirectDepthwiseSpatialSpec(
-            problem=p, name=f"test_direct_sp_dw_{shape.id}"
+            problem=p, name=f"test_direct_sp_dw_{shape.id}", wave_size=wave_size
         )
         ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
         if not ok:
             return False, f"skip {reason}"
         build = build_direct_depthwise_spatial
     else:
-        spec = DirectDepthwiseSpec(problem=p, name=f"test_direct_dw_{shape.id}")
+        spec = DirectDepthwiseSpec(
+            problem=p, name=f"test_direct_dw_{shape.id}", wave_size=wave_size
+        )
         ok, reason = is_valid_depthwise_spec(spec, arch=arch)
         if not ok:
             return False, f"invalid spec (shapes should be pre-validated): {reason}"
@@ -937,6 +957,7 @@ def _run_depthwise_col_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         block_w=shape.block_w,
         block_waves=shape.block_waves,
         dtype=shape.dtype,
+        wave_size=_wave_size(arch),
     )
 
     ok, reason = is_valid_depthwise_col_spec(spec, arch=arch)
@@ -997,6 +1018,7 @@ def _run_depthwise_col_aot(
         name="test_direct_dw_col_aot",
         block_h=4,
         block_w=2,
+        wave_size=_wave_size(arch),
     )
     artifact = compile_kernel(build_direct_depthwise_col(spec, arch=arch), arch=arch)
     out = []
@@ -1161,6 +1183,59 @@ class TestDirectConvCorrectness(unittest.TestCase):
                     self.assertTrue(passed, f"FAIL {label} on {GPU_ARCH}: {reason}")
                     ran += 1
         self._assert_ran(ran, "test_depthwise_col_aot_reuse")
+
+
+@unittest.skipUnless(
+    _HAS_TORCH and _IS_WAVE32_DW, "needs torch and a wave32 (gfx1250) GPU"
+)
+class TestDirectDepthwiseFwdWave32(unittest.TestCase):
+    """The depthwise forward sweeps above, at wave_size 32 on gfx1250.
+
+    The runners build every spec at the target's wave size, so these are the
+    same cases: one lane per channel (preloading, tiled, column-streamed) or a
+    lane split over channels and columns (spatial, groups below the wave).
+    """
+
+    _run_depthwise = TestDirectConvCorrectness._run_depthwise
+    _run_depthwise_spatial = TestDirectConvCorrectness._run_depthwise_spatial
+    _run_depthwise_col = TestDirectConvCorrectness._run_depthwise_col
+    _assert_ran = TestDirectConvCorrectness._assert_ran
+
+    test_depthwise = TestDirectConvCorrectness.test_depthwise
+    test_depthwise_spatial = TestDirectConvCorrectness.test_depthwise_spatial
+    test_depthwise_tiled = TestDirectConvCorrectness.test_depthwise_tiled
+    test_depthwise_col = TestDirectConvCorrectness.test_depthwise_col
+    test_depthwise_col_dtypes = TestDirectConvCorrectness.test_depthwise_col_dtypes
+    test_depthwise_col_aot_reuse = (
+        TestDirectConvCorrectness.test_depthwise_col_aot_reuse
+    )
+
+    def test_depthwise_bf16(self):
+        for s in _SHAPES:
+            if s.cpg == 1:
+                with self.subTest(shape=s.id):
+                    passed, reason = _run_depthwise_one(GPU_ARCH, s, dtype="bf16")
+                    self.assertTrue(passed, f"FAIL {s.id} bf16 on {GPU_ARCH}: {reason}")
+
+    def test_logical_wave64(self):
+        # The preloading and spatial kernels use no cross-lane operation, so a
+        # wave_size-64 spec is a logical wave the wave32 target runs as two
+        # hardware waves. groups=48 is spatial-only at wave64 (it needs
+        # groups < wave_size).
+        shapes = [s for s in _SHAPES if s.cpg == 1] + [
+            _Shape("sp_g48", N=2, H=14, W=14, groups=48, cpg=1),
+            _Shape("sp_g48_s2", N=2, H=15, W=17, groups=48, cpg=1, stride=2),
+        ]
+        ran = 0
+        for s in shapes:
+            for spatial in (False, True) if s.groups < 64 else (False,):
+                with self.subTest(shape=s.id, spatial=spatial):
+                    passed, reason = _run_depthwise_one(
+                        GPU_ARCH, s, spatial=spatial, wave_size=64
+                    )
+                    self.assertTrue(passed, f"FAIL {s.id} wave64: {reason}")
+                    ran += 1
+        self.assertGreater(ran, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -3234,6 +3309,48 @@ _AOT_WGRAD_CASES = [
         dict(N=2, H=16, W=32, groups=8, cpg=1, kpg=1, KH=9, KW=9, PAD=4),
         dict(channels=8, strip=8, threads=64, target_blocks=9),
     ),
+    # Depthwise 4x4x4 MFMA, 7x7 in row chunks, a partial channel tile.
+    (
+        "dw_mfma_7x7_chunks",
+        "direct_wgrad_dw_mfma",
+        dict(N=2, H=17, W=23, groups=72, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=4, rows_per_chunk=7, prefetch=2, target_blocks=1024, unfold_n=1),
+    ),
+    # Whole images per unit (the PAD-row prologue), one staging buffer.
+    (
+        "dw_mfma_7x7_whole",
+        "direct_wgrad_dw_mfma",
+        dict(N=3, H=9, W=30, groups=64, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=8, rows_per_chunk=14, prefetch=1, target_blocks=1024, unfold_n=1),
+    ),
+    # Three 7x7 images packed in one tile, a batch that leaves one short.
+    (
+        "dw_mfma_unfold3",
+        "direct_wgrad_dw_mfma",
+        dict(N=5, H=7, W=7, groups=128, cpg=1, kpg=1, KH=7, KW=7, PAD=3),
+        dict(q_tiles=8, rows_per_chunk=14, prefetch=2, target_blocks=1024, unfold_n=3),
+    ),
+    # 3x3 valid padding: no preshift, both prologue bodies differ.
+    (
+        "dw_mfma_3x3_pad0",
+        "direct_wgrad_dw_mfma",
+        dict(N=2, H=12, W=18, groups=64, cpg=1, kpg=1, PAD=0),
+        dict(q_tiles=4, rows_per_chunk=7, prefetch=2, target_blocks=2048, unfold_n=1),
+    ),
+    # Grouped 4x4x4 MFMA, 4 channels per group.
+    (
+        "grouped_mfma_c4",
+        "direct_wgrad_grouped_mfma",
+        dict(N=2, H=13, W=21, groups=32, cpg=4, kpg=4),
+        dict(waves_q=4, wave_q4=2, rows_per_chunk=28, prefetch=2, target_blocks=1024),
+    ),
+    # 8 channels per group, a partial channel tile.
+    (
+        "grouped_mfma_c8",
+        "direct_wgrad_grouped_mfma",
+        dict(N=2, H=13, W=21, groups=9, cpg=8, kpg=8),
+        dict(waves_q=2, wave_q4=1, rows_per_chunk=28, prefetch=3, target_blocks=1024),
+    ),
 ]
 
 
@@ -3267,6 +3384,8 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=0, kpg=0)
     elif variant == "direct_wgrad_gather":
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=0)
+    elif variant == "direct_wgrad_grouped_mfma":
+        caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=p.kpg)
     else:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=1, kpg=1)
     probe = probe_problem(caps, p.dtype, variant, knobs)
@@ -3283,7 +3402,7 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
     torch.manual_seed(7)
     td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
     total_c, total_k = p.groups * p.cpg, p.groups * p.kpg
-    if folded and variant != "direct_wgrad_gather":
+    if folded and p.cpg == 1 and p.kpg == 1:
         total_k = total_c = p.groups  # depthwise
     X = torch.empty(p.N, p.H, p.W, total_c, dtype=td).uniform_(-0.5, 0.5)
     dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=td).uniform_(-0.5, 0.5)
@@ -3341,7 +3460,7 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
                 arch=arch,
             )
             channels = (
-                spec.fold_channels() if variant == "direct_wgrad_gather" else p.groups
+                spec.fold_channels() if hasattr(spec, "fold_channels") else p.groups
             )
             fgrid, fblock = fold_spec.launch_geometry(channels)
             fold = KernelLauncher(
