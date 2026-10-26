@@ -213,6 +213,7 @@ def test_reject_unsupported_fp4_contract(changes):
     [("fp4e2m1", "fp4e2m1"), ("fp4", "fp4e2m1"), ("fp4e2m1", "fp4")],
 )
 def test_fp4e2m1_alias_preserves_packed_contract(path, a_dtype, b_dtype):
+    pytest.importorskip("ml_dtypes")
     original = fp4_spec(path, 256)
     alias = replace(original, dtype_a=a_dtype, dtype_b=b_dtype)
     assert is_valid_spec(alias)[0]

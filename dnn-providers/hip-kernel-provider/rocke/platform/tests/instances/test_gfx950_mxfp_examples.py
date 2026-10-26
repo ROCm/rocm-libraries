@@ -80,6 +80,7 @@ def test_default_and_all_case_cli(monkeypatch, family, count):
 @pytest.mark.parametrize("a,b", list(product(FORMATS, repeat=2)))
 @pytest.mark.parametrize("output", ["bf16", "fp16"])
 def test_nontrivial_scale_coverage_and_oracle_sensitivity(a, b, output):
+    pytest.importorskip("ml_dtypes")
     spec = BlockScaledGemmSpec("fixture", 64, 96, 256, a, b, output)
 
     def reference(inputs):

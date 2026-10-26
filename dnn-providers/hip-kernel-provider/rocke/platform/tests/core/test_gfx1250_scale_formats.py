@@ -92,6 +92,7 @@ def test_catalog_and_builder_agree_on_legal_scale_combinations(a, b, sa, sb, blo
 @pytest.mark.parametrize("block_k", [32, 16])
 @pytest.mark.parametrize("dtype_c", ["bf16", "fp16"])
 def test_scale_formats_lowering_and_reference(a, b, sa, sb, block_k, dtype_c):
+    pytest.importorskip("ml_dtypes")
     spec = spec_for(a, b, sa, sb, block_k, dtype_c=dtype_c)
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
@@ -173,6 +174,7 @@ def test_e4m3_decoder_against_independent_dtype():
 @pytest.mark.parametrize("dtype", ["e5m2", "bf8e5m2", "fp8e5m2", "bf8", "", "i32"])
 @pytest.mark.parametrize("field", ["scale_dtype_a", "scale_dtype_b"])
 def test_invalid_scale_spellings(dtype, field):
+    pytest.importorskip("ml_dtypes")
     spec = replace(spec_for(), **{field: dtype})
     assert not is_valid_spec(spec)[0]
     with pytest.raises(ValueError):
@@ -182,6 +184,7 @@ def test_invalid_scale_spellings(dtype, field):
 
 
 def test_per_operand_overrides_preserve_defaults_and_aliases():
+    pytest.importorskip("ml_dtypes")
     implicit = spec_for(sa=None, sb=None)
     explicit = replace(implicit, scale_dtype_a="e8m0", scale_dtype_b="i8")
     assert implicit.kernel_name() == explicit.kernel_name()
