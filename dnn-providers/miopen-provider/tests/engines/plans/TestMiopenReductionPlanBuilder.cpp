@@ -1,30 +1,36 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstddef>
 #include <memory>
-#include <ostream>
-#include <string>
+#include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenContext.hpp"
 #include "HipdnnMiopenHandle.hpp"
 #include "HipdnnMiopenSettings.hpp"
-#include "common/ReductionCommon.hpp"
+#include "MiopenApi.hpp"
 #include "engines/plans/MiopenReductionPlanBuilder.hpp"
 
 using namespace miopen_plugin;
-using namespace reduction_common;
-
-using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
-using hipdnn_test_sdk::utilities::MockEngineConfig;
 
 namespace
 {
+
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+using hipdnn_test_sdk::utilities::createReductionGraph;
+using hipdnn_test_sdk::utilities::MockEngineConfig;
+using hipdnn_test_sdk::utilities::ReductionGraphSpec;
+using hipdnn_test_sdk::utilities::ReductionTensorSpec;
 
 // Owns the flatbuffer a GraphWrapper views, so the two cannot be separated.
 class ReductionGraph
@@ -46,30 +52,56 @@ private:
     GraphWrapper _graph;
 };
 
-// Shared state for both fixtures below.
-class ReductionPlanBuilderFixture
+// The workspace size miopenGetReductionWorkspaceSize reports on `handle` for `spec` reduced with
+// `op`. Built from raw MIOpen calls, so none of the provider code under test is involved. Any
+// MIOpen failure is recorded as a test failure and yields 0.
+size_t queryMiopenReductionWorkspaceSize(miopenHandle_t handle,
+                                         miopenReduceTensorOp_t op,
+                                         const ReductionGraphSpec& spec)
 {
-protected:
-    MiopenReductionPlanBuilder _planBuilder;
-    std::unique_ptr<HipdnnMiopenHandle> _handle;
-    MockEngineConfig _mockEngineConfig;
-};
+    using TensorDescriptor = std::unique_ptr<std::remove_pointer_t<miopenTensorDescriptor_t>,
+                                             decltype(&miopenDestroyTensorDescriptor)>;
+    using ReduceDescriptor = std::unique_ptr<std::remove_pointer_t<miopenReduceTensorDescriptor_t>,
+                                             decltype(&miopenDestroyReduceTensorDescriptor)>;
 
-struct WorkspaceCase
-{
-    ReductionGraphSpec spec;
-    const char* name;
-};
+    const auto toMiopenType
+        = [](DataType type) { return type == DataType::HALF ? miopenHalf : miopenFloat; };
 
-std::ostream& operator<<(std::ostream& os, const WorkspaceCase& workspaceCase)
-{
-    return os << workspaceCase.name;
+    const auto makeTensor = [](miopenDataType_t type, const ReductionTensorSpec& tensor) {
+        miopenTensorDescriptor_t raw = nullptr;
+        EXPECT_EQ(miopenCreateTensorDescriptor(&raw), miopenStatusSuccess);
+        TensorDescriptor descriptor(raw, &miopenDestroyTensorDescriptor);
+        const std::vector<int> dims(tensor.dims.begin(), tensor.dims.end());
+        const std::vector<int> strides(tensor.strides->begin(), tensor.strides->end());
+        EXPECT_EQ(miopenSetTensorDescriptor(
+                      raw, type, static_cast<int>(dims.size()), dims.data(), strides.data()),
+                  miopenStatusSuccess);
+        return descriptor;
+    };
+
+    const auto x = makeTensor(toMiopenType(spec.dataType), spec.x);
+    const auto y = makeTensor(toMiopenType(spec.outputDataType()), spec.y);
+
+    miopenReduceTensorDescriptor_t rawReduce = nullptr;
+    EXPECT_EQ(miopenCreateReduceTensorDescriptor(&rawReduce), miopenStatusSuccess);
+    const ReduceDescriptor reduce(rawReduce, &miopenDestroyReduceTensorDescriptor);
+    EXPECT_EQ(miopenSetReduceTensorDescriptor(rawReduce,
+                                              op,
+                                              miopenFloat,
+                                              MIOPEN_PROPAGATE_NAN,
+                                              MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                                              MIOPEN_32BIT_INDICES),
+              miopenStatusSuccess);
+
+    size_t workspaceSize = 0;
+    EXPECT_EQ(miopenGetReductionWorkspaceSize(handle, rawReduce, x.get(), y.get(), &workspaceSize),
+              miopenStatusSuccess);
+    return workspaceSize;
 }
 
 } // namespace
 
-class TestGpuMiopenReductionPlanBuilder : public ::testing::Test,
-                                          protected ReductionPlanBuilderFixture
+class TestGpuMiopenReductionPlanBuilder : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -77,24 +109,28 @@ protected:
         SKIP_IF_NO_DEVICES();
         _handle = std::make_unique<HipdnnMiopenHandle>();
     }
+
+    // A multi-block ADD: MIOpen's workspace holds a descriptor page plus partials sized from the
+    // tensor lengths, so it differs if the plan queries with the wrong tensors. A single-pass
+    // shape would always get the one page.
+    const ReductionGraphSpec _multiBlockSpec
+        = ReductionGraphSpec::packed(ReductionMode::ADD, {2, 4096}, {2, 1});
+    MiopenReductionPlanBuilder _planBuilder;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
+    MockEngineConfig _mockEngineConfig;
 };
 
 // isApplicable() delegates to reduction_applicability::isSupported(), whose rules
 // TestMiopenReductionChecks pins one by one, so one accepted and one declined graph suffice here.
-TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsTrueForValidGraph)
+TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableDelegatesToGate)
 {
-    const ReductionGraph graph{ReductionGraphSpec{}};
+    ReductionGraphSpec mulNoZerosSpec;
+    mulNoZerosSpec.mode = ReductionMode::MUL_NO_ZEROS;
+    const ReductionGraph accepted{ReductionGraphSpec{}};
+    const ReductionGraph declined{mulNoZerosSpec};
 
-    EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph.graph()));
-}
-
-TEST_F(TestGpuMiopenReductionPlanBuilder, IsApplicableReturnsFalseForMulNoZeros)
-{
-    ReductionGraphSpec spec;
-    spec.mode = ReductionMode::MUL_NO_ZEROS;
-    const ReductionGraph graph{spec};
-
-    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph.graph()));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_handle, accepted.graph()));
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, declined.graph()));
 }
 
 TEST_F(TestGpuMiopenReductionPlanBuilder, GetCustomKnobsReturnsEmpty)
@@ -116,57 +152,25 @@ TEST_F(TestGpuMiopenReductionPlanBuilder, InitializeExecutionSettingsLeavesSetti
     EXPECT_FALSE(settings.defaultWorkspaceSize().has_value());
 }
 
-// The workspace depends on the reduction method MIOpen picks for the shape, so cover a
-// single-pass shape (only MIOpen's descriptor page) and a multi-block one (page plus partials).
-class TestGpuMiopenReductionPlanBuilderWorkspace : public ::testing::TestWithParam<WorkspaceCase>,
-                                                   protected ReductionPlanBuilderFixture
+TEST_F(TestGpuMiopenReductionPlanBuilder, GetMaxWorkspaceSizeMatchesMiopenQuery)
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-        _handle = std::make_unique<HipdnnMiopenHandle>();
-    }
-
-    static size_t miopenWorkspaceSize(const HipdnnMiopenHandle& handle)
-    {
-        return queryMiopenReductionWorkspaceSize(
-            handle.miopenHandle, MIOPEN_REDUCE_TENSOR_ADD, GetParam().spec);
-    }
-};
-
-TEST_P(TestGpuMiopenReductionPlanBuilderWorkspace, GetMaxWorkspaceSizeMatchesMiopenQuery)
-{
-    const ReductionGraph graph{GetParam().spec};
+    const ReductionGraph graph{_multiBlockSpec};
     const HipdnnMiopenSettings settings;
 
-    const auto workspaceSize = _planBuilder.getMaxWorkspaceSize(*_handle, graph.graph(), settings);
-
-    EXPECT_GT(workspaceSize, 0u);
-    EXPECT_EQ(workspaceSize, miopenWorkspaceSize(*_handle));
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(*_handle, graph.graph(), settings),
+              queryMiopenReductionWorkspaceSize(
+                  _handle->miopenHandle, MIOPEN_REDUCE_TENSOR_ADD, _multiBlockSpec));
 }
 
-TEST_P(TestGpuMiopenReductionPlanBuilderWorkspace, BuildPlanSetsPlanWithQueriedWorkspaceSize)
+TEST_F(TestGpuMiopenReductionPlanBuilder, BuildPlanSetsPlanWithQueriedWorkspaceSize)
 {
-    const ReductionGraph graph{GetParam().spec};
+    const ReductionGraph graph{_multiBlockSpec};
     HipdnnMiopenContext context;
 
     _planBuilder.buildPlan(*_handle, graph.graph(), _mockEngineConfig, context);
 
     ASSERT_TRUE(context.hasValidPlan());
-    EXPECT_EQ(context.plan().getWorkspaceSize(*_handle), miopenWorkspaceSize(*_handle));
+    EXPECT_EQ(context.plan().getWorkspaceSize(*_handle),
+              queryMiopenReductionWorkspaceSize(
+                  _handle->miopenHandle, MIOPEN_REDUCE_TENSOR_ADD, _multiBlockSpec));
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    AllCases,
-    TestGpuMiopenReductionPlanBuilderWorkspace,
-    ::testing::Values(
-        WorkspaceCase{ReductionGraphSpec{}, "SinglePassFloat"},
-        WorkspaceCase{ReductionGraphSpec::packed(ReductionMode::ADD, {2, 4096}, {2, 1}),
-                      "MultiBlockFloat"},
-        WorkspaceCase{
-            ReductionGraphSpec::packed(ReductionMode::ADD, {2, 4096}, {2, 1}, DataType::HALF),
-            "MultiBlockHalf"}),
-    [](const ::testing::TestParamInfo<WorkspaceCase>& info) {
-        return std::string(info.param.name);
-    });

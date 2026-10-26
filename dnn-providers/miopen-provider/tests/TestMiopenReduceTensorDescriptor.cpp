@@ -1,8 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <ostream>
-#include <string>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -14,17 +12,6 @@ using namespace miopen_plugin;
 
 namespace
 {
-
-struct ReduceOpCase
-{
-    miopenReduceTensorOp_t op;
-    const char* name;
-};
-
-std::ostream& operator<<(std::ostream& os, const ReduceOpCase& opCase)
-{
-    return os << opCase.name;
-}
 
 // Everything miopenGetReduceTensorDescriptor reports about a descriptor.
 struct ReduceDescriptorFields
@@ -51,36 +38,20 @@ ReduceDescriptorFields queryFields(miopenReduceTensorDescriptor_t descriptor)
 
 } // namespace
 
-class TestMiopenReduceTensorDescriptorOps : public ::testing::TestWithParam<ReduceOpCase>
+// NORM2 is not op 0 (ADD), so a descriptor that ignored the op would show. The op mapping per
+// reduction mode is pinned by TestMiopenReductionChecks.
+TEST(TestMiopenReduceTensorDescriptor, ConfiguresLegacyReduceWithoutIndices)
 {
-};
-
-TEST_P(TestMiopenReduceTensorDescriptorOps, ConfiguresLegacyReduceWithoutIndices)
-{
-    const MiopenReduceTensorDescriptor descriptor(GetParam().op);
+    const MiopenReduceTensorDescriptor descriptor(MIOPEN_REDUCE_TENSOR_NORM2);
     ASSERT_NE(descriptor.reduceTensorDescriptor(), nullptr);
 
     const auto fields = queryFields(descriptor.reduceTensorDescriptor());
-    EXPECT_EQ(fields.op, GetParam().op);
+    EXPECT_EQ(fields.op, MIOPEN_REDUCE_TENSOR_NORM2);
     EXPECT_EQ(fields.compType, miopenFloat);
     EXPECT_EQ(fields.nanOpt, MIOPEN_PROPAGATE_NAN);
     EXPECT_EQ(fields.indices, MIOPEN_REDUCE_TENSOR_NO_INDICES);
     EXPECT_EQ(fields.indicesType, MIOPEN_32BIT_INDICES);
 }
-
-INSTANTIATE_TEST_SUITE_P(AllCases,
-                         TestMiopenReduceTensorDescriptorOps,
-                         ::testing::Values(ReduceOpCase{MIOPEN_REDUCE_TENSOR_ADD, "Add"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_MUL, "Mul"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_MIN, "Min"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_MAX, "Max"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_AMAX, "Amax"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_AVG, "Avg"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_NORM1, "Norm1"},
-                                           ReduceOpCase{MIOPEN_REDUCE_TENSOR_NORM2, "Norm2"}),
-                         [](const ::testing::TestParamInfo<ReduceOpCase>& info) {
-                             return std::string(info.param.name);
-                         });
 
 TEST(TestMiopenReduceTensorDescriptor, MoveConstructorTransfersOwnership)
 {

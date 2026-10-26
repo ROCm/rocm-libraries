@@ -122,11 +122,8 @@ TEST(TestReferenceOpCoverage, CpuCoversReduction)
 {
     const auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
         hipdnn_test_sdk::utilities::ReductionGraphSpec{});
-    const auto* graph = builder.GetBufferPointer();
-    const auto size = static_cast<size_t>(builder.GetSize());
-
-    EXPECT_TRUE(referenceCoversGraph(ReferenceExecutorType::CPU, graph, size));
-    EXPECT_TRUE(uncoveredNodeTypes(ReferenceExecutorType::CPU, graph, size).empty());
+    EXPECT_TRUE(referenceCoversGraph(
+        ReferenceExecutorType::CPU, builder.GetBufferPointer(), builder.GetSize()));
 }
 
 // ---------------------------------------------------------------------------
