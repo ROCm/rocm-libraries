@@ -303,16 +303,27 @@ def _build_miopen_args(args) -> list[str]:
 _ALL_STOPPED_RE = re.compile(r"all \d+ early-stopped: .*")
 
 
-def _write_results(path: str, rows_direct: str, rows_implicit: str) -> None:
+def _write_results(
+    path: str,
+    rows_direct: str,
+    rows_implicit: str,
+    *,
+    miopen_file: str | None = None,
+    miopen_cmd: str | None = None,
+) -> None:
     """Join the two sweeps' per-case rows into ``path`` (and a ``.csv``).
 
     The two files are what the children wrote under ``--results``; a sweep that
     was skipped (``--skip-direct`` / ``--skip-implicit``) or that reached no
     case leaves none, and :func:`case_results.read_rows` reads that as no rows,
     so the merged table is simply one-sided.
+
+    The children key their rows by geometry, not by the line they read, so the
+    MIOpenDriver command goes back on here, from the input this run was given.
     """
     rows = case_results.merge(
-        case_results.read_rows(rows_direct) + case_results.read_rows(rows_implicit)
+        case_results.read_rows(rows_direct) + case_results.read_rows(rows_implicit),
+        case_results.miopen_cmds_by_key(miopen_file=miopen_file, miopen_cmd=miopen_cmd),
     )
     if not rows:
         print(f"\n[info] no per-case results to write to {path}", file=sys.stderr)
@@ -726,7 +737,13 @@ def main() -> int:
                 implicit_note = m.group(0)
 
         if args.results:
-            _write_results(args.results, rows_direct, rows_implicit)
+            _write_results(
+                args.results,
+                rows_direct,
+                rows_implicit,
+                miopen_file=args.miopen_file,
+                miopen_cmd=args.miopen_cmd,
+            )
 
     _print_summary(direct_result, implicit_result, implicit_note)
     return 0

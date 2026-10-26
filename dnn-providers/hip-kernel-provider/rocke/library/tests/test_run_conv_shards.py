@@ -305,8 +305,100 @@ def test_write_leaves_a_csv_beside_the_jsonl(tmp_path):
     csv_path = case_results.write(rows, out)
     assert csv_path.is_file() and csv_path != out
     header, body = csv_path.read_text().splitlines()[:2]
-    assert header.split(",") == list(case_results.MERGED_FIELDS)
+    assert header.split(",") == list(case_results.CSV_FIELDS)
     assert "d" in body and "i" in body
+
+
+def test_the_csv_is_narrower_than_the_json_it_is_written_from(tmp_path):
+    """The CSV is the reading view; the JSON keeps the fields it leaves out, so
+    nothing is lost by the narrowing."""
+    rows = case_results.merge(
+        [_row("direct", "k", 0.5, "d"), _row("implicit", "k", 1.0, "i")]
+    )
+    out = tmp_path / "results.jsonl"
+    csv_path = case_results.write(rows, out)
+    assert set(case_results.CSV_FIELDS) < set(case_results.MERGED_FIELDS)
+    assert "tflops" not in csv_path.read_text().splitlines()[0]
+    assert json.loads(out.read_text().splitlines()[0])["direct_tflops"] == 100.0
+
+
+def test_the_winner_columns_repeat_the_winning_engines_row(tmp_path):
+    rows = case_results.merge(
+        [_row("direct", "k", 0.5, "d"), _row("implicit", "k", 1.0, "i")]
+    )
+    assert rows[0]["winner_ms"] == 0.5 and rows[0]["winner_kernel"] == "d"
+
+
+def test_a_one_sided_case_names_no_winner():
+    """One time is not a comparison: the engine that did reach the case is
+    already on the row under its own name."""
+    rows = case_results.merge([_row("implicit", "k", 1.0, "i")])
+    assert rows[0]["winner_ms"] is None and rows[0]["winner_kernel"] is None
+
+
+# ------------------------------------------------------------------ miopen cmd
+_MIOPEN_LINE = (
+    "convbfp16 -F 1 -n 4 -c 64 -k 128 -H 320 -W 320 -y 3 -x 3 -p 1 -q 1 "
+    "-u 2 -v 2 -l 1 -j 1 -g 1 -m conv -I NHWC -O NHWC -f NHWC"
+)
+
+
+def _key_of(line, direction="fwd"):
+    from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+
+    problem, dtype, _forw = parse_miopen_cmd(line)
+    return case_key(problem, dtype, direction)
+
+
+def test_the_case_file_puts_its_own_line_on_the_row(tmp_path):
+    """The sweeps key their rows by geometry, so the line the user wrote is not
+    in them -- the merge reads it back off the input the run was given."""
+    f = tmp_path / "cases.txt"
+    f.write_text(f"# a comment\n\n{_MIOPEN_LINE}\n")
+    key = _key_of(_MIOPEN_LINE)
+    rows = case_results.merge(
+        [_row("direct", key, 0.5, "d")],
+        case_results.miopen_cmds_by_key(miopen_file=f),
+    )
+    assert rows[0]["miopen_cmd"] == _MIOPEN_LINE
+
+
+def test_a_case_with_no_command_behind_it_gets_one_written_from_its_key():
+    """A run given shape flags rather than a command still has to leave a row
+    you can re-run."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+
+    key = _key_of(_MIOPEN_LINE)
+    rows = case_results.merge([_row("direct", key, 0.5, "d")])
+    cmd = rows[0]["miopen_cmd"]
+    assert cmd != _MIOPEN_LINE and "MIOpenDriver convbfp16" in cmd
+    # It describes the same case: round-tripping it lands back on the key.
+    problem, dtype, forw = parse_miopen_cmd(cmd)
+    assert forw == 1 and case_key(problem, dtype, "fwd") == key
+
+
+def test_a_key_the_case_file_does_not_cover_falls_back_to_a_written_command(tmp_path):
+    f = tmp_path / "cases.txt"
+    f.write_text(_MIOPEN_LINE + "\n")
+    rows = case_results.merge(
+        [_row("direct", _key_of(_MIOPEN_LINE, "wgrad"), 0.5, "d")],
+        case_results.miopen_cmds_by_key(miopen_file=f),
+    )
+    assert rows[0]["miopen_cmd"].endswith("-F 4 -t 1 -in_layout=NHWC")
+
+
+def test_a_case_file_line_that_does_not_parse_is_skipped_not_fatal(tmp_path):
+    """Writing the results of a finished sweep must not fail over the label on
+    a row."""
+    f = tmp_path / "cases.txt"
+    f.write_text(f"not a MIOpenDriver command\n{_MIOPEN_LINE}\n")
+    assert list(case_results.miopen_cmds_by_key(miopen_file=f)) == [
+        _key_of(_MIOPEN_LINE)
+    ]
+
+
+def test_a_key_that_does_not_parse_is_left_as_it_is():
+    assert case_results.miopen_cmd_from_key("nonsense") == "nonsense"
 
 
 def test_a_writer_without_a_path_writes_nothing(tmp_path):
@@ -520,6 +612,109 @@ log.write_text(json.dumps(prev + ran))
 '''
 
 
+# --------------------------------------------------------------------------- progress
+def _rows_file(path, keys, engines=("direct", "implicit")):
+    path.write_text(
+        "".join(
+            json.dumps(_row(engine, key, 1.0, f"{engine}-{key}")) + "\n"
+            for key in keys
+            for engine in engines
+        )
+    )
+    return path
+
+
+def test_a_case_both_engines_measured_counts_once(tmp_path):
+    """The row files hold one row per engine; progress is in cases."""
+    a = _rows_file(tmp_path / "shard-0.jsonl", ["k1", "k2"])
+    b = _rows_file(tmp_path / "shard-1.jsonl", ["k3"], engines=("implicit",))
+
+    assert run_conv_shards.measured_keys([a, b]) == {"k1", "k2", "k3"}
+
+
+def test_measured_keys_ignores_a_shard_that_has_written_nothing(tmp_path):
+    """Every shard's row file is read on each tick, including the ones whose
+    card has not reached its first case yet."""
+    a = _rows_file(tmp_path / "shard-0.jsonl", ["k1"])
+
+    assert run_conv_shards.measured_keys([a, tmp_path / "absent.jsonl"]) == {"k1"}
+
+
+def test_the_progress_line_reports_the_run(tmp_path):
+    line = run_conv_shards.progress_line(
+        measured=142,
+        total=4218,
+        baseline=0,
+        shards_done=7,
+        shards=22,
+        busy=8,
+        devices=8,
+        elapsed=12 * 60,
+    )
+    assert "142/4218 cases (3%)" in line
+    assert "7/22 shards" in line and "8/8 busy" in line
+    # 142 cases in 12 min leaves 4076 -- hours, so the ETA says hours.
+    assert "ETA 5.7 h" in line
+
+
+def test_a_resumed_run_does_not_extrapolate_from_carried_cases(tmp_path):
+    """4000 cases carried in by --resume took this run no time. Dividing the
+    elapsed minute by them would promise the remaining 218 in seconds."""
+    line = run_conv_shards.progress_line(
+        measured=4010,
+        total=4218,
+        baseline=4000,
+        shards_done=0,
+        shards=22,
+        busy=8,
+        devices=8,
+        elapsed=60,
+    )
+    # 10 cases in a minute, 208 to go: ~21 min, not the ~3 s the carried rows
+    # would imply.
+    assert "ETA 21 min" in line
+
+
+def test_the_progress_line_omits_an_eta_it_cannot_compute(tmp_path):
+    """Nothing measured yet: no rate, so no guess."""
+    line = run_conv_shards.progress_line(
+        measured=0,
+        total=4218,
+        baseline=0,
+        shards_done=0,
+        shards=22,
+        busy=8,
+        devices=8,
+        elapsed=30,
+    )
+    assert "0/4218 cases (0%)" in line
+    assert "ETA" not in line
+
+
+def test_progress_is_reported_while_the_shards_run(tmp_path):
+    """The point of the line: the console says something between one shard
+    finishing and the next, which on a long sweep is a quarter of an hour."""
+    ticks = []
+
+    def popen(cmd, **_kw):
+        return _FakeProc(3)
+
+    run_conv_shards.run_shards(
+        _plan(tmp_path, 4),
+        devices=["0", "1"],
+        command=lambda index, paths: ["python", str(index)],
+        popen=popen,
+        poll_seconds=0,
+        on_progress=lambda shards_done, busy: ticks.append((shards_done, busy)),
+        progress_seconds=0,
+    )
+
+    assert ticks, "no progress was reported"
+    # Reported while cards were still working, not only at the end.
+    assert any(busy > 0 for _done, busy in ticks)
+    assert ticks[-1][0] == 4, "the last tick sees every shard finished"
+
+
 # --------------------------------------------------------------------------- compare
 def test_compare_merges_one_engine_when_the_other_was_skipped(tmp_path, capsys):
     """--skip-direct leaves no direct rows; the table is then one-sided rather
@@ -544,6 +739,48 @@ def test_compare_says_so_when_there_is_nothing_to_write(tmp_path, capsys):
     compare._write_results(str(out), str(tmp_path / "a"), str(tmp_path / "b"))
     assert not out.exists()
     assert "no per-case results" in capsys.readouterr().err
+
+
+def _compare_argv(cache) -> list:
+    """The smallest argv that gets ``main`` to the sweep it will stub out."""
+    return ["x", "--run-from-cache", str(cache), "--skip-direct"]
+
+
+def test_compare_fails_when_a_sweep_dies(tmp_path, monkeypatch, capsys):
+    """A sweep that crashed on every case prints no ``Best:`` line -- but then
+    neither does a shape none of the cached kernels support. The exit status is
+    the only thing that separates them, and ``run_conv_shards.py`` reports it
+    per shard."""
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    monkeypatch.setattr(compare, "_run_script", lambda *a, **k: (None, "", "boom", 1))
+    monkeypatch.setattr(sys, "argv", _compare_argv(tmp_path))
+
+    assert compare.main() == 1
+    assert "exited 1" in capsys.readouterr().err
+
+
+def test_compare_turns_a_killed_sweep_into_a_usable_status(tmp_path, monkeypatch):
+    """A child killed by a signal reports a negative status. Returned verbatim
+    it would be truncated to an arbitrary byte -- zero among them, which is the
+    one value that must not come out of a failed run."""
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    monkeypatch.setattr(compare, "_run_script", lambda *a, **k: (None, "", "", -9))
+    monkeypatch.setattr(sys, "argv", _compare_argv(tmp_path))
+
+    assert compare.main() == 1
+
+
+def test_compare_succeeds_when_the_sweep_does(tmp_path, monkeypatch):
+    """The other half of the status: a healthy sweep still exits zero, so the
+    shard runner does not start reporting every shard as failed."""
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    monkeypatch.setattr(compare, "_run_script", lambda *a, **k: (1.0, "kern", "", 0))
+    monkeypatch.setattr(sys, "argv", _compare_argv(tmp_path))
+
+    assert compare.main() == 0
 
 
 def test_the_comparison_driver_needs_no_torch():

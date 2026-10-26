@@ -43,6 +43,17 @@ rows). The runner then writes ``results.jsonl`` and ``results.csv`` over all
 shards. A shard that dies keeps the rows it had written -- they are flushed
 per case -- so a re-run of the remaining cases merges cleanly with them.
 
+Progress
+--------
+A shard reports nothing until it exits, and one shard is minutes to hours, so
+the runner counts the case keys in the shards' row files every
+``PROGRESS_SECONDS`` and prints a line across the whole run::
+
+    [progress] 142/4218 cases (3%) | 7/22 shards | 8/8 busy | 12 min elapsed | ETA 2.1 h
+
+For one shard's detail, follow its ``shard-NN.log``: the sweeps print a banner
+per case into it.
+
 Devices (``--devices``): a count ``N`` (devices ``0..N-1``), a list ``2,3``,
 or ``auto`` (default): the entries of ``HIP_VISIBLE_DEVICES``, else the count
 of ``ROCR_VISIBLE_DEVICES`` (``0..k-1``), else one device. This duplicates the
@@ -61,7 +72,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from benchmarks.common import case_results
 
@@ -82,6 +93,11 @@ SHARDS_PER_DEVICE = 4
 #: minutes; a second of latency on starting the next one is not worth a busier
 #: loop.
 POLL_SECONDS = 1.0
+
+#: How often the aggregate progress line is printed. Without it the console
+#: says nothing between one shard finishing and the next -- a quarter of an
+#: hour of silence on a long sweep, which reads the same as a hang.
+PROGRESS_SECONDS = 30.0
 
 
 # --------------------------------------------------------------------------- devices
@@ -134,6 +150,66 @@ def split_cases(cases: Sequence[str], shards: int) -> List[List[str]]:
     for i, case in enumerate(cases):
         dealt[i % shards].append(case)
     return [shard for shard in dealt if shard]
+
+
+# --------------------------------------------------------------------------- progress
+def measured_keys(paths: Iterable[Path]) -> Set[str]:
+    """The case keys recorded across *paths*, as a set.
+
+    By key rather than by row: the comparison writes one row per engine, so a
+    case both sweeps measured is one case done, not two. The rows are flushed
+    per case, so reading the shard files mid-run is how the progress line sees
+    inside a shard without the children reporting anything back.
+
+    This is a floor on the cases attempted, not a count of them: a case no
+    cached kernel supports finishes without writing a row. A sweep with many
+    of those shows a percentage that lags the real position and so an ETA on
+    the long side.
+    """
+    keys: Set[str] = set()
+    for path in paths:
+        for row in case_results.read_rows(path):
+            keys.add(row["key"])
+    return keys
+
+
+def _duration(seconds: float) -> str:
+    """Minutes up to an hour and a half, hours past it."""
+    if seconds < 90 * 60:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+def progress_line(
+    *,
+    measured: int,
+    total: int,
+    baseline: int,
+    shards_done: int,
+    shards: int,
+    busy: int,
+    devices: int,
+    elapsed: float,
+) -> str:
+    """One line of aggregate progress over every shard.
+
+    ``baseline`` is what a ``--resume`` carried in. Those cases cost this run
+    no time, so the rate the ETA extrapolates from counts only the cases this
+    run measured itself -- otherwise resuming a nearly-finished sweep would
+    report minutes left before it had timed a single case.
+    """
+    pct = 100.0 * measured / total if total else 0.0
+    parts = [
+        f"{measured}/{total} cases ({pct:.0f}%)",
+        f"{shards_done}/{shards} shards",
+        f"{busy}/{devices} busy",
+        f"{_duration(elapsed)} elapsed",
+    ]
+    fresh = measured - baseline
+    remaining = total - measured
+    if fresh > 0 and remaining > 0:
+        parts.append(f"ETA {_duration(elapsed / fresh * remaining)}")
+    return "[progress] " + " | ".join(parts)
 
 
 # --------------------------------------------------------------------------- runs
@@ -193,13 +269,17 @@ def run_shards(
     popen=subprocess.Popen,
     poll_seconds: float = POLL_SECONDS,
     on_done=None,
+    on_progress=None,
+    progress_seconds: float = PROGRESS_SECONDS,
 ) -> List[Tuple[int, str, int, float]]:
     """Run every shard, at most one per device at a time.
 
     A device that frees up takes the next shard off the queue, so a long shard
     delays only the card running it. ``command(index, paths)`` builds the
     child's argv; ``popen`` is the process factory (a stub, under test);
-    ``on_done(index, device, rc, seconds)`` is called as each shard ends.
+    ``on_done(index, device, rc, seconds)`` is called as each shard ends and
+    ``on_progress(shards_done, busy)`` every ``progress_seconds`` while any
+    shard is still running.
 
     Returns ``(shard index, device, rc, seconds)`` per shard, in the order
     they finished.
@@ -208,6 +288,7 @@ def run_shards(
     running: Dict[str, Tuple[int, Mapping[str, Path], object, object, float]] = {}
     free = list(devices)
     done: List[Tuple[int, str, int, float]] = []
+    last_progress = time.monotonic()
 
     while queue or running:
         while queue and free:
@@ -237,6 +318,10 @@ def run_shards(
             done.append(entry)
             if on_done is not None:
                 on_done(*entry)
+        now = time.monotonic()
+        if on_progress is not None and now - last_progress >= progress_seconds:
+            last_progress = now
+            on_progress(len(done), len(running))
     return done
 
 
@@ -403,12 +488,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     started = time.monotonic()
+
+    # The shards' own row files, re-read on each progress tick. A shard reports
+    # nothing until it exits, so its rows are the only live view into it.
+    row_files = [paths["rows"] for _index, paths in plan]
+    baseline = {row["key"] for row in carried}
+
+    def _progress(shards_done: int, busy: int) -> None:
+        print(
+            progress_line(
+                measured=len(baseline | measured_keys(row_files)),
+                total=len(cases),
+                baseline=len(baseline),
+                shards_done=shards_done,
+                shards=len(dealt),
+                busy=busy,
+                devices=len(devices),
+                elapsed=time.monotonic() - started,
+            ),
+            flush=True,
+        )
+
     done = run_shards(
         plan,
         devices=devices,
         command=lambda index, paths: shard_command(script, forwarded, paths),
         poll_seconds=POLL_SECONDS,
         on_done=_report,
+        on_progress=_progress,
+        progress_seconds=PROGRESS_SECONDS,
     )
 
     rc_all = 0
@@ -424,7 +532,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             row
             for _index, paths in plan
             for row in case_results.read_rows(paths["rows"])
-        ]
+        ],
+        # The shards' rows are keyed by geometry; the case file is what puts
+        # each row's MIOpenDriver line back on it.
+        case_results.miopen_cmds_by_key(miopen_file=args.miopen_file),
     )
     if rows:
         out = Path(args.results or (log_dir / "results.jsonl"))
