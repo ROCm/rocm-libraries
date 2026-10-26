@@ -125,6 +125,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/FlattenCalleesPassTest.cpp
     unit/asm/Gfx1250HazardPassTest.cpp
     unit/asm/Gfx1250HazardProfileTest.cpp
+    unit/asm/WaitAluTrackerTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
