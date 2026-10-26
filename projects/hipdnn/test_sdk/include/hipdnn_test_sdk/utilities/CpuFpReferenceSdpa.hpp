@@ -21,8 +21,9 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-// Non-deduced context: the mask element type comes from explicit template arguments only,
-// so a literal nullptr mask compiles and a wrong-dtype mask pointer is a compile error.
+// Non-deduced context: a parameter of type NonDeduced<T>::type takes its element type from the
+// other arguments or explicit template arguments only, so a literal nullptr compiles and a
+// pointer of the wrong element type is a compile error.
 template <class T>
 struct NonDeduced
 {

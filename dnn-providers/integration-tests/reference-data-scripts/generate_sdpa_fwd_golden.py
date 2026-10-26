@@ -1587,7 +1587,9 @@ def main():
     )
     args = parser.parse_args()
     if args.window_left == 0:
-        parser.error("--window-left 0 keeps no keys (cuDNN rejects left_bound = 0)")
+        parser.error(
+            "--window-left must be positive or -1 (hipDNN rejects left_bound = 0)"
+        )
 
     if args.install_aiter:
         install_aiter()

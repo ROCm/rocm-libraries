@@ -182,7 +182,8 @@ Add `--additive-mask` for an explicit attention-mask tensor of shape
 `[1, 1, S_q, S_kv]` in the IO dtype, carried by both halves of the pair. It is
 added to the scores *before* the diagonal band, which is the order the CPU
 reference uses, so a finite bias can never resurrect a position the band drops.
-`dBias` is not produced.
+`--bias-dims` gives the mask any broadcast shape of `[B, H_q, S_q, S_kv]`, and
+`--dbias` adds the `dBias` output (the unscaled `dS` reduced to that shape).
 
 ### Template-sweep output
 
@@ -210,21 +211,27 @@ intermediate and accumulation is FP32. Softmax probabilities are recovered from
 the saved forward `LSE` rather than re-softmaxed, so the reference is anchored
 to the forward statistics the way a flash-attention kernel is. Backward is
 computed from the IO-dtype-rounded `O` that is written to the bundle, not from a
-higher-precision pre-conversion value. Rounded intermediates (ALMIOPEN-2704) are
-not modelled yet, which `intermediate_rounding: "none"` records.
+higher-precision pre-conversion value. Kernels that round intermediates such as
+`P` and `dS` to the IO dtype before their matrix products are not modelled yet,
+which `intermediate_rounding: "none"` records.
 
 Regenerating with the same seed and PyTorch version reproduces byte-identical
 tensors. The RNG draw order (`Q`, `K`, `V`, `dO`) is part of that contract.
 
 ### Supported feature surface
 
-Deliberately narrow; each unsupported feature fails loudly rather than emitting
-a wrong golden. Supported: BHSD layout, FP16/BF16, equal query and key/value
-head counts, independent `D_qk`/`D_v`, and the causal/sliding-window diagonal
-band with either alignment, and an additive attention mask. Not supported yet:
-GQA, FP8, BSHD and ragged layouts, GROUP mode, dropout, dBias, and ALiBi. Configurations that leave a
-query row fully masked are rejected, because the resulting `-inf` LSE makes
-every dependent gradient NaN.
+Each unsupported feature fails loudly rather than emitting a wrong golden.
+Supported: BHSD layout, FP16/BF16, independent `D_qk`/`D_v`, the
+causal/sliding-window diagonal band with either alignment, GQA/MQA
+(`H_q` a multiple of `H_kv`), padding (`--seq-lens-q`/`--seq-lens-kv`), an
+additive attention mask with `dBias`, and explicit-mask dropout (`--dropout-p`).
+Padding, GQA, `dBias` and dropout are single-graph only (not template-sweep
+cases) and are always cross-checked against FP64 autograd. Not supported yet:
+FP8, BSHD and ragged layouts, Philox dropout, sinks and ALiBi.
+
+Fully masked query rows (padded rows, and rows a band leaves empty in a padded
+bundle) give `O = 0`, `LSE = -inf` and zero gradients, as in cuDNN. Without
+padding, a band that leaves a row fully masked is rejected.
 
 Mask semantics, stride computation, the forward pass and the LSE come from
 `utilities/sdpa_common.py`, which `generate_sdpa_fwd_golden.py` also uses, so
@@ -248,6 +255,23 @@ seed reproducibility, acceptance by `verify_golden_bundles.py --require-data`,
 rejection of unsupported configurations, and agreement with PyTorch autograd.
 They also assert that the paired forward bundle is byte-identical to what
 `generate_sdpa_fwd_golden.py` produces for the same configuration.
+
+### Regenerating the bundles
+
+`integration-test-bundles/quick/SdpaBackward/generate_golden_data.sh` (and the
+`SdpaFwd` one) regenerate the checked-in bundles per tier. The discriminating
+bundles (`Sq != Skv` and per-batch lengths that differ, plus GQA, `dBias` and
+dropout for backward) are regenerated only with `GENERATE_DISCRIMINATING=1`;
+pass the tier `none` to generate them alone.
+
+## `generate_sdpa_fwd_golden.py`
+
+Generates SDPA forward bundles from PyTorch (the MATH backend or an explicit FP32
+reference); its module docstring lists the supported options. `--graph-only`
+writes the graph and a `.meta.json` whose `inputs` tell the harness how to fill
+each input, with no golden tensors, so the bundle is verified against the
+reference executor instead (dense BATCH mode only).
+
 ## Sliding-window bounds in the generators
 
 A left window bound has two common conventions, and each generator flag is named after the

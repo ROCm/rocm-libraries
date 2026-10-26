@@ -5,13 +5,18 @@ use cases disagree: cuDNN, PyTorch (SDPA, AOTriton, FlexAttention), vLLM, and Fl
 For each entry it says what hipDNN does today, what the contract is, and where the gaps are.
 
 The CPU and GPU reference implementations are the executable form of this contract. A change to an entry's
-**Contract** column must land together with the reference changes and the tests that pin it.
+**Contract** line must land together with the reference changes and the tests that pin it.
 
 Status values:
 - **Aligned**: hipDNN matches cuDNN today.
-- **Diverges**: hipDNN differs from cuDNN today. The entry tracks the fix.
-- **Extension**: cuDNN does not define the behaviour, and hipDNN defines it.
+- **Diverges**: hipDNN differs from cuDNN today. The entry gives the reason, and tracks the fix when one is planned.
+- **Extension**: cuDNN does not define or does not support the behaviour, and hipDNN defines it.
 - **Adapter**: the framework integration converts; no hipDNN change is needed.
+
+A status may carry its scope in parentheses. An entry whose parts differ gives one status per part.
+
+cudnn-frontend file and line citations refer to tag v1.22.0 unless an entry names another version. Entries are
+numbered by topic; SEM-016 to SEM-019 are not used.
 
 Notation: query row `i`, key column `j`, `off = 0` for TOP_LEFT and `off = Skv - Sq` for BOTTOM_RIGHT (per
 batch when `seq_len_q/kv` are set).
@@ -20,21 +25,21 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-001: Meaning of `left_bound`
 
-- **Status:** Matches cuDNN (it used to keep one key too many).
+- **Status:** Aligned.
 - **cuDNN:** `left_bound = L` keeps `j > i + off - L`, so each row sees **L** keys including the diagonal.
-  `set_sliding_window_length(L)` is the same field. `left_bound = 0` would keep no keys and is rejected.
+  `set_sliding_window_length(L)` is the same field. `left_bound = 0` keeps only keys right of the diagonal, so a
+  row is empty only when `right_bound = 0`. The accepted values are in SEM-005.
   - Sources: cudnn-frontend `include/cudnn_frontend/utils/attn_score_modifiers.h:207-247` (retain
     `col + L > row`), `test/python/sdpa/fp16_ref.py:132-147`.
-- **hipDNN:** the same. `left_bound` must be positive or -1 (unbounded); the frontend nodes, the CPU/GPU graph
-  plans and the hip-kernel-provider band resolution reject 0 and values below -1.
+- **hipDNN:** the same for every accepted value. `left_bound` must be positive or -1 (unbounded); the frontend
+  nodes, the CPU/GPU graph plans and the hip-kernel-provider band resolution reject 0 and values below -1 (SEM-005).
   - References: `CpuFpReferenceSdpa.hpp` / `CpuFpReferenceSdpaRagged.hpp` `isMasked`, `GpuRefSdpa{Fwd,RaggedFwd,Bwd}.cpp`,
     golden generator `build_mask` (its `--window-left` is the graph's `left_bound`).
   - Kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at the
     boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
     `window_left`. The gfx950 dense pack declines windows.
-  - Before the fix every hipDNN component used `j >= i + off - L` (L + 1 keys). It was internally consistent, so no
-    test caught it. `TestCpuFpReferenceSdpaFp64.LeftBoundCountsTheDiagonalKey` now pins the count.
+  - `TestCpuFpReferenceSdpaFp64.LeftBoundCountsTheDiagonalKey` pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.
@@ -44,20 +49,19 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-002: Deprecated `causal_mask` / `causal_mask_bottom_right` combined with explicit bounds
 
-- **Status:** Aligned in the hipDNN references; diverges in the rocKE oracle.
+- **Status:** Aligned (hipDNN references); Diverges (rocKE oracle).
 - **cuDNN:** the setters compose. The causal setter sets `right_bound = 0` (and BOTTOM_RIGHT for
   `_bottom_right`). Later bound and alignment setters refine it.
 - **hipDNN today:**
   - The CPU executor and the dense and ragged GPU references all compose this way, through `PlanUtils.hpp`
-    `extractDiagonalBandParams`, as the frontend documents (`SdpaAttributes.hpp:128-135`).
-  - The ragged GPU reference forced `(-1, 0)` until this was fixed. Pinned by
-    `TestGpuSdpaRaggedFwdPlanDeprecatedCausal`.
+    `extractDiagonalBandParams`, as the frontend documents (`SdpaAttributes.hpp:128-135`). Pinned for the ragged
+    GPU reference by `TestGpuSdpaRaggedFwdPlanDeprecatedCausal`.
   - The rocKE `sdpa_reference.py` (hip-kernel-provider) still forces `(-1, 0)`.
 - **Contract:** compose, as cuDNN does. All references use `extractDiagonalBandParams` semantics.
 
 ### SEM-003: Causal alignment
 
-- **Status:** Aligned (adapter).
+- **Status:** Adapter.
 - **cuDNN:** explicit `diagonal_alignment`.
 - **PyTorch:** dense `is_causal` is TOP_LEFT. The flash and AOTriton ops and `CausalBias(LOWER_RIGHT)` use
   BOTTOM_RIGHT.
@@ -75,25 +79,61 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-005: Band parameter domain
 
-- **Status:** Diverges (hipDNN is more permissive).
-- **cuDNN:** rejects `left_bound <= 0` and `right_bound < 0`. A left bound with `s_q > s_kv` needs padding.
-  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:229-232`. The forward
-    check applies only to backends before 9.10; the backward check always applies.
-- **hipDNN today:** accepts any bound `>= -1`, with `-1` meaning unbounded.
-- **Contract:** to be decided together with SEM-001. Under cuDNN's meaning `left_bound = 0` masks every key,
-  so it must be rejected.
+- **Status:** Diverges (deliberately stricter on `left_bound = 0`; `-1` is hipDNN's unbounded value).
+- **cuDNN:** an unset bound is unbounded.
+  - `left_bound <= 0` is rejected by the backward node always, and by the forward node only on backends before
+    9.10. On 9.10 and later the forward node accepts `left_bound = 0`, which keeps only keys right of the diagonal
+    (SEM-001).
+  - `right_bound < 0` is rejected in both directions.
+  - A left bound with `s_q > s_kv` needs padding.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:229-232` (forward left
+    bound, backend gate) and `:253-255` (right bound), `scaled_dot_product_flash_attention.h:1239-1242` (backward
+    left bound).
+- **hipDNN:** `left_bound` must be positive or `-1`; `right_bound` must be `>= -1`. `-1` means unbounded for
+  either bound, where cuDNN leaves the bound unset. Both directions reject `left_bound = 0` and values below `-1`
+  (frontend nodes, `PlanUtils.hpp` `extractDiagonalBandParams`, hip-kernel-provider `resolveDiagonalBand`).
+- **Contract:** hipDNN's domain. Forward `left_bound = 0` is rejected so that forward and backward accept the same
+  bands (cuDNN's backward rejects it), and because providers convert to the kernels' `window_left = L - 1`, where
+  `-1` means unbounded. A graph that needs this mask can use an explicit bias.
+
+### SEM-006: Bias combined with a band or bottom-right causal
+
+- **Status:** Extension (bottom-right causal with a bias); Aligned (a band with a bias, cuDNN 9.10.2 and later).
+- **cuDNN:** the support surface (cudnn-frontend `node/sdpa_support_surface.h`):
+  - Bottom-right causal is only supported without bias, ALiBi or dropout (lines 112-114), on every backend.
+  - Left and right bounds are only supported without dropout or bias on backends before 9.10.2 (lines 245-251).
+  - With paging and `max_seq_len_kv` set, a bias whose last dim is not `max_seq_len_kv` is rejected (lines 296-300).
+- **hipDNN today:** the CPU and dense GPU references apply an additive bias and then the band, in any
+  combination.
+- **Contract:** hipDNN accepts every combination, defined as the bias added to the scaled scores followed by the
+  band mask. vLLM and PyTorch need it: chunked prefill with a bias, and windowed models
+  with masks.
+- **Validation gap:** real cuDNN cannot arbitrate this case, so it rests on the property tests (a band equals a
+  -inf bias, so band + bias equals the sum of the two biases).
+
+### SEM-007: Boolean attention masks
+
+- **Status:** Adapter.
+- **cuDNN:** a boolean bias is rejected ("Bias mask data type cannot be boolean",
+  cudnn-frontend `node/sdpa_support_surface.h:78-80`).
+- **PyTorch:** `attn_mask` may be bool (True = attend). The math backend converts it to an additive mask of
+  0 / -inf before softmax.
+- **Contract:** cuDNN. The PyTorch adapter converts a bool mask to a 0 / -inf additive bias (or, for pure
+  causal/band patterns, to the diagonal-band attributes). The references need no bool-mask path.
 
 ### SEM-008: Padding (`seq_len_q` / `seq_len_kv`) and the `padding_mask` flag
 
-- **Status:** Extension (hipDNN is more permissive about the flag); semantics aligned.
+- **Status:** Extension (the flag is optional); Aligned (padding semantics).
 - **cuDNN:** `padding_mask = true` requires both seq_len tensors, and seq_len tensors without the flag are an error
   (cudnn-frontend `node/sdpa_support_surface.h:83-88`). Keys past `seq_len_kv[b]` are masked, query rows past
-  `seq_len_q[b]` give O = 0 and Stats = -inf (9.14+; 0 before), and bottom-right alignment uses the per-batch
-  offset `seq_len_kv[b] - seq_len_q[b]` (`test/python/sdpa/fp16_ref.py`).
-- **hipDNN today:** existing graphs (the golden generator and the checked-in `*_group` bundles) send both seq_len
-  tensors with `padding_mask = false`. The CPU references and the dense GPU forward reference treat both tensors
-  present as padding whatever the flag says, and decline `padding_mask = true` without them or only one tensor (`PlanUtils.hpp`
-  `isSupportedSdpaPadding`). Seq_len tensors are INT32 with one value per batch.
+  `seq_len_q[b]` give O = 0 and Stats = -inf (9.14+; 0 before; `test/python/sdpa/fp16.py:591-600`), and
+  bottom-right alignment uses the per-batch offset `seq_len_kv[b] - seq_len_q[b]` (`test/python/sdpa/fp16_ref.py`).
+- **hipDNN today:** existing graphs (the golden generator and the checked-in `SdpaFwd/*_group` bundles) send both
+  seq_len tensors with `padding_mask = false`. The CPU references and the dense GPU forward reference treat both
+  tensors present as padding whatever the flag says, and decline `padding_mask = true` without them or only one
+  tensor (`PlanUtils.hpp` `isSupportedSdpaPadding`). Seq_len tensors are INT32 `[B, 1, 1, 1]`, one value per batch.
+  The `SdpaFwdRuntimeScale/*_group` bundles carry rank-1 `[B + 1]` seq_len tensors; the frontend rejects that shape
+  and the references decline those bundles.
 - **PyTorch / vLLM:** varlen and padded batches are expressed by lengths (`cu_seqlens`, `seq_lens`); the adapter
   produces seq_len tensors, so the flag question does not reach them.
 - **Contract:** cuDNN semantics; the flag is not required. Padding contents are never read.
@@ -129,45 +169,19 @@ batch when `seq_len_q/kv` are set).
   per-row loop in its tests); its bundles cover decode, speculative decode, mixed ragged prefill/decode, windows and
   sinks.
 
-### SEM-007: Boolean attention masks
-
-- **Status:** Adapter.
-- **cuDNN:** a boolean bias is rejected ("Bias mask data type cannot be boolean",
-  cudnn-frontend `node/sdpa_support_surface.h:78-80`).
-- **PyTorch:** `attn_mask` may be bool (True = attend). The math backend converts it to an additive mask of
-  0 / -inf before softmax.
-- **Contract:** cuDNN. The PyTorch adapter converts a bool mask to a 0 / -inf additive bias (or, for pure
-  causal/band patterns, to the diagonal-band attributes). The references need no bool-mask path.
-
-### SEM-006: Bias combined with a band or bottom-right causal
-
-- **Status:** Extension (hipDNN is more permissive).
-- **cuDNN:** the support surface rejects these combinations (cudnn-frontend `node/sdpa_support_surface.h`):
-  - Bottom-right causal is only supported without bias, ALiBi or dropout (lines 112-114).
-  - Left and right bounds are only supported without dropout or bias (lines 247-249).
-  - A bias whose last dim is not the KV sequence length is rejected (line 298).
-- **hipDNN today:** the CPU and dense GPU references apply an additive bias and then the band, in any
-  combination.
-- **Contract:** hipDNN keeps the combination as an extension, defined as the bias added to the scaled scores
-  followed by the band mask. vLLM and PyTorch need it: chunked prefill with a bias, and windowed models
-  with masks.
-- **Validation gap:** real cuDNN cannot arbitrate this case, so it rests on the property tests (a band equals a
-  -inf bias, so band + bias equals the sum of the two biases).
-
 ## Softmax and statistics
 
 ### SEM-010: Fully masked or empty rows
 
-- **Status:** Aligned in the hipDNN references.
+- **Status:** Aligned (hipDNN references).
 - **cuDNN:** O = 0 and Stats = -inf (padded query rows since 9.14).
 - **PyTorch math, Flex, vLLM and FlashInfer:** O = 0, LSE = -inf.
 - **FlashAttention and AOTriton kernels:** LSE = +inf.
 - **JAX-XLA:** mean(V).
 - **hipDNN today:**
   - All forward references: O = 0, LSE = -inf.
-  - CPU backward: such a row contributes zero to every gradient. It previously produced NaN gradients when an
-    additive -inf bias masked the whole row. Pinned by `TestCpuFpReferenceSdpaClosedFormDeadRow` (LSE and
-    recomputed-softmax paths).
+  - CPU backward: such a row contributes zero to every gradient, including a row masked entirely by an additive
+    -inf bias. Pinned by `TestCpuFpReferenceSdpaClosedFormDeadRow` (LSE and recomputed-softmax paths).
   - The GPU backward reference (`GpuRefSdpaBwd.cpp`) follows the same rule; pinned by the dead-row cases of
     `TestGpuSdpaBwdFp32`.
 - **Contract:** O = 0, LSE = -inf, and that row contributes 0 to dQ, dK and dV. Engines whose kernels store
@@ -196,7 +210,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-013: Default scale
 
-- **Status:** Diverges in rocKE.
+- **Status:** Aligned (hipDNN references); Diverges (rocKE oracle).
 - **cuDNN:** no scaling unless `attn_scale` is set.
 - **PyTorch and vLLM:** default to 1/sqrt(D), but the adapter always passes the scale explicitly.
   vLLM uses per-model scales (Gemma `query_pre_attn_scalar`, DeepSeek `mscale`).
@@ -220,7 +234,8 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-015: Dropout
 
-- **Status:** Aligned for cuDNN's explicit-mask ("custom") dropout (CPU and GPU references); Philox dropout declined.
+- **Status:** Aligned (cuDNN's explicit-mask ("custom") dropout, CPU and GPU references; Philox dropout with
+  RNG_DUMP, forward). Philox dropout without RNG_DUMP is declined.
 - **cuDNN:** forward `O = (P ∘ M · s) V` with mask M `[B|1, H|1, Sq, Skv]` and `dropout_scale` s; Stats are the
   pre-dropout softmax's. Backward (composite lowering, `scaled_dot_product_flash_attention.h`):
   `D = rowsum(dO ∘ O) · dropout_scale_inv` (1 when absent), `dS = s · P ∘ (M ∘ dP − D)`, `dV = (P ∘ M · s)ᵀ dO`,
@@ -228,8 +243,8 @@ batch when `seq_len_q/kv` are set).
 - **PyTorch / AOTriton:** Philox dropout with seed/offset; the keep mask is not exposed except through test
   helpers (`_fill_mem_eff_dropout_mask_`).
 - **hipDNN today:** the CPU forward and backward references implement the explicit-mask form (FLOAT mask,
-  one-element FLOAT scale, optional scale_inv). `dropout_probability` / seed / offset and RNG_DUMP are declined: no
-  reference can reproduce a kernel's random stream. Pinned by `TestCpuFpReferenceSdpaGradCheck.ExplicitMaskDropout`
+  one-element FLOAT scale, optional scale_inv). `dropout_probability` / seed / offset without RNG_DUMP are
+  declined: no reference can reproduce a kernel's random stream. Pinned by `TestCpuFpReferenceSdpaGradCheck.ExplicitMaskDropout`
   (mutation: dropping the scale_inv factor fails dQ, dK and dBias).
 - **Philox dropout:** validated through RNG_DUMP. A forward graph with `dropout_probability`, seed,
   offset and an `rng_dump` output FLOAT `[B, H_q, Sq, Skv]` is accepted by the CPU and GPU forward references, which
@@ -240,53 +255,9 @@ batch when `seq_len_q/kv` are set).
 
 ## Score modifiers (extensions and conventions)
 
-### SEM-023: Max and Sum_exp row statistics
-
-- **Status:** Matches cuDNN.
-- **cuDNN:** `Max` = row max of the masked scores, raised to the sink logit when there is a sink;
-  `Sum_exp` = sum of exp(s - Max) over the live keys plus exp(sink - Max). Stats (LSE) = Max + log(Sum_exp).
-  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (score_max_ref, score_sum_exp_ref).
-- **hipDNN:** the same, FLOAT [B, H, Sq, 1] (the GPU reference takes rank 3 like the LSE). A row with no live key
-  and no sink has Max = -inf and Sum_exp = 0, so LSE = -inf (SEM-010); with a sink, Max = sink and Sum_exp = 1.
-  Rows past seq_len_q have Max = -inf and Sum_exp = 0.
-- **Other use cases:** cuDNN added these for Muon-clip style score monitoring; FlashAttention and vLLM expose only
-  the LSE.
-
-### SEM-024: fp8 softmax and output scaling (cuDNN sdpa_fp8)
-
-- **Status:** Matches cuDNN up to 128 keys per row; above that it differs by tile (below).
-- **cuDNN:** with fp8 Q/K/V: S = (Q K^T) * descale_q * descale_k * scale (+ bias, masks); P is the unnormalized
-  exp(S - m), stored in the input fp8 type as fp8(P * scale_s), and P @ V is multiplied by descale_s * descale_v;
-  the result is divided by the sum of the *unquantized* exp (plus the sink term). O = fp8(O_f * scale_o);
-  amax_o = max |O_f|. cuDNN's reference computes this online per 128-key tile, so m is the running row max of
-  the tiles seen so far, not the final one.
-  - Source: cudnn-frontend `test/python/sdpa/fp8_ref.py` (compute_ref), scales from `helpers.py`.
-- **hipDNN:** the references quantize exp(S - Max) with the final row max (Max includes the sink). With at most
-  128 keys this is exactly cuDNN's computation: the fp8 golden bundles (`generate_sdpa_fwd_golden.py
-  --fp8-scaling`) reproduce cuDNN's `compute_ref` bit for bit. With more keys, earlier tiles see a smaller m and
-  their P lands on different fp8 codes; the difference is a quantization artifact, not a different softmax.
-  amax_s = max exp(S - Max) over live keys before scale_s (1 for any row whose max is a key; below 1 when the sink
-  dominates). Encoding is round-to-nearest-even and saturating (hipdnn_data_sdk); PyTorch's cast does not
-  saturate, which only matters past the fp8 range. scale_s / descale_s need fp8 inputs; scale_o and the amax
-  outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined.
-- **Contract:** cuDNN for <= 128 keys. A tile-faithful mode would need the tile size as an input.
-
-### SEM-025: Block-sparse mask
-
-- **Status:** Matches cuDNN (forward only; cuDNN's backward node takes no block mask).
-- **cuDNN:** `block_mask` is UINT8 `[B, H_q, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)]`. Bit i of byte j
-  enables the 128 x 128 score tile in tile row `sq / 128` and tile column `8 j + i`; a clear bit adds -inf to the
-  tile's scores.
-  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (block_mask expansion) and `fp16.py` (shape).
-- **hipDNN:** the references mask the cleared tiles' keys to -inf with the band, in absolute positions; padding
-  and paging do not move tiles (Skv is the paged key extent). A row whose every key is cleared behaves as
-  SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
-  cuDNN's code.
-- **Contract:** cuDNN.
-
 ### SEM-020: Softcap
 
-- **Status:** Extension, implemented in the references only; not expressible in the graph.
+- **Status:** Extension (references only; not expressible in the graph).
 - **cuDNN:** no attribute; only possible through score_mod.
 - **vLLM (Gemma2) and Flex:** `c * tanh(S / c)` after scaling, before the mask and bias.
 - **hipDNN today:** the CPU forward/backward references and the GPU forward/backward references take an optional
@@ -300,7 +271,7 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-021: ALiBi
 
-- **Status:** Matches cuDNN (FA/TE differ by convention).
+- **Status:** Aligned (FA/TE differ by convention).
 - **cuDNN:** adds `(j - i) * slope`, and requires causal.
 - **FlashAttention and TransformerEngine:** `-slope * |i + Skv - Sq - j|`. Under BOTTOM_RIGHT with
   Skv > Sq the output O is the same but the LSE differs.
@@ -324,6 +295,50 @@ batch when `seq_len_q/kv` are set).
   golden bundles.
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
 - **Open:** the dSink definition. AITER's test uses an LSE without the sink; do not follow it.
+
+### SEM-023: Max and Sum_exp row statistics
+
+- **Status:** Aligned.
+- **cuDNN:** `Max` = row max of the masked scores, raised to the sink logit when there is a sink;
+  `Sum_exp` = sum of exp(s - Max) over the live keys plus exp(sink - Max). Stats (LSE) = Max + log(Sum_exp).
+  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (score_max_ref, score_sum_exp_ref).
+- **hipDNN:** the same, FLOAT [B, H, Sq, 1] (the GPU reference takes rank 3 like the LSE). A row with no live key
+  and no sink has Max = -inf and Sum_exp = 0, so LSE = -inf (SEM-010); with a sink, Max = sink and Sum_exp = 1.
+  Rows past seq_len_q have Max = -inf and Sum_exp = 0.
+- **Other use cases:** cuDNN added these for Muon-clip style score monitoring; FlashAttention and vLLM expose only
+  the LSE.
+
+### SEM-024: fp8 softmax and output scaling (cuDNN sdpa_fp8)
+
+- **Status:** Aligned (up to 128 keys per row); Diverges (more keys, by fp8 tile rounding, below).
+- **cuDNN:** with fp8 Q/K/V: S = (Q K^T) * descale_q * descale_k * scale (+ bias, masks); P is the unnormalized
+  exp(S - m), stored in the input fp8 type as fp8(P * scale_s), and P @ V is multiplied by descale_s * descale_v;
+  the result is divided by the sum of the *unquantized* exp (plus the sink term). O = fp8(O_f * scale_o);
+  amax_o = max |O_f|. cuDNN's reference computes this online per 128-key tile, so m is the running row max of
+  the tiles seen so far, not the final one.
+  - Source: cudnn-frontend `test/python/sdpa/fp8_ref.py` (compute_ref), scales from `helpers.py`.
+- **hipDNN:** the references quantize exp(S - Max) with the final row max (Max includes the sink). With at most
+  128 keys this is exactly cuDNN's computation: the fp8 golden bundles (`generate_sdpa_fwd_golden.py
+  --fp8-scaling`) reproduce cuDNN's `compute_ref` bit for bit. With more keys, earlier tiles see a smaller m and
+  their P lands on different fp8 codes; the difference is a quantization artifact, not a different softmax.
+  amax_s = max exp(S - Max) over live keys before scale_s (1 for any row whose max is a key; below 1 when the sink
+  dominates). Encoding is round-to-nearest-even and saturating (hipdnn_data_sdk); PyTorch's cast does not
+  saturate, which only matters past the fp8 range. scale_s / descale_s need fp8 inputs; scale_o and the amax
+  outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined.
+- **Contract:** cuDNN for <= 128 keys. A tile-faithful mode would need the tile size as an input.
+
+### SEM-025: Block-sparse mask
+
+- **Status:** Aligned (forward only; cuDNN's backward node takes no block mask).
+- **cuDNN:** `block_mask` is UINT8 `[B, H_q, ceil(Sq / 128), ceil(ceil(Skv / 128) / 8)]`. Bit i of byte j
+  enables the 128 x 128 score tile in tile row `sq / 128` and tile column `8 j + i`; a clear bit adds -inf to the
+  tile's scores.
+  - Source: cudnn-frontend `test/python/sdpa/fp16_ref.py` (block_mask expansion) and `fp16.py` (shape).
+- **hipDNN:** the references mask the cleared tiles' keys to -inf with the band, in absolute positions; padding
+  and paging do not move tiles (Skv is the paged key extent). A row whose every key is cleared behaves as
+  SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
+  cuDNN's code.
+- **Contract:** cuDNN.
 
 ## Process
 

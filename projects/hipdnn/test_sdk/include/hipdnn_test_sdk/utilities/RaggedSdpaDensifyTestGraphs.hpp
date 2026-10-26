@@ -242,8 +242,7 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink)
     return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
 }
 
-// Random values for every packed token, NaN everywhere else (a read outside the live tokens
-// shows up as NaN in the outputs).
+// Random values for exactly `tokens` packed tokens of `width` elements each.
 inline std::vector<float> packedValues(int64_t tokens, int64_t width, unsigned seed)
 {
     Tensor<float> t({tokens * width});

@@ -22,8 +22,9 @@ namespace hipdnn_test_sdk::detail
 
 /// True if any of an SDPA node's Q/K/V/O tensors has a ragged_offset. The reference graph
 /// executors key such a node as ragged. The ragged plan needs all four tensors ragged, and the
-/// dense plan rejects any ragged tensor, so a partly ragged node is declined by both. Uids missing
-/// from the map are ignored.
+/// dense plan rejects any ragged tensor, so a partly ragged node is declined by both plans; the
+/// executors then try the dense rewrite (RaggedSdpaDensify.hpp). Uids missing from the map are
+/// ignored.
 inline bool hasRaggedSdpaPrimary(
     const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attributes,
     const std::unordered_map<int64_t,

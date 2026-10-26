@@ -549,16 +549,14 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
 
 ## In CI
 
-- `.github/workflows/hipdnn-superbuild-ci.yml` configures with
+- `.github/workflows/hipdnn-superbuild-ci.yml` runs `dvc pull --recursive` on
+  the bundle tree before configuring (Linux and Windows lanes) and fails the lane
+  when the pull produces no golden blob. It then configures with
   `-DROCM_LIBS_ENABLE_ROOT_CTEST=ON` and runs `ctest --test-dir build
-  --output-on-failure`. This runs every registered lane and enforces claims. It
-  does not run `dvc pull`, so golden comparisons there fall back to references and
-  `hipdnn_golden_data_tests` registers nothing.
-- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
-  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
-  default and was removed once it had gone unused; TheRock's multi-arch Linux
-  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
-  references in every CI lane today.
+  --output-on-failure`, which runs every registered lane and enforces claims.
+- TheRock Multi-Arch CI fetches the rocm-libraries DVC data while fetching
+  sources (`--dvc-projects`), and the fetch fails when a blob is missing, so its
+  test jobs run `hipdnn_golden_data_tests` with golden data.
 
 ## Troubleshooting
 

@@ -23,6 +23,7 @@
 #   cd <repo-root>/dnn-providers/integration-tests/integration-test-bundles/quick/SdpaBackward
 #   bash generate_golden_data.sh              # Generate all tiers
 #   bash generate_golden_data.sh quick        # Generate quick tier only
+#   GENERATE_DISCRIMINATING=1 bash generate_golden_data.sh none   # Discriminating bundles only
 #
 # After generating, register the tensor payloads with DVC from the repo root:
 #   dvc commit -f <bundle>/<Name>.tensors.dvc
@@ -193,9 +194,9 @@ generate_sweep_case() {
 #
 # The mask configurations mirror the graph-only cases already checked in under
 # quick/SdpaBackward/Default/sweep.json, so the golden data covers the shapes the
-# sweep already exercises. Features the generator does not support yet (GQA, FP8,
-# dropout, bias/dBias, ALiBi and variable length) are deliberately absent; add a
-# case here as each reference feature lands.
+# sweep already exercises. GQA, padding, bias/dBias and dropout are single-graph only
+# and live in the discriminating bundles below; FP8 and ALiBi are not supported by the
+# generator yet.
 if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
     echo "=== Generating quick tier ==="
 

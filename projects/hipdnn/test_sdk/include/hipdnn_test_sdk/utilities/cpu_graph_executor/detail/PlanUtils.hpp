@@ -49,7 +49,8 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
             std::string(planName) + ": left_bound and right_bound must be >= -1 (got left_bound="
             + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
-    // cuDNN's left_bound counts the diagonal key, so 0 would mask every key (cuDNN rejects it).
+    // left_bound counts the diagonal key. 0 is outside hipDNN's band domain in both directions
+    // (cuDNN's backward rejects it too).
     if(leftBound == 0)
     {
         throw std::invalid_argument(std::string(planName)

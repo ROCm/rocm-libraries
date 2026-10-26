@@ -2,9 +2,9 @@
 
 The SDPA (scaled dot-product attention) references are the oracles every hipDNN attention engine is
 checked against. This document says what they implement, how they are built, and how we know they are
-right, so they can be trusted as the thing everything else is compared to.
+right.
 
-There are two references, written independently and checked against each other and against PyTorch:
+There are two references, checked against each other and against PyTorch:
 
 | | CPU reference | GPU reference |
 |---|---|---|
@@ -53,11 +53,16 @@ call:
 | Ragged (RFC 0014) | native packed forward (bf16, fp8); every other ragged graph is rewritten to its dense padded form, run dense, and packed back (`RaggedSdpaDensify.hpp`) | both executors |
 | Philox dropout | the engine's `rng_dump` keep mask is applied as an explicit dropout mask with scale `1 / (1 - p)` | plans (`RngDumpHandoff.hpp` in the harness) |
 
-### 1.3 Things deliberately not shared
+### 1.3 What the references share
 
-The CPU and GPU references do not share code: they share only the semantics in the register. That is
-what makes comparing them meaningful. Within the GPU reference, the forward and backward kernels share
-`GpuRefSdpaCommon.hpp`, so a score feature is written once per reference.
+The score, softmax and gradient math is written twice, in host C++ and in HIP kernels, and shares no
+code; that is what makes comparing them meaningful. Within the GPU reference, the forward and backward
+kernels share `GpuRefSdpaCommon.hpp`, so a score feature is written once per reference.
+
+Graph translation is shared: the GPU plans use the CPU executor's `PlanUtils.hpp` (band and alignment
+resolution, padding and paging rules, the paged key extent, applicability gates) and both executors use
+`RaggedSdpaDensify.hpp` for the ragged rewrite. CPU-vs-GPU parity cannot catch a bug there; the golden
+bundles and the plan unit tests do.
 
 ## 2. What is supported
 
@@ -106,7 +111,7 @@ The table lists every attribute of the hipDNN SDPA graph nodes (`sdpa_attributes
 
 These are not expressible in the graph API. The reference functions take them so tests and adapters can use them.
 
-- **Softcap** `c * tanh(s / c)`, forward and backward (SEM-020). An attribute is pending a team decision.
+- **Softcap** `c * tanh(s / c)`, forward and backward (SEM-020). A graph attribute is planned.
 - **GPU `probabilityMode`** (bf16 RTNE/RTZ rounding of P before P @ V). This models specific provider kernels. The graph plans always use FP32 P (SEM-012).
 
 ### 2.4 Not supported, and why
@@ -122,16 +127,10 @@ Everything below needs a schema or frontend change first:
 
 ## 3. How we know the references are right
 
-No single check is enough, so the evidence is layered. Each layer catches a different kind of mistake.
-
 ### 3.1 Simple by construction
 
-The references compute the definition directly:
-- FP32 throughout.
-- No tiling, no online softmax, no early exit.
-- One code path per feature, in the order the register gives.
-
-A reviewer can check each step against the cuDNN reference code it cites (cudnn-frontend
+The references compute the definition directly (§1.1), with one code path per feature in the order the
+register gives. A reviewer can check each step against the cuDNN reference code it cites (cudnn-frontend
 `test/python/sdpa/fp16_ref.py`, `fp8_ref.py`). The fp8 layers wrap the float core instead of changing
 it. When a semantics question comes up (left_bound, ALiBi sign, sink in the LSE, fp8 tiling), the
 answer goes into the register first and then into the code and its tests.
@@ -159,22 +158,24 @@ Two graphs that must give the same result because one feature is defined in term
 - Padding = truncated batches.
 - Paged = dense padded.
 - Sink = an extra zero-value key.
-- Ragged = per-batch dense (and the dense rewrite = the native ragged plan).
+- Ragged = per-batch dense, for the native ragged plan and for the dense rewrite (each checked against
+  dense separately).
 - The deprecated causal flags = explicit bounds.
 
 These pin how features compose. A single closed form cannot do that.
 
 ### 3.4 Finite-difference gradient checks (backward)
 
-`TestCpuFpReferenceSdpaGradCheck*` checks dQ, dK, dV and dBias against central differences of the
-forward. It covers plain, GQA, band, padding, bias, dropout, softcap and ALiBi. The backward is
+`TestCpuFpReferenceSdpaGradCheck*` and `TestCpuFpReferenceSdpaScoreModGradCheck` check dQ, dK, dV and
+dBias against central differences of the forward. They cover plain, GQA, band, bias, dropout, softcap and
+ALiBi; the padded backward is covered by the padding = truncated batches property (§3.3). The backward is
 therefore checked against the forward, not just against another backward.
 
 ### 3.5 CPU vs GPU parity
 
-The two references are independent implementations: host C++ and HIP kernels, with no shared code.
-- **Quick:** every feature is compared at small shapes, with outputs pre-filled with NaN so an
-  unwritten element fails. Files: `tests/gpu-ref/TestGpuFpReferenceSdpa*.cpp`, `TestGpuSdpa*Plan.cpp`,
+Parity checks the math the two references implement separately (§1.3).
+- **Quick:** every feature is compared at small shapes. The padding and paging tests fill unused input
+  slots (padding, unused pages) with NaN, so a read of them that reaches an output fails. Files: `tests/gpu-ref/TestGpuFpReferenceSdpa*.cpp`, `TestGpuSdpa*Plan.cpp`,
   `TestGpuRaggedSdpaDensify.cpp`.
 - **Standard:** medium shapes, with hundreds to over a thousand keys and several features combined
   (`Standard/TestGpuSdpaFwdSweepFp32`, `Standard/TestGpuSdpaBwdFp32`).
@@ -241,7 +242,8 @@ directory (`integration-test-bundles/{quick,standard,comprehensive,full}`). Labe
 
 | Tier | When | SDPA reference content |
 |---|---|---|
-| **Quick** | every PR (pre-commit, CI) | All CPU reference tests (`hipdnn_test_sdk_tests`): closed forms, properties, gradchecks, plan applicability. All small-shape CPU-vs-GPU parity tests (`hipdnn_gpu_ref_tests`, `hipdnn_integration_tests_unit_tests`). Every `quick/` golden bundle on the GPU lane, and on the CPU lane when Q and K have at most 4M elements. Generator Python tests (skip without PyTorch). |
+| **Quick** | every PR (pre-commit, CI) | All CPU reference tests (`hipdnn_test_sdk_tests`): closed forms, properties, gradchecks, plan applicability. All small-shape CPU-vs-GPU parity tests (`hipdnn_gpu_ref_tests`, `hipdnn_integration_tests_unit_tests`). Every `quick/` golden bundle on the GPU lane, and on the CPU lane when Q and K have at most 4M elements. Generator Python tests (their cases skip without PyTorch; only the paged generator's test then reports as
+skipped in CTest). |
 | **Standard** | PR / pre-check-in | Medium-shape CPU-vs-GPU sweeps (`Standard/TestGpuSdpaFwdSweepFp32`, `Standard/TestGpuSdpaBwdFp32`). `standard/` golden bundles (GPU lane). |
 | **Comprehensive** | nightly | `comprehensive/` golden bundles (GPU lane): longer sequences, more head/dim combinations |
 | **Full** | release / on demand | `full/` golden bundles (GPU lane) |
