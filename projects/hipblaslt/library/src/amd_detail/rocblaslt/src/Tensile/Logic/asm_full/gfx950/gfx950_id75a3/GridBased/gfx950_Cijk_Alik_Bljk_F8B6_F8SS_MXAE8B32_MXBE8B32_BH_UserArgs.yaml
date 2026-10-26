@@ -708,9 +708,7 @@ Solutions:
     threads: [256, 1, 1]
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
-  - {tag: SizeLessThan, index: 0, value: 33}
   - {tag: SizeGreaterThan, index: 3, value: 127}
-  - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
@@ -784,9 +782,7 @@ Solutions:
     threads: [256, 1, 1]
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 31}
-  - {tag: SizeLessThan, index: 0, value: 33}
   - {tag: SizeGreaterThan, index: 3, value: 127}
-  - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
