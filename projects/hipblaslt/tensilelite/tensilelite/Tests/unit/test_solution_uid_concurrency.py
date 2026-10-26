@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -300,3 +301,116 @@ def test_rewrite_colliding_solution_uids_changes_only_the_duplicate(tmp_path) ->
     second_text = second.read_text(encoding="utf-8")
     assert "SolutionUID: 0u5" not in second_text
     assert "SolutionIndex: 1" in second_text
+
+
+def test_claim_solution_uid_invalid_existing_value_regenerates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed existing UID is treated as unusable and replaced.
+
+    Args:
+        monkeypatch: Pytest fixture used to control UID generation.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the malformed UID is preserved.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 6,
+    )
+
+    solution = {"SolutionUID": "0u$"}
+    seen: set[str] = set()
+    claimed = claim_solution_uid(solution, seen)
+
+    assert claimed != "0u$"
+    assert claimed == solution["SolutionUID"]
+    assert claimed in seen
+
+
+def test_claim_solution_uid_raises_after_retry_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claiming UID fails after 100 collisions.
+
+    Args:
+        monkeypatch: Pytest fixture used to force repeated collisions.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If retry exhaustion does not raise RuntimeError.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="could not draw a unique SolutionUID"):
+        claim_solution_uid({}, {"0u1"})
+
+
+def test_rewrite_colliding_solution_uids_replaces_malformed_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed file UID is rewritten to a generated canonical UID.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to make replacement deterministic.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If malformed UID is not rewritten.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 6,
+    )
+
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u5\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u$\n", encoding="utf-8")
+
+    assert rewrite_colliding_solution_uids([first, second]) == 1
+    second_text = second.read_text(encoding="utf-8")
+    assert "SolutionUID: 0u$" not in second_text
+    assert "SolutionUID: 0u6" in second_text
+
+
+def test_rewrite_colliding_solution_uids_raises_when_replacement_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewrite fails if every generated replacement collides.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to force repeated collisions.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If replacement exhaustion does not raise RuntimeError.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 1,
+    )
+
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u1\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u1\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="could not draw a unique SolutionUID"):
+        rewrite_colliding_solution_uids([first, second])
