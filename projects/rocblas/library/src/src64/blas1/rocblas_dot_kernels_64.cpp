@@ -140,12 +140,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
 
             // sum partial_results to results always needed if only to down convert
             ROCBLAS_LAUNCH_KERNEL(
-                (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                 dim3(batch_count),
                 dim3(NB),
                 0,
                 handle->get_stream(),
                 n_passes,
+                batch_count,
                 partial_results,
                 output);
 
@@ -234,12 +235,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                 // reduce n partitions within batch chunk
                 // sum partial_results to results always needed as may down convert
                 ROCBLAS_LAUNCH_KERNEL(
-                    (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                    (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                     dim3(batch_count),
                     dim3(NB),
                     0,
                     handle->get_stream(),
                     n_passes,
+                    batch_count,
                     partial_results,
                     output);
 

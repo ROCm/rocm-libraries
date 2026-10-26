@@ -91,12 +91,13 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
                     return status;
             }
             // sum final partial_results to output
-            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_64<true, NB, FINALIZE>),
+            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_pass_major<NB, 1, FINALIZE>),
                                   dim3(batch_count),
                                   dim3(NB),
                                   0,
                                   handle->get_stream(),
                                   n_passes,
+                                  batch_count,
                                   partial_results,
                                   output);
 
@@ -153,12 +154,13 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
                     return status;
             }
             // sum final partial_results to output
-            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_64<true, NB, FINALIZE>),
+            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_pass_major<NB, 1, FINALIZE>),
                                   dim3(batch_count),
                                   dim3(NB),
                                   0,
                                   handle->get_stream(),
                                   n_passes,
+                                  batch_count,
                                   partial_results,
                                   output);
 
