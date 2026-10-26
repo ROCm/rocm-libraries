@@ -119,7 +119,7 @@ TEST(ScalarConversionTutorial, NonFiniteValues) {
         convertScalar<bool>(nan, {IntegerRounding::NearestEven, IntegerOverflow::Saturate}));
 }
 
-TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
+TEST(ScalarConversionTutorial, ComplexValues) {
     // Real-to-complex supplies a zero imaginary part. Complex-to-complex converts
     // both components; integer rounding policies do not round floating components.
     EXPECT_EQ(convertScalar<std::complex<double>>(
@@ -135,12 +135,6 @@ TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
     EXPECT_EQ(convertScalar<int32_t>(std::complex<double>{3.5, 0.0},
                                      {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
               4);
-
-    // A C++ enum source converts using its underlying numeric value.
-    enum class Sample : int16_t { Negative = -3 };
-    EXPECT_EQ(convertScalar<int32_t>(Sample::Negative,
-                                     {IntegerRounding::NearestEven, IntegerOverflow::Identity}),
-              -3);
 }
 
 constexpr ScalarConversionOptions identity{IntegerRounding::TowardZero, IntegerOverflow::Identity};
@@ -252,12 +246,9 @@ TEST(ScalarConversion, ConvertsComplexComponents) {
               std::complex<float>(1.25f, -2.5f));
 }
 
-TEST(ScalarConversion, ConvertsBooleansEnumsAndFloatingValues) {
-    enum class SignedValue : int16_t { Negative = -129, Positive = 128 };
+TEST(ScalarConversion, ConvertsBooleansAndFloatingValues) {
     EXPECT_EQ(convertScalar<int32_t>(true, identity), 1);
     EXPECT_EQ(convertScalar<uint8_t>(false, wrap), 0);
-    EXPECT_EQ(convertScalar<int8_t>(SignedValue::Positive, wrap), -128);
-    EXPECT_EQ(convertScalar<int8_t>(SignedValue::Negative, saturate), -128);
     EXPECT_FALSE(convertScalar<bool>(-0.0, wrap));
     EXPECT_TRUE(convertScalar<bool>(-0.25, wrap));
     EXPECT_EQ(convertScalar<double>(int64_t{-123}, wrap), -123.0);
@@ -283,13 +274,9 @@ TYPED_TEST(CharacterConversion, ConvertsNumericValuesUnderEveryPolicy) {
     EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::min(), saturate), 0);
 }
 
-TEST(ScalarConversion, NarrowsCharacterAndCharacterBackedEnumValues) {
-    enum class Sample : char16_t { High = 256 };
+TEST(ScalarConversion, NarrowsCharacterValues) {
     EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, saturate), 255);
     EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, wrap), 0);
-    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, saturate), 255);
-    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, wrap), 0);
-    EXPECT_EQ(convertScalar<int64_t>(Sample::High, identity), 256);
 }
 
 TEST(ScalarConversion, RequiresExplicitPolicies) {

@@ -157,9 +157,6 @@ uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestinati
     } else if constexpr (std::is_same_v<Value, bool>) {
         return convertIntegralToIntegerBits(static_cast<uint8_t>(source), bits, signedDestination,
                                             options);
-    } else if constexpr (std::is_enum_v<Value>) {
-        return convertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
-                                    signedDestination, options);
     } else if constexpr (std::is_integral_v<Value>) {
         // Standard integer comparisons exclude character types. Widen integral
         // sources without changing their values or signedness.

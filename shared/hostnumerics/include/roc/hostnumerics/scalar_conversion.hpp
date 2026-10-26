@@ -14,6 +14,8 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
     using Destination = std::remove_cv_t<Target>;
     using Value = std::remove_cvref_t<Source>;
     static_assert(!std::is_reference_v<Target>);
+    static_assert(std::is_arithmetic_v<Value> || RuntimeIsComplexV<Value>,
+                  "Scalar conversion requires an arithmetic or std::complex source.");
     if constexpr (RuntimeIsComplexV<Destination>) {
         using Component = typename Destination::value_type;
         if constexpr (RuntimeIsComplexV<Value>) {
@@ -25,7 +27,6 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
     } else if constexpr (RuntimeIsComplexV<Value>) {
         return convertScalarValue<Destination>(source.real(), options);
     } else if constexpr (std::is_same_v<Destination, bool>) {
-        static_assert(std::is_arithmetic_v<Value> || std::is_enum_v<Value>);
         return source != Value{0};
     } else if constexpr (std::is_integral_v<Destination>) {
         if constexpr (std::is_floating_point_v<Value>) {
@@ -42,8 +43,7 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
         return integerFromBits<Destination>(
             convertToIntegerBits(source, bits, std::is_signed_v<Destination>, options));
     } else {
-        static_assert(std::is_floating_point_v<Destination> &&
-                      (std::is_arithmetic_v<Value> || std::is_enum_v<Value>));
+        static_assert(std::is_floating_point_v<Destination>);
         return static_cast<Destination>(source);
     }
 }
@@ -55,10 +55,7 @@ namespace roc::hostnumerics {
 //
 // Types:
 // Source and Target are C++ arithmetic types (integers up to 64 bits) or
-// std::complex with a float, double, or long double component. Target cannot be
-// a reference. An enum Source contributes its underlying integer value; see the
-// Level example below. A ScalarType enumerator identifies an encoding and does
-// not supply a numeric value stored in that encoding.
+// std::complex with a float, double, or long double component. Target cannot be a reference.
 //
 // Integer destinations:
 // Apply rounding, then range handling, then the destination cast. Both policies
@@ -81,9 +78,6 @@ namespace roc::hostnumerics {
 // convertScalar<bool>(0.25, options) == true;  // Boolean conversion tests for nonzero.
 // convertScalar<int>(std::complex<double>{3.5, 0.0}, options) == 4;
 // std::complex<double>{3.5, 1.0} is outside the domain for a non-complex Target.
-//
-// enum class Level : int16_t { High = 3 };
-// convertScalar<int>(Level::High, options) == 3;  // Converts the enum's integer value.
 template <typename Target, typename Source>
 Target convertScalar(Source source, const ScalarConversionOptions& options) noexcept {
     return detail::convertScalarValue<Target>(std::move(source), options);
