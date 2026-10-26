@@ -652,7 +652,6 @@ TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
     });
     EXPECT_EQ(ranged, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
     EXPECT_EQ(explicitCoordinates, ranged);
-    EXPECT_TRUE(shape.selectsAll(IndexRange(0, 1, 8)));
     size_t calls = 0;
     const std::set<size_t> invalid{0, 8};
     EXPECT_THROW(
@@ -660,6 +659,20 @@ TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
         std::runtime_error);
     EXPECT_EQ(calls, 0);
     EXPECT_THROW(IndexRange(0, 0, 3), std::runtime_error);
+}
+
+TEST(ShapeVisitationCpp, ContiguousRangeCrossesAxis) {
+    const Shape shape{2, 3};
+    const std::array<size_t, 2> order{0, 1};
+    std::vector<size_t> indices;
+    std::vector<std::vector<size_t>> points;
+    shape.forEachCoordinate(IndexRange(2, 1, 3), order,
+                            [&](size_t index, std::span<const size_t> coordinates) {
+                                indices.push_back(index);
+                                points.emplace_back(coordinates.begin(), coordinates.end());
+                            });
+    EXPECT_EQ(indices, (std::vector<size_t>{2, 3, 4}));
+    EXPECT_EQ(points, (std::vector<std::vector<size_t>>{{0, 2}, {1, 0}, {1, 1}}));
 }
 
 TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
@@ -685,12 +698,17 @@ TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
 TEST(IndexRangeCpp, SizeBoundaries) {
     static_assert(!std::is_default_constructible_v<IndexRange>);
     const size_t maximum = std::numeric_limits<size_t>::max();
-    const Shape shape{maximum};
-    EXPECT_EQ(shape.selectedCount(IndexRange::all()), maximum);
-    EXPECT_EQ(shape.selectedIndices(IndexRange(maximum - 2, 3, maximum)),
+    EXPECT_EQ(IndexRange::all().count(maximum), maximum);
+    EXPECT_EQ(IndexRange(maximum - 2, 3, maximum).indices(maximum),
               (std::vector<size_t>{maximum - 2}));
-    EXPECT_EQ(shape.selectedIndices(IndexRange(1, maximum - 2, maximum)),
+    EXPECT_EQ(IndexRange(1, maximum - 2, maximum).indices(maximum),
               (std::vector<size_t>{1, maximum - 1}));
+    EXPECT_EQ(IndexRange(2, 3, 1).indices(10), (std::vector<size_t>{2}));
+    EXPECT_EQ(IndexRange(10, 1, 1).count(10), 0);
+    EXPECT_EQ(IndexRange::all().count(0), 0);
+    IndexRange invalid(0, 1, 0);
+    invalid.stride = 0;
+    EXPECT_THROW(invalid.count(0), std::runtime_error);
     EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
 }
 
