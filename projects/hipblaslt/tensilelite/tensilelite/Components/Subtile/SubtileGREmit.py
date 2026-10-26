@@ -902,7 +902,7 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
     edge = padStack.enter_context(_TluFreeEdge(writer, kernel, module, tileInfo))
     edge.compare(module, mc)
     if padMaskSgpr is not None:
-      edge.andInto(module, padMaskSgpr)
+      edge.absorb(module, padMaskSgpr)
 
     waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
     colK = writer.vgprPool.checkOut(1, tag="_graColScatter_colK")
@@ -925,8 +925,7 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
       if waveAxisOffVgpr is not None:
         module.add(VAddU32(dst=vgpr(out), src0=vgpr(out), src1=vgpr(waveAxisOffVgpr),
                    comment="%s: + per-wave free-dim (M/N) global offset" % tc))
-      edge.select(module, out, keepSgpr=padMaskSgpr,
-                  why="pad or past-M/N" if padMaskSgpr is not None else "past-M/N")
+      edge.select(module, out)
 
   if waveAxisOffVgpr is not None:
     writer.vgprPool.checkIn(waveAxisOffVgpr)
@@ -1320,6 +1319,7 @@ class _TluFreeEdge:
     self.writer, self.tc = writer, tileInfo.tc
     self.lanes = writer.states.laneSGPRCount
     self.stack = contextlib.ExitStack()
+    self.why   = "past-M/N"
     isA = (self.tc == 'A')
     mt = int(kernel["MacroTile0" if isA else "MacroTile1"])
     sizeIdx = kernel["ProblemType"]["Index0" if isA else "Index1"]
@@ -1351,18 +1351,21 @@ class _TluFreeEdge:
     module.add(VCmpLtU32(dst=sgpr(self.mask, self.lanes), src0=vgpr(src), src1=sgpr(self.rem),
                comment="%s: lane inside the real M/N?" % self.tc))
 
-  def andInto(self, module, keepSgpr):
-    """Fold the mask into a caller mask that already rejects some lanes."""
+  def absorb(self, module, otherMaskSgpr):
+    """Fold a caller mask that rejects lanes for its own reason into this one,
+    so a single select covers both."""
     andX = SAndB64 if self.lanes == 2 else SAndB32
-    module.add(andX(dst=sgpr(keepSgpr, self.lanes), src0=sgpr(keepSgpr, self.lanes),
-               src1=sgpr(self.mask, self.lanes),
+    module.add(andX(dst=sgpr(self.mask, self.lanes), src0=sgpr(self.mask, self.lanes),
+               src1=sgpr(otherMaskSgpr, self.lanes),
                comment="%s: keep lanes that are neither pad nor past M/N" % self.tc))
+    self.why = "pad or past-M/N"
 
-  def select(self, module, out, keepSgpr=None, why="past-M/N"):
+  def select(self, module, out):
     """Send the rejected lanes of this load's offset to BufferOOB."""
     module.add(VCndMaskB32(dst=vgpr(out), src0=vgpr(self.oob), src1=vgpr(out),
-               src2=sgpr(self.mask if keepSgpr is None else keepSgpr, self.lanes),
-               comment="%s: %s lane -> BufferOOB, dropping its global read" % (self.tc, why)))
+               src2=sgpr(self.mask, self.lanes),
+               comment="%s: %s lane -> BufferOOB, dropping its global read"
+                       % (self.tc, self.why)))
 
   def __enter__(self):
     return self
