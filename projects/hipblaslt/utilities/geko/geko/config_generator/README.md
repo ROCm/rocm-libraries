@@ -163,10 +163,12 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
 
 Each list names the rocm-libraries commit it was generated from, gives every buildable MI's DepthUs in its
 comment (e.g. `# MT256x128  DepthU 64,128`; MI Designer ignores comments), and ends with the unbuildable MIs
-and why the setting closest to fitting failed. Finding where each MI stops building roughly doubles the time:
-about 70 min for all 24 gfx950 lists on 352 workers without DepthUs, 2.5 h with them. `--report-dir` also
-writes every MI's verdict and witness setting as CSV, which lets a later TensileLite change be rechecked by
-replaying the witnesses instead of regenerating.
+and why the setting closest to fitting failed. Finding where each MI stops building roughly doubles the time.
+On 352 workers: about 7 h for all 96 gfx950 lists, 3 h for the 52 gfx942 lists. Each MI runs in a fresh worker
+process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352
+workers), so lower `--workers` on machines with less memory. GEMM types MI Designer tunes only as subtile kernels
+(gfx950 MX, e.g. FP4) are skipped: they never read a list. `--report-dir` also writes every MI's verdict and witness
+setting as CSV, which lets a later TensileLite change be rechecked by replaying the witnesses instead of regenerating.
 
 ---
 
