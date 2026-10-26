@@ -71,13 +71,13 @@ namespace
         options.computeUlp                   = true;
         options.ulpType                      = scalarType<T>();
         options.maxReportedMismatches        = 0;
-        options.selection
-            = IndexSelection(roc::hostnumerics::IndexRange::all(), std::vector<size_t>{2, 1, 0});
 
         const ComparisonReport report
             = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),
                       copyTensorFromEncodedStorage(hCPU, storageElements, layout),
-                      options);
+                      options,
+                      roc::hostnumerics::IndexRange::all(),
+                      std::vector<size_t>{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
@@ -108,12 +108,13 @@ namespace
         options.computeUlp                   = true;
         options.ulpType                      = scalar;
         options.maxReportedMismatches        = 0;
-        options.selection
-            = IndexSelection(roc::hostnumerics::IndexRange::all(), std::vector<size_t>{2, 1, 0});
+
         const ComparisonReport report
             = compare(hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hGPU, scalar, layout),
                       hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
-                      options);
+                      options,
+                      roc::hostnumerics::IndexRange::all(),
+                      std::vector<size_t>{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;

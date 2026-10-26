@@ -19,12 +19,15 @@ void testParallelSparseSelection() {
     const std::vector<float> b(reductionElements * columns, 1.0f);
     Tensor output = makeOutput(rows, columns, sentinel);
     GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
-    problem.outputSelection = IndexSelection(
+    roc::hostnumerics::detail::bindIndices(
+        problem, problem.d.shape(),
         primeIndexRange(output.elementCount(), output.elementCount(), 128), LastDimensionFastest{});
 
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 
-    const std::vector<size_t> selected = output.shape().selectedIndices(problem.outputSelection);
+    std::vector<size_t> selected(problem.indicesCount);
+    for (size_t ordinal = 0; ordinal < selected.size(); ++ordinal)
+        selected[ordinal] = problem.indexAt(ordinal);
     require(run.outputElementsWritten == selected.size() &&
                 run.outputElementsCovered == selected.size(),
             "Sparse blocked GEMM did not report its directly computed outputs.");

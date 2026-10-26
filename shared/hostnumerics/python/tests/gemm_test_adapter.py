@@ -130,7 +130,8 @@ def reference_gemm(
     compute_type_a,
     compute_type_b,
     math_mode,
-    output_selection,
+    indices,
+    index_order,
     backend,
     block_scale_a=None,
     block_scale_b=None,
@@ -169,7 +170,8 @@ def reference_gemm(
         compute_type_a=compute_type_a,
         compute_type_b=compute_type_b,
         math_mode=math_mode,
-        output_selection=output_selection,
+        indices=indices,
+        index_order=index_order,
         backend=backend,
         block_scale_a=block_scale_a,
         block_scale_b=block_scale_b,
@@ -203,7 +205,8 @@ def reference_gemm_into(
     compute_type_a,
     compute_type_b,
     math_mode,
-    output_selection,
+    indices,
+    index_order,
     backend,
     block_scale_a=None,
     block_scale_b=None,
@@ -223,7 +226,6 @@ def reference_gemm_into(
 ):
     if backend not in (hn.GemmBackend.Automatic, hn.GemmBackend.Blocked):
         raise ValueError("Python matmul exposes the built-in blocked backend")
-    selection = output_selection
     product = _product(
         a,
         b,
@@ -254,7 +256,8 @@ def reference_gemm_into(
         bias=bias,
         output_scale=output_scale,
         output_conversion=output_conversion,
-        output_selection=selection,
+        indices=indices,
+        index_order=index_order,
         activation=hn.Activation.None_,
         activation_application=hn.ActivationApplication.Forward,
         auxiliary_scale=complex(1.0, 0.0),

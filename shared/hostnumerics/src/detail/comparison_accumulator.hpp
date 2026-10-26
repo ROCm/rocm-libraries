@@ -13,7 +13,7 @@
 namespace roc::hostnumerics::detail {
 class ComparisonAccumulator {
    public:
-    ComparisonAccumulator(const ComparisonOptions& options, const Shape& shape);
+    ComparisonAccumulator(const ComparisonInvocation& options, const Shape& shape);
 
     void observeReal(size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset,
                      double observed, double expected,

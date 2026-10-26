@@ -283,7 +283,11 @@ class Tensor {
     void copyLogicalElementsToEncodedStorage(std::span<std::byte> destination) const;
 
     void copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
-                                              const IndexSelection& selection) const;
+                                              const IndexRange& range,
+                                              std::span<const size_t> order) const;
+    void copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
+                                              const std::set<size_t>& indices,
+                                              std::span<const size_t> order) const;
 
     // Copies the selected logical elements into a contiguous rank-one Tensor
     // in selection order. Encoded bits are preserved exactly.

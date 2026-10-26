@@ -13,9 +13,15 @@
 
 namespace roc::hostnumerics {
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                IndexSelection selection, GemmBackend backend) {
-    (void)detail::executeGemm(
-        GemmInvocation(a, b, std::move(output), options, std::move(selection)), backend);
+                const IndexRange& range, std::span<const size_t> order, GemmBackend backend) {
+    (void)detail::executeGemm(GemmInvocation(a, b, std::move(output), options, range, order),
+                              backend);
+}
+void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
+                const std::set<size_t>& indices, std::span<const size_t> order,
+                GemmBackend backend) {
+    (void)detail::executeGemm(GemmInvocation(a, b, std::move(output), options, indices, order),
+                              backend);
 }
 
 Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,
@@ -33,8 +39,8 @@ Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const Mat
     Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
-    matmulInto(a, b, output, options, IndexSelection(IndexRange::all(), LastDimensionFastest{}),
-               backend);
+    matmulInto(a, b, output, options, IndexRange::all(),
+               output.shape().indexOrderLastDimensionFastest(), backend);
     return output;
 }
 

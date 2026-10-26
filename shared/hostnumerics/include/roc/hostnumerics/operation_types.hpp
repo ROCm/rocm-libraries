@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <roc/hostnumerics/index_selection.hpp>
+#include <roc/hostnumerics/index_range.hpp>
 #include <variant>
 
 namespace roc::hostnumerics {

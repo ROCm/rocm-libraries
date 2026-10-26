@@ -274,9 +274,9 @@ PeriodicMatmulCheck PeriodicMatmulPlan::checkRegion(const Tensor& observed,
         epilogue.outputConversion != OutputConversion::Default ||
         !std::holds_alternative<IdentityActivation>(epilogue.activation) ||
         epilogue.activationApplication != ActivationApplication::Forward ||
-        !observed.shape().selectsAll(epilogue.outputSelection) || epilogue.accumulateAmax ||
-        epilogue.outputScale.shape().rank() != 0 || epilogue.outputScale.item<double>() != 1 ||
-        epilogue.auxiliaryScale.shape().rank() != 0 || epilogue.auxiliaryScale.item<double>() != 1)
+        epilogue.accumulateAmax || epilogue.outputScale.shape().rank() != 0 ||
+        epilogue.outputScale.item<double>() != 1 || epilogue.auxiliaryScale.shape().rank() != 0 ||
+        epilogue.auxiliaryScale.item<double>() != 1)
         return fail(VerificationStatus::Unsupported,
                     "Periodic comparison requires a linear F32 epilogue and output.");
     const double alpha = epilogue.inputScale ? epilogue.inputScale->item<double>() : 1;

@@ -29,21 +29,22 @@ namespace roc::hostnumerics {
 namespace {
 template <typename Observe>
 ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expected,
-                                      const ComparisonOptions& options, Observe&& observe) {
-    const size_t selectedCount = observed.shape().selectedCount(options.selection);
+                                      const detail::ComparisonInvocation& options,
+                                      Observe&& observe) {
+    const size_t selectedCount = options.indicesCount;
     constexpr size_t minimumElementsPerThread = 500'000;
     // Keep norm accumulation serial so its rounding order is independent of the OpenMP runtime.
     // Complete selections can be partitioned into ordered logical ranges without materializing
     // indices; sparse selections retain their existing traversal.
     const int threadCount =
-        observed.shape().selectsAll(options.selection) && !options.computeFrobenius
+        options.indicesCount == observed.elementCount() && !options.computeFrobenius
             ? detail::operationThreadCount(selectedCount, minimumElementsPerThread, 8)
             : 1;
 
     if (threadCount <= 1) {
         detail::ComparisonAccumulator accumulator(options, observed.shape());
         detail::forEachSelectedOffsetPair(
-            observed.layout(), expected.layout(), options.selection,
+            observed.layout(), expected.layout(), options,
             [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                 observe(accumulator, logicalIndex, observedOffset, expectedOffset);
             });
@@ -61,8 +62,8 @@ ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expe
             const auto [firstSelected, pastLastSelected] =
                 detail::evenlyPartitionedRange(selectedCount, partitionCount, partition);
             detail::forEachLayoutOffsetPairRange(
-                observed.layout(), expected.layout(),
-                observed.shape().indexOrder(options.selection), firstSelected, pastLastSelected,
+                observed.layout(), expected.layout(), options.indicesOrder, firstSelected,
+                pastLastSelected,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                     observe(partials[partition], logicalIndex, observedOffset, expectedOffset);
                 });
@@ -118,14 +119,13 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type) {
     return detail::encodedUlpDistance(exact, approximation, type);
 }
 
-ComparisonReport compare(const Tensor& observed, const Tensor& expected,
-                         const ComparisonOptions& options) {
+static ComparisonReport compareBound(const Tensor& observed, const Tensor& expected,
+                                     const detail::ComparisonInvocation& options) {
     detail::validateComparisonOptions(options);
     if (observed.shape() != expected.shape())
         throw std::runtime_error("HostNumerics tensor comparison shape mismatch.");
 
-    (void)detail::validatedIndexOrder(observed.shape().rank(),
-                                      observed.shape().indexOrder(options.selection));
+    (void)detail::validatedIndexOrder(observed.shape().rank(), options.indicesOrder);
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
 
@@ -142,9 +142,9 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                                   (options.reportMatchingElements || result.mismatches != 0);
         if (!needsSamples) return result;
 
-        ComparisonOptions detailed = options;
+        detail::ComparisonInvocation detailed = options;
         detailed.computeElementwiseStatistics = true;
-        return compare(observed, expected, detailed);
+        return compareBound(observed, expected, detailed);
     }
 
     const auto integerCategory = [](ScalarCategory category) {
@@ -241,6 +241,38 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
     }
 }
 
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options) {
+    return compare(observed, expected, options, IndexRange::all(),
+                   observed.shape().indexOrderLastDimensionFastest());
+}
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const IndexRange& range,
+                         std::span<const size_t> order) {
+    return compareBound(observed, expected,
+                        detail::ComparisonInvocation(options, observed.shape(), range, order));
+}
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const std::set<size_t>& indices,
+                         std::span<const size_t> order) {
+    return compareBound(observed, expected,
+                        detail::ComparisonInvocation(options, observed.shape(), indices, order));
+}
+
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const IndexRange& indices,
+                         LastDimensionFastest) {
+    return compare(observed, expected, options, indices,
+                   observed.shape().indexOrderLastDimensionFastest());
+}
+
+ComparisonReport compare(const Tensor& observed, const Tensor& expected,
+                         const ComparisonOptions& options, const std::set<size_t>& indices,
+                         LastDimensionFastest) {
+    return compare(observed, expected, options, indices,
+                   observed.shape().indexOrderLastDimensionFastest());
+}
+
 std::string formatComparisonReport(const ComparisonReport& report) {
     std::ostringstream output;
     output << std::setprecision(std::numeric_limits<double>::max_digits10) << "comparison "
@@ -280,15 +312,41 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
                                                          std::span<const double> absoluteCandidates,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options) {
-    for (const double absolute : absoluteCandidates) {
-        for (const double relative : relativeCandidates) {
+    return findAllCloseTolerance(observed, expected, absoluteCandidates, relativeCandidates,
+                                 options, IndexRange::all(),
+                                 observed.shape().indexOrderLastDimensionFastest());
+}
+
+template <typename Indices>
+static std::optional<ComparisonTolerance> findTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates, ComparisonOptions options, const Indices& indices,
+    std::span<const size_t> order) {
+    for (double absolute : absoluteCandidates) {
+        for (double relative : relativeCandidates) {
             options.absoluteTolerance = absolute;
             options.relativeTolerance = relative;
-            if (compare(observed, expected, options).passed())
+            if (compare(observed, expected, options, indices, order).passed())
                 return ComparisonTolerance{absolute, relative};
         }
     }
     return std::nullopt;
+}
+
+std::optional<ComparisonTolerance> findAllCloseTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates, ComparisonOptions options,
+    const IndexRange& indices, std::span<const size_t> order) {
+    return findTolerance(observed, expected, absoluteCandidates, relativeCandidates, options,
+                         indices, order);
+}
+
+std::optional<ComparisonTolerance> findAllCloseTolerance(
+    const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
+    std::span<const double> relativeCandidates, ComparisonOptions options,
+    const std::set<size_t>& indices, std::span<const size_t> order) {
+    return findTolerance(observed, expected, absoluteCandidates, relativeCandidates, options,
+                         indices, order);
 }
 
 SentinelReport checkUnwrittenSentinel(ScalarType type, std::span<const std::byte> storage,
@@ -326,9 +384,8 @@ SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
     if (upper >= lower && (lower < 0 || static_cast<size_t>(upper) >= allocatedElements))
         throw std::runtime_error("Logical tensor addresses outside allocated storage.");
     std::vector<bool> used(allocatedElements, false);
-    detail::forEachSelectedIndex(
-        layout.shape(), IndexSelection(IndexRange::all(), LastDimensionFastest{}),
-        [&](size_t, std::span<const size_t> coordinates) {
+    layout.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(), [&](size_t, std::span<const size_t> coordinates) {
             used[static_cast<size_t>(detail::preparedElementOffset(layout, coordinates))] = true;
         });
 

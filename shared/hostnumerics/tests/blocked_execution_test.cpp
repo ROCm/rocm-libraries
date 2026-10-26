@@ -41,7 +41,8 @@ void testAutomaticSelectionUsesBlockedBackend() {
     const float firstOutput = output.loadAs<float>({0, 0});
 
     fillTensor(output, untouchedValue);
-    problem.outputSelection = IndexSelection(std::vector<size_t>({0}), LastDimensionFastest{});
+    roc::hostnumerics::detail::bindIndices(problem, problem.d.shape(), std::set<size_t>({0}),
+                                           LastDimensionFastest{});
     const GemmSupportInfo sparseSupport = queryGemmSupport(problem, GemmBackend::Blocked);
     require(sparseSupport.supported, "Blocked backend rejected sparse work.");
     const GemmTestRunInfo sparse = referenceGemm(problem, GemmBackend::Automatic);
@@ -51,7 +52,7 @@ void testAutomaticSelectionUsesBlockedBackend() {
             "Sparse blocked GEMM reported the wrong write or coverage count.");
     require(output.loadAs<float>({0, 0}) == firstOutput,
             "Automatic backend selection changed the selected numerical result.");
-    requireOnlySelectedOutputsStored(output, problem.outputSelection);
+    requireOnlySelectedOutputsStored(output, std::set<size_t>{0});
 }
 
 void testParallelFullSelection() {

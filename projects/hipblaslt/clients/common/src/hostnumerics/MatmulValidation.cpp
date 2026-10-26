@@ -19,7 +19,7 @@ namespace hipblaslt::hostnumerics
     using roc::hostnumerics::ComparisonReport;
     using roc::hostnumerics::ComparisonTolerance;
     using roc::hostnumerics::findAllCloseTolerance;
-    using roc::hostnumerics::IndexSelection;
+
     using roc::hostnumerics::Layout;
     using roc::hostnumerics::ScalarType;
     using roc::hostnumerics::Shape;
@@ -94,8 +94,9 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = specialValueConsistency;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = validation.compareAllClose ? 10 : 0;
-                options.selection = IndexSelection(roc::hostnumerics::IndexRange::all(), order);
-                result.comparison = compare(observed, expected, options);
+
+                result.comparison = compare(
+                    observed, expected, options, roc::hostnumerics::IndexRange::all(), order);
             }
 
             if(computeUlp)
@@ -107,8 +108,9 @@ namespace hipblaslt::hostnumerics
                 options.computeUlp                   = true;
                 options.ulpType                      = expected.type();
                 options.maxReportedMismatches        = 0;
-                options.selection = IndexSelection(roc::hostnumerics::IndexRange::all(), order);
-                result.unitsInLastPlace = compare(observed, expected, options);
+
+                result.unitsInLastPlace = compare(
+                    observed, expected, options, roc::hostnumerics::IndexRange::all(), order);
             }
 
             if(validation.compareNorm && expected.elementCount() != 0)
@@ -119,8 +121,6 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = true;
                 options.maxReportedMismatches        = 0;
-                options.selection = IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                   std::vector<size_t>{1, 0});
 
                 const size_t batches
                     = expected.shape().rank() == 3 ? expected.shape()[2] : size_t{1};
@@ -130,10 +130,13 @@ namespace hipblaslt::hostnumerics
                     std::vector<size_t> batchOrder(batchExpected.shape().rank());
                     for(size_t axis = 0; axis < batchOrder.size(); ++axis)
                         batchOrder[axis] = batchOrder.size() - 1 - axis;
-                    options.selection = IndexSelection(roc::hostnumerics::IndexRange::all(),
-                                                       std::move(batchOrder));
+
                     const ComparisonReport batchReport
-                        = compare(batchView(observed, batch), batchExpected, options);
+                        = compare(batchView(observed, batch),
+                                  batchExpected,
+                                  options,
+                                  roc::hostnumerics::IndexRange::all(),
+                                  batchOrder);
                     result.relativeFrobeniusError += batchReport.relativeFrobeniusError;
                 }
             }
@@ -144,7 +147,6 @@ namespace hipblaslt::hostnumerics
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = 0;
-                options.selection = IndexSelection(roc::hostnumerics::IndexRange::all(), order);
 
                 constexpr std::array<double, 6> candidates{
                     1e-6,
@@ -155,7 +157,13 @@ namespace hipblaslt::hostnumerics
                     1e-1,
                 };
                 result.allCloseTolerance
-                    = findAllCloseTolerance(observed, expected, candidates, candidates, options);
+                    = findAllCloseTolerance(observed,
+                                            expected,
+                                            candidates,
+                                            candidates,
+                                            options,
+                                            roc::hostnumerics::IndexRange::all(),
+                                            order);
             }
             return result;
         }

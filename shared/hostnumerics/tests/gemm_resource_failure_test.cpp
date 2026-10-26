@@ -62,7 +62,7 @@ TEST(GemmResourceFailure, ValidationFailurePropagatesInsteadOfBecomingUnsupporte
     const detail::GemmInvocation request(
         Tensor(ScalarType::Float32, Shape{2, 2}), Tensor(ScalarType::Float32, Shape{2, 2}),
         Tensor(ScalarType::Float32, Shape{2, 2}), MatmulOptions{ScalarType::Float32},
-        IndexSelection(IndexRange::all(), LastDimensionFastest{}));
+        IndexRange::all(), LastDimensionFastest{});
     EXPECT_TRUE(detail::queryGemmSupport(request, GemmBackend::Blocked));
     EXPECT_THROW(withAllocationFailure(
                      [&] { (void)detail::queryGemmSupport(request, GemmBackend::Blocked); }),

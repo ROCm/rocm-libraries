@@ -15,16 +15,20 @@ Tensor binary(detail::BinaryOperation operation, const Tensor& left, const Tenso
     if (layout.shape() != outputShape)
         throw std::runtime_error("Elementwise output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runBinary({left, right, output, computeType,
-                       IndexSelection(IndexRange::all(), LastDimensionFastest{})},
-                      operation);
+    detail::BinaryInvocation invocation{left, right, output, computeType};
+    detail::bindIndices(invocation, outputShape, IndexRange::all(),
+                        outputShape.indexOrderLastDimensionFastest());
+    detail::runBinary(invocation, operation);
     return output;
 }
 
+template <typename Indices>
 void binaryInto(detail::BinaryOperation operation, const Tensor& left, const Tensor& right,
-                Tensor output, ScalarType computeType, IndexSelection selection) {
-    detail::runBinary({left, right, std::move(output), computeType, std::move(selection)},
-                      operation);
+                Tensor output, ScalarType computeType, const Indices& indices,
+                std::span<const size_t> order) {
+    detail::BinaryInvocation invocation{left, right, std::move(output), computeType};
+    detail::bindIndices(invocation, invocation.output.shape(), indices, order);
+    detail::runBinary(invocation, operation);
 }
 
 Tensor binarySameType(detail::BinaryOperation operation, const Tensor& left, const Tensor& right) {
@@ -48,9 +52,14 @@ Tensor add(const Tensor& left, const Tensor& right, ScalarType outputType, Scala
 }
 
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             IndexSelection selection) {
-    binaryInto(detail::BinaryOperation::Add, left, right, std::move(output), computeType,
-               std::move(selection));
+             const IndexRange& indices, std::span<const size_t> order) {
+    binaryInto(detail::BinaryOperation::Add, left, right, std::move(output), computeType, indices,
+               order);
+}
+void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
+             const std::set<size_t>& indices, std::span<const size_t> order) {
+    binaryInto(detail::BinaryOperation::Add, left, right, std::move(output), computeType, indices,
+               order);
 }
 
 Tensor subtract(const Tensor& left, const Tensor& right) {
@@ -64,9 +73,14 @@ Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
 }
 
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  IndexSelection selection) {
+                  const IndexRange& indices, std::span<const size_t> order) {
     binaryInto(detail::BinaryOperation::Subtract, left, right, std::move(output), computeType,
-               std::move(selection));
+               indices, order);
+}
+void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
+                  const std::set<size_t>& indices, std::span<const size_t> order) {
+    binaryInto(detail::BinaryOperation::Subtract, left, right, std::move(output), computeType,
+               indices, order);
 }
 
 Tensor multiply(const Tensor& left, const Tensor& right) {
@@ -80,9 +94,14 @@ Tensor multiply(const Tensor& left, const Tensor& right, ScalarType outputType,
 }
 
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  IndexSelection selection) {
+                  const IndexRange& indices, std::span<const size_t> order) {
     binaryInto(detail::BinaryOperation::Multiply, left, right, std::move(output), computeType,
-               std::move(selection));
+               indices, order);
+}
+void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
+                  const std::set<size_t>& indices, std::span<const size_t> order) {
+    binaryInto(detail::BinaryOperation::Multiply, left, right, std::move(output), computeType,
+               indices, order);
 }
 
 Tensor activate(const Tensor& input, ActivationFunction function) {
@@ -98,15 +117,27 @@ Tensor activate(const Tensor& input, ActivationFunction function, ScalarType out
     if (layout.shape() != input.shape())
         throw std::runtime_error("Activation output layout shape mismatch.");
     Tensor output(outputType, layout);
-    detail::runActivation({input, output, std::move(function), computeType,
-                           IndexSelection(IndexRange::all(), LastDimensionFastest{})});
+    detail::ActivationInvocation invocation{input, output, std::move(function), computeType};
+    detail::bindIndices(invocation, output.shape(), IndexRange::all(),
+                        output.shape().indexOrderLastDimensionFastest());
+    detail::runActivation(invocation);
     return output;
 }
 
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
-                  ScalarType computeType, IndexSelection selection) {
-    detail::runActivation(
-        {input, std::move(output), std::move(function), computeType, std::move(selection)});
+                  ScalarType computeType, const IndexRange& range, std::span<const size_t> order) {
+    detail::ActivationInvocation invocation{input, std::move(output), std::move(function),
+                                            computeType};
+    detail::bindIndices(invocation, invocation.output.shape(), range, order);
+    detail::runActivation(invocation);
+}
+void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
+                  ScalarType computeType, const std::set<size_t>& indices,
+                  std::span<const size_t> order) {
+    detail::ActivationInvocation invocation{input, std::move(output), std::move(function),
+                                            computeType};
+    detail::bindIndices(invocation, invocation.output.shape(), indices, order);
+    detail::runActivation(invocation);
 }
 
 Tensor Tensor::absolute() const {

@@ -3,102 +3,36 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
-#include <iterator>
+#include <limits>
+#include <roc/hostnumerics/detail/prime.hpp>
 #include <stdexcept>
-#include <vector>
 
 namespace roc::hostnumerics {
-// Flat indices start + ordinal * stride, all less than the exclusive stop, as in
-// Python's range(start, stop, step). A start at or beyond stop yields no entries.
-class IndexRange {
-   public:
-    // Tracks the ordinal rather than the index, so advancing past the last entry
-    // never computes an index beyond size_t.
-    class Iterator {
-       public:
-        using iterator_concept = std::forward_iterator_tag;
-        using iterator_category = std::input_iterator_tag;
-        using value_type = size_t;
-        using difference_type = std::ptrdiff_t;
+struct IndexRange {
+    size_t first;
+    size_t stride;
+    size_t maxElements;
 
-        Iterator() = default;
-
-        size_t operator*() const noexcept {
-            return m_start + m_ordinal * m_stride;
-        }
-
-        Iterator& operator++() noexcept {
-            ++m_ordinal;
-            return *this;
-        }
-
-        Iterator operator++(int) noexcept {
-            Iterator previous = *this;
-            ++m_ordinal;
-            return previous;
-        }
-
-        bool operator==(const Iterator& other) const noexcept {
-            return m_ordinal == other.m_ordinal;
-        }
-
-       private:
-        friend class IndexRange;
-
-        Iterator(size_t start, size_t stride, size_t ordinal) noexcept
-            : m_start(start), m_stride(stride), m_ordinal(ordinal) {}
-
-        size_t m_start = 0;
-        size_t m_stride = 1;
-        size_t m_ordinal = 0;
-    };
-
-    // Explicit, so a braced list of indices is never read as a range.
-    explicit IndexRange(size_t start, size_t stop, size_t stride)
-        : m_start(start), m_stop(stop), m_stride(stride) {
-        if (stride == 0) throw std::runtime_error("Index range stride must be nonzero.");
+    IndexRange(size_t first, size_t stride, size_t maxElements)
+        : first(first), stride(stride), maxElements(maxElements) {
+        if (stride == 0) throw std::runtime_error("Index selection stride must be nonzero.");
     }
 
-    static IndexRange all(size_t stop) {
-        return IndexRange(0, stop, 1);
+    static IndexRange all() {
+        return {0, 1, std::numeric_limits<size_t>::max()};
     }
-
-    size_t start() const noexcept {
-        return m_start;
-    }
-
-    size_t stop() const noexcept {
-        return m_stop;
-    }
-
-    size_t stride() const noexcept {
-        return m_stride;
-    }
-
-    size_t count() const noexcept {
-        if (m_start >= m_stop) return 0;
-        return 1 + (m_stop - 1 - m_start) / m_stride;
-    }
-
-    Iterator begin() const noexcept {
-        return Iterator(m_start, m_stride, 0);
-    }
-
-    Iterator end() const noexcept {
-        return Iterator(m_start, m_stride, count());
-    }
-
-    std::vector<size_t> indices() const {
-        return std::vector<size_t>(begin(), end());
-    }
-
-    bool operator==(const IndexRange&) const noexcept = default;
-
-   private:
-    size_t m_start;
-    size_t m_stop;
-    size_t m_stride;
 };
+
+// Sampling retains the allocated-element quotient and approximate sample count.
+inline IndexRange primeIndexRange(size_t logicalElements, size_t allocatedElements,
+                                  size_t requestedElements) {
+    if (requestedElements == 0 || requestedElements >= logicalElements) return IndexRange::all();
+    const auto stride =
+        detail::getNextPrime(std::max<size_t>(1, allocatedElements / requestedElements));
+    if (!stride) throw std::runtime_error("Prime-stride index selection overflow.");
+    return {0, *stride, std::numeric_limits<size_t>::max()};
+}
 
 }  // namespace roc::hostnumerics

@@ -3752,9 +3752,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                                               referenceB,
                                               referenceD,
                                               matmulOptions,
-                                              roc::hostnumerics::IndexSelection(
-                                                  roc::hostnumerics::IndexRange::all(),
-                                                  roc::hostnumerics::LastDimensionFastest{}));
+                                              roc::hostnumerics::IndexRange::all(),
+                                              roc::hostnumerics::LastDimensionFastest{});
                 }
                 else
                 {
@@ -3774,9 +3773,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                   referenceB,
                                                   referenceAccumulator,
                                                   matmulOptions,
-                                                  roc::hostnumerics::IndexSelection(
-                                                      roc::hostnumerics::IndexRange::all(),
-                                                      roc::hostnumerics::LastDimensionFastest{}));
+                                                  roc::hostnumerics::IndexRange::all(),
+                                                  roc::hostnumerics::LastDimensionFastest{});
                         conversion.inputScale = alpha;
                     }
                     if(betaValue != std::complex<double>(0.0, 0.0))
