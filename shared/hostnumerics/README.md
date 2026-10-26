@@ -46,7 +46,8 @@ removing an old accelerated path.
 ## Documentation
 
 See [concepts and usage](docs/usage.md),
-[build and package instructions](docs/build_and_test.md), and
+[build and package instructions](docs/build_and_test.md),
+[design decisions](docs/design.md), and
 [error handling](docs/error_handling.md).
 
 The C++ and Python walkthroughs are [tutorial.cpp](examples/tutorial.cpp) and
