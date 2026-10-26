@@ -80,7 +80,8 @@
 #  endif
 #endif
 
-// Defined in {cuda,hip}/std/__internal/namespaces.h
+// Defined in '{cuda,hip}/std/__internal/namespaces.h'
+// Transitively included via '{cuda,hip}/std/version'
 #if defined(_THRUST_HAS_DEVICE_SYSTEM_STD)
 #  define _THRUST_STD_NAMESPACE_BEGIN         _CCCL_BEGIN_NAMESPACE_CUDA_STD
 #  define _THRUST_STD_NAMESPACE_END           _CCCL_END_NAMESPACE_CUDA_STD
