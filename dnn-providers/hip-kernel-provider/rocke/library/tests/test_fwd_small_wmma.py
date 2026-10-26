@@ -274,6 +274,157 @@ class TestSmallSpecs(unittest.TestCase):
                         lower(sd, arch="gfx1250")
 
 
+# ---------------------------------------------------------------------------
+# The shipped path: a gfx1250 forward cache (placeholder binaries) and
+# direct_plans, which matches capabilities, rebuilds each entry's spec from
+# its identity and re-validates it on the request (tile efficiency included).
+# ---------------------------------------------------------------------------
+_CACHE_ARCH = "gfx1250"
+
+
+def _wmma_fwd_cache(tmp_path):
+    """The wave32-only WMMA forward entries of the gfx1250 cache, each with a
+    placeholder binary (nothing is compiled)."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from benchmarks.common.kernel_cache import KernelCache
+    from kernels.conv.direct_variants import (
+        DIRECT_FWD_SMALLC_WMMA,
+        DIRECT_FWD_SMALLK_WMMA,
+        DIRECT_FWD_WMMA,
+    )
+    from rocke.core.arch import ArchTarget
+
+    families = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
+    cache = KernelCache(tmp_path, _CACHE_ARCH)
+    for job in dks.enumerate_direct_jobs(
+        arch=_CACHE_ARCH,
+        target=ArchTarget.from_gfx(_CACHE_ARCH),
+        directions=("fwd",),
+    ):
+        if job.identity.algorithm in families:
+            # One placeholder per entry, so each keeps its own symbol.
+            label = job.identity.label()
+            meta = {"kernel_name": label, "spec_wave_size": 32}
+            cache.put(job.identity, label.encode(), meta)
+    return cache
+
+
+def _cpu_problem(N, H, W, C, K, KH, S, PAD):
+    return DirectConvProblem(
+        N=N, H=H, W=W, groups=1, cpg=C, kpg=K, KH=KH, KW=KH, PAD=PAD, stride=S
+    )
+
+
+def _check_small_plans(problem, variant, plans, rejected):
+    """Every ``variant`` plan launches the spec its knobs make on ``problem``,
+    with the forward operands; every rejection of it is a shape rule."""
+    import json
+
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.conv.direct_variants import make_direct_spec
+    from rocke.runtime.packing import compile_packer
+
+    mine = [pl for pl in plans if pl.identity.algorithm == variant]
+    assert mine, [why for i, why in rejected if i.algorithm == variant]
+    ptrs = {"x": 0x1000, "w": 0x2000, "y": 0x3000}
+    sizes = {
+        "x": 2 * problem.N * problem.H * problem.W * problem.total_c,
+        "w": 2 * problem.total_k * problem.KH * problem.KW * problem.cpg,
+        "y": 2 * problem.N * problem.Ho * problem.Wo * problem.total_k,
+    }
+    expect = ConvArgs.from_problem(problem, direction="fwd").to_launch_values(
+        ptrs["x"], ptrs["w"], ptrs["y"], sizes["x"], sizes["w"], sizes["y"]
+    )
+    for plan in mine:
+        ident = plan.identity
+        assert (ident.filter_h, ident.pad_h, ident.stride_h, ident.wave_size) == (
+            problem.KH,
+            problem.PAD,
+            problem.stride,
+            32,
+        )
+        knobs = json.loads(ident.knobs)
+        spec = make_direct_spec(variant, problem, knobs)
+        (step,) = plan.steps
+        assert step.kernel_name == ident.label()
+        assert (step.grid, step.block) == spec.launch_geometry(), ident.label()
+        assert step.buffers == ("x", "w", "y")
+        assert step.signature == conv_direct_args_signature(
+            problem.dtype, direction="fwd"
+        )
+        assert plan.workspaces == {}
+        values = dks.launch_values(step, ptrs, sizes)
+        assert values == expect
+        compile_packer(step.signature)(values)
+    for ident, why in rejected:
+        if ident.algorithm == variant:
+            assert "tile efficiency" in why or "block_k" in why, why
+    return mine
+
+
+def test_smallc_is_served_from_the_cache(tmp_path):
+    """A 3-channel stem (and a 4-channel one) gets the small-C kernel from the
+    cache, with the launch its knobs make on the request; a filter no binary
+    bakes, or C past the small-C limit, gets none."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.conv.direct_variants import (
+        DIRECT_FWD_SMALLC_WMMA,
+        DIRECT_FWD_SMALLK_WMMA,
+    )
+
+    cache = _wmma_fwd_cache(tmp_path)
+    for problem in (
+        _cpu_problem(N=2, H=224, W=224, C=3, K=64, KH=7, S=2, PAD=3),
+        _cpu_problem(N=3, H=64, W=96, C=4, K=32, KH=3, S=1, PAD=1),
+        _cpu_problem(N=1, H=224, W=224, C=3, K=96, KH=4, S=4, PAD=0),
+    ):
+        plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        mine = _check_small_plans(problem, DIRECT_FWD_SMALLC_WMMA, plans, rejected)
+        assert {pl.identity.cpg for pl in mine} == {problem.cpg}
+        assert DIRECT_FWD_SMALLK_WMMA not in {pl.identity.algorithm for pl in plans}
+    # A tiny output: the filter rejects the knobs whose tiles are mostly
+    # padding, and keeps the rest.
+    tiny = _cpu_problem(N=1, H=12, W=12, C=3, K=64, KH=3, S=1, PAD=1)
+    plans, rejected = dks.direct_plans(cache, tiny, "fwd", _CACHE_ARCH)
+    _check_small_plans(tiny, DIRECT_FWD_SMALLC_WMMA, plans, rejected)
+    assert any("tile efficiency" in why for _, why in rejected)
+    for problem in (
+        _cpu_problem(N=2, H=56, W=56, C=3, K=64, KH=5, S=1, PAD=2),
+        _cpu_problem(N=2, H=56, W=56, C=8, K=64, KH=3, S=1, PAD=1),
+    ):
+        plans, _ = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        assert DIRECT_FWD_SMALLC_WMMA not in {pl.identity.algorithm for pl in plans}
+
+
+def test_smallk_is_served_from_the_cache(tmp_path):
+    """A 4-output-channel layer gets the small-K kernel from the cache at any
+    multiple-of-8 C, with the launch its knobs make on the request; K or a
+    filter no binary bakes gets none."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.conv.direct_variants import (
+        DIRECT_FWD_SMALLC_WMMA,
+        DIRECT_FWD_SMALLK_WMMA,
+    )
+
+    cache = _wmma_fwd_cache(tmp_path)
+    for problem in (
+        _cpu_problem(N=2, H=56, W=56, C=64, K=4, KH=3, S=1, PAD=1),
+        _cpu_problem(N=1, H=100, W=60, C=192, K=4, KH=3, S=1, PAD=1),
+    ):
+        plans, rejected = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        mine = _check_small_plans(problem, DIRECT_FWD_SMALLK_WMMA, plans, rejected)
+        assert {pl.identity.kpg for pl in mine} == {problem.kpg}
+        assert DIRECT_FWD_SMALLC_WMMA not in {pl.identity.algorithm for pl in plans}
+    for problem in (
+        _cpu_problem(N=2, H=56, W=56, C=64, K=8, KH=3, S=1, PAD=1),
+        _cpu_problem(N=2, H=56, W=56, C=64, K=4, KH=3, S=2, PAD=1),
+    ):
+        plans, _ = dks.direct_plans(cache, problem, "fwd", _CACHE_ARCH)
+        assert DIRECT_FWD_SMALLK_WMMA not in {pl.identity.algorithm for pl in plans}
+
+
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
         return f"needs gfx1250 (got {GPU_ARCH!r})"
