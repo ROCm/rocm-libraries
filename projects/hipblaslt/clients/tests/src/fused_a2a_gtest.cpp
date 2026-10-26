@@ -460,6 +460,60 @@ namespace
         EXPECT_EQ(readBack, fused);
     }
 
+    TEST(FusedA2APrologueAttach_pre_checkin, AttachedPrologueReadsBackAndDetaches)
+    {
+        hipblasLtMatmulDesc_t              matmulDesc = nullptr;
+        hipblasLtFusedEpilogueDescriptor_t prologue   = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtFusedEpilogueCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtFusedPrologueAdd(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        EXPECT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, &prologue, sizeof(prologue)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtFusedEpilogueDescriptor_t readBack = nullptr;
+        size_t                             written  = 0;
+        EXPECT_EQ(hipblasLtMatmulDescGetAttribute(matmulDesc,
+                                                  HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE,
+                                                  &readBack,
+                                                  sizeof(readBack),
+                                                  &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(written, sizeof(readBack));
+        EXPECT_EQ(readBack, prologue);
+
+        hipblasLtFusedEpilogueDescriptor_t none = nullptr;
+        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                      matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, &none, sizeof(none)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatmulDescGetAttribute(matmulDesc,
+                                                  HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE,
+                                                  &readBack,
+                                                  sizeof(readBack),
+                                                  &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(readBack, nullptr);
+
+        EXPECT_EQ(hipblasLtFusedEpilogueDestroy(prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST(FusedA2APrologueAttach_pre_checkin, PrologueAttachRejectsAShortBuffer)
+    {
+        hipblasLtMatmulDesc_t matmulDesc = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        hipblasLtFusedEpilogueDescriptor_t prologue = nullptr;
+        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                      matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, &prologue, 4),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
+    }
+
     /************************************************************************
      * Communicator registration.
      ***********************************************************************/

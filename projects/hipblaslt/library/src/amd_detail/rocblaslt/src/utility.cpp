@@ -304,6 +304,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
+    case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+        return "MATMUL_DESC_FUSED_PROLOGUE";
 #endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";

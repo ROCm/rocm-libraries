@@ -401,12 +401,15 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
-    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,
+    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105,
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,
 #endif
-    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 107,
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,
+#endif
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -662,9 +665,10 @@ struct RocblasltContractionProblem
     bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    // The four below are set post-construction, not through the constructor.
-    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    // The five below are set post-construction, not through the constructor.
+    // fused_epilogue, fused_prologue and fused_a2a_peer_flag are non-owning.
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    const struct hipblasLtFusedEpilogueDescriptor* fused_prologue      = nullptr;
     uint32_t                                       fused_a2a_world     = 0;
     uint32_t                                       fused_a2a_rank      = 0;
     void* const*                                   fused_a2a_peer_flag = nullptr;

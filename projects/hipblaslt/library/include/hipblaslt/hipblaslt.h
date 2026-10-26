@@ -465,6 +465,9 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
 #endif
   HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107, /**<Encoding of the int4 weights in matrix A. Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtInt4Encoding_t``, default ``HIPBLASLT_INT4_ENCODING_SIGNED_EXT``; others are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Only used when A is ``HIP_R_4I`` with a w4a16 ``VEC*_16BF``/``VEC*_16F`` scale mode. Data type: ``int32_t``. */
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+  HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,              /**<Attach a fused prologue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` whose stages were added with ``hipblasLtFusedPrologueAdd``. It is referenced, not copied, and validated, as for ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``. A matmul runs at most one all-to-all, so ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a matmul with all-to-all stages attached through both attributes, and a descriptor attached through the attribute that does not match its stages. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
+#endif
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
