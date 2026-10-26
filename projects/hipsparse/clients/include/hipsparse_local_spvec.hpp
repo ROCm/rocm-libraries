@@ -47,11 +47,6 @@ public:
             = hipsparseCreateSpVec(&descr, size, nnz, indices, values, idxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            if(descr != nullptr)
-            {
-                hipsparseDestroySpVec(descr);
-                descr = nullptr;
-            }
             std::cerr << "hipsparseCreateSpVec failed: " << hipsparseGetErrorName(status)
                       << std::endl;
             throw(status);

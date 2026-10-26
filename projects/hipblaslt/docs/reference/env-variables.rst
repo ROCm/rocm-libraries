@@ -159,7 +159,7 @@ go depends on logging:
     * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
         | Sets a soft wall-clock limit on one shape's search, checked between candidates.
       - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
-        | A search the limit stops records nothing
+        | A truncated search records its best candidate as incomplete
         | A single candidate can overrun the limit
 
     * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``

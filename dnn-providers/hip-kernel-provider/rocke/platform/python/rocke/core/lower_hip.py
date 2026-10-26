@@ -27,6 +27,7 @@ from .ir import (
     F64,
     I32,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     PtrType,
@@ -2725,6 +2726,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]

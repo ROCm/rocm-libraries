@@ -322,13 +322,11 @@ void testing_sptrsm_csc_bad_arg(const Arguments& arg)
                                                        p_error));
                         break;
                     }
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
                     case rocsparse_sptrsm_input_solve_mode:
                     case rocsparse_sptrsm_input_diagonal_modifier:
                     {
                         break;
                     }
-#endif
                     }
                 }
                 //
@@ -459,13 +457,6 @@ void testing_sptrsm_csc(const Arguments& arg)
     {
         return;
     }
-
-#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.solve_mode != 0)
-    {
-        return;
-    }
-#endif
 
     const J                    K               = arg.K;
     const rocsparse_operation  trans_A         = arg.transA;
@@ -813,7 +804,6 @@ void testing_sptrsm_csc(const Arguments& arg)
                                                          p_error));
     }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     {
         const rocsparse_solve_mode solve_mode = static_cast<rocsparse_solve_mode>(arg.solve_mode);
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
@@ -831,7 +821,6 @@ void testing_sptrsm_csc(const Arguments& arg)
                                                          sizeof(diagonal_modifier),
                                                          p_error));
     }
-#endif
 
     {
         size_t buffer_size_in_bytes;

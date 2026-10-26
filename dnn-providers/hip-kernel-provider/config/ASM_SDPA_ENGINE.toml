@@ -22,18 +22,6 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
-# ASM can rank only the bf16 D128 cases of the shared SdpaFwd sweeps
-# (integration-test-bundles/{quick,standard}/SdpaFwd/Default/), and in an installed
-# artifact it cannot load their kernels: AITER_ASM_DIR is the configure-time absolute
-# install prefix, and this entry sets no HIPDNN_AITER_ASM_DIR. The filter keys on the
-# case id's shape and dtype tokens (..._<D>_<dtype>_...), which assign_case_ids emits
-# while both vary across the sweep, including for cases import_graph.py appends. It
-# does not skip the whole sweep: the TOML skip runs before claim checks, so a
-# sweep-wide filter would silently hide any ASM-claimed case later added to it.
-# Arch-independent, so 'archs' is omitted.
-[[test_skips]]
-filters = ["*_SdpaFwd_Default.*_128_bfp16_*"]
-reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a relocated install"
 
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
@@ -43,6 +31,10 @@ reason  = "ALMIOPEN-2766 — ASM SDPA fwd .co load fails (hipError 301) from a r
 # asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1, fp16: 2.5e-1).
 # Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
 # in "_fp16_" keeps it from also matching "bfp16_".
+# The bundles fill O and the LSE from the sweep's "inputs" ranges, so the
+# softmax the backward recomputes is not the forward's and these tolerances are
+# not calibrated for that input regime. Deriving O and the LSE from Q, K and V
+# in the bundle fill path is tracked in #14008.
 [[tolerance_overrides]]
 filters = ["*_SdpaBackward_*.*_fp16_*"]
 atol = 2.5e-1

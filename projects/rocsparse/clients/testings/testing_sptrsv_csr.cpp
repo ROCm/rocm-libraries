@@ -215,10 +215,8 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
             case rocsparse_sptrsv_input_compute_datatype:
             case rocsparse_sptrsv_input_operation:
             case rocsparse_sptrsv_input_analysis_policy:
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             case rocsparse_sptrsv_input_solve_mode:
             case rocsparse_sptrsv_input_diagonal_modifier:
-#endif
             {
                 EXPECT_ROCSPARSE_STATUS(
                     rocsparse_sptrsv_set_input(handle, sptrsv_descr, e, data, 0, p_error),
@@ -350,13 +348,11 @@ void testing_sptrsv_bad_arg(const Arguments& arg)
                                                        p_error));
                         break;
                     }
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
                     case rocsparse_sptrsv_input_solve_mode:
                     case rocsparse_sptrsv_input_diagonal_modifier:
                     {
                         break;
                     }
-#endif
                     }
                 }
 

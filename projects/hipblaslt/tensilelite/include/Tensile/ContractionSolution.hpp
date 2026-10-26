@@ -166,7 +166,7 @@ namespace TensileLite
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
         X_MACRO(StrideMetadata2) \
-        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps
+        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps \
            them distinct from another generator's WorkgroupMapping. */ \
         X_MACRO(RR_WorkgroupMapping) \
         X_MACRO(RR_MagicMultipleWgm) \
@@ -180,7 +180,8 @@ namespace TensileLite
         X_MACRO(RR_MagicMultipleWgmMainBlock) \
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
-        X_MACRO(ScaleBlockSizeA)
+        X_MACRO(ScaleBlockSizeA) \
+        X_MACRO(ESMRuntimeSupported)
 
     enum class CustomArgSemantic
     {
@@ -401,6 +402,7 @@ namespace TensileLite
     struct SizeMapping
     {
         size_t waveNum;
+        int    WavefrontSize = 0;
 
         dim3 clusterDim{1, 1, 1};
 
@@ -501,9 +503,8 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
-        // SourceSwap: MFMA output is mapped so that M is the fast (stride-1)
-        // store axis in D.  Enabled for all non-sparse kernels; plumbed into
-        // the Origami epilogue model to select the correct store-pattern cost.
+        // SourceSwap: MFMA operands are swapped so consecutive lanes run along M
+        // in D.  Either way each lane stores StoreVectorWidth contiguous M elements.
         bool SourceSwap = false;
 
         int NonTemporalD = 0;
@@ -519,6 +520,11 @@ namespace TensileLite
         int LocalSplitU = 1;
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
+        bool OneLDSBuffer = false;
+        int  UnrollMajorLDSA = -1;
+        int  UnrollMajorLDSB = -1;
+        bool enableLDSTrA    = false;
+        bool enableLDSTrB    = false;
 
         int expertSchedulingMode = 0;
 

@@ -7,7 +7,7 @@ from copy import deepcopy
 
 import pytest
 
-from Tensile.SolutionStructs.Naming import getKernelNameMin
+from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 
 @pytest.mark.unit

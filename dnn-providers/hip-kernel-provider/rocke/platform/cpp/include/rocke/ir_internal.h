@@ -203,6 +203,26 @@ void rocke_i_check_bitcast_width(const char* verb,
                                  const rocke_type_t* target,
                                  const char* hint);
 
+/* ------------------------------------------------- loop-carried descriptors */
+
+/* Mirrors ir._is_buffer_descriptor: true when `value` is the result of a
+ * tile.buffer_rsrc op. */
+bool rocke_i_is_buffer_descriptor(const rocke_value_t* value);
+
+/* Mirrors ir._loop_carried_descriptor_message: writes into `buf` the refusal
+ * for a buffer descriptor as scf.for iter_arg `index` (its initial value or the
+ * value an iteration yields to it) and returns `buf`. A loop cannot carry a
+ * descriptor: the phi or HIP variable holding the carried value cannot hold the
+ * lowered descriptor (an opaque ptr addrspace(8) / rsrc_t). */
+const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap);
+
+/* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
+ * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
+ * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
+ * Accepts any operand / region counts. The builder, the verifier and both
+ * lowerings use it. */
+const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* ------------------------------------------------------------- attr helpers */
 
 /* Build a small attr map IN the arena and return it by value (the map's

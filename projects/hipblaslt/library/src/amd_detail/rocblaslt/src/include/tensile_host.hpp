@@ -256,12 +256,25 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
 namespace TensileLite
 {
     class ProblemOverride;
+    struct TunedEntry;
 }
 
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/**
+ * Whether one row still names the kernel its index resolves to and supports
+ * this problem within the workspace, the checks replay makes. Leaves gemmData's
+ * problem as updateTensileProblem makes it from problem.
+ */
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
 
 /**
  * The solution index of the first entry for this key that still resolves to its

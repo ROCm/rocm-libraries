@@ -496,7 +496,6 @@ namespace rocsparse_clients
 
         void set_solve_mode(rocsparse_solve_mode solve_mode)
         {
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(this->m_handle,
                                            this->m_descr,
@@ -504,14 +503,10 @@ namespace rocsparse_clients
                                            &solve_mode,
                                            sizeof(solve_mode),
                                            nullptr));
-#else
-            (void)solve_mode;
-#endif
         }
 
         void set_diagonal_modifier(rocsparse_diagonal_modifier diagonal_modifier)
         {
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             CHECK_ROCSPARSE_THROW_ERROR(
                 rocsparse_sptrsv_set_input(this->m_handle,
                                            this->m_descr,
@@ -519,9 +514,6 @@ namespace rocsparse_clients
                                            &diagonal_modifier,
                                            sizeof(diagonal_modifier),
                                            nullptr));
-#else
-            (void)diagonal_modifier;
-#endif
         }
 
     private:
@@ -753,13 +745,6 @@ void testing_sptrsv(const Arguments& arg)
     {
         return;
     }
-
-#ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.solve_mode != rocsparse_solve_mode_triangular)
-    {
-        return;
-    }
-#endif
 
     const int64_t batch_count   = (arg.batch_count > 1) ? arg.batch_count : 1;
     const int64_t batch_count_A = (arg.batch_count_A > 0) ? arg.batch_count_A : batch_count;

@@ -77,6 +77,11 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
 endif()
 
+option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel registration." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
+endif()
+
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -794,6 +799,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
