@@ -595,6 +595,41 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
     return false;
 }
 
+static bool ll_table_has(const rocke_ll_decl_t* table, int n, const char* key)
+{
+    for(int i = 0; i < n; i++)
+    {
+        if(strcmp(table[i].key, key) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Refuse a demand that finalize could not declare on this flavor (Python
+ * _Lowerer._require_declared). A key that a newer flavor's table adds is a
+ * too-old flavor. Any other missing key is a defect in the emitter. */
+[[noreturn]] static void ll_refuse_undeclared(rocke_lower_t* L, const char* key)
+{
+    static const rocke_llvm_flavor_t newer[] = {ROCKE_LLVM_FLAVOR_LLVM22, ROCKE_LLVM_FLAVOR_LLVM23};
+    for(rocke_llvm_flavor_t f : newer)
+    {
+        int n = 0;
+        const rocke_ll_decl_t* table = rocke_ll_flavor_overrides(f, &n);
+        if(ll_table_has(table, n, key))
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_NOTIMPL,
+                          "intrinsic '%s' requires %s, got %s",
+                          key,
+                          rocke_llvm_flavor_name(f),
+                          rocke_llvm_flavor_name(L->flavor));
+        }
+    }
+    rocke_ll_fail(L, ROCKE_ERR_VALUE, "intrinsic '%s' has no declaration in any flavor table", key);
+}
+
 void rocke_ll_need(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -607,7 +642,11 @@ void rocke_ll_need(rocke_lower_t* L, const char* key)
     }
     rocke_ll_need_t rec;
     rec.key = rocke_arena_strdup(&L->arena, key);
-    rec.decl = ll_resolve_decl(L, key); /* may be NULL; finalize tolerates */
+    rec.decl = ll_resolve_decl(L, key);
+    if(rec.decl == NULL)
+    {
+        ll_refuse_undeclared(L, key);
+    }
     int rc;
     rocke_vec_push(&L->arena, &L->needs, rec, rc);
     if(rc != 0)
