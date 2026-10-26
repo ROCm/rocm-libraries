@@ -6,6 +6,7 @@
 #include "program_options.hpp"
 
 #include <functional>
+#include <string>
 
 using namespace hipblaslt_bench;
 using namespace roc; // For emulated program_options
@@ -21,14 +22,15 @@ try
     bool verify = false;
     bool timing = false;
     // 0 marks "not given on the command line".
-    int a2a_world = 0;
+    int         a2a_world = 0;
+    std::string a2a_mode;
 
     options_description desc("hipblaslt-bench-a2a command line options");
     desc.add_options()
         // clang-format off
         ("sizem,m",
          value<int64_t>(&arg.M[0])->default_value(18432),
-         "Feature extent (free0)")
+         "Feature extent (free0); a2a-gemm defaults to 8192")
 
         ("sizen,n",
          value<int64_t>(&arg.N[0])->default_value(2048),
@@ -38,9 +40,14 @@ try
          value<int64_t>(&arg.K[0])->default_value(8192),
          "Bound extent")
 
+        ("a2a_mode",
+         value<std::string>(&a2a_mode)->default_value(kCollectiveGemmA2A),
+         "gemm-a2a: all-to-all of D's leading features after the GEMM;"
+         " a2a-gemm: all-to-all of B before the GEMM")
+
         ("a2a_extent",
          value<int64_t>(&arg.a2a_extent)->default_value(10240),
-         "Features taking the all-to-all path")
+         "Features taking the all-to-all path; a2a-gemm uses K")
 
         ("a2a_world",
          value<int>(&a2a_world)->default_value(0),
@@ -81,6 +88,19 @@ try
         return 0;
     }
 
+    const Collective collective = parse_collective(a2a_mode.c_str());
+    if(collective == Collective::Unknown)
+    {
+        hipblaslt_cerr << "error: unknown --a2a_mode " << a2a_mode << "\n";
+        return 1;
+    }
+    if(collective == Collective::A2AGemm)
+    {
+        if(vm["sizem"].defaulted())
+            arg.M[0] = 8192;
+        arg.a2a_extent = arg.K[0];
+    }
+
     arg.timing = timing ? 1 : 0;
     if(verify)
         arg.norm_check = arg.allclose_check = 1;
@@ -101,6 +121,7 @@ try
 
     RankResources res;
     res.rendezvous = &rendezvous;
+    res.collective = collective;
     if(!setup_rank(env, arg, res))
         return 1;
 
@@ -122,6 +143,11 @@ try
     hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
     std::vector<hipblasLtBfloat16> hostGold, hostLanded;
     auto                           launch = make_launch(res, heur, launchCount, lastStatus);
+    auto                           check  = [&]() {
+        return collective == Collective::A2AGemm
+                                              ? a2a_gemm_check(env, arg, res, 0)
+                                              : check_recv(env, arg, res, 0, hostGold, hostLanded);
+    };
 
     if(arg.timing)
     {
@@ -148,8 +174,7 @@ try
             for(int32_t i = 0; i < arg.iters; ++i)
             {
                 launch(0);
-                if(hipStreamSynchronize(res.stream) != hipSuccess
-                   || !check_recv(env, arg, res, 0, hostGold, hostLanded))
+                if(hipStreamSynchronize(res.stream) != hipSuccess || !check())
                     verified = false;
             }
 
@@ -190,9 +215,10 @@ try
         {
             const double gflops = gemm_gflop_count<hipblasLtBfloat16>(arg.M[0], arg.N[0], arg.K[0]);
 
-            hipblaslt_cout << "a2a_world,a2a_extent,M,N,K,hipblaslt-Gflops,us\n"
-                           << unsigned(arg.a2a_world) << "," << arg.a2a_extent << "," << arg.M[0]
-                           << "," << arg.N[0] << "," << arg.K[0] << ","
+            hipblaslt_cout << "a2a_mode,a2a_world,a2a_extent,M,N,K,hipblaslt-Gflops,us\n"
+                           << collective_name(collective) << "," << unsigned(arg.a2a_world) << ","
+                           << arg.a2a_extent << "," << arg.M[0] << "," << arg.N[0] << ","
+                           << arg.K[0] << ","
                            << hipblaslt_bench::rate_per_second(gflops, slowest, -1.0) << ","
                            << slowest << "\n";
         }
@@ -200,15 +226,15 @@ try
     else
     {
         if(env.rank == 0)
-            hipblaslt_cout << "a2a_world,a2a_extent,M,N,K\n"
-                           << unsigned(arg.a2a_world) << "," << arg.a2a_extent << "," << arg.M[0]
-                           << "," << arg.N[0] << "," << arg.K[0] << "\n";
+            hipblaslt_cout << "a2a_mode,a2a_world,a2a_extent,M,N,K\n"
+                           << collective_name(collective) << "," << unsigned(arg.a2a_world) << ","
+                           << arg.a2a_extent << "," << arg.M[0] << "," << arg.N[0] << ","
+                           << arg.K[0] << "\n";
 
         launch(0);
         bool ok = hipStreamSynchronize(res.stream) == hipSuccess
                   && lastStatus == HIPBLAS_STATUS_SUCCESS;
-        if(ok && (arg.norm_check || arg.allclose_check)
-           && !check_recv(env, arg, res, 0, hostGold, hostLanded))
+        if(ok && (arg.norm_check || arg.allclose_check) && !check())
             ok = false;
 
         if(!agreement.agree(ok, std::logical_and<>{}))
