@@ -67,6 +67,7 @@ _GFX950_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_staggered_iter_wait"),
     _values("kv_ring_depth", 2, (2, 3)),
     _flag("use_q_reread"),
+    _flag("use_qblock_reverse"),
     _gated("use_kq_lds_pad", {"kq_lds_pad_halves": _KQ_LDS_PAD_HALVES}),
     _gated("use_sched_barrier", {"sched_barrier_mask": _SCHED_BARRIER_MASKS}),
     KnobAxis(

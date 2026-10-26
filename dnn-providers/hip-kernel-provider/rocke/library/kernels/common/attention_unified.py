@@ -955,6 +955,8 @@ def _d256_gfx950_spec_overrides() -> dict:
         # conflict on the QK K read for a ~25% Sq8192 latency win.
         use_kq_lds_pad=True,
         kq_lds_pad_halves=16,
+        # Longest-first causal query blocks: the long-block tail dominated.
+        use_qblock_reverse=True,
     )
 
 
