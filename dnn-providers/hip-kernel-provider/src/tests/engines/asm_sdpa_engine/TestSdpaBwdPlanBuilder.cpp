@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -422,12 +423,15 @@ constexpr int MASK_BOTTOM_RIGHT_CAUSAL = 2; // MaskType::BOTTOM_RIGHT_CAUSAL
 constexpr int MASK_SLIDING_WINDOW = 3; // MaskType::SLIDING_WINDOW
 constexpr int MODE_BATCH = 0; // BatchMode::BATCH
 constexpr int ATOMIC_A32 = 1; // AccumulatorMode::A32
+constexpr int ATOMIC_A16 = 0; // AccumulatorMode::A16
 constexpr int ATOMIC_NONE = 0; // odo / dq_convert use atomic32=0
 constexpr int PSSK_ON = 1;
 constexpr int PDDV_ON = 1;
 constexpr int PSSK_OFF = 0;
 constexpr int PDDV_OFF = 0;
 constexpr int BF16_CVT_RTNE = 0; // RoundingMode::RTNE
+constexpr int BF16_CVT_RTNA = 1; // RoundingMode::RTNA
+constexpr int BF16_CVT_RTZ = 2; // RoundingMode::RTZ
 using asm_sdpa_engine::bwd_dispatch::BF16_CVT_FP16_SENTINEL;
 } // namespace
 
@@ -718,6 +722,72 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
                                          MODE_BATCH,
                                          BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
+}
+
+// The comment on the a16 rejection in initializeExecutionSettings rests on
+// this: every DQDKDV tuple requests pssk=1, pddv=1, and gfx942 ships a16 DQDKDV
+// kernels only with pssk=0. If a pssk=1 a16 row appears, revisit that comment.
+// The rejection stays either way, because the a16 kernels have their own
+// layout limits.
+TEST(TestSdpaBwdRegistryLookup, Gfx942HasNoA16DqdkdvForDispatchedLayout)
+{
+    using namespace bwd_dispatch;
+
+    // The pssk=0 a16 rows resolve, so the misses below are not a lookup that
+    // finds nothing.
+    auto bf16A16Key = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                          "gfx942",
+                                          "bf16",
+                                          /*hdimQ=*/128,
+                                          /*hdimV=*/128,
+                                          MASK_NONE,
+                                          ATOMIC_A16,
+                                          PSSK_OFF,
+                                          PDDV_OFF,
+                                          MODE_BATCH,
+                                          BF16_CVT_RTNE);
+    EXPECT_FALSE(bf16A16Key.empty()) << "hd128 bf16 a16 pssk=0 dqdkdv lookup should resolve";
+
+    auto fp16A16Key = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                          "gfx942",
+                                          "fp16",
+                                          /*hdimQ=*/128,
+                                          /*hdimV=*/128,
+                                          MASK_NONE,
+                                          ATOMIC_A16,
+                                          PSSK_OFF,
+                                          PDDV_OFF,
+                                          MODE_BATCH,
+                                          BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(fp16A16Key.empty()) << "hd128 fp16 a16 pssk=0 dqdkdv lookup should resolve";
+
+    const std::vector<std::pair<std::string, int>> dtypeCvts = {{"bf16", BF16_CVT_RTNE},
+                                                                {"bf16", BF16_CVT_RTNA},
+                                                                {"bf16", BF16_CVT_RTZ},
+                                                                {"fp16", BF16_CVT_FP16_SENTINEL}};
+    for(const auto& [dtype, bf16Cvt] : dtypeCvts)
+    {
+        for(const int hdim : {64, 128, 192})
+        {
+            for(const int mask :
+                {MASK_NONE, MASK_TOP_LEFT_CAUSAL, MASK_BOTTOM_RIGHT_CAUSAL, MASK_SLIDING_WINDOW})
+            {
+                const auto key = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                                     "gfx942",
+                                                     dtype,
+                                                     /*hdimQ=*/hdim,
+                                                     /*hdimV=*/hdim,
+                                                     mask,
+                                                     ATOMIC_A16,
+                                                     PSSK_ON,
+                                                     PDDV_ON,
+                                                     MODE_BATCH,
+                                                     bf16Cvt);
+                EXPECT_TRUE(key.empty()) << dtype << " bf16_cvt=" << bf16Cvt << " hd=" << hdim
+                                         << " mask=" << mask << " resolved " << key;
+            }
+        }
+    }
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
@@ -1706,12 +1776,157 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
     ASSERT_NE(defaultVal, nullptr);
     EXPECT_EQ(defaultVal->value, "a32");
 
-    // Valid values are ["a32", "a16"]
+    // The only valid value is "a32": initializeExecutionSettings rejects "a16".
     const auto* constraint = knobs[0].constraint.AsStringConstraint();
     ASSERT_NE(constraint, nullptr);
-    ASSERT_EQ(constraint->valid_values.size(), 2u);
+    ASSERT_EQ(constraint->valid_values.size(), 1u);
     EXPECT_EQ(constraint->valid_values[0], "a32");
-    EXPECT_EQ(constraint->valid_values[1], "a16");
+}
+
+constexpr const char* ACC_TYPE_KNOB = "sdpa.bwd.accumulator_type";
+
+// Engine config with one knob setting: knobId = value.
+flatbuffers::DetachedBuffer knobConfig(const std::string& knobId,
+                                       hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion value)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto knob = std::make_unique<KnobSettingT>();
+    knob->knob_id = knobId;
+    knob->value = std::move(value);
+
+    EngineConfigT config;
+    config.knobs.push_back(std::move(knob));
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(EngineConfig::Pack(builder, &config));
+    return builder.Release();
+}
+
+flatbuffers::DetachedBuffer knobConfig(const std::string& knobId, const std::string& value)
+{
+    hipdnn_flatbuffers_sdk::data_objects::StringValueT stringValue;
+    stringValue.value = value;
+    hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion knobValue;
+    knobValue.Set(std::move(stringValue));
+    return knobConfig(knobId, std::move(knobValue));
+}
+
+// What initializeExecutionSettings does with an engine config: the
+// accumulator type it leaves in the settings, and the status and message of
+// the exception it throws (SUCCESS and empty when it returns).
+struct SettingsOutcome
+{
+    std::optional<AccumulatorType> accumulatorType;
+    hipdnnPluginStatus_t status = HIPDNN_PLUGIN_STATUS_SUCCESS;
+    std::string message;
+};
+
+SettingsOutcome initializeSettings(const SdpaBwdPlanBuilder& planBuilder,
+                                   const Handle& handle,
+                                   const flatbuffers::DetachedBuffer& config)
+{
+    // initializeExecutionSettings reads only the knob, so any graph will do.
+    auto graphBuilder = createSdpaBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        config.data(), config.size());
+
+    Settings settings;
+    SettingsOutcome outcome;
+    try
+    {
+        planBuilder.initializeExecutionSettings(handle, graphWrapper, configWrapper, settings);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        outcome.status = error.getStatus();
+        outcome.message = error.what();
+    }
+    outcome.accumulatorType = settings.accumulatorType;
+    return outcome;
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, InitializeExecutionSettingsAcceptsA32)
+{
+    // An engine config without the knob leaves the setting unset, and buildPlan
+    // then uses A32. The config may be invalid (an empty buffer), valid with no
+    // knob settings, or valid with only another knob, which is what an engine
+    // that forwards knobs passes when the user sets none of this builder's.
+    std::vector<std::pair<std::string, flatbuffers::DetachedBuffer>> withoutKnob;
+    withoutKnob.emplace_back("invalid config", flatbuffers::DetachedBuffer{});
+    withoutKnob.emplace_back("no knobs",
+                             hipdnn_test_sdk::utilities::createValidEngineConfig(1).Release());
+    withoutKnob.emplace_back("another knob", knobConfig("sdpa.bwd.some_other_knob", "a16"));
+    for(const auto& [what, config] : withoutKnob)
+    {
+        const auto unset = initializeSettings(_planBuilder, _handle, config);
+        EXPECT_EQ(unset.status, HIPDNN_PLUGIN_STATUS_SUCCESS) << what << ": " << unset.message;
+        EXPECT_FALSE(unset.accumulatorType.has_value()) << what;
+    }
+
+    const auto a32 = initializeSettings(_planBuilder, _handle, knobConfig(ACC_TYPE_KNOB, "a32"));
+    EXPECT_EQ(a32.status, HIPDNN_PLUGIN_STATUS_SUCCESS) << a32.message;
+    EXPECT_TRUE(a32.accumulatorType == AccumulatorType::A32);
+}
+
+// "a16" gets its own rejection, not the unknown-value one, and leaves the
+// setting unset.
+TEST_F(TestSdpaBwdPlanBuilder, InitializeExecutionSettingsRejectsA16)
+{
+    const auto a16 = initializeSettings(_planBuilder, _handle, knobConfig(ACC_TYPE_KNOB, "a16"));
+    EXPECT_EQ(a16.status, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    EXPECT_NE(a16.message.find("'a16' is not supported"), std::string::npos) << a16.message;
+    EXPECT_FALSE(a16.accumulatorType.has_value());
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, InitializeExecutionSettingsRejectsUnknownAccumulator)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto unknown = initializeSettings(_planBuilder, _handle, knobConfig(ACC_TYPE_KNOB, "a8"));
+    EXPECT_EQ(unknown.status, HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    EXPECT_NE(unknown.message.find("Must be 'a32'"), std::string::npos) << unknown.message;
+    EXPECT_FALSE(unknown.accumulatorType.has_value());
+
+    IntValueT intValue;
+    intValue.value = 32;
+    KnobValueUnion knobValue;
+    knobValue.Set(intValue);
+    const auto nonString = initializeSettings(
+        _planBuilder, _handle, knobConfig(ACC_TYPE_KNOB, std::move(knobValue)));
+    EXPECT_EQ(nonString.status, HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(nonString.accumulatorType.has_value());
+}
+
+// An A16 setting that did not come through initializeExecutionSettings is
+// refused before buildPlan queries the device or resolves a kernel, so this
+// needs no GPU.
+TEST_F(TestSdpaBwdPlanBuilder, BuildPlanRejectsA16Setting)
+{
+    auto graphBuilder = createSdpaBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper noConfig(nullptr, 0);
+
+    Settings settings;
+    settings.accumulatorType = AccumulatorType::A16;
+    Context context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        _planBuilder.buildPlan(_handle, graphWrapper, noConfig, context);
+        FAIL() << "buildPlan should refuse an A16 setting";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        const std::string what = error.what();
+        EXPECT_NE(what.find("A16 accumulator is not supported"), std::string::npos) << what;
+    }
+    EXPECT_FALSE(context.hasValidPlan());
 }
 
 // =============================================================================

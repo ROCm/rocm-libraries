@@ -306,7 +306,7 @@ bool wouldBwdByteStridesFitUint32(
 // and odo additionally always uses the bf16_cvt=3 sentinel. The dqdkdv
 // (main backward) kernel carries the full dispatch axes; its atomic32 column
 // follows the resolved accumulator type (A32 → 3-kernel FP32-accumulator path,
-// A16 → 2-kernel BF16 path), while pssk=1, pddv=1 are pinned because the
+// A16 → 2-kernel 16-bit path), while pssk=1, pddv=1 are pinned because the
 // registry rows for pssk=1, pddv=0 do not exist in batch mode and the unpadded
 // (pssk=0, pddv=0) row uses a different kernarg layout than the engine builds
 // today. TODO: lift the padding pin once the engine emits the unpadded kernarg
@@ -455,7 +455,13 @@ std::string lookupKernelNameKey(PipelineStage stage,
 
 } // namespace bwd_dispatch
 
-// Engine knob identifier for accumulator precision (a32 vs a16)
+// Engine knob identifier for accumulator precision. Only "a32" is supported;
+// initializeExecutionSettings explains why "a16" is rejected.
+//
+// AsmSdpaEngine publishes no builder knobs and never calls
+// initializeExecutionSettings, so plans built through hipDNN always use the A32
+// default. The knob is kept so the builder contract stays correct if the engine
+// ever forwards knobs the way HipMlopsEngine does.
 static constexpr const char* K_ACC_TYPE_KNOB_NAME = "sdpa.bwd.accumulator_type";
 
 bool SdpaBwdPlanBuilder::isApplicable(
@@ -682,9 +688,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
-    // Applicability validates the default (A32) accumulator path: it is the
-    // default knob value and the most demanding (dq_acc + DQ_CONVERT). The user
-    // may still select A16 via the knob at buildPlan time.
+    // Applicability validates the A32 accumulator path, the only one this
+    // builder dispatches: initializeExecutionSettings rejects "a16" and
+    // buildPlan refuses an A16 setting.
     auto dispatchTuples = computeDispatchTuples(
         dataTypeId, headDimQk, maskType, bf16CvtValue, AccumulatorMode::A32);
 
@@ -783,6 +789,8 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
     auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
 
+    // An A16 setting is sized without dq_acc and not refused here. buildPlan is
+    // the gate: it refuses A16, so no plan ever runs with this size.
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
 
@@ -815,17 +823,41 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
     if(value == "a32")
     {
         executionSettings.accumulatorType = AccumulatorType::A32;
+        return;
     }
-    else if(value == "a16")
+
+    // "a16" is rejected. Every DQDKDV dispatch tuple requests pssk=1, pddv=1,
+    // and gfx942 ships no a16 kernel for that layout, so buildPlan would fail
+    // for every graph isApplicable accepts. (gfx950, which isApplicable does
+    // not accept yet, has such rows, but none has been validated here.) The
+    // gfx942 a16 kernels that do ship (pssk=0) are no drop-in replacement
+    // either. They add dQ atomically, in the 16-bit output type (BF16 or FP16),
+    // straight into the output dQ, address dQ and dO with Q's strides, and
+    // never load seqlen_k, the window bounds, or any V, dO, dK or dV stride
+    // except dK's seq stride. isApplicable cannot do the gating: it sees no
+    // knob, and it accepts graphs for A32 that A16 cannot run. Enabling A16
+    // needs, besides a kernel row, getCustomKnobs to list "a16" and this
+    // function to accept it only for graphs where:
+    //   - Sq == Skv and Sq % 64 == 0;
+    //   - the mask is none or causal, not a sliding window;
+    //   - the head dim is 64 or 128;
+    //   - dQ and dO have Q's strides;
+    //   - V has K's strides, dK and dV have K's head and batch strides, and dV
+    //     has dK's seq stride;
+    //   - dQ can be zeroed in one memset (e.g. packed), which the plan must do
+    //     before DQDKDV.
+    // The a16 dQ also differs between runs on identical inputs.
+    if(value == "a16")
     {
-        executionSettings.accumulatorType = AccumulatorType::A16;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "accumulator_type 'a16' is not supported by the ASM SDPA backward engine; "
+            "use 'a32'");
     }
-    else
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                                       "Invalid accumulator_type: '" + value
-                                                           + "'. Must be 'a32' or 'a16'");
-    }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                   "Invalid accumulator_type: '" + value
+                                                       + "'. Must be 'a32'");
 }
 
 void SdpaBwdPlanBuilder::buildPlan(
@@ -835,13 +867,23 @@ void SdpaBwdPlanBuilder::buildPlan(
     Context& executionContext) const
 {
     // -------------------------------------------------------------------------
-    // 0. Resolve accumulator type from the user knob / execution settings.
-    // This is the single source of truth for a32 (3-kernel) vs a16 (2-kernel)
-    // selection; it drives CSV row selection, DQ_CONVERT loading, the dq_acc
-    // workspace, and params below. Defaults to A32 when the knob is unset.
+    // 0. Resolve accumulator type from the execution settings, defaulting to
+    // A32 when the knob is unset. It drives CSV row selection, DQ_CONVERT
+    // loading, the dq_acc workspace, and params below. Only A32 is supported:
+    // initializeExecutionSettings rejects "a16", and an A16 setting that gets
+    // here by any other route is refused before any kernel is resolved. This is
+    // the only gate: getMaxWorkspaceSize still sizes an A16 setting, and the
+    // A16 branches below are kept for a future enablement.
     // -------------------------------------------------------------------------
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
+    if(accType != AccumulatorType::A32)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaBwdPlanBuilder::buildPlan: the A16 accumulator is not supported "
+            "(initializeExecutionSettings should have rejected it)");
+    }
 
     auto deviceStringOpt = plan_utils::tryGetDeviceString(
         handle.getStream(), "Failed to query device properties with error: ");
@@ -1003,9 +1045,9 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
-    // The resolved accumulator type (from the user knob, defaulting to A32) is
-    // authoritative: it selects the a32 vs a16 dqdkdv CSV row and gates whether
-    // the DQ_CONVERT stage is resolved and loaded below.
+    // accType is A32 here: step 0 refuses A16. It selects the dqdkdv CSV row's
+    // atomic32 value and gates whether the DQ_CONVERT stage is resolved and
+    // loaded below.
     auto dispatchTuples = computeDispatchTuples(dataTypeId,
                                                 static_cast<int>(headDimQk),
                                                 maskType,
@@ -1081,11 +1123,12 @@ void SdpaBwdPlanBuilder::buildPlan(
                                                   static_cast<int>(batchMode),
                                                   dqdtuple.bf16Cvt));
 
-    // The DQ_CONVERT stage (FP32 dq_acc → BF16 cast) is only part of the A32
-    // 3-kernel path. For A16 the DQDKDV kernel writes dQ directly in BF16, so
-    // dq_convert is not resolved, the dq_acc workspace is skipped, and the plan
-    // is built with a nullopt post-kernel. The resolved tuple's atomic32 column
-    // already mirrors accType (see computeDispatchTuples above).
+    // The DQ_CONVERT stage (FP32 dq_acc → output dtype cast) is only part of the
+    // A32 3-kernel path, the only path that gets here. For A16 (refused in step
+    // 0) the DQDKDV kernel adds dQ atomically into the output dQ, so dq_convert
+    // would not be resolved, the dq_acc workspace would be skipped, and the plan
+    // would be built with a nullopt post-kernel. The resolved tuple's atomic32
+    // column already mirrors accType (see computeDispatchTuples above).
     const bool useA32 = (accType == AccumulatorType::A32);
 
     std::optional<ResolvedKernel> dqConvertResolved;
@@ -1252,16 +1295,16 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
     KnobT accKnob;
     accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
     accKnob.description
-        = "Accumulator precision for backward dQ gradient: a32 (FP32, 3-kernel) or a16 (BF16, "
-          "2-kernel)";
+        = "Accumulator precision for backward dQ gradient. Only a32 (FP32, 3-kernel) is "
+          "supported";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";
     accKnob.default_value.Set(defaultValue);
 
+    // "a16" is not listed: initializeExecutionSettings rejects it.
     StringConstraintT constraint;
     constraint.valid_values.emplace_back("a32");
-    constraint.valid_values.emplace_back("a16");
     accKnob.constraint.Set(constraint);
 
     knobs.push_back(std::move(accKnob));
