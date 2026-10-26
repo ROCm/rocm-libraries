@@ -231,6 +231,190 @@ static std::string getKernelTocKey(std::string coName, const std::string& archId
     return asm_kernels::getAsmKernelTocKey(coName);
 }
 
+// Exclusive bounds on the sequence byte stride of Q, K, V and O. A kernel that
+// forms a tensor's row offsets with v_mul_i32_i24 addresses its rows correctly
+// only while the stride stays below 2^23 bytes; the fp8 kernels multiply
+// 16 * stride for Q and K, which lowers their bound to 2^19 bytes. Which tensors
+// go through that multiply differs by kernel (from the disassembly of the
+// vendored forward .co files; MI300 and MI308 builds and the causal variants
+// agree):
+// - gfx942 bf16 hd128: O.
+// - gfx942 bf16 hd192x128: Q, K and O.
+// - gfx942 fp8 hd128: Q and K (16 * stride), V and O.
+// - gfx950: Q, K, V and O.
+// The other strides keep the 2^32 bound of their uint32 kernarg field. The
+// gfx942 bf16 bounds were checked on a GPU; the fp8 and gfx950 ones were not.
+struct FwdSeqStrideBounds
+{
+    uint64_t q;
+    uint64_t k;
+    uint64_t v;
+    uint64_t o;
+};
+
+static FwdSeqStrideBounds getFwdSeqStrideBounds(const std::string& archId,
+                                                const std::string& dataTypeId,
+                                                int64_t headDimQk)
+{
+    constexpr uint64_t K_I24 = plan_utils::K_I24_STRIDE_BOUND;
+    constexpr uint64_t K_FP8_QK = K_I24 / 16;
+    constexpr uint64_t K_FIELD = plan_utils::K_U32_ADDRESS_MAX + 1;
+    if(archId == "gfx950")
+    {
+        return {K_I24, K_I24, K_I24, K_I24};
+    }
+    if(dataTypeId == "fp8bf16")
+    {
+        return {K_FP8_QK, K_FP8_QK, K_I24, K_I24};
+    }
+    if(headDimQk == 192)
+    {
+        return {K_I24, K_I24, K_FIELD, K_I24};
+    }
+    return {K_FIELD, K_FIELD, K_FIELD, K_I24};
+}
+
+// Largest power of two that divides `bytes`, capped at 2^32 (2^32 for 0). Every
+// lo32(b * bytes) is a multiple of it.
+static uint64_t lowestSetBitUpTo2Pow32(uint64_t bytes)
+{
+    constexpr uint64_t K_2_POW_32 = uint64_t{1} << 32;
+    const uint64_t lowestSetBit = bytes & (~bytes + 1);
+    return (lowestSetBit == 0 || lowestSetBit > K_2_POW_32) ? K_2_POW_32 : lowestSetBit;
+}
+
+// Validate that the selected forward kernel forms every Q/K/V/O/LSE offset
+// correctly. wouldFwdByteStridesFitUint32 bounds each stride field on its own;
+// every forward kernel also combines the strides as follows (from the .co
+// disassembly), and an offset that overflows gives a wrong O or LSE with no
+// error. Each overflow was confirmed on gfx942 unless marked otherwise:
+// - Slice base. The kernel adds b * Bs to the base pointer as a 64-bit value,
+//   but forms lo32(b * Bs) + h * Hs in 32 bits and drops its carry (h is the
+//   KV head for K and V). With Bs = 2^32 - 2^15 and Hs = 2^16 bytes, slice
+//   (1, 1) of Q, K or O was read or written 4 GiB low. Every lo32(b * Bs) is a
+//   multiple of the largest power of two dividing Bs, so nothing carries when
+//   (H - 1) * Hs is below it, which keeps packed power-of-two shapes over
+//   4 GiB. Otherwise (B - 1) * Bs + (H - 1) * Hs must fit 32 bits.
+// - Buffer size. Each (batch, head) buffer ends S * Seqs bytes after its base,
+//   a 32-bit product, and reads past the end return 0: K with Seqs = 2^24 bytes
+//   at S_kv = 256, and an SBHD decode with S_kv = 2^20 and 4 GiB K and V, gave
+//   O = 0. The kernel also stores the O rows of the last Q tile past S_q, up to
+//   the next multiple of ts_qo, at r * Seqs in 32 bits, and a store that wraps
+//   lands back inside the buffer, so O is bounded at that row count. With
+//   S_q = 1025 and an O stride of 4186128 bytes, the padded rows of the last
+//   tile overwrote rows of the first.
+// - Row offset. v_mul_i32_i24 reproduces a sequence byte stride only below
+//   2^23 (getFwdSeqStrideBounds lists the tensors each kernel passes through
+//   it). On hd128 bf16 an O stride of 2^23 bytes permuted the O rows, while Q,
+//   K and V strides of 2^23 bytes were correct. On hd192x128 a Q or K stride
+//   of 2^23 bytes gave a wrong O, and 2^23 - 128 bytes did not.
+// - LSE. The base of slice (b, h), (b * H_q + h) * lse_Hs * 4, is formed in 32
+//   bits and added to the 64-bit LSE pointer; the rows are buffer offsets from
+//   that base, so only the base must fit. With H_q = 3 and lse_Hs = 2^30 - 1
+//   elements, the LSE of head 2 was written 4 GiB low and its own rows were
+//   left unwritten, while rows of head 1 more than 2^32 bytes from the LSE
+//   pointer were correct.
+// Logs the first overflow found and returns false; returns true when every
+// offset fits.
+static bool wouldFwdOffsetsFitKernelArithmetic(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats,
+    const std::string& archId,
+    const std::string& dataTypeId,
+    const fmha_v3_fwdConfig& config)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
+    using plan_utils::lastIndex;
+    using plan_utils::saturatingProduct;
+    using plan_utils::saturatingSum;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+    constexpr uint64_t K_U32_MAX = plan_utils::K_U32_ADDRESS_MAX;
+
+    // Q/K/V elements are 1 byte for fp8 and 2 for bf16; O is BF16, LSE is FP32.
+    const int64_t inputBytes = (dataTypeId == "fp8bf16") ? 1 : 2;
+    constexpr int64_t K_OUTPUT_BYTES = 2;
+    constexpr int64_t K_LSE_BYTES = 4;
+
+    const int64_t seqLenQ = q.dims()->Get(2);
+    const int64_t paddedSeqLenQ = plan_utils::roundUpToTile(seqLenQ, config.ts_qo);
+    const auto seqStrideBounds = getFwdSeqStrideBounds(archId, dataTypeId, q.dims()->Get(3));
+
+    auto toString = [](const flatbuffers::Vector<int64_t>* values) {
+        return hipdnn_data_sdk::utilities::vecToString(
+            hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(values));
+    };
+
+    struct AddressedTensor
+    {
+        const char* name;
+        const TensorAttributes* tensor;
+        int64_t elementBytes;
+        // Rows the kernel addresses from each (batch, head) base.
+        int64_t rows;
+        // Exclusive bound on the sequence byte stride.
+        uint64_t seqStrideBound;
+    };
+    for(const AddressedTensor& io :
+        {AddressedTensor{"q", &q, inputBytes, seqLenQ, seqStrideBounds.q},
+         AddressedTensor{"k", &k, inputBytes, k.dims()->Get(2), seqStrideBounds.k},
+         AddressedTensor{"v", &v, inputBytes, v.dims()->Get(2), seqStrideBounds.v},
+         AddressedTensor{"o", &o, K_OUTPUT_BYTES, paddedSeqLenQ, seqStrideBounds.o}})
+    {
+        const auto* dims = io.tensor->dims();
+        const auto* strides = io.tensor->strides();
+        const auto describe = [&]() {
+            return std::string(io.name) + " tensor (Actual dims: " + toString(dims)
+                   + ", strides: " + toString(strides) + ")";
+        };
+
+        const uint64_t batchSpan
+            = saturatingProduct({lastIndex(dims->Get(0)), strides->Get(0), io.elementBytes});
+        const uint64_t headSpan
+            = saturatingProduct({lastIndex(dims->Get(1)), strides->Get(1), io.elementBytes});
+        HIP_KERNEL_RETURN_FALSE_IF(
+            saturatingSum({batchSpan, headSpan}) > K_U32_MAX
+                && headSpan >= lowestSetBitUpTo2Pow32(
+                       saturatingProduct({strides->Get(0), io.elementBytes})),
+            "batch and head byte offsets carry out of the kernel's 32-bit slice offset for "
+                + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            saturatingProduct({io.rows, strides->Get(2), io.elementBytes}) > K_U32_MAX,
+            std::to_string(io.rows)
+                + " rows of the sequence stride overflow the kernel's 32-bit buffer size for "
+                + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            saturatingProduct({strides->Get(2), io.elementBytes}) >= io.seqStrideBound,
+            "sequence byte stride must be below " + std::to_string(io.seqStrideBound)
+                + " for the kernel's 24-bit row-offset multiply for " + describe());
+    }
+
+    if(stats != nullptr)
+    {
+        // The kernel takes only the stats head stride (lse_Hs); the batch stride
+        // it uses is H_q * lse_Hs. The last slice base is (B * H_q - 1) * lse_Hs * 4.
+        const int64_t batchSize = q.dims()->Get(0);
+        const int64_t numHeadsQ = q.dims()->Get(1);
+        const int64_t lseHeadStride = stats->strides()->Get(1);
+        const uint64_t lastSliceBase = saturatingSum(
+            {saturatingProduct({lastIndex(batchSize), numHeadsQ, lseHeadStride, K_LSE_BYTES}),
+             saturatingProduct({lastIndex(numHeadsQ), lseHeadStride, K_LSE_BYTES})});
+        const auto describeStats = [&]() {
+            return "stats tensor (Actual dims: " + toString(stats->dims()) + ", strides: "
+                   + toString(stats->strides()) + ") for q tensor dims " + toString(q.dims());
+        };
+        HIP_KERNEL_RETURN_FALSE_IF(
+            lastSliceBase > K_U32_MAX,
+            "LSE batch and head byte offsets overflow the kernel's 32-bit slice offset for "
+                + describeStats());
+    }
+
+    return true;
+}
+
 bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -481,6 +665,17 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
         "Forward byte strides overflow uint32_t kernarg fields");
+
+    HIP_KERNEL_RETURN_FALSE_IF(!wouldFwdOffsetsFitKernelArithmetic(*qTensor,
+                                                                   *kTensor,
+                                                                   *vTensor,
+                                                                   *oTensor,
+                                                                   statsTensor,
+                                                                   deviceString,
+                                                                   dataTypeId,
+                                                                   cfg_fmha_fwd.at(key)),
+                               "Forward tensor offsets overflow the kernel's 32-bit or 24-bit "
+                               "address arithmetic");
 
     return true;
 }

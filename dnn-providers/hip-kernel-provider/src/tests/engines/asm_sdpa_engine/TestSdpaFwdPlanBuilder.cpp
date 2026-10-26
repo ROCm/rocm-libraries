@@ -1187,6 +1187,281 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
 }
 
+// =============================================================================
+// Tensor offsets and the kernels' 32-bit and 24-bit address arithmetic
+// =============================================================================
+
+// Replaces the strides, and the dims when non-empty, of the tensor called name.
+// The forward graph builders name their tensors q, k, v, o and stats.
+struct TensorLayout
+{
+    std::string name;
+    std::vector<int64_t> strides;
+    std::vector<int64_t> dims;
+};
+
+// Copy of a graph with the given tensor layouts applied.
+flatbuffers::FlatBufferBuilder withTensorLayouts(const flatbuffers::FlatBufferBuilder& base,
+                                                 const std::vector<TensorLayout>& layouts)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+    for(const auto& layout : layouts)
+    {
+        bool found = false;
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == layout.name)
+            {
+                tensor->strides = layout.strides;
+                if(!layout.dims.empty())
+                {
+                    tensor->dims = layout.dims;
+                }
+                found = true;
+            }
+        }
+        if(!found)
+        {
+            throw std::runtime_error("withTensorLayouts: no tensor named " + layout.name);
+        }
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return builder;
+}
+
+// The same layout on each named tensor.
+std::vector<TensorLayout> onEachTensor(const std::vector<std::string>& names,
+                                       const std::vector<int64_t>& strides,
+                                       const std::vector<int64_t>& dims = {})
+{
+    std::vector<TensorLayout> layouts;
+    layouts.reserve(names.size());
+    for(const auto& name : names)
+    {
+        layouts.push_back({name, strides, dims});
+    }
+    return layouts;
+}
+
+// Q, K, V and O, which the kernels address through the batch, head and sequence
+// byte strides of their argument block.
+const std::vector<std::string> K_STRIDED_TENSORS = {"q", "k", "v", "o"};
+
+// A sequence stride of 2^23 - 128 bytes, below every kernel's 24-bit bound.
+constexpr int64_t K_SEQ_STRIDE_BELOW_I24 = (int64_t{1} << 22) - 64;
+
+// Stats head stride for B=2 H_q=2 S_q=256: the last LSE slice starts at
+// (2 * 2 - 1) * Hs * 4 = 2^32 - 4 bytes, the largest base that fits 32 bits.
+// Its rows end past 2^32, which is fine: they are buffer offsets from the base.
+constexpr int64_t K_LSE_HEAD_STRIDE_FITS = 357913941;
+
+// A [2, 2, 256, 128] graph with stats whose head stride is lseHeadStride.
+flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithLseHeadStride(int64_t lseHeadStride)
+{
+    return withTensorLayouts(
+        createSdpaFwdGraph({2, 2, 256, 128},
+                           {2, 2, 256, 128},
+                           hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                           /*withAttnMask=*/false,
+                           /*withScale=*/false,
+                           /*withStats=*/true),
+        {{"stats", {2 * lseHeadStride, lseHeadStride, 1, 1}, {}}});
+}
+
+// Layouts whose offsets fit the forward kernels' 32-bit arithmetic. Every
+// sequence stride stays below 2^23 bytes, so these hold on gfx942 and gfx950.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsOffsetsWithinKernelArithmetic)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    for(const auto& name : K_STRIDED_TENSORS)
+    {
+        // Slice (1, 1) starts (2^32 - 2^17) + 2^16 bytes in, below 2^32. On gfx942
+        // this was correct for Q and O.
+        acceptTests.emplace_back(
+            withTensorLayouts(createSdpaFwdGraph({2, 2, 256, 128}, {2, 2, 256, 128}),
+                              {{name, {(int64_t{1} << 31) - 65536, 32768, 128, 1}, {}}}),
+            name + " slice (1, 1) starting 2^16 bytes below 2^32");
+        // Batches 2^31 bytes apart: lo32(b * Bs) is 0 or 2^31, so adding the
+        // 2^16-byte head offset never carries, though the tensor is past 4 GiB.
+        acceptTests.emplace_back(
+            withTensorLayouts(createSdpaFwdGraph({3, 2, 256, 128}, {3, 2, 256, 128}),
+                              {{name, {int64_t{1} << 30, 32768, 128, 1}, {}}}),
+            name + " past 4 GiB in batches 2^31 bytes apart");
+        // With one head there is no head offset to carry.
+        acceptTests.emplace_back(
+            withTensorLayouts(createSdpaFwdGraph({4, 1, 256, 128}, {4, 1, 256, 128}),
+                              {{name, {(int64_t{1} << 31) - 1, 32768, 128, 1}, {}}}),
+            name + " past 4 GiB with one head");
+        // Each (batch, head) buffer is 512 rows of 2^23 - 128 bytes, 2^32 - 2^16.
+        acceptTests.emplace_back(
+            withTensorLayouts(
+                createSdpaFwdGraph({1, 1, 512, 128}, {1, 1, 512, 128}),
+                {{name,
+                  {K_SEQ_STRIDE_BELOW_I24, K_SEQ_STRIDE_BELOW_I24, K_SEQ_STRIDE_BELOW_I24, 1},
+                  {}}}),
+            name + " 512 rows of 2^23 - 128 bytes");
+    }
+    acceptTests.emplace_back(createSdpaFwdGraphWithLseHeadStride(K_LSE_HEAD_STRIDE_FITS),
+                             "LSE slice base just below 2^32, its rows past it");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// The forward kernels' 32-bit slice offsets, buffer sizes and LSE offsets.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOffsetsPast32Bits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    for(const auto& name : K_STRIDED_TENSORS)
+    {
+        // lo32(1 * Bs) + 1 * Hs = (2^32 - 2^15) + 2^16 carries. On gfx942 slice
+        // (1, 1) of Q, K or O was read or written 4 GiB low.
+        declineTests.emplace_back(
+            withTensorLayouts(createSdpaFwdGraph({2, 2, 256, 128}, {2, 2, 256, 128}),
+                              {{name, {(int64_t{1} << 31) - 16384, 32768, 128, 1}, {}}}),
+            name + " slice (1, 1) base carrying out of 32 bits");
+        // Heads 2^32 - 2 bytes apart: the third starts past 2^32.
+        declineTests.emplace_back(
+            withTensorLayouts(
+                createSdpaFwdGraph({1, 3, 256, 128}, {1, 3, 256, 128}),
+                {{name, {(int64_t{1} << 31) - 1, (int64_t{1} << 31) - 1, 128, 1}, {}}}),
+            name + " third head starting past 2^32");
+        // 513 rows of 2^23 - 128 bytes do not fit a 32-bit buffer size.
+        declineTests.emplace_back(
+            withTensorLayouts(
+                createSdpaFwdGraph({1, 1, 513, 128}, {1, 1, 513, 128}),
+                {{name,
+                  {K_SEQ_STRIDE_BELOW_I24, K_SEQ_STRIDE_BELOW_I24, K_SEQ_STRIDE_BELOW_I24, 1},
+                  {}}}),
+            name + " 513 rows of 2^23 - 128 bytes");
+    }
+    // O rows of 8,000,000 bytes: the 513 real rows fit a 32-bit buffer size,
+    // but the kernel also stores the last Q tile's rows up to 768.
+    constexpr int64_t K_O_SEQ_STRIDE = 4000000;
+    declineTests.emplace_back(
+        withTensorLayouts(createSdpaFwdGraph({1, 1, 513, 128}, {1, 1, 513, 128}),
+                          {{"o", {K_O_SEQ_STRIDE, K_O_SEQ_STRIDE, K_O_SEQ_STRIDE, 1}, {}}}),
+        "o rows of the last Q tile past 2^32");
+    // (2 * 2 - 1) * Hs * 4 = 2^32 + 8.
+    declineTests.emplace_back(createSdpaFwdGraphWithLseHeadStride(K_LSE_HEAD_STRIDE_FITS + 1),
+                              "LSE slice base past 2^32");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Exclusive bound on each tensor's sequence byte stride in each forward kernel
+// (getFwdSeqStrideBounds), or 0 where no v_mul_i32_i24 reads the stride. On
+// gfx942 hd128 bf16, an O stride of 2^23 bytes gave wrong rows, while O at
+// 2^23 - 128 bytes and Q, K and V at 2^23 bytes were correct. The other bounds
+// come from the disassembly of the kernels.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsSequenceStridesByKernelRowArithmetic)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    struct SeqStrideBound
+    {
+        const char* tensor;
+        int64_t elementBytes;
+        int64_t boundBytes;
+    };
+    constexpr int64_t K_I24 = int64_t{1} << 23;
+
+    // B = H = 1 and S = 16, so the strides of the size-1 axes are 16 rows.
+    const auto checkKernel = [&](const std::string& kernel,
+                                 const flatbuffers::FlatBufferBuilder& base,
+                                 const std::vector<SeqStrideBound>& bounds) {
+        const auto withSeqStrideBytes = [&](const char* tensor,
+                                            int64_t elementBytes,
+                                            int64_t bytes) {
+            const int64_t stride = bytes / elementBytes;
+            return GraphTest{
+                withTensorLayouts(base, {{tensor, {16 * stride, 16 * stride, stride, 1}, {}}}),
+                kernel + " " + tensor + " sequence stride of " + std::to_string(bytes) + " bytes"};
+        };
+        for(const auto& bound : bounds)
+        {
+            if(bound.boundBytes == 0)
+            {
+                const GraphTest test = withSeqStrideBytes(bound.tensor, bound.elementBytes, K_I24);
+                EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper()))
+                    << test.message;
+                continue;
+            }
+            const GraphTest atBound
+                = withSeqStrideBytes(bound.tensor, bound.elementBytes, bound.boundBytes);
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, atBound.graphWrapper()))
+                << atBound.message;
+            const GraphTest belowBound
+                = withSeqStrideBytes(bound.tensor, bound.elementBytes, bound.boundBytes - 128);
+            EXPECT_TRUE(_planBuilder.isApplicable(_handle, belowBound.graphWrapper()))
+                << belowBound.message;
+        }
+    };
+
+    const std::vector<int64_t> dims128 = {1, 1, 16, 128};
+    const std::vector<int64_t> dims192 = {1, 1, 16, 192};
+    if(deviceString == "gfx950")
+    {
+        checkKernel("gfx950 bf16 hd128",
+                    createSdpaFwdGraph(dims128, dims128),
+                    {{"q", 2, K_I24}, {"k", 2, K_I24}, {"v", 2, K_I24}, {"o", 2, K_I24}});
+        checkKernel("gfx950 bf16 hd192x128",
+                    createSdpaFwdGraph(dims192, dims128),
+                    {{"q", 2, K_I24}, {"k", 2, K_I24}, {"v", 2, K_I24}, {"o", 2, K_I24}});
+        return;
+    }
+    checkKernel("gfx942 bf16 hd128",
+                createSdpaFwdGraph(dims128, dims128),
+                {{"q", 2, 0}, {"k", 2, 0}, {"v", 2, 0}, {"o", 2, K_I24}});
+    checkKernel("gfx942 bf16 hd192x128",
+                createSdpaFwdGraph(dims192, dims128),
+                {{"q", 2, K_I24}, {"k", 2, K_I24}, {"v", 2, 0}, {"o", 2, K_I24}});
+    // The fp8 kernels multiply 16 * stride for Q and K. FP8 Q, K and V are one
+    // byte per element; O is BF16.
+    checkKernel("gfx942 fp8 hd128",
+                withTensorLayouts(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                                  onEachTensor(K_STRIDED_TENSORS,
+                                               hipdnn_data_sdk::utilities::generateStrides(dims128),
+                                               dims128)),
+                {{"q", 1, K_I24 / 16}, {"k", 1, K_I24 / 16}, {"v", 1, K_I24}, {"o", 2, K_I24}});
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
 {
     SKIP_IF_NO_DEVICES();
