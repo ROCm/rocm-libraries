@@ -2,29 +2,23 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
-## Unreleased
-
-### Added
-
-* Added gfx1250 FP16/BF16/exact-FP32 grouped forward candidates with channels-last operands and native NCHW/NCDHW output stores, avoiding an output-layout conversion when selected.
-
-### Resolved Issues
-
-* Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
-* Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
-* Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
-
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
 ### Added
 
 * Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
+* Added gfx1250 FP16/BF16/exact-FP32 grouped forward candidates with channels-last operands and native NCHW/NCDHW output stores, avoiding an output-layout conversion when selected.
 
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
 
+### Resolved Issues
+
+* Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
+* Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
+* Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
