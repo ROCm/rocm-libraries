@@ -259,6 +259,23 @@ namespace hiptensor
                         stream, (hip_bfloat16*)resource->hostReference().get(), elementsRef);
                     stream << std::endl;
                 }
+                else if(dataType == HIPTENSOR_R_64F)
+                {
+                    stream << "Tensor A elements (" << elementsA << "):\n";
+                    hiptensorPrintArrayElements<double>(
+                        stream, (double*)resource->hostInput1().get(), elementsA);
+                    stream << std::endl;
+
+                    stream << "Tensor B elements (" << elementsB << "):\n";
+                    hiptensorPrintArrayElements<double>(
+                        stream, (double*)resource->hostOutput().get(), elementsB);
+                    stream << std::endl;
+
+                    stream << "Tensor ref elements (" << elementsRef << "):\n";
+                    hiptensorPrintArrayElements<double>(
+                        stream, (double*)resource->hostReference().get(), elementsRef);
+                    stream << std::endl;
+                }
                 else
                 {
                     stream << "Tensor A elements (" << elementsA << "):\n";

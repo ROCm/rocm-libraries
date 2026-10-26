@@ -60,7 +60,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
 | `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
-| `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`. No kernel launch |
+| `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`; a permute whose output data type differs from the input's returns `NOT_SUPPORTED`. Allocates small device buffers but launches no kernel |
 | `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
@@ -142,7 +142,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | FP16/FP32/FP64; ranks 2–6 (BF16 is accepted by the API but not tested — see Known Gaps) |
 | Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | FP16/FP32/FP64; ranks 2–6 |
 | Elementwise — output strides | `elementwise_output_strides_test` | User-supplied (gapped and packed) output strides for permute, binary, and trinary (FP32); launches kernels |
-| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation against fixed expected values (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary). Permute: FP32/FP16/BF16/FP64; binary and trinary: FP32/FP16 |
+| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation against fixed expected values (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary). Permute: FP32/FP16/BF16 (with a BF16 or FP32 scalar)/FP64 (checked at FP64 precision); binary and trinary: FP32/FP16 |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
@@ -150,7 +150,7 @@ All device tests compare GPU results against a CPU reference implementation usin
 
 **GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
 
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`). `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors.
+**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`). `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
 **Test tiers (CTest labels):**
 
