@@ -146,27 +146,31 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 
     // Lambda computing the masked, scaled score for a single kv position.
     // Recomputed in both softmax passes (correctness over speed for a reference).
+    // A masked key's score is -inf whatever its dot product, so the band and block mask are
+    // tested first and the dot is skipped. The Q and K row bases are computed once per key, not
+    // once per dim: the page-table lookup in rowOffset is not hoisted by the compiler. Both keep
+    // the arithmetic of every unmasked score unchanged.
+    const long long qRowBase = b * args.qStr.s[0] + h * args.qStr.s[1] + sq * args.qStr.s[2];
     auto score = [&](long long skv) -> COMPUTE_TYPE {
-        COMPUTE_TYPE dot = static_cast<COMPUTE_TYPE>(0);
-        for(long long d = 0; d < args.headDim; ++d)
-        {
-            long long qIdx = b * args.qStr.s[0] + h * args.qStr.s[1] + sq * args.qStr.s[2]
-                             + d * args.qStr.s[3];
-            long long kIdx = rowOffset(args.pageTableK,
-                                       args.pageTableKStrB,
-                                       args.pageTableKStrT,
-                                       args.blockSizeK,
-                                       args.kStr,
-                                       skv)
-                             + kvHeadK * args.kStr.s[1] + d * args.kStr.s[3];
-            dot += toAccum(q[qIdx]) * toAccum(k[kIdx]);
-        }
-        // The shared score pipeline (scale, softcap, bias, ALiBi), then the band.
         if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv)
            || sdpa_common::blockMasked(args.score, b, h, sq, skv))
         {
             return negInf;
         }
+        const long long kRowBase = rowOffset(args.pageTableK,
+                                             args.pageTableKStrB,
+                                             args.pageTableKStrT,
+                                             args.blockSizeK,
+                                             args.kStr,
+                                             skv)
+                                   + kvHeadK * args.kStr.s[1];
+        COMPUTE_TYPE dot = static_cast<COMPUTE_TYPE>(0);
+        for(long long d = 0; d < args.headDim; ++d)
+        {
+            dot += toAccum(q[qRowBase + d * args.qStr.s[3]])
+                   * toAccum(k[kRowBase + d * args.kStr.s[3]]);
+        }
+        // The shared score pipeline (scale, softcap, bias, ALiBi).
         return sdpa_common::scoreFromDot(args.score, dot, b, h, sq, skv, args.numHeads);
     };
 
