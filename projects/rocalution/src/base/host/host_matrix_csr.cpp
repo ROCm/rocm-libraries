@@ -789,7 +789,7 @@ namespace rocalution
     bool HostMatrixCSR<ValueType>::ExtractDiagonal(BaseVector<ValueType>* vec_diag) const
     {
         assert(vec_diag != NULL);
-        assert(vec_diag->GetSize() >= this->nrow_);
+        assert(vec_diag->GetSize() >= std::min(this->nrow_, this->ncol_));
 
         HostVector<ValueType>* cast_vec_diag = dynamic_cast<HostVector<ValueType>*>(vec_diag);
 
@@ -817,7 +817,7 @@ namespace rocalution
     bool HostMatrixCSR<ValueType>::ExtractInverseDiagonal(BaseVector<ValueType>* vec_inv_diag) const
     {
         assert(vec_inv_diag != NULL);
-        assert(vec_inv_diag->GetSize() == this->nrow_);
+        assert(vec_inv_diag->GetSize() >= std::min(this->nrow_, this->ncol_));
 
         HostVector<ValueType>* cast_vec_inv_diag
             = dynamic_cast<HostVector<ValueType>*>(vec_inv_diag);
@@ -3703,7 +3703,7 @@ namespace rocalution
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::DiagonalMatrixMultL(const BaseVector<ValueType>& diag)
     {
-        assert(diag.GetSize() == this->ncol_);
+        assert(diag.GetSize() == this->nrow_);
 
         const HostVector<ValueType>* cast_diag = dynamic_cast<const HostVector<ValueType>*>(&diag);
         assert(cast_diag != NULL);

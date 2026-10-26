@@ -77,6 +77,28 @@ enum class MetadataType
     INT_LIST,
 };
 
+/// The descriptor spelling of @p type, which `metadataTypeFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(MetadataType type)
+{
+    switch(type)
+    {
+    case MetadataType::BOOL:
+        return "bool";
+    case MetadataType::INT:
+        return "int";
+    case MetadataType::FLOAT:
+        return "float";
+    case MetadataType::STRING:
+        return "string";
+    case MetadataType::INT_LIST:
+        return "int_list";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(type)) + ")";
+}
+
 inline MetadataType metadataTypeOf(const MetadataValue& value)
 {
     return static_cast<MetadataType>(value.index());
@@ -317,6 +339,26 @@ enum class KernelSourceKind
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
+
+/// The descriptor spelling of @p kind, which `kernelSourceKindFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(KernelSourceKind kind)
+{
+    switch(kind)
+    {
+    case KernelSourceKind::EMBEDDED_SOURCE:
+        return "embedded_source";
+    case KernelSourceKind::KPACK:
+        return "kpack";
+    case KernelSourceKind::HSACO_FILE:
+        return "hsaco_file";
+    case KernelSourceKind::ROCKE_BUILDER:
+        return "rocke_builder";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(kind)) + ")";
+}
 
 /// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
 /// metadata note declares it -- read out of the object by the packager, never authored.

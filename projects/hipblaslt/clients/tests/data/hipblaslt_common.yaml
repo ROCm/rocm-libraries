@@ -637,8 +637,8 @@ Arguments:
   - compute_input_typeB: hipDataType
   - scale_type: hipDataType
   - initialization: hipblaslt_initialization
-  - gpu_arch: c_char*16
-  - gpu_arch_exclude: c_char*16
+  - gpu_arch: c_char*32
+  - gpu_arch_exclude: c_char*32
   - pad: c_uint32
   - grouped_gemm: c_int32
   - threads: c_uint16
