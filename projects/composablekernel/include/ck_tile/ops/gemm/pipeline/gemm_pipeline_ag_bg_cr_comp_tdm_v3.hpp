@@ -8,6 +8,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v3_policy.hpp"
 
 #include "ck_tile/core/arch/barrier.hpp"
+#include "ck_tile/core/arch/split_barrier.hpp"
 #include "ck_tile/core/tensor/tile_window_utils.hpp"
 
 namespace ck_tile {
@@ -356,6 +357,71 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 });
             };
 
+#ifndef CK_TDM_V3_SPLIT_BARRIER
+#define CK_TDM_V3_SPLIT_BARRIER 1
+#endif
+#ifndef CK_TDM_V3_ARRIVE_AT_END
+#define CK_TDM_V3_ARRIVE_AT_END 1
+#endif
+#ifndef CK_TDM_V3_LIGHT_ARRIVE
+#define CK_TDM_V3_LIGHT_ARRIVE 1
+#endif
+            auto stage_wait = [&]() {
+#if CK_TDM_V3_LIGHT_ARRIVE
+                __builtin_amdgcn_s_barrier_wait(-1);
+#else
+                workgroup_barrier_wait();
+#endif
+            };
+            // One split barrier per LDS stage: every wave arrives once its last LDS read of stage
+            // s has drained (the fill issuers first wait for their outstanding fill of the other
+            // stage, so the arrive also publishes that stage), runs the last sub-tile's WMMAs, and
+            // waits only afterwards. The wait then covers both hazards the two full barriers of
+            // the plain loop served: stage s may be refilled, and the other stage may be read.
+            const bool is_issuer = is_a_issuer0 || is_b_issuer0 || is_a_issuer1 || is_b_issuer1;
+            auto stage_gemm_arrive = [&](auto s) {
+                static_for<0, sub_tile_num, 1>{}([&](auto i) {
+                    constexpr auto mode = sub_tile_num == 1               ? WindowSlideMode::Stay
+                                          : (i.value == sub_tile_num - 1) ? WindowSlideMode::Reset
+                                                                          : WindowSlideMode::Move;
+                    block_gemm.template LocalPrefetch<mode>(a_block_tile,
+                                                            b_block_tile,
+                                                            a_lds_gemm_windows[s],
+                                                            b_lds_gemm_windows[s],
+                                                            is_a_load_tr_v,
+                                                            is_b_load_tr_v);
+                    if constexpr(i.value == sub_tile_num - 1 && !CK_TDM_V3_ARRIVE_AT_END)
+                    {
+#if CK_TDM_V3_LIGHT_ARRIVE
+                        // Plain arrive: drain this wave's LDS reads, then signal. No fence and no
+                        // sched_barrier pins, which at this tile's 256-VGPR budget force spills.
+                        s_wait_dscnt<0>();
+                        if(is_issuer)
+                        {
+                            s_wait_tensorcnt<0>();
+                        }
+                        __builtin_amdgcn_s_barrier_signal(-1);
+#else
+                        if(is_issuer)
+                        {
+                            s_wait_tensorcnt<0>();
+                        }
+                        workgroup_barrier_arrive();
+#endif
+                    }
+                    block_gemm(c_block_tile, a_block_tile, b_block_tile);
+                });
+#if CK_TDM_V3_ARRIVE_AT_END
+                // Arrive after the stage's last WMMAs: one barrier per stage, no overlap window.
+                s_wait_dscnt<0>();
+                if(is_issuer)
+                {
+                    s_wait_tensorcnt<0>();
+                }
+                __builtin_amdgcn_s_barrier_signal(-1);
+#endif
+            };
+
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(HasHotLoop)
             {
@@ -405,9 +471,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 }
                             }
                         }
+#if CK_TDM_V3_SPLIT_BARRIER
+                        stage_gemm_arrive(I0{});
+                        stage_wait();
+#else
                         stage_gemm(I0{});
 
                         block_sync_lds();
+#endif
 
                         if(is_a_issuer0)
                         {
@@ -423,6 +494,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                                     b_copy_lds_windows[number<0>{}],
                                                     b_copy_dram_window);
                         }
+#if !CK_TDM_V3_SPLIT_BARRIER
                         if(is_a_issuer1 || is_b_issuer1)
                         {
                             s_wait_tensorcnt<kNewerFillsOnWait>();
@@ -430,6 +502,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
                         __builtin_amdgcn_s_barrier_signal(-1);
                         __builtin_amdgcn_s_barrier_wait(-1);
+#endif
                         __builtin_amdgcn_sched_barrier(0);
                         if constexpr(UseDataCachePrefetch)
                         {
@@ -465,9 +538,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     }
                     // pong
                     {
+#if CK_TDM_V3_SPLIT_BARRIER
+                        stage_gemm_arrive(I1{});
+                        stage_wait();
+#else
                         stage_gemm(I1{});
 
                         block_sync_lds();
+#endif
 
                         if(is_a_issuer1)
                         {
@@ -481,7 +559,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             Base::GlobalPrefetchTDM(
                                 tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
                         }
-
+#if !CK_TDM_V3_SPLIT_BARRIER
                         if(is_a_issuer0 || is_b_issuer0)
                         {
                             s_wait_tensorcnt<kNewerFillsOnWait>();
@@ -489,6 +567,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
                         __builtin_amdgcn_s_barrier_signal(-1);
                         __builtin_amdgcn_s_barrier_wait(-1);
+#endif
                         __builtin_amdgcn_sched_barrier(0);
                     }
                     i_global_read += 2;
@@ -497,6 +576,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             if constexpr(TailNum == TailNumber::Two)
             {
+#if CK_TDM_V3_SPLIT_BARRIER
+                stage_gemm_arrive(I0{});
+                stage_wait();
+#else
                 stage_gemm(I0{});
                 if(is_a_issuer1 || is_b_issuer1)
                 {
@@ -505,6 +588,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
                 __builtin_amdgcn_s_barrier_signal(-1);
                 __builtin_amdgcn_s_barrier_wait(-1);
+#endif
                 __builtin_amdgcn_sched_barrier(0);
                 stage_gemm(I1{});
             }
