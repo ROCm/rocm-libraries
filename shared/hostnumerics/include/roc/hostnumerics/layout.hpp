@@ -10,42 +10,16 @@
 #include <limits>
 #include <numeric>
 #include <optional>
-#include <roc/hostnumerics/detail/index_order.hpp>
 #include <roc/hostnumerics/detail/layout_offset.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace roc::hostnumerics {
-class Layout;
-
 namespace detail {
-
-inline constexpr std::string_view message(LayoutError error) noexcept {
-    switch (error) {
-        case LayoutError::ExtentOutOfRange:
-            return "Tensor extent exceeds ptrdiff_t.";
-        case LayoutError::ContiguousStrideOverflow:
-            return "Tensor contiguous stride overflow.";
-        case LayoutError::OffsetMultiplyOverflow:
-            return "Tensor layout offset multiplication overflow.";
-        case LayoutError::OffsetAddOverflow:
-            return "Tensor layout offset addition overflow.";
-        case LayoutError::OrderRankMismatch:
-            return "Tensor layout order rank does not match shape rank.";
-        case LayoutError::InvalidOrder:
-            return "Tensor layout order must contain each dimension once.";
-        case LayoutError::CoordinateRankMismatch:
-            return "Tensor coordinate rank does not match shape rank.";
-        case LayoutError::CoordinateOutOfRange:
-            return "Tensor coordinate is outside the shape.";
-    }
-    return "Unknown LayoutError failure.";
-}
 
 inline std::string LayoutFailure::message() const {
     switch (error) {
@@ -60,12 +34,14 @@ inline std::string LayoutFailure::message() const {
             return "Tensor extent " + std::to_string(value) + " in dimension " +
                    std::to_string(dimension) + " exceeds ptrdiff_t.";
         case LayoutError::ContiguousStrideOverflow:
+            return "Tensor contiguous stride overflow in dimension " + std::to_string(dimension) +
+                   ".";
         case LayoutError::OffsetMultiplyOverflow:
-        case LayoutError::OffsetAddOverflow: {
-            std::string result(detail::message(error));
-            result.pop_back();
-            return result + " in dimension " + std::to_string(dimension) + ".";
-        }
+            return "Tensor layout offset multiplication overflow in dimension " +
+                   std::to_string(dimension) + ".";
+        case LayoutError::OffsetAddOverflow:
+            return "Tensor layout offset addition overflow in dimension " +
+                   std::to_string(dimension) + ".";
         case LayoutError::CoordinateRankMismatch:
             return "Tensor coordinate rank " + std::to_string(value) +
                    " does not match shape rank " + std::to_string(limit) + ".";
@@ -73,10 +49,9 @@ inline std::string LayoutFailure::message() const {
             return "Tensor coordinate " + std::to_string(value) + " in dimension " +
                    std::to_string(dimension) + " is outside [0, " + std::to_string(limit) + ").";
         default:
-            return std::string(detail::message(error));
+            return "Unknown LayoutError failure.";
     }
 }
-
 }  // namespace detail
 
 // Maps logical coordinates to element offsets using a shape, strides and a
@@ -87,7 +62,6 @@ class Layout {
    public:
     Layout() = default;
     Layout(const Layout&) = default;
-    Layout& operator=(const Layout&) = default;
 
     // Moving leaves the source as a scalar with zero offset.
     Layout(Layout&& other) noexcept
@@ -97,13 +71,12 @@ class Layout {
         other.m_strides.clear();
     }
 
-    Layout& operator=(Layout&& other) noexcept {
-        if (this != &other) {
-            m_shape = std::move(other.m_shape);
-            m_strides = std::move(other.m_strides);
-            m_offset = std::exchange(other.m_offset, 0);
-            other.m_strides.clear();
-        }
+    // Copy the metadata before replacing this value so an allocation failure
+    // cannot leave shape and strides with different ranks.
+    Layout& operator=(Layout other) noexcept {
+        m_shape = std::move(other.m_shape);
+        m_strides = std::move(other.m_strides);
+        m_offset = other.m_offset;
         return *this;
     }
 
@@ -135,9 +108,14 @@ class Layout {
         if (order.size() != shape.rank())
             return Unexpected(
                 LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
-        if (const auto position = getInvalidOrderPosition(order, shape.rank()))
-            return Unexpected(LayoutFailure{LayoutError::InvalidOrder, *position, order[*position],
-                                            shape.rank()});
+        std::vector<bool> seen(shape.rank(), false);
+        for (size_t position = 0; position < order.size(); ++position) {
+            const size_t axis = order[position];
+            if (axis >= shape.rank() || seen[axis])
+                return Unexpected(
+                    LayoutFailure{LayoutError::InvalidOrder, position, axis, shape.rank()});
+            seen[axis] = true;
+        }
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank());
