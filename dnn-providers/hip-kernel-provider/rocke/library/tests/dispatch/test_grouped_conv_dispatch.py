@@ -246,7 +246,14 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
     req = gc.ConvGroupedRequest(**fields)
     with pytest.raises(ValueError, match=match):
         gc.dispatch_conv_grouped(req)
-    assert not gc.dispatch_conv_grouped_all(req)
+    results = gc.dispatch_conv_grouped_all(req)
+    if fields["arch"] == "gfx1250" and set(kw) == {"arch"}:
+        # Only the opt-in Winograd forward route; never an auto pick.
+        assert results
+        assert {r.spec.algorithm for r in results} == {"winograd"}
+        assert all(r.candidate.opt_in for r in results)
+    else:
+        assert not results
 
 
 def test_only_wgrad_has_no_candidates():
