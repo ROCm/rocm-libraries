@@ -398,6 +398,79 @@ class TestSplitKSpecDict(unittest.TestCase):
                     conv_implicit_gemm_spec_to_dict(_Without())
 
 
+def _engine_or_skip(case):
+    try:
+        import rocke_engine  # type: ignore
+    except ImportError:
+        case.skipTest("rocke_engine (the C++ engine extension) is not built")
+    return rocke_engine
+
+
+class TestEngineAgreement(unittest.TestCase):
+    """The Python and C++ engines, reached through the backend, agree on the
+    accumulator epilogue and on split-K admission."""
+
+    def test_split_k_with_a_fused_epilogue_is_rejected_by_both(self):
+        _engine_or_skip(self)
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        for epi in (
+            ConvAccumulatorEpilogue(bias=1.0),
+            ConvAccumulatorEpilogue(relu=True),
+            ConvAccumulatorEpilogue(clamp_min=-1.0, clamp_max=1.0),
+        ):
+            spec = _spec(split_k=2, acc_epilogue=epi)
+            for backend in ("python", "cpp"):
+                with self.subTest(epi=epi, backend=backend):
+                    with self.assertRaisesRegex(Exception, "identity acc_epilogue"):
+                        lower_conv_implicit_gemm(spec, arch="gfx1250", backend=backend)
+
+    def test_unsplit_fused_epilogue_lowers_identically(self):
+        _engine_or_skip(self)
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        # fp16: the C++ conv implicit-GEMM builder stages A/B in LDS as f16
+        # whatever the dtype (a separate, pre-existing mirror gap), so bf16
+        # cannot be compared through this path yet.
+        fp16 = ConvDataSpec("fp16", "fp16", "fp16")
+        spec = _spec(
+            data=fp16,
+            acc_epilogue=ConvAccumulatorEpilogue(
+                bias=0.5, scale=2.0, relu=True, clamp_max=6.0
+            ),
+        )
+        py = lower_conv_implicit_gemm(spec, arch="gfx1250", backend="python")
+        cpp = lower_conv_implicit_gemm(spec, arch="gfx1250", backend="cpp")
+        self.assertEqual(py.llvm_text, cpp.llvm_text)
+        plain = lower_conv_implicit_gemm(
+            _spec(data=fp16), arch="gfx1250", backend="cpp"
+        )
+        self.assertNotEqual(cpp.llvm_text, plain.llvm_text)
+
+    def test_reduce_rejects_an_explicit_none_dtype_in_both(self):
+        engine = _engine_or_skip(self)
+        from kernels.common.conv_fwd_split_k_reduce import (
+            FwdSplitKReduceSpec,
+            build_conv_fwd_split_k_reduce,
+        )
+
+        with self.assertRaisesRegex(ValueError, r"dtype_d must be fp16 or bf16"):
+            build_conv_fwd_split_k_reduce(
+                FwdSplitKReduceSpec(dtype_d=None), arch="gfx1250"
+            )
+        with self.assertRaisesRegex(
+            Exception, r"dtype_d must be fp16 or bf16 \(got None\)"
+        ):
+            engine.conv_fwd_split_k_reduce_lower_llvm(
+                dict(dtype_d=None, vec=4), arch="gfx1250"
+            )
+        # An absent key keeps the engine default (the dataclass default, bf16).
+        ll = engine.conv_fwd_split_k_reduce_lower_llvm(dict(vec=4), arch="gfx1250")
+        self.assertIn("bf16", ll)
+
+
 class TestSplitKReduceEngine(unittest.TestCase):
     """The C++ Stage 2 builder fails cleanly on a name it cannot hold."""
 

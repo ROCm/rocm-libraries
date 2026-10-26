@@ -1569,6 +1569,27 @@ void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
 
 /* ========================= conv_implicit_gemm ======================= */
 
+/* ConvAccumulatorEpilogue dict {bias, scale, relu, clamp_min, clamp_max}
+ * (clamp_* None => unset). Absent keys keep the identity default. */
+void fill_conv_acc_epilogue(rocke_conv_acc_epilogue_t* e, const py::dict& d)
+{
+    if(d.contains("bias") && !d["bias"].is_none())
+        e->bias = d["bias"].cast<double>();
+    if(d.contains("scale") && !d["scale"].is_none())
+        e->scale = d["scale"].cast<double>();
+    e->relu = dict_bool(d, "relu", e->relu);
+    if(d.contains("clamp_min") && !d["clamp_min"].is_none())
+    {
+        e->has_clamp_min = true;
+        e->clamp_min = d["clamp_min"].cast<double>();
+    }
+    if(d.contains("clamp_max") && !d["clamp_max"].is_none())
+    {
+        e->has_clamp_max = true;
+        e->clamp_max = d["clamp_max"].cast<double>();
+    }
+}
+
 rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
                                                       std::deque<std::string>& store)
 {
@@ -1632,6 +1653,10 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     /* The wavelet load-wave count sizes the launch block and the load-wave
      * loaders; dropped, a non-default count builds a different kernel. */
     s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);
+    /* The fused accumulator epilogue: dropped, the engine would build the
+     * identity epilogue (and admit split-K specs Python rejects). */
+    if(d.contains("acc_epilogue") && py::isinstance<py::dict>(d["acc_epilogue"]))
+        fill_conv_acc_epilogue(&s.acc_epilogue, d["acc_epilogue"].cast<py::dict>());
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
@@ -2749,6 +2774,11 @@ rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dic
         return store.back().c_str();
     };
     rocke_fwd_split_k_reduce_spec_t s = rocke_fwd_split_k_reduce_spec_default();
+    /* An explicit dtype_d=None is a malformed spec (Python validate() rejects
+     * it), not a request for the bf16 default: pass NULL so the builder
+     * rejects it. Only an absent key keeps the default. */
+    if(d.contains("dtype_d") && d["dtype_d"].is_none())
+        s.dtype_d = NULL;
     s.vec = dict_int(d, "vec", s.vec);
     s.block_size = dict_int(d, "block_size", s.block_size);
     /* The unrolled fold bakes the slab count: it must match the launch's

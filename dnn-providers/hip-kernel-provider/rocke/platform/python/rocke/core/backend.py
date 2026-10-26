@@ -887,6 +887,17 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
     return d
 
 
+def _conv_acc_epilogue_to_dict(epi: Any) -> Dict[str, Any]:
+    """:class:`ConvAccumulatorEpilogue` -> dict (clamp bounds None when unset)."""
+    return dict(
+        bias=float(epi.bias),
+        scale=float(epi.scale),
+        relu=bool(epi.relu),
+        clamp_min=None if epi.clamp_min is None else float(epi.clamp_min),
+        clamp_max=None if epi.clamp_max is None else float(epi.clamp_max),
+    )
+
+
 def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
     fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
@@ -923,6 +934,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         split_k_cluster=spec.split_k_cluster,
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=spec.num_load_waves,
+        # The fused accumulator epilogue changes the emitted epilogue (and
+        # split-K admission); dropped, the engine would build the identity.
+        acc_epilogue=_conv_acc_epilogue_to_dict(spec.acc_epilogue),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the
