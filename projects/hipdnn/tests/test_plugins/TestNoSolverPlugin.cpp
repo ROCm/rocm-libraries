@@ -10,7 +10,8 @@ thread_local char
     = "";
 
 // Reports its engine applicable for every graph, then cannot build a plan for
-// it. Mirrors a provider whose applicability check is a cheap op-level predicate
+// it and says so with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE from plan creation.
+// Mirrors a provider whose applicability check is a cheap op-level predicate
 // while the real solver search only happens when the execution plan is created.
 class NoSolverPlugin : public TestPluginBase
 {
@@ -44,7 +45,7 @@ public:
 
     void onCreateExecutionContext() const override
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                                                        "NoSolverPlugin: no applicable solver");
     }
 };

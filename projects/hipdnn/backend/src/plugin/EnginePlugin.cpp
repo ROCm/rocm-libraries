@@ -398,12 +398,23 @@ hipdnnEnginePluginExecutionContext_t
 {
     assert(_initialized);
     hipdnnEnginePluginExecutionContext_t execContext;
-    invokePluginFunction("create execution context",
-                         _funcCreateExecutionContext,
-                         handle,
-                         engineConfig,
-                         opGraph,
-                         &execContext);
+    const auto status = _funcCreateExecutionContext(handle, engineConfig, opGraph, &execContext);
+    // NOT_APPLICABLE here means the engine accepted the graph when applicability was
+    // queried but has no solver for it. It is reported separately from a failure so
+    // callers can move on to another engine.
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                              std::string("Engine has no solver for the graph: ")
+                                  + std::string(getLastErrorString()));
+    }
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                              std::string("Failed to create execution context. Status: ")
+                                  + toString(status) + "(" + std::to_string(status) + ")"
+                                  + ", Error: " + std::string(getLastErrorString()));
+    }
     return execContext;
 }
 

@@ -119,12 +119,16 @@ Frontend API control flow
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
      4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()
+     5. graph.build_plans()          [finalizes the active plan]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
               -> Plugin: hipdnnEnginePluginCreateExecutionContext()
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+        c. If finalize returns HIPDNN_STATUS_NOT_SUPPORTED (the engine's
+           CreateExecutionContext reported HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE:
+           no solver), repeat a-b for the next ranked plan.
+           Any other failure is returned to the caller.
 
 
 ``graph.get_workspace_size()``

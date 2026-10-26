@@ -9,6 +9,7 @@
 #include <optional>
 #include <utility>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -139,8 +140,10 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
         slots.emplace_back(entry);
     }
 
-    // Caller thread, in order. The first error ends the walk where the sequential loop would
-    // have thrown, so no later engine runs.
+    // Caller thread, in order. An engine that throws a std::exception is recorded and the walk
+    // goes on, as the sequential loop skips it and moves to the next engine. Any other
+    // exception ends the walk where the sequential loop would have let it propagate, so no
+    // later engine runs.
     for(std::size_t index = 0; index < slots.size(); ++index)
     {
         auto& slot = slots[index];
@@ -156,6 +159,10 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
             {
                 slot.verdict = static_cast<char>(slot.engine->isApplicable(handle, opGraph));
             }
+        }
+        catch(const std::exception&)
+        {
+            slot.error = std::current_exception();
         }
         catch(...)
         {
@@ -233,12 +240,26 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
         }
     }
 
+    // In registration order, so the ids and the first non-std exception match the sequential
+    // loop. An engine whose begin or finish threw a std::exception is inapplicable and its
+    // siblings are still reported; anything else propagates from the rethrow.
     std::vector<int64_t> applicable;
     for(const auto& slot : slots)
     {
         if(slot.error)
         {
-            std::rethrow_exception(slot.error);
+            try
+            {
+                std::rethrow_exception(slot.error);
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("applicability manager: engine "
+                                       << hipdnn_data_sdk::utilities::formatEngineIdHex(slot.id)
+                                       << " threw from its applicability check and is skipped: "
+                                       << e.what());
+                continue;
+            }
         }
         if(slot.verdict != 0)
         {

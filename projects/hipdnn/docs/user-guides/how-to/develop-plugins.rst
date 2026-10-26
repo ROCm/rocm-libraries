@@ -302,8 +302,8 @@ The **Engine manager** is responsible for:
 For **Engine implementations**:
 
 - Each engine must have a globally unique ``int64_t`` identifier.
-- Implement ``isApplicable()`` to check if the engine solves the given graph.
-- Create execution contexts for executing plans.
+- Implement ``isApplicable()`` to check if the engine solves the given graph. Return ``false`` to decline a graph; that is the supported way to opt out. An exception from ``isApplicable()`` (or an error status from ``hipdnnEnginePluginGetApplicableEngineIds``) is tolerated: hipDNN logs a warning and skips that engine, or for a plugin-level status the whole plugin, and goes on with the others. A graph the engine accepts should be one it can build a plan for.
+- Create execution contexts for executing plans. If the engine accepted the graph but learns while building the plan that it has no solver for this configuration, report ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` from ``hipdnnEnginePluginCreateExecutionContext`` (with the SDK, throw ``HipdnnPluginException`` with that status from ``initializeExecutionContext``). hipDNN reports it as ``HIPDNN_STATUS_NOT_SUPPORTED`` and the frontend's default ``build_plans`` moves to the next ranked engine. Any other non-success status is a failure that is returned to the caller, so reserve ``NOT_APPLICABLE`` for the no-solver case and decline at ``isApplicable()`` whenever you can already tell.
 
   - Handle operation-specific kernel launches.
   - Manage memory transfers and synchronization.

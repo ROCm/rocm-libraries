@@ -1586,14 +1586,25 @@ hipDNN moves on to the next engine having lost nothing.
 
 After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so
 a later failure (a heuristic that ranks nothing, a source that fails to resolve, a descriptor that
-fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
-build. The catalog is settled during applicability and every later stage is a read, so the cost of
-being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
-accepting is a bug, not a legal outcome. For a multi-launch kernel
+fails validation, a resource or device error, an internal error) is not a fallback to another
+engine; it surfaces to the caller as a failed plan build. The catalog is settled during
+applicability and every later stage is a read, so the cost of being wrong is paid by the user, not
+absorbed by the framework. Producing no launchable kernel after accepting is a bug, not a legal
+outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
 never accepted. The same invariant applies to a composite's mandatory
 stage.
+
+There is one exception, and it is the plan-build analogue of declining at applicability. An engine
+that has no solver for a configuration it can only learn about while building the plan reports
+`HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` from `hipdnnEnginePluginCreateExecutionContext` (the SDK
+engine throws it from `initializeExecutionContext`). hipDNN's backend reports it as
+`HIPDNN_STATUS_NOT_SUPPORTED` from the execution plan's finalize, and the frontend's default
+`build_plans` then moves to the next ranked engine. This does not relax the invariant: an engine
+that can tell at applicability that it has no kernel declines there by returning false, and
+`NOT_APPLICABLE` at plan creation is reserved for what the engine can learn only when building.
+Every other failure status stays a failed plan build.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.
 A drop-in pack may be deleted between the applicability that accepted it and the plan build that

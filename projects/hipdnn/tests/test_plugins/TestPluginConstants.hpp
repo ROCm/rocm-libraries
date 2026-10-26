@@ -68,6 +68,15 @@ inline const std::string& testNoSolverPluginPath()
 }
 #endif
 
+#ifdef TEST_RESOURCE_FAIL_PLUGIN_NAME
+inline const std::string& testResourceFailPluginPath()
+{
+    static const std::string s_testResourceFailPluginPath
+        = getTestCustomFilepathForPlugin(TEST_RESOURCE_FAIL_PLUGIN_NAME);
+    return s_testResourceFailPluginPath;
+}
+#endif
+
 // The hashed-name plugin is consumed only by the frontend engine-filtering
 // integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME get
 // this accessor.

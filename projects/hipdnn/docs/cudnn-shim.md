@@ -80,6 +80,7 @@ Details: [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md).
 | Numerical-note filters | Mostly ignored with a warning. `deselect_numeric_notes(NONDETERMINISTIC)` keeps only engines that claim determinism. `deselect_numeric_notes` with `DOWN_CONVERT_INPUTS` or `REDUCED_PRECISION_REDUCTION`, and `select_numeric_notes(STRICT_NAN_PROP)`, record `GRAPH_NOT_SUPPORTED`. |
 | Behavior-note filters | hipDNN notes filter engines. cuDNN-only notes: `deselect` is ignored with a warning, `select` records `GRAPH_NOT_SUPPORTED`. |
 | Engine filters | Applied after plan creation. `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan; if none survives, plan creation, `check_support()`, and plan builds return `GRAPH_NOT_SUPPORTED`. |
+| Plan build fallback | `build_plans(HEURISTICS_CHOICE)` moves to the next ranked plan only when the failing engine has no solver for the graph; cuDNN builds the first plan that builds. Any other build failure is returned. If no plan builds, the active plan's backend error is returned. An active plan over the workspace limit is an error, not skipped. |
 | Engine indices | Dense graph-local indices mapped to hipDNN engines, in hipDNN's ranking order. |
 | Knobs | Only integer hipDNN knobs that map to a `KnobType_t` are reported. A knob choice the target engine cannot take returns `INVALID_VALUE`. |
 | `deselect_shared_mem_greater_than` | Non-zero limit records `GRAPH_NOT_SUPPORTED`. |

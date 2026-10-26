@@ -109,7 +109,9 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                 + " dimensions, expected " + std::to_string(expectedDims));
     }
 
-    // Validate that there are solutions available for this configuration.
+    // Validate that there are solutions available for this configuration. NOT_APPLICABLE tells
+    // the backend the engine accepted the graph but has no solver for it, so another engine
+    // can be tried.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
@@ -122,7 +124,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     if(solutionCount == 0)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
             "miopenConvolutionForwardGetSolutionCount returned no solutions");
     }
 

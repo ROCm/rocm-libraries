@@ -59,6 +59,12 @@ public:
      *
      * Typically this is implemented by checking all the engine's plan builders.
      *
+     * Return false to decline a graph; that is the supported way to opt out. An exception thrown
+     * from here is tolerated rather than fatal: the host logs a warning and skips this engine for
+     * the graph. Accepting a graph means the engine can build a plan for it; an engine that learns
+     * only while building that it has no solver throws NOT_APPLICABLE from
+     * initializeExecutionContext instead.
+     *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to check.
      * @return true if this engine can handle the graph, false otherwise.
@@ -167,8 +173,11 @@ public:
      * @param opGraph The operation graph.
      * @param engineConfig The engine configuration settings.
      * @param executionContext The execution context to initialize with a plan.
-     * @throws HipdnnPluginException if no applicable plan builder is found or
-     *         if plan creation fails.
+     * @throws HipdnnPluginException with status NOT_APPLICABLE if the engine accepted the graph at
+     *         applicability but has no solver for it (the host reports it as not supported and the
+     *         frontend's default plan build moves to the next ranked engine). Any other status is a
+     *         failure that is returned to the caller: no applicable plan builder is found, or plan
+     *         creation fails.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(

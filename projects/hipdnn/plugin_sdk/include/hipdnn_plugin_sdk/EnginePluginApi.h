@@ -104,6 +104,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  *
+ * @note A plugin declines a graph for an engine by leaving that engine's ID out of the result and returning
+ *       `HIPDNN_PLUGIN_STATUS_SUCCESS`; this is the supported way to decline. An error status is tolerated
+ *       rather than fatal: the host logs a warning and skips this plugin for the graph.
  * @note The caller is responsible for ensuring that the `engine_ids` array is large enough to hold up to
  *       `max_engines` IDs. If the number of applicable engines exceeds `max_engines`, only the first
  *       `max_engines` IDs will be returned, and the total count will be stored in `num_engines`.
@@ -228,6 +231,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @param[out] execution_context A pointer to a variable where the created execution context will be stored.
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
+ *         `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` reports that the engine accepted the graph at applicability but has
+ *         no solver for it (it cannot build an execution context for this configuration); the host reports this as
+ *         `HIPDNN_STATUS_NOT_SUPPORTED` and the frontend's default plan build moves to the next ranked engine. Any
+ *         other non-success status is a failure that is returned to the caller. An engine that can tell at
+ *         applicability that it has no solver should decline there instead.
  *
  * @note After calling this function, the engine configuration and the operation graph are no longer needed, as
  *       the execution context stores all the required information internally. Internal resources are allocated

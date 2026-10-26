@@ -79,8 +79,8 @@ public:
         EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
         EXPECT_CALL(*_mockHandle, getPluginResourceManager())
             .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-            .WillOnce(Return(std::vector<int64_t>{engineId}));
+        EXPECT_CALL(*_mockEnginePluginResourceManager, isEngineApplicable(engineId, _))
+            .WillOnce(Return(true));
     }
 
     /// Expects the first details-derived read, except engine name resolution. @p details
@@ -504,6 +504,62 @@ TEST_F(TestEngineDescriptor, FinalizeDoesNotQueryEngineDetails)
     // Neither do the attributes finalize() itself fixes.
     EXPECT_EQ(getEngineDescriptor()->getEngineId(), ENGINE_ID);
     (void)getEngineDescriptor()->toString();
+}
+
+/// A pin asks only its own engine's plugin, so a plugin that cannot answer for another
+/// engine never gets the chance to fail it.
+TEST_F(TestEngineDescriptor, FinalizeQueriesOnlyThePinnedEngineApplicability)
+{
+    expectFinalizeCalls(ENGINE_ID);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _)).Times(0);
+
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    EXPECT_TRUE(getEngineDescriptor()->isFinalized());
+}
+
+/// The owning plugin's real failure reaches the caller instead of being rewritten into a
+/// misleading out-of-range engine ID.
+TEST_F(TestEngineDescriptor, FinalizePropagatesOwningPluginApplicabilityError)
+{
+    auto engine = getEngineDescriptor();
+    setGraph();
+    setGlobalIndex(ENGINE_ID);
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, isEngineApplicable(ENGINE_ID, _))
+        .WillOnce(::testing::Throw(HipdnnException(
+            HIPDNN_STATUS_PLUGIN_ERROR,
+            "Failed to get applicable engine IDs. Status: 7, Error: plugin broke")));
+
+    try
+    {
+        engine->finalize();
+        FAIL() << "Expected the owning plugin's error to propagate";
+    }
+    catch(const HipdnnException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_STATUS_PLUGIN_ERROR);
+        EXPECT_EQ(e.getMessage(),
+                  "Failed to get applicable engine IDs. Status: 7, Error: plugin broke");
+    }
+    EXPECT_FALSE(engine->isFinalized());
+}
+
+/// A pinned engine that is simply not applicable to the graph is still a bad parameter.
+TEST_F(TestEngineDescriptor, FinalizeRejectsPinnedEngineThatIsNotApplicable)
+{
+    auto engine = getEngineDescriptor();
+    setGraph();
+    setGlobalIndex(ENGINE_ID);
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, isEngineApplicable(ENGINE_ID, _))
+        .WillOnce(Return(false));
+
+    ASSERT_THROW_HIPDNN_STATUS(engine->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_FALSE(engine->isFinalized());
 }
 
 TEST_F(TestEngineDescriptor, HeuristicResultMaterializesWithoutSelectorOrMetadataQueries)

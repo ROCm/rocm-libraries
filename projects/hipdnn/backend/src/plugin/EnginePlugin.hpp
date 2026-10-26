@@ -97,6 +97,10 @@ public:
                                     hipdnnEnginePluginExecutionContext_t executionContext) const;
 
     // Execution functions
+    /// Throws HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED) when the plugin answers
+    /// HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE: the engine accepted the graph at applicability but
+    /// has no solver for it. Any other failure is HIPDNN_STATUS_PLUGIN_ERROR. Both messages
+    /// carry the plugin's last error string.
     [[nodiscard]] virtual hipdnnEnginePluginExecutionContext_t
         createExecutionContext(hipdnnEnginePluginHandle_t handle,
                                const hipdnnPluginConstData_t* engineConfig,
