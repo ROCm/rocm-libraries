@@ -41,7 +41,7 @@ concurrency:
 jobs:
   configure:
     name: Configure Test Scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       test_projects: ${{ steps.scope.outputs.test_projects }}
     steps:
@@ -51,19 +51,15 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-
+      # Uses the runner's preinstalled python3 instead of actions/setup-python.
+      # --break-system-packages is required because the image manages its Python
+      # through apt and PEP 668 otherwise rejects installing into it.
       - name: Install python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pydantic requests
+        run: python3 -m pip install --break-system-packages pydantic requests
 
       - name: Collect rocm-libraries subtrees
         id: scope
-        run: python .github/scripts/therock_nightly_test_scope.py
+        run: python3 .github/scripts/therock_nightly_test_scope.py
 
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
