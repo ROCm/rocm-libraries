@@ -190,14 +190,12 @@ public:
         const auto out
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.out, deviceBuffers, numDeviceBuffers);
 
-        // The workspace slice: decode's output and merge's input. Launch takes its
-        // arguments by address, so the pointer needs a name.
-        void* partials = workspace;
         const hipStream_t stream = handle.getStream();
 
-        // Order is the handler's: decode, then merge, on the one stream of the handle.
-        dispatch.decode().kernelForStream(stream).launch(stream, in.ptr, partials);
-        dispatch.merge().kernelForStream(stream).launch(stream, partials, out.ptr);
+        // Order is the handler's: decode writes the workspace slice, then merge reads it,
+        // on the one stream of the handle.
+        dispatch.decode().kernelForStream(stream).launch(stream, in.ptr, workspace);
+        dispatch.merge().kernelForStream(stream).launch(stream, workspace, out.ptr);
     }
 
 private:
