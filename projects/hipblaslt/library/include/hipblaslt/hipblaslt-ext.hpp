@@ -186,6 +186,9 @@ namespace hipblaslt_ext
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
         HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
         HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set the int4 encoding of A (C API: HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT).
+        //! Throws std::invalid_argument for values outside hipblasLtInt4Encoding_t.
+        HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -196,6 +199,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute data type.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
+        HIPBLASLT_EXPORT hipblasLtInt4Encoding_t
+            getInt4EncodingA() const; //!< How the int4 weights in A are encoded.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
@@ -324,7 +329,7 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleC(const void* scaleC); //!< Set the scale C input pointer.
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
-            setScaleAux(const void* scaleAux); //!< Set the scale aux input pointer.
+            setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
         HIPBLASLT_EXPORT void setScaleAlphaVec(
             const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.

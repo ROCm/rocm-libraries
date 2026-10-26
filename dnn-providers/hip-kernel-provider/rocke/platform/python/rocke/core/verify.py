@@ -38,6 +38,9 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _assume_range_errors,
+    _int_add_wrap_error,
+    _int_cmp_pred_error,
     _is_flag_ptr,
     KernelDef,
     Op,
@@ -121,6 +124,7 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "arith.constant": ["value", "ity"],
     "arith.cmp": ["pred"],
     "arith.fcmp": ["pred"],
+    "arith.assume_range": ["multiple_of", "residue"],
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
@@ -316,6 +320,10 @@ class _Verifier:
                     f"{name}: result type {r.type.name} != operand type {a.type.name}",
                     op,
                 )
+            if name == "arith.add":
+                wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), a.type.name)
+                if wrap_error:
+                    self.err(wrap_error, op)
         elif name in _UNARY_SAME_TYPE:
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(
@@ -351,6 +359,33 @@ class _Verifier:
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
+            if name == "arith.cmp":
+                pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+                if pred_error:
+                    self.err(pred_error, op)
+        elif name == "arith.assume_range":
+            if len(op.operands) not in (1, 2) or len(op.results) != 1:
+                self.err(
+                    f"{name}: expected 1 or 2 operands / 1 result, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            v = op.operands[0]
+            if op.results[0].type != v.type:
+                self.err(
+                    f"{name}: result type {op.results[0].type.name} != "
+                    f"operand type {v.type.name}",
+                    op,
+                )
+            if len(op.operands) == 2 and op.operands[1].type != v.type:
+                self.err(
+                    f"{name}: hi_value type {op.operands[1].type.name} != "
+                    f"operand type {v.type.name}",
+                    op,
+                )
+            for message in _assume_range_errors(op.attrs, len(op.operands)):
+                self.err(message, op)
         elif name == "arith.select":
             if len(op.operands) != 3 or len(op.results) != 1:
                 self.err(f"{name}: expected 3 operands / 1 result", op)

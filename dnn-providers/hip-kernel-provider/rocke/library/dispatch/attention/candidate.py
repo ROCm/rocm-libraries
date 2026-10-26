@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from kernels.common.attention_unified import supports_native_unified_attention
+from kernels.common.attention_unified import (
+    supports_native_unified_attention,
+    supports_native_unified_attention_3d_tiled,
+    supports_native_unified_attention_tiled,
+)
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
@@ -37,6 +41,28 @@ from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_s
 DENSE_ALGORITHM = "attention_dense"
 DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
+
+
+def _tuning_precheck(variant: AttentionGeometryVariant):
+    """Coverage for one geometry variant. The scalar coverage check knows nothing
+    about the LSE output, so an LSE request also has to pass the gate of the
+    variant's own path: the split-KV gate owns which arches and features can
+    write LSE, and the 2D gate refuses it. That holds even if a 2D variant ever
+    declared the ``lse`` feature by mistake."""
+    path_gate = (
+        supports_native_unified_attention_3d_tiled
+        if variant.path == "3d"
+        else supports_native_unified_attention_tiled
+    )
+
+    def precheck(req):
+        problem = _tuning_problem(req)
+        ok, why = supports_native_unified_attention(problem, arch=variant.arch)
+        if ok and problem.emit_lse:
+            return path_gate(problem, arch=variant.arch)
+        return ok, why
+
+    return precheck
 
 
 def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
@@ -86,14 +112,17 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=ATTENTION_FEATURES,
+            # Only split-KV variants write LSE; 2D variants refuse the feature.
+            supports_features=(
+                ATTENTION_FEATURES | {"lse"}
+                if variant.path == "3d"
+                else ATTENTION_FEATURES
+            ),
         ),
         space=unified_space(variant),
         base=_tuning_problem,
         request_errors=_request_errors,
-        precheck=lambda req: supports_native_unified_attention(
-            _tuning_problem(req), arch=variant.arch
-        ),
+        precheck=_tuning_precheck(variant),
         signature=signature,
         build=build,
         bind_torch=bind_torch,

@@ -73,9 +73,9 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         ragged_offset spacing differs from seq_lens; a config with no such
 #         headroom is rejected. The in-block O pad rows hold the NaN sentinel
 #         (RFC 0014 §4.11.4) because kernels may leave them undefined
-#         mma_core_mode is "unset" (was "float"); it is the MMA operand
-#         precision, and a float request on bf16/fp16/fp8 inputs is a mismatch
-#         that ASM_SDPA_ENGINE declines (see #12844)
+#         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
+#         "float"); it is the MMA operand precision, and a float request on
+#         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
 GENERATOR_VERSION = "1.4.0"
 
 DTYPE_MAP = {
@@ -456,7 +456,7 @@ def build_graph_json(
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
-                    "mma_core_mode": "unset",
+                    "mma_core_mode": "fp8_e4m3" if fp8 else "unset",
                     "implementation": "AUTO",
                 },
             }

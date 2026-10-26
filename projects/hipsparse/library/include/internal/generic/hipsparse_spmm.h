@@ -217,7 +217,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmm_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG2</td>
@@ -225,7 +224,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG2</td>
@@ -234,13 +232,11 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
 *  <tr><th>ELL Algorithms
 *  <tr><td>HIPSPARSE_SPMM_BLOCKED_ELL_ALG1</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
 *  <tr><td>HIPSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
@@ -258,7 +254,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -268,7 +263,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="spmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B      <th>C         <th>compute_type
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F

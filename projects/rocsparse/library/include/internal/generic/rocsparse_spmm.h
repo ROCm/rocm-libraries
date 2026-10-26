@@ -82,7 +82,6 @@ extern "C" {
 *  be performed.
 *
 *  <table>
-*  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
 *  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Batched  <th>Notes
 *  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Default algorithm.</td>
 *  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Assigns a fixed number of threads per row, regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros.</td>
@@ -91,7 +90,6 @@ extern "C" {
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Batched  <th>Notes
 *  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Yes</td> <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
 *  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Yes</td> <td>Generally the fastest COO algorithm. This is the default algorithm.</td>
@@ -99,13 +97,11 @@ extern "C" {
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
 *  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
 *  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
 *  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
@@ -126,7 +122,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -136,7 +131,6 @@ extern "C" {
 *
 *  \par Mixed precisions:
 *  <table>
-*  <caption id="spmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B                     <th>C                        <th>compute_type
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r

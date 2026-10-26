@@ -95,12 +95,14 @@ def _paged_cache(torch, logical, block_size):
     "dim,block,tile",
     [(256, 16, None), (256, 32, None), (128, 64, None), (256, 64, 16), (256, 64, None)],
 )
-def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile, monkeypatch):
+def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
 
     torch, arch = gpu
+    if arch == "gfx950" and tile is not None and tile < block:
+        pytest.skip("gfx950 tile_size_override is a multiple of block_size")
     request = AttentionRequest(
         batch=3,
         nhead_q=8,
@@ -132,12 +134,12 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile, monkeypatch
         seqused_k=torch.tensor(lengths, dtype=torch.int32).cuda(),
     )
     spec = None
-    if tile is not None or (arch == "gfx942" and dim == 256 and block == 64):
+    if tile is not None:
         supported = dispatch_attention(replace(request, kv_block_size=32)).spec
         spec = replace(
             supported,
             kernel_spec=replace(
-                supported.kernel_spec, block_size=block, tile_size_override=tile or 32
+                supported.kernel_spec, block_size=block, tile_size_override=tile
             ),
         )
     kwargs = dict(
@@ -148,18 +150,6 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile, monkeypatch
         softcap=0,
         kv_layout="strided",
     )
-    if arch == "gfx942" and dim == 256 and block == 64 and tile is None:
-        monkeypatch.setattr(
-            au,
-            "compile_kernel",
-            lambda *a, **kw: pytest.fail("must reject before compile"),
-        )
-        with pytest.raises(ValueError, match="74752 B LDS"):
-            dispatch_attention(request)
-        for explicit in (None, spec):
-            with pytest.raises(ValueError, match="74752 B LDS"):
-                au.run_unified_attention_torch(**kwargs, tuning_spec=explicit)
-        return
     if tile is None:
         selected = dispatch_attention(request)
         binding = selected.candidate.bind_torch(
@@ -253,7 +243,6 @@ def test_strided_kv_decode(
         max_seqlen_k=capacity,
         dtype=dtype,
         sliding_window=window,
-        clamp_arch=arch,
         target_ctas=8,
     )
     stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
@@ -261,8 +250,16 @@ def test_strided_kv_decode(
     # Paged cases exercise the direct runtime; strided cases also test dispatch.
     if kv_layout == "strided":
         from dispatch.attention import AttentionRequest, dispatch_attention
+        from dispatch.attention.common import AttentionMaskType
 
+        # A decode window is anchored at the end of the sequence (bottom-right causal);
+        # NO_MASK + sliding_window is the non-causal top-left band.
         request = AttentionRequest(
+            mask_type=(
+                AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+                if window
+                else AttentionMaskType.NO_MASK
+            ),
             batch=batch,
             nhead_q=q_heads,
             nhead_k=kv_heads,
@@ -422,7 +419,6 @@ def test_decode_concurrent_workspace(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch=arch,
         target_ctas=8,
     )
     requests, expected = [], []
@@ -589,7 +585,6 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype=dtype,
-            clamp_arch=arch,
             target_ctas=8,
         ),
         q=q_host.cuda(),

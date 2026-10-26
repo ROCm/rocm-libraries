@@ -350,14 +350,18 @@ static void wavelet_fetch(rocke_conv_build_ctx_t* ctx,
                                             ctx->a_rsrc,
                                             NULL,
                                             a_staged);
-    rocke_coalesced_tile_loader_load_global(b,
-                                            &ctx->b_wavelet_loader,
-                                            ctx->wavelet_load_tid,
-                                            rocke_conv_b_descriptor,
-                                            ctx,
-                                            ctx->b_rsrc,
-                                            NULL,
-                                            b_staged);
+    /* The merged B descriptor under group_merge, as the sync path: Python
+     * swaps the closure once, so every consumer, the wavelet fetch included,
+     * loads through it. */
+    rocke_coalesced_tile_loader_load_global(
+        b,
+        &ctx->b_wavelet_loader,
+        ctx->wavelet_load_tid,
+        (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor,
+        ctx,
+        ctx->b_rsrc,
+        NULL,
+        b_staged);
 }
 
 /* wavelet_store: write staged VGPRs to LDS.

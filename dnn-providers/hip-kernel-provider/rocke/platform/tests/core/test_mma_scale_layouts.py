@@ -90,6 +90,29 @@ def test_scale_coordinates(dtype, block_k, role):
             layout.coord(b, lane, slot)
 
 
+def test_every_scaled_catalog_coordinates_match_independent_lane_oracle():
+    atoms = [
+        op
+        for op in ArchTarget.from_gfx("gfx1250").mma.ops
+        if op.family == "wmma_scaled"
+    ]
+    assert len(atoms) == 86
+    for atom in atoms:
+        for role in ("a_scale", "b_scale"):
+            layout = getattr(atom, f"{role}_layout")()
+            b = IRBuilder("all_scale_coordinates")
+            lane = b.thread_id_x()
+            count = 128 // atom.scale_block_k
+            assert layout.frag_len == count
+            for slot in range(count):
+                coords = layout.coord(b, lane, slot)
+                for l in range(32):
+                    actual = tuple(_evaluate(v, lane=l) for v in coords)
+                    assert actual == (
+                        (l % 16, slot) if role == "a_scale" else (slot, l % 16)
+                    )
+
+
 def test_scale_defaults_and_unavailable_maps():
     for gfx in known_arches():
         for atom in ArchTarget.from_gfx(gfx).mma.ops:

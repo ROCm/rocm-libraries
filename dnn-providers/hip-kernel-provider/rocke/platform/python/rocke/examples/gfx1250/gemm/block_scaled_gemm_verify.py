@@ -4,7 +4,7 @@
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
 Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use independent FP8/BF8, FP6/BF6, or FP4 operands and
-E8M0 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
+encoded scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after output-type rounding.
 Numerical equality treats positive and negative zero as equal; output zero-sign
 and signed-zero accumulation semantics are not verified.
@@ -48,6 +48,7 @@ from ...common.scaled_gemm_reference import (
     decode_e8m0,
     decode_fp4,
     decode_fp6,
+    decode_scale,
     make_case_inputs,
     pack_fp4_codes,
     pack_fp6_codes,
@@ -59,6 +60,7 @@ __all__ = [
     "decode_e8m0",
     "decode_fp4",
     "decode_fp6",
+    "decode_scale",
     "main",
     "make_case_inputs",
     "pack_fp4_codes",
@@ -136,6 +138,7 @@ def run_cases(
         fn = module.get_function(art.kernel_name)
         for case in cases:
             inputs = make_case_inputs(spec, case)
+            da, db = spec.resolved_scale_dtypes()
             expected = reference_result(
                 *inputs,
                 spec.block_k,
@@ -143,10 +146,12 @@ def run_cases(
                 dtype_a=spec.dtype_a,
                 dtype_b=spec.dtype_b,
                 dtype_c=spec.dtype_c,
+                scale_dtype_a=da,
+                scale_dtype_b=db,
             )
             label = (
                 f"{spec.resolved_matrix_path()}/{spec.dtype_a}x{spec.dtype_b}/{compile_route}/{case} "
-                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
+                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k} scales={da}/{db}"
             )
             got = _launch(rt, fn, spec, inputs)
             try:

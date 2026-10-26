@@ -26,6 +26,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -42,6 +43,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
@@ -74,10 +76,12 @@ constexpr const char* SERVED_ARCH = "gfx950";
 constexpr const char* BLOCK_M_KNOB = "block_m";
 constexpr const char* BLOCK_N_KNOB = "block_n";
 
-/// The heuristic path's selection line (GenericPlanBuilder::buildPlan), which names the
-/// kernel id as the kdp spells it: lowercase, hyphenated.
-constexpr const char* SELECTED_KERNEL_MARKER = "' selected kernel ";
+// The selection line spells the kernel id in lowercase with hyphens, in 36 characters.
 constexpr size_t KERNEL_ID_LENGTH = 36;
+
+// The knob case that the save and load cases build. Its graph sets the scale 1/sqrt(64), so a
+// loaded plan that applies the default scale 1.0 fails the comparison.
+constexpr const char* SAVE_LOAD_CASE = "D64_Bm128Bn64";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -108,6 +112,9 @@ struct GraphShape
     int64_t seqKv;
     /// Leaves attn_scale_value unset, so the engine must apply 1.0 (no scaling).
     bool omitScale = false;
+    /// Sets attn_scale_value to this instead of 1/sqrt(headSize), so a kernel that hard-wires
+    /// the default scale fails the comparison. Ignored when omitScale is set.
+    std::optional<float> scaleOverride = std::nullopt;
 };
 
 struct Tile
@@ -167,12 +174,19 @@ GraphShape withoutScale(GraphShape shape)
     return shape;
 }
 
+GraphShape withScale(GraphShape shape, float scale)
+{
+    shape.scaleOverride = scale;
+    return shape;
+}
+
 /// Forced (tile, head size) pairs and cold cases first; then one case for each remaining
 /// catalog head configuration, in ascending (head size, Hq, Hkv) order at B=1, Sq=Skv=256;
 /// then further cases until every (head size, dtype, causal, tile) class the catalog compiles
 /// runs at least once; then cold cases of an fp16 graph with an explicit mma_core_mode; then
-/// two forced cases with no attn_scale_value. Within them: bounds on both corners and both
-/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and forced cases with B > 1 and Sq != Skv.
+/// two forced cases with no attn_scale_value and one with a non-default attn_scale_value.
+/// Within them: bounds on both corners and both deprecated flags, fp16 and bf16, MHA, GQA and
+/// MQA, and forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -420,6 +434,12 @@ std::vector<KnobCase> knobCases()
          withoutScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256)),
          FORCED,
          Tile{256, 64}},
+        // A baked scale other than 1/sqrt(D) and 1.0: the engine must launch with the
+        // graph's value, not a default.
+        {"D128_Bm256Bn64_Scale2",
+         withScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256), 2.0F),
+         FORCED,
+         Tile{256, 64}},
     };
 }
 
@@ -487,7 +507,8 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     attributes.set_name(name);
     if(!shape.omitScale)
     {
-        attributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(shape.headSize)));
+        attributes.set_attn_scale(
+            shape.scaleOverride.value_or(1.0f / std::sqrt(static_cast<float>(shape.headSize))));
     }
     switch(shape.mask)
     {
@@ -502,10 +523,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
         break;
     case Mask::CAUSAL_MASK_FLAG:
-        attributes.set_causal_mask(true);
+        attributes.causal_mask = true;
         break;
     case Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG:
-        attributes.set_causal_mask_bottom_right(true);
+        attributes.causal_mask_bottom_right = true;
         break;
     default:
         throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");
@@ -668,7 +689,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
 std::optional<std::string>
     selectedKernelId(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
 {
-    const std::string marker = std::string("engine '") + ENGINE_NAME + SELECTED_KERNEL_MARKER;
+    const std::string marker = std::string("engine '") + ENGINE_NAME + detail::SELECTED_KERNEL_LOG;
     for(const auto& log : recorder.getRecordedLogs())
     {
         const auto at = log.message.find(marker);
@@ -965,7 +986,7 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
 
     // Rank 0: a cold case serves the heuristic's front rather than a fallback past a
     // kernel that failed to load, and a forced case filters to its one kernel.
-    auto selectionLine = std::string(SELECTED_KERNEL_MARKER) + *expectedId + " at rank 0";
+    auto selectionLine = std::string(detail::SELECTED_KERNEL_LOG) + *expectedId + " at rank 0";
     if(testCase.forced)
     {
         selectionLine += " from 1 candidate(s)";
@@ -1024,6 +1045,133 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
 
     EXPECT_FALSE(selectedKernelId(recorder).has_value()) << "Captured logs:\n"
                                                          << recorder.getRecordedLogsAsString();
+}
+
+class IntegrationGpuGfx950AttentionDenseSaveLoad
+    : public IntegrationGpuGfx950AttentionDenseBase<KnobCase>
+{
+protected:
+    // Builds the forced-tile graph of the save and load knob case, validates one run and saves
+    // the plan in form. Then it destroys the graph, loads the plan with a new handle and
+    // validates two runs of the loaded plan. Every run uses the CPU reference of the original
+    // graph.
+    void roundTripInAFreshHandle(SaveForm form)
+    {
+        const auto cases = knobCases();
+        const auto found = std::find_if(cases.begin(), cases.end(), [](const KnobCase& candidate) {
+            return std::string(candidate.name) == SAVE_LOAD_CASE;
+        });
+        ASSERT_NE(found, cases.end()) << "no knob case is named " << SAVE_LOAD_CASE;
+        ASSERT_TRUE(found->forced);
+        const KnobCase& knobCase = *found;
+
+        auto sdpa = buildSdpaGraph(knobCase.name, knobCase.shape);
+        {
+            const ScopedPluginLogCapture capture(this);
+            ASSERT_NO_FATAL_FAILURE(this->buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
+
+            auto result
+                = sdpa.graph->create_execution_plan_ext(engineId(), knobSettingsFor(knobCase.tile));
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            result = sdpa.graph->check_support();
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            result = sdpa.graph->build_plans();
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+            // The load below must log no selection. This check proves that the capture
+            // records selection lines.
+            ASSERT_TRUE(capture.recorder().hasLogContaining(detail::SELECTED_KERNEL_LOG))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+
+        int64_t servingEngineId = 0;
+        auto result = sdpa.graph->get_execution_plan_engine_id(servingEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(servingEngineId, engineId());
+
+        std::vector<BehaviorNote> notes;
+        result = sdpa.graph->get_behavior_notes_for_engine(engineId(), notes);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NE(std::find(notes.begin(),
+                            notes.end(),
+                            BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                  notes.end());
+
+        VerificationRun run;
+        {
+            GraphVerificationContext context(*sdpa.graph);
+            const float tolerance = sdpaForwardTolerance(knobCase.shape.dataType);
+            ASSERT_NO_FATAL_FAILURE(
+                this->registerValidator(context, sdpa.output, tolerance, tolerance));
+            ASSERT_NO_FATAL_FAILURE(this->prepareVerification(context, /*seed=*/0, run));
+        }
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *sdpa.graph, this->_handle));
+
+        std::vector<uint8_t> saved;
+        {
+            const ScopedPluginLogCapture capture(this);
+            auto save = detail::saveInForm(*sdpa.graph, form);
+            ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+            saved = std::move(save.first);
+            EXPECT_FALSE(capture.recorder().hasLogContaining(
+                "does not support execution plan serialization"))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            int contents = 0;
+            ASSERT_EQ(
+                hipdnnBackendGetSerializedBinaryContents_ext(saved.data(), saved.size(), &contents),
+                HIPDNN_STATUS_SUCCESS);
+            ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
+                << "the saved graph holds no execution plan";
+        }
+
+        int64_t originalWorkspaceSize = 0;
+        result = sdpa.graph->get_workspace_size(originalWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const std::weak_ptr<Graph> original = sdpa.graph;
+        sdpa = SdpaGraph{};
+        ASSERT_TRUE(original.expired()) << "another owner keeps the original graph alive";
+
+        const ScopedPluginLogCapture capture(this);
+        ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(this->_handle, this->_stream));
+
+        auto loaded = std::make_shared<Graph>();
+        result = detail::loadInForm(*loaded, this->_handle, saved, form);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        EXPECT_TRUE(capture.recorder().hasLogContaining(detail::CREATING_CONTAINER_LOG))
+            << "the new handle did not get a new provider container. Captured logs:\n"
+            << capture.recorder().getRecordedLogsAsString();
+        detail::expectNoKernelSelectionLogged(capture.recorder());
+
+        int64_t loadedEngineId = 0;
+        result = loaded->get_execution_plan_engine_id(loadedEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedEngineId, engineId());
+
+        int64_t loadedWorkspaceSize = 0;
+        result = loaded->get_workspace_size(loadedWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedWorkspaceSize, originalWorkspaceSize);
+
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *loaded, this->_handle));
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *loaded, this->_handle));
+    }
+};
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN);
+}
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,

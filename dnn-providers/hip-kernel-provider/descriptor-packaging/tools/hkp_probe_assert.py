@@ -6,12 +6,17 @@ This tool inspects the packed output root and fails, with one greppable line per
 failure, unless the shipped set is the one `--expect` lists
 (hkp_probe_derive_root.py writes it) and every UKD is well formed for its kind: a JSON
 list of {"kdp": <KDP path relative to the arch directory>, "name": <UKD name>, "kind":
-<authored kernel_source.kind>}, plus the authored "kernel_source" for kinds whose
-output is a pass-through. The checks applied to a UKD follow its EXPECTED kind's output
-type (hkp_probe_kinds.KINDS): `kpack` UKDs are checked against the archive;
-`passthrough` UKDs must ship as authored. The archive checks (kpack-missing,
-kpack-empty, kpack-toc, sha256, symbol, signature) run only when the expect list holds
-at least one kpack-output UKD; a pass-through-only root ships no archive.
+<authored kernel_source.kind>, "arch": <the pass the UKD packs under>}, plus the
+authored "kernel_source" for kinds whose output is a pass-through, or "launches" ({<launch
+name>: <authored role or null>}) for a UKD that authors `sources`. The pass is `--arch`,
+or a generic target containing it: the packer compiles a generic once and merges its
+descriptors and archive into the member folder, so the UKD ships under `<out>/<arch>/`
+with `arch` [<generic>]. The checks applied to a UKD follow its EXPECTED kind's output
+type (hkp_probe_kinds.KINDS): `kpack` UKDs are checked against the archive of their
+pass; `passthrough` UKDs must ship as authored. The archive of a pass
+(<out>/<arch>/kpack/hip_kernel_provider_<pass>.kpack) is checked (kpack-missing,
+kpack-empty, kpack-toc, sha256, symbol, signature) for each pass that has at least one
+kpack-output UKD in the expect list; a pass-through-only root ships no archive.
 
     hkp_probe_assert: FAIL <assertion-id>: <detail>
 
@@ -25,8 +30,8 @@ Assertion ids:
     stamp-missing      <out>/<stamp-name> does not exist
     arch-dir-missing   <out>/<arch>/ does not exist
     extra-arch-dir     another gfx* directory sits beside <out>/<arch>/
-    kpack-missing      kpack output expected but <out>/<arch>/kpack/hip_kernel_provider_
-                       <arch>.kpack is absent
+    kpack-missing      kpack output expected for a pass but <out>/<arch>/kpack/
+                       hip_kernel_provider_<pass>.kpack is absent
     kpack-empty        that archive has size 0
     no-kdp             no *.kdp.json under <out>/<arch>/, or one is not valid JSON
     provenance-sidecar a KDP's provenance sidecar is missing, unreadable, or does not
@@ -37,16 +42,26 @@ Assertion ids:
     ukd-kind           a UKD's shipped kernel_source.kind is not what its expected
                        kind's output type requires ("kpack", or the authored kind for
                        a pass-through)
-    arch-field         a KDP `arch` present and not [<arch>], or a UKD `arch` absent
-                       or not [<arch>]
+    arch-field         a KDP `arch` present and not [<pass>], or a UKD `arch` absent
+                       or not [<pass>], where <pass> is the expected UKD's `arch` (for
+                       a KDP, that of its expected UKDs; --arch when it has none)
     passthrough-source a pass-through UKD's kernel_source differs from the authored one
     passthrough-provenance
                        a pass-through UKD's provenance.source_label is empty or its
                        provenance.source_file differs from kernel_source.source_file
-    kpack-toc          the archive is unreadable or has no entry for a UKD's toc_key
+    kpack-toc          an archive is unreadable or has no entry, under its pass, for a
+                       UKD's toc_key
     sha256             the archive blob's sha256 differs from kernel_source.sha256
     signature          a UKD's signature is not a non-empty list
     symbol             a UKD's symbol does not appear in its archive blob
+    launches           a kpack UKD ships `kernel_source` where the expect entry lists
+                       launches, or `sources` where it lists none; the shipped launch
+                       names differ from the expect entry's; or a launch's shipped symbol
+                       differs from the one the compiler recorded for it in
+                       provenance.effective_spec[<launch>].observations (its primary
+                       `symbol`, or `companions[<role>]` for an authored role)
+    launch-signature   a shipped launch's signature differs from the argument list its
+                       symbol has in the archive blob, or the blob has no such kernel
     no-rules-for-kind  a UKD's expected kind has no entry in hkp_probe_kinds.KINDS
     provenance-origin  provenance.origin_kind is not the UKD's expected kind
     provenance-wheel   kinds with the wheel check (rocke): provenance.rocke_wheel_sha256
@@ -62,9 +77,9 @@ import os
 import sys
 from pathlib import Path
 
-from hkp_probe_kinds import KINDS
-
-# tools/ holds hkp_pack.py, which must never resolve as the `hkp_pack` package.
+# Put the package dir ahead of everything, including this script's own dir: tools/
+# also holds a module literally named hkp_pack (hkp_pack.py), which would otherwise
+# shadow the hkp_pack package when tools/ is sys.path[0].
 _PKG_ROOT = str(Path(__file__).resolve().parent.parent / "python")
 while _PKG_ROOT in sys.path:
     sys.path.remove(_PKG_ROOT)
@@ -72,6 +87,9 @@ sys.path.insert(0, _PKG_ROOT)
 
 from hkp_pack import provenance_sidecar  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
+from hkp_pack.kernel_signature import kernel_signature  # noqa: E402
+from hkp_pack.pipeline import _kpack_filename  # noqa: E402
+from hkp_probe_kinds import KINDS  # noqa: E402
 
 _PREFIX = "hkp_probe_assert"
 
@@ -105,7 +123,7 @@ class _UsageError(Exception):
 
 
 def _load_expect(path):
-    """Read --expect into {(kdp, name): entry}; entry keeps `kind` and `kernel_source`."""
+    """Read --expect into {(kdp, name): entry}; entry keeps its other fields."""
     try:
         entries = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -115,10 +133,10 @@ def _load_expect(path):
     expected = {}
     for entry in entries:
         if not isinstance(entry, dict) or not all(
-            isinstance(entry.get(k), str) for k in ("kdp", "name", "kind")
+            isinstance(entry.get(k), str) for k in ("kdp", "name", "kind", "arch")
         ):
             raise _UsageError(
-                f"--expect {path} entry {entry!r} lacks string kdp, name and kind"
+                f"--expect {path} entry {entry!r} lacks string kdp, name, kind and arch"
             )
         if _output_of(entry["kind"]) == "passthrough" and not isinstance(
             entry.get("kernel_source"), dict
@@ -126,6 +144,19 @@ def _load_expect(path):
             raise _UsageError(
                 f"--expect {path} entry {entry!r}: a {entry['kind']} entry needs the "
                 "authored kernel_source object"
+            )
+        launches = entry.get("launches")
+        if launches is not None and not (
+            isinstance(launches, dict)
+            and launches
+            and all(
+                isinstance(name, str) and (role is None or isinstance(role, str))
+                for name, role in launches.items()
+            )
+        ):
+            raise _UsageError(
+                f"--expect {path} entry {entry!r}: launches must be a non-empty object "
+                "mapping each launch name to its authored role or null"
             )
         key = (entry["kdp"], entry["name"])
         if key in expected:
@@ -177,9 +208,9 @@ def _check_layout(args, failures):
     return arch_dir
 
 
-def _check_kpack(args, arch_dir, failures):
-    """Check 4. Returns the archive path when it exists and is non-empty."""
-    kpack_path = arch_dir / "kpack" / f"hip_kernel_provider_{args.arch}.kpack"
+def _check_kpack(arch_dir, pass_arch, failures):
+    """Check 4 for one pass. Returns the archive path when it is non-empty."""
+    kpack_path = arch_dir / "kpack" / _kpack_filename(pass_arch)
     if not kpack_path.is_file():
         failures.add("kpack-missing", f"{kpack_path} does not exist")
         return None
@@ -223,35 +254,49 @@ def _check_provenance(args, label, ukd, kind, failures):
         _PROVENANCE_CHECKS[name](args, label, prov, failures)
 
 
-def _check_kpack_ukd(args, label, ukd, expected, archive, failures):
-    source = ukd.get("kernel_source") or {}
+def _shipped_entries(ukd):
+    """The kernel sources a shipped UKD carries, as [(launch, source)].
+
+    `kernel_source` is one entry whose launch is None; `sources` is one entry per launch,
+    in launch-name order. A UKD carrying both is reported by the caller."""
+    sources = ukd.get("sources")
+    if isinstance(sources, dict):
+        return sorted(
+            (name, source if isinstance(source, dict) else {})
+            for name, source in sources.items()
+        )
+    return [(None, ukd.get("kernel_source") or {})]
+
+
+def _check_kpack_entry(label, source, pass_arch, archives, failures, field):
+    """Check 4-7 for one shipped kpack source. Returns its archive blob, or None.
+
+    Nothing is checked past a `kind` that is not "kpack": the entry is not one this
+    check can read. `field` names where the kind is shipped: `kernel_source` for a
+    single-launch UKD, the launch's `sources` entry otherwise."""
     kind = source.get("kind")
     if kind != "kpack":
         failures.add(
             "ukd-kind",
-            f"{label} kernel_source.kind is {kind!r}; expected kind "
-            f'{expected["kind"]!r} has kpack output, which ships "kpack"',
+            f"{label} {field} kind is {kind!r}; expected kind has kpack output, "
+            'which ships "kpack"',
         )
-        return
-
-    if ukd.get("arch") != [args.arch]:
-        failures.add("arch-field", f"{label} arch is {ukd.get('arch')!r}")
+        return None
 
     signature = source.get("signature")
     if not isinstance(signature, list) or not signature:
         failures.add("signature", f"{label} signature is {signature!r}")
 
-    _check_provenance(args, label, ukd, expected["kind"], failures)
-
+    archive = archives.get(pass_arch)
     if archive is None:
-        return
+        return None
     toc_key = source.get("toc_key")
-    blob = archive.get_kernel(toc_key, args.arch) if toc_key else None
+    blob = archive.get_kernel(toc_key, pass_arch) if toc_key else None
     if blob is None:
         failures.add(
-            "kpack-toc", f"{label} toc_key {toc_key!r} has no {args.arch} archive entry"
+            "kpack-toc", f"{label} toc_key {toc_key!r} has no {pass_arch} archive entry"
         )
-        return
+        return None
     digest = hashlib.sha256(blob).hexdigest()
     if digest != source.get("sha256"):
         failures.add(
@@ -262,9 +307,117 @@ def _check_kpack_ukd(args, label, ukd, expected, archive, failures):
     symbol = source.get("symbol")
     if not isinstance(symbol, str) or not symbol or symbol.encode("utf-8") not in blob:
         failures.add("symbol", f"{label} symbol {symbol!r} not found in archive blob")
+    return blob
 
 
-def _check_passthrough_ukd(args, label, ukd, expected, archive, failures):
+def _check_launch(label, launch, source, role, blob, ukd, failures):
+    """The `launches` and `launch-signature` checks for one shipped launch."""
+    symbol = source.get("symbol")
+    evidence = (ukd.get("provenance") or {}).get("effective_spec")
+    if not isinstance(evidence, dict):
+        failures.add(
+            "launches",
+            f"{label} provenance.effective_spec is {evidence!r}, not an object keyed "
+            "by launch",
+        )
+    else:
+        observed = (evidence.get(launch) or {}).get("observations")
+        if not isinstance(observed, dict):
+            failures.add(
+                "launches",
+                f"{label} provenance.effective_spec has no observations for it",
+            )
+        else:
+            # Both directions, so a swap between launches whose signatures are
+            # identical is still caught.
+            recorded = (
+                observed.get("symbol")
+                if role is None
+                else (observed.get("companions") or {}).get(role)
+            )
+            if recorded != symbol:
+                failures.add(
+                    "launches",
+                    f"{label} symbol {symbol!r} != compiler-recorded {recorded!r}",
+                )
+    if blob is None:
+        return
+    try:
+        recovered = kernel_signature(blob, symbol, label)
+    except HkpPackError as exc:
+        failures.add("launch-signature", str(exc))
+        return
+    if recovered != source.get("signature"):
+        failures.add(
+            "launch-signature",
+            f"{label} signature {source.get('signature')!r} != {recovered!r} in "
+            "archive blob",
+        )
+
+
+def _check_kpack_ukd(args, label, ukd, expected, archives, failures):
+    pass_arch = expected["arch"]
+    launches = expected.get("launches")
+
+    # Both sides default to a single launch, so a `sources` the packer dropped (or one
+    # it invented) is reported rather than read as a UKD with nothing to check.
+    if "sources" in ukd and "kernel_source" in ukd:
+        failures.add("launches", f"{label} ships both kernel_source and sources")
+        return
+    multi = "sources" in ukd
+    if multi and not isinstance(ukd["sources"], dict):
+        failures.add(
+            "launches", f"{label} sources is {ukd['sources']!r}, not an object"
+        )
+        return
+    if multi != (launches is not None):
+        failures.add(
+            "launches",
+            f"{label} ships {'sources' if multi else 'kernel_source'} but the expect "
+            f"entry lists launches {sorted(launches) if launches is not None else None}",
+        )
+        return
+
+    entries = _shipped_entries(ukd)
+    if multi:
+        shipped = [name for name, _ in entries]
+        if shipped != sorted(launches):
+            failures.add(
+                "launches",
+                f"{label} launches {shipped!r} != expected {sorted(launches)!r}",
+            )
+    else:
+        kind = entries[0][1].get("kind")
+        if kind != "kpack":
+            failures.add(
+                "ukd-kind",
+                f"{label} kernel_source.kind is {kind!r}; expected kind "
+                f'{expected["kind"]!r} has kpack output, which ships "kpack"',
+            )
+            return
+
+    if ukd.get("arch") != [pass_arch]:
+        failures.add("arch-field", f"{label} arch is {ukd.get('arch')!r}")
+
+    _check_provenance(args, label, ukd, expected["kind"], failures)
+
+    for launch, source in entries:
+        entry_label = label if launch is None else f"{label} launch {launch!r}"
+        blob = _check_kpack_entry(
+            entry_label,
+            source,
+            pass_arch,
+            archives,
+            failures,
+            "kernel_source" if launch is None else "sources entry",
+        )
+        if launch in (launches or {}) and source.get("kind") == "kpack":
+            _check_launch(
+                entry_label, launch, source, launches[launch], blob, ukd, failures
+            )
+
+
+def _check_passthrough_ukd(args, label, ukd, expected, archives, failures):
     source = ukd.get("kernel_source") or {}
     kind = source.get("kind")
     if kind != expected["kind"]:
@@ -275,7 +428,7 @@ def _check_passthrough_ukd(args, label, ukd, expected, archive, failures):
         )
         return
 
-    if ukd.get("arch") != [args.arch]:
+    if ukd.get("arch") != [expected["arch"]]:
         failures.add("arch-field", f"{label} arch is {ukd.get('arch')!r}")
 
     if source != expected["kernel_source"]:
@@ -305,7 +458,7 @@ def _check_passthrough_ukd(args, label, ukd, expected, archive, failures):
 _OUTPUT_CHECKS = {"kpack": _check_kpack_ukd, "passthrough": _check_passthrough_ukd}
 
 
-def _check_ukd(args, kdp_name, ukd, archive, failures):
+def _check_ukd(args, kdp_name, ukd, archives, failures):
     """Check one shipped UKD against its expectation. True when it was expected."""
     label = f"{kdp_name}:{ukd.get('name', ukd.get('id', '?'))}"
     expected = args.expected.get((kdp_name, ukd.get("name")))
@@ -321,11 +474,17 @@ def _check_ukd(args, kdp_name, ukd, archive, failures):
             f"{label} expected kind {expected['kind']!r} has no rules",
         )
         return True
-    _OUTPUT_CHECKS[output](args, label, ukd, expected, archive, failures)
+    _OUTPUT_CHECKS[output](args, label, ukd, expected, archives, failures)
     return True
 
 
-def _check_descriptors(args, arch_dir, archive, failures):
+def _kdp_arch(args, kdp_name):
+    """The arch a shipped KDP carries: the pass of its expected UKDs, else --arch."""
+    passes = sorted({e["arch"] for (k, _), e in args.expected.items() if k == kdp_name})
+    return passes if passes else [args.arch]
+
+
+def _check_descriptors(args, arch_dir, archives, failures):
     """Checks 5-7: every UKD of every shipped KDP."""
     kdps = sorted(arch_dir.rglob("*.kdp.json"))
     if not kdps:
@@ -346,10 +505,10 @@ def _check_descriptors(args, arch_dir, archive, failures):
         except HkpPackError as exc:
             failures.add("provenance-sidecar", f"{name}: {exc}")
             continue
-        if "arch" in kdp and kdp["arch"] != [args.arch]:
+        if "arch" in kdp and kdp["arch"] != _kdp_arch(args, name):
             failures.add("arch-field", f"{name} arch is {kdp['arch']!r}")
         for ukd in kdp.get("kernelDescriptors", []):
-            if _check_ukd(args, name, ukd, archive, failures):
+            if _check_ukd(args, name, ukd, archives, failures):
                 matched += 1
     expected = len(args.expected)
     if matched != expected or matched < 1:
@@ -360,9 +519,11 @@ def _check_descriptors(args, arch_dir, archive, failures):
         )
 
 
-def _needs_archive(args):
-    """Whether any expected UKD has kpack output, so the archive must exist."""
-    return any(_output_of(e["kind"]) == "kpack" for e in args.expected.values())
+def _archive_passes(args):
+    """The passes with an expected UKD of kpack output, whose archive must exist."""
+    return sorted(
+        {e["arch"] for e in args.expected.values() if _output_of(e["kind"]) == "kpack"}
+    )
 
 
 def run(args):
@@ -374,19 +535,19 @@ def run(args):
     arch_dir = _check_layout(args, failures)
     if arch_dir is None:
         return failures
-    archive = None
-    if _needs_archive(args):
-        kpack_path = _check_kpack(args, arch_dir, failures)
+    archives = {}
+    for pass_arch in _archive_passes(args):
+        kpack_path = _check_kpack(arch_dir, pass_arch, failures)
         if kpack_path is not None:
             kpack = _load_kpack(args.kpack_python_dir)
             try:
-                archive = kpack.PackedKernelArchive.read(kpack_path)
+                archives[pass_arch] = kpack.PackedKernelArchive.read(kpack_path)
             except Exception as exc:
                 failures.add(
                     "kpack-toc",
                     f"{kpack_path} is unreadable: {type(exc).__name__}: {exc}",
                 )
-    _check_descriptors(args, arch_dir, archive, failures)
+    _check_descriptors(args, arch_dir, archives, failures)
     return failures
 
 

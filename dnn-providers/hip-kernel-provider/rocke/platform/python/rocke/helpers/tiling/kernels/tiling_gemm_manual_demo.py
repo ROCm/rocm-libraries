@@ -17,13 +17,14 @@ Where this sits in the layered API:
     the escape hatch for a custom / non-standard layout the calculator would not give you.
 
 What is hand-authored here:
-  * pointers + `make_tensor_desc` for the memory (lengths + strides, rightmost = stride-1);
+  * pointers + `make_tensor_desc` for the memory (lengths + strides);
   * `TileMma` is configured ONLY to hand back the backend `mma` op + wave_size -- NO layout comes
     from it (`a_desc`/`b_desc`/`c_desc` are authored by us, not by the calculator);
   * the A / B / Acc / C register distributions are authored MANUALLY with `make_tile_desc`;
   * the MMA loop is hand-iterated -- fragments plug straight into the raw `b.mma(op, ...)`.
 
-Layout is RCC (A row-major, B col-major, C col-major). Single 16x16x16 atom, one wave (wave64).
+Memory layout: A K-contiguous, B K-contiguous, C M-contiguous. Single 16x16x16 atom, one wave
+(wave64).
 
 KEY TEACHING POINT -- two INDEPENDENT mappings that this demo keeps deliberately separate:
   * the DESCRIPTOR maps a logical element (e.g. (m, k)) -> a MEMORY ADDRESS, via strides. Pure
@@ -34,11 +35,10 @@ KEY TEACHING POINT -- two INDEPENDENT mappings that this demo keeps deliberately
   "which element?", then ask the descriptor "which address?"). That separation is the whole point
   of the primitive surface, and it is why the same distribution can front any memory layout.
 
-And their AXIS ORDER differs by design: the TENSOR descriptor is authored in PHYSICAL order
-(fastest stride right-most, like numpy / CK / CuTe); the TILE descriptor is in LOGICAL matrix
-order. A col-major operand bridges the two with a `.permute([...])` VIEW on the tensor descriptor
--- an explicit axis-index reorder (a pure re-labeling of axes -- same bytes); the 2-D swap is
-`.permute([1, 0])`.
+Both mappings use ONE axis order -- A (M, K), B (N, K), C (M, N) -- and the memory layout lives
+only in the tensor descriptor's strides. A tensor whose contiguous axis is not its last one (C here,
+M-contiguous) is still described in that order, with stride 1 on the contiguous axis: C is
+`make_tensor_desc((M, N), (1, ldc), dtype)`. No axis reorder stands between a tensor and its tile.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ import numpy as np
 
 from .. import (
     TileMma,
+    check_gemm_shapes,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -67,7 +68,8 @@ def build_manual_gemm(
     ldb: int | None = None,
     ldc: int | None = None,
 ):
-    """Build the RCC f16->f32(->f16) GEMM from primitives only. One 16x16x16 atom per CTA."""
+    """Build the f16->f32(->f16) GEMM (A and B K-contiguous, C M-contiguous) from primitives only.
+    One 16x16x16 atom per CTA."""
     from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
 
     TILE_M = TILE_N = TILE_K = 16  # single universal atom
@@ -95,36 +97,29 @@ def build_manual_gemm(
 
     lda = (
         lda if lda is not None else K_LEN
-    )  # A physical (M, K): M-stride (row length K)
+    )  # A (M, K): the stride of M (K-contiguous rows)
     ldb = (
         ldb if ldb is not None else K_LEN
-    )  # B physical (N, K): N-stride (column length K)
+    )  # B (N, K): the stride of N (K-contiguous rows)
     ldc = (
         ldc if ldc is not None else M_LEN
-    )  # C physical (N, M): N-stride (column length M)
+    )  # C (M, N): the stride of N (M-contiguous columns)
 
     # ---- MEMORY (tensor descriptors) ----------------------------------------------------------
-    # TRADITIONAL memory layout: lengths + strides with the FASTEST (stride-1) axis RIGHT-MOST,
-    # the same convention as numpy / CK / CuTe. The axis ORDER here is PHYSICAL -- it follows
-    # memory, NOT the logical matrix. This demo is RCC, so the stride-1 rightmost axis is K for A
-    # (row-major) and K / M for B / C (col-major -- hence their physical shapes are (N, K) and
-    # (N, M)). Each is handed to its tile in LOGICAL order via `.permute([1, 0])` at the window (a
-    # pure view, same bytes): a col-major operand's physical (N, K) then reads as logical (K, N).
-    a_td = make_tensor_desc(
-        (M_LEN, K_LEN), (lda, 1), F16
-    )  # physical (M, K): K contiguous (stride 1)
-    b_td = make_tensor_desc(
-        (N_LEN, K_LEN), (ldb, 1), F16
-    )  # physical (N, K): K contiguous (stride 1)
-    c_td = make_tensor_desc(
-        (N_LEN, M_LEN), (ldc, 1), F16
-    )  # physical (N, M): M contiguous (stride 1)
+    # Every tensor is written in the GEMM axis order -- A (M, K), B (N, K), C (M, N) -- and its
+    # memory layout is carried by the strides alone: the contiguous axis is the one with stride 1,
+    # wherever it sits. A and B are K-contiguous (stride 1 on their last axis, K); C is M-contiguous
+    # (stride 1 on its first axis, M).
+    a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)  # (M, K), K-contiguous
+    b_td = make_tensor_desc((N_LEN, K_LEN), (ldb, 1), F16)  # (N, K), K-contiguous
+    c_td = make_tensor_desc((M_LEN, N_LEN), (1, ldc), F16)  # (M, N), M-contiguous
+    # A's K is B's K, A's M is C's M, B's N is C's N -- checked at build time, no IR.
+    check_gemm_shapes(a_td, b_td, c_td)
 
     # ---- DISTRIBUTION (the heart of this demo: PURE CUSTOMIZATION) -----------------------------
     # `make_tile_desc` is the quantity-major surface: one axes-ordered list per geometric quantity.
-    # Its COLUMNS are the LOGICAL matrix axes -- A is (M, K), B is (K, N), C is (M, N) -- NOT the
-    # physical memory order; the physical tensor descriptor above is lined up to this logical order
-    # by the window's `.permute([1, 0])`. It takes the tile `shape` too, so it hands back a ready
+    # Its COLUMNS are the tensor's axes, in the same order as the tensor descriptor above -- A is
+    # (M, K), B is (N, K), C is (M, N). It takes the tile `shape` too, so it hands back a ready
     # `TileDesc` (shape + layout) in ONE call.
     #   * shape            -- the tile size per axis.
     #   * thread_tile      -- contiguous elements each lane holds per axis (register run; stride-1 vector).
@@ -136,11 +131,11 @@ def build_manual_gemm(
     #   * wave_order       -- wave axes, fastest right-most (unused here -- single wave).
     #   * wave_broadcast   -- duplicate the tile across waves (1 = none).
     #
-    # The 16x16x16 MFMA atom fixes the lane<->element wiring: it wants the CONTRACTION axis as the
-    # MAJOR (slowest) lane -- K for A/B, M for C. In logical coords that axis is column 0 for B (K, N)
-    # and C (M, N), so plain column order already puts it major; for A (M, K) it is column 1, so A's
-    # thread_order lists K first. EVERY argument is spelled out below for teaching -- the trivial ones
-    # (block_repeat, thread_broadcast, wave_*) sit at their no-op values.
+    # The 16x16x16 MFMA atom fixes the lane<->element wiring: it wants K as the MAJOR (slowest) lane
+    # for A and B, and M for C. K is column 1 of A (M, K) and of B (N, K), so their thread_order lists
+    # it first; M is column 0 of C (M, N), so plain column order already puts it major. EVERY argument
+    # is spelled out below for teaching -- the trivial ones (block_repeat, thread_broadcast, wave_*)
+    # sit at their no-op values.
     a_desc = make_tile_desc(
         shape=[TILE_M, TILE_K],  # (M, K)
         thread_tile=[1, 4],  # K: 4 contiguous per lane (k_inner) -- the vector
@@ -157,10 +152,13 @@ def build_manual_gemm(
         wave_size=64,
     )  # A operand
     b_desc = make_tile_desc(
-        shape=[TILE_K, TILE_N],  # (K, N)
-        thread_tile=[4, 1],  # K: 4 contiguous per lane (k_inner) -- the vector
-        thread_dist=[4, 16],  # K -> 4 lanes (k_outer), N -> 16 lanes
-        thread_order=[0, 1],  # N fastest, K major -- column order (K already column 0)
+        shape=[TILE_N, TILE_K],  # (N, K)
+        thread_tile=[1, 4],  # K: 4 contiguous per lane (k_inner) -- the vector
+        thread_dist=[16, 4],  # N -> 16 lanes, K -> 4 lanes (k_outer)
+        thread_order=[
+            1,
+            0,
+        ],  # N fastest, K major -- the atom's wiring (K is column 1, as for A)
         thread_broadcast=1,  # no lane duplication
         block_repeat=[1, 1],  # no stamped repeats
         wave_dist=[1, 1],  # single wave
@@ -189,22 +187,16 @@ def build_manual_gemm(
     for tile_k_base in range(0, K_LEN, TILE_K):
         k_base = b.const_i32(tile_k_base)
         # Positioned windows at this K tile; origin order matches each descriptor's axis order.
-        a_win = make_window(
-            a_td, (m_tile_base, k_base)
-        )  # A physical (M,K) == logical (M,K)
-        b_win = make_window(
-            b_td.permute([1, 0]), (k_base, n_tile_base)
-        )  # B physical (N,K) -> logical (K,N)
+        a_win = make_window(a_td, (m_tile_base, k_base))  # A (M, K)
+        b_win = make_window(b_td, (n_tile_base, k_base))  # B (N, K)
         a_fragment = load_fragment(b, a_ptr, a_win, a_desc, lane_id)
         b_fragment = load_fragment(b, b_ptr, b_win, b_desc, lane_id)
         accumulator.value = b.mma(
             op, a_fragment.value, b_fragment.value, accumulator.value
         )
 
-    # Store through the hand-authored C distribution; C physical (N,M) -> logical (M,N) via permute.
-    c_win = make_window(
-        c_td.permute([1, 0]), (m_tile_base, n_tile_base)
-    )  # C physical (N,M) -> logical (M,N)
+    # Store through the hand-authored C distribution; C is (M, N), M-contiguous.
+    c_win = make_window(c_td, (m_tile_base, n_tile_base))
     store_fragment(b, c_ptr, c_win, accumulator, lane_id)
     b.ret()
     return b.kernel, mma
@@ -213,7 +205,7 @@ def build_manual_gemm(
 def run_and_verify_manual(
     M_LEN: int = 256, N_LEN: int = 256, K_LEN: int = 256, *, arch: str = "gfx90a"
 ) -> dict:
-    """Compile, launch, and verify the MANUAL RCC GEMM is bit-exact vs a NUMPY golden reference
+    """Compile, launch, and verify the MANUAL GEMM is bit-exact vs a NUMPY golden reference
     (integer inputs). torch-free: numpy host arrays + `DeviceMem` device buffers."""
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
@@ -242,10 +234,10 @@ def run_and_verify_manual(
     launcher = KernelLauncher(
         hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=signature
     )
-    # RCC buffers, each laid out to match its descriptor exactly:
-    #   A (M, K) row-major   -> a_buf[m, k] = A[m, k]
-    #   B (N, K) col-major   -> b_buf[n, k] = B[k, n]   (i.e. the logical B is b_buf transposed)
-    #   C (N, M) col-major   -> c_buf[n, m] = C[m, n]
+    # Host buffers, each laid out to match its descriptor exactly:
+    #   A (M, K) K-contiguous -> a_buf[m, k] = A[m, k]
+    #   B (N, K) K-contiguous -> b_buf[n, k] = B[n, k]
+    #   C (M, N) M-contiguous -> c_buf[n, m] = C[m, n]   (numpy (N, M) array, last axis M)
     rng = np.random.default_rng(0)
     a_buf = rng.integers(-3, 4, size=(M_LEN, K_LEN)).astype(np.float16)
     b_buf = rng.integers(-3, 4, size=(N_LEN, K_LEN)).astype(np.float16)
@@ -264,11 +256,9 @@ def run_and_verify_manual(
     )
     synchronize_and_release()
     rt.memcpy_d2h(as_u8_buffer(c_buf), c_dev.ptr(), c_buf.nbytes)
-    # logical: C[m, n] = sum_k A[m, k] * B[k, n] = sum_k a_buf[m, k] * b_buf[n, k]
-    reference = (
-        a_buf.astype(np.float32) @ b_buf.astype(np.float32).T
-    )  # (M, K) @ (K, N) = (M, N)
-    result = c_buf.astype(np.float32).T  # (N, M) buffer -> logical (M, N) C
+    # C[m, n] = sum_k A[m, k] * B[n, k] = sum_k a_buf[m, k] * b_buf[n, k]
+    reference = a_buf.astype(np.float32) @ b_buf.astype(np.float32).T  # (M, N)
+    result = c_buf.astype(np.float32).T  # numpy (N, M) array -> C (M, N)
     max_abs_diff = float(np.abs(result - reference).max())
     return {
         "shape": (M_LEN, N_LEN, K_LEN),

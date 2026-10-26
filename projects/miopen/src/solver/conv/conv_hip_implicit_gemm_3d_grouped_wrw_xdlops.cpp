@@ -236,6 +236,11 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
         {
             return false;
         }
+        // InitValidKernels seeds the first config (index 0, split_k 1, kernel_id); emit it. Falling
+        // through would step past it -- the non-deterministic loop advances split_k 1 -> 2 and the
+        // deterministic branch advances the index -- dropping (valid_kernels[0], split_k 1) from
+        // the search, which GenericSearch offers as a candidate via FillValidKernels.
+        return true;
     }
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
@@ -243,13 +248,14 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        if((index + 1) < static_cast<int>(valid_kernels.size()))
         {
-            return false; // All kernels exhausted
+            ++index;
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            return true;
         }
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-        return true;
+        return false; // All kernels exhausted
     }
 
     // General (non-deterministic) mode: iterate over both split_k and kernels

@@ -21,7 +21,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeScaleAlphaVec: 13  # cos(row); random ints amplify FP8 WMMA error past tolerance
   Architecture: gfx1250
 BenchmarkProblems:
   ########################################

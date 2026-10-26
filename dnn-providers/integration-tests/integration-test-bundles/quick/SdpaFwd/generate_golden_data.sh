@@ -35,7 +35,7 @@ SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
 # DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
 # .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
 # a bare `dvc pull` (and CI) fetches the data from the right place without any
-# `-r` flag or workflow change. See ../../README.md ("DVC Remote Layout").
+# `-r` flag or workflow change. See ../../../docs/file-formats.md ("Golden data").
 DVC_REMOTE="golden-data"
 
 # Bundles are tiered by coverage (quick/standard/comprehensive/full), not by the

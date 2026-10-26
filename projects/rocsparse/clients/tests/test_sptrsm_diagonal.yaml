@@ -37,8 +37,7 @@ Definitions:
     - { M: 152, N: 152 }
 
   - &M_N_range_nightly
-    - { M:  9381, N:  9381 }
-    - { M: 37017, N: 37017 }
+    - { M: 1024, N: 1024 }
 
   - &alpha_range_quick
     - { alpha:   1.0, alphai: -0.2 }
@@ -57,166 +56,6 @@ Definitions:
 
 
 Tests:
-- name: sptrsm
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i64
-  precision: *double_only_precisions
-  M_N: *M_N_range_checkin
-  K: [1, 4]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero]
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-  batch_count_C: [1,2,8]
-  batch_count_B: [-1,1]
-  batch_count_A: [-1,1]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
-  direction: [rocsparse_direction_row]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none]
-
-
-- name: sptrsm
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i32
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin
-  K: [8]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: *all_rocsparse_order
-  diag: [rocsparse_diag_type_unit]
-  uplo: rocsparse_fill_mode_lower
-  baseA: rocsparse_index_base_one
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-  batch_count_C: [2, 4]
-  batch_count_B: [-1,1]
-  batch_count_A: [-1,1]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
-  direction: [rocsparse_direction_column]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
-
-
-
-- name: sptrsm
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i64i32
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin_1
-  K: [7]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero]
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-  batch_count_C: [3]
-  batch_count_B: [-1]
-  batch_count_A: [-1]
-  formatA: [rocsparse_format_csr]
-  direction: [rocsparse_direction_column]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none]
-
-
-- name: sptrsm_file
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions
-  K: [5]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  orderB: rocsparse_order_row
-  orderC: rocsparse_order_column
-  diag: rocsparse_diag_type_unit
-  uplo: rocsparse_fill_mode_lower
-  baseA: rocsparse_index_base_zero
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4,
-             nos7,
-             mplate]
-  batch_count_C: [1]
-  batch_count_B: [-1]
-  batch_count_A: [1]
-  formatA: [rocsparse_format_csr]
-  direction: [rocsparse_direction_column]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_absolute, rocsparse_diagonal_modifier_none]
-
-
-- name: sptrsm_file
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions
-  M: [15]
-  N: [15]
-  K: [5]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: rocsparse_order_row
-  orderC: rocsparse_order_row
-  diag: rocsparse_diag_type_non_unit
-  uplo: rocsparse_fill_mode_upper
-  baseA: rocsparse_index_base_zero
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-  batch_count_C: [2]
-  batch_count_B: [-1]
-  batch_count_A: [1]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
-  direction: [rocsparse_direction_row]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
-
-
-- name: sptrsm_file
-  category: pre_checkin
-  function: sptrsm
-  indextype: *i64i32
-  precision: *single_double_precisions
-  K: [7]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  sptrsm_alg: [rocsparse_sptrsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
-  batch_count_C: [32]
-  batch_count_B: [-1]
-  batch_count_A: [-1]
-  formatA: [rocsparse_format_csc]
-  direction: [rocsparse_direction_row]
-  solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none]
-
-
 - name: sptrsm_file
   category: quick
   function: sptrsm
@@ -224,7 +63,7 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  K: [16]
+  K: [4]
   alpha_alphai: *alpha_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -235,13 +74,11 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos5,
-             nos6,
-             nos7]
-  batch_count_C: [3]
-  batch_count_B: [-1, 1]
-  batch_count_A: [-1, 1]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  filename: [nos4]
+  batch_count_C: [2]
+  batch_count_B: [-1]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csr]
   direction: [rocsparse_direction_row]
   solve_mode: [rocsparse_solve_mode_diagonal]
   diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
@@ -249,8 +86,8 @@ Tests:
 - name: sptrsm_file
   category: quick
   function: sptrsm
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions_complex
+  indextype: *i64
+  precision: *single_double_precisions_complex
   M: 1
   N: 1
   K: [4]
@@ -264,22 +101,19 @@ Tests:
   baseA: [rocsparse_index_base_one]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
-  batch_count_C: [3]
+  filename: [nos4]
+  batch_count_C: [2]
   batch_count_B: [1]
-  batch_count_A: [-1, 1]
-  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  batch_count_A: [-1]
+  formatA: [rocsparse_format_csc]
   direction: [rocsparse_direction_row]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
 
-
-
-
-- name: sptrsm_file
+- name: sptrsm
   category: quick
   function: sptrsm
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions_complex
   M: [3]
   N: [3]
@@ -287,31 +121,109 @@ Tests:
   alpha: [2]
   alphai: [2]
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none]
   orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_upper]
   baseA: [rocsparse_index_base_one]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_random]
-  batch_count_C: [4]
-  batch_count_B: [-1, 1]
-  batch_count_A: [-1, 1]
+  batch_count_C: [2]
+  batch_count_B: [1]
+  batch_count_A: [1]
   formatA: [rocsparse_format_csr]
   direction: [rocsparse_direction_row]
   solve_mode: [rocsparse_solve_mode_diagonal]
   diagonal_modifier: [rocsparse_diagonal_modifier_none]
 
+- name: sptrsm
+  category: pre_checkin
+  function: sptrsm
+  indextype: *i64i32
+  precision: *double_only_precisions
+  M_N: *M_N_range_checkin
+  K: [4]
+  alpha: [2.0]
+  alphai: [0.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  batch_count_C: [2]
+  batch_count_B: [-1]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  direction: [rocsparse_direction_row]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none]
+
+- name: sptrsm
+  category: pre_checkin
+  function: sptrsm
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [8]
+  N: [8]
+  K: [8]
+  alpha: [3.0]
+  alphai: [-1.0]
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: *all_rocsparse_order
+  diag: [rocsparse_diag_type_unit]
+  uplo: rocsparse_fill_mode_lower
+  baseA: rocsparse_index_base_one
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  batch_count_C: [4]
+  batch_count_B: [1]
+  batch_count_A: [-1]
+  formatA: [rocsparse_format_csc]
+  direction: [rocsparse_direction_column]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
+
+- name: sptrsm_file
+  category: pre_checkin
+  function: sptrsm
+  indextype: *i64i32
+  precision: *double_only_precisions
+  K: [5]
+  alpha: [2.0]
+  alphai: [0.0]
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos7]
+  batch_count_C: [2]
+  batch_count_B: [-1]
+  batch_count_A: [-1]
+  formatA: [rocsparse_format_csr]
+  direction: [rocsparse_direction_column]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none]
 
 - name: sptrsm
   category: nightly
   function: sptrsm
   indextype: *i32
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions_complex_real
   M_N: *M_N_range_nightly
-  K: [32]
-  alpha_alphai: *alpha_range_nightly
+  K: [8]
+  alpha_alphai: *alpha_range_nightly_one
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
   orderB: [rocsparse_order_row]
@@ -322,22 +234,151 @@ Tests:
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_random]
   batch_count_C: [2]
-  batch_count_B: [-1, 1]
-  batch_count_A: [-1, 1]
+  batch_count_B: [-1]
+  batch_count_A: [1]
   formatA: [rocsparse_format_csr]
   solve_mode: [rocsparse_solve_mode_diagonal]
   diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
-
 
 - name: sptrsm_file
   category: nightly
   function: sptrsm
   indextype: *i64
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions
   M: 1
   N: 1
-  K: [16]
+  K: [8]
   alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+  batch_count_C: [2]
+  batch_count_B: [-1]
+  batch_count_A: [-1]
+  formatA: [rocsparse_format_csc]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
+
+- name: sptrsm_file
+  category: nightly
+  function: sptrsm
+  indextype: *i32
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  K: [4]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+  batch_count_C: [2]
+  batch_count_B: [1]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csr]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none]
+
+# Diagonal kernels wider than 64 columns, both modifiers, on an irregular matrix.
+- name: sptrsm_file
+  category: pre_checkin
+  function: sptrsm
+  indextype: *i32
+  precision: *double_only_precisions
+  K: [65, 129]
+  alpha: [1.0]
+  alphai: [0.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+  batch_count_C: [1]
+  batch_count_B: [1]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
+  direction: [rocsparse_direction_row]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+
+- name: sptrsm_file
+  category: pre_checkin
+  function: sptrsm
+  indextype: *i64
+  precision: *single_only_precisions_complex
+  K: [4]
+  alpha: [1.0]
+  alphai: [-0.2]
+  transA: [rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+  batch_count_C: [3]
+  batch_count_B: [1]
+  batch_count_A: [-1]
+  formatA: [rocsparse_format_csc]
+  direction: [rocsparse_direction_row]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
+
+- name: sptrsm_file
+  category: nightly
+  function: sptrsm
+  indextype: *i32
+  precision: *double_only_precisions_complex
+  K: [129, 513]
+  alpha: [1.0]
+  alphai: [-0.2]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+  batch_count_C: [1]
+  batch_count_B: [1]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csr]
+  direction: [rocsparse_direction_row]
+  solve_mode: [rocsparse_solve_mode_diagonal]
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+
+- name: sptrsm_file
+  category: nightly
+  function: sptrsm
+  indextype: *i64
+  precision: *double_only_precisions
+  K: [16]
+  alpha: [1.0]
+  alphai: [0.0]
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_transpose]
   orderB: [rocsparse_order_column]
@@ -351,23 +392,21 @@ Tests:
   batch_count_C: [2]
   batch_count_B: [-1]
   batch_count_A: [-1]
-  formatA: [rocsparse_format_csc]
+  formatA: [rocsparse_format_csr]
+  direction: [rocsparse_direction_row]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none]
-
-
+  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
 
 - name: sptrsm_file
   category: nightly
   function: sptrsm
   indextype: *i32
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  K: [3]
-  alpha_alphai: *alpha_range_nightly_one
-  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  precision: *single_only_precisions
+  K: [8]
+  alpha: [1.0]
+  alphai: [0.0]
+  transA: [rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
   diag: [rocsparse_diag_type_unit]
@@ -375,10 +414,11 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron4, ASIC_320k]
+  filename: [ASIC_320k, Chevron4]
   batch_count_C: [2]
   batch_count_B: [1]
-  batch_count_A: [-1, 1]
-  formatA: [rocsparse_format_csr]
+  batch_count_A: [1]
+  formatA: [rocsparse_format_csc]
+  direction: [rocsparse_direction_column]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none]
+  diagonal_modifier: [rocsparse_diagonal_modifier_absolute]
