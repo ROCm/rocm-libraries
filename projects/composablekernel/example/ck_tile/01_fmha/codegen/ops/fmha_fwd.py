@@ -1630,6 +1630,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
     _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
+    # Workgroups per CU the D64 instances of resident_blocks_per_cu keep on hardware.
+    _QR_TDM_SCHED_FP8_D64_RESIDENT_BLOCKS = 3
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
@@ -1660,6 +1662,20 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         if bias == "bias":
             return cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
         return cls._QR_TDM_SCHED_FP8_OCCUPANCY
+
+    @classmethod
+    def resident_blocks_per_cu(cls, kernel: "FmhaFwdKernel") -> Optional[int]:
+        # Hardware residency enforced by a post-build VGPR budget test; not a launch bound.
+        pipeline = kernel.F_pipeline
+        if (
+            pipeline.tag == "qr_tdm_fp8_sched"
+            and kernel.F_hdim == 64
+            and pipeline.F_mask in ("no", "s_no")
+            and pipeline.F_bias == "no"
+            and not (pipeline.F_qscale == "mx" and pipeline.F_lse == "t")
+        ):
+            return cls._QR_TDM_SCHED_FP8_D64_RESIDENT_BLOCKS
+        return None
 
     @classmethod
     def is_tile_supported_by_qr_tdm_fp8_sched(

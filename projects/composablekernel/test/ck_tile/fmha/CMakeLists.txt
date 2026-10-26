@@ -190,6 +190,31 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
+    # Post-build check that instances with a codegen residency target fit its VGPR budget.
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(objects_list ${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_instance_objects.txt)
+        file(GENERATE OUTPUT ${objects_list}
+            CONTENT "$<JOIN:$<TARGET_OBJECTS:${FMHA_FWD_INSTANCES}>,\n>\n")
+        set(vgpr_budget_archs ${SUPPORTED_GPU_TARGETS})
+        list(FILTER vgpr_budget_archs INCLUDE REGEX "^gfx125")
+        list(JOIN vgpr_budget_archs "," vgpr_budget_archs)
+        add_test(NAME test_ck_tile_fmha_fwd_vgpr_budget
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_fwd_vgpr_budget.py
+                --compiler=${CMAKE_HIP_COMPILER}
+                --archs=${vgpr_budget_archs}
+                --objects=${objects_list} -v)
+        # SMOKE_TEST: the gfx1250 CI stage only runs `ninja smoke` (ctest -L SMOKE_TEST).
+        set_tests_properties(test_ck_tile_fmha_fwd_vgpr_budget PROPERTIES
+            LABELS "SMOKE_TEST;${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+            TIMEOUT 300)
+        add_dependencies(${TEST_NAME} ${FMHA_FWD_INSTANCES})
+        # Makes `ninja smoke` build the whole fwd instance library on gfx125x targets.
+        if(TARGET smoke)
+            add_dependencies(smoke ${FMHA_FWD_INSTANCES})
+        endif()
+    endif()
+
     foreach(dtype IN ITEMS bf16 fp16)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})

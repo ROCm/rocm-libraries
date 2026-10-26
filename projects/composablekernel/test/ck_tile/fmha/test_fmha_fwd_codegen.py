@@ -1487,6 +1487,20 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         self.assertEqual(k.F_tile.F_occupancy, 1)
                         self.assertIn("_o1_qr_tdm_fp8_sched_", k.name)
 
+    def test_fp8_sched_d64_resident_blocks_scope(self):
+        _, kernels = get_fwd_blobs(["gfx1250"], "", 0, [-1], "simplified")
+        targeted = [
+            k
+            for k in kernels
+            if KernelComponentFactoryGfx125.resident_blocks_per_cu(k) is not None
+        ]
+        # No mask or bias, in every mode and dtype; MX without LSE.
+        self.assertEqual(len(targeted), 104)
+        for k in targeted:
+            self.assertEqual(k.F_hdim, 64)
+            self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
+            self.assertEqual(KernelComponentFactoryGfx125.resident_blocks_per_cu(k), 3)
+
     def test_fp8_sched_d64_mirrors_d128(self):
         key = lambda k: (
             k.F_mode,
