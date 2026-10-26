@@ -358,13 +358,13 @@ rocsparse_status
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
                                                          rocsparse_csrmv_info*     p_csrmv_info,
-                                                         bool* retarget_to_nnzsplit)
+                                                         bool                      allow_retarget)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Allocate only when this routine keeps the matrix. A retarget returns with
-    // a null info pointer, so the caller does not destroy an empty object (that
-    // destructor device-synchronizes before freeing).
+    // Allocate only when this routine keeps the matrix. A retarget calls nnz-split
+    // analysis, which allocates the info object itself. p_csrmv_info[0] is still
+    // null here: the caller clears it, and nothing has been allocated yet.
     rocsparse_csrmv_info csrmv_info = nullptr;
 
     if(trans == rocsparse_operation_none)
@@ -406,14 +406,14 @@ rocsparse_status
                                gen_wg,
                                true);
 
-        // Only the default algorithm may leave adaptive. The pointer is null when
+        // Only default analysis may leave adaptive. allow_retarget is false when
         // the caller selected adaptive explicitly. Nothing has been allocated yet.
-        if(retarget_to_nnzsplit != nullptr
+        if(allow_retarget
            && adaptive_partition_should_retarget(
                row_blocks.data(), row_block_size, hptr.data(), static_cast<I>(m), gen_wg))
         {
-            *retarget_to_nnzsplit = true;
-            return rocsparse_status_success;
+            return rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
+                handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info);
         }
 
         p_csrmv_info[0] = new _rocsparse_csrmv_info();
@@ -928,7 +928,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
         rocsparse_csrmv_info*     info,                                             \
-        bool*                     retarget_to_nnzsplit);
+        bool                      allow_retarget);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);

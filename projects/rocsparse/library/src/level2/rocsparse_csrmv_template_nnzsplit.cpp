@@ -491,11 +491,15 @@ rocsparse_status
 
     DISPATCH_BLOCK_NPT(LAUNCH_CSRMV_ANALYSIS, block, npt)
 
-    // Store some pointers to verify correct execution
-    csrmv_info->trans = trans;
-    csrmv_info->m     = m;
-    csrmv_info->n     = n;
-    csrmv_info->nnz   = nnz;
+    // Store some pointers to verify correct execution. Index types size the
+    // arrays in copy_csrmv_info; without them a copied nnz-split analysis is
+    // treated as 16-bit indices.
+    csrmv_info->trans        = trans;
+    csrmv_info->m            = m;
+    csrmv_info->n            = n;
+    csrmv_info->nnz          = nnz;
+    csrmv_info->index_type_I = rocsparse::get_indextype<I>();
+    csrmv_info->index_type_J = rocsparse::get_indextype<J>();
 
     return rocsparse_status_success;
 }

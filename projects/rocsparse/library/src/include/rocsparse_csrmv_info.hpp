@@ -53,11 +53,6 @@ typedef struct _rocsparse_csrmv_info
     rocsparse_indextype index_type_I = deprecated_rocsparse_indextype_u16;
     rocsparse_indextype index_type_J = deprecated_rocsparse_indextype_u16;
 
-    // Concrete algorithm chosen while analysing rocsparse_spmv_alg_default.
-    // 0 means unset. Compute consults this only when the caller asked for default;
-    // an explicit adaptive (or other) selection is never replaced by it.
-    int32_t resolved_alg{};
-
     _rocsparse_csrmv_info() {}
 
     ~_rocsparse_csrmv_info()
@@ -80,10 +75,9 @@ typedef struct _rocsparse_csrmv_info
         this->csr_col_ind  = nullptr;
         this->index_type_I = deprecated_rocsparse_indextype_u16;
         this->index_type_J = deprecated_rocsparse_indextype_u16;
-        this->resolved_alg = 0;
     }
 
-} * rocsparse_csrmv_info, *rocsparse_cscmv_info;
+} *rocsparse_csrmv_info, *rocsparse_cscmv_info;
 
 namespace rocsparse
 {

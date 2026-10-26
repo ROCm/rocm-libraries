@@ -111,30 +111,21 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     {
     case rocsparse::csrmv_alg_adaptive:
     {
-        bool retarget_to_nnzsplit = false;
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_adaptive_template_dispatch(
-            handle,
-            trans,
-            m,
-            n,
-            nnz,
-            descr,
-            csr_val,
-            csr_row_ptr,
-            csr_col_ind,
-            p_csrmv_info,
-            may_retarget_default ? &retarget_to_nnzsplit : nullptr));
-        if(retarget_to_nnzsplit)
-        {
-            // Adaptive analysis returns without an info object when it asks to leave.
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
-                handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
-            p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_nnzsplit);
-        }
-        else if(may_retarget_default && p_csrmv_info[0] != nullptr)
-        {
-            p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_adaptive);
-        }
+        // may_retarget_default is false for an explicit adaptive request, so that
+        // analysis keeps the adaptive buffers. Default may call nnz-split analysis
+        // from inside adaptive analysis when the partition is a poor fit.
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_analysis_adaptive_template_dispatch(handle,
+                                                                 trans,
+                                                                 m,
+                                                                 n,
+                                                                 nnz,
+                                                                 descr,
+                                                                 csr_val,
+                                                                 csr_row_ptr,
+                                                                 csr_col_ind,
+                                                                 p_csrmv_info,
+                                                                 may_retarget_default));
         return rocsparse_status_success;
     }
 
@@ -253,12 +244,14 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
-    // Default uses the algorithm analysis selected. An explicit selection,
-    // including adaptive, is left unchanged.
+    // Default follows the analysis that was stored. An explicit selection,
+    // including adaptive, is left unchanged. Default leaves adaptive only by
+    // filling nnz-split's buffers and leaving the adaptive row blocks empty.
     if(alg == rocsparse::csrmv_alg_default && csrmv_info != nullptr
-       && csrmv_info->resolved_alg != static_cast<int32_t>(rocsparse::csrmv_alg_default))
+       && csrmv_info->nnzsplit.starting_ids != nullptr
+       && csrmv_info->adaptive.row_blocks == nullptr)
     {
-        alg = static_cast<rocsparse::csrmv_alg>(csrmv_info->resolved_alg);
+        alg = rocsparse::csrmv_alg_nnzsplit;
     }
     else
     {
