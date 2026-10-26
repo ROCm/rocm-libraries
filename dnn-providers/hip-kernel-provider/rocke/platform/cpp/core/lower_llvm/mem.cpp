@@ -1499,13 +1499,14 @@ static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op
     rocke_ll_emitf(L,
                    "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
                    "ptr addrspace(8) %s, ptr addrspace(3) %s, i32 %lld, i32 %s, i32 %s, "
-                   "i32 0, i32 %lld)",
+                   "i32 0, i32 %lld)%s",
                    rocke_ll_operand(L, rsrc),
                    lds,
                    (long long)bytes_per_lane,
                    rocke_ll_operand(L, voffset),
                    rocke_ll_operand(L, soffset),
-                   (long long)aux);
+                   (long long)aux,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_lds_prov_get(L, lds_ptr)));
 }
 
 static void op_tile_buffer_load_lds_async(rocke_lower_t* L, const rocke_op_t* op)

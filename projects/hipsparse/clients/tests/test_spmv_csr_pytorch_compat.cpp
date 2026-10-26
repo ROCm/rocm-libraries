@@ -47,7 +47,7 @@ protected:
     {
         // Check if device is available
         int deviceCount = 0;
-        (void)hipGetDeviceCount(&deviceCount);
+        CHECK_HIP_ERROR(hipGetDeviceCount(&deviceCount));
         if(deviceCount == 0)
         {
             GTEST_SKIP() << "No HIP devices available";

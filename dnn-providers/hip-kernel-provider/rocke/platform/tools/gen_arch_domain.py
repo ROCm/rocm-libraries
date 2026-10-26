@@ -32,9 +32,20 @@ external call. It runs in a subprocess because an unsupported intrinsic reaches
                                              text; the question was never
                                              answered, so nothing is recorded
                                              about the name (see NameVerdict)
-    link OK               -> "ok"            available here
+    link OK, assembles    -> "ok"            available here
     Cannot select / fatal -> "arch_absent"   the name is real, this target
                                              cannot lower it (arch axis)
+    link OK, the assembler -> "arch_absent"  the backend emitted an
+      rejects the text                       instruction this target does not
+                                             have
+
+The last row exists because a link is not proof. The backend can select an
+intrinsic for a target that lacks its instruction and write the encoding into
+the object without complaint (llvm.amdgcn.cvt.scalef32.pk.f32.fp8 on gfx942
+links, and the object holds a gfx950 instruction). The text assembler,
+`llvm-mc` for the same target, checks every instruction against the target's
+feature set, so each probe that links is also compiled to assembly and
+assembled.
 
 Three more buckets exist so that a non-answer is never recorded as a negative:
 
@@ -72,6 +83,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import NamedTuple
 
@@ -83,12 +95,18 @@ ROCKE = HERE.parent  # tools -> rocke/platform
 
 
 def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+    """Import rocke from a checkout or a relocated provider test artifact.
+
+    Source execution finds ``python/`` beside ``tools/``. Installed provider
+    tests stage this script below ``tests/arch_domain`` and the package at the
+    artifact root. A standalone install supplies its site-packages directory
+    through the CTest environment. Only existing layouts are added, so normal
+    package resolution remains authoritative everywhere else.
+    """
+    candidates = (ROCKE / "python", HERE.parents[1])
+    for path in candidates:
+        if (path / "rocke").is_dir() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
 # At import time, not in main(): the status vocabulary and the schema string
@@ -99,7 +117,10 @@ _bootstrap_sys_path()
 from rocke.core.arch import domain as _domain
 
 SCHEMA = _domain.SCHEMA
-DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+# The committed columns are package data, not source-tree data. Resolving them
+# through the imported package makes ``--check`` compare the exact payload CI
+# tests after relocation while retaining the same path in a source checkout.
+DATA_DIR = Path(str(resource_files("rocke.core.arch") / "data"))
 
 
 def default_out(flavor: str) -> Path:
@@ -728,7 +749,87 @@ def _probe(
             STATUS_TOOLCHAIN_TIMEOUT,
             f"clang did not terminate within {timeout:g}s",
         )
-    return _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
+    status, evidence = _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
+    if status != STATUS_OK:
+        return status, evidence
+    return _assemble(clang, path, arch, out, timeout)
+
+
+def _llvm_mc_beside(clang: str) -> Path:
+    """The `llvm-mc` of the same install as `clang`: the assembler must judge
+    the instructions the measured backend emits, not another LLVM's."""
+    return Path(clang).with_name("llvm-mc")
+
+
+def _assembler_rejection(diag: str) -> str:
+    """`llvm-mc`'s rejection without the scratch path: the message and the
+    rejected mnemonic (the source line it echoes after the error)."""
+    lines = diag.splitlines()
+    for i, line in enumerate(lines):
+        if "error:" in line:
+            message = line.split("error:", 1)[1].strip()
+            echoed = next((l.split() for l in lines[i + 1 :] if l.strip()), [])
+            mnemonic = f" ({echoed[0]})" if echoed else ""
+            return f"assembler: {message}{mnemonic}"
+    return "assembler: " + _first_error(diag)
+
+
+def _assemble(
+    clang: str,
+    path: Path,
+    arch: str,
+    out: Path,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[str, str]:
+    """Compile a probe that linked to assembly text and assemble it for `arch`.
+
+    `ok` only if the target's assembler accepts every instruction. Its
+    "instruction not supported on this GPU" is a real arch answer
+    (`arch_absent`); any other assembler failure is ours to explain
+    (`probe_error`), never a silent `ok`.
+    """
+    asm = out.with_suffix(".s")
+    argv = [
+        clang,
+        "-x",
+        "ir",
+        *PROBE_CFLAGS,
+        "-target",
+        "amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-S",
+        "-o",
+        str(asm),
+        str(path),
+    ]
+    mc = [
+        str(_llvm_mc_beside(clang)),
+        "-triple=amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-filetype=null",
+        str(asm),
+    ]
+    for step in (argv, mc):
+        try:
+            proc = subprocess.run(
+                step,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                cwd=str(out.parent),
+            )
+        except subprocess.TimeoutExpired:
+            return (
+                STATUS_TOOLCHAIN_TIMEOUT,
+                f"{Path(step[0]).name} did not terminate within {timeout:g}s",
+            )
+        if proc.returncode:
+            diag = (proc.stderr or proc.stdout).strip()
+            if step is mc and "instruction not supported on this gpu" in diag.lower():
+                return STATUS_ARCH_ABSENT, _assembler_rejection(diag)
+            return STATUS_PROBE_ERROR, f"{Path(step[0]).name}: " + _first_error(diag)
+    return STATUS_OK, ""
 
 
 # --------------------------------------------------------------------------
@@ -845,6 +946,16 @@ def _prune() -> int:
     return 0
 
 
+def _unvalidated_exit(requested: int | None, legacy: int) -> int:
+    """Map an existing unvalidated result to a scheduler-requested skip code.
+
+    The generator's legacy CLI uses different exits for different conditions.
+    The source CTest asks only that those same conditions be distinguishable
+    from green; it does not redefine which conditions are unvalidated.
+    """
+    return requested if requested is not None else legacy
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -870,7 +981,21 @@ def main() -> int:
     )
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--unvalidated-exit-code",
+        type=int,
+        default=None,
+        help=(
+            "exit with this code when --check cannot validate on this host "
+            "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
+        ),
+    )
     args = ap.parse_args()
+    if args.unvalidated_exit_code is not None:
+        if not args.check:
+            ap.error("--unvalidated-exit-code requires --check")
+        if not 1 <= args.unvalidated_exit_code <= 255:
+            ap.error("--unvalidated-exit-code must be between 1 and 255")
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
@@ -930,7 +1055,7 @@ def main() -> int:
             "\nRESULT: UNVALIDATED - no clang found under the resolved ROCm "
             "install or on PATH; nothing was probed. Set ROCKE_LLVM_BIN."
         )
-        return 0
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
     # `opt` is not optional: it owns the flavor axis, and without it nothing
     # separates "this LLVM has no such intrinsic" from "this target cannot
@@ -965,7 +1090,7 @@ def main() -> int:
             "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
             "if the override is intended."
         )
-        return 2
+        return _unvalidated_exit(args.unvalidated_exit_code, 2)
 
     # `opt` and `clang` are found by independent searches, so a prefix that
     # ships clang but not `opt` lets `opt` fall through to another install.
@@ -986,6 +1111,16 @@ def main() -> int:
             "      Set ROCKE_LLVM_BIN to one complete LLVM install."
         )
         return 2
+
+    # The assembler is not optional either: a probe that links is only `ok`
+    # once the target's assembler accepts it (see `_assemble`).
+    if not _llvm_mc_beside(clang).is_file():
+        print(
+            f"\nFAIL: no llvm-mc beside {clang}; every probe that links is "
+            "assembled for its target before it is recorded as ok. Nothing was "
+            "probed. Set ROCKE_LLVM_BIN to a complete LLVM install."
+        )
+        return 1
 
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
@@ -1296,7 +1431,7 @@ def main() -> int:
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
-            return 0
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
         committed = out.read_text()
         if committed == text:
             print(f"\nOK: {out.name} is up to date.")

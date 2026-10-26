@@ -938,9 +938,14 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 
 def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
-    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` -> flat dict.
-    ``kind`` ("16c"|"4c") selects the binding's spec path. The 16c-only
-    ``double_buffer``/``fold_k32`` fields are forwarded when present."""
+    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec` -> flat dict. ``kind`` ("16c"|"4c"|"generic")
+    selects the binding's spec path. The problem's ``dtype`` is always
+    forwarded; every other kernel field the spec has is forwarded when
+    present: the 16c ``double_buffer``/``fold_k32``, the 4c dgrad knobs
+    (``dgrad_fused_weights``, ``dgrad_weights_lds``, ``stage_rows``,
+    ``waves_q``) and the generic kernel's tiling, persistent-grid,
+    runtime-channel, weight-path and row-stream fields."""
     p = spec.problem
     d = dict(
         kind=kind,
@@ -957,17 +962,79 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
             stride=p.stride,
             dil_h=p.dil_h,
             dil_w=p.dil_w,
+            dtype=p.dtype,
         ),
         name=spec.name,
         block_q=spec.block_q,
         block_groups=spec.block_groups,
         wave_size=spec.wave_size,
     )
-    for f in ("double_buffer", "fold_k32"):
+    for f in (
+        "double_buffer",
+        "fold_k32",
+        "dgrad_fused_weights",
+        "dgrad_weights_lds",
+        "stage_rows",
+        "waves_q",
+        # DirectConvSpec (kind "generic").
+        "block_h",
+        "waves_k",
+        "runtime_k_loop",
+        "persistent_grid",
+        "persistent_rounds",
+        "runtime_channels",
+        "k_atoms",
+        "m_tiles",
+        "preload_weights",
+        "waves_per_eu",
+        "row_guard",
+        "prefetch_rows",
+        "lds_only_sync",
+        "waves_m",
+        "xcd_tiles",
+        "lds_pad",
+        "stage_out",
+        "row_exit",
+    ):
         v = getattr(spec, f, None)
         if v is not None:
             d[f] = v
     return d
+
+
+def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectDgradWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        tile_n=spec.tile_n,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
 
 
 def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
@@ -1553,17 +1620,22 @@ def lower_conv_direct_grouped(
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
-    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec`.
-    ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
+    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec`. ``kind`` ("16c"|"4c"|"generic") selects the
+    kernel variant."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_grouped import (
+            build_direct_conv,
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
         from .lower_llvm import lower_kernel_to_llvm
 
-        build = build_direct_conv_4c if kind == "4c" else build_direct_conv_16c
+        build = {
+            "4c": build_direct_conv_4c,
+            "generic": build_direct_conv,
+        }.get(kind, build_direct_conv_16c)
         k = build(spec, arch=arch)
         ll = lower_kernel_to_llvm(k, arch=arch)
         ir = ""
@@ -1621,6 +1693,43 @@ def lower_conv_direct_nongrouped(
         py_fn,
         lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectDgradWmmaSpec` (the gfx1250 WMMA direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_wmma import build_direct_dgrad_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_dgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_dgrad_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 

@@ -580,7 +580,9 @@ static rocke_status_t rocke_h_op_arith_fneg(rocke_h_lowerer_t* lw, const rocke_o
 /* def _op_arith_fabs(self, op):
  *     (v,) = op.operands
  *     ty = _type_to_hip(op.result.type)
- *     _reject_f64(op, op.result.type.name)
+ *     if op.result.type.name == "f64":
+ *         self._emit(f"{ty} {_name(op.result)} = fabs({_name(v)});")
+ *         return
  *     helper = {"f32":"fabsf","f16":"__builtin_fabsf","bf16":"__builtin_fabsf"}
  *              .get(op.result.type.name, "fabsf")
  *     self._emit(f"{ty} {_name(op.result)} = ({ty}){helper}((float){_name(v)});") */
@@ -590,7 +592,13 @@ static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
     const char* tname = r->type->name;
-    rocke_h_reject_f64(lw, op, tname);
+    if(tname && strcmp(tname, "f64") == 0)
+    {
+        /* The double overload stays in double; the float helper below would
+         * round the value to f32. */
+        rocke_h_emitf(lw, "%s %s = fabs(%s);", ty, rocke_h_name(lw, r), rocke_h_name(lw, v));
+        return lw->status;
+    }
     const char* helper = "fabsf";
     if(tname && (strcmp(tname, "f16") == 0 || strcmp(tname, "bf16") == 0))
     {
