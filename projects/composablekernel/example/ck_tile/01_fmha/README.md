@@ -279,6 +279,7 @@ The following quantization scale modes are available via `-qscale`:
 | `ph` or `5` | Per-head quantization scale — one scale factor per (batch, head) |
 
 Currently only `-vlayout=r` (`seqlen*hdim` for V matrix) is supported for fp8 data types.
+MX data types take `-vlayout=c`, except `mxfp8` on gfx1250, which needs `-vlayout=r`.
 
 ### V scale with `bs` on gfx1250
 

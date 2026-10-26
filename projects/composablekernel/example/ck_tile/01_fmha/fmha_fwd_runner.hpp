@@ -554,10 +554,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
         std::cerr << "The value of qscale_str cannot be 'mx' for non-MX data types" << std::endl;
         return fwd_result::invalid_args;
     }
-    if(is_mx && is_v_rowmajor)
+    // Row-major MXFP8 V is served by gfx1250 qr_tdm_fp8_sched; packed MXFP4 V stays col-major.
+    if(is_mx && is_v_rowmajor && std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
     {
-        std::cerr << "The value of is_v_rowmajor must be 'false' for MX data types" << std::endl;
+        std::cerr << "The value of is_v_rowmajor must be 'false' for MXFP4" << std::endl;
         return fwd_result::invalid_args;
+    }
+    if(is_mx && is_v_rowmajor && !ck_tile::is_gfx125_supported())
+    {
+        std::cerr << "row-major MXFP8 V has instances only on gfx1250" << std::endl;
+        return fwd_result::no_instance;
     }
 
     if(p_drop < 0.0f || p_drop > 1.0f)

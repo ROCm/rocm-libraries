@@ -148,6 +148,17 @@ static inline constexpr bool uses_tdm_affine_dram_path_v = []() {
 }();
 
 template <typename T>
+using has_tdm_output_store = decltype(T::kStoresOutputViaTdm);
+
+template <typename T>
+static inline constexpr bool stores_output_via_tdm_v = []() {
+    if constexpr(is_detected<has_tdm_output_store, T>::value)
+        return static_cast<bool>(T::kStoresOutputViaTdm);
+    else
+        return false;
+}();
+
+template <typename T>
 static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
     if constexpr(is_detected<has_fixed_segmented_lds_arena, T>::value)
         return static_cast<bool>(T::kUsesFixedSegmentedLdsArena);
@@ -205,8 +216,12 @@ struct FmhaFwdKernel
 
     static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
-    static_assert(kPipelineName == "qr_tdm" || QScaleEnum != BlockAttentionQuantScaleEnum::PERHEAD,
-                  "perhead scale is only supported on qr_tdm");
+    // Pipelines that take the descale arguments; GetSoftmaxScale folds them as for qr_tdm.
+    static constexpr bool kTakesTdmDescales =
+        kPipelineName == "qr_tdm" || kPipelineName == "qr_tdm_fp8_sched";
+
+    static_assert(kTakesTdmDescales || QScaleEnum != BlockAttentionQuantScaleEnum::PERHEAD,
+                  "perhead scale is only supported on qr_tdm and qr_tdm_fp8_sched");
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -1494,6 +1509,49 @@ struct FmhaFwdKernel
             }
         }
 
+        if constexpr(kPipelineName == "qr_tdm_fp8_sched")
+        {
+            const bool log    = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
+            const auto reject = [&](const char* reason) {
+                if(log)
+                    CK_TILE_ERROR("FMHA fwd qr_tdm_fp8_sched: ", reason);
+                return false;
+            };
+            // No head-dim padding: Q/K/V TDM tiles and WMMAs cover exactly the tile head dims.
+            if(kargs.hdim_q != FmhaPipeline::kQKHeaddim || kargs.hdim_v != FmhaPipeline::kN1)
+                return reject("hdim_q and hdim_v must equal the tile head dims.");
+            if constexpr(!FmhaPipeline::kEnableVirtualSink)
+            {
+                if(kargs.sink_ptr != nullptr)
+                    return reject("sink_ptr is not supported.");
+            }
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
+            {
+                if(kargs.block_scale_size_q <= 0 || kargs.block_scale_size_kv <= 0)
+                    return reject("block_scale_size_q and block_scale_size_kv must be positive.");
+            }
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+            {
+                // Q/K E8M0 rows are read as one int32 per lane.
+                const auto bits  = [](auto v) { return static_cast<uint64_t>(v); };
+                uint64_t offsets = bits(reinterpret_cast<uintptr_t>(kargs.q_descale_ptr)) |
+                                   bits(reinterpret_cast<uintptr_t>(kargs.k_descale_ptr)) |
+                                   bits(kargs.stride_q_descale) | bits(kargs.stride_k_descale) |
+                                   bits(kargs.nhead_stride_q_descale) |
+                                   bits(kargs.nhead_stride_k_descale);
+                if constexpr(!kIsGroupMode)
+                    offsets |=
+                        bits(kargs.batch_stride_q_descale) | bits(kargs.batch_stride_k_descale);
+                if(offsets % 4 != 0)
+                    return reject("MX Q/K descale pointers and strides must be 4-byte aligned.");
+                if constexpr(kIsGroupMode)
+                {
+                    if(kargs.seqstart_v_scale_ptr == nullptr)
+                        return reject("group mode MX needs seqstart_v_scale_ptr.");
+                }
+            }
+        }
+
         if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
         {
             const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
@@ -1509,7 +1567,7 @@ struct FmhaFwdKernel
                 return false;
             }
 
-            if constexpr(kPipelineName == "qr_tdm")
+            if constexpr(kTakesTdmDescales)
             {
                 if(kargs.block_scale_size_kv % FmhaPipeline::kKVScaleAlign != 0)
                 {
@@ -1832,8 +1890,7 @@ struct FmhaFwdKernel
 
             return kargs.scale_s * q_descale * k_descale;
         }
-        else if constexpr(kPipelineName == "qr_tdm" &&
-                          QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD)
+        else if constexpr(kTakesTdmDescales && QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD)
         {
             const float* q_descale_ptr = reinterpret_cast<const float*>(kargs.q_descale_ptr);
             const float* k_descale_ptr = reinterpret_cast<const float*>(kargs.k_descale_ptr);
@@ -1841,7 +1898,7 @@ struct FmhaFwdKernel
             return kargs.scale_s * q_descale_ptr[descale_offset_q] *
                    k_descale_ptr[descale_offset_k];
         }
-        else if constexpr(kPipelineName == "qr_tdm" &&
+        else if constexpr(kTakesTdmDescales &&
                           QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
         {
             const float* q_descale_ptr = reinterpret_cast<const float*>(kargs.q_descale_ptr);
@@ -3399,10 +3456,13 @@ struct FmhaFwdKernel
 
             constexpr bool kPerHeadQScale = QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD;
             constexpr bool kBlockQScale   = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
+            // MX descales: E8M0 per 32 elements, consumed as WMMA scale operands.
+            constexpr bool kMxTdmSched = kPipelineName == "qr_tdm_fp8_sched" &&
+                                         QScaleEnum == BlockAttentionQuantScaleEnum::MX;
             [[maybe_unused]] long_index_t descale_offset_q = 0;
             [[maybe_unused]] long_index_t descale_offset_k = 0;
             [[maybe_unused]] long_index_t descale_offset_v = 0;
-            if constexpr(kPerHeadQScale || kBlockQScale)
+            if constexpr(kPerHeadQScale || kBlockQScale || kMxTdmSched)
             {
                 descale_offset_q =
                     static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q_descale;
@@ -3419,6 +3479,15 @@ struct FmhaFwdKernel
                     descale_offset_v +=
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale;
                 }
+                else if constexpr(kMxTdmSched)
+                {
+                    // Group MX: Q/K scale rows follow the physical token starts, V its own.
+                    descale_offset_q += static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]) *
+                                        kargs.stride_q_descale;
+                    descale_offset_k += static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]) *
+                                        kargs.stride_k_descale;
+                    descale_offset_v += kargs.seqstart_v_scale_ptr[i_batch];
+                }
                 else
                 {
                     descale_offset_q += kargs.block_scale_seqstart_q_ptr[i_batch];
@@ -3427,9 +3496,9 @@ struct FmhaFwdKernel
                 }
             }
 
-            static_assert(kPipelineName == "qr_tdm" ||
-                              QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
-                          "only qr_tdm implements quantization descales in this branch");
+            static_assert(kTakesTdmDescales || QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
+                          "only qr_tdm and qr_tdm_fp8_sched implement quantization descales in "
+                          "this branch");
 
             constexpr bool kFoldedQScale =
                 QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR || kPerHeadQScale;
@@ -3450,7 +3519,7 @@ struct FmhaFwdKernel
                     : -numeric<float>::infinity();
 
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
-                if constexpr(kPipelineName == "qr_tdm" && kBlockQScale)
+                if constexpr(kTakesTdmDescales && kBlockQScale)
                 {
                     const float* k_descale_ptr =
                         reinterpret_cast<const float*>(kargs.k_descale_ptr) + descale_offset_k;
@@ -3462,7 +3531,23 @@ struct FmhaFwdKernel
                                           kargs.block_scale_size_kv,
                                           v_descale);
                 }
-                else if constexpr(kPipelineName == "qr_tdm" && kFoldedQScale)
+                else if constexpr(kMxTdmSched)
+                {
+                    typename FmhaPipeline::MxDescales mx;
+                    mx.q_ptr =
+                        reinterpret_cast<const e8m0_t*>(kargs.q_descale_ptr) + descale_offset_q;
+                    mx.k_ptr =
+                        reinterpret_cast<const e8m0_t*>(kargs.k_descale_ptr) + descale_offset_k;
+                    mx.v_ptr =
+                        reinterpret_cast<const e8m0_t*>(kargs.v_descale_ptr) + descale_offset_v;
+                    mx.stride_q = kargs.stride_q_descale;
+                    mx.stride_k = kargs.stride_k_descale;
+                    mx.stride_v = kargs.stride_v_descale;
+                    mx.seqlen_q = kargs.seqlen_q;
+                    return FmhaPipeline{}(
+                        static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, 1.0f, mx);
+                }
+                else if constexpr(kTakesTdmDescales && kFoldedQScale)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, v_descale);
                 else
@@ -3572,30 +3657,45 @@ struct FmhaFwdKernel
                 }
             }();
 
-            // Oacc DRAM and Oacc DRAM window
-            auto o_dram = [&] {
-                const auto o_dram_naive = [&] {
-                    {
-                        return make_naive_tensor_view<address_space_enum::global>(
-                            o_ptr,
-                            make_tuple(kargs.seqlen_q, kargs.hdim_v),
-                            make_tuple(kargs.stride_o, 1),
-                            number<FmhaPipeline::kAlignmentOacc>{},
-                            number<1>{});
-                    }
+            if constexpr(detail::stores_output_via_tdm_v<FmhaPipeline>)
+            {
+                // o_ptr already holds the group's physical query start; rows stop at seqlen_q.
+                alignas(16) __shared__ char smem_o[FmhaPipeline::kOLdsBytes];
+                FmhaPipeline::StoreOutput(o_acc_tile,
+                                          o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o +
+                                              i_n1,
+                                          kargs.seqlen_q - i_m0,
+                                          kargs.hdim_v - i_n1,
+                                          kargs.stride_o,
+                                          smem_o);
+            }
+            else
+            {
+                // Oacc DRAM and Oacc DRAM window
+                auto o_dram = [&] {
+                    const auto o_dram_naive = [&] {
+                        {
+                            return make_naive_tensor_view<address_space_enum::global>(
+                                o_ptr,
+                                make_tuple(kargs.seqlen_q, kargs.hdim_v),
+                                make_tuple(kargs.stride_o, 1),
+                                number<FmhaPipeline::kAlignmentOacc>{},
+                                number<1>{});
+                        }
+                    }();
+
+                    return pad_tensor_view(
+                        o_dram_naive,
+                        make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                        sequence<kPadSeqLenQ, kPadHeadDimV>{});
                 }();
 
-                return pad_tensor_view(
-                    o_dram_naive,
+                auto o_dram_window = make_tile_window(
+                    o_dram,
                     make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
-                    sequence<kPadSeqLenQ, kPadHeadDimV>{});
-            }();
-
-            auto o_dram_window = make_tile_window(
-                o_dram,
-                make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
-                {i_m0, i_n1});
-            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+                    {i_m0, i_n1});
+                EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+            }
         }
     }
 };

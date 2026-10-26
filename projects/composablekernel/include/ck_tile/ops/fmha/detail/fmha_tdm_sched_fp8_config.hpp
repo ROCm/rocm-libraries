@@ -1,0 +1,64 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <type_traits>
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_config.hpp"
+
+namespace ck_tile {
+
+// Geometries the hand-written FP8 pieces are implemented for; kept apart from the 16-bit list.
+template <typename Geometry>
+struct FmhaTdmSchedFp8SupportedGeometry
+{
+    using Q = typename Geometry::QDataType;
+    static_assert(std::is_same_v<Q, fp8_t> && std::is_same_v<typename Geometry::KDataType, Q> &&
+                      std::is_same_v<typename Geometry::VDataType, Q> &&
+                      std::is_same_v<typename Geometry::PDataType, Q>,
+                  "qr_tdm_fp8_sched requires homogeneous FP8 Q/K/V/P");
+    static_assert(Geometry::kM == 128 && Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 &&
+                      Geometry::kN == 128,
+                  "qr_tdm_fp8_sched supports D128/V128 N128");
+    static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
+                  "qr_tdm_fp8_sched requires four wave32 waves");
+    static_assert(Geometry::kQkWmmaK == 128 && Geometry::kPvWmmaK == 128,
+                  "qr_tdm_fp8_sched supports only K128 WMMA geometry");
+    static_assert(Geometry::kQkStages == Geometry::kN / 32 &&
+                      Geometry::kPvStages == Geometry::kN / 128,
+                  "qr_tdm_fp8_sched requires 32-row QK stages and 128-row PV stages");
+    static_assert(Geometry::PRepackLayout::kInThread,
+                  "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
+    static constexpr bool value = true;
+};
+
+// TDM pads each 128 B K/V row by 16 B so the 16 rows of one 8 B LDS read hit distinct banks.
+template <typename Geometry>
+struct FmhaTdmSchedFp8Layout
+{
+    static_assert(FmhaTdmSchedFp8SupportedGeometry<Geometry>::value);
+    static constexpr index_t kRowPadBytes     = 16;
+    static constexpr index_t kKPhysicalStride = Geometry::kHeadDimQK + kRowPadBytes;
+    static constexpr index_t kVPhysicalStride = Geometry::kDv + kRowPadBytes;
+};
+
+// The low 32 bits of a generic LDS pointer are its LDS offset; no null check.
+CK_TILE_DEVICE uint32_t fmha_tdm_sched_fp8_lds_offset(const void* p)
+{
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+}
+
+template <typename T>
+CK_TILE_DEVICE __attribute__((address_space(3))) T* fmha_tdm_sched_fp8_lds_ptr(uint32_t offset)
+{
+    return reinterpret_cast<__attribute__((address_space(3))) T*>(static_cast<uintptr_t>(offset));
+}
+
+// A full DS counter field means no wait; clamp a tail count to one that still emits a real wait.
+template <index_t Count>
+inline constexpr index_t kFmhaTdmSchedFp8DsWait =
+    Count < waitcnt_arg::kMaxLgkmCnt ? Count : waitcnt_arg::kMaxLgkmCnt - 1;
+
+} // namespace ck_tile
