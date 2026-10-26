@@ -7,6 +7,7 @@
 #include <cfenv>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/integer_conversion.hpp>
@@ -62,13 +63,23 @@ template <typename Target, typename Source>
 concept Converts =
     requires(Source source) { convertToInteger<Target>(source, TowardZero, Identity); };
 
-TEST(IntegerConversion, AcceptsArithmeticSourcesAndNonBooleanIntegerTargets) {
-    static_assert(Converts<int8_t, bool> && Converts<uint64_t, long double>);
+// The examples in the convertToInteger header comment.
+TEST(IntegerConversion, HeaderExamples) {
+    EXPECT_EQ(convertToInteger<int8_t>(double{2.5}, NearestEven, Identity), 2);
+    EXPECT_EQ(convertToInteger<int8_t>(double{3.5}, NearestEven, Identity), 4);
+    EXPECT_EQ(convertToInteger<int8_t>(double{-3.75}, TowardZero, Identity), -3);
+    EXPECT_EQ(convertToInteger<int8_t>(int32_t{300}, TowardZero, Saturate), 127);
+    EXPECT_EQ(convertToInteger<int8_t>(int32_t{300}, TowardZero, ModuloWrap), 44);
+    EXPECT_EQ(convertToInteger<uint8_t>(int32_t{-1}, TowardZero, Saturate), 0);
+    EXPECT_EQ(convertToInteger<uint8_t>(int32_t{-1}, TowardZero, ModuloWrap), 255);
+    EXPECT_EQ(convertToInteger<int8_t>(double{1e300}, TowardZero, Saturate), 127);
+    EXPECT_EQ(convertToInteger<int64_t>(bool{true}, TowardZero, Identity), 1);
+    EXPECT_EQ(convertToInteger<size_t>(uint64_t{42}, TowardZero, Identity), 42);
+    EXPECT_EQ(convertToInteger<char>(double{65.0}, TowardZero, Identity), 'A');
+
     static_assert(!Converts<bool, double>);
     static_assert(!Converts<float, int32_t>);
-    static_assert(!Converts<int32_t, std::complex<double>>);
-    EXPECT_EQ(convertToInteger<int32_t>(true, TowardZero, Identity), 1);
-    EXPECT_EQ(convertToInteger<uint8_t>(false, TowardZero, ModuloWrap), 0);
+    static_assert(!Converts<char, std::complex<double>>);
 }
 
 template <typename T>
