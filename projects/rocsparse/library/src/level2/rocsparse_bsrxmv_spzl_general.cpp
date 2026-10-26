@@ -28,9 +28,7 @@
 namespace rocsparse
 {
     // General BSRXMV that works for any BSR block dimensions
-    // row_offset is the (masked) block row this block handles. The kernel wrapper
-    // supplies it from a grid-stride loop, so a grid.x clamped to
-    // maxGridSize[0] still covers every block row.
+    // row_offset is the (masked) block row this block handles.
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               typename T,
@@ -162,11 +160,7 @@ namespace rocsparse
             // mask only the size_of_mask entries the mask selects.
             const J nblockrows = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
 
-            // Grid-stride over the block rows: grid.x is clamped to
-            // maxGridSize[0], so one grid sweep only covers hipGridDim_x block
-            // rows. The bound depends solely on block uniform values
-            // (hipBlockIdx_x, hipGridDim_x and a kernel argument), so every
-            // thread of a block runs the same number of iterations.
+            // Grid-stride over block rows; grid.x comes from get_grid_size_x.
             for(int64_t row_offset = hipBlockIdx_x; row_offset < nblockrows;
                 row_offset += hipGridDim_x)
             {
@@ -219,10 +213,7 @@ void rocsparse::bsrxmvn_general(rocsparse_handle     handle,
         return;
     }
 
-    // One block per block row, clamped to the device's grid.x limit. `size` is J
-    // (instantiated as int64_t), so handing it to dim3 unclamped narrows it to
-    // unsigned int and silently drops most of the matrix. The kernel grid-strides
-    // over the block rows, so an undersized grid still covers [0, size).
+    // Clamped by get_grid_size_x; the kernel grid-strides (see rocsparse_grid.hpp).
 
     // Differentiate BSR block dimensions
     //

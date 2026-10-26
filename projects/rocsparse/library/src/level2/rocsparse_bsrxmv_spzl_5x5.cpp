@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,7 @@
 namespace rocsparse
 {
     // row_base is the first block row this block handles; the thread at
-    // threadIdx.y takes row_base + threadIdx.y. The kernel wrapper supplies it
-    // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
-    // every block row.
+    // threadIdx.y takes row_base + threadIdx.y.
     template <uint32_t BLOCKSIZE, rocsparse_direction DIR, typename I, typename J>
     ROCSPARSE_DEVICE_ILF void sbsrxmvn_5x5_device(J     row_base,
                                                   J     mb,
@@ -123,9 +121,7 @@ namespace rocsparse
     }
 
     // BSRXMV kernel for BSR block dimension of 5
-    // row_offset is the (masked) block row this block handles. The kernel wrapper
-    // supplies it from a grid-stride loop, so a grid.x clamped to maxGridSize[0]
-    // still covers every block row.
+    // row_offset is the (masked) block row this block handles.
     template <uint32_t BLOCKSIZE,
               typename T,
               typename I,
@@ -282,13 +278,8 @@ namespace rocsparse
             // mask only the size_of_mask entries the mask selects.
             const J nblockrows = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
 
-            // Grid-stride over the block rows: grid.x is clamped to
-            // maxGridSize[0], so one grid sweep only covers hipGridDim_x block
-            // rows. The bound is block uniform -- it depends only on
-            // hipBlockIdx_x, hipGridDim_x and a kernel argument, never on
-            // hipThreadIdx_x or on data -- so every thread of the block runs the
-            // same iteration count and reaches the __syncthreads() below
-            // together.
+            // Grid-stride over block rows; grid.x comes from get_grid_size_x. The
+            // bound is block uniform, so every thread reaches the __syncthreads() below.
             for(int64_t row_offset = hipBlockIdx_x; row_offset < nblockrows;
                 row_offset += hipGridDim_x)
             {
@@ -339,13 +330,10 @@ namespace rocsparse
             // host-side grid sizing (mb without a mask, size_of_mask with one).
             const J nblockrows = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
 
-            // This kernel maps one block row onto each threadIdx.y, so a block
-            // owns hipBlockDim_y consecutive block rows and the grid strides by
-            // hipGridDim_x * hipBlockDim_y. Both factors are launch geometry and
-            // therefore block uniform; the bound never depends on hipThreadIdx_x
-            // or on data, so the iteration count is identical for every thread of
-            // the block. No __syncthreads() is needed: this kernel holds no
-            // shared state across block rows, it reduces through rocsparse::shfl.
+            // Grid-stride over block rows; grid.x comes from get_grid_size_x. A block
+            // owns hipBlockDim_y consecutive block rows, so the stride is
+            // hipGridDim_x * hipBlockDim_y. No __syncthreads() is needed: the kernel
+            // reduces through rocsparse::shfl and keeps no shared state.
             const J rows_per_block = static_cast<J>(hipBlockDim_y);
 
             for(int64_t row_base = static_cast<int64_t>(hipBlockIdx_x) * rows_per_block;
@@ -399,10 +387,7 @@ namespace rocsparse
                 return;
             }
 
-            // One block per block row, clamped to the device's grid.x limit. `size` is J
-            // (instantiated as int64_t), so handing it to dim3 unclamped narrows it to
-            // unsigned int and silently drops most of the matrix. The kernel grid-strides
-            // over the block rows, so an undersized grid still covers [0, size).
+            // Clamped by get_grid_size_x; the kernel grid-strides (see rocsparse_grid.hpp).
             THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrxmvn_5x5_kernel<50>),
                 dim3(rocsparse::get_grid_size_x(handle, size, 50)),
@@ -464,10 +449,7 @@ namespace rocsparse
                     return;
                 }
 
-                // One block per block row, clamped to the device's grid.x limit. `size` is J
-                // (instantiated as int64_t), so handing it to dim3 unclamped narrows it to
-                // unsigned int and silently drops most of the matrix. The kernel grid-strides
-                // over the block rows, so an undersized grid still covers [0, size).
+                // Clamped by get_grid_size_x; the kernel grid-strides (see rocsparse_grid.hpp).
                 THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::bsrxmvn_5x5_kernel<50, float>),
                     dim3(rocsparse::get_grid_size_x(handle, size, 50)),
@@ -495,10 +477,7 @@ namespace rocsparse
                 static constexpr int nthreads_per_halfwarp = 32;
                 const J              size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
                 dim3 const nThreads_solver(nthreads_per_halfwarp, nhalfwarps_per_block, 1);
-                // Clamped to the device's grid.x limit; `size` is J (int64_t), so dim3
-                // would otherwise narrow the block count to unsigned int. The kernel
-                // grid-strides over the block rows, so an undersized grid still covers
-                // [0, size).
+                // Clamped by get_grid_size_x; the kernel grid-strides (see rocsparse_grid.hpp).
                 dim3 const nBlocks_solver(
                     rocsparse::get_grid_size_x(
                         handle, (size - 1) / nhalfwarps_per_block + 1, nthreads_per_halfwarp),
