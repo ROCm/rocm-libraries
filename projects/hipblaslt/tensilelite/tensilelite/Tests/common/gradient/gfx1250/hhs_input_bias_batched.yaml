@@ -1,0 +1,60 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Four waves publish independent A/B bias sums; D-gradient uses an FP32 intermediate.
+# Padded batch vectors, nontrivial alpha/beta, whole K, split K and empty K.
+TestParameters:
+  streamk_schedules: [{grid: 32, reduction: tree}]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941,
+    skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters: {Architecture: gfx1250, NumElementsToValidate: -1,
+  DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 1, DataInitTypeD: 0,
+  DataInitTypeAlpha: 2, DataInitTypeBeta: 2, NumWarmups: 1, EnqueuesPerSync: 1,
+  SyncsPerBenchmark: 0, CpuThreads: 1, KernelTime: false, NumBenchmarks: 1}
+BenchmarkProblems:
+- - &bias_problem {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s,
+    HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true,
+    Batched: true, Gradient: true, UseBias: 1, BiasSrc: A, BiasDataTypeList: [s],
+    SetConstStrideBias: [[2, 64]]}
+  - &bias_cases
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+    - Groups:
+      - - {TileProcessingStrategy: DataParallel, PrefetchGlobalRead: 2, StreamKFixupTreeReduction: 0}
+        - {TileProcessingStrategy: StreamK, PrefetchGlobalRead: 1, StreamKFixupTreeReduction: 0}
+        - {TileProcessingStrategy: StreamK, PrefetchGlobalRead: 2, StreamKFixupTreeReduction: 1}
+    - PrefetchLocalRead: [1]
+    - ClusterLocalRead: [1]
+    - DepthU: [64]
+    - WavefrontSize: [32]
+    - GlobalReadVectorWidthA: [-1]
+    - GlobalReadVectorWidthB: [-1]
+    - LocalReadVectorWidth: [-1]
+    - ScheduleIterAlg: [0]
+    - TDMInst: [3]
+    - ExpandPointerSwap: [false]
+    - TransposeLDS: [-1]
+    - LdsBlockSizePerPadA: [-1]
+    - LdsBlockSizePerPadB: [-1]
+    - LdsPadA: [-1]
+    - LdsPadB: [-1]
+    - 1LDSBuffer: [0]
+    - GlobalSplitU: [0]
+    - GlobalSplitUAlgorithm: [MultipleBuffer]
+    - SourceSwap: [false]
+    - ActivationFuncCall: [false]
+    - StoreVectorWidth: [-1]
+    - WorkAssignment: [StaticGrid]
+    - ClusterDim: [[2, 2]]
+    - PrefetchAcrossPersistent: [0]
+    - StaggerU: [0]
+    BenchmarkFinalParameters:
+    - ProblemSizes: [{Exact: [33, 49, 2, 1031]}, {Exact: [33, 49, 2, 64]}, {Exact: [17, 33, 2, 0]}]
+    - BiasTypeArgs: [s]
+- - {<<: *bias_problem, BiasSrc: B}
+  - *bias_cases
+- - {<<: *bias_problem, BiasSrc: D}
+  - *bias_cases

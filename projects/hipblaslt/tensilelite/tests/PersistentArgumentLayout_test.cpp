@@ -109,6 +109,109 @@ namespace
     };
 }
 
+TEST(PersistentArgumentLayout, InputBiasRequiresOnlyItsSourceAtAlphaZero)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    for(auto source : {Tensor::A, Tensor::B})
+    // Runtime pointer arrays accept a/b (hipBLASLt) or batchA/B (Tensile).
+    for(auto [stridedBatched, pointerArray, batchInputs] :
+        {std::tuple{true, false, false}, {true, true, false},
+         {true, true, true}, {false, true, true}})
+    for(size_t k : {size_t{0}, size_t{65}})
+    {
+        SCOPED_TRACE(::testing::Message() << "source=" << source
+                     << " stridedBatched=" << stridedBatched << " pointerArray=" << pointerArray
+                     << " batchInputs=" << batchInputs << " K=" << k);
+        ContractionSolution solution;
+        configurePersistentSolution(solution, 3, 1);
+        solution.problemType.stridedBatched = stridedBatched;
+        solution.problemType.useBias = 1;
+        solution.problemType.useGradient = true;
+        solution.problemType.biasSrcWhiteList = {source};
+        auto problem = persistentProblem(33, 49, k, 2);
+        problem.setUseBias(1);
+        problem.setUseGradient(true);
+        size_t length = source == Tensor::A ? 33 : 49;
+        problem.setBias(rocisa::DataType::Float, length, length + 7, true, source);
+        problem.setStridedBatched(stridedBatched);
+        problem.setBatchMode(pointerArray ? ContractionProblemGemm::POINTER_ARRAY
+                                         : ContractionProblemGemm::STRIDED);
+        auto device = persistentDevice();
+        auto inputs = persistentInputs(0.0f);
+        inputs.beta = 1.0f;
+        float storage = 1.0f;
+        void const* matrixPointers[] = {&storage, &storage};
+        inputs.c = inputs.d = &storage;
+        inputs.bias = &storage;
+        // Legacy non-strided kernels require the separate batchA/B fields.
+        if(!stridedBatched)
+            inputs.a = inputs.b = &storage;
+        if(k)
+            EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+        else
+            EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        if(batchInputs)
+            (source == Tensor::A ? inputs.batchA : inputs.batchB) = matrixPointers;
+        else
+            (source == Tensor::A ? inputs.a : inputs.b)
+                = pointerArray ? static_cast<void const*>(matrixPointers) : &storage;
+        EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        // GEMM still requires the other input at nonzero alpha and K.
+        inputs.alpha = 1.0f;
+        if(k)
+            EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+        inputs.alpha = 0.0f;
+        inputs.a = inputs.b = nullptr;
+        inputs.batchA = inputs.batchB = nullptr;
+        for(bool nullBias : {false, true})
+        for(bool noBiasType : {false, true})
+        {
+            inputs.bias = nullBias ? nullptr : &storage;
+            problem.setParams().setBiasEnum(noBiasType ? rocisa::DataType::None
+                                                       : rocisa::DataType::Float);
+            if(k)
+                EXPECT_THROW(solution.solve(problem, inputs, device), std::runtime_error);
+            else
+                EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        }
+        // An ordinary kernel with no compiled input reduction accepts null A/B.
+        solution.problemType.useBias = 0;
+        solution.problemType.useGradient = false;
+        EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+        inputs.alpha = 1.0f;
+        if(batchInputs)
+            inputs.batchA = inputs.batchB = matrixPointers;
+        else
+            inputs.a = inputs.b = pointerArray ? static_cast<void const*>(matrixPointers) : &storage;
+        EXPECT_NO_THROW(solution.solve(problem, inputs, device));
+    }
+}
+
+TEST(PersistentArgumentLayout, BatchedBiasRejectsOverlappingOutputs)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.problemType.useBias = 1;
+    solution.problemType.useGradient = true;
+    auto problem = persistentProblem(33, 33, 0, 2);
+    problem.setUseBias(1);
+    problem.setUseGradient(true);
+    auto inputs = persistentInputs(0.0f);
+    inputs.beta = 1.0f;
+    float output = 0;
+    inputs.c = inputs.d = &output;
+    inputs.bias = inputs.ws = &output;
+    for(auto source : {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
+    for(size_t stride : {size_t{0}, size_t{32}, size_t{33}, size_t{40}})
+    {
+        problem.setBias(rocisa::DataType::Float, 33, stride, true, source);
+        if(stride < 33)
+            EXPECT_THROW(solution.solve(problem, inputs, persistentDevice()), std::runtime_error);
+        else
+            EXPECT_NO_THROW(solution.solve(problem, inputs, persistentDevice()));
+    }
+}
+
 TEST_P(PersistentArgumentLayoutTest, PackedLayoutAndLaunch)
 {
     auto [outer, layout] = GetParam();
@@ -456,6 +559,17 @@ TEST(PersistentArgumentLayout, PersistentCustomDescriptorMatchesCompleteNormalBu
             invalid.argsVersion = 1;
             EXPECT_THROW(solution.generateCustomCall<true>(problem, inputs, device, invalid), std::runtime_error);
         }
+        if(layout == 2 && !initialStrides && !pointerArray && useBeta && k != 0 && alpha != 0.0f)
+        {
+            solution.problemType.useGradient = true;
+            problem.setUseGradient(true);
+            problem.setBias(rocisa::DataType::Float, 257, 521, true, ContractionProblemGemm::D);
+            const auto biasLaunch = solution.resolvePersistentSettings(problem, device);
+            ASSERT_GT(biasLaunch.clusterSchedule.biasWorkspaceOffset, 0u);
+            const auto biasCall = solution.generateCustomCall<true>(problem, inputs, device, biasLaunch);
+            EXPECT_EQ(value<void const*>(biasCall.args, "AddressBias"),
+                      static_cast<uint8_t*>(inputs.ws) + biasLaunch.clusterSchedule.biasWorkspaceOffset);
+        }
     }
 }
 
@@ -671,7 +785,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabili
     solution.problemType.useBias = 1;
     EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
     solution.problemType.useGradient = true;
-    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
     solution.problemType.useBias = 0;
     EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
 }
@@ -1073,5 +1187,75 @@ TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdge
             problem, clusterInputs(), device, launch, GSUSettings{});
         EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), expectedSplits);
         EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, cluster.physicalGrid);
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputReduction)
+{
+    for(auto source : {ContractionProblemGemm::TENSOR::A, ContractionProblemGemm::TENSOR::B,
+                       ContractionProblemGemm::TENSOR::D})
+    for(size_t batches : {size_t{1}, size_t{2}})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, 4, 2);
+        solution.sizeMapping.macroTile = {64, 128, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1}; // Four wave32 waves.
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.problemType.useBias = 1;
+        solution.problemType.useGradient = true;
+        // An odd element count above 2^24 exposes float-rounded workspace offsets.
+        auto problem = clusterProblem(4097, 4097, 4097, batches);
+        problem.setUseBias(1);
+        problem.setUseGradient(true);
+        problem.setBias(rocisa::DataType::Half, 4097, 4104, true, source);
+        auto device = persistentDevice(128);
+        device.processor = AMDGPU::Processor::gfx1250;
+        device.wavefrontSize = 32;
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        ASSERT_GT(launch.clusterSchedule.partialSlots, 0u);
+        const size_t partialBytes = launch.clusterSchedule.partialSlots * 64 * 128 * sizeof(float);
+        const size_t biasTile = source == ContractionProblemGemm::TENSOR::A ? 64 : 128;
+        const size_t biasBytes = source == ContractionProblemGemm::TENSOR::D
+            ? 4097 * 4097 * batches * sizeof(float)
+            : launch.clusterSchedule.partialSlots * biasTile * 32 * sizeof(float);
+        EXPECT_EQ(launch.clusterSchedule.biasWorkspaceOffset, partialBytes);
+        EXPECT_EQ(launch.clusterSchedule.biasWorkspaceBytes, biasBytes);
+        EXPECT_EQ(launch.workspaceBytes, partialBytes + biasBytes);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+        problem.setWorkspaceSize(launch.workspaceBytes);
+        auto inputs = clusterInputs();
+        inputs.beta = 1.0f;
+        inputs.a = inputs.b = inputs.c = reinterpret_cast<void*>(uintptr_t{0x40000});
+        inputs.d = reinterpret_cast<void*>(uintptr_t{0x50000});
+        inputs.bias = reinterpret_cast<void*>(uintptr_t{0x30000});
+        const auto main = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+        if(source == ContractionProblemGemm::TENSOR::D)
+        {
+            EXPECT_EQ(value<void const*>(main.args, "ws_bias"),
+                static_cast<uint8_t*>(inputs.ws) + partialBytes);
+            const auto calls = solution.solve(problem, inputs, device);
+            ASSERT_EQ(calls.size(), 1 + batches);
+            for(size_t batch = 0; batch < batches; ++batch)
+            {
+                void const* pointers[2];
+                std::memcpy(pointers, calls[1 + batch].args.data(), sizeof(pointers));
+                EXPECT_EQ(pointers[0], static_cast<uint8_t*>(inputs.ws) + partialBytes
+                                      + batch * 4097 * 4097 * sizeof(float));
+                EXPECT_EQ(pointers[1], static_cast<uint8_t const*>(inputs.bias) + batch * 4104 * sizeof(Half));
+            }
+        }
+        problem.setWorkspaceSize(launch.workspaceBytes - 1);
+        const auto fallback = solution.resolvePersistentSettings(problem, device);
+        EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
+        EXPECT_EQ(fallback.clusterSchedule.biasWorkspaceOffset, 0u);
+        EXPECT_EQ(fallback.workspaceBytes, source == ContractionProblemGemm::TENSOR::D ? biasBytes : 0u);
+        if(source != ContractionProblemGemm::TENSOR::D)
+        {
+            problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+            problem.setParams().setBiasEnum(rocisa::DataType::None);
+            const auto disabledBias = solution.resolvePersistentSettings(problem, device);
+            EXPECT_EQ(disabledBias.clusterSchedule.biasWorkspaceBytes, biasBytes);
+            EXPECT_EQ(disabledBias.workspaceBytes, partialBytes + biasBytes);
+        }
     }
 }
