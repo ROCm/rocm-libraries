@@ -3186,11 +3186,6 @@ Solutions:
     macrotile: [256, 256, 128]
     name: RR_GEMM_TN_FP6_FP6_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
     threads: [256, 1, 1]
-  CustomKernelSizePredicate:
-  - {tag: SizeGreaterThan, index: 0, value: 255}
-  - {tag: SizeLessThan, index: 0, value: 257}
-  - {tag: SizeGreaterThan, index: 3, value: 127}
-  - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
