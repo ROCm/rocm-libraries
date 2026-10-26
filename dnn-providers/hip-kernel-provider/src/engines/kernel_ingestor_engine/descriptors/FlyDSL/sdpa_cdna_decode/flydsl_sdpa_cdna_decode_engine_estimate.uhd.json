@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "3dad889b-22c8-561d-b374-f1653290544f",
   "name": "flydsl sdpa_cdna_decode engine estimate",
-  "provenance": "Slot for a trained engine estimate; uhd_gen promote replaces it. No scorer is registered under its symbol, so until then the loader disables the estimate and keeps the engine.",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
   "adapter": "native",
   "objective": "max",
   "score": {
