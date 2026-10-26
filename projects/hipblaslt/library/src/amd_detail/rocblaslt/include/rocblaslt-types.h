@@ -746,7 +746,13 @@ struct RocblasltContractionProblem
 // Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
-    bool                         hasA2APrefix      = false;
+    enum class Mode
+    {
+        Disabled,
+        GemmA2A,
+    };
+
+    Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
     int64_t                      a2aExtent         = 0;
@@ -757,6 +763,14 @@ struct RocblasltFusedEpilogueInfo
 // Returns false when desc is nullptr.
 bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
                                       RocblasltFusedEpilogueInfo&                    out);
+
+// Returns false unless prob requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
+                                        RocblasltFusedEpilogueInfo&        out)
+{
+    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
 #endif
 
 namespace rocblaslt

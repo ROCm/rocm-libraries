@@ -12,7 +12,7 @@ inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           ha
                                            const RocblasltContractionProblem& problem)
 {
     RocblasltFusedEpilogueInfo info;
-    if(!rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, info) || !info.hasA2APrefix)
+    if(!rocblaslt_resolve_fused_a2a(problem, info))
         return rocblaslt_status_success;
 
     if(handle == nullptr || handle->device_comm_world == 0)
@@ -34,8 +34,7 @@ inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           ha
 inline bool fused_a2a_lacks_sdma_queues(const RocblasltContractionProblem& problem)
 {
     RocblasltFusedEpilogueInfo info;
-    return rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, info) && info.hasA2APrefix
-           && info.a2aSdmaQueues == nullptr;
+    return rocblaslt_resolve_fused_a2a(problem, info) && info.a2aSdmaQueues == nullptr;
 }
 
 #endif
