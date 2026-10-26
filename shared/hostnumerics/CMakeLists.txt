@@ -33,7 +33,6 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
             include/roc/hostnumerics/scalar_type.hpp
             include/roc/hostnumerics/scalar.hpp
-            include/roc/hostnumerics/scalar_conversion.hpp
             include/roc/hostnumerics/scalar_conversion_options.hpp
             include/roc/hostnumerics/scalar_integer_conversion.hpp
             include/roc/hostnumerics/shape.hpp
