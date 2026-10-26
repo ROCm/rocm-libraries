@@ -240,10 +240,10 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // grid.x is clamped, so walk the contiguous chunk of row groups this
-        // block owns; a grid-stride loop could deadlock on the done flags. Each
-        // wavefront only touches its own slice of shared memory, so no barrier
-        // is needed between iterations.
+        // grid.x may be clamped, so walk the contiguous chunk of row groups this
+        // block owns (a single group when it is not); a grid-stride loop could
+        // deadlock on the done flags. Each wavefront only touches its own slice
+        // of shared memory, so no barrier is needed between iterations.
         const int64_t num_row_groups = (static_cast<int64_t>(mb) - 1) / (BLOCKSIZE / WFSIZE) + 1;
 
         int64_t first_row_group, last_row_group;
@@ -290,10 +290,10 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // grid.x is clamped, so walk the contiguous chunk of row groups this
-        // block owns; a grid-stride loop could deadlock on the done flags. Each
-        // wavefront only touches its own slice of shared memory, so no barrier
-        // is needed between iterations.
+        // grid.x may be clamped, so walk the contiguous chunk of row groups this
+        // block owns (a single group when it is not); a grid-stride loop could
+        // deadlock on the done flags. Each wavefront only touches its own slice
+        // of shared memory, so no barrier is needed between iterations.
         const int64_t num_row_groups = (static_cast<int64_t>(mb) - 1) / (BLOCKSIZE / WFSIZE) + 1;
 
         int64_t first_row_group, last_row_group;
@@ -340,8 +340,9 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // grid.x is clamped, so walk the contiguous chunk of row groups this
-        // block owns; a grid-stride loop could deadlock on the done flags.
+        // grid.x may be clamped, so walk the contiguous chunk of row groups this
+        // block owns (a single group when it is not); a grid-stride loop could
+        // deadlock on the done flags.
         const int64_t num_row_groups = (static_cast<int64_t>(mb) - 1) / (BLOCKSIZE / WFSIZE) + 1;
 
         int64_t first_row_group, last_row_group;
@@ -388,8 +389,9 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // grid.x is clamped, so walk the contiguous chunk of row groups this
-        // block owns; a grid-stride loop could deadlock on the done flags.
+        // grid.x may be clamped, so walk the contiguous chunk of row groups this
+        // block owns (a single group when it is not); a grid-stride loop could
+        // deadlock on the done flags.
         const int64_t num_row_groups = (static_cast<int64_t>(mb) - 1) / (BLOCKSIZE / WFSIZE) + 1;
 
         int64_t first_row_group, last_row_group;
