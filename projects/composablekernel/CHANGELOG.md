@@ -2,10 +2,12 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
-## Unreleased
+## Composable Kernel 1.3.0 for ROCm 10.2.0
 
 ### Added
 
+* Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
+* Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
 * Added gfx1250 scalar FP16/BF16 weight-gradient candidates for odd per-group channels; automatic reduction splitting selects the supported single-split path.
 * Added gfx1250 BF16 skinny-channel and nonoverlapping RGB-patch weight-gradient candidates.
 * Added bounded gfx1250 native NCHW FP32 pointwise backward-data and FP16 pointwise forward candidates.
@@ -14,6 +16,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Optimized
 
+* Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
 * Avoided redundant clears for proven packed split-one WMMA weight-gradient and pointwise backward-data invocations.
 
 ### Resolved Issues
@@ -22,18 +25,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
 * Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
 * Restored device-wide occupancy planning for gfx1250 automatic weight-gradient reduction splitting.
-
-## Composable Kernel 1.3.0 for ROCm 10.2.0
-
-### Added
-
-* Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
-* Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
-
-### Optimized
-
-* Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
-
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
