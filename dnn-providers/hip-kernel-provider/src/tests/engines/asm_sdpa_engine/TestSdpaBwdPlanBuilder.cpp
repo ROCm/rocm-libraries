@@ -21,7 +21,15 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace asm_sdpa_engine
 {
@@ -883,6 +891,325 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Tensor layouts the backward kernels can and cannot address
+// =============================================================================
+
+// Replaces the strides, and the dims when non-empty, of the tensor called name.
+// createValidSdpaBwdGraph names its tensors q, k, v, o, do, stats, dq, dk, dv.
+struct LayoutOverride
+{
+    std::string name;
+    std::vector<int64_t> strides;
+    std::vector<int64_t> dims;
+};
+
+// Copy of a backward graph with the given tensor layouts applied.
+flatbuffers::FlatBufferBuilder withLayouts(const flatbuffers::FlatBufferBuilder& base,
+                                           const std::vector<LayoutOverride>& layouts)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+    for(const auto& layout : layouts)
+    {
+        const auto it
+            = std::find_if(graph.tensors.begin(), graph.tensors.end(), [&](const auto& tensor) {
+                  return tensor->name == layout.name;
+              });
+        if(it == graph.tensors.end())
+        {
+            throw std::logic_error("withLayouts: no tensor named " + layout.name);
+        }
+        (*it)->strides = layout.strides;
+        if(!layout.dims.empty())
+        {
+            (*it)->dims = layout.dims;
+        }
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return builder;
+}
+
+constexpr std::array<const char*, 8> K_IO_TENSOR_NAMES
+    = {"q", "k", "v", "o", "do", "dq", "dk", "dv"};
+
+// The same strides on the named tensors.
+std::vector<LayoutOverride> onTensors(const std::vector<const char*>& names,
+                                      const std::vector<int64_t>& strides)
+{
+    std::vector<LayoutOverride> layouts;
+    layouts.reserve(names.size());
+    for(const char* name : names)
+    {
+        layouts.push_back({name, strides, {}});
+    }
+    return layouts;
+}
+
+// The same strides on all eight Q/K/V/O/dO/dQ/dK/dV tensors.
+std::vector<LayoutOverride> onAllIoTensors(const std::vector<int64_t>& strides)
+{
+    return onTensors({K_IO_TENSOR_NAMES.begin(), K_IO_TENSOR_NAMES.end()}, strides);
+}
+
+// Layouts the kernels address correctly, all GPU-verified on gfx942: BSHD, padded
+// row strides, dO strides that differ from O, and odd strides on every axis whose
+// offset the kernels do not put in a 4-byte record index.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // B=2 and H=2 so that every batch and head stride is used.
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    // [B, H, S, D] dims stored as [B, S, H, D].
+    const std::vector<int64_t> bshd = {int64_t{256} * 2 * 128, 128, int64_t{2} * 128, 1};
+    // BHSD with each row padded from D=128 to D+8 or D+2 elements.
+    const std::vector<int64_t> paddedRows = {int64_t{2} * 256 * 136, int64_t{256} * 136, 136, 1};
+    const std::vector<int64_t> rowsPlus2 = {int64_t{2} * 256 * 130, int64_t{256} * 130, 130, 1};
+    // BHSD with an odd batch, head or row stride (every row 2-byte aligned only).
+    const std::vector<int64_t> oddBatch = {int64_t{2} * 256 * 128 + 1, int64_t{256} * 128, 128, 1};
+    const std::vector<int64_t> oddHead
+        = {int64_t{2} * (int64_t{256} * 128 + 1), int64_t{256} * 128 + 1, 128, 1};
+    const std::vector<int64_t> oddRows = {int64_t{2} * 256 * 129, int64_t{256} * 129, 129, 1};
+
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests;
+    applicabilityTests.emplace_back(GraphTest{createSdpaBwdGraph(dims), "packed BHSD"}, true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), onAllIoTensors(bshd)),
+                  "BSHD on all eight tensors"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), onAllIoTensors(paddedRows)),
+                  "row stride D+8 on all eight tensors"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), onAllIoTensors(rowsPlus2)),
+                  "row stride D+2 on all eight tensors"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), {{"do", bshd, {}}}),
+                  "dO BSHD while O is BHSD"},
+        true);
+    // Batch offsets go to the buffer base in every kernel.
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), onAllIoTensors(oddBatch)),
+                  "odd batch stride on all eight tensors"},
+        true);
+    // DQDKDV adds these head offsets to the buffer base.
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims),
+                              onTensors({"q", "k", "v", "o", "do", "dq"}, oddHead)),
+                  "odd head stride on Q, K, V, O, dO and dQ"},
+        true);
+    // ODO reads O and DQ_CONVERT writes dQ by byte offset.
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), onTensors({"o", "dq"}, oddRows)),
+                  "row stride D+1 on O and dQ"},
+        true);
+    // The stride of a size-1 axis only ever multiplies index 0.
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({2, 2, 1, 128}),
+                                                          onAllIoTensors({260, 130, 129, 1})),
+                                              "row stride D+1 with S=1 on all eight tensors"},
+                                    true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph({2, 1, 256, 128}),
+                              onTensors({"dk", "dv"},
+                                        {int64_t{256} * 128, int64_t{256} * 128 + 1, 128, 1})),
+                  "odd dK and dV head stride with H=1"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1}, {2, 2, 256}}}),
+                  "rank-3 packed stats"},
+        true);
+    // No kernel reads the stats strides, so the stride of a size-1 stats axis
+    // must not decline, even when it does not fit a 32-bit byte stride.
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({1, 1, 256, 128}),
+                                                          {{"stats", {1024, 640, 1, 1}, {}}}),
+                                              "unused stats strides of size-1 axes"},
+                                    true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph({1, 1, 256, 128}),
+                              {{"stats", {int64_t{1} << 40, -7, 1, 1}, {}}}),
+                  "huge and negative stats strides of size-1 axes"},
+        true);
+    applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({2, 1, 256, 128}),
+                                                          {{"stats", {256, 999, 1, 1}, {}}}),
+                                              "unused stats head stride, H=1"},
+                                    true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 7}, {}}}),
+                  "arbitrary stride on the size-1 last stats dim"},
+        true);
+    applicabilityTests.emplace_back(
+        GraphTest{withLayouts(createSdpaBwdGraph({2, 2, 1, 128}), {{"stats", {2, 1, 5, 1}, {}}}),
+                  "unused stats seq stride, S_q=1"},
+        true);
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+// Row strides the kernels cannot address. On gfx942 each of these gave wrong
+// gradients:
+// - an odd row stride on a tensor DQDKDV indexes in 4-byte records (Q, K, V, dO,
+//   dK, dV), and an odd dK/dV head stride: rows start 2 bytes into a dword;
+// - a row stride below D, also on a length-1 sequence axis: each buffer ends
+//   S * row stride bytes into its (batch, head) slice, cutting off the last row.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    const std::vector<int64_t> oddRows = {int64_t{2} * 256 * 129, int64_t{256} * 129, 129, 1};
+    const std::vector<int64_t> oddHead
+        = {int64_t{2} * (int64_t{256} * 128 + 1), int64_t{256} * 128 + 1, 128, 1};
+    // Rows overlap: 64-element row stride with D=128, all strides even.
+    const std::vector<int64_t> overlappingRows
+        = {int64_t{2} * (int64_t{255} * 64 + 128), int64_t{255} * 64 + 128, 64, 1};
+    // S=1 with a row stride of 1.
+    const std::vector<int64_t> unitRowStride = {256, 128, 1, 1};
+
+    std::vector<GraphTest> declineTests;
+    for(const char* name : {"q", "k", "v", "do", "dk", "dv"})
+    {
+        declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{name, oddRows, {}}}),
+                                  std::string(name) + " row stride D+1");
+    }
+    // REG-20: dO row pitch D+1, fp16.
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph({2, 2, 64, 128},
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF),
+                    {{"do", {16512, 8256, 129, 1}, {}}}),
+        "dO strides [16512, 8256, 129, 1]");
+    for(const char* name : {"dk", "dv"})
+    {
+        declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{name, oddHead, {}}}),
+                                  std::string(name) + " odd head stride");
+    }
+    for(const char* name : K_IO_TENSOR_NAMES)
+    {
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(dims), {{name, overlappingRows, {}}}),
+            std::string(name) + " row stride D/2");
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph({2, 2, 1, 128}), {{name, unitRowStride, {}}}),
+            std::string(name) + " row stride 1 with S=1");
+    }
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// No kernel takes a head-dim stride, so a strided head dim on any of the eight
+// tensors must decline. On gfx942 a stride-2 Q gave Inf dK/dV and a stride-2 dQ
+// left dQ elements unwritten.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonUnitHeadDimStride)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    // BHSD with head-dim stride 2 and row stride 2 * D.
+    const std::vector<int64_t> headDimStride2
+        = {int64_t{2} * 256 * 256, int64_t{256} * 256, 256, 2};
+
+    for(const char* name : K_IO_TENSOR_NAMES)
+    {
+        const GraphTest test{withLayouts(createSdpaBwdGraph(dims), {{name, headDimStride2, {}}}),
+                             std::string(name) + " head-dim stride 2"};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// The kernels read LSE and D only as packed [B, H_q, S_q]. On gfx942 a stats head
+// stride padded to S_q + 64 gave wrong, run-to-run varying gradients for both
+// B=2 H=2 and B=1 H=2.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonPackedStats)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // Packed stats for these dims are [2, 2, 256, 1] with strides [512, 256, 1, 1].
+    const std::vector<int64_t> dims = {2, 2, 256, 128};
+    std::vector<GraphTest> declineTests;
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {640, 320, 1, 1}, {}}}),
+        "stats head stride S_q + 64, B=2 H=2");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph({1, 2, 256, 128}), {{"stats", {640, 320, 1, 1}, {}}}),
+        "stats head stride S_q + 64, B=1 H=2");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {576, 256, 1, 1}, {}}}),
+        "stats batch stride H * S_q + 64");
+    // Only the seq stride is wrong in the next three, so only the seq stride
+    // check can decline them.
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 2, 1}, {}}}),
+        "stats seq stride 2");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 0, 1}, {}}}),
+        "stats broadcast along S_q");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph({1, 1, 256, 128}), {{"stats", {512, 512, 2, 1}, {}}}),
+        "stats seq stride 2, B=1 H=1");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 1, 2, 1}, {}}}),
+        "stats stored as [B, S_q, H]");
+    // These strides are packed for Q's [B, H_q, S_q], so only the dims check can
+    // decline the rest.
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 1}, {2, 2, 128, 1}}}),
+        "stats S_q differs from Q");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 1}, {2, 1, 256, 1}}}),
+        "stats H differs from Q");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 1}, {1, 2, 256, 1}}}),
+        "stats B differs from Q");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 1}, {2, 2, 256, 2}}}),
+        "stats trailing dim 2");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1, 1, 1}, {2, 2, 256, 1, 1}}}),
+        "rank-5 stats");
+    declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 256, 1}, {}}}),
+                              "3 stats strides for rank-4 stats dims");
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims), {{"stats", {512, 1}, {2, 512}}}), "rank-2 stats");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
 }
 
 // =============================================================================
