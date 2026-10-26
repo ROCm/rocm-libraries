@@ -73,7 +73,7 @@ class SIA3(SIA):
             lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
-            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
+            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, itemsGRToSchedLater)
             writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=isNGLL)
@@ -111,7 +111,7 @@ class SIA2(SIA):
             lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
-            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
+            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, itemsGRToSchedLater)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched)
             startIter = assignLWSchedIndexDefault(writer, kernel, numLocalWritesPerSched, localWriteEndIter, lastLoadIter, numWritesToSched)
@@ -139,7 +139,7 @@ class SIA1(SIA):
             lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
         # Schedule local write
         if not writer.states.scheduleLocalWrite:
-            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
+            noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, itemsGRToSchedLater)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched)
             startIter = assignLWSchedIndexDefault(writer, kernel, numLocalWritesPerSched, localWriteEndIter, lastLoadIter, numWritesToSched)
@@ -832,7 +832,7 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
 ################################################################################
 ################################################################################
 
-def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter):
+def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, itemsGRToSchedLater=None):
     # if no scheduleLocalWrite - just add writes to localWritelocalWriteEndIter
     # If PGR=0, writes have to be done immediately following the loads - no opportunity to schedule
     #   so don't add to schedule, these will be added separately and before the first iter
@@ -850,6 +850,20 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
         imod.add(writer.codes.localWriteMXSB)
         imod.addComment1("local write B")
         imod.add(writer.codes.localWriteB)
+        # PGR>=2 defers the next prefetch until its G2L vgprs are consumed by the local
+        # writes (prepareGRInstToSched); schedLocalWrite is not called here, so issue them
+        # all after the writes, else the main loop never loads the next tile.
+        if itemsGRToSchedLater:
+            imod.addComment1("global read (deferred after local write)")
+            reads = 0  # vmcnt(0) above drained everything older
+            while itemsGRToSchedLater:
+                itemGR = itemsGRToSchedLater.pop(0)
+                hasHolder, wcList = hasHolderInWaitCnt(itemGR)
+                if hasHolder:
+                    for wc in wcList:
+                        replaceHolder(wc, reads)
+                imod.add(itemGR)
+                reads += countGlobalRead(itemGR)
 
         if kernel["PrefetchGlobalRead"] == 2 and writer.codes.perIterLocalWriteCodeNGLL is not None: # TODO: check condition
             # do we need a module here? That would prevent these from being scheduled

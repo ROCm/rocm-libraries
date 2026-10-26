@@ -1,0 +1,57 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# 1LDSBuffer=1 + ScheduleLocalWrite=0 + PGR2: the next tile's global reads are
+# issued by noSchedLocalWrite. K spans 1 to many DepthU tiles plus a tail.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PrintSolutionRejectionReason: True
+  Device: 0
+  SyncsPerBenchmark: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   2, 2,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [1, 2]
+        - ScheduleLocalWrite: [0]
+        - 1LDSBuffer: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 32]
+          - Exact: [256, 256, 1, 96]
+          - Exact: [256, 256, 1, 1024]
+          - Exact: [255, 257, 1, 1000]
