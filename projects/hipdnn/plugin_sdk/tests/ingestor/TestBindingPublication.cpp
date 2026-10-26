@@ -272,20 +272,11 @@ struct LayoutCase
     bool packed;
 };
 
-TEST(TestBindingPublication, PackednessSeparatesDensePermutationsFromOverlapGapsAndReversal)
+TEST(TestBindingPublication, PackedFollowsLayoutAndRaggedness)
 {
-    const std::vector<LayoutCase> cases{{{2, 3, 4}, {12, 4, 1}, true},
-                                        {{2, 3, 4}, {1, 2, 6}, true},
-                                        {{2, 1, 3}, {3, 999, 1}, true},
-                                        {{2, 1, 3}, {3, 1, 1}, true},
-                                        {{2, 1, 3}, {3, 0, 1}, true},
-                                        {{2, 1, 3}, {3, -7, 1}, true},
-                                        {{2, 2, 2}, {1, 1, 5}, false},
-                                        {{2, 3}, {4, 1}, false},
-                                        {{2, 3}, {0, 1}, false},
-                                        {{2, 3}, {-3, 1}, false},
-                                        {{1, 1, 1, 1}, {1, 1, 1, 1}, true},
-                                        {{1, 1}, {0, -1}, true}};
+    // isTensorPacked() layouts are covered in TestShapeUtilities; this checks the wiring.
+    const std::vector<LayoutCase> cases{{{2, 3, 4}, {1, 2, 6}, true},
+                                        {{2, 2, 2}, {1, 1, 5}, false}};
     for(const auto& layout : cases)
     {
         auto source = tensor();
