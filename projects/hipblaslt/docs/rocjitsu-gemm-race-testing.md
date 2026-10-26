@@ -85,3 +85,6 @@ without starting the benchmark or rocJITsu. These samples are marked `dry-run`,
 so they do not count as passes. `--stop-on-failure` stops starting new samples
 after a failure; already running samples finish. Each run creates a new output
 directory, with `summary.json` for totals and `cases.md` for individual results.
+The runner saves partial totals during execution. If the job is interrupted,
+`summary.json` retains those totals with `complete` set to `false`; completed
+cases also retain their individual results and logs.

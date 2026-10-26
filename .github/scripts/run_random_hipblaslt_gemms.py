@@ -306,6 +306,19 @@ def main(argv=None):
     records = []
     started = time.perf_counter()
 
+    def save_summary():
+        completed = sum(summary[key] for key in ("passed", "failed", "unsupported"))
+        summary["random_no_solution_rate"] = (
+            summary["unsupported"] / completed if completed else None
+        )
+        summary["elapsed_seconds"] = time.perf_counter() - started
+        # Replace the file so an interrupted write leaves the previous totals intact.
+        temporary = args.output / "summary.json.tmp"
+        write_json(temporary, summary)
+        temporary.replace(args.output / "summary.json")
+
+    save_summary()
+
     def worker():
         while True:
             # Sample in iteration order so scheduling cannot change the inputs.
@@ -329,6 +342,7 @@ def main(argv=None):
                 for key, category in categories.items():
                     counts = summary["coverage"][key]
                     counts[category] = counts.get(category, 0) + 1
+                save_summary()
             directory = args.output / name
             directory.mkdir()
             write_input(directory / "input.yaml", problem)
@@ -351,6 +365,7 @@ def main(argv=None):
                     summary[result["outcome"]] += 1
                     if args.stop_on_failure and result["outcome"] != "passed":
                         stop.set()
+                    save_summary()
                 print(
                     f"{name}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
                     flush=True,
@@ -376,12 +391,7 @@ def main(argv=None):
                     raise
         summary["complete"] = summary["sampled"] == summary["requested"]
     finally:
-        completed = sum(summary[key] for key in ("passed", "failed", "unsupported"))
-        summary["random_no_solution_rate"] = (
-            summary["unsupported"] / completed if completed else None
-        )
-        summary["elapsed_seconds"] = time.perf_counter() - started
-        write_json(args.output / "summary.json", summary)
+        save_summary()
         write_case_report(args.output, records)
         print(json.dumps(summary, sort_keys=True), flush=True)
     return int(summary["failed"] + summary["unsupported"] != 0)
