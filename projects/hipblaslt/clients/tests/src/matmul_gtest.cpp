@@ -29,13 +29,95 @@
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
+#include <string>
 #include <type_traits>
 
 #include <gtest/gtest-spi.h>
 
 namespace
 {
+
+    class NaturalMXScalePadding : public ::testing::Test
+    {
+        void SetUp() override
+        {
+#ifndef HIPBLASLT_ENABLE_MXDATAGENERATOR
+            GTEST_SKIP() << "natural MX inputs require MX data generation";
+#endif
+            if(hipblaslt_get_arch() != 950)
+                GTEST_SKIP() << "natural MX scale padding is specific to gfx950";
+
+            const char* previous = std::getenv("HIPBLASLT_USE_ROCROLLER");
+            if(previous)
+            {
+                m_previous = previous;
+            }
+
+            // Exercise the Tensile library's padded scale descriptors, including
+            // builds that also enable the legacy rocRoller dispatch path.
+#ifdef _WIN32
+            ASSERT_EQ(_putenv_s("HIPBLASLT_USE_ROCROLLER", "0"), 0);
+#else
+            ASSERT_EQ(setenv("HIPBLASLT_USE_ROCROLLER", "0", 1), 0);
+#endif
+            m_changed = true;
+        }
+
+        void TearDown() override
+        {
+            if(!m_changed)
+                return;
+#ifdef _WIN32
+            EXPECT_EQ(_putenv_s("HIPBLASLT_USE_ROCROLLER", m_previous ? m_previous->c_str() : ""),
+                      0);
+#else
+            if(m_previous)
+                EXPECT_EQ(setenv("HIPBLASLT_USE_ROCROLLER", m_previous->c_str(), 1), 0);
+            else
+                EXPECT_EQ(unsetenv("HIPBLASLT_USE_ROCROLLER"), 0);
+#endif
+        }
+
+    protected:
+        void check_numerical_result()
+        {
+            Arguments arg{};
+            arg.init();
+            arg.a_type = arg.b_type = HIP_R_8F_E5M2;
+            arg.c_type = arg.d_type = HIP_R_16BF;
+            arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0;
+            // Four generated scales per row must expand to the gfx950 stride of eight.
+            arg.M[0] = arg.N[0] = 64;
+            arg.K[0]            = 128;
+            arg.lda[0] = arg.ldb[0] = 128;
+            arg.ldc[0] = arg.ldd[0] = 64;
+            arg.stride_a[0] = arg.stride_b[0] = 8192;
+            arg.stride_c[0] = arg.stride_d[0] = 4096;
+            arg.transA                        = 'T';
+            arg.transB                        = 'N';
+            arg.initialization                = hipblaslt_initialization::hpl;
+            // Use the BFloat16 norm tolerance for reduction-order rounding.
+            arg.unit_check        = 0;
+            arg.norm_check        = 1;
+            arg.norm_check_assert = true;
+            arg.print_kernel_info = true;
+            arg.timing            = 1;
+            arg.iters = arg.cold_iters = 0;
+            testing_matmul(arg);
+        }
+
+    private:
+        std::optional<std::string> m_previous;
+        bool                       m_changed = false;
+    };
+
+    TEST_F(NaturalMXScalePadding, smoke_numerical_result)
+    {
+        check_numerical_result();
+    }
 
     void expect_preswizzled_layout_error(const Arguments& arg, const char* expected)
     {
