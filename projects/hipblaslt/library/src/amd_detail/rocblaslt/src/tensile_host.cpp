@@ -7657,6 +7657,7 @@ static rocblaslt_status
             continue;
 
         std::shared_ptr<TensileLite::ContractionSolution> found;
+        int                                               nameMatches = 0;
         {
             std::lock_guard<std::mutex> lock(library->solutionsGuard);
             for(auto const& entry : library->solutions)
@@ -7678,16 +7679,33 @@ static rocblaslt_status
                     continue;
 
                 found = entry.second;
-                break;
+                ++nameMatches;
+                // Map order is not a rank. A second hit means two kernels still
+                // describe this tile; keep scanning only long enough to know.
+                if(nameMatches > 1)
+                    break;
             }
+        }
+        // One kernel per ranked tile. Zero is "not checked in". Two or more
+        // is ambiguous: taking the first would launch whichever solution the
+        // map happened to yield.
+        if(nameMatches != 1)
+        {
+            if(nameMatches > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+            {
+                std::ostringstream msg;
+                msg << "skipping rocRoller tile " << tile.m << "x" << tile.n << "x" << tile.k
+                    << ": more than one kernel matches";
+                log_info(__func__, msg.str());
+            }
+            continue;
         }
         // Heuristic conversion reports workspace requirements but does not
         // filter them, so reject kernels that exceed the caller's budget here.
-        if(found && found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
+        if(found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
             continue;
 
-        if(found)
-            chosen.push_back(found);
+        chosen.push_back(found);
     }
 
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
