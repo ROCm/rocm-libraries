@@ -64,6 +64,15 @@ using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_f16_instances = std::tupl
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,    96,   128,   128,    8,   16,   16,       6,       1,      S<16, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              6,              8,         1,      S<16, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,       S<1, 16, 1, 16>,                      8, Scheduler, PipelineVersion>
     // DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    96,    96,    96,    48,    8,   16,   16,       6,       2,       S<6, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              6,              8,         0,       S<6, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              6,              8,         0,           1,           1,        S<1, 16, 1, 6>,                      8, Scheduler, PipelineVersion>, // Incorrect results for at least GemmDefault
     // DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    96,    96,    96,    48,    8,   16,   16,       6,       2,       S<6, 16, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              6,              8,         1,       S<6, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              6,              8,         0,           1,           1,        S<1, 16, 1, 6>,                      8, Scheduler, PipelineVersion>  // Incorrect results for at least GemmDefault
+#if defined(CK_USE_GFX1250)
+    , DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<
+        NDimSpatial, ALayout, BLayout, ELayout, F16, F16, F16, F32,
+        PassThrough, PassThrough, PassThrough, ConvSpec,
+        32, 16, 16, 32, 8, 16, 16, 1, 1,
+        S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+        S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+        1, 1, S<1, 4, 1, 8>, 1, Scheduler, PipelineVersion>
+#endif
     // clang-format on
     >;
 
@@ -98,6 +107,15 @@ using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_instances = std::tup
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   256,   256,   256,    64,    8,   16,   16,       8,       4,      S< 1, 32, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 1, 32, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1, 8>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   256,   128,    8,   16,   16,       4,       2,      S< 4, 16, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 2, 32, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1,16>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   512,   128,   128,    64,    8,   16,   16,       4,       1,      S< 4, 16, 8>,       S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              8,         1,      S< 4, 16, 8>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,        S<1, 32, 1,16>,                      8, Scheduler, PipelineVersion, BF16, BF16, 1, 1, true, true>
+#if defined(CK_USE_GFX1250)
+    , DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<
+        NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32,
+        PassThrough, PassThrough, PassThrough, ConvSpec,
+        32, 16, 16, 32, 8, 16, 16, 1, 1,
+        S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+        S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 1, 4, 0,
+        1, 1, S<1, 4, 1, 8>, 1, Scheduler, PipelineVersion>
+#endif
     //clang-format on
     >;
 

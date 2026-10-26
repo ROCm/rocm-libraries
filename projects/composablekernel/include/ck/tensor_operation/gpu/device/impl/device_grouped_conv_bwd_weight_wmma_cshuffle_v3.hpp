@@ -453,6 +453,11 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
             else
             {
+                // Scalar 16-bit output must not instantiate a packed half/bfloat atomic.
+                constexpr auto occupancy_store_op =
+                    sizeof(WeiDataType) == 2 && CShuffleBlockTransferScalarPerVector_NPerBlock == 1
+                        ? InMemoryDataOperationEnum::Set
+                        : InMemoryDataOperationEnum::AtomicAdd;
                 hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_occupancy,
                     kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
@@ -462,7 +467,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                         remove_reference_t<DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
                         ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                         true,
-                        InMemoryDataOperationEnum::AtomicAdd,
+                        occupancy_store_op,
                         minimum_occupancy>,
                     BlockSize,
                     dynamic_smem_size));
@@ -502,6 +507,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
               c_grid_desc_m_n_{},
               c_grid_desc_mblock_mperblock_nblock_nperblock_{},
               compute_ptr_offset_of_batch_{},
+              is_packed_weight_{false},
               M01_{M01},
               N01_{N01},
               a_element_op_{out_element_op},
@@ -519,7 +525,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
               input_right_pads_{input_right_pads}
         {
             stride_overflow = stride_overflow_in;
-            static ActiveWorkgroupsPerCU active_workgroups_per_cu;
 
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
@@ -539,29 +544,38 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
 
             if(split_k < 0)
             {
-                ck::index_t gemmM, gemmN, gemmK;
-                std::tie(gemmM, gemmN, gemmK) =
-                    get_bwd_weight_gemm_sizes<NDimSpatial>(a_g_n_k_wos_lengths, e_g_k_c_xs_lengths);
-
-                const auto grid_size =
-                    calculate_mn_grid_size<MPerBlock, NPerBlock>(gemmM, gemmN) * Conv_G_;
-                k_batch_ = get_best_occupancy_k_batch_value(active_workgroups_per_cu.max_occupancy_,
-                                                            grid_size);
-
-                // Ensure that k_batch_ does not exceed the maximum value
-                // for the GEMM pipeline.
-                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
-                k_batch_               = std::min(k_batch_, k_batch_max);
-
-                // Cap k_batch_ to 128 to avoid accuracy issues
-                k_batch_ = std::min(k_batch_, 128);
-
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                if constexpr(sizeof(WeiDataType) == 2 &&
+                             CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
                 {
-                    std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
-                              << std::endl;
-                    std::cout << "[SPLIT-K AUTODEDUCE] Final k_batch value: " << k_batch_
-                              << std::endl;
+                    k_batch_ = 1;
+                }
+                else
+                {
+                    static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+                    ck::index_t gemmM, gemmN, gemmK;
+                    std::tie(gemmM, gemmN, gemmK) = get_bwd_weight_gemm_sizes<NDimSpatial>(
+                        a_g_n_k_wos_lengths, e_g_k_c_xs_lengths);
+
+                    const auto grid_size =
+                        calculate_mn_grid_size<MPerBlock, NPerBlock>(gemmM, gemmN) * Conv_G_;
+                    k_batch_ = get_best_occupancy_k_batch_value(
+                        active_workgroups_per_cu.max_occupancy_, grid_size);
+
+                    // Ensure that k_batch_ does not exceed the maximum value
+                    // for the GEMM pipeline.
+                    const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
+                    k_batch_               = std::min(k_batch_, k_batch_max);
+
+                    // Cap k_batch_ to 128 to avoid accuracy issues.
+                    k_batch_ = std::min(k_batch_, 128);
+
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
+                                  << std::endl;
+                        std::cout << "[SPLIT-K AUTODEDUCE] Final k_batch value: " << k_batch_
+                                  << std::endl;
+                    }
                 }
             }
             else
@@ -579,6 +593,20 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_strides_transposed =
                 conv_ngchw_to_nhwgc_transformer.TransposeWeiStrides(e_g_k_c_xs_lengths,
                                                                     e_g_k_c_xs_strides);
+            // The GEMM weight descriptor flattens filter positions using the innermost
+            // spatial stride and C stride 1. Only a dense, nonoverlapping weight tensor
+            // gives each logical weight (and each group) a distinct Set destination.
+            long_index_t packed_weight_stride = Conv_C_;
+            is_packed_weight_                 = e_g_k_c_xs_lengths[0] == Conv_G_ &&
+                                e_g_k_c_xs_lengths[2] == Conv_C_ &&
+                                e_g_k_c_xs_strides_transposed[2] == 1;
+            for(index_t i = NDimSpatial + 2; i >= 3; --i)
+            {
+                is_packed_weight_ &= e_g_k_c_xs_strides_transposed[i] == packed_weight_stride;
+                packed_weight_stride *= e_g_k_c_xs_lengths[i];
+            }
+            is_packed_weight_ &= e_g_k_c_xs_strides_transposed[1] == packed_weight_stride &&
+                                 e_g_k_c_xs_strides_transposed[0] == packed_weight_stride * Conv_K_;
 
             const auto descs =
                 conv_to_gemm_transformer
@@ -721,6 +749,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
 
         // for computing batch offset
         ComputePtrOffsetOfStridedBatch<I1, I1, I0> compute_ptr_offset_of_batch_;
+        bool is_packed_weight_;
 
         index_t M01_;
         index_t N01_;
@@ -737,7 +766,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
         std::array<ck::index_t, NDimSpatial> input_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> output_spatial_lengths_;
-        // Own metadata retained for support checks after temporary conversion arrays expire.
         const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
         const std::array<ck::index_t, NDimSpatial> input_left_pads_;
         const std::array<ck::index_t, NDimSpatial> input_right_pads_;
@@ -870,9 +898,27 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             const auto num_k_per_block =
                 arg.a_grid_desc_kbatch_k0_m_k1_.GetLength(Number<0>{}) / gemm_arg.KBatch;
 
+            // At split 1 the Set epilogue covers every valid (K, filter..., C) coordinate:
+            // the ceil-divided M/N grid includes tail tiles, whose invalid lanes are masked
+            // by the weight descriptor. Packed group strides make these stores disjoint.
+            // For the transposed-weight path retain initialization: its conversion consumes
+            // a separate workspace layout. AtomicAdd at split > 1 always needs zero input.
+            constexpr bool direct_packed_weight_layout =
+                is_GNWC_GKXC_GNWK<InLayout, WeiLayout, OutLayout>() ||
+                is_NHWGC_GKYXC_NHWGK<InLayout, WeiLayout, OutLayout>() ||
+                is_GNHWC_GKYXC_GNHWK<InLayout, WeiLayout, OutLayout>() ||
+                is_NDHWGC_GKZYXC_NDHWGK<InLayout, WeiLayout, OutLayout>() ||
+                is_GNDHWC_GKZYXC_GNDHWK<InLayout, WeiLayout, OutLayout>();
+            const bool skip_clear =
+                direct_packed_weight_layout && arg.is_packed_weight_ && gemm_arg.KBatch == 1 &&
+                (BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ||
+                 (BlkGemmPipelineVer == BlockGemmPipelineVersion::v3 && has_main_k_block_loop));
             const auto clear_workspace = [&]() {
-                hip_check_error(
-                    hipMemsetAsync(p_e_grid, 0, arg.c_space_size_bytes, stream_config.stream_id_));
+                if(!skip_clear)
+                {
+                    hip_check_error(hipMemsetAsync(
+                        p_e_grid, 0, arg.c_space_size_bytes, stream_config.stream_id_));
+                }
             };
 
             const auto Run = [&](const auto& kernel) {
@@ -917,6 +963,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
+            // Split 1 uses Set. Split > 1 requires vector stores for 16-bit atomics;
+            // FP32 output also supports scalar AtomicAdd.
             if(has_main_k_block_loop)
             {
                 // Tail number always full
@@ -925,17 +973,26 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
-                            GridwiseGemm,
-                            remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
-                            remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
-                            remove_reference_t<
-                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
-                            true,
-                            InMemoryDataOperationEnum::AtomicAdd,
-                            minimum_occupancy>;
-                        Run(kernel);
+                        if constexpr(sizeof(WeiDataType) != 2 ||
+                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
+                        {
+                            const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
+                                GridwiseGemm,
+                                remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
+                                remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
+                                remove_reference_t<
+                                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
+                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                                true,
+                                InMemoryDataOperationEnum::AtomicAdd,
+                                minimum_occupancy>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
+                        }
                     }
                     else
                     {
@@ -964,17 +1021,26 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                 {
                     if(gemm_arg.KBatch > 1)
                     {
-                        const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
-                            GridwiseGemm,
-                            remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
-                            remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
-                            remove_reference_t<
-                                DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
-                            false,
-                            InMemoryDataOperationEnum::AtomicAdd,
-                            minimum_occupancy>;
-                        Run(kernel);
+                        if constexpr(sizeof(WeiDataType) != 2 ||
+                                     CShuffleBlockTransferScalarPerVector_NPerBlock > 1)
+                        {
+                            const auto kernel = kernel_grouped_conv_bwd_weight_wmma_cshuffle_v3<
+                                GridwiseGemm,
+                                remove_reference_t<DeviceOp::AGridDesc_K0_M_K1>,
+                                remove_reference_t<DeviceOp::BGridDesc_K0_N_K1>,
+                                remove_reference_t<
+                                    DeviceOp::CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock>,
+                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                                false,
+                                InMemoryDataOperationEnum::AtomicAdd,
+                                minimum_occupancy>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            throw std::runtime_error(
+                                "Scalar 16-bit WRW WMMA output does not support split-K > 1");
+                        }
                     }
                     else
                     {
@@ -1118,6 +1184,13 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             }
             // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
             return false;
+        }
+        // Scalar low-precision output can use Set, but not a packed half/bfloat atomic.
+        if constexpr(sizeof(WeiDataType) == 2 &&
+                     CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
+        {
+            if(!ck::is_gfx125_supported() || gemm_arg.KBatch > 1)
+                return false;
         }
 
         if constexpr(std::is_same_v<ComputeTypeA, f8_t> || std::is_same_v<ComputeTypeA, bf8_t> ||

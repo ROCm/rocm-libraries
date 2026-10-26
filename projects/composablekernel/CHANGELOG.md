@@ -4,6 +4,16 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ## Unreleased
 
+### Added
+
+* Added gfx1250 FP16/BF16 scalar WMMA backward-weight instances for odd per-group channels, supporting explicit split-one and automatic split-one selection.
+* Added gfx1250 BF16 skinny-output and RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
+
+### Optimized
+
+* Removed redundant output clears for proven packed split-one WMMA backward-weight mappings.
+* Restored device-wide automatic split-K occupancy planning for two-stage WMMA backward-weight, without the squared per-CU cap that underfilled small output grids with long reductions.
+
 ### Resolved Issues
 
 * Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
