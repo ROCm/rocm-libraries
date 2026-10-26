@@ -929,13 +929,17 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
         if dtype in ["fp16", "bf16"] and hdim == 128:
             # qr_tdm is generated for no bias / no logits soft cap / no sink
-            # only: the pipeline static_asserts the soft cap away, its sink is
-            # the prefill one that counts the sink once per split
-            # (SplitKvSinkDoubleCount / SplitKvSinkDroppedSink catch that), and
-            # split-kv with bias dispatches to nothing even on develop. Like
-            # fmha_fwd.py it pads both sequence lengths together and both head
-            # dims together; the qr entries padding one side only stay as they
-            # are, which is why the dispatch chain still has to put qr_tdm
+            # only:
+            #   soft cap  the pipeline static_asserts it away
+            #   sink      the pipeline seeds m/l under i_split == 0 but has no
+            #             equivalent of qr_ks_vs's keeps_sink rule for deciding
+            #             which split publishes a sink-bearing lse_acc, so
+            #             SplitKvSinkDoubleCount and SplitKvSinkDroppedSink fail
+            #   bias      split-kv with bias dispatches to nothing today and no
+            #             test covers it, so taking it over cannot be validated
+            # Like fmha_fwd.py it pads both sequence lengths together and both
+            # head dims together; the qr entries padding one side only stay as
+            # they are, which is why the dispatch chain still has to put qr_tdm
             # first (see FmhaFwdSplitKVApiPool.api).
             #
             # `superseded` is the qr entry the unpadded qr_tdm one replaces
