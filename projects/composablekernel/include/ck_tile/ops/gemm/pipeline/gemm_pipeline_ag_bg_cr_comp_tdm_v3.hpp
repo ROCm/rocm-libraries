@@ -512,6 +512,14 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             {
                 stage_gemm(I0{});
             }
+            // Drain TENSORcnt before leaving the pipeline. On the TailNumber::One path the fill of
+            // LDS stage 1 issued for the past-the-end K tile is still in flight, and the compiler
+            // does not track TDM writes to LDS, so the epilogue could reuse that LDS while the TDM
+            // engine still writes it. TENSORcnt is per wave: each issuer waits for its own fills
+            // (a no-op for the other waves); the barrier makes the drain workgroup-wide and orders
+            // every wave's last LDS reads before LDS is reused. On TailNumber::Two it is a no-op
+            // wait plus one barrier.
+            s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
             return c_block_tile;
         }
 
