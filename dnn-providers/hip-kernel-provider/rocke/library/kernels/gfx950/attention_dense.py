@@ -2882,6 +2882,32 @@ def _has_shape_params(spec: AttentionDenseSpec) -> bool:
     return not spec.persistent
 
 
+def _shape_kernarg_fields(spec: AttentionDenseSpec) -> tuple[str, ...]:
+    """The i32 scalar kernargs after ``scale``, in ABI order.
+
+    Every grid body takes batch/seqlen_q/seqlen_kv (``_has_shape_params``), baked or
+    not; the head counts ride along only under ``runtime_shape``, the one path whose
+    body reads them from kernargs. The persistent body takes none.
+    """
+    if not _has_shape_params(spec):
+        return ()
+    fields = ("batch", "seqlen_q", "seqlen_kv")
+    if spec.runtime_shape:
+        fields += ("num_query_heads", "num_kv_heads")
+    return fields
+
+
+def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
+    """Values for every :func:`_shape_kernarg_fields` entry, read off the spec.
+
+    The single source for the scalar kernargs: :func:`attention_dense_signature`
+    declares the same fields and every launcher (``run_attention_dense_torch``, the
+    SDPA reference export) merges this into its pointer/scale args rather than
+    listing the fields itself.
+    """
+    return {f: int(getattr(spec, f)) for f in _shape_kernarg_fields(spec)}
+
+
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
     plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
@@ -2896,19 +2922,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
-    if _has_shape_params(spec):
-        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
-        # build_attention_dense.
-        sig = (
-            sig.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-        # Heads ride along ONLY under runtime_shape (the body declares them there and
-        # nowhere else), after the seqlens and before any pointer. Baked specs omit
-        # them, so their ABI is unchanged.
-        if spec.runtime_shape:
-            sig = sig.scalar("num_query_heads", "i32").scalar("num_kv_heads", "i32")
+    # Mirrors the scalar params declared right after scale in build_attention_dense.
+    for field in _shape_kernarg_fields(spec):
+        sig = sig.scalar(field, "i32")
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -2925,6 +2941,34 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
     return sig.build()
+
+
+def _check_head_dims(spec: AttentionDenseSpec, *, q, k, v, out) -> None:
+    """Hold the tensors' trailing (heads, head_size) dims to the spec.
+
+    The spec's head counts reach the kernel as strides, the GQA divide and the K/V
+    buffer-resource extent (runtime kernargs on the runtime-shape grid, baked
+    constants elsewhere), and nothing on the device checks them against the
+    allocation. A tensor with other head counts would be read out of range or
+    mis-strided with no error, so reject it here. Every layout this launcher takes
+    (dense, ragged, varlen packed, paged cache) ends in (heads, head_size). A raw
+    device address (an int, as the SDPA replay passes) carries no shape to check.
+    """
+    D = spec.head_size
+    for name, tensor, heads in (
+        ("q", q, spec.num_query_heads),
+        ("out", out, spec.num_query_heads),
+        ("k", k, spec.num_kv_heads),
+        ("v", v, spec.num_kv_heads),
+    ):
+        shape = getattr(tensor, "shape", None)
+        if shape is None:
+            continue
+        got = tuple(shape[-2:])
+        if got != (heads, D):
+            raise ValueError(
+                f"{name} trailing (heads, head_size) {got} != spec ({heads}, {D})"
+            )
 
 
 _DENSE_LAUNCHER_CACHE: dict = {}
@@ -3120,6 +3164,8 @@ def run_attention_dense_torch(
         kv_lens=kv_lens,
         sinks=sinks,
     )
+    # After the LSE presence checks, which must fail before any input is touched.
+    _check_head_dims(spec, q=q, k=k, v=v, out=out)
 
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
@@ -3144,13 +3190,7 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
-    if _has_shape_params(spec):
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
-        if spec.runtime_shape:
-            vals["num_query_heads"] = int(spec.num_query_heads)
-            vals["num_kv_heads"] = int(spec.num_kv_heads)
+    vals.update(attention_dense_runtime_args(spec))
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv

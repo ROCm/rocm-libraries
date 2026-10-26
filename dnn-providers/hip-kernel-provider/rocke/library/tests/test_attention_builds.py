@@ -1579,8 +1579,19 @@ class TestAttentionHelpers(unittest.TestCase):
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
             _has_shape_params,
+            attention_dense_runtime_args,
             attention_dense_signature,
             build_attention_dense,
+        )
+
+        # The i32 shape/head scalars; every other kernarg is a pointer, scale, or
+        # the paged block-table stride, none of which the launcher reads off the spec.
+        shape_scalars = (
+            "batch",
+            "seqlen_q",
+            "seqlen_kv",
+            "num_query_heads",
+            "num_kv_heads",
         )
 
         def type_str(param):
@@ -1608,6 +1619,18 @@ class TestAttentionHelpers(unittest.TestCase):
             "persistent": AttentionDenseSpec(
                 **base, persistent=True, num_persistent=256
             ),
+            "lse": AttentionDenseSpec(**base, emit_lse=True),
+            "ragged": AttentionDenseSpec(
+                **{**base, "seqlen_q": 2000, "seqlen_kv": 2000}, ragged=True
+            ),
+            "varlen": AttentionDenseSpec(**base, varlen=True),
+            "paged": AttentionDenseSpec(
+                **{**base, "batch": 1},
+                paged=True,
+                sliding_window=256,
+                block_size=16,
+                num_kv_blocks=128,
+            ),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
@@ -1620,6 +1643,16 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertEqual(
                     _has_shape_params(spec), "batch" in [p.name for p in params]
                 )
+                # The launchers bind exactly the signature's shape/head scalars,
+                # in order, from attention_dense_runtime_args.
+                self.assertEqual(
+                    list(attention_dense_runtime_args(spec)),
+                    [a["name"] for a in sig if a["name"] in shape_scalars],
+                )
+                self.assertEqual(
+                    "num_query_heads" in attention_dense_runtime_args(spec),
+                    spec.runtime_shape,
+                )
         # The predicates really diverge on the bottom-right arm (shape is a param
         # AND baked). A sliding window is runtime-shape, so that arm checks the
         # runtime-shape ABI (shape and head kernargs) under a window.
@@ -1631,6 +1664,65 @@ class TestAttentionHelpers(unittest.TestCase):
             [True, True, False],
         )
         self.assertTrue(_has_shape_params(arms["bottom-right"]))
+
+    def test_gfx950_launcher_rejects_tensors_whose_heads_disagree_with_the_spec(self):
+        """The spec's head counts set the kernel's strides, GQA divide and K/V
+        buffer extent (runtime kernargs on the runtime-shape grid), and nothing on
+        the device checks them against the allocation, so the launcher must reject
+        a tensor whose trailing (heads, head_size) disagrees -- before compiling."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            _check_head_dims,
+            run_attention_dense_torch,
+        )
+
+        def t(*shape):
+            return SimpleNamespace(shape=shape)
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        self.assertTrue(spec.runtime_shape)
+        good = dict(
+            q=t(1, 512, 32, 128),
+            k=t(1, 512, 8, 128),
+            v=t(1, 512, 8, 128),
+            out=t(1, 512, 32, 128),
+        )
+        _check_head_dims(spec, **good)  # dense layout passes
+        # Packed varlen [tokens, heads, D] and a paged cache [blocks, page, Hkv, D]
+        # end in the same (heads, head_size) and pass too.
+        _check_head_dims(
+            spec,
+            q=t(512, 32, 128),
+            k=t(64, 16, 8, 128),
+            v=t(64, 16, 8, 128),
+            out=t(512, 32, 128),
+        )
+        for name, bad in (
+            ("q", t(1, 512, 16, 128)),
+            ("out", t(1, 512, 32, 64)),
+            ("k", t(1, 512, 4, 128)),
+            ("v", t(1, 512, 8, 64)),
+        ):
+            with self.subTest(tensor=name):
+                with self.assertRaisesRegex(ValueError, rf"^{name} trailing"):
+                    _check_head_dims(spec, **{**good, name: bad})
+        # Wired into the launcher: a GQA ratio the spec does not have is rejected
+        # before any compile or device access (no torch, no GPU needed).
+        with self.assertRaisesRegex(ValueError, r"^k trailing"):
+            run_attention_dense_torch(
+                spec=spec, scale=0.125, **{**good, "k": t(1, 512, 4, 128)}
+            )
 
     def test_persist_decodes_build_with_distinct_names_on_both_arches(self):
         """Every persist decode an arch supports builds and has its own name,
@@ -3787,7 +3879,9 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         heads = ((128, 8), (40, 8), (28, 4), (32, 32), (64, 64))
         for decode in ("auto", *NONPERSIST_DECODES):
             for sliding_window in (0, 128):
-                with self.subTest(nonpersist_decode=decode, sliding_window=sliding_window):
+                with self.subTest(
+                    nonpersist_decode=decode, sliding_window=sliding_window
+                ):
                     groups = {}
                     for hq, hkv in heads:
                         try:
@@ -3809,7 +3903,9 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
                     # Anti-vacuity: some order must hold several head configs.
                     self.assertGreater(max(len(g) for g in groups.values()), 1)
                     for order, specs in groups.items():
-                        keys = {attention_dense_cache_key(s, arch="gfx950") for s in specs}
+                        keys = {
+                            attention_dense_cache_key(s, arch="gfx950") for s in specs
+                        }
                         irs = {self._ir_sha(s) for s in specs}
                         names = {s.kernel_name() for s in specs}
                         self.assertEqual(

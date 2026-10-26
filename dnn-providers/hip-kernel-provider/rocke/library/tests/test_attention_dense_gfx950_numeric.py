@@ -1254,6 +1254,59 @@ class TestDenseLseNumeric:
         assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
         assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
 
+    @pytest.mark.parametrize("right", [0, -1], ids=["causal", "left-only"])
+    def test_runtime_shape_keyless_rows_match_with_and_without_lse(self, right):
+        """On the runtime-shape grid both paths zero keyless rows through the O
+        store's integer bit mask -- the LSE path via its row_has_key, the LSE-off
+        path via the pre-loop runtime predicate -- so O must be bit-identical with
+        and without LSE, keyless rows included. Sq > Skv + W - 1, batch 2 so a
+        keyless q-block cannot borrow the next batch's keys unnoticed."""
+        window, sq, skv = 128, 1024, 512
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=_BAND_BATCH,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=right >= 0,
+            right_bound=max(right, 0),
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            sliding_window=window,
+            emit_lse=True,
+        )
+        assert spec.runtime_shape, "test setup error: not on the runtime-shape path"
+        torch.manual_seed(23)
+        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(_BAND_BATCH, skv, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        scale = 1.0 / math.sqrt(128)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (_BAND_BATCH, 4, sq, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+        )
+        off_out = torch.full_like(q, float("nan"))
+        run_attention_dense_torch(
+            spec=replace(spec, emit_lse=False),
+            q=q,
+            k=k,
+            v=v,
+            out=off_out,
+            scale=scale,
+        )
+        torch.cuda.synchronize()
+        ref, empty = _band_reference(q, k, v, scale, window, right)
+        assert empty.any(), "test setup error: the shape has no keyless rows"
+        _check_band(out, ref, empty)
+        _check_band(off_out, ref, empty)
+        assert torch.equal(out, off_out)
+
     @pytest.mark.parametrize(
         "persistent", [False, True], ids=["ordinary", "persistent"]
     )
