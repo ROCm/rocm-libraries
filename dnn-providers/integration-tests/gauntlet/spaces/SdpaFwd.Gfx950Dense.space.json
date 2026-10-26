@@ -1,13 +1,14 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp: BSHD only, head size 64 or 128, bfloat16 or half, (query heads, kv heads) pairs taken from the quick SdpaFwd claims for this engine, seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. The pair list is the verified starting set; the shipped KDP holds more.",
+  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64).",
   "engine": "hipkernel:Gfx950AttentionDense",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
     "dtype":    {"values": ["bfloat16", "half"]},
     "b":        {"values": [1, 2, 3, 4]},
-    "heads":    {"values": [[16, 2], [32, 32], [32, 8], [64, 4], [64, 8], [8, 1]]},
+    "heads_d64":  {"values": [[8, 1], [8, 8], [10, 10], [12, 12], [16, 2], [16, 16], [20, 20], [32, 4], [32, 8], [32, 32], [64, 8], [128, 128]]},
+    "heads_d128": {"values": [[4, 4], [8, 1], [8, 2], [8, 8], [9, 9], [16, 2], [16, 16], [24, 24], [28, 4], [32, 4], [32, 8], [32, 32], [40, 8], [40, 10], [40, 40], [48, 8], [64, 4], [64, 8], [64, 64], [96, 8], [128, 8]]},
     "d":        {"values": [64, 128]},
     "sq_m":     {"range": [1, 16], "boundaries": [1, 2, 4, 16]},
     "skv_mode": {"values": ["same", "independent"]},
@@ -16,6 +17,7 @@
     "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]}
   },
   "derive": {
+    "heads":     "heads_d64 if d == 64 else heads_d128",
     "hq":        "heads[0]",
     "hkv":       "heads[1]",
     "sq":        "sq_m * 128",
