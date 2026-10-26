@@ -1,0 +1,21 @@
+// Tensor-reference fields of table {{ op.fbs_table }} in
+// flatbuffers_sdk/schemas/{{ op.fbs_schema_filename }}, with their annotations (semantics in
+// graph.fbs). Make the schema's declarations match, keeping its field order.
+//   cache_uid            every tensor reference.
+//   work_data_dependent  the tensor's contents, not its shape, decide how much work the
+//                        node does (YAML: tensor_fields[].work_data_dependent: true).
+// Then run the cache-key-hipdnn and node-operands-hipdnn pre-commit hooks (or
+// scripts/gen_cache_key.py and scripts/gen_node_operands.py) and commit the regenerated
+// cachekey_generated.h and node_operands_generated.h.
+
+// Declare at file scope each attribute the schema uses:
+attribute "cache_uid";
+{% if op.work_data_dependent_fields %}
+attribute "work_data_dependent";
+{% endif %}
+
+table {{ op.fbs_table }} {
+{% for declaration in op.fbs_tensor_declarations %}
+    {{ declaration }};
+{% endfor %}
+}

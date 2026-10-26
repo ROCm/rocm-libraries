@@ -23,7 +23,8 @@
 
 #include <hip/hip_runtime.h>
 
-namespace rocrand_device {
+namespace rocrand_device
+{
 
 template<bool UseSharedVectors>
 struct sobol32_state
@@ -32,11 +33,13 @@ struct sobol32_state
     unsigned int i;
     unsigned int vectors[32];
 
-    __forceinline__ __device__ __host__ sobol32_state() : d(), i(), vectors() {}
+    __forceinline__ __device__ __host__
+    sobol32_state()
+        : d(), i(), vectors()
+    {}
 
-    __forceinline__ __device__ __host__ sobol32_state(const unsigned int  d,
-                                                      const unsigned int  i,
-                                                      const unsigned int* vectors)
+    __forceinline__ __device__ __host__
+    sobol32_state(const unsigned int d, const unsigned int i, const unsigned int* vectors)
         : d(d), i(i)
     {
         for(int k = 0; k < 32; k++)
@@ -49,15 +52,17 @@ struct sobol32_state
 template<>
 struct sobol32_state<true>
 {
-    unsigned int d;
-    unsigned int i;
-    const unsigned int * vectors;
+    unsigned int        d;
+    unsigned int        i;
+    const unsigned int* vectors;
 
-    __forceinline__ __device__ __host__ sobol32_state() : d(), i(), vectors() {}
+    __forceinline__ __device__ __host__
+    sobol32_state()
+        : d(), i(), vectors()
+    {}
 
-    __forceinline__ __device__ __host__ sobol32_state(const unsigned int  d,
-                                                      const unsigned int  i,
-                                                      const unsigned int* vectors)
+    __forceinline__ __device__ __host__
+    sobol32_state(const unsigned int d, const unsigned int i, const unsigned int* vectors)
         : d(d), i(i), vectors(vectors)
     {}
 };
@@ -66,64 +71,73 @@ template<bool UseSharedVectors>
 class sobol32_engine
 {
 public:
-
     typedef struct sobol32_state<UseSharedVectors> sobol32_state;
 
-    __forceinline__ __device__ __host__ sobol32_engine() {}
+    __forceinline__ __device__ __host__
+    sobol32_engine()
+    {}
 
-    __forceinline__ __device__ __host__ sobol32_engine(const unsigned int* vectors,
-                                                       const unsigned int  offset)
+    __forceinline__ __device__ __host__
+    sobol32_engine(const unsigned int* vectors, const unsigned int offset)
         : m_state(0, 0, vectors)
     {
         discard_state(offset);
     }
 
     /// Advances the internal state to skip \p offset numbers.
-    __forceinline__ __device__ __host__ void discard(unsigned int offset)
+    __forceinline__ __device__ __host__
+    void discard(unsigned int offset)
     {
         discard_state(offset);
     }
 
-    __forceinline__ __device__ __host__ void discard()
+    __forceinline__ __device__ __host__
+    void discard()
     {
         discard_state();
     }
 
     /// Advances the internal state by stride times, where stride is power of 2
-    __forceinline__ __device__ __host__ void discard_stride(unsigned int stride)
+    __forceinline__ __device__ __host__
+    void discard_stride(unsigned int stride)
     {
         discard_state_power2(stride);
     }
 
-    __forceinline__ __device__ __host__ unsigned int operator()()
+    __forceinline__ __device__ __host__
+    unsigned int operator()()
     {
         return this->next();
     }
 
-    __forceinline__ __device__ __host__ unsigned int next()
+    __forceinline__ __device__ __host__
+    unsigned int next()
     {
         unsigned int p = m_state.d;
         discard_state();
         return p;
     }
 
-    __forceinline__ __device__ __host__ unsigned int current() const
+    __forceinline__ __device__ __host__
+    unsigned int current() const
     {
         return m_state.d;
     }
 
-    __forceinline__ __device__ __host__ static constexpr bool uses_shared_vectors()
+    __forceinline__ __device__ __host__
+    static constexpr bool uses_shared_vectors()
     {
         return UseSharedVectors;
     }
 
 protected:
     // Advances the internal state by offset times.
-    __forceinline__ __device__ __host__ void discard_state(unsigned int offset)
+    __forceinline__ __device__ __host__
+    void discard_state(unsigned int offset)
     {
         m_state.i += offset;
         const unsigned int g = m_state.i ^ (m_state.i >> 1);
-        m_state.d = 0;
+        m_state.d            = 0;
         for(int i = 0; i < 32; i++)
         {
             m_state.d ^= (g & (1U << i) ? m_state.vectors[i] : 0);
@@ -131,13 +145,15 @@ protected:
     }
 
     // Advances the internal state to the next state
-    __forceinline__ __device__ __host__ void discard_state()
+    __forceinline__ __device__ __host__
+    void discard_state()
     {
         m_state.d ^= m_state.vectors[rightmost_zero_bit(m_state.i)];
         m_state.i++;
     }
 
-    __forceinline__ __device__ __host__ void discard_state_power2(unsigned int stride)
+    __forceinline__ __device__ __host__
+    void discard_state_power2(unsigned int stride)
     {
         // Leap frog
         //
@@ -158,12 +174,17 @@ protected:
 
     // Returns the index of the rightmost zero bit in the binary expansion of
     // x (Gray code of the current element's index)
-    __forceinline__ __device__ __host__ unsigned int rightmost_zero_bit(unsigned int x)
+    // If x has no zero bit (x == 0xFFFFFFFF), returns 31: advancing past the end of
+    // the 2^32 period wraps the index to 0, which flips bit 31 of the Gray code.
+    __forceinline__ __device__ __host__
+    unsigned int rightmost_zero_bit(unsigned int x)
     {
-        #if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__)
         unsigned int z = __ffs(~x);
-        return z ? z - 1 : 0;
-        #else
+        return z ? z - 1 : 31;
+#else
+        if(x == 0xFFFFFFFFu)
+            return 31;
         if(x == 0)
             return 0;
         unsigned int y = x;
@@ -174,7 +195,7 @@ protected:
             z++;
         }
         return z - 1;
-        #endif
+#endif
     }
 
 protected:

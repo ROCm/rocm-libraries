@@ -1,0 +1,79 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S10 MFMA main-path metadata VPerm K-packing (numSplitMetadata branches).
+#
+# Target: Tensile/Components/LocalRead.py numSplitMetadata block 1428-1534
+#   MIInputPerThUnroll ==8 ->1442, ==4 ->1491, ==2 ->1518, ==1 ->1530.
+#
+# Reachability (verified from source):
+#   - Chain: reach `elif lrvwTile > 1 and not UseF32XEmulation` at LR:1412 by
+#     NOT (ConvertAfterDS and bpe!=bpeDS) (both default off).
+#   - lrvwTile = states.lrvwTileMetadata = VectorWidthMetadata (KW:7255) when
+#     Sparse and not DirectToVgprSparseMetadata and not UnrollMajorLDSMetadata.
+#   - VectorWidthMetadata = VectorWidthA for Sparse==1 (Solution:2527) -> fork
+#     VectorWidthA=2 so lrvwTileMetadata=2 (>1).
+#   - numSplitMetadata>0 from blockWidth (Metadata) => enters `if numSplitMetadata`.
+#   - MIInputPerThUnroll = MIInputPerThreadMetadata = MIInputPerThread//8
+#     = (mi[0]*mi[2]*mi[3]//64)//8  (MatrixInstruction.py:129,149; numTilePerInst=1).
+#       [16,16,32,1] -> MIPT 8  -> meta 1  -> LR:1530
+#       [16,16,64,1] -> MIPT 16 -> meta 2  -> LR:1518   (i8, v_mfma_i32_16x16x64)
+#   - TransposeLDS:0 => UnrollMajorLDSMetadata=0. ScheduleIterAlg:3, ClusterLR:1
+#     mirror sparse_pack (metadata pack path).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS NT 2:4 sparse-A, MI 16x16x32 -> MIInputPerThreadMetadata=1 (LR:1530)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - VectorWidthA: [2]
+        - DirectToVgprSparseMetadata: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+  ########################################
+  # I8 NT 2:4 sparse-A, MI 16x16x{32,64} -> MIInputPerThreadMetadata 1/2 (LR:1518/1530)
+  ########################################

@@ -35,6 +35,22 @@ class TestKernelSourceEmission:
         assert "source_file" not in doc
         assert "entry_point" not in doc
 
+    def test_rocke_target_is_emitted_only_when_set(self):
+        ks = KernelSource(
+            kind="rocke",
+            source="kernels/gfx1151/wmma_fmha_fwd.py",
+            builder="build_wmma_fmha_fwd",
+            spec={"head_size": 64},
+            target="generic",
+        )
+        # Key order is part of the descriptor bytes: target sits before the spec.
+        assert list(ks.as_document()) == ["kind", "source", "builder", "target", "spec"]
+        assert ks.as_document()["target"] == "generic"
+
+    def test_hip_never_emits_a_target(self):
+        ks = KernelSource(kind="hip", source="X.cpp", entry="X", target="generic")
+        assert "target" not in ks.as_document()
+
     def test_embedded_emits_only_embedded_keys(self):
         ks = KernelSource(kind="embedded_source", source_file="X.cpp", entry_point="X")
         doc = ks.as_document()
@@ -48,6 +64,20 @@ class TestKernelSourceEmission:
         )
         doc = ks.as_document()
         assert set(doc) == {"kind", "source", "entry", "build"}
+
+    def test_hsaco_emits_exactly_kind_file_symbol(self):
+        ks = KernelSource(
+            kind="hsaco",
+            file="HsacoFixture.co",
+            symbol="HsacoFixtureAdd",
+            source="X.cpp",
+            spec={"batch": 1},
+        )
+        assert ks.as_document() == {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        }
 
     def test_unemittable_kind_raises_rather_than_guessing(self):
         with pytest.raises(ValueError, match="no emitter"):
@@ -142,16 +172,26 @@ class TestPackagedFragments:
     ):
         """The call is spliced verbatim, so its suite must be one this run actually
         wrote: a census whose gtest filter matches nothing runs zero cases and reports
-        success."""
+        success.
+
+        Every assertion reads the comment-stripped payload rather than the raw
+        fragment, because the prose around the call names the same keywords and would
+        otherwise satisfy a check the emitted call had stopped meeting."""
         written = generator.render(gfx950_attention_dense_config, tmp_path)
-        text, _payload = self._payload(tmp_path, "cmake_test_sources.txt")
-        assert "hkp_register_census_tests(TARGET hip_kernel_provider_tests" in text
-        assert "PACK_NAME product" in text
-        suite = re.search(r"^\s*SUITES (\w+)$", text, re.MULTILINE)
-        assert suite, f"the census call names no single suite:\n{text}"
+        _text, payload = self._payload(tmp_path, "cmake_test_sources.txt")
+        spliced = "\n".join(payload)
+        # The census binary and the ordinary unit binary are not interchangeable:
+        # naming the unit target puts package-census state on every ordinary run.
+        assert (
+            "hkp_register_census_tests(TARGET hip_kernel_provider_census_tests"
+            in spliced
+        ), f"the census call does not name the census target:\n{spliced}"
+        assert "PACK_NAME product" in spliced
+        suite = re.search(r"^\s*SUITES (\w+)$", spliced, re.MULTILINE)
+        assert suite, f"the census call names no single suite:\n{spliced}"
         assert re.search(
-            r"^\s*\)$", text, re.MULTILINE
-        ), f"the census call is never closed, so the splice would not parse:\n{text}"
+            r"^\s*\)$", spliced, re.MULTILINE
+        ), f"the census call is never closed, so the splice would not parse:\n{spliced}"
         assert f"tests/{suite.group(1)}.cpp" in written
 
     def test_direct_load_fragment_splices_nothing_either(

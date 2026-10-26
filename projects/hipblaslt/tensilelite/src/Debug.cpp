@@ -115,9 +115,14 @@ namespace TensileLite
         return m_value & 0x100000;
     }
 
-    bool Debug::printStreamKLaunchSummary() const
+    bool Debug::printPersistentLaunchSummary() const
     {
         return m_value & 0x200000;
+    }
+
+    bool Debug::printStreamKLaunchSummary() const
+    {
+        return printPersistentLaunchSummary();
     }
 
     bool Debug::printNoSolutionUniformSummationOrder() const
@@ -143,11 +148,6 @@ namespace TensileLite
     int Debug::streamK5ForceMode() const
     {
         return m_streamK5ForceMode;
-    }
-
-    bool Debug::usePreciseSMTarget() const
-    {
-        return m_usePreciseSMTarget;
     }
 
     int Debug::useExperimentalSelection() const
@@ -205,6 +205,13 @@ namespace TensileLite
         m_excludedFromGetAll = excludedSet;
     }
 
+    Debug& Debug::Instance()
+    {
+        static Debug instance;
+
+        return instance;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)
@@ -227,7 +234,7 @@ namespace TensileLite
 
         // StreamK=5 hybrid-mode debug override (-1=respect API, 0=static, 1=dynamic).
         // Non-numeric or out-of-range values are ignored (not silently coerced to 0).
-        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        const char* sk5Force = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         if(sk5Force)
         {
             char* end = nullptr;
@@ -235,10 +242,6 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
-
-        const char* preciseSMTarget = std::getenv("TENSILE_PRECISE_SM_TARGET");
-        if(preciseSMTarget)
-            m_usePreciseSMTarget = strtol(preciseSMTarget, nullptr, 0) != 0;
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)
@@ -296,7 +299,7 @@ namespace TensileLite
         const char* db2 = std::getenv("TENSILE_DB2");
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
 
-        const char* sk5Force    = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         m_streamK5ForceMode     = -1;
         if(sk5Force)
         {

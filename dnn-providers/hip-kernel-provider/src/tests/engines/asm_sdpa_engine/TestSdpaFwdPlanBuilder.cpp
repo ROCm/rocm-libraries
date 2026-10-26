@@ -18,11 +18,14 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <optional>
 
 namespace asm_sdpa_engine
 {
@@ -372,6 +375,116 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
     return builder;
 }
 
+// Build an fp8-in / bf16-out forward SDPA graph, optionally with q/k/v descale
+// tensors, to exercise the fp8 applicability policy. descaleDims defaults to a
+// per-tensor scalar ([1,1,1,1]); pass a larger shape (e.g. [B,H_kv,1,1]) to build
+// the non-scalar descales the engine must reject.
+flatbuffers::FlatBufferBuilder
+    createSdpaFwdFp8Graph(bool withDescale, const std::vector<int64_t>& descaleDims = {1, 1, 1, 1})
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t>& scalarDims = descaleDims;
+    const std::vector<int64_t> scalarStrides
+        = hipdnn_data_sdk::utilities::generateStrides(scalarDims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+
+    flatbuffers::Optional<int64_t> descaleQUid;
+    flatbuffers::Optional<int64_t> descaleKUid;
+    flatbuffers::Optional<int64_t> descaleVUid;
+    if(withDescale)
+    {
+        descaleQUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleQUid, "descale_q", DataType::FLOAT, &scalarStrides, &scalarDims));
+        descaleKUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleKUid, "descale_k", DataType::FLOAT, &scalarStrides, &scalarDims));
+        descaleVUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleVUid, "descale_v", DataType::FLOAT, &scalarStrides, &scalarDims));
+    }
+
+    const auto sdpaAttributes
+        = CreateSdpaAttributes(builder,
+                               qUid,
+                               kUid,
+                               vUid,
+                               oUid,
+                               flatbuffers::nullopt, // attn_mask_tensor_uid
+                               flatbuffers::nullopt, // scale_tensor_uid
+                               flatbuffers::nullopt, // seq_len_q_tensor_uid
+                               flatbuffers::nullopt, // seq_len_kv_tensor_uid
+                               flatbuffers::nullopt, // seed_tensor_uid
+                               flatbuffers::nullopt, // offset_tensor_uid
+                               flatbuffers::nullopt, // dropout_mask_tensor_uid
+                               flatbuffers::nullopt, // dropout_scale_tensor_uid
+                               flatbuffers::nullopt, // page_table_k_tensor_uid
+                               flatbuffers::nullopt, // page_table_v_tensor_uid
+                               flatbuffers::nullopt, // block_mask_tensor_uid
+                               flatbuffers::nullopt, // sink_token_tensor_uid
+                               descaleQUid,
+                               descaleKUid,
+                               descaleVUid,
+                               flatbuffers::nullopt, // descale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_o_tensor_uid
+                               flatbuffers::nullopt, // stats_tensor_uid
+                               flatbuffers::nullopt, // max_tensor_uid
+                               flatbuffers::nullopt, // sum_exp_tensor_uid
+                               flatbuffers::nullopt, // rng_dump_tensor_uid
+                               flatbuffers::nullopt, // amax_s_tensor_uid
+                               flatbuffers::nullopt, // amax_o_tensor_uid
+                               flatbuffers::nullopt, // generate_stats
+                               false, // alibi_mask
+                               false, // padding_mask
+                               false, // causal_mask
+                               false, // causal_mask_bottom_right
+                               flatbuffers::nullopt, // dropout_probability
+                               flatbuffers::nullopt, // attn_scale_value
+                               flatbuffers::nullopt, // left_bound
+                               flatbuffers::nullopt, // right_bound
+                               flatbuffers::nullopt, // max_seq_len_kv
+                               DiagonalAlignment::TOP_LEFT,
+                               DataType::UNSET, // mma_core_mode (engine requires unset)
+                               AttentionImplementation::AUTO);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::FLOAT, // node compute type (engine requires FLOAT)
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
 {
     SKIP_IF_NO_DEVICES();
@@ -628,6 +741,49 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsStatsRank4)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+// FP8 forward kernels are only shipped for gfx942, so these applicability tests
+// are gated on that architecture.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithoutDescale)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    auto builder = createSdpaFwdFp8Graph(/*withDescale=*/false);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
+        << "fp8 inputs without q/k/v descales must be rejected";
+}
+
+// Note: the positive "fp8 + scalar descales is accepted" case is intentionally not a
+// standalone test — IsApplicableAvailableKernels already covers it. On gfx942 that loop
+// iterates every cfg_fmha_fwd config, which includes the fp8bf16 rows; configToCompatibleGraph
+// builds them with scalar q/k/v descales and asserts isApplicable. Only the negative cases
+// below (missing / non-scalar descale) need explicit coverage.
+
+// The kernel-arg builder only wires per-tensor (scalar) descales (all s_descale_*
+// strides are zero), so a non-scalar descale (here per-[B, H_kv]) must be declined
+// rather than silently mis-read as descale[0] for every batch/head.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    // Q dims are {B=4, H_kv=8, ...}; a [B, H_kv, 1, 1] descale is a valid per-head
+    // shape for the CPU reference but is not supported by the ASM engine.
+    auto builder = createSdpaFwdFp8Graph(/*withDescale=*/true, /*descaleDims=*/{4, 8, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
+        << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 {
     // Create an SDPA graph with known dimensions (withStats = false by default)
@@ -647,13 +803,13 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::getMaskType)
+// Canonical mask-attribute policy (resolveDiagonalBand + getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
+// These tests exercise the shared mask policy directly through
+// plan_utils::resolveDiagonalBand and plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so testing the helper keeps the assertions meaningful on
 // any device — including this gfx950 box. Driving the policy through
@@ -661,101 +817,7 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 // matching kernel" rejection that gfx950 produces for causal configurations
 // (the gfx950 forward registry carries NO_MASK rows only).
 
-// Build a forward SDPA graph that sets the deprecated causal booleans and the
-// modern bounds trio explicitly, so contradictory combinations can be
-// constructed. Returns the FlatBufferBuilder owning the graph buffer.
-flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithMask(
-    bool causalMask,
-    bool causalMaskBottomRight,
-    flatbuffers::Optional<int64_t> leftBound,
-    flatbuffers::Optional<int64_t> rightBound,
-    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagAlignment)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
-
-    const std::vector<int64_t> dims = {4, 8, 256, 128};
-    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-
-    int64_t uid = 1;
-    const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
-    const auto kUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
-    const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
-    const auto oUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
-
-    const auto sdpaAttributes
-        = CreateSdpaAttributes(builder,
-                               qUid,
-                               kUid,
-                               vUid,
-                               oUid,
-                               flatbuffers::nullopt, // attn_mask_tensor_uid
-                               flatbuffers::nullopt, // scale_tensor_uid
-                               flatbuffers::nullopt, // seq_len_q_tensor_uid
-                               flatbuffers::nullopt, // seq_len_kv_tensor_uid
-                               flatbuffers::nullopt, // seed_tensor_uid
-                               flatbuffers::nullopt, // offset_tensor_uid
-                               flatbuffers::nullopt, // dropout_mask_tensor_uid
-                               flatbuffers::nullopt, // dropout_scale_tensor_uid
-                               flatbuffers::nullopt, // page_table_k_tensor_uid
-                               flatbuffers::nullopt, // page_table_v_tensor_uid
-                               flatbuffers::nullopt, // block_mask_tensor_uid
-                               flatbuffers::nullopt, // sink_token_tensor_uid
-                               flatbuffers::nullopt, // descale_q_tensor_uid
-                               flatbuffers::nullopt, // descale_k_tensor_uid
-                               flatbuffers::nullopt, // descale_v_tensor_uid
-                               flatbuffers::nullopt, // descale_s_tensor_uid
-                               flatbuffers::nullopt, // scale_s_tensor_uid
-                               flatbuffers::nullopt, // scale_o_tensor_uid
-                               flatbuffers::nullopt, // stats_tensor_uid
-                               flatbuffers::nullopt, // max_tensor_uid
-                               flatbuffers::nullopt, // sum_exp_tensor_uid
-                               flatbuffers::nullopt, // rng_dump_tensor_uid
-                               flatbuffers::nullopt, // amax_s_tensor_uid
-                               flatbuffers::nullopt, // amax_o_tensor_uid
-                               flatbuffers::nullopt, // generate_stats
-                               false, // alibi_mask
-                               false, // padding_mask
-                               causalMask,
-                               causalMaskBottomRight,
-                               flatbuffers::nullopt, // dropout_probability
-                               flatbuffers::nullopt, // attn_scale_value
-                               leftBound,
-                               rightBound,
-                               flatbuffers::nullopt, // max_seq_len_kv
-                               diagAlignment,
-                               DataType::UNSET, // mma_core_mode
-                               AttentionImplementation::AUTO);
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(builder,
-                                     "sdpa_fwd",
-                                     DataType::FLOAT,
-                                     NodeAttributes::SdpaAttributes,
-                                     sdpaAttributes.Union()));
-
-    const auto graphOffset = CreateGraphDirect(builder,
-                                               "test",
-                                               DataType::FLOAT,
-                                               DataType::HALF,
-                                               DataType::BFLOAT16,
-                                               &tensorAttributes,
-                                               &nodes);
-    builder.Finish(graphOffset);
-    return builder;
-}
-
-// Resolve the SDPA attributes from a graph buffer and classify the mask.
+// Extract the diagonal band from a graph buffer and classify the mask.
 plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
@@ -763,96 +825,177 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     const auto& attrs = graphWrapper.nodeWrappers()
                             .front()
                             ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
-    return plan_utils::getMaskType(attrs);
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
+// cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
+TEST_F(TestSdpaFwdPlanBuilder, AbsentAttnScaleValueIsOne)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // Both deprecated causal booleans set is a contradiction.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        DiagonalAlignment::TOP_LEFT);
-
-    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true takes precedence over the bounds trio, even though the
-    // bounds describe a sliding window (left=64, right=64): result is causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though the trio (left=-1, right=0, diag=TOP_LEFT) would derive
-    // TOP_LEFT_CAUSAL: result is bottom-right causal.
     auto builder = createSdpaFwdGraphWithMask(
         /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
-    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
         /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graphWrapper.nodeWrappers()
+                            .front()
+                            ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    ASSERT_FALSE(attrs.attn_scale_value().has_value());
+    EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
+class TestSdpaFwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+};
 
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though a symmetric sliding window (left=64, right=64) would derive
-    // SLIDING_WINDOW: result is bottom-right causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::BOTTOM_RIGHT);
+TEST_P(TestSdpaFwdDeprecatedCausalMask, Classifies)
+{
+    const auto& param = GetParam();
+    auto builder = createSdpaFwdGraphWithMask(param.causalMask,
+                                              param.causalMaskBottomRight,
+                                              param.leftBound,
+                                              param.rightBound,
+                                              param.alignment);
 
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(maskType, param.expected.value());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestSdpaFwdDeprecatedCausalMask,
+                         ::testing::ValuesIn(deprecatedCausalMaskCases()),
+                         deprecatedCausalMaskCaseName);
+
+// =============================================================================
+// plan_utils::makeCoveringBoundsUnbound
+// =============================================================================
+//
+// A window that already covers the whole sequence span masks nothing on that
+// side, so it classifies as the plain causal or unmasked kernel. Narrower windows
+// stay sliding windows. Spans: top-left left=seqLenQ-1 right=seqLenKv-1;
+// bottom-right left=seqLenKv-1 right=seqLenQ-1.
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+constexpr int64_t COVERING_SEQ_LEN_Q = 128;
+constexpr int64_t COVERING_SEQ_LEN_KV = 512;
+
+plan_utils::MaskType classifyAfterUnbounding(int64_t leftBound,
+                                             int64_t rightBound,
+                                             DiagonalAlignment alignment,
+                                             int64_t seqLenQ = COVERING_SEQ_LEN_Q,
+                                             int64_t seqLenKv = COVERING_SEQ_LEN_KV)
+{
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {leftBound, rightBound, alignment}, seqLenQ, seqLenKv);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+}
+} // namespace
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, TopLeftCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(126, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, TopLeftCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 510, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BottomRightCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(511, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(510, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BottomRightCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 127, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 126, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BothBoundsCoveringIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, -1, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, BoundsInsideSequencePassThroughUnchanged)
+{
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            {10, 20, alignment}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+        EXPECT_EQ(band.leftBound, 10);
+        EXPECT_EQ(band.rightBound, 20);
+        EXPECT_EQ(band.alignment, alignment);
+    }
+}
+
+// A raw int64 bound of 4294967298 would wrap to 2 in an int32 kernel field and
+// shrink the window; once covering it is the unbounded request instead.
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, HugeCoveringBoundBecomesUnboundedRequest)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(band.leftBound, -1);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    constexpr auto SEQ_Q = static_cast<int32_t>(COVERING_SEQ_LEN_Q);
+    constexpr auto SEQ_KV = static_cast<int32_t>(COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(plan_utils::computeMaskCoordinates(
+                  static_cast<int32_t>(band.leftBound), 0, SEQ_Q, SEQ_KV, true),
+              plan_utils::computeMaskCoordinates(SEQ_Q - 1, 0, SEQ_Q, SEQ_KV, true));
+}
+
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, HugeBoundBelowHugeSequenceStaysSlidingWindow)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    constexpr int64_t HUGE_SEQ_LEN = int64_t{1} << 40;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, HUGE_SEQ_LEN, HUGE_SEQ_LEN);
+    EXPECT_EQ(band.leftBound, HUGE_BOUND);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// A sequence length of 0 or 1 gives a span <= 0, so a causal right bound of 0
+// covers it and the mask is dropped on that side.
+TEST(TestSdpaFwdMakeCoveringBoundsUnbound, SingleTokenSequenceDropsCausalMaskOnItsAxis)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 128, 1),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 1, 128),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 1, 128),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 128, 1),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
@@ -1042,6 +1185,30 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
         builderOk.GetBufferPointer(), builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the vendored kernels
+    // cannot add the sink logit to the softmax denominator.
+    auto base = createSdpaFwdGraph();
+    auto withSinkBuilder = addSinkToken(base);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, withSink));
 }
 
 // =============================================================================

@@ -49,7 +49,29 @@ satisfied. Each group becomes one independent sub-GEMM.
 | `mem` | Single-buffer LDS, synchronous loads, no scheduler hints. Default. |
 | `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True`, `split_k > 1` and `lds_k_outer=True`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
 
-The MFMA/CDNA pipelines (`compv3`, `compv4`) are not supported for dgrad; `is_valid_spec` rejects them.
+On MFMA targets `compv3` / `compv4` are schedule policies only (hint
+placement, `s_setprio`): the K loop stays single-buffered and is charged one A
+and one B tile (`_dgrad_lds_charge`, `dgrad_lds_bytes`).
+
+### Validation rules worth knowing
+
+`is_valid_dgrad_spec` (and the C++ validator, with the same reason text)
+rejects rather than ignores:
+
+- `async_dma`, `unroll_k` and `chiplet_swizzle`: the builder implements none
+  of them (no direct global-to-LDS path, no unrolled K loop, no swizzled tile
+  order), so they would only rename the kernel.
+- An accumulator tile above `_MAX_ACC_REGS_PER_LANE` fp32 registers per lane:
+  it fills the whole wave64 register file. This is a correctness guard, not a
+  no-spill guarantee.
+- A K-outer `B` tile whose atom fragment length is not a multiple of what one
+  transpose read returns per lane (a builder `raise` before; now filtered
+  before a sweep builds it).
+- The stride-1 knobs off their path: `tap_outer_k` and `dy_halo` outside the
+  rules of their sections below.
+
+A non-default `lds_k_pad` is tagged `kp<pad>` in the kernel name: it changes
+the `A` tile layout, so it must not share the default build's name.
 
 ## Kernel Architecture
 
@@ -59,6 +81,9 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
 - Each CTA binary-searches the buffer to find its sub-GEMM and loads record fields.
 - The K-loop uses runtime descriptor closures that compute `dY` and `W` offsets
   from the record's coefficients.
+- At stride 1 the record is rebuilt from the kernargs instead (see
+  [Stride-1 record from kernargs](#stride-1-record-from-kernargs)): no search
+  and no record loads; the buffer stays in the ABI, unread.
 - **Epilogue dispatch** based on `needs_atomic`:
   - `False` (1 sub-GEMM, split_k=1): direct `buffer_store` into `dX`.
   - `True` (stride > 1 or split_k > 1): `global_atomic_fadd` into `dX`
@@ -97,9 +122,11 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
 (dY, W, dX, dY_bytes, W_bytes, dX_bytes, sub_gemm_buf, num_sub_gemms)
 ```
 
-All kernels — stride=1 and strided — share this 8-param ABI. For stride=1
-`sub_gemm_buf` holds exactly one record and the binary search trivially
-returns index 0.
+All kernels — stride=1 and strided — share this 8-param ABI. The binary
+search runs `ceil(log2(num_sub_gemms))` steps, so for stride=1 (exactly one
+record) it is skipped and returns index 0. `max_sub_gemms` (default 1024,
+strides up to 32x32) only bounds the record count a kernel accepts; the
+search does not grow with it.
 
 ## Grid Layout
 
@@ -201,13 +228,131 @@ write M-outer into a K-outer allocation).
 
 **Not a knob.** The spec field defaults `False`; the value is deduced by
 the keyword-only `DgradConvSpec.default_lds_k_outer(*, arch, dtype_b,
-warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which both library dispatch
-(`library/dispatch/grouped_convolution.py`,
-`_dgrad_lds_k_outer`) and the sweep driver call. The predicate is
+warp_tile_n, cpg, wave_size=64, pipeline="mem")`, which the sweep driver
+calls. The predicate is
 asymmetric with wgrad's — B-side dtype and warp tile only, never the A-side
 counterparts — and additionally keys on `cpg`: the saving is proportional to the
 B load width, which collapses to 1 on an odd channel run, where `axis_b` is
 already `"col"` and there is no scatter to remove.
+
+## Per-tile K decode (`uniform_k_decode`)
+
+The kernel is shape-generic: `kpg`, the tap counts and every stride are
+kernargs or record fields. The plain K loop therefore splits each load chunk's
+reduction index into `(ydot, xdot, k_out)` with two runtime signed divisions
+and builds the offset from runtime-stride products, per chunk and per
+iteration, ahead of the first `buffer_load`.
+
+`uniform_k_decode=True` adds a second K loop for problems with
+`kpg % tile_k == 0` (checked at run time). There a K tile never straddles a
+filter tap, so every element's `k_out` is the tile's base `k_out` plus its
+column. The loop carries the tile's `(k_out, xdot, ydot)` as uniform iteration
+arguments, advances them with a compare-and-wrap, and splits each offset into a
+loop-invariant per-element part and a uniform per-tile part; the `dY` bounds
+compare the invariant `(ho, wo)` base against shifted uniform limits. It issues
+all of the tile's reads before its LDS writes. The plain loop is emitted as
+well and runs for every other `kpg`, so the binary serves the same problems.
+Both loops visit the same k values in the same order: with `split_k == 1`, `dX`
+is bit-identical to the plain loop's.
+
+Rejected with `pipeline="wavelet"`, which has its own K loop. **Not a knob**:
+the field defaults `False`, and the sweep driver and the AOT job generator take
+the value from `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size,
+pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
+
+## Stride-1 record from kernargs
+
+At stride 1 the tilde decomposition is the identity in both spatial axes
+(`y_tilde = x_tilde = 1`, whatever the dilation, pad, filter or grouping), so
+there is exactly one sub-GEMM and every field of its record is an existing
+kernarg or a constant: `[0, num_pid_m, num_pid_n, dg_M, dg_K, Hi, Wi, pH, pW,
+Y, X, -dH, -dW, 1, 0, 1, 0, 1, 0, 1, 0, roundup(dg_K, tile_k * split_k)]`.
+`DgradConvSpec.folds_sub_gemm_record` (stride 1) makes the builder bind those
+values instead of searching the record buffer and loading the record; the unit
+strides and zero offsets fold into the address arithmetic. The magic-division
+table is still read, from its one entry after the one record (constant
+offsets). The condition is the stride alone, which an AOT binary carries as
+its stride capability: the AOT grid builds a stride-1 / dilation-1 binary of
+every wave64 MFMA configuration (with the tap-outer K loop below) next to the
+tilde binary, and the cache offers it to stride-1, dilation-1 problems only.
+The ABI is unchanged.
+
+## Tap-outer K loop (`tap_outer_k`)
+
+`tap_outer_k=True` runs the reduction of a stride-1, dilation-1 problem as two
+nested loops: filter tap `(y, x)` outer, output-channel chunk inner. Tap
+`(y, x)` reads `dY` pixel `(hi + pH - y, wi + pW - x)`, so the tap decode is
+uniform arithmetic on the kernargs once per tap, the pixel decode `(n, hi, wi)`
+and a tap's `dY` bounds are invariant across the chunk loop, and each chunk
+adds one uniform offset per operand; all of a tile's reads are issued before
+its LDS writes. A K tile must lie inside one tap, so `kpg % tile_k == 0` is
+required; unlike `uniform_k_decode` there is no fallback loop, so the validator
+rejects a problem that breaks it (and stride or dilation other than 1,
+`split_k > 1`, wave32 / the wavelet pipeline, and `uniform_k_decode=True`,
+whose loop it replaces), and the AOT cache offers the binary only to problems
+with `kpg % tile_k == 0`. Default `False`; the name gains `_tapk`. It is the
+only stride-1 binary the AOT grid builds (on every wave64 MFMA configuration
+outside the wavelet pipeline): a flat-loop stride-1 binary would serve the
+problems the tilde binary of its configuration already serves. The
+loop reduces in the same order as the flat loop, so `dX` matches it bit for
+bit.
+
+## dY halo reuse (`dy_halo`)
+
+A mode of the tap-outer loop for problems whose output is the input's size
+(`Ho == Hi`, `Wo == Wi`, stride 1, dilation 1). Filter tap `(y, x)` reads `dY`
+pixel `m + (pH - y)*Wo + (pW - x)` for `dX` pixel `m` in the linear `(n, h, w)`
+order, so every tap of a tile of `tile_m` consecutive pixels reads one
+contiguous `dY` range: the tile plus `(Y-1)*Wo + (X-1)` halo pixels. With
+`dy_halo` the K loop runs output-channel chunk outer and filter tap inner
+(unrolled), stages that range in LDS once per chunk and serves every tap from
+it at a row shift of `(Y-1-y)*Wo + (X-1-x)`; a lane whose shifted pixel leaves
+the image reads a trailing all-zero LDS row instead (one select per fragment
+row). `dy_halo=1` loads the `W` tile per (chunk, tap); `dy_halo=2`
+double-buffers it (tap `t+1`'s tile is read into registers before tap `t`'s
+MFMAs). `dy_halo_setprio` raises the wave priority around each tap's MFMAs,
+`dy_halo_kouter_pad` widens the K-outer `B` row pad.
+
+The filter is baked (the taps are unrolled; an AOT binary records it as
+`filter_h/w`), and so is the pad, which `Ho == Hi` at stride 1 fixes to
+`((Y-1)/2, (X-1)/2)`. The staged tile is sized for `halo_max_wo`
+(`tile_m + (Y-1)*halo_max_wo + (X-1)` rows, whole loader passes, plus the zero
+row), not for the problem: `Wo`, the shifts, the row bounds and the rows the
+loader fills are kernargs, and the binary serves every `Wo <= halo_max_wo`. A
+wider `halo_max_wo` costs LDS on a narrower image, which lowers the workgroups
+per CU where it crosses an LDS step. The validator (both engines, reasons
+verbatim) requires `tap_outer_k`, `Ho == Hi`, `Wo == Wi`, more than one tap,
+`0 < Wo <= halo_max_wo` and K-outer for the pad knob. Name tags `_halo<n>`,
+`_hprio<n>`, `_hkp<n>`, `_hwo<n>`. The AOT grid builds a capped sub-grid on
+gfx950 (see `CACHE_DGRAD_HALO_*` in `../conv/aot_jobs.py`).
+
+| Field | Default | Effect | Name tag |
+|-------|---------|--------|----------|
+| `dy_halo` | `0` | `1`: staged halo, `B` loaded per (chunk, tap), two barriers per tap. `2`: plus a double-buffered `B` tile whose next-tap global reads are issued before the current tap's MFMAs (fenced with `sched_barrier` on both sides; without the fence the scheduler sinks the loads next to their LDS store), one barrier per tap. The AOT grid builds `2` only. | `halo<n>` |
+| `dy_halo_setprio` | `0` | `s_setprio` level (1..3) around each tap's MFMA block. | `hprio<n>` |
+| `dy_halo_kouter_pad` | `0` | Row pad of the K-outer `B` tile instead of `_KOUTER_PAD`; a multiple of 8 (16-byte rows for the wide LDS store and the transpose read; an unaligned pad gave wrong `dX` and is rejected). Removes transpose-read bank conflicts at an LDS cost. | `hkp<pad>` |
+| `halo_max_wo` | `0` | The widest `Wo` the binary serves; sizes the staged halo. Required (> 0) with `dy_halo`, 0 otherwise. | `hwo<n>` |
+
+The halo tile is padded to whole loader passes (`dy_halo_lds_rows`); the LDS
+charge (`dgrad_lds_bytes`) and the allocation read the same shape. The
+validator also rejects a halo that outgrows the LDS (it grows by
+`(Y-1)*halo_max_wo` rows, so wide buckets and large filters can).
+
+## XCD-contiguous tile order (`xcd_tile_order`)
+
+The hardware hands workgroups to the XCDs round-robin in launch order, and
+each XCD has its own L2, so the tiles of one group (which share its weight
+slice and its `dY` rows) land on different XCDs and every XCD refetches the
+group's operands. On gfx950, a grouped stride-1 kernel (folded record, no
+split-K) remaps its linear id `block_id_x + block_id_y * num_pid_m *
+num_pid_n` with `chiplet_transform_chunked_runtime` (one contiguous chunk of
+`num_wgs / 8` workgroups per XCD) and splits it back into tile and group. The
+grid, the chunk and the decision are runtime: the remap is selected (one
+uniform select) when `groups > 1`, `Y*X > 1 or num_pid_n > 1` (a 1x1 filter
+with one N tile shares no `dY` row between tiles) and `num_wgs >= 8`. The
+remap is a bijection of the launch grid, so correctness never depends on the
+decision. `xcd_tile_order=False` (name tag `_noxcd`) builds the launch-order
+kernel for an A/B comparison; the AOT grid does not sweep it.
 
 ## Key Files
 
@@ -219,9 +364,16 @@ already `"col"` and there is no scatter to remove.
 | `../../../platform/cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
 | `../../../platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
+| `../conv/aot_jobs.py` | AOT grid: tilde and stride-1 (tap-outer) binaries, the `CACHE_DGRAD_HALO_*` sub-grid |
+| `../conv/kernel_identity.py` | `KernelIdentity` and `identity_supports_problem`: which problems a cached binary serves (`tap_outer_k` needs `kpg % tile_k == 0`; a halo binary needs `Ho == Hi`, `Wo == Wi`, `Wo <= halo_max_wo`) |
+| `../../../platform/python/rocke/examples/gfx950/conv_dgrad/` | `run_one_dgrad.py` (one config, for traces) and the dgrad case studies |
 
-There is no dgrad dispatcher family yet — dgrad is built directly, without a
-`dispatch/` selection policy of its own.
+The stride-1, tap-outer and dY halo binaries are reached through the AOT
+cache (`benchmark_implicit_gemm_conv --compile-all` / `--run-from-cache`);
+they are not dispatched yet (the grouped-convolution dispatcher is being
+reworked separately). The tile and halo findings that bear on choosing among
+them are in the case study:
+`../../../platform/python/rocke/examples/gfx950/conv_dgrad/stride1_igemm_dgrad_case_study.md`.
 
 ## Differences from Wgrad
 

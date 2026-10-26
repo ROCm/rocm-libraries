@@ -72,6 +72,15 @@ struct SupportResult
 
     hipdnn_frontend::ErrorCode queryStatus = hipdnn_frontend::ErrorCode::OK;
     std::string queryMessage;
+
+    /// The sweep case this verdict is for; empty for a single-graph bundle.
+    std::string caseId;
+
+    /// How far the run got, and how far the bundle asks it to get. Set by
+    /// finalizeClaims() for the engine under test once the run is over; empty for a
+    /// verdict the run never got to act on.
+    std::optional<VerificationDepth> reachedDepth;
+    std::optional<VerificationDepth> requiredDepth;
 };
 
 /// Did this graph have a sidecar, and did we read it?
@@ -107,7 +116,10 @@ enum class SidecarState : uint8_t
 struct SupportObservation
 {
     SidecarState sidecar = SidecarState::NONE;
-    std::vector<SupportResult> results; ///< claimed engines, plus positive drift
+    /// At most one today: one lane tests one engine, so there is one cell to decide.
+    /// Empty when the sidecar promised nothing here and the engine took nothing
+    /// either -- which is why it cannot stand in for `sidecar` above.
+    std::vector<SupportResult> results;
 
     /// Did the sidecar promise anything about the arch, platform and case this run
     /// is on?

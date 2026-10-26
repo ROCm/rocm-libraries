@@ -17,6 +17,7 @@
  * lives in bucket 0 and is reached through rocke/lower_llvm_internal.h.
  */
 
+#include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
@@ -164,15 +165,26 @@ static void _op_tile_wave_ballot(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_wave_all(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* wave_all(p) = (ballot(p) == -1). */
+    /* wave_all(p) = (ballot(p) == full-wave mask): -1 on wave64, 0xffffffff on
+     * wave32 (ballot.i64 sets only the low wave_size bits). Mirrors Python. */
     const rocke_value_t* pred = op->operands[0];
+    const rocke_arch_target_t* target;
     const char* b_name;
     const char* eq_name;
     rocke_ll_need(L, "ballot.i64");
     b_name = rocke_ll_fresh(L, "ballot");
     rocke_ll_emit_wave_ballot(L, pred, b_name);
+    target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    }
     eq_name = rocke_ll_fresh(L, "all_eq");
-    rocke_ll_emitf(L, "  %s = icmp eq i64 %s, -1", eq_name, b_name);
+    rocke_ll_emitf(L,
+                   "  %s = icmp eq i64 %s, %s",
+                   eq_name,
+                   b_name,
+                   target->wave_size == 64 ? "-1" : "4294967295");
     rocke_ll_emitf(L, "  %s = zext i1 %s to i32", ll_result_name(op), eq_name);
 }
 
@@ -325,12 +337,50 @@ static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)(sel & 0xFFFFFF));
 }
 
+/* Validated int attribute `key` of a one-operand i32 DPP op: "ctrl" for
+ * tile.quad_perm, "xor_mask" for tile.dpp_xor. Mirrors
+ * rocke.core.ir.dpp_ctrl_attr: the builders guarantee all of this, but IR can
+ * reach the lowerer without a builder, so nothing is coerced -- anything but
+ * one operand and one result is ROCKE_ERR_VALUE, non-i32 data or result
+ * ROCKE_ERR_VALUE (the DPP move is 32-bit), a missing attribute ROCKE_ERR_KEY,
+ * a non-int one ROCKE_ERR_TYPE. Call it before touching operands[0] or
+ * results[0]. The per-op range check stays with each handler. */
+static int64_t
+    ll_dpp_attr(rocke_lower_t* L, const rocke_op_t* op, const char* opname, const char* key)
+{
+    if(op->num_operands != 1 || op->num_results != 1)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s expects one operand and one result, got %d and %d",
+                      opname,
+                      op->num_operands,
+                      op->num_results);
+    const rocke_value_t* data = op->operands[0];
+    if(!rocke_i_type_is(data->type, "i32"))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires i32 data, got %s",
+                      opname,
+                      data->type ? data->type->name : "(null)");
+    const rocke_value_t* res = op->results[0];
+    if(!rocke_i_type_is(res->type, "i32"))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires an i32 result, got %s",
+                      opname,
+                      res->type ? res->type->name : "(null)");
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, key);
+    if(!v)
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "%s: missing '%s'", opname, key);
+    if(v->kind != ROCKE_ATTR_INT)
+        rocke_ll_fail(L, ROCKE_ERR_TYPE, "%s: %s must be an int", opname, key);
+    return v->u.i;
+}
+
 static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
 {
+    const int64_t ctrl = ll_dpp_attr(L, op, "tile.quad_perm", "ctrl");
     const rocke_value_t* data = op->operands[0];
-    int64_t ctrl = 0;
-    if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
-        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
     /* ctrl packs four two-bit lane selectors (p0 | p1<<2 | p2<<4 | p3<<6),
      * so 0..255 is the whole legal range. Reject instead of masking: a
      * truncated control is a different, silently valid permutation. */
@@ -339,6 +389,40 @@ static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
                       ROCKE_ERR_VALUE,
                       "tile.quad_perm: ctrl must be in 0..255, got %lld",
                       (long long)ctrl);
+    rocke_ll_need(L, "update.dpp.i32");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
+                   "i32 %s, i32 %s, i32 %lld, i32 15, i32 15, i1 true)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   rocke_ll_operand(L, data),
+                   (long long)ctrl);
+}
+
+/* Python _op_tile_dpp_xor: the DPP control word comes from the target
+ * (rocke_i_dpp_xor_ctrl) -- row_xmask (0x160 | mask) where the arch has it,
+ * else the gfx9 base-DPP encoding of the mask; a mask outside 1..15 or with
+ * no encoding on the target is ROCKE_ERR_VALUE, never emitted. */
+static void _op_tile_dpp_xor(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const int64_t mask = ll_dpp_attr(L, op, "tile.dpp_xor", "xor_mask");
+    const rocke_value_t* data = op->operands[0];
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : "gfx950";
+    if(mask < 1 || mask > 15)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.dpp_xor: xor_mask must be in 1..15, got %lld",
+                      (long long)mask);
+    const int64_t ctrl
+        = rocke_i_dpp_xor_ctrl(mask, rocke_arch_has_dpp_row_xmask(rocke_arch_target_from_gfx(gfx)));
+    if(ctrl < 0)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.dpp_xor: xor_mask %lld has no register-only DPP encoding on %s (no "
+                      "row_xmask); masks 1, 2, 3, 7, 8 and 15 do. Use warp_shuffle_xor "
+                      "(ds_swizzle) for this mask",
+                      (long long)mask,
+                      gfx);
     rocke_ll_need(L, "update.dpp.i32");
     rocke_ll_emitf(L,
                    "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
@@ -691,21 +775,6 @@ static void _op_tile_byte_perm(rocke_lower_t* L, const rocke_op_t* op)
 /* ds_read_tr16_b64 / ds_read_tr16_b128 / ds_read_tr_b8                   */
 /* ====================================================================== */
 
-/* Python ISABackend.ds_tr16_b128_spec: the gfx950 opcode is type-agnostic --
- * it returns <8 x i16> whatever the payload is, so the handler reinterprets. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(strcmp(elem_type, "bf16") != 0 && strcmp(elem_type, "f16") != 0
-       && strcmp(elem_type, "fp16") != 0)
-    {
-        return false;
-    }
-    out->decl_key = "ds.read.tr16.b128";
-    out->intrinsic = "llvm.amdgcn.ds.read.tr16.b128";
-    out->ret_ty = "<8 x i16>";
-    return true;
-}
-
 /* Python Gfx1250Backend.ds_tr16_b128_spec: the gfx1250 wave32 opcode is
  * overloaded on the result element type. Select the one matching the op so an
  * f16 read does not reinterpret a bf16 payload (and vice versa). */
@@ -726,18 +795,6 @@ bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t
         return true;
     }
     return false;
-}
-
-/* Python self._backend.ds_tr16_b128_spec(elem_type), with the type-agnostic
- * gfx950 opcode as the fallback when no backend is bound. */
-static bool
-    ll_backend_tr16_spec_b128(rocke_lower_t* L, const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(L && L->backend && L->backend->ds_tr16_b128_spec)
-    {
-        return L->backend->ds_tr16_b128_spec(elem_type, out);
-    }
-    return rocke_ll_tr16_spec_b128_default(elem_type, out);
 }
 
 /* Shared prologue for the b16 transpose reads: emit the getelementptr that
@@ -807,25 +864,35 @@ static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, "ds.read.tr16.b64");
     raw = rocke_ll_fresh(L, "tr.raw");
-    rocke_ll_emitf(
-        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)%s",
+                   raw,
+                   base,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_smem_global_name(L, op->operands[0], NULL)));
     elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
     rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }
 
-/* ds_read_b128_tr_b16. The backend chooses the opcode: gfx950 has one
- * type-agnostic <8 x i16> form that the payload is reinterpreted out of, while
- * gfx1250 has per-element-type forms that land in the right type directly. */
+/* ds_load_tr16_b128. Only gfx1250 has a wide transpose read: its backend
+ * selects an element-typed opcode that lands in the result type directly. Any
+ * other backend has no spec, because LLVM has no ds.read.tr16.b128. */
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* base = ll_ds_read_tr16_base(L, op, "trw.base");
     const char* elem_name = "f16";
     rocke_ll_tr16_spec_t spec;
-    const char* elem_ty;
-    char want_ty[32];
 
     if(!rocke_ll_live(L))
     {
+        return;
+    }
+    if(!L->backend || !L->backend->ds_tr16_b128_spec)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "ds_read_tr16_b128 is not available on %s: LLVM has no "
+                      "ds.read.tr16.b128 intrinsic; use ds_read_tr16_b64",
+                      L->backend ? L->backend->gfx : "(unknown)");
         return;
     }
     {
@@ -835,35 +902,22 @@ static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
             elem_name = attr;
         }
     }
-    if(!ll_backend_tr16_spec_b128(L, elem_name, &spec))
+    if(!L->backend->ds_tr16_b128_spec(elem_name, &spec))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "ds_load_tr16_b128 on %s supports f16/bf16 only, got elem_type='%s'",
-                      L->backend ? L->backend->gfx : "(unknown)",
+                      L->backend->gfx,
                       elem_name);
         return;
     }
     rocke_ll_need(L, spec.decl_key);
-    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    snprintf(want_ty, sizeof(want_ty), "<8 x %s>", elem_ty);
-    if(strcmp(spec.ret_ty, want_ty) == 0)
-    {
-        rocke_ll_emitf(L,
-                       "  %s = call %s @%s(ptr addrspace(3) %s)",
-                       ll_result_name(op),
-                       spec.ret_ty,
-                       spec.intrinsic,
-                       base);
-        return;
-    }
-    {
-        const char* raw = rocke_ll_fresh(L, "trw.raw");
-        rocke_ll_emitf(
-            L, "  %s = call %s @%s(ptr addrspace(3) %s)", raw, spec.ret_ty, spec.intrinsic, base);
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to %s", ll_result_name(op), spec.ret_ty, raw, want_ty);
-    }
+    rocke_ll_emitf(L,
+                   "  %s = call %s @%s(ptr addrspace(3) %s)",
+                   ll_result_name(op),
+                   spec.ret_ty,
+                   spec.intrinsic,
+                   base);
 }
 
 static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)
@@ -1075,6 +1129,7 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE, _op_tile_ds_swizzle);
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
     rocke_ll_set_handler(ROCKE_OP_TILE_QUAD_PERM, _op_tile_quad_perm);
+    rocke_ll_set_handler(ROCKE_OP_TILE_DPP_XOR, _op_tile_dpp_xor);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
     rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
     rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);

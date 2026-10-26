@@ -17,6 +17,7 @@ endif()
 add_executable(
     hip_kernel_provider_tests
     main.cpp
+    core/TestApplicabilityManager.cpp
     core/TestContainer.cpp
     core/TestHandle.cpp
     core/TestContext.cpp
@@ -92,6 +93,38 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     add_subdirectory(engines/hip_flash2_engine)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # The descriptor census, in its own binary.
+    #
+    # A census suite is not an ordinary unit: it states the inventory of ONE pack
+    # target's shard for ONE architecture, both of which the caller supplies through the
+    # environment. Left in hip_kernel_provider_tests those suites run in every bare
+    # invocation of it with neither supplied -- against the unit shard on a build that
+    # may not even pack their bundle -- where they can only fail or skip, and say nothing
+    # about the descriptors either way.
+    #
+    # Same main() as the ordinary binary, so the census listener, the cache redirect and
+    # the compiled-in descriptor root behave identically, and the same embedded-source
+    # table, so TestPointwisePacks resolves the keys its descriptors name.
+    add_executable(
+        hip_kernel_provider_census_tests
+        main.cpp
+        ${HIP_KERNEL_PROVIDER_GENERATED_TEST_SOURCES}
+    )
+
+    set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_TEST_SOURCES}
+        TARGET_DIRECTORY hip_kernel_provider_census_tests
+        PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
+
+    target_compile_options(hip_kernel_provider_census_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
+    target_link_libraries(
+        hip_kernel_provider_census_tests PUBLIC GTest::gtest GTest::gmock hip::host
+                                       hip_kernel_provider_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+    )
+
+    target_include_directories(hip_kernel_provider_census_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
+
     add_subdirectory(engines/kernel_ingestor_engine)
 
     # descriptorSearchDirectory()'s tests assert which of its three sources answered, and
@@ -112,6 +145,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
+    # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
+    # the shared main() resolves its root identically in both. The archive cases that read
+    # the kpack reldir stay in the ordinary binary, and a define no source here consumes
+    # would only invite a census case to start depending on one.
+    target_compile_definitions(hip_kernel_provider_census_tests PRIVATE
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
+
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
     # here -- including the dispatch ones, which sit under engines/ -- so they sit between
     # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
@@ -119,12 +160,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
     # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestCodeObjectLoad.cpp
+        compilation/TestKpackArchSelection.cpp
         compilation/TestKpackArchive.cpp
+        compilation/TestKpackCodeObjectRead.cpp
+        compilation/TestKpackGenericArchive.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
+        core/TestPluginSerialization.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
         ingestor/TestPackedDescriptorLoad.cpp
     )
+
+    # This binary's own packed copy of the archive_fixture Pointwise set. The save cases
+    # need a packed Pointwise kernel, and the unit root packs none: its Pointwise set is
+    # embedded_source. The copy stages outside the unit root, so the engine does not
+    # discover it. Binary-relative, like the defines above.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
+    if(TARGET hkp_packaging_unit_archive_fixture)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_unit_archive_fixture)
+    endif()
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
     # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
@@ -145,6 +203,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
+    # Install the vendored kpack test fixture beside the test binary so it is
+    # available in installed / repackaged layouts (e.g. TheRock CI) where the
+    # source tree is absent. The test code falls back to this exe-relative path
+    # when the compile-time source path does not exist.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/fixtures")
+
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
@@ -153,8 +218,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
+            add_dependencies(hip_kernel_provider_census_tests ${_hkp_set})
         endif()
     endforeach()
+
+    # The census binary additionally reads the production shard, which is wired only
+    # where a production root holds descriptors this build packs for. Absent, there is
+    # nothing to depend on and no entry is registered against it either.
+    if(TARGET hkp_packaging_product)
+        add_dependencies(hip_kernel_provider_census_tests hkp_packaging_product)
+    endif()
 
     # The parent of the unit descriptor sets, and the only root this binary reads.
     # A walk of a parent reaches every subtree staged under it, so a further pack
@@ -178,7 +251,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # case filtered out, a root that does not exist, and a pin naming an unregistered case
     # -- each matched against the diagnostic it must provoke.
     hkp_register_census_tests(
-        TARGET hip_kernel_provider_tests
+        TARGET hip_kernel_provider_census_tests
         PACK_NAME unit
         SUITES TestPointwisePacks
         EXPECTED_CASES
@@ -191,6 +264,86 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    # Census for the gfx950 dense-attention production pack. Reads only the product
+    # shard, so it is eligible for census registration.
+    #
+    # The predicate and ARCHES narrow independently -- whether `product` carries THIS
+    # bundle at all, and which of its wired architectures the bundle emits for. Either
+    # alone lets a census address a shard its suite has nothing to say about.
+    #
+    # The Pointwise call above needs neither: its fixtures are the unit root itself, and
+    # they cover every architecture it is wired for.
+    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+    if(_hkp_gfx950_attention_dense)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionDensePacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+
+        # Hand-written companion census over the same shard: every shipped kernel's tile
+        # passes the engine's own isSupportedGfx950AttentionDenseTile() check. Its own call
+        # because a pin names one suite's cases.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionDenseCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsTileIsOneTheEngineLaunches
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
+    # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
+    # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.
+    set(_hkp_rdna_wmma_attention_arches "")
+    foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
+                           gfx1200 gfx1201)
+        hkp_product_ships_engine_for_arch(
+            _hkp_ships "hipkernel:Gfx1151WmmaAttention" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_rdna_wmma_attention_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_rdna_wmma_attention_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_rdna_wmma_attention_arches}
+            SUITES TestGfx1151WmmaAttentionPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                UnderstandsRuntimePassByValueScaleGraphs
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
+            "any RDNA arch, so its census is not registered.")
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
@@ -200,6 +353,16 @@ clang_tidy_check(hip_kernel_provider_tests)
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    clang_tidy_check(hip_kernel_provider_census_tests)
+
+    # Every entry for this binary comes from hkp_register_census_tests() above, each naming
+    # one shard, one architecture and one filtered suite; a bare run supplies none of those.
+    # That is the no-correct-bare-invocation case EXPLICIT_REGISTRATION exists for.
+    add_unit_test_target(hip_kernel_provider_census_tests ${CMAKE_CURRENT_BINARY_DIR}
+                         EXPLICIT_REGISTRATION)
+endif()
 
 # Published one scope up for the same reason the integration tests do it: under YAML
 # categorization the raw test name is never registered, so the tiered suites created by

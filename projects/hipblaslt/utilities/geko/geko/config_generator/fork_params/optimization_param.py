@@ -60,8 +60,9 @@ class BaseOptimizationParams(BaseParamBuilder):
     Instantiated once per GEMM type.
 
     Decorate per-param methods with @param, per-group methods with @group.
-    generate_for_size discovers them automatically via the method resolution
-    order (MRO).
+    generate_for_size discovers them automatically from the concrete class's
+    own methods (not inherited ones, so mixins must be flattened into the
+    leaf class).
     Methods returning None are stripped.
     """
 

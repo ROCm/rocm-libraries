@@ -11,7 +11,7 @@ the object rather than from anything an author wrote.
 
 import pytest
 
-from conftest import (
+from synthesised_objects import (
     _arg,
     _bundle,
     _elf,

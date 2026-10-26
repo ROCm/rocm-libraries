@@ -157,16 +157,46 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         count *= node.length[i];
     count *= numof;
 
+    // Lay out a flat work item count as a grid of blocks, for kernels that
+    // assign one thread per element.
+    //
+    // Total work items along a grid dimension is counted in uint32_t in the
+    // dispatch packet, so one dimension cannot dispatch more than that many
+    // work items.  The block count stays well inside the grid size limits
+    // long before that point, so exceeding it truncates the dispatch instead
+    // of failing the launch.  Spill into Y once X alone can no longer cover
+    // the range.
+    //
+    // Kernels using this must derive their thread index as
+    //   threadIdx.x + blockIdx.x * blockDim.x + blockIdx.y * gridDim.x * blockDim.x
+    // computed in 64 bits, and must tolerate a grid that rounds up past the
+    // work item count.
+    auto flat_grid_dim = [](size_t work_items, unsigned int block_size) -> dim3 {
+        // whole blocks a single dimension can dispatch
+        const size_t max_blocks = std::numeric_limits<uint32_t>::max() / block_size;
+
+        auto num_blocks = DivRoundingUp<size_t>(work_items, block_size);
+
+        if(num_blocks <= max_blocks)
+            return {static_cast<unsigned int>(num_blocks), 1, 1};
+
+        // fewest Y rows that leave X able to cover the rest
+        auto grid_y = DivRoundingUp<size_t>(num_blocks, max_blocks);
+        if(grid_y > std::numeric_limits<uint32_t>::max())
+            throw std::runtime_error("work item count too large to dispatch as a 2D grid");
+        auto grid_x = DivRoundingUp<size_t>(num_blocks, grid_y);
+
+        return {static_cast<unsigned int>(grid_x), static_cast<unsigned int>(grid_y), 1};
+    };
+
     if(scheme == CS_KERNEL_CHIRP)
     {
-        generator.gridDim
-            = {static_cast<unsigned int>((M - N) / LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL + 1)};
+        generator.gridDim  = flat_grid_dim(M - N + 1, LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL);
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
     else
     {
-        generator.gridDim
-            = {(static_cast<unsigned int>(count) - 1) / LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL + 1};
+        generator.gridDim  = flat_grid_dim(count, LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL);
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
@@ -179,7 +209,8 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
                               node.outArrayType,
                               cbtype,
                               node.loadOps,
-                              node.storeOps};
+                              node.storeOps,
+                              generator.gridDim.y > 1};
 
     generator.generate_name = [=]() { return bluestein_multi_rtc_kernel_name(specs); };
 
@@ -205,8 +236,10 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
     {
         int twl = 0;
 
-        if(data.node->large1D > (size_t)256 * 256 * 256 * 256)
+        if(data.node->large1D > (size_t)256 * 256 * 256 * 256 * 256)
             throw std::runtime_error("large1D twiddle size too large error");
+        else if(data.node->large1D > (size_t)256 * 256 * 256 * 256)
+            twl = 5;
         else if(data.node->large1D > (size_t)256 * 256 * 256)
             twl = 4;
         else if(data.node->large1D > (size_t)256 * 256)

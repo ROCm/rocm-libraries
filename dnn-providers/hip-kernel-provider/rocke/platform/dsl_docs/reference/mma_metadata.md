@@ -4,6 +4,52 @@ This reference describes the `MmaOp` metadata and `MmaCatalog` queries used to
 select matrix operations. For the overall kernel-building workflow, see the
 [authoring model](../architecture/authoring_model.md).
 
+## Selection, IR Emission, and Dispatch
+
+These APIs operate at different levels:
+
+| API | Responsibility | Result |
+|---|---|---|
+| `target.mma.op_for_shape(...)` | Match one instruction's shape, A/B/C dtypes, family and scale contract in the target catalog | An `MmaOp`; no match returns `None`, ambiguity raises `ValueError`; no IR is emitted |
+| `builder.mma(atom, a, b, c, *extra)` | Record the selected operation and its operands | One `tile.mma` IR operation; lowering later emits the LLVM intrinsic selected by `op_id` |
+| `MfmaAtom.emit_scaled(...)` | Call the existing named 16x16x128 scaled-MFMA wrapper | Delegates to `builder.mma` with a fixed operation ID, regardless of the helper atom's shape or dtype |
+| Operator dispatcher | Select a kernel implementation and specialization for a workload | A kernel builder and spec; that builder selects and emits instructions |
+
+`mma` also accepts a raw operation-ID string, as the existing named wrappers
+do. The selected `MmaOp` supplies accumulator size and dtype; the operation ID
+identifies the concrete lowering. Matrix loads, packing and scale-tensor loads
+belong to the surrounding kernel builder. A dispatcher is above this authoring
+layer: request -> kernel/spec selection -> IR construction -> compilation/launch.
+Direct examples may start from a spec and builder without dispatch.
+
+### gfx950 Scaled-MFMA Paths
+
+Both instruction shapes have rocKE lowering support, through different
+authoring entrypoints:
+
+| Path | Authoring entrypoint | Per-lane FP32 accumulator | Current consumer |
+|---|---|---|---|
+| Existing 16x16x128 scaled wrapper | `IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(...)`, also called by `MfmaAtom.emit_scaled(...)` | 4 values | Direct operation authoring; A/B format selectors are fixed to zero in lowering |
+| Existing 16x16x128 FP8 atom | `MfmaAtom.fp8_16x16x128().emit(...)` | 4 values | gfx950 FP8 fused-MoE dispatcher; the same scaled intrinsic is used with constant in-instruction scales |
+| Native 32x32x64 scaled family | `op_for_shape(family="mfma_scaled", ...)`, then `IRBuilder.mma(atom, a, b, c, a_scale, b_scale)` | 16 values | Direct packed GEMM builder and untuned examples, with independent A/B formats and K32 E8M0 scales |
+
+The [fused-MoE dispatcher](../../python/rocke/dispatch/families/moe.py) selects
+the 16x16x128 FP8 atom on gfx950 and the 16x16x32 FP8 atom on gfx942. Its
+[FP8 builder](../../python/rocke/instances/common/moe_fused_mega_fp8.py) uses
+`atom.emit()` and applies FP32 block-scale factors outside the MFMA. It does
+not call `emit_scaled()` with variable E8M0 operands. The native 32x32x64
+GEMM instead loads raw E8M0 bytes and passes separate A/B scales to the
+instruction. It currently has no GEMM dispatcher registration.
+
+The new 32x32x64 lowering lives beside the existing 16x16x128 lowering in
+[`core/lower_llvm.py`](../../python/rocke/core/lower_llvm.py) and
+[`cpp/core/lower_llvm/mma.cpp`](../../cpp/core/lower_llvm/mma.cpp). Its catalog
+and lane maps are in the existing architecture layer. The Python/C++
+`instances/gfx950/block_scaled_gemm` builders and `examples/gfx950/gemm`
+entrypoints mirror the gfx1250 scaled-GEMM structure. See the
+[gfx950 family contract](../instances/gfx950_block_scaled_gemm.md) and
+[example guide](../../python/rocke/examples/gfx950/gemm/README.md).
+
 ## Operand Metadata
 
 MMA metadata uses `a_dtype`, `b_dtype`, and `c_dtype`, with C describing both
@@ -61,6 +107,26 @@ atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
 assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
+
+For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
+example selects FP8 A and FP4 B, with independent E8M0 scales over K32:
+
+```python
+atom = ArchTarget.from_gfx("gfx950").mma.op_for_shape(
+    family="mfma_scaled",
+    a_dtype="fp8", b_dtype="fp4", c_dtype="fp32",
+    scales=(MmaScaleDType.E8M0, MmaScaleDType.E8M0, MmaScaleBlockK.K32),
+    m=32, n=32, k=64,
+)
+assert atom is not None
+# result = builder.mma(atom, a, b, c, scale_a, scale_b)
+```
+
+This operation takes two `vec<i32x8>` packed payloads, a `vec<f32x16>`
+accumulator and two i32 scale operands. The catalog describes all 25 ordered
+FP8/BF8/FP6/BF6/FP4 pairs. The scale-group K=32 is separate from instruction
+K=64. The existing 16x16x128 scaled wrapper retains its fixed operation ID;
+`MfmaAtom.emit_scaled()` does not perform this catalog lookup.
 
 Omitting `scales` leaves scales unconstrained. Passing `(a_type, b_type, block_k)`
 matches the scale contract exactly; `(None, None, None)` selects unscaled atoms.
@@ -128,3 +194,36 @@ Existing `wmma_scale*_f32_*` and dotted `wmma.scaled.*` IDs are retired, as are
 the dedicated scaled builder wrappers; serialized IR using those IDs must be regenerated.
 Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain
 their existing spelling.
+
+## Logical TF32 operands
+
+On gfx942, `tf32` (`xf32` alias) selects `mfma_f32_16x16x8_xf32` or
+`mfma_f32_32x32x4_xf32`. Both take two logical TF32 A/B elements per lane;
+C/D are FP32 with four or sixteen elements. FP32 queries retain the ordinary
+FP32 atoms. The logical type uses one I32 storage word per element and is
+bitcast to the intrinsic's float-vector ABI during lowering.
+
+On gfx950, `tf32` selects the emulated `mfma_f32_16x16x32_xf32` or
+`mfma_f32_32x32x16_xf32`: eight logical TF32 A/B elements per lane, C/D FP32 with
+four or sixteen elements, so the same `(tf32, tf32, fp32)` query returns an atom with
+the same operand ABI on either target. Such a row carries an `emulation` descriptor
+(`MmaOp.emulation`, `is_native` is `False`) naming the physical BF16 atom it expands
+into; its fragment lengths and layout maps are inherited from that atom, and
+the catalog refuses a row whose physical atom is not a native atom of the same arch.
+The lowering reinterprets the TF32 payload as FP32 and splits it, so no payload bit is
+dropped; see the [emulation description](../architecture/xf32_bf16x3_emulation.md).
+
+See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+for the distinction between raw FP32 payloads and explicit RNE preparation,
+and for a reproducible comparison through both engines.
+
+## FP64 operands
+
+On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks). A/B take
+one f64 element per lane, as `f64` or a one-element `vec<f64x1>` (reinterpreted
+with one bitcast); another number format is rejected. C/D take four and one, so
+`IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
+follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see
+the [MFMA atom catalog](mfma_atom_catalog.md)). The probe instance
+`instances/gfx942/f64_mma_probe.py` drives both atoms through both engines.

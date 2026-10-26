@@ -2,7 +2,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Regenerates SDPA forward golden reference bundles for quick and standard tiers.
+# Regenerates SDPA forward golden reference bundles. The `quick`/`standard`
+# arguments select which group of bundles to generate; each bundle is written to
+# the coverage tier it lives in today (see resolve_tier_outdir).
 # Requires PyTorch with ROCm support.
 #
 # Usage:
@@ -24,16 +26,42 @@ fi
 
 TIER="${1:-all}"
 
+# The checked-in bundles use the conventional 1/sqrt(D_qk) scale. The generator's
+# default is 1.0 (no scaling, as for an unset attn_scale_value), so state the scale
+# for every bundle to regenerate the same data.
+SCALE_D128="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(128)))')"
+SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
+
 # DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
 # .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
 # a bare `dvc pull` (and CI) fetches the data from the right place without any
-# `-r` flag or workflow change. See ../../README.md ("DVC Remote Layout").
+# `-r` flag or workflow change. See ../../../docs/file-formats.md ("Golden data").
 DVC_REMOTE="golden-data"
+
+# Bundles are tiered by coverage (quick/standard/comprehensive/full), not by the
+# section of this script that generates them. Regenerate each bundle where it
+# lives today: swap the tier segment of "outdir" for the tier that already holds
+# "<outdir>/<name>". A bundle that exists in no tier keeps the tier given in
+# "outdir".
+resolve_tier_outdir() {
+    local outdir="$1"
+    local name="$2"
+    local rel="${outdir#"$GOLDEN_ROOT"/*/}"
+    local tier
+    for tier in quick standard comprehensive full; do
+        if [[ -d "$GOLDEN_ROOT/$tier/$rel/$name" ]]; then
+            echo "$GOLDEN_ROOT/$tier/$rel"
+            return
+        fi
+    done
+    echo "$outdir"
+}
 
 generate_bundle() {
     local outdir="$1"
     local name="$2"
     shift 2
+    outdir="$(resolve_tier_outdir "$outdir" "$name")"
     mkdir -p "$outdir/$name"
     python3 "$GENERATOR" --base-filename "$outdir/$name/$name" "$@"
 
@@ -57,39 +85,39 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
 
     # BF16 non-stats
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_nomask_batch"
-    generate_bundle "$OUTDIR" "Small" --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 stats
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_nomask_batch_stats"
-    generate_bundle "$OUTDIR" "SmallStats" --stats --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "SmallStats" --stats --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 non-stats
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd128_nomask_batch"
-    generate_bundle "$OUTDIR" "Small" --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 stats
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd128_nomask_batch_stats"
-    generate_bundle "$OUTDIR" "SmallStats" --stats --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "SmallStats" --stats --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 hd128 bottom-right causal
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_causal_batch"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 hd128 bottom-right causal
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd128_causal_batch"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 hd192 (D_qk=192, D_v=128), no mask + causal
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd192_nomask_batch"
-    generate_bundle "$OUTDIR" "Small" --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D192"
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd192_causal_batch"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
     # FP16 hd192, no mask + causal
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd192_nomask_batch"
-    generate_bundle "$OUTDIR" "Small" --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D192"
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd192_causal_batch"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
     echo ""
 fi
@@ -100,49 +128,49 @@ if [[ "$TIER" == "all" || "$TIER" == "standard" ]]; then
 
     # BF16 non-stats
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd128_nomask_batch"
-    generate_bundle "$OUTDIR" "Medium" --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "Gqa" --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 stats
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd128_nomask_batch_stats"
-    generate_bundle "$OUTDIR" "MediumStats" --stats --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "GqaStats" --stats --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "MediumStats" --stats --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "GqaStats" --stats --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 non-stats
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_nomask_batch"
-    generate_bundle "$OUTDIR" "Medium" --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "Gqa" --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 stats
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_nomask_batch_stats"
-    generate_bundle "$OUTDIR" "MediumStats" --stats --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "GqaStats" --stats --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "MediumStats" --stats --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "GqaStats" --stats --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 hd128 bottom-right causal
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd128_causal_batch"
-    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # FP16 hd128 bottom-right causal
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_causal_batch"
-    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 hd192, no mask + causal
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd192_nomask_batch"
-    generate_bundle "$OUTDIR" "Medium" --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D192"
+    generate_bundle "$OUTDIR" "Gqa" --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd192_causal_batch"
-    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D192"
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
     # FP16 hd192, no mask + causal
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd192_nomask_batch"
-    generate_bundle "$OUTDIR" "Medium" --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D192"
+    generate_bundle "$OUTDIR" "Gqa" --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd192_causal_batch"
-    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
-    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D192"
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
     echo ""
 fi
@@ -154,17 +182,43 @@ if [[ "${GENERATE_TIER_B:-0}" == "1" ]]; then
     echo "=== Generating Tier B (fp8 + group) ==="
 
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_nomask_batch"
-    generate_bundle "$OUTDIR" "Small" --dtype fp8 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_causal_batch"
-    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D128"
 
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_nomask_group"
-    generate_bundle "$OUTDIR" "Small" --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_causal_group"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
 
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_causal_group"
-    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
+
+    echo ""
+fi
+
+# --- Ragged (RFC-0014) bundles (not validated by the reference executors,
+# which reject ragged tensors). Generate in isolation with:
+#   GENERATE_RAGGED=1 bash generate_golden_data.sh none ---
+if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
+    echo "=== Generating ragged bundles ==="
+
+    # Ragged (packed RFC-0014 BSHD), uniform S_max blocks, no seq-lens
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_nomask_ragged"
+    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 128 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 128 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
+
+    # hd192x128 ragged: Q and O share offset uid 10 with different
+    # ragged_offset_multipliers (H*192 vs H*128).
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged"
+    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 192 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd192_causal_ragged"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 192 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
     echo ""
 fi

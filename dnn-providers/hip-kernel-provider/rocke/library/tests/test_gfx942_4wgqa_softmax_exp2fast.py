@@ -52,7 +52,7 @@ def _emit_4wgqa_ir(dtype: str) -> str:
         dtype=dtype,
         sliding_window=4096,
     )
-    spec = _tiled_spec_from_problem(p)
+    spec = _tiled_spec_from_problem(p, "gfx942")
     return print_ir(build_gfx942_4warp_gqa(spec, arch="gfx942"))
 
 

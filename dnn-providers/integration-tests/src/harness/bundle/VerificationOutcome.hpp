@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
@@ -106,6 +108,34 @@ inline const char* toString(FailureOrigin origin)
     }
 }
 
+/// The oracle the engine's outputs were compared against. NONE when nothing was
+/// compared: a skip, a failure before the comparison, or a bundle whose
+/// enforcement_level stops short of comparing.
+enum class Verifier : uint8_t
+{
+    NONE,
+    GOLDEN,
+    GPU_REFERENCE,
+    CPU_REFERENCE,
+};
+
+inline const char* toString(Verifier verifier)
+{
+    switch(verifier)
+    {
+    case Verifier::NONE:
+        return "none";
+    case Verifier::GOLDEN:
+        return "golden";
+    case Verifier::GPU_REFERENCE:
+        return "gpu_ref";
+    case Verifier::CPU_REFERENCE:
+        return "cpu_ref";
+    default:
+        return "unknown";
+    }
+}
+
 /// What one test body did, as a value.
 ///
 /// Everything under TestBody() returns one of these instead of calling GTEST_SKIP()
@@ -130,27 +160,35 @@ struct VerificationOutcome
     /// pass this harness exists to rule out. Only alreadyReported() sets it.
     bool alreadyReported = false;
 
+    /// Which oracle graded the outputs, pass or fail. Only a comparison sets it.
+    Verifier verifier = Verifier::NONE;
+
     static VerificationOutcome passed(VerificationDepth depth)
     {
-        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false};
+        return {OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false, Verifier::NONE};
     }
 
     static VerificationOutcome skipped(VerificationDepth depth, std::string message)
     {
-        return {OutcomeStatus::SKIPPED, depth, FailureOrigin::NONE, std::move(message), false};
+        return {OutcomeStatus::SKIPPED,
+                depth,
+                FailureOrigin::NONE,
+                std::move(message),
+                false,
+                Verifier::NONE};
     }
 
     static VerificationOutcome
         failed(VerificationDepth depth, FailureOrigin origin, std::string message)
     {
-        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false};
+        return {OutcomeStatus::FAILED, depth, origin, std::move(message), false, Verifier::NONE};
     }
 
     /// A failure whose detail is already on the record. The caller MUST have issued
     /// at least one gtest failure before building this.
     static VerificationOutcome alreadyReportedFailure(VerificationDepth depth, FailureOrigin origin)
     {
-        return {OutcomeStatus::FAILED, depth, origin, {}, true};
+        return {OutcomeStatus::FAILED, depth, origin, {}, true, Verifier::NONE};
     }
 };
 
@@ -178,6 +216,38 @@ inline std::string describeOutcome(const VerificationOutcome& outcome, Verificat
 
     return std::string("engine in ranked list; reached ") + toString(outcome.depth)
            + ", bundle requires " + toString(required);
+}
+
+/// Something wrong with the *run*, as a value rather than an assertion. Distinct
+/// from VerificationOutcome: that is the engine's result and becomes the test's
+/// disposition, while this is the harness objecting to how the test was conducted.
+///
+/// Every complaint is a failure. A grievance the harness is willing to print and let
+/// the run stay green is a grievance nobody acts on, so the type carries no severity
+/// to get wrong -- producing one is the decision, and the raise site has none left.
+struct HarnessComplaint
+{
+    std::string message;
+};
+
+/// The complaint, if this outcome went green without reaching `required` -- every
+/// fallback in the chain can decline, and a bundle whose oracles all decline would
+/// otherwise report success having compared nothing.
+///
+/// Self-guarding, which is why the call site needs no surrounding condition: only a
+/// PASSED outcome can trip it, so a blocked claim or a thrown exception is silently
+/// nothing.
+inline std::optional<HarnessComplaint> shallowPassComplaint(const VerificationOutcome& outcome,
+                                                            VerificationDepth required,
+                                                            std::string_view bundlePath)
+{
+    if(outcome.status != OutcomeStatus::PASSED || outcome.depth >= required)
+    {
+        return std::nullopt;
+    }
+
+    return HarnessComplaint{std::string("test passed without reaching ") + toString(required)
+                            + " for " + std::string(bundlePath)};
 }
 
 } // namespace hipdnn_integration_tests::bundle

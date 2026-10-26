@@ -114,6 +114,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), WDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         // Reject if any operand is runtime pass-by-value; the conv fwd plan
         // cannot resolve a PBV host scalar. ConvolutionFwd has no scalar
         // operand today, but scan all three tensors so the guard holds if the

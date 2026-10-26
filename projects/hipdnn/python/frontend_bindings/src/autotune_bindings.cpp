@@ -192,7 +192,10 @@ void autotuneBindings(nb::module_& m)
         .def_ro("supports_exhaustive", &AutotuneResult::supportsExhaustive)
         .def_ro("ran_exhaustive", &AutotuneResult::ranExhaustive)
         .def_ro("exhaustive_not_run_reason", &AutotuneResult::exhaustiveNotRunReason)
-        .def_ro("strategy_used", &AutotuneResult::strategyUsed);
+        .def_ro("strategy_used", &AutotuneResult::strategyUsed)
+        // How this candidate's time was measured. DEVICE_ONLY and UNSTALLED use
+        // different event-submission methods, so callers must not compare them.
+        .def_ro("timing_quality", &AutotuneResult::timingQuality);
 
     // Bind AutotuneStorageConfig: optional JSON heuristic-config output for Graph.autotune()
     nb::class_<AutotuneStorageConfig>(m, "AutotuneStorageConfig")

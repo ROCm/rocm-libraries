@@ -17,8 +17,17 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 using namespace hipdnn_backend;
 using namespace plugin;
@@ -798,6 +807,136 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
         HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
 }
 
+TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanIsSafeFromManyThreads)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan();
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    // The sleep keeps the first fill in progress while the other threads arrive.
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(1)
+        .WillOnce([&pluginPayload](int64_t,
+                                   hipdnnEnginePluginExecutionContext_t,
+                                   std::vector<uint8_t>& serializedContext) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            serializedContext = pluginPayload;
+        });
+
+    constexpr size_t THREAD_COUNT = 16;
+    std::mutex gateMutex;
+    std::condition_variable gateCondition;
+    size_t checkedIn = 0;
+    bool released = false;
+
+    std::vector<std::vector<uint8_t>> outputs(THREAD_COUNT);
+    std::vector<int> threw(THREAD_COUNT, 0);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t i = 0; i < THREAD_COUNT; ++i)
+    {
+        threads.emplace_back([&, i]() {
+            {
+                std::unique_lock<std::mutex> lock(gateMutex);
+                ++checkedIn;
+                gateCondition.notify_all();
+                gateCondition.wait(lock, [&released]() { return released; });
+            }
+
+            try
+            {
+                size_t planByteSize = 0;
+                plan->serializeBackendPlan(0, &planByteSize, nullptr);
+                outputs[i].resize(planByteSize);
+                plan->serializeBackendPlan(planByteSize, &planByteSize, outputs[i].data());
+            }
+            catch(...)
+            {
+                threw[i] = 1;
+            }
+        });
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(gateMutex);
+        gateCondition.wait(lock, [&checkedIn]() { return checkedIn == THREAD_COUNT; });
+        released = true;
+    }
+    gateCondition.notify_all();
+
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    for(size_t i = 0; i < THREAD_COUNT; ++i)
+    {
+        EXPECT_EQ(threw[i], 0) << "Thread " << i << " threw an exception.";
+    }
+    ASSERT_FALSE(outputs[0].empty());
+    for(size_t i = 1; i < THREAD_COUNT; ++i)
+    {
+        EXPECT_EQ(outputs[i], outputs[0]) << "Thread " << i << " produced a different plan.";
+    }
+}
+
+TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanRetriesAfterAFailedFill)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan();
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(2)
+        .WillOnce([](int64_t, hipdnnEnginePluginExecutionContext_t, std::vector<uint8_t>&) {
+            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                                  "Failed to serialize execution context.");
+        })
+        .WillOnce([&pluginPayload](int64_t,
+                                   hipdnnEnginePluginExecutionContext_t,
+                                   std::vector<uint8_t>& serializedContext) {
+            serializedContext = pluginPayload;
+        });
+
+    size_t planByteSize = 0;
+    ASSERT_THROW_HIPDNN_STATUS(plan->serializeBackendPlan(0, &planByteSize, nullptr),
+                               HIPDNN_STATUS_PLUGIN_ERROR);
+
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+    ASSERT_GT(planByteSize, 0);
+    std::vector<uint8_t> serializedOutput(planByteSize);
+    ASSERT_NO_THROW(
+        plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
+
+    flatbuffers::Verifier verifier(serializedOutput.data(), serializedOutput.size());
+    ASSERT_TRUE(hipdnn_flatbuffers_sdk::data_objects::VerifySerializedExecutionPlanBuffer(verifier))
+        << "The second call returned " << serializedOutput.size()
+        << " bytes that are not a rebuilt plan.";
+
+    auto executionPlan
+        = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
+    ASSERT_NE(executionPlan->plugin_payload(), nullptr);
+    EXPECT_EQ(std::vector<uint8_t>(executionPlan->plugin_payload()->begin(),
+                                   executionPlan->plugin_payload()->end()),
+              pluginPayload);
+}
+
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)
 {
     auto plan = getExecutionPlanDescriptor();
@@ -887,4 +1026,62 @@ TEST_F(TestExecutionPlanDescriptor, GetExecutionContext)
     auto context = plan->getExecutionContext();
     ASSERT_NE(context, nullptr);
     ASSERT_EQ(context, getExecutionContext());
+}
+
+TEST_F(TestExecutionPlanDescriptor, RecordExecutionCountsPerPlan)
+{
+    auto plan = getExecutionPlanDescriptor();
+    ExecutionPlanDescriptor otherPlan;
+
+    EXPECT_EQ(plan->recordExecution(), 1u);
+    EXPECT_EQ(plan->recordExecution(), 2u);
+    EXPECT_EQ(otherPlan.recordExecution(), 1u);
+    EXPECT_EQ(plan->recordExecution(), 3u);
+}
+
+TEST_F(TestExecutionPlanDescriptor, RecordExecutionGivesDistinctCountsAcrossThreads)
+{
+    constexpr size_t THREAD_COUNT = 8;
+    // Enough increments per thread that the threads overlap after the start flag is set.
+    constexpr size_t EXECUTIONS_PER_THREAD = 10000;
+    auto plan = getExecutionPlanDescriptor();
+
+    std::atomic<bool> startFlag{false};
+    std::vector<std::vector<uint64_t>> countsPerThread(THREAD_COUNT);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(auto& counts : countsPerThread)
+    {
+        threads.emplace_back([&plan, &counts, &startFlag]() {
+            counts.reserve(EXECUTIONS_PER_THREAD);
+            // Wait so that all threads increment at the same time, not one after another.
+            while(!startFlag.load())
+            {
+                std::this_thread::yield();
+            }
+            for(size_t i = 0; i < EXECUTIONS_PER_THREAD; ++i)
+            {
+                counts.push_back(plan->recordExecution());
+            }
+        });
+    }
+    startFlag.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    std::vector<uint64_t> allCounts;
+    allCounts.reserve(THREAD_COUNT * EXECUTIONS_PER_THREAD);
+    for(const auto& counts : countsPerThread)
+    {
+        allCounts.insert(allCounts.end(), counts.begin(), counts.end());
+    }
+    std::sort(allCounts.begin(), allCounts.end());
+
+    // Each execution must get a unique count in [1, total].
+    for(size_t i = 0; i < allCounts.size(); ++i)
+    {
+        ASSERT_EQ(allCounts[i], static_cast<uint64_t>(i + 1));
+    }
 }

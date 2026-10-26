@@ -11,9 +11,13 @@ target inherits nothing here until someone opts it in.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Tuple
 
-from kernels.common.attention_unified import supports_native_unified_attention
+from kernels.common.attention_unified import (
+    supports_native_unified_attention,
+    supports_native_unified_attention_3d_tiled,
+)
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
     Capability,
@@ -53,9 +57,16 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
-    # Unified kernels already shift the causal diagonal by the runtime
-    # difference between each sequence's KV and query lengths.
+    # Unified kernels shift the causal diagonal by the runtime difference
+    # between each sequence's KV and query lengths (bottom-right); top-left
+    # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
     supports_features=ATTENTION_FEATURES,
+)
+# Only the split-KV (3D) path writes the optional LSE output; its support check
+# (the 3D gate below) still refuses it on arches/features that cannot.
+_UNIFIED_3D_CAPABILITY = dataclasses.replace(
+    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
 
@@ -79,6 +90,12 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path()!r} path, not {path!r}"
             )
+        if problem.emit_lse:
+            # The scalar coverage check above knows nothing about LSE; the
+            # split-KV gate owns which arches and features can write it.
+            ok, why = supports_native_unified_attention_3d_tiled(problem, arch=req.arch)
+            if not ok:
+                return False, why
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
@@ -96,6 +113,10 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             num_kv_heads=problem.num_kv_heads,
             use_fp8=problem.use_fp8,
             fp8_fnuz=problem.fp8_fnuz,
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
+            emit_lse=problem.emit_lse,
         )
 
     candidate = KernelCandidate(
@@ -105,7 +126,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
-        capability=_UNIFIED_CAPABILITY,
+        capability=_UNIFIED_3D_CAPABILITY if path == "3d" else _UNIFIED_CAPABILITY,
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
@@ -165,6 +186,9 @@ def _make_d256_decode_candidate() -> KernelCandidate:
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_d256_decode",
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(
@@ -193,8 +217,10 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
-    registry.extend(
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    """Route-only: these candidates name a path and have no builder."""
+    del execution
+    route.extend(
         (
             # 2d and 3d are mutually exclusive per problem (select_path returns
             # one), so priority only orders the two when both could match --
@@ -203,4 +229,4 @@ def register(registry: CandidateRegistry) -> None:
             _make_candidate(path="3d", priority=10),
         )
     )
-    registry.register(_make_d256_decode_candidate())
+    route.register(_make_d256_decode_candidate())

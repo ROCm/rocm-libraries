@@ -3,35 +3,133 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "../DigitGroupingLocale.hpp"
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+namespace
+{
+struct HipStreamWaitFaults
+{
+    bool enabled = false;
+    bool unsupported = false;
+    int capabilityQueries = 0;
+    int armCalls = 0;
+    int failFromArm = 0;
+    int rejectedArms = 0;
+    hipError_t lastError = hipSuccess;
+    // Makes this many successful hipEventElapsedTime readings taken while a stall gate
+    // wait was enqueued report a finite negative span, the shape seen on Windows.
+    int negativeStalledReadings = 0;
+    int stalledReadings = 0;
+    bool waitEnqueued = false;
+};
+
+thread_local HipStreamWaitFaults gStreamWaitFaults;
+} // namespace
+
+// GNU ld requires these symbol names for test-only HIP call wrapping.
+// NOLINTBEGIN(readability-identifier-naming, bugprone-reserved-identifier)
+extern "C" hipError_t __real_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask);
+extern "C" hipError_t
+    __real_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device);
+extern "C" hipError_t __real_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop);
+
+extern "C" hipError_t __wrap_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask)
+{
+    if(gStreamWaitFaults.enabled)
+    {
+        ++gStreamWaitFaults.armCalls;
+        if(gStreamWaitFaults.failFromArm > 0
+           && gStreamWaitFaults.armCalls >= gStreamWaitFaults.failFromArm)
+        {
+            // HIP rejects nullptr before enqueueing anything. Exercise a real runtime
+            // error while preserving the valid stream for ordinary event timing.
+            gStreamWaitFaults.lastError
+                = __real_hipStreamWaitValue32(stream, nullptr, value, flags, mask);
+            ++gStreamWaitFaults.rejectedArms;
+            return gStreamWaitFaults.lastError;
+        }
+    }
+    const hipError_t status = __real_hipStreamWaitValue32(stream, ptr, value, flags, mask);
+    gStreamWaitFaults.waitEnqueued = status == hipSuccess;
+    return status;
+}
+
+extern "C" hipError_t
+    __wrap_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device)
+{
+    if(gStreamWaitFaults.enabled && gStreamWaitFaults.unsupported
+       && attribute == hipDeviceAttributeCanUseStreamWaitValue)
+    {
+        ++gStreamWaitFaults.capabilityQueries;
+        *value = 0;
+        return hipSuccess;
+    }
+    return __real_hipDeviceGetAttribute(value, attribute, device);
+}
+
+extern "C" hipError_t __wrap_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop)
+{
+    const hipError_t status = __real_hipEventElapsedTime(ms, start, stop);
+    if(gStreamWaitFaults.enabled && status == hipSuccess && gStreamWaitFaults.waitEnqueued)
+    {
+        ++gStreamWaitFaults.stalledReadings;
+        if(gStreamWaitFaults.negativeStalledReadings > 0)
+        {
+            --gStreamWaitFaults.negativeStalledReadings;
+            *ms = -0.01F;
+        }
+    }
+    // The ingestor arms before every stalled sample, so the next wait decides again.
+    gStreamWaitFaults.waitEnqueued = false;
+    return status;
+}
+// NOLINTEND(readability-identifier-naming, bugprone-reserved-identifier)
+#endif
 
 /**
  * @file TestBenchmarkPlan.cpp
@@ -82,8 +180,10 @@ private:
 using OraclePlanBuilder = GenericPlanBuilder<StubHandle, StubSettings, OracleContext>;
 
 /// Three kernels with no matchers, so every kernel survives catalog construction and
-/// only the heuristic decides rank.
-std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubStateManager()
+/// only the heuristic decides rank. @p graphMatchSymbol selects what graph matching
+/// binds; the default binds nothing.
+std::unique_ptr<KernelIngestorStateManager<StubHandle>>
+    makeThreeKernelStubStateManager(const char* graphMatchSymbol = GRAPH_MATCH_SYMBOL)
 {
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -106,7 +206,7 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_MATCH_SYMBOL);
+        graphMatchSymbol);
 }
 
 /// With benchmarking off, buildPlan() builds one plain GenericPlan for the ranked front
@@ -162,29 +262,99 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 // ---------------------------------------------------------------------------
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
-/// StubHandle (used by the oracle above) has no getStream(). The injected timer never
-/// records an event, so the null stream's behaviour never matters.
+/// StubHandle (used by the oracle above) has no getStream(). Defaults to the null stream,
+/// which never matters for the injected timers; the watchdog case below passes a real one,
+/// because the default timer arms the stall gate on whatever stream it is given.
 struct BenchmarkTestHandle
 {
+    hipStream_t stream = nullptr;
+
     // Non-static: models a real handle's instance accessor, which is what HasGetStream
     // detects.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
-        return nullptr;
+        return stream;
     }
 };
 
+#ifdef _WIN32
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
+/// default timer's events bracket real device work. Large so that reaching
+/// GPU_WORK_MIN_SPAN takes few memsets, which keeps the queue behind an armed stall gate
+/// short.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{64} * 1024 * 1024;
+
+/// HIP on Windows misreports event spans in both directions (ROCm/rocm-systems#12925),
+/// and a span shorter than its error reads negative. BenchmarkPlan repeats such a sample
+/// and, past MAX_NEGATIVE_SAMPLE_RETRIES, drops the candidate, so the exact launch counts
+/// and rankings asserted below would not hold.
+constexpr std::chrono::milliseconds GPU_WORK_MIN_SPAN{50};
+#else
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
+/// default timer's events bracket real device work.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{4} * 1024 * 1024;
+#endif
+
+/// How many GPU_WORK_SCRATCH_BYTES memsets of @p scratch one execute() enqueues: one, or on
+/// Windows enough to span GPU_WORK_MIN_SPAN. The rate is measured once per process on the
+/// host clock, because HIP events are what the padding works around.
+int gpuWorkMemsetsPerExecute(void* scratch)
+{
+#ifdef _WIN32
+    static const int s_memsets = [scratch] {
+        const auto memsetAndDrain = [scratch](int count) {
+            for(int i = 0; i < count; ++i)
+            {
+                if(hipMemsetAsync(scratch, 0, GPU_WORK_SCRATCH_BYTES, nullptr) != hipSuccess)
+                {
+                    throw std::runtime_error("FakePlan: GPU work calibration failed");
+                }
+            }
+            if(hipStreamSynchronize(nullptr) != hipSuccess)
+            {
+                throw std::runtime_error("FakePlan: GPU work calibration failed");
+            }
+        };
+        // Untimed first: the first touch of the scratch is slower than the rest.
+        memsetAndDrain(1);
+        constexpr int SAMPLE_MEMSETS = 8;
+        const auto start = std::chrono::steady_clock::now();
+        memsetAndDrain(SAMPLE_MEMSETS);
+        const auto perMemset = std::max<std::chrono::nanoseconds>(
+            (std::chrono::steady_clock::now() - start) / SAMPLE_MEMSETS,
+            std::chrono::microseconds{1});
+        return static_cast<int>(std::chrono::nanoseconds(GPU_WORK_MIN_SPAN) / perMemset) + 1;
+    }();
+    return s_memsets;
+#else
+    static_cast<void>(scratch);
+    return 1;
+#endif
+}
+
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
-/// succeeds and counts a "launch".
+/// succeeds and counts a "launch". @p enqueueGpuWork additionally memsets a same-stream
+/// scratch buffer gpuWorkMemsetsPerExecute() times on every execute(): the real-HIP-timer
+/// tests need actual device work between the timer's start and stop events.
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
-    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0)
+    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0, bool enqueueGpuWork = false)
         : _workspaceSize(workspaceSize)
         , _throwForCalls(throwForCalls)
     {
+        if(enqueueGpuWork)
+        {
+            void* raw = nullptr;
+            if(hipMalloc(&raw, GPU_WORK_SCRATCH_BYTES) != hipSuccess || raw == nullptr)
+            {
+                throw std::runtime_error("FakePlan: GPU scratch allocation failed");
+            }
+            _gpuScratch = {raw, [](void* ptr) { static_cast<void>(hipFree(ptr)); }};
+            _gpuWorkMemsets = gpuWorkMemsetsPerExecute(raw);
+        }
     }
 
     size_t getWorkspaceSize(const BenchmarkTestHandle& /*handle*/) const override
@@ -192,7 +362,7 @@ public:
         return _workspaceSize;
     }
 
-    void execute(const BenchmarkTestHandle& /*handle*/,
+    void execute(const BenchmarkTestHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override
@@ -201,6 +371,14 @@ public:
         _lastDeviceBuffers = deviceBuffers;
         _lastNumDeviceBuffers = numDeviceBuffers;
         _lastWorkspace = workspace;
+        for(int pass = 0; pass < _gpuWorkMemsets; ++pass)
+        {
+            if(hipMemsetAsync(_gpuScratch.get(), 0, GPU_WORK_SCRATCH_BYTES, handle.getStream())
+               != hipSuccess)
+            {
+                throw std::runtime_error("FakePlan: GPU work enqueue failed");
+            }
+        }
         if(_callCount <= _throwForCalls)
         {
             throw std::runtime_error("FakePlan: simulated failure");
@@ -231,11 +409,38 @@ public:
 private:
     size_t _workspaceSize;
     int _throwForCalls;
+    hipdnn_data_sdk::utilities::ScopedResource<void*> _gpuScratch;
+    int _gpuWorkMemsets = 0;
     mutable int _callCount = 0;
     mutable int _launchCount = 0;
     mutable const hipdnnPluginDeviceBuffer_t* _lastDeviceBuffers = nullptr;
     mutable uint32_t _lastNumDeviceBuffers = 0;
     mutable void* _lastWorkspace = nullptr;
+};
+
+/// Blocks the host on the handle's own stream from inside execute(). The GPU work
+/// stays behind the stall gate until release; synchronizing it before the caller's
+/// release still requires the watchdog. The same work gives the unstalled rerun a
+/// meaningful interval to time.
+class StreamSyncingPlan : public FakePlan
+{
+public:
+    StreamSyncingPlan()
+        : FakePlan(/*workspaceSize=*/0, /*throwForCalls=*/0, /*enqueueGpuWork=*/true)
+    {
+    }
+
+    void execute(const BenchmarkTestHandle& handle,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 void* workspace = nullptr) const override
+    {
+        FakePlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+        if(hipStreamSynchronize(handle.getStream()) != hipSuccess)
+        {
+            throw std::runtime_error("StreamSyncingPlan: stream synchronization failed");
+        }
+    }
 };
 
 using TestBenchmarkPlan = BenchmarkPlan<BenchmarkTestHandle>;
@@ -412,11 +617,7 @@ TEST(TestIngestorBenchmarkPlan, TheReductionTrimsASingleSlowOutlier)
               uint32_t numDeviceBuffers,
               void* workspace) -> std::optional<double> {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        if(&plan == steadyRaw)
-        {
-            return STEADY_SAMPLE;
-        }
-        return SPIKY_SAMPLES.at(spikySampleIndex++);
+        return &plan == steadyRaw ? STEADY_SAMPLE : SPIKY_SAMPLES.at(spikySampleIndex++);
     };
 
     const BenchmarkTestHandle handle;
@@ -454,10 +655,9 @@ TEST(TestIngestorBenchmarkPlan, AnUntimeableCandidateIsScoredUnusableAndLosesToA
     EXPECT_EQ(timedRaw->launchCount(), SAMPLING_LAUNCHES + 1);
 }
 
-/// The only case exercising the DEFAULT timer: no timer argument, so makeHipEventTimer()
-/// runs for real against HIP. Every other case here injects a fake, which would let a
-/// regression in event creation, event reuse across samples, the record/synchronize
-/// pair, or the elapsed-time read pass unnoticed.
+/// The default timer runs against real HIP events and same-stream GPU work.
+/// This case verifies event creation, reuse, recording, synchronization, and elapsed
+/// readback without an injected timer; the watchdog and fault tests cover recovery.
 ///
 /// Asserting the exact count is what makes it meaningful: the timer must have returned a
 /// duration on all BENCHMARK_ITERATIONS samples. A single nullopt would score the
@@ -466,16 +666,23 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 {
     SKIP_IF_NO_DEVICES();
 
-    auto sub = std::make_unique<FakePlan>(64);
+    // Unsupported stream-wait devices must use ordinary event timing from the
+    // first sample, without an extra discarded pass.
+    auto sub = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
     const auto* subRaw = sub.get();
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
     candidates.push_back({testId(0x01), std::move(sub)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    std::vector<RankedEntry> recorded;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
 
     plan.execute(handle, nullptr, 0, nullptr);
+    ASSERT_EQ(recorded.size(), 1U) << "the HIP-event timer did not produce a usable ranking";
 
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 1)
         << "the HIP-event timer failed a sample; the candidate was scored unusable";
@@ -485,6 +692,294 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
     plan.execute(handle, nullptr, 0, nullptr);
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 2);
 }
+
+namespace
+{
+
+/// Every log line that parses as a candidate record. Parsed rather than substring-matched,
+/// so a record that stopped being valid JSON fails the assertions.
+template <typename TRecorder>
+std::vector<nlohmann::json> candidateRecords(const TRecorder& recorder)
+{
+    std::vector<nlohmann::json> records;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        if(start == std::string::npos)
+        {
+            continue;
+        }
+        auto parsed = nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(parsed.is_discarded() || !parsed.contains("event"))
+        {
+            continue;
+        }
+        if(parsed["event"] == "ingestor.benchmark.candidate")
+        {
+            records.push_back(std::move(parsed));
+        }
+    }
+    return records;
+}
+
+} // namespace
+
+/// A watchdog timeout says the candidate cannot be measured with the stream stalled; it
+/// says nothing about how fast the candidate is. The comparison aborts sampling the
+/// instant the timeout is seen -- a candidate ordered after the deadlocking one is never
+/// sampled stalled at all -- then re-measures every candidate unstalled from scratch, so
+/// all three end up ranked.
+///
+/// This is the real default timer against real HIP: the middle candidate synchronizes
+/// the very stream the gate stalls, which is the self-inflicted deadlock the watchdog
+/// exists for. No module-wide latch is consulted or reset: this policy is local to each
+/// comparison, proven by running a second, independent comparison afterward and seeing
+/// its own gate stall and time out too.
+TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerunsUnstalled)
+{
+    SKIP_IF_NO_DEVICES();
+
+    int canWaitValue = 0;
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWaitValue, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWaitValue == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    // One run of a [normal, deadlocking, normal] comparison against a fresh stream and
+    // plan: how long plan.execute() took, what the ranking recorded, and how many times
+    // the candidates before/after the deadlocking one launched. Returned by value rather
+    // than through out-params so two calls below cannot share any state.
+    struct ComparisonResult
+    {
+        std::vector<RankedEntry> recorded;
+        std::chrono::milliseconds wallTime;
+        int beforeLaunches;
+        int afterLaunches;
+    };
+
+    const auto runComparison = []() -> ComparisonResult {
+        hipStream_t rawStream = nullptr;
+        EXPECT_EQ(hipStreamCreate(&rawStream), hipSuccess);
+        // ScopedResource, the same RAII pattern the default HIP-event timer uses for its
+        // events: destroys the stream on every exit path instead of only fall-through.
+        const hipdnn_data_sdk::utilities::ScopedResource<hipStream_t> stream(
+            rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
+        const BenchmarkTestHandle handle{stream.get()};
+
+        auto before = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        auto after = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        const auto* beforeRaw = before.get();
+        const auto* afterRaw = after.get();
+
+        std::vector<TestBenchmarkPlan::Candidate> candidates;
+        candidates.push_back({testId(0x01), std::move(before), testId(0xF0), testId(0xD0)});
+        candidates.push_back(
+            {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+        candidates.push_back({testId(0x03), std::move(after), testId(0xF0), testId(0xD0)});
+
+        std::vector<RankedEntry> recorded;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            TestBenchmarkPlan::Timer{},
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        const auto start = std::chrono::steady_clock::now();
+        plan.execute(handle, nullptr, 0U, nullptr);
+        const auto wallTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+
+        return {std::move(recorded), wallTime, beforeRaw->launchCount(), afterRaw->launchCount()};
+    };
+
+    // plan.execute() samples every candidate and then delegates once more to whichever
+    // one the ranking crowned the winner, so that candidate's launch count is one higher
+    // than a pure sampling count. Compare against the actual winner rather than assuming
+    // one: real HIP timing decides which candidate wins.
+    const auto delegatedBonus
+        = [](const std::vector<RankedEntry>& recorded, DescriptorId id) -> int {
+        return !recorded.empty() && recorded.front().kernelId == id ? 1 : 0;
+    };
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto first = runComparison();
+    const auto firstRecords = candidateRecords(recorder);
+
+    EXPECT_GE(first.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "the watchdog never fired, so this case proved nothing";
+    EXPECT_EQ(first.recorded.size(), 3U)
+        << "the timed-out candidate was dropped instead of re-measured unstalled";
+
+    // Immediate abort: the candidate ordered after the deadlocking one accrues exactly
+    // one pass's launches (the unstalled rerun only), because the stalled pass never
+    // reaches it. The candidate ordered before it finishes its stalled pass normally and
+    // is then resampled unstalled, so it accrues two passes' worth. Either count gains
+    // one more launch if that candidate turned out to be the delegated winner.
+    EXPECT_EQ(first.beforeLaunches,
+              2 * SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x01)))
+        << "the candidate before the timeout must be sampled once per pass";
+    EXPECT_EQ(first.afterLaunches, SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x03)))
+        << "the candidate after the timeout must not be sampled during the aborted stalled "
+           "pass, only during the unstalled rerun";
+
+    // The discarded stalled pass logs nothing: each kernel is one row, from the pass that
+    // ranked it.
+    std::vector<std::string> loggedKernels;
+    loggedKernels.reserve(firstRecords.size());
+    for(const auto& record : firstRecords)
+    {
+        loggedKernels.push_back(record["kernel"].get<std::string>());
+    }
+    EXPECT_THAT(loggedKernels,
+                ::testing::ElementsAre(
+                    toString(testId(0x01)), toString(testId(0x02)), toString(testId(0x03))));
+
+    // A second, wholly independent comparison must still be able to stall and time out:
+    // nothing about the first comparison's fallback may have disabled stalling for it.
+    const auto second = runComparison();
+
+    EXPECT_GE(second.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "a prior comparison's fallback suppressed stalling for this independent one";
+    EXPECT_EQ(second.recorded.size(), 3U);
+    EXPECT_EQ(second.afterLaunches,
+              SAMPLING_LAUNCHES + delegatedBonus(second.recorded, testId(0x03)));
+}
+
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+class TestIngestorHipTimerFaults : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        gStreamWaitFaults = {};
+        SKIP_IF_NO_DEVICES();
+        gStreamWaitFaults.enabled = true;
+    }
+
+    void TearDown() override
+    {
+        gStreamWaitFaults = {};
+        static_cast<void>(hipGetLastError());
+    }
+};
+
+TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    std::array<const FakePlan*, 3> plans{};
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        auto candidate
+            = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        plans[index] = candidate.get();
+        candidates.push_back({testId(static_cast<uint8_t>(index + 1)), std::move(candidate)});
+    }
+
+    // The first candidate finishes stalled. The next arm and any later attempts
+    // fail in HIP, so recovery must stop arming and remeasure every candidate.
+    gStreamWaitFaults.failFromArm = BENCHMARK_ITERATIONS + 1;
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(gStreamWaitFaults.lastError, hipErrorInvalidValue);
+    EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
+    ASSERT_EQ(recorded.size(), plans.size());
+    const std::array<int, 3> expectedLaunches{
+        2 * SAMPLING_LAUNCHES, SAMPLING_LAUNCHES + BENCHMARK_WARMUP_RUNS + 1, SAMPLING_LAUNCHES};
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        const int delegated
+            = recorded.front().kernelId == testId(static_cast<uint8_t>(index + 1)) ? 1 : 0;
+        EXPECT_EQ(plans[index]->launchCount(), expectedLaunches[index] + delegated);
+    }
+}
+
+TEST_F(TestIngestorHipTimerFaults, UnsupportedDeviceStartsUnstalledWithoutDiscardingSamples)
+{
+    gStreamWaitFaults.unsupported = true;
+    auto candidate = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    const auto* candidatePtr = candidate.get();
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(1), std::move(candidate)});
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_GT(gStreamWaitFaults.capabilityQueries, 0);
+    EXPECT_EQ(gStreamWaitFaults.armCalls, 0);
+    ASSERT_EQ(recorded.size(), 1U);
+    EXPECT_EQ(candidatePtr->launchCount(), SAMPLING_LAUNCHES + 1);
+}
+
+TEST_F(TestIngestorHipTimerFaults, NegativeStalledReadingsRestartTheComparisonUnstalled)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto first = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    auto second = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    const auto* firstRaw = first.get();
+    const auto* secondRaw = second.get();
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(1), std::move(first)});
+    candidates.push_back({testId(2), std::move(second)});
+
+    // Every stalled reading is negative. The first candidate spends its retry budget on
+    // the first slot; that must restart the comparison unstalled, not drop the candidate.
+    gStreamWaitFaults.negativeStalledReadings = std::numeric_limits<int>::max();
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(gStreamWaitFaults.stalledReadings, 1 + MAX_NEGATIVE_SAMPLE_RETRIES);
+    ASSERT_EQ(recorded.size(), 2U) << "a candidate with only negative stalled readings was dropped";
+    for(const auto& entry : recorded)
+    {
+        EXPECT_GE(entry.timeMs, 0.0);
+    }
+    const int firstDelegated = recorded.front().kernelId == testId(1) ? 1 : 0;
+    EXPECT_EQ(firstRaw->launchCount(),
+              BENCHMARK_WARMUP_RUNS + 1 + MAX_NEGATIVE_SAMPLE_RETRIES + SAMPLING_LAUNCHES
+                  + firstDelegated);
+    EXPECT_EQ(secondRaw->launchCount(), SAMPLING_LAUNCHES + 1 - firstDelegated);
+}
+#endif
 
 /// A one-candidate composite still samples before delegating to the only candidate.
 TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
@@ -613,7 +1108,11 @@ inline TestBenchmarkPlan::Timer
             return std::nullopt;
         }
         const auto index = static_cast<size_t>(std::distance(order.begin(), found));
-        return index < times.size() ? times[index] : std::nullopt;
+        if(index < times.size())
+        {
+            return times[index];
+        }
+        return std::nullopt;
     };
 }
 
@@ -622,10 +1121,17 @@ inline TestBenchmarkPlan makeDeterministicPlan(std::vector<TestBenchmarkPlan::Ca
                                                const BenchmarkTestHandle& handle,
                                                std::vector<std::optional<double>> times,
                                                TestBenchmarkPlan::RecordRankingFn recordRanking
-                                               = {})
+                                               = {},
+                                               std::string benchmarkId = {},
+                                               std::string deviceIdentity = {})
 {
     auto timer = makeDeterministicTimer(candidates, std::move(times));
-    return {std::move(candidates), handle, std::move(timer), std::move(recordRanking)};
+    return {std::move(candidates),
+            handle,
+            std::move(timer),
+            std::move(recordRanking),
+            std::move(benchmarkId),
+            std::move(deviceIdentity)};
 }
 
 std::vector<TestBenchmarkPlan::Candidate> threeCandidates()
@@ -679,6 +1185,132 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRan
             << "a known-broken kernel recorded as a fallback would be served ahead of the "
                "normal ranked path on a later run";
     }
+}
+
+/// A malformed sample from the timer must never enter robustMean() or the ranking. NaN
+/// and infinite samples score the candidate unusable immediately, with no retry. A
+/// negative sample is instead retried in place, so a candidate that is persistently
+/// negative -- this deterministic timer keeps returning the same malformed value on
+/// every retry -- still exhausts MAX_NEGATIVE_SAMPLE_RETRIES and ends up scored unusable
+/// exactly like a nullopt return, just after paying the retry budget first rather than
+/// on the very first sample. Zero is a valid sample and stays in the ranking.
+TEST(TestIngestorBenchmarkPlan, MalformedTimerSamplesScoreTheCandidateUnusable)
+{
+    constexpr double NEGATIVE = -1.0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    for(const double malformed : {NEGATIVE, nan, inf})
+    {
+        std::vector<RankedEntry> recorded;
+        const BenchmarkTestHandle handle;
+        auto candidates = threeCandidates();
+        const auto* malformedCandidate = candidates[1].plan.get();
+        auto timer = makeDeterministicTimer(candidates, {5.0, malformed, 3.0});
+        int malformedCalls = 0;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& subPlan,
+                const BenchmarkTestHandle& planHandle,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* workspace) {
+                if(&subPlan == malformedCandidate)
+                {
+                    ++malformedCalls;
+                }
+                return timer(subPlan, planHandle, deviceBuffers, numDeviceBuffers, workspace);
+            },
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        plan.execute(handle, nullptr, 0U, nullptr);
+        EXPECT_EQ(malformedCalls, malformed < 0.0 ? MAX_NEGATIVE_SAMPLE_RETRIES + 1 : 1);
+
+        ASSERT_EQ(recorded.size(), 2U);
+        for(const auto& entry : recorded)
+        {
+            EXPECT_NE(entry.kernelId, testId(0x02))
+                << "a malformed measurement recorded as a fallback would be served ahead of "
+                   "the normal ranked path on a later run";
+        }
+    }
+}
+
+/// A single transient negative sample must not disqualify the candidate: sampleCandidate()
+/// discards it and re-measures the same slot, so a candidate that only stumbles once
+/// still accrues its full BENCHMARK_ITERATIONS valid samples and can win the sweep. This
+/// is the case a naive "any negative sample means unusable" check would defeat.
+TEST(TestIngestorBenchmarkPlan, ATransientNegativeSampleIsReplacedAndTheCandidateCanStillWin)
+{
+    auto flaky = std::make_unique<FakePlan>(64);
+    auto steady = std::make_unique<FakePlan>(64);
+    const auto* flakyRaw = flaky.get();
+    const auto* steadyRaw = steady.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(flaky)});
+    candidates.push_back({testId(0x02), std::move(steady)});
+
+    constexpr double FLAKY_SAMPLE = 1.0;
+    constexpr double STEADY_SAMPLE = 10.0;
+
+    // Only the very first timed sample is negative; every retry after it is a real,
+    // valid measurement.
+    int flakyCallIndex = 0;
+    const TestBenchmarkPlan::Timer timer
+        = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+              const BenchmarkTestHandle& planHandle,
+              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+              uint32_t numDeviceBuffers,
+              void* workspace) -> std::optional<double> {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        if(&plan == steadyRaw)
+        {
+            return STEADY_SAMPLE;
+        }
+        return flakyCallIndex++ == 0 ? -1.0 : FLAKY_SAMPLE;
+    };
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle, timer, [&recorded](auto ranking) {
+        recorded = std::move(ranking);
+    });
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    ASSERT_EQ(recorded.size(), 2U) << "the transient negative must not drop the candidate";
+    EXPECT_EQ(recorded.front().kernelId, testId(0x01))
+        << "the candidate that recovered from a transient negative must still win on its "
+           "real, faster time";
+    EXPECT_EQ(recorded.front().timeMs, FLAKY_SAMPLE)
+        << "a full set of BENCHMARK_ITERATIONS valid samples, all equal to FLAKY_SAMPLE, "
+           "must reduce to exactly that value: the discarded negative sample never enters "
+           "the reduction";
+
+    // One retry beyond the normal sampling launches for the recovered candidate, plus
+    // the delegated winner execute.
+    EXPECT_EQ(flakyRaw->launchCount(), SAMPLING_LAUNCHES + 1 + 1);
+    EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
+}
+
+/// Zero is a valid measurement (an unmeasurably fast launch): it must win and be cached
+/// like any other real sample, not be treated as malformed.
+TEST(TestIngestorBenchmarkPlan, ZeroTimerSampleIsValidAndCanWin)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 0.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded.front().kernelId, testId(0x02));
+    EXPECT_EQ(recorded.front().timeMs, 0.0);
 }
 
 TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
@@ -768,6 +1400,542 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSort
         EXPECT_EQ(recorded[index].kernelId, testId(static_cast<uint8_t>(index + 1)))
             << "candidate at index " << index << " moved; equal times must keep input order";
     }
+}
+
+/// RFC 0019.13 §8.3: the log is the only record of losing and failed candidates; the
+/// winner cache keeps only the winner.
+TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 1.0, 3.0}, {}, "deadbeef", "d15ea5e");
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U) << "a losing kernel's time appears here or nowhere";
+
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["benchmark"], "deadbeef")
+            << "rows of one sweep must be groupable; a process benchmarks several graphs "
+               "and their lines interleave";
+        EXPECT_EQ(record["device"], "d15ea5e")
+            << "a problem is (graph, device), exactly as the winner cache keys it: without "
+               "the device half, a corpus merged across machines takes RFC 0019.13 §11.2's "
+               "per-problem oracle across devices and understates every regret figure";
+        EXPECT_EQ(record["status"], "ok");
+        EXPECT_EQ(record["pack"], toString(testId(0xF0)));
+        EXPECT_EQ(record["dispatch"], toString(testId(0xD0)));
+        EXPECT_EQ(record["iters"], BENCHMARK_ITERATIONS);
+        EXPECT_GE(record["stddev_ms"].get<double>(), 0.0);
+        EXPECT_LE(record["min_ms"].get<double>(), record["avg_ms"].get<double>())
+            << "min must not exceed the mean it was drawn with";
+    }
+
+    std::vector<std::string> kernels;
+    kernels.reserve(records.size());
+    for(const auto& record : records)
+    {
+        kernels.push_back(record["kernel"].get<std::string>());
+    }
+    EXPECT_THAT(kernels,
+                ::testing::UnorderedElementsAre(
+                    toString(testId(0x01)), toString(testId(0x02)), toString(testId(0x03))))
+        << "every candidate is logged, not just the winner";
+}
+
+TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
+{
+    // Identical samples make every statistic equal the sample, so no field can come from
+    // the wrong one unnoticed.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+    EXPECT_DOUBLE_EQ(records[0]["min_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["avg_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["robust_mean_ms"].get<double>(), 4.0);
+    EXPECT_DOUBLE_EQ(records[0]["stddev_ms"].get<double>(), 0.0);
+}
+
+TEST(TestIngestorBenchmarkPlan, EachRecordCarriesItsOwnKernelsTimes)
+{
+    // Every kernel times differently, so a record carrying a sibling's statistics, or one
+    // set shared by all three, cannot match.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const std::map<std::string, double> timeByKernel{{toString(testId(0x01)), 5.0},
+                                                     {toString(testId(0x02)), 1.0},
+                                                     {toString(testId(0x03)), 3.0}};
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), timeByKernel.size());
+    for(const auto& record : records)
+    {
+        const auto kernel = record["kernel"].get<std::string>();
+        const auto expected = timeByKernel.find(kernel);
+        ASSERT_NE(expected, timeByKernel.end()) << "unexpected kernel " << kernel;
+        for(const auto* field : {"min_ms", "avg_ms", "robust_mean_ms"})
+        {
+            EXPECT_DOUBLE_EQ(record[field].get<double>(), expected->second)
+                << field << " of kernel " << kernel;
+        }
+    }
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
+{
+    // The winner cache omits failed candidates, so this record is the only evidence the
+    // pair was tried.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, std::nullopt, 3.0}, {}, "cafe", "d15ea5e");
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+
+    const auto failed = std::find_if(records.begin(), records.end(), [](const auto& record) {
+        return record["status"] == "failed";
+    });
+    ASSERT_NE(failed, records.end()) << "the untimeable candidate must still be reported";
+    EXPECT_EQ((*failed)["kernel"], toString(testId(0x02)));
+    EXPECT_EQ((*failed)["reason"], "launch-not-timed");
+    EXPECT_EQ((*failed)["benchmark"], "cafe");
+    EXPECT_EQ((*failed)["device"], "d15ea5e")
+        << "a candidate that could not run still belongs to a specific problem on a "
+           "specific device; an unattributable failed row can only be dropped, which "
+           "biases the corpus towards the kernels that happened to work";
+    EXPECT_FALSE(failed->contains("min_ms")) << "a failed row carries no timings to mistake "
+                                                "for a measurement";
+}
+
+TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
+{
+    // Records are per candidate per sweep, so the default path must not build them.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(threeCandidates(), handle, {5.0, 1.0, 3.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_TRUE(candidateRecords(recorder).empty());
+}
+
+/// One candidate carrying explicit feature values, keyed as UHD namespaces minus the `$`
+/// (`$q.seqlen` -> `q.seqlen`).
+std::vector<TestBenchmarkPlan::Candidate> oneCandidateWithFeatures(nlohmann::json features)
+{
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01),
+                          std::make_unique<FakePlan>(64),
+                          testId(0xF0),
+                          testId(0xD0),
+                          std::move(features)});
+    return candidates;
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbatim)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        oneCandidateWithFeatures(
+            {{"q.seqlen", 512}, {"kernel.tile_m", 128}, {"kernel.dtype", "fp16"}}),
+        handle,
+        {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+
+    ASSERT_TRUE(records[0].contains("q.seqlen"));
+    EXPECT_TRUE(records[0]["q.seqlen"].is_number_integer())
+        << "a number logged as a string forces every reader to guess how to parse it back";
+    EXPECT_EQ(records[0]["q.seqlen"].get<int64_t>(), 512);
+    EXPECT_EQ(records[0]["kernel.tile_m"].get<int64_t>(), 128);
+
+    ASSERT_TRUE(records[0].contains("kernel.dtype"));
+    EXPECT_TRUE(records[0]["kernel.dtype"].is_string())
+        << "encoding a category to a number here would bake one encoding into the corpus "
+           "that the feature extractor would then have to guess and undo";
+    EXPECT_EQ(records[0]["kernel.dtype"].get<std::string>(), "fp16");
+
+    EXPECT_EQ(records[0]["kernel"], toString(testId(0x01)))
+        << "the envelope's identity must survive the merge";
+}
+
+TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAlwaysDid)
+{
+    // Asserted as the whole key set: a stray `"features": {}` or an empty `device` would
+    // break consumers reading columns by name.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+
+    std::vector<std::string> keys;
+    for(const auto& entry : records[0].items())
+    {
+        keys.push_back(entry.key());
+    }
+    EXPECT_THAT(keys,
+                ::testing::UnorderedElementsAre("event",
+                                                "benchmark",
+                                                "kernel",
+                                                "pack",
+                                                "dispatch",
+                                                "status",
+                                                "min_ms",
+                                                "avg_ms",
+                                                "stddev_ms",
+                                                "robust_mean_ms",
+                                                "iters"));
+}
+
+TEST(TestIngestorBenchmarkPlan, AFailedCandidateStillCarriesItsFeatures)
+{
+    // Without features a failed row cannot be placed in feature space and gets dropped,
+    // biasing the corpus toward kernels that ran.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        oneCandidateWithFeatures({{"q.seqlen", 512}, {"kernel.dtype", "fp16"}}),
+        handle,
+        {std::nullopt});
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 1U);
+    ASSERT_EQ(records[0]["status"], "failed");
+    EXPECT_EQ(records[0]["q.seqlen"].get<int64_t>(), 512);
+    EXPECT_EQ(records[0]["kernel.dtype"].get<std::string>(), "fp16");
+}
+
+/// Binds tokens of two types, so a record proves bindings reach the log uncoerced.
+std::optional<BoundTokens> bindTestProblemTokens(const MatchContext& /*context*/)
+{
+    return BoundTokens{{"seqlen", MetadataValue{int64_t{512}}},
+                       {"layout", MetadataValue{std::string{"nhwc"}}}};
+}
+
+/// Registers @p implementation under @p symbol for the object's lifetime, beside the shared
+/// fixture's graph matcher rather than replacing it.
+class ScopedGraphMatchRegistration
+{
+public:
+    ScopedGraphMatchRegistration(std::string symbol, GraphMatchFn implementation)
+        : _symbol(std::move(symbol))
+    {
+        GraphMatchRegistry::registerSymbol(_symbol, implementation);
+    }
+
+    ~ScopedGraphMatchRegistration()
+    {
+        GraphMatchRegistry::unregisterSymbol(_symbol);
+    }
+
+    ScopedGraphMatchRegistration(const ScopedGraphMatchRegistration&) = delete;
+    ScopedGraphMatchRegistration& operator=(const ScopedGraphMatchRegistration&) = delete;
+
+private:
+    std::string _symbol;
+};
+
+TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDeviceItRanOn)
+{
+    // The bootstrap case: no UHD, signature or model; a NativeKernelHeuristic orders the
+    // catalog. The first corpus must come from such a build.
+    constexpr const char* BOUND_GRAPH_MATCH_SYMBOL
+        = "hipdnn.kernel_ingestor.test.bound_graph_match";
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedTestSymbols symbols;
+    const ScopedGraphMatchRegistration boundGraphMatch(BOUND_GRAPH_MATCH_SYMBOL,
+                                                       &bindTestProblemTokens);
+
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto manager = makeThreeKernelStubStateManager(BOUND_GRAPH_MATCH_SYMBOL);
+    const auto engine = makeEngineWithKnobs({});
+    const StubDeviceResolver resolver;
+    // Constant time: this asserts what was logged, not who won.
+    const OraclePlanBuilder builder(engine,
+                                    *manager,
+                                    resolver,
+                                    [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
+                                       const StubHandle&,
+                                       const hipdnnPluginDeviceBuffer_t*,
+                                       uint32_t,
+                                       void*) -> std::optional<double> { return 1.0; });
+
+    const TestGraph graph(makeGraphId(0x51));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+    StubSettings settings;
+    builder.initializeExecutionSettings(StubHandle{}, graph, invalidConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    OracleContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(StubHandle{}, graph, invalidConfig, context);
+
+    // StubWorkspaceHandler sizes scratch from BLOCK_SIZE, so the sweep needs a real
+    // buffer: GenericPlan refuses to launch a kernel that asked for one and got null.
+    const StubHandle handle;
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0, workspace.data());
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+
+    std::ostringstream expectedDeviceFold;
+    expectedDeviceFold << std::hex << DeviceKey{testDeviceProperties()}.hash();
+    const auto expectedDeviceIdentity = expectedDeviceFold.str();
+
+    std::vector<int64_t> blockSizes;
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["seqlen"].get<int64_t>(), 512);
+        EXPECT_EQ(record["layout"].get<std::string>(), "nhwc");
+        ASSERT_TRUE(record.contains("kernel.block_size"));
+        blockSizes.push_back(record["kernel.block_size"].get<int64_t>());
+        EXPECT_TRUE(record["kernel.dtype"].is_string());
+
+        // Recomputed from the resolver's properties: the logged device must be the full
+        // DeviceKey fold, not something coarser such as the arch alone.
+        EXPECT_EQ(record["device"].get<std::string>(), expectedDeviceIdentity)
+            << "the logged device identity must agree with the winner cache's DeviceKey";
+    }
+
+    EXPECT_THAT(blockSizes, ::testing::UnorderedElementsAre(64, 64, 256))
+        << "each row must carry the metadata of the kernel it measured, not one kernel's "
+           "copied onto all three";
+}
+
+/// The exporter joins rows on these ids as text, so the host's locale must not reach them.
+TEST(TestIngestorBenchmarkPlan, BuildPlanSpellsItsBenchmarkAndDeviceIdsWhateverTheGlobalLocale)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+    const ScopedTestSymbols symbols;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto manager = makeThreeKernelStubStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const StubDeviceResolver resolver;
+    const OraclePlanBuilder builder(engine,
+                                    *manager,
+                                    resolver,
+                                    [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
+                                       const StubHandle&,
+                                       const hipdnnPluginDeviceBuffer_t*,
+                                       uint32_t,
+                                       void*) -> std::optional<double> { return 1.0; });
+    const TestGraph graph(makeGraphId(0x52));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
+                                                                                          0);
+
+    // Spelled under the classic locale, as the winner cache and every exporter read them.
+    std::ostringstream expectedBenchmark;
+    expectedBenchmark
+        << std::hex << hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph}.hash();
+    std::ostringstream expectedDevice;
+    expectedDevice << std::hex << DeviceKey{testDeviceProperties()}.hash();
+
+    OracleContext context;
+    {
+        const hipdnn_plugin_sdk::test::ScopedDigitGroupingLocale grouping;
+        std::ostringstream probe;
+        probe << std::hex << DeviceKey{testDeviceProperties()}.hash();
+        ASSERT_NE(probe.str(), expectedDevice.str()) << "the grouping locale is not in effect";
+
+        StubSettings settings;
+        builder.initializeExecutionSettings(StubHandle{}, graph, invalidConfig, settings);
+        ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+        context.setExecutionSettings(settings);
+        builder.buildPlan(StubHandle{}, graph, invalidConfig, context);
+    }
+
+    const StubHandle handle;
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0, workspace.data());
+
+    const auto records = candidateRecords(recorder);
+    ASSERT_EQ(records.size(), 3U);
+    for(const auto& record : records)
+    {
+        EXPECT_EQ(record["benchmark"].get<std::string>(), expectedBenchmark.str());
+        EXPECT_EQ(record["device"].get<std::string>(), expectedDevice.str());
+    }
+}
+
+/// A dispatch handler that prepares an empty launch and launches nothing. It lets a test
+/// build a real GenericPlan over BenchmarkTestHandle.
+class StubBenchmarkDispatchHandler : public IKernelDispatchHandler<BenchmarkTestHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const BenchmarkTestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// A FakePlan that answers saveablePlan() with a given plan.
+class SaveableFakePlan : public FakePlan
+{
+public:
+    explicit SaveableFakePlan(const GenericPlan<BenchmarkTestHandle>& saveable)
+        : _saveable(&saveable)
+    {
+    }
+
+    const GenericPlan<BenchmarkTestHandle>* saveablePlan() const override
+    {
+        return _saveable;
+    }
+
+private:
+    const GenericPlan<BenchmarkTestHandle>* _saveable;
+};
+
+/// A real GenericPlan over @p handler, for a candidate that has something to save.
+std::unique_ptr<GenericPlan<BenchmarkTestHandle>>
+    makeStubGenericPlan(const StubBenchmarkDispatchHandler& handler, const DescriptorId& kernelId)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const BoundTokens bound;
+    return std::make_unique<GenericPlan<BenchmarkTestHandle>>(
+        KernelDispatcher<BenchmarkTestHandle>{makeDefinition(kernelId, 64), &handler},
+        context,
+        bound);
+}
+
+TEST(TestIngestorBenchmarkPlan, HasNoSaveablePlanBeforeAWinnerIsChosen)
+{
+    const StubBenchmarkDispatchHandler handler;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), makeStubGenericPlan(handler, testId(0x01))});
+    candidates.push_back({testId(0x02), makeStubGenericPlan(handler, testId(0x02))});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle);
+
+    EXPECT_EQ(plan.chosenPlan(), nullptr);
+    EXPECT_EQ(plan.saveablePlan(), nullptr);
+}
+
+TEST(TestIngestorBenchmarkPlan, SaveablePlanIsTheChosenCandidates)
+{
+    const StubBenchmarkDispatchHandler handler;
+    const auto winnersSaveable = makeStubGenericPlan(handler, testId(0x22));
+
+    auto loser = std::make_unique<FakePlan>(64);
+    auto winner = std::make_unique<SaveableFakePlan>(*winnersSaveable);
+    const auto* loserRaw = loser.get();
+    const auto* winnerRaw = winner.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(loser)});
+    candidates.push_back({testId(0x02), std::move(winner)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{loserRaw, 5.0}, {winnerRaw, 1.0}}));
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(plan.chosenPlan(), winnerRaw);
+    EXPECT_EQ(plan.saveablePlan(), winnersSaveable.get());
+}
+
+TEST(TestIngestorBenchmarkPlan, PlanInterfaceHasNoSaveablePlanByDefault)
+{
+    const FakePlan plan;
+    const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& asPlan = plan;
+
+    EXPECT_EQ(asPlan.saveablePlan(), nullptr);
+}
+
+TEST(TestIngestorBenchmarkPlan, HasNoSaveablePlanWhenTheChosenCandidateHasNone)
+{
+    auto loser = std::make_unique<FakePlan>(64);
+    auto winner = std::make_unique<FakePlan>(64);
+    const auto* loserRaw = loser.get();
+    const auto* winnerRaw = winner.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(loser)});
+    candidates.push_back({testId(0x02), std::move(winner)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{loserRaw, 5.0}, {winnerRaw, 1.0}}));
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(plan.chosenPlan(), winnerRaw);
+    EXPECT_EQ(plan.saveablePlan(), nullptr);
 }
 
 } // namespace

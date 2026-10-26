@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizeSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleQuantizeSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwPlan.hpp>
@@ -70,7 +71,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
+        std::vector<std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
         const std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
@@ -87,7 +88,7 @@ private:
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>& virtualTensors)
+        std::vector<std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>& virtualTensors)
     {
         std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
 
@@ -186,6 +187,8 @@ private:
             return detail::ResampleBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return detail::BlockScaleDequantizeSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            return detail::BlockScaleQuantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
             return detail::SdpaFwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:

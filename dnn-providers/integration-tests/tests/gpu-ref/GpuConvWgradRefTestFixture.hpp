@@ -12,6 +12,7 @@
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceConvolution.hpp>
 
 #include <string>
@@ -28,6 +29,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 using gpu_conv_ref_test::assertAllClose;
 using gpu_conv_ref_test::ConvShapeCase;
@@ -48,10 +50,16 @@ void compareGpuVsCpuConvWrw(Tensor<XDataType>& xTensor,
                             float fillRange)
 {
     const unsigned int seed = 42;
-    xTensor.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
-    dyTensor.fillWithRandomValues(
-        static_cast<DyDataType>(-fillRange), static_cast<DyDataType>(fillRange), seed + 1);
+    fillWithRandomValues(
+        xTensor, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
+    fillWithRandomValues(dyTensor,
+                         static_cast<DyDataType>(-fillRange),
+                         static_cast<DyDataType>(fillRange),
+                         seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    xTensor.memory().hostData();
+    dyTensor.memory().hostData();
 
     CpuFpReferenceConvolution::wgrad<XDataType, DwDataType, DyDataType, ComputeDataType>(
         xTensor, dwCpu, dyTensor, strides, dilations, prePadding, postPadding);

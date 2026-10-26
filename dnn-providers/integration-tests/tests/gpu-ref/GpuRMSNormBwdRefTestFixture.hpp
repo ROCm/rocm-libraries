@@ -5,6 +5,7 @@
 
 #include "RMSNormShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
@@ -24,6 +25,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::rmsnorm;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_rmsnorm_ref_test;
 
 template <typename GradOutputDataType,
@@ -47,13 +49,18 @@ void runGpuVsCpuRMSNormBwd(const std::vector<int64_t>& ioDims,
     auto dscaleCpu = Tensor<ScaleDataType>(scaleDims, layout);
     auto dscaleGpu = Tensor<ScaleDataType>(scaleDims, layout);
 
-    dyTensor.fillWithRandomValues(static_cast<GradOutputDataType>(-fillRange),
-                                  static_cast<GradOutputDataType>(fillRange),
-                                  seed);
-    xTensor.fillWithRandomValues(
-        static_cast<InputDataType>(-fillRange), static_cast<InputDataType>(fillRange), seed + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleDataType>(-fillRange), static_cast<ScaleDataType>(fillRange), seed + 2);
+    fillWithRandomValues(dyTensor,
+                         static_cast<GradOutputDataType>(-fillRange),
+                         static_cast<GradOutputDataType>(fillRange),
+                         seed);
+    fillWithRandomValues(xTensor,
+                         static_cast<InputDataType>(-fillRange),
+                         static_cast<InputDataType>(fillRange),
+                         seed + 1);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleDataType>(-fillRange),
+                         static_cast<ScaleDataType>(fillRange),
+                         seed + 2);
 
     std::vector<int64_t> invRmsDims = ioDims;
     for(size_t i = 0; i < invRmsDims.size(); ++i)
@@ -64,9 +71,16 @@ void runGpuVsCpuRMSNormBwd(const std::vector<int64_t>& ioDims,
         }
     }
     auto invRmsTensor = Tensor<ComputeDataType>(invRmsDims, layout);
-    invRmsTensor.fillWithRandomValues(static_cast<ComputeDataType>(1.0e-05f),
-                                      static_cast<ComputeDataType>(std::fabs(fillRange)),
-                                      seed + 3); // Ensure invRms is always positive!
+    fillWithRandomValues(invRmsTensor,
+                         static_cast<ComputeDataType>(1.0e-05f),
+                         static_cast<ComputeDataType>(std::fabs(fillRange)),
+                         seed + 3); // Ensure invRms is always positive!
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    invRmsTensor.memory().hostData();
 
     auto dbiasCpu
         = includeBias ? Tensor<ScaleDataType>(scaleDims, layout) : Tensor<ScaleDataType>({});

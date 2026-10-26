@@ -24,11 +24,7 @@
 #include "rocblas.h"
 #include <cstring>
 
-#define TO_STR2(x) #x
-#define TO_STR(x) TO_STR2(x)
-#define VERSION_STRING                                                           \
-    (TO_STR(ROCBLAS_VERSION_MAJOR) "." TO_STR(ROCBLAS_VERSION_MINOR) "." TO_STR( \
-        ROCBLAS_VERSION_PATCH) "." TO_STR(ROCBLAS_VERSION_TWEAK))
+static constexpr char rocblas_version_string[] = ROCBLAS_VERSION_STRING;
 
 /*******************************************************************************
  *! \brief   loads char* buf with the rocblas library version. size_t len
@@ -36,12 +32,12 @@
  ******************************************************************************/
 extern "C" rocblas_status rocblas_get_version_string(char* buf, size_t len)
 {
-    static constexpr char v[] = VERSION_STRING;
     if(!buf)
         return rocblas_status_invalid_pointer;
-    if(len < sizeof(v))
+    // sizeof includes the terminating null, matching rocblas_get_version_string_size().
+    if(len < sizeof(rocblas_version_string))
         return rocblas_status_invalid_size;
-    memcpy(buf, v, sizeof(v));
+    memcpy(buf, rocblas_version_string, sizeof(rocblas_version_string));
     return rocblas_status_success;
 }
 
@@ -52,11 +48,11 @@ extern "C" rocblas_status rocblas_get_version_string_size(size_t* len)
 {
     if(!len)
         return rocblas_status_invalid_pointer;
-    *len = std::strlen(VERSION_STRING) + 1;
+    *len = sizeof(rocblas_version_string);
     return rocblas_status_success;
 }
 
-static constexpr const char* rocblas_tensile_commit_hash[] = {ROCBLAS_TENSILE_COMMIT_ID};
+static constexpr char rocblas_commit_hash[] = ROCBLAS_COMMIT_ID;
 
 /*******************************************************************************
  *! \brief   loads char* buf with the rocblas library version. size_t len
@@ -64,12 +60,12 @@ static constexpr const char* rocblas_tensile_commit_hash[] = {ROCBLAS_TENSILE_CO
  ******************************************************************************/
 extern "C" rocblas_status rocblas_get_commit_hash_string(char* buf, size_t len)
 {
-
     if(!buf)
         return rocblas_status_invalid_pointer;
-    if(len < sizeof(rocblas_tensile_commit_hash[0]))
+    // sizeof includes the terminating null, matching rocblas_get_commit_hash_string_size().
+    if(len < sizeof(rocblas_commit_hash))
         return rocblas_status_invalid_size;
-    memcpy(buf, rocblas_tensile_commit_hash[0], strlen(rocblas_tensile_commit_hash[0]));
+    memcpy(buf, rocblas_commit_hash, sizeof(rocblas_commit_hash));
     return rocblas_status_success;
 }
 
@@ -80,6 +76,6 @@ extern "C" rocblas_status rocblas_get_commit_hash_string_size(size_t* len)
 {
     if(!len)
         return rocblas_status_invalid_pointer;
-    *len = std::strlen(rocblas_tensile_commit_hash[0]) + 1;
+    *len = sizeof(rocblas_commit_hash);
     return rocblas_status_success;
 }

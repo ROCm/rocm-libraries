@@ -58,13 +58,42 @@ struct TdmDesc
         d1.set_tensor_stride2(stride_elems);
     }
 
+    // One issue repeating the descriptor, stepping the global address and the LDS
+    // address by a fixed increment each pass. Both increments count elements, not
+    // bytes, and the count field holds passes minus one. Extents are re-applied per
+    // pass rather than consumed, so a run of rows batches whatever its extents say.
+    __device__ __forceinline__ void
+    set_iterate(unsigned lds_inc_elems, unsigned long long global_inc_elems, unsigned passes)
+    {
+        d1.iterate_enable = passes > 1 ? 1u : 0u;
+        d2.set_tensor_dim3(lds_inc_elems);
+        d2.set_tensor_stride3(global_inc_elems);
+        d2.tile_dim3 = passes - 1;
+    }
+
+    // Group 0 filled in, and nothing started. Split from the issue so that a caller with
+    // a barrier between the two can put the addressing on one side and the transfer on
+    // the other: working out where a tile comes from is free at any time, and starting
+    // to write it is not free until the LDS it lands in is dead.
+    __device__ __forceinline__ void arm(unsigned long long global_addr_bytes,
+                                        unsigned lds_offset_bytes)
+    {
+        d0.set_global_addr(static_cast<uintptr_t>(global_addr_bytes));
+        d0.lds_addr = lds_offset_bytes;
+    }
+
+    // The issue alone, against whatever arm() and the extent setters last left behind.
+    __device__ __forceinline__ void fire_load()
+    {
+        arch_mi400::tensor_load_to_lds(d0, d1, d2, d3, d4);
+    }
+
     // Issue a load against the extents already in the descriptor.
     __device__ __forceinline__ void load(unsigned long long global_addr_bytes,
                                          unsigned lds_offset_bytes)
     {
-        d0.set_global_addr(static_cast<uintptr_t>(global_addr_bytes));
-        d0.lds_addr = lds_offset_bytes;
-        __builtin_amdgcn_tensor_load_to_lds(d0.data, d1.data, d2.data, d3.data, d4.data, 0);
+        arm(global_addr_bytes, lds_offset_bytes);
+        fire_load();
     }
 
     __device__ __forceinline__ void load(unsigned long long global_addr_bytes,
@@ -84,7 +113,7 @@ struct TdmDesc
         d0.set_global_addr(static_cast<uintptr_t>(global_addr_bytes));
         d0.lds_addr = lds_offset_bytes;
         d0.is_store = 1; // the "must be 0" in tdm_group0 is the load direction's constraint
-        __builtin_amdgcn_tensor_store_from_lds(d0.data, d1.data, d2.data, d3.data, d4.data, 0);
+        arch_mi400::tensor_store_from_lds(d0, d1, d2, d3, d4);
     }
 };
 

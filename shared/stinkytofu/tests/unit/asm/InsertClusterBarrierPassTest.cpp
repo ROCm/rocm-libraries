@@ -539,11 +539,12 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass(int rule3SignalLeadCycles = 100) {
+    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
-            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles);
+            /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles,
+            /*splitWaveLoop=*/splitWaveLoop);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -768,13 +769,18 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
 
     StinkyInstruction* firstLoad = findFirstTensorLoad();
     ASSERT_NE(firstLoad, nullptr);
-    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(firstLoad))
-        << "Rule 2 must insert s_barrier_wait -3 immediately before the first "
-           "load:"
-        << blockListing(*bb);
-
-    StinkyInstruction* rule2Wait = realInstBefore(firstLoad);
+    StinkyInstruction* localWait = realInstBefore(firstLoad);
+    ASSERT_NE(localWait, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*localWait)) << blockListing(*bb);
+    StinkyInstruction* localSignal = realInstBefore(localWait);
+    ASSERT_NE(localSignal, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierSignalInst(*localSignal)) << blockListing(*bb);
+    StinkyInstruction* rule2Wait = realInstBefore(localSignal);
     ASSERT_NE(rule2Wait, nullptr);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*rule2Wait, /*wantSignal=*/false))
+        << "all local waves must finish the run-up cluster wait before a later "
+           "iteration can post its next arrival:"
+        << blockListing(*bb);
     EXPECT_EQ(inFlightAt(indexOf(rule2Wait)), 1)
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
 }
@@ -786,14 +792,244 @@ TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
     closeLoop();
     runPass();
     const auto [signalsAfterFirst, waitsAfterFirst] = clusterBarrierCounts();
+    const std::string afterFirst = blockListing(*bb);
 
     runPass();
     const auto [signalsAfterSecond, waitsAfterSecond] = clusterBarrierCounts();
+    EXPECT_EQ(blockListing(*bb), afterFirst)
+        << "a second pass must preserve the complete handoff, including WG barriers";
 
     EXPECT_EQ(signalsAfterSecond, signalsAfterFirst)
         << "a second pass must not insert additional cluster signals";
     EXPECT_EQ(waitsAfterSecond, waitsAfterFirst)
         << "a second pass must not insert additional cluster waits";
+}
+
+// Python can emit the first wait itself while SCC carries the normal-load
+// skip predicate. Completing the handoff must not re-elect a wave or otherwise
+// clobber that predicate, and must leave existing memory drains in order.
+TEST_F(InsertClusterBarrierPassTest, Rule2ExistingWaitJoinsWithoutClobberingScc) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    StinkyInstruction* predicate = createSCmpWritingScc(90);
+    StinkyInstruction* clusterWait = createBarrierWait(kClusterBarrierId);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createTensorLoadInBlock(bb, arch, 60, 64);
+    StinkyInstruction* branch = createBranchReadingScc(GFX::s_cbranch_scc1, "load_done");
+    createWMMA(32, 8, 16);
+    createLabel("load_done");
+
+    runPass();
+
+    StinkyInstruction* localSignal = firstRealInstAfter(clusterWait);
+    ASSERT_NE(localSignal, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierSignalInst(*localSignal)) << blockListing(*bb);
+    StinkyInstruction* localWait = firstRealInstAfter(localSignal);
+    ASSERT_NE(localWait, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*localWait)) << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(localWait), drain);
+    EXPECT_EQ(lastSccWriterBefore(indexOf(branch)), predicate) << blockListing(*bb);
+    EXPECT_EQ(clusterBarrierCounts(), std::make_pair(1, 1));
+    const std::string once = blockListing(*bb);
+    runPass();
+    EXPECT_EQ(blockListing(*bb), once);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule2ReusesCompleteExistingWorkgroupJoin) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    StinkyInstruction* clusterWait = createBarrierWait(kClusterBarrierId);
+    createWaitTensorCnt(0);
+    StinkyInstruction* localSignal = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* localWait = createBarrierWait(kWorkgroupBarrierId);
+    localSignal->addModifier<MemTokenData>(MemTokenData{{0}});
+    localWait->addModifier<MemTokenData>(MemTokenData{{0}});
+    StinkyInstruction* firstLoad = createTensorLoadInBlock(bb, arch, 60, 64);
+
+    runPass();
+
+    EXPECT_EQ(realInstBefore(firstLoad), localWait);
+    EXPECT_EQ(realInstBefore(localWait), localSignal);
+    EXPECT_EQ(realInstBefore(realInstBefore(localSignal)), clusterWait);
+    EXPECT_EQ(clusterBarrierCounts(), std::make_pair(1, 1));
+    const std::string once = blockListing(*bb);
+    runPass();
+    EXPECT_EQ(blockListing(*bb), once);
+}
+
+// The Python O0 prologue can retain a complete local join after the first
+// loads and shadow-init branches. It orders the same phase as an immediate
+// Rule 2 join, so the pass must reuse it after resolving Rule 3's signals.
+TEST_F(InsertClusterBarrierPassTest, Rule2ReusesLaterJoinAcrossPrologueBranches) {
+    appendGsu1Preheader();
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "shadow_else");
+    createWMMA(24, 0, 8);
+    createUnconditionalBranch("shadow_join");
+    createLabel("shadow_else");
+    createWMMA(32, 8, 16);
+    createLabel("shadow_join");
+    createWaitTensorCnt(0);
+    StinkyInstruction* localSignal = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* localWait = createBarrierWait(kWorkgroupBarrierId);
+    localSignal->addModifier<MemTokenData>(MemTokenData{{0}});
+    localWait->addModifier<MemTokenData>(MemTokenData{{0}});
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass();
+
+    ASSERT_NE(realInstBefore(firstLoad), nullptr);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*realInstBefore(firstLoad), false))
+        << "the later all-path join makes an extra entry pair redundant:" << blockListing(*bb);
+    EXPECT_EQ(firstRealInstAfter(localSignal), localWait);
+    const std::string once = blockListing(*bb);
+    runPass();
+    EXPECT_EQ(blockListing(*bb), once);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule2ReusesJoinsOnBothProloguePaths) {
+    appendGsu1Preheader();
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "other_join");
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createUnconditionalBranch("joined");
+    createLabel("other_join");
+    createBarrierSignal(kWorkgroupBarrierId);
+    createWaitTensorCnt(0);
+    createBarrierWait(kWorkgroupBarrierId);
+    createLabel("joined");
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass();
+
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*realInstBefore(firstLoad), false))
+        << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule2DoesNotReuseBypassedLaterJoin) {
+    appendGsu1Preheader();
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "bypass_join");
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createLabel("bypass_join");
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass();
+
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*realInstBefore(firstLoad)))
+        << "a local join on only one branch cannot protect all waves:" << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule2DoesNotReuseJoinBeyondCall) {
+    appendGsu1Preheader();
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    createCall();
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass();
+
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*realInstBefore(firstLoad)))
+        << "unknown callee synchronization must not justify removing the entry join:"
+        << blockListing(*bb);
+}
+
+// A repeated scalar guard can bypass the prefetch join only if the counter
+// changed. At a merge, a write on either predecessor must invalidate the fact.
+class InsertClusterBarrierGuardTest : public InsertClusterBarrierPassTest,
+                                      public testing::WithParamInterface<int> {};
+
+TEST_P(InsertClusterBarrierGuardTest, ReusesJoinOnlyWhileGuardRemainsValid) {
+    appendGsu1Preheader();
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "zero_join");
+    if (GetParam() == 2) createGuardedBranch(GFX::s_cbranch_scc1, 93, "counter_unchanged");
+    if (GetParam() != 0) createSSubWritingSgprAndScc(90);
+    if (GetParam() == 2) createLabel("counter_unchanged");
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "bypass_join");
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createUnconditionalBranch("bypass_join");
+    createLabel("zero_join");
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createLabel("bypass_join");
+    openLoop();
+    buildTwoHandshakeBody();
+    closeLoop();
+
+    runPass();
+
+    ASSERT_NE(realInstBefore(firstLoad), nullptr);
+    if (GetParam() == 0)
+        EXPECT_TRUE(isClusterBarrierWithLiteral(*realInstBefore(firstLoad), false))
+            << "the unchanged nonzero counter cannot bypass the existing join:"
+            << blockListing(*bb);
+    else
+        EXPECT_TRUE(isWorkgroupBarrierWaitInst(*realInstBefore(firstLoad)))
+            << "an overwritten counter must not justify removing the entry join:"
+            << blockListing(*bb);
+}
+
+INSTANTIATE_TEST_SUITE_P(CounterWrites, InsertClusterBarrierGuardTest, testing::Values(0, 1, 2));
+
+TEST_F(InsertClusterBarrierPassTest, Rule2RejectsIncompleteExistingWorkgroupJoin) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createBarrierWait(kClusterBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, 60, 64);
+
+    EXPECT_DEATH(runPass(), "incomplete workgroup rendezvous");
+}
+
+// A zero-K/skip path can have a balanced wait and local join of its own. A
+// different predecessor enters the first-load path at a label and cannot use
+// that textual predecessor's handoff. LABEL must not be skipped as a pseudo.
+TEST_F(InsertClusterBarrierPassTest, Rule2DoesNotBorrowWaitOrJoinFromBypassedPath) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createGuardedBranch(GFX::s_cbranch_scc1, 90, "normal_load");
+    createBarrierWait(kClusterBarrierId);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createUnconditionalBranch("load_done");
+    // A drain textually above the incoming label must not pull the newly
+    // inserted handoff onto the unreachable predecessor path.
+    createWaitTensorCnt(0);
+    createLabel("normal_load");
+    StinkyInstruction* firstLoad = createTensorLoadInBlock(bb, arch, 60, 64);
+    createLabel("load_done");
+
+    runPass();
+
+    StinkyInstruction* normal = findLabelNamed("normal_load");
+    ASSERT_NE(normal, nullptr);
+    StinkyInstruction* clusterWait = firstRealInstAfter(normal);
+    ASSERT_NE(clusterWait, nullptr);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false));
+    StinkyInstruction* localSignal = firstRealInstAfter(clusterWait);
+    ASSERT_NE(localSignal, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierSignalInst(*localSignal));
+    StinkyInstruction* localWait = firstRealInstAfter(localSignal);
+    ASSERT_NE(localWait, nullptr);
+    EXPECT_TRUE(isWorkgroupBarrierWaitInst(*localWait));
+    EXPECT_EQ(firstRealInstAfter(localWait), firstLoad);
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+    const std::string once = blockListing(*bb);
+    runPass();
+    EXPECT_EQ(blockListing(*bb), once);
 }
 
 TEST_F(InsertClusterBarrierPassTest, Rule3ForwardsPastWorkgroupBarriers) {
@@ -2721,4 +2957,110 @@ TEST_F(InsertClusterBarrierPassTest, WrappedClimbClearsARangeOnlyTheBackEdgeReac
                              << blockListing(*bb);
     EXPECT_TRUE(found.crossedLoopHead)
         << "it left by the back edge, so the first trip is owed a signal:" << blockListing(*bb);
+}
+
+// Wave 0 falls into the original body and posts a bare signal. Every other wave
+// takes a renamed copy that only waits. The entrance compare runs once; each
+// copy's latch stays inside that copy.
+TEST_F(InsertClusterBarrierPassTest, SplitWaveLoopPostsSignalOnlyOnWave0Copy) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(48, 0, 8);
+    createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_Inside");
+    createWMMA(56, 8, 16);
+    createLabel("label_Inside");
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createWMMA(64, 16, 24);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/true);
+    runPass(/*rule3SignalLeadCycles=*/0, /*splitWaveLoop=*/true);
+
+    std::vector<StinkyInstruction*> insts;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        insts.push_back(cast<StinkyInstruction>(&ir));
+    }
+    auto labelName = [](const StinkyInstruction* inst) -> std::string {
+        const auto* labelData = inst->getModifier<LabelData>();
+        return (labelData != nullptr) ? labelData->label : std::string{};
+    };
+    auto findLabel = [&](const std::string& name) -> int {
+        for (int i = 0; i < static_cast<int>(insts.size()); ++i) {
+            if (isLabel(*insts[i]) && labelName(insts[i]) == name) return i;
+        }
+        return -1;
+    };
+
+    const int loop = findLabel("label_TestLoop");
+    const int wave0 = findLabel("label_TestLoop_CBWave0");
+    ASSERT_GT(loop, -1) << blockListing(*bb);
+    ASSERT_GT(wave0, loop) << blockListing(*bb);
+
+    int wave0Heads = 0;
+    for (const StinkyInstruction* inst : insts) {
+        if (isLabel(*inst) && labelName(inst).ends_with("_CBWave0")) ++wave0Heads;
+    }
+    EXPECT_EQ(wave0Heads, 1) << "a second run must not duplicate the loop again:"
+                             << blockListing(*bb);
+
+    ASSERT_LT(loop + 2, wave0);
+    EXPECT_EQ(insts[loop + 1]->getUnifiedOpcode(), GFX::s_cmp_eq_u32) << blockListing(*bb);
+    const auto* entranceComment = insts[loop + 1]->getModifier<CommentData>();
+    ASSERT_NE(entranceComment, nullptr);
+    EXPECT_EQ(entranceComment->comment, "Check for waveID 0");
+    EXPECT_EQ(insts[loop + 2]->getUnifiedOpcode(), GFX::s_cbranch_scc0) << blockListing(*bb);
+    const std::string loop1Name = getBranchTarget(*insts[loop + 2]);
+    EXPECT_EQ(loop1Name.rfind("label_skipCBPreSignal_", 0), 0u) << loop1Name;
+    const int loop1 = findLabel(loop1Name);
+    ASSERT_GT(loop1, wave0) << blockListing(*bb);
+
+    const int exit = findLabel("label_TestLoopEnd");
+    ASSERT_GT(exit, loop1) << blockListing(*bb);
+
+    int wave0Signals = 0;
+    bool wave0Latch = false;
+    for (int i = wave0 + 1; i < loop1; ++i) {
+        if (clusterBarrierKind(*insts[i]) == 1) {
+            ++wave0Signals;
+            const StinkyInstruction* prev = nullptr;
+            for (int j = i - 1; j > wave0; --j) {
+                if (isPseudoInst(insts[j])) continue;
+                prev = insts[j];
+                break;
+            }
+            EXPECT_TRUE(prev == nullptr || prev->getUnifiedOpcode() != GFX::s_cbranch_scc0)
+                << "wave 0 keeps the signal and drops the per-iteration wave check:"
+                << blockListing(*bb);
+        }
+        if (isBranch(*insts[i]) && getBranchTarget(*insts[i]) == "label_TestLoop_CBWave0")
+            wave0Latch = true;
+    }
+    EXPECT_EQ(wave0Signals, 1) << blockListing(*bb);
+    EXPECT_TRUE(wave0Latch) << "wave 0 must latch to its own head:" << blockListing(*bb);
+
+    int loop1Signals = 0;
+    int loop1Waits = 0;
+    bool loop1Latch = false;
+    bool renamedInside = false;
+    bool renamedBranch = false;
+    for (int i = loop1 + 1; i < exit; ++i) {
+        const int kind = clusterBarrierKind(*insts[i]);
+        if (kind == 1) ++loop1Signals;
+        if (kind == -1) ++loop1Waits;
+        if (isLabel(*insts[i]) && labelName(insts[i]).rfind("label_Inside_CBWaveNz_", 0) == 0)
+            renamedInside = true;
+        if (isBranch(*insts[i])) {
+            const std::string target = getBranchTarget(*insts[i]);
+            if (target.rfind("label_Inside_CBWaveNz_", 0) == 0) renamedBranch = true;
+            if (target == loop1Name) loop1Latch = true;
+        }
+    }
+    EXPECT_EQ(loop1Signals, 0) << "other waves do not post the cluster signal:"
+                               << blockListing(*bb);
+    EXPECT_GE(loop1Waits, 1) << blockListing(*bb);
+    EXPECT_TRUE(loop1Latch) << "the copy must latch to its own head:" << blockListing(*bb);
+    EXPECT_TRUE(renamedInside) << blockListing(*bb);
+    EXPECT_TRUE(renamedBranch) << blockListing(*bb);
+    EXPECT_GT(findLabel("label_Inside"), -1) << "the original label stays in wave 0";
 }

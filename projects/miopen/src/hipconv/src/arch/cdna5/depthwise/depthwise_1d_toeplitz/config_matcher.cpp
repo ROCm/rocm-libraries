@@ -1,39 +1,8 @@
 #include "config_matcher.hpp"
+#include "direction_field.h"
 
 namespace hipconv::cdna5::depthwise_1d_toeplitz
 {
-
-namespace
-{
-
-// Render a Direction as its descriptor tag.
-const char* direction_tag(hipconv::Direction d)
-{
-    switch(d)
-    {
-    case hipconv::Direction::Dgrad:
-        return "dgrad";
-    case hipconv::Direction::Wgrad:
-        return "wgrad";
-    case hipconv::Direction::Fprop:
-    default:
-        return "fprop";
-    }
-}
-
-// Parse a direction tag. Returns false on an unknown tag.
-bool to_direction(std::string_view s, hipconv::Direction& out)
-{
-    if(s == "fprop")
-        return out = hipconv::Direction::Fprop, true;
-    if(s == "dgrad")
-        return out = hipconv::Direction::Dgrad, true;
-    if(s == "wgrad")
-        return out = hipconv::Direction::Wgrad, true;
-    return false;
-}
-
-} // namespace
 
 // Every knob in Config is registered, so describe() is a unique name for a table entry and
 // --config can always pin exactly one.
@@ -47,7 +16,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("kw", cfg.kw);
     int_field("stride", cfg.stride);
     int_field("dilation", cfg.dilation, /*default=*/1);
-    custom_field("direction", cfg.direction, to_direction, direction_tag);
+    direction_field(*this, cfg.direction);
     int_field("waves_per_wg", cfg.waves_per_wg);
     bool_field("narrow_c", cfg.narrow_c, /*default=*/false);
     int_field("w_fold", cfg.w_fold, /*default=*/1);

@@ -100,9 +100,42 @@ def test_cross_length_bottom_right_accepts_both_geometries(geometry, ragged):
     assert spec.block_n == int(tile["block_n"])
 
 
-def test_ragged_cross_length_relaxation_is_bottom_right_only():
+def test_ragged_non_causal_cross_length_is_gfx950_cross_attention():
+    # Full attention between different lengths is valid on gfx950: the key-pad mask and
+    # the guarded store handle the ragged tails, the diagonal plays no part.
+    for sq, sk in ((197, 400), (400, 197)):
+        spec = _spec(seqlen_q=sq, seqlen_kv=sk, ragged=True, causal=False)
+        ok, why = supports_attention_dense(spec, arch="gfx950")
+        assert ok, why
+
+
+def test_ragged_non_causal_cross_length_stays_rejected_on_gfx942():
+    from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+    tile = DENSE_TILE_GEOMETRIES["default"]
     with pytest.raises(ValueError, match="self-attention only"):
-        _spec(seqlen_q=197, seqlen_kv=400, ragged=True)
+        Gfx942AttentionDenseSpec(
+            batch=1,
+            seqlen_q=197,
+            seqlen_kv=400,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=False,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            ragged=True,
+        )
+
+
+@pytest.mark.parametrize("sq,sk", [(1000, 1050), (1050, 1000)])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_ragged_cross_length_top_left_accepted(sq, sk, persistent):
+    spec = _spec(seqlen_q=sq, seqlen_kv=sk, ragged=True, persistent=persistent)
+    assert not spec.causal_bottom_right
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
 
 
 @pytest.mark.parametrize(
@@ -191,11 +224,10 @@ def test_equal_length_bottom_right_emits_no_add_zero(geometry):
 
 
 def test_equal_length_dispatch_normalizes_to_top_left_body():
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
 
     def dispatched(mask_type):
-        return dense_spec_for_request(
+        return attention_tuning_spec(
             AttentionRequest(
                 batch=1,
                 nhead_q=4,
@@ -207,10 +239,9 @@ def test_equal_length_dispatch_normalizes_to_top_left_body():
                 arch="gfx950",
                 mask_type=mask_type,
                 dtype="bf16",
-                algorithm="attention_dense",
-                dense_persistent="off",
-            )
-        )
+            ),
+            "gfx950_dense_grid",
+        ).kernel_spec
 
     top_left = dispatched(1)
     bottom_right_request = dispatched(2)

@@ -23,16 +23,26 @@
 
 # Need to support Release/Debug
 
-string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
+# Keeps a "-strict" suffix while still dropping ":xnack+" (re-added below by
+# tensilelite_offload_target). Truncating it would collapse gfx1250-strict onto
+# gfx1250, leaving gfx1250-strict with code objects it cannot load.
+string(REGEX MATCHALL "gfx[a-z0-9]+(-[a-z0-9]+)*" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 
 set(matrix_transform_cpp "${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp")
+
+# clang derives the HIP compilation-unit ID (and the __hip_cuid_<hash> symbol
+# it emits) from the input path and the full command line, including -o, so
+# the .hsaco would differ between source/build directories. Pin it so the
+# output is reproducible. A fixed value is safe: this is a single device-only
+# TU loaded via hipModuleLoad, never linked with host code or other HIP TUs.
+set(matrix_transform_cuid "hipblasltTransform")
 
 foreach(arch IN LISTS archs)
     tensilelite_offload_target(offload_arch "${arch}")
     set(output_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransform_${arch}.hsaco")
     add_custom_command(
-        COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} --offload-arch=${offload_arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o ${output_library}
+        COMMAND ${CMAKE_CXX_COMPILER} -x hip ${matrix_transform_cpp} -cuid=${matrix_transform_cuid} --offload-arch=${offload_arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o ${output_library}
         OUTPUT ${output_library}
         COMMENT "Building hipblasltTransform_${arch}.hsaco"
     )

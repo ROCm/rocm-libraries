@@ -55,7 +55,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_wmma_cshuffle_two_stage(
         typename GridwiseGemm::Argument karg,
@@ -77,35 +77,38 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         auto epilogue_args            = SelectedEpilogue{};
 
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
-        __shared__ char p_shared[LDS_size];
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
 
-        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
-                                   AGridDesc_AK0_M_K1,
-                                   BGridDesc_BK0_N_K1,
-                                   ck::Tuple<>, // Empty tuple
-                                   CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   decltype(block_2_ctile_map_),
-                                   ComputePtrOffsetOfBatch,
-                                   ComputePtrOffsetOfBatch, // placeholder
-                                   NumGroupsToMerge,
-                                   HasMainKBlockLoop,
-                                   CGlobalMemoryDataOperation,
-                                   false,
-                                   TailNum,
-                                   decltype(epilogue_args)>(
-            p_shared,
-            a_grid_desc_ak0_m_ak1,
-            b_grid_desc_bk0_n_bk1,
-            ck::Tuple<>(), // placeholder
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            block_2_ctile_map_,
-            compute_ptr_offset_of_batch,
-            ComputePtrOffsetOfBatch{}, // placeholder
-            num_k_per_block,
-            karg,
-            epilogue_args);
+        if constexpr(LDS_size <= get_lds_size(get_device_arch()))
+        {
+            __shared__ char p_shared[LDS_size];
 
+            GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
+                                       AGridDesc_AK0_M_K1,
+                                       BGridDesc_BK0_N_K1,
+                                       ck::Tuple<>, // Empty tuple
+                                       CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                       decltype(block_2_ctile_map_),
+                                       ComputePtrOffsetOfBatch,
+                                       Tuple<>, // placeholder
+                                       NumGroupsToMerge,
+                                       HasMainKBlockLoop,
+                                       CGlobalMemoryDataOperation,
+                                       false,
+                                       TailNum,
+                                       decltype(epilogue_args)>(
+                p_shared,
+                a_grid_desc_ak0_m_ak1,
+                b_grid_desc_bk0_n_bk1,
+                ck::Tuple<>(), // placeholder
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                block_2_ctile_map_,
+                compute_ptr_offset_of_batch,
+                Tuple<>(), // placeholder
+                num_k_per_block,
+                karg,
+                epilogue_args);
+        }
 #if defined(__gfx11__)
     }
 #endif
@@ -164,7 +167,8 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeA                       = InDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           index_t TransposeTransferSrcScalarPerVector = 1,
-          index_t TransposeTransferDstScalarPerVector = 1>
+          index_t TransposeTransferDstScalarPerVector = 1,
+          bool UseLdsTranspose                        = false>
 struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -412,7 +416,9 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         false, // permuteA
         false, // permuteB
         false, // IsBPreShuffled
-        true>; // ForceThreadTileTransfer
+        true,  // ForceThreadTileTransfer
+        false, // IsFusedKernel
+        UseLdsTranspose>;
 
     using Block2TileMapElementwise = BlockToCTileMap_M00_N0_M01Adapt<MPerBlock, NPerBlock>;
 
@@ -879,45 +885,14 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
                 {
-                    typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
-
-                    std::array<std::size_t, GridwiseGemm::NumATensor> size_as_buffers;
-                    size_as_buffers[0] = arg.a_grid_desc_k0_m_k1_.GetElementSpaceSize() *
-                                         sizeof(ADataType) / GridwiseGemm::APackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumBTensor> size_bs_buffers;
-                    size_bs_buffers[0] = arg.b_grid_desc_k0_n_k1_.GetElementSpaceSize() *
-                                         sizeof(BDataType) / GridwiseGemm::BPackedSize;
-
-                    std::array<std::size_t, GridwiseGemm::NumDTensor> size_ds_buffers;
-
-                    ck::utility::RotatingMemWrapperMultiABD<typename GridwiseGemm::Argument,
-                                                            Tuple<ADataType>,
-                                                            Tuple<BDataType>,
-                                                            Tuple<>>
-                        rotating_mem(gemm_arg_,
-                                     stream_config.rotating_count,
-                                     size_as_buffers,
-                                     size_bs_buffers,
-                                     size_ds_buffers);
-                    rotating_mem.Print();
-
-                    auto run_flush_cache = [&]() {
-                        // flush icache
-                        ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
-                        clear_workspace();
-                    };
-
-                    ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
+                    ave_time += launch_and_time_kernel_with_preprocess_flush_cache(
                         stream_config,
-                        run_flush_cache,
+                        clear_workspace,
                         kernel,
                         dim3(gdx, gdy, gdz),
                         dim3(BlockSize),
                         0,
-                        gemm_arg_,
+                        gemm_arg,
                         arg.a_grid_desc_k0_m_k1_,
                         arg.b_grid_desc_k0_n_k1_,
                         arg.c_grid_desc_mblock_mperblock_nblock_nperblock_,
@@ -1169,7 +1144,43 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     static bool IsSupportedArgument(const Argument& arg)
     {
         if(arg.stride_overflow)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Stride overflow!" << " In " << __FILE__ << ":" << __LINE__
+                          << ", in function: " << __func__ << std::endl;
+            }
             return false;
+        }
+
+        if constexpr(UseLdsTranspose)
+        {
+            if(!ck::is_gfx125_supported())
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "LDS Transpose instances not supported on this architecture!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+        }
+
+        // GridwiseGemm CheckValidity is not called here so we need to check LDS on host
+        // explicitly here
+        constexpr index_t ldsBufferCount =
+            BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
+        if(GridwiseGemm::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount > get_lds_size())
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Instance tile too large for LDS size of target device! In "
+                          << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                          << std::endl;
+            }
+            return false;
+        }
 
         const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
         const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
@@ -1464,15 +1475,18 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                  const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                  const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                 const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                 const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                 const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                 const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                 const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                 const std::array<index_t, NDimSpatial>& input_left_pads,
+                 const std::array<index_t, NDimSpatial>& input_right_pads,
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 const ck::index_t split_k)
+                 const index_t split_k)
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
         return Argument{p_in_grid,
                         p_wei_grid,
                         p_out_grid,
@@ -1491,7 +1505,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                         in_element_op,
                         wei_element_op,
                         out_element_op,
-                        split_k};
+                        split_k,
+                        stride_ovf};
     }
 
     static auto MakeArgument(const InDataType* p_in_grid,
@@ -1513,7 +1528,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                              const ck::index_t split_k)
     {
         const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                tensor_exceeds_2gb<EDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                 tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
         std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
         std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -1569,15 +1584,19 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                         const std::array<index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output
                         const std::array<index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides,
-                        const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations,
-                        const std::array<ck::index_t, NDimSpatial>& input_left_pads,
-                        const std::array<ck::index_t, NDimSpatial>& input_right_pads,
+                        const std::array<index_t, NDimSpatial>& conv_filter_strides,
+                        const std::array<index_t, NDimSpatial>& conv_filter_dilations,
+                        const std::array<index_t, NDimSpatial>& input_left_pads,
+                        const std::array<index_t, NDimSpatial>& input_right_pads,
                         InElementwiseOperation in_element_op,
                         WeiElementwiseOperation wei_element_op,
                         OutElementwiseOperation out_element_op,
-                        const ck::index_t split_k) override
+                        const index_t split_k) override
     {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+
         return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
                                           static_cast<WeiDataType*>(p_wei_grid),
                                           static_cast<const OutDataType*>(p_out_grid),
@@ -1596,7 +1615,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                                           in_element_op,
                                           wei_element_op,
                                           out_element_op,
-                                          split_k);
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseArgument>
@@ -1619,7 +1639,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                         ck::index_t split_k) override
     {
         const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                tensor_exceeds_2gb<EDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                 tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
         std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
@@ -1717,6 +1737,10 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 << "TransposeTransferDstScalarPerVector: " << TransposeTransferDstScalarPerVector;
             }
 
+        if constexpr(UseLdsTranspose)
+        {
+            str << ", LdsTranspose";
+        }
             
             str << ">";
         // clang-format on

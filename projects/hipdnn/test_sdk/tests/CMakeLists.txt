@@ -15,14 +15,17 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_test_sdk_tests
     main.cpp
+    utilities/TestAsanDefaultSuppressions.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
+    utilities/TestCpuFpReferenceBlockScaleQuantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceResampleFwd.cpp
     utilities/TestCpuFpReferenceResampleBwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
+    utilities/TestCpuFpReferenceSdpaRagged.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp
@@ -59,6 +62,8 @@ add_executable(
     utilities/TestVectorLoggingUtils.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
@@ -103,6 +108,7 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdSignatureKey.cpp>
     TestVersion.cpp
 )
 

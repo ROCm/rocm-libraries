@@ -3040,6 +3040,10 @@ VMaxPKF16 = _make_scalar_alu_class("VMaxPKF16", "v_pk_max_f16", InstType.INST_F1
 VMed3I32 = _make_ternary_class("VMed3I32", "v_med3_i32", InstType.INST_I32)
 # logicalIR: VMed3F32
 VMed3F32 = _make_ternary_class("VMed3F32", "v_med3_f32", InstType.INST_F32)
+# logicalIR: VMaximumMinimumF32
+VMaximumMinimumF32 = _make_ternary_class(
+    "VMaximumMinimumF32", "v_maximumminimum_f32", InstType.INST_F32
+)
 # logicalIR: VMinF16
 VMinF16 = _make_scalar_alu_class("VMinF16", "v_min_f16", InstType.INST_F16)
 # logicalIR: VMinF32
@@ -3984,7 +3988,7 @@ DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
 # logicalIR: DSLoadB96TrB6
 DSLoadB96TrB6 = _make_ds_load_class("DSLoadB96TrB6", "ds_load_tr6_b96")
 # logicalIR: DSLoadB64TrB4
-DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_tr4_b64")
+DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_b64_tr_b4")
 # logicalIR: DSLoadB64TrB16
 DSLoadB64TrB16 = _make_ds_load_class("DSLoadB64TrB16", "ds_load_tr16_b64")
 # logicalIR: DSLoadB128TrB16
@@ -4477,8 +4481,20 @@ def _init_wmma_matrix_fmt() -> None:
 
 _WMMA_TYPE_CONVERT_KNOWN = None
 
+_WMMA_FP8_TYPES = frozenset({
+    InstType.INST_F8, InstType.INST_BF8, InstType.INST_F8_BF8, InstType.INST_BF8_F8,
+})
 
-def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> str:
+
+def _use_native_fp8_wmma(k: int, has_wmma_v3: bool, force_scaled: bool) -> bool:
+    """Port of rocisa ``MFMAInstruction::useNativeFp8WMMA``: gfx1250 K=128 FP8/BF8
+    uses the dedicated ``v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}`` opcodes. They are
+    absent on gfx1250 (gfx1250v0), so strict/v0 builds keep scaled f8f6f4."""
+    return has_wmma_v3 and k == 128 and not force_scaled
+
+
+def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool,
+                       native_fp8: bool = False) -> str:
     """Port of rocisa ``MFMAInstruction::typeConvert`` for the low-precision
     (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`.
 
@@ -4494,16 +4510,17 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
 
     f8f6f4_k = 128 if has_wmma_v3 else 64
     f4_t = 32 if has_wmma_v3 else 0
+    use_f8f6f4 = k >= f8f6f4_k and not native_fp8
     if it in _WMMA_F8F6F4_ALWAYS:
         return "f8f6f4"
     if it == InstType.INST_F8:
-        return "f8f6f4" if k >= f8f6f4_k else "fp8_fp8"
+        return "f8f6f4" if use_f8f6f4 else "fp8_fp8"
     if it == InstType.INST_BF8:
-        return "f8f6f4" if k >= f8f6f4_k else "bf8_bf8"
+        return "f8f6f4" if use_f8f6f4 else "bf8_bf8"
     if it == InstType.INST_F8_BF8:
-        return "f8f6f4" if k >= f8f6f4_k else "fp8_bf8"
+        return "f8f6f4" if use_f8f6f4 else "fp8_bf8"
     if it == InstType.INST_BF8_F8:
-        return "f8f6f4" if k >= f8f6f4_k else "bf8_fp8"
+        return "f8f6f4" if use_f8f6f4 else "bf8_fp8"
     if it == InstType.INST_F4:
         return "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
     # rocisa MFMAInstruction::typeConvert maps the 8-bit integer inputs to the
@@ -4518,10 +4535,13 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
     raise RuntimeError(f"Type not found: {it}")
 
 
-def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
+def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool,
+                      native_fp8: bool = False):
     """Port of rocisa ``getArgStr`` (HasWMMA_f8f6f4 branch): the matrix_*_fmt
     tokens, gated by the same K/tile condition rocisa uses."""
     _init_wmma_matrix_fmt()
+    if native_fp8 and it in _WMMA_FP8_TYPES:
+        return ("", "")
     f4_t = 32 if has_wmma_v3 else 0
     if it == InstType.INST_F4:
         if m < f4_t and n < f4_t:
@@ -4574,15 +4594,21 @@ class MFMAInstruction(Instruction):
         instruction_name = "mfma" if is_mfma else "wmma"
         instruction_step = "" if is_mfma else "_"
         mfma_1k = "_1k" if self.mfma1k else ""
-        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
 
-        # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*
-        try:
-            from . import rocIsa  # noqa: WPS433
-            isa = tuple(rocIsa.getInstance().getKernel().isa)
-        except Exception:  # noqa: BLE001
-            isa = ()
-        if not is_mfma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4"):
+        # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*.
+        # Mirror rocisa MFMAInstruction::forceScaledWMMA (mfma.hpp): gate on the
+        # rocIsa toggle (true only for gfx1250-strict / gfx1250v0), NOT the shared
+        # ISA (12,5,0) which cannot tell base gfx1250 from the strict/v0 steppings.
+        # Read the toggle directly (no broad except): getForceScaledWMMA() returns
+        # a safe False default for an uninitialized thread without throwing, so an
+        # exception here means a genuinely broken binding. It must fail loudly
+        # rather than silently emit plain WMMA and disable the required strict/v0
+        # workaround -- matching native forceScaledWMMA, which does not catch.
+        from . import rocIsa  # noqa: WPS433
+        force_scaled = bool(rocIsa.getInstance().getForceScaledWMMA())
+        native_fp8 = _use_native_fp8_wmma(k, has_wmma_v3, force_scaled)
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3, native_fp8)
+        if not is_mfma and force_scaled and type_str in ("f8f6f4", "f4"):
             return (f"v_wmma_scale_{_inst_type_to_str(self.accType)}_{variant_str}"
                     f"{instruction_step}{type_str}")
 
@@ -4601,18 +4627,21 @@ class MFMAInstruction(Instruction):
         has_wmma_v3 = bool(caps.get("HasWMMA_V3", 0))
         has_wmma_f8f6f4 = bool(caps.get("HasWMMA_f8f6f4", 0))
         is_wmma = not bool(caps.get("HasMFMA", 0))
-        try:
-            from . import rocIsa  # noqa: WPS433
-            isa = tuple(rocIsa.getInstance().getKernel().isa)
-        except Exception:  # noqa: BLE001 — best effort; fall back to no scaling
-            isa = ()
+        # Read the toggle directly (no broad except) so a genuine failure fails
+        # loudly instead of silently emitting plain WMMA on a strict/v0 build;
+        # getForceScaledWMMA() returns a safe False default without throwing for an
+        # uninitialized thread. Matches native forceScaledWMMA (mfma.hpp).
+        from . import rocIsa  # noqa: WPS433
+        force_scaled = bool(rocIsa.getInstance().getForceScaledWMMA())
 
         # rocisa MFMAInstruction::typeConvert + forceScaledWMMA (mfma.hpp).
         # gfx1250 low-precision (f8f6f4/f4) WMMA uses the v_wmma_scale_* encoding
         # with zero scales, plus per-matrix input formats.
-        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
-        # forceScaledWMMA() gates only the mnemonic (isaVersion, not caps).
-        scaled = is_wmma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4")
+        native_fp8 = _use_native_fp8_wmma(k, has_wmma_v3, force_scaled)
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3, native_fp8)
+        # forceScaledWMMA() gates only the mnemonic via the rocIsa toggle (set
+        # true only for gfx1250-strict / gfx1250v0), not the shared ISA (12,5,0).
+        scaled = is_wmma and force_scaled and type_str in ("f8f6f4", "f4")
         # rocisa emits the ", 0, 0" scale operands and matrix_*_fmt only inside
         # the HasWMMA_f8f6f4 getArgStr branch, so both are caps-gated.
         scale_operands = scaled and has_wmma_f8f6f4
@@ -4620,7 +4649,7 @@ class MFMAInstruction(Instruction):
         matrix_b_fmt = ""
         if has_wmma_f8f6f4:
             matrix_a_fmt, matrix_b_fmt = _wmma_matrix_fmts(
-                self.instType, m, n, k, has_wmma_v3)
+                self.instType, m, n, k, has_wmma_v3, native_fp8)
 
         acc2_reg = None
         if self.acc2_imm is not None:

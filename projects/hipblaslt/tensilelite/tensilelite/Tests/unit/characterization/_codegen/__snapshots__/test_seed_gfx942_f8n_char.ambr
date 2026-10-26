@@ -1,0 +1,37 @@
+# serializer version: 1
+# name: test_gfx942_f8n_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_07EKex3x_oMZfYv4iLHkKtMksNlnNGVHFY61sx-Nolw=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_6U-vY0wmJiKRiZzaWxgiPqzl-QXrmFAob92xmVyaH8E=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_DqF6d9v4HjcAAMnxG8w16KrZOln4c8u1CjGPcJ2_LV0=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_P6nDsB-m8ByXPtsAhtUgRaMFiFTWOC-8mfA_fLQWRls=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV__aL2CF-NkHpF6O14dDBKqvbmt79RRrzmO0zKG9fLPak=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_mjKqzzO4euCTjTVzQnri0A-Aj5-1edMjGpjCRxbzLTs=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_rwV--eOfjb_tiHxsHJNDzahLR-el6HsXuGlLt122EVs=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_F8NHS_BH_Bias_S_HA_S_SAB_SCD_SAV_tu_2C1A_i5_5VWQUukUJ4qPoj4BcB8z7KXkLDO9FCRA=',
+      'err': 0,
+    }),
+  ])
+# ---

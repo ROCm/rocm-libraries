@@ -3,11 +3,11 @@
  *
  * C99 port of rocke/instances/common/conv_wgrad_workspace_reduce.py
  *
- * Stage 2 of the deterministic two-stage wgrad path.  Reads the f32 workspace
- * buffer [groups * split_k, wg_M, wg_N] written by Stage 1 and reduces along
- * the split_k axis in a fixed sequential order (k_id = 0, 1, ..., split_k-1).
- * block_id_z encodes the group index; each CTA handles one group's slices.
- * The fixed iteration order guarantees bit-exact, run-to-run determinism.
+ * Stage 2 of the two-stage wgrad path.  Stage 1 f32-atomic-added its partial
+ * sums into a scratch of shape [groups * R, wg_M, wg_N], so the reduction over
+ * split_k is already done by the time this runs; this kernel folds the R
+ * replica slabs and converts f32 -> dtype_d into dW.  block_id_z encodes the
+ * group index.
  */
 
 #include <stddef.h>
@@ -16,6 +16,7 @@
 
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
 
+#include "rocke/arena.h" /* rocke_arena_alloc */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type, rocke_b_store_scalar_from_f32 */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, SignatureBuilder */
@@ -29,6 +30,11 @@
 #ifndef ROCKE_WGRAD_REDUCE_DEFAULT_TILE_N
 #define ROCKE_WGRAD_REDUCE_DEFAULT_TILE_N 64
 #endif
+/* Scratch replica slabs to fold.  Must match the Stage 1 spec's ws_replicas;
+ * mirrors _DEFAULT_WS_REPLICAS in the Python instances. */
+#ifndef ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS
+#define ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS 8
+#endif
 
 /* ---- spec helpers -------------------------------------------------------- */
 
@@ -39,9 +45,10 @@ rocke_wgrad_reduce_spec_t rocke_wgrad_reduce_spec_default(void)
     s.dtype_d = "fp16";
     s.tile_m = ROCKE_WGRAD_REDUCE_DEFAULT_TILE_M;
     s.tile_n = ROCKE_WGRAD_REDUCE_DEFAULT_TILE_N;
-    s.name = "conv_wgrad_ws_reduce";
+    s.name = "conv_wgrad_ws_cast";
     s.problem_short = "";
     s.groups = 1;
+    s.ws_replicas = ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS;
     return s;
 }
 
@@ -53,13 +60,21 @@ int rocke_wgrad_reduce_spec_block_size(const rocke_wgrad_reduce_spec_t* spec)
 rocke_status_t
     rocke_wgrad_reduce_kernel_name(const rocke_wgrad_reduce_spec_t* spec, char* out, int out_cap)
 {
-    /* Python: kernel_name_join(name, problem.short(), f"t{tile_m}x{tile_n}", dtype_d) */
+    /* Python: parts = [short, t{m}x{n}] + (["wsr{R}"] if R > 1) + [dtype_d] */
     char t_buf[32];
+    char r_buf[32];
     snprintf(t_buf, sizeof(t_buf), "t%dx%d", spec->tile_m, spec->tile_n);
-    const char* parts[3] = {spec->problem_short ? spec->problem_short : "",
-                            t_buf,
-                            spec->dtype_d ? spec->dtype_d : "fp16"};
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    const char* parts[4];
+    int n_parts = 0;
+    parts[n_parts++] = spec->problem_short ? spec->problem_short : "";
+    parts[n_parts++] = t_buf;
+    if(spec->ws_replicas > 1)
+    {
+        snprintf(r_buf, sizeof(r_buf), "wsr%d", spec->ws_replicas);
+        parts[n_parts++] = r_buf;
+    }
+    parts[n_parts++] = spec->dtype_d ? spec->dtype_d : "fp16";
+    return rocke_kernel_name_join(spec->name, parts, n_parts, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
@@ -85,6 +100,12 @@ bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
     {
         if(reason)
             snprintf(reason, reason_cap, "block_size=%d out of range [1,1024]", bs);
+        return false;
+    }
+    if(spec->ws_replicas < 1)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "ws_replicas=%d must be >= 1", spec->ws_replicas);
         return false;
     }
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
@@ -145,7 +166,6 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     rocke_value_t* dw_ptr = rocke_b_param(b, "dw_ptr", rocke_ptr_type(b, dw_elem, "global"), &wo);
     rocke_value_t* wg_M_p = rocke_b_param(b, "wg_M", rocke_i32(), NULL);
     rocke_value_t* wg_N_p = rocke_b_param(b, "wg_N", rocke_i32(), NULL);
-    rocke_value_t* sk_p = rocke_b_param(b, "split_k", rocke_i32(), NULL);
     rocke_b_param(b, "ws_bytes", rocke_i32(), NULL); /* consumed by host */
     rocke_b_param(b, "dw_bytes", rocke_i32(), NULL); /* consumed by host */
     /* groups is in the ABI so callers can pass it; the kernel uses block_id_z
@@ -178,58 +198,52 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     rocke_if_t guard = rocke_b_scf_if(b, in_bounds);
     rocke_b_region_enter(b, guard.then_region);
     {
-        /* Sequential reduction over split_k slices for this group.
-         * Workspace layout: [groups * split_k, wg_M, wg_N] (f32).
-         * Group g's slices are at indices g*split_k .. g*split_k+split_k-1, so:
-         *   ws_off = (kid * groups + grp_id) * wg_M * wg_N + c_m * wg_N + c_n
-         * The fixed iteration order (k_id = 0..split_k-1) is the determinism
-         * guarantee: the summation order is determined entirely by the loop
-         * bounds and is identical across every run. */
-        rocke_value_t* c0 = rocke_b_const_i32(b, 0);
-        rocke_value_t* c1 = rocke_b_const_i32(b, 1);
-        rocke_value_t* acc0 = rocke_b_const_f32(b, 0.0);
+        /* Stage 1's f32 atomics already reduced over split_k; all that is
+         * left is to fold this group's R replica slabs and cast.
+         *
+         *   dw_off = grp_id * wg_M*wg_N + c_m * wg_N + c_n
+         *   ws_off = (grp_id * R + r) * wg_M*wg_N + c_m * wg_N + c_n
+         *
+         * At R == 1 the two coincide and the fold collapses to one load. */
+        rocke_value_t* grp_stride = rocke_b_mul(b, wg_M_p, wg_N_p);
+        rocke_value_t* elem_in_slab = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n);
+        rocke_value_t* dw_off = rocke_b_add(b, rocke_b_mul(b, grp_id, grp_stride), elem_in_slab);
 
-        rocke_iter_arg_t iter_arg;
-        iter_arg.name = "acc";
-        iter_arg.init = acc0;
-
-        rocke_for_t for_op = rocke_b_scf_for_iter(b,
-                                                  c0,
-                                                  sk_p,
-                                                  c1,
-                                                  &iter_arg,
-                                                  1,
-                                                  "kid",
-                                                  /*unroll=*/false,
-                                                  /*elide_trailing_barrier=*/true);
-
-        rocke_b_region_enter(b, for_op.body);
+        const int reps = spec->ws_replicas;
+        rocke_value_t* total = NULL;
+        if(reps == 1)
         {
-            rocke_value_t* kid = for_op.iv;
-            rocke_value_t* acc_in = for_op.iter_vars[0];
-
-            /* ws_off = (grp_id * split_k + kid) * wg_M * wg_N + c_m * wg_N + c_n
-             * Stage 1 writes z = grp_id*split_k + kid, so group g's slices
-             * occupy contiguous indices [g*split_k, g*split_k+split_k). */
-            rocke_value_t* grp_stride = rocke_b_mul(b, wg_M_p, wg_N_p);
-            rocke_value_t* slice_idx = rocke_b_add(b, rocke_b_mul(b, grp_id, sk_p), kid);
-            rocke_value_t* slice_base = rocke_b_mul(b, slice_idx, grp_stride);
-            rocke_value_t* elem_off
-                = rocke_b_add(b, slice_base, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n));
-
-            rocke_value_t* partial = rocke_b_global_load_f32(b, ws_ptr, elem_off, 4);
-            rocke_value_t* new_acc = rocke_b_fadd(b, acc_in, partial);
-
-            rocke_b_scf_yield(b, &new_acc, 1);
+            total = rocke_b_global_load_f32(b, ws_ptr, dw_off, 4);
         }
-        rocke_b_region_leave(b);
-
-        rocke_value_t* total = for_op.op->results[0];
-
-        /* dw_off = grp_id * wg_M * wg_N + c_m * wg_N + c_n */
-        rocke_value_t* grp_dw_base = rocke_b_mul(b, grp_id, rocke_b_mul(b, wg_M_p, wg_N_p));
-        rocke_value_t* dw_off
-            = rocke_b_add(b, grp_dw_base, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n));
+        else
+        {
+            /* R is compile-time, so this is a flat unrolled fold -- R
+             * independent loads issued before the first add consumes one. */
+            rocke_value_t* ws_base = rocke_b_add(
+                b,
+                rocke_b_mul(b, rocke_b_mul(b, grp_id, rocke_b_const_i32(b, reps)), grp_stride),
+                elem_in_slab);
+            rocke_value_t** partials = (rocke_value_t**)rocke_arena_alloc(
+                &b->arena, sizeof(rocke_value_t*) * (size_t)reps);
+            if(partials == NULL)
+            {
+                rocke_i_set_err(b, ROCKE_ERR_OOM, "wgrad_reduce: partials alloc failed");
+                rocke_b_region_leave(b);
+                return NULL;
+            }
+            for(int r = 0; r < reps; ++r)
+            {
+                rocke_value_t* off
+                    = (r == 0) ? ws_base
+                               : rocke_b_add(b,
+                                             ws_base,
+                                             rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
+                partials[r] = rocke_b_global_load_f32(b, ws_ptr, off, 4);
+            }
+            total = partials[0];
+            for(int r = 1; r < reps; ++r)
+                total = rocke_b_fadd(b, total, partials[r]);
+        }
 
         /* Store: fp32 output is already the right type; f16/bf16 need cast. */
         if(is_fp32_out)
@@ -290,7 +304,6 @@ rocke_status_t rocke_wgrad_reduce_signature(rocke_arena_t* arena,
     rocke_signature_builder_ptr(&sb, "dw_ptr", dtype_d, NULL);
     rocke_signature_builder_scalar(&sb, "wg_M", "i32");
     rocke_signature_builder_scalar(&sb, "wg_N", "i32");
-    rocke_signature_builder_scalar(&sb, "split_k", "i32");
     rocke_signature_builder_scalar(&sb, "ws_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "dw_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "groups", "i32");

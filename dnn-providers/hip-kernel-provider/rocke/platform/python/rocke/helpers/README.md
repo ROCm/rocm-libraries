@@ -87,7 +87,8 @@ rocke/helpers/
 │ # descriptor + per-lane offset emitter for the
 │ # high-bandwidth FP8 / BF8 GEMM path.
 ├── spec.py # IOSpecRule + validate_io, SignatureBuilder,
-│ # kernel_name_join, ceil_div_grid -- spec/signature/grid
+│ # kernel_name_join, ceil_div_grid, ceil_div / align_up,
+│ # non_default_fields / salted_kernel_name -- spec/signature/grid
 │ # scaffolding so each instance file is ~10 lines of glue.
 │
 │ # Kernel-shape abstractions (GEMM / conv / attention infrastructure).
@@ -105,6 +106,8 @@ rocke/helpers/
 ├── attention.py # Attention2DConfig, OnlineSoftmaxState, PagedKvDescriptor,
 │ # warp_xor_reduce_*, dtype MFMA dispatch, log2 softcap,
 │ # causal/sliding-window masks, select_*d_config.
+├── attention_fwd_ext.py # AttnFwdExt: opt-in hooks / tail guards for the MFMA+WMMA forward body
+├── attention_band.py # AttnRuntimeBounds / BandEmitter / I32_FAR: runtime two-sided band (shell-side)
 ├── compile.py # compile_kernel() one-shot IR -> HSACO
 └── manifest.py # make_gemm_manifest, make_conv_manifest,
  # make_simple_op_manifest, write_artifact
@@ -811,6 +814,14 @@ inside each XCD). Together they restore L2 locality on the multi-die
 MI300X / MI350X by ensuring every contiguous stripe of workgroups
 shares one XCD's L2 slice.
 
+`chiplet_transform_chunked_dynamic` takes a runtime `num_wgs` with a
+compile-time chunk. Shape-generic (AOT) kernels whose locality unit follows
+the problem use `chiplet_transform_chunked_runtime`, where the chunk is an
+i32 SSA value as well: `max(1, num_wgs / num_xcds)` by default (one
+contiguous run of the launch per XCD), or the caller's `chunk_size` (e.g. the
+workgroups of one image row band, computed from the kernargs). Its pure-Python
+model is `python_chiplet_transform_chunked_runtime`.
+
 ### XOR-based LDS swizzles (`helpers/layouts.py`)
 
 ```python
@@ -856,7 +867,8 @@ if_branch = b.cmp_eq(all_below, b.const_i32(1))
 # ... skip the per-row rescale when every lane agrees ...
 ```
 
-Lowered to `llvm.amdgcn.ballot.i64` + `icmp eq i64 ... -1`. Pairs
+Lowered to `llvm.amdgcn.ballot.i64` + `icmp eq i64 ...` against the
+full-wave mask (`-1` on wave64, `0xffffffff` on wave32). Pairs
 naturally with adaptive online-softmax rescaling: skip the rescale
 pass entirely when every lane's `max_diff` stayed below threshold.
 
@@ -998,7 +1010,7 @@ configs = [
 @functools.lru_cache(maxsize=None) # cache the compiled launcher
 def _build(cfg):
  k = build_universal_gemm(cfg.spec)
- ir = lower_kernel_to_llvm(k)
+ ir = lower_kernel_to_llvm(k, arch="gfx950")
  hsaco, _ = build_hsaco_from_llvm_ir(ir)
  return KernelLauncher(hsaco=hsaco, kernel_name=k.name,
  signature=gemm_args_signature()), cfg.spec

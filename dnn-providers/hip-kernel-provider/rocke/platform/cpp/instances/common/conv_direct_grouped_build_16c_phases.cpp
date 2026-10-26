@@ -95,39 +95,14 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     /* b.kernel.attrs["max_workgroup_size"] = THREADS */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
-    /* ---- params ---- */
-    {
-        const rocke_type_t* io_ptr = rocke_ptr_type(b, ctx->io_type, "global");
-        rocke_param_opts_t ro;
-        rocke_param_opts_t wo;
-        rocke_param_opts_t none;
-
-        /* A = b.param("A", PtrType(io_type,"global"), noalias=True, readonly=True, align=16) */
-        ro = (rocke_param_opts_t){0};
-        ro.noalias = true;
-        ro.noalias_set = true;
-        ro.readonly = true;
-        ro.readonly_set = true;
-        ro.align = 16;
-        ro.align_set = true;
-        ctx->A = rocke_b_param(b, "A", io_ptr, &ro);
-        ctx->Bp = rocke_b_param(b, "B", io_ptr, &ro);
-
-        /* D = b.param("D", PtrType(io_type,"global"), noalias=True, writeonly=True, align=16) */
-        wo = (rocke_param_opts_t){0};
-        wo.noalias = true;
-        wo.noalias_set = true;
-        wo.writeonly = true;
-        wo.writeonly_set = true;
-        wo.align = 16;
-        wo.align_set = true;
-        ctx->D = rocke_b_param(b, "D", io_ptr, &wo);
-
-        none = (rocke_param_opts_t){0};
-        ctx->A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
-        ctx->B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), &none);
-        ctx->D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
-    }
+    /* ---- params (AOT kernarg block, conv_abi order) ---- */
+    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    ctx->A = ctx->params.A;
+    ctx->Bp = ctx->params.Bp;
+    ctx->D = ctx->params.D;
+    ctx->A_bytes = ctx->params.A_bytes;
+    ctx->B_bytes = ctx->params.B_bytes;
+    ctx->D_bytes = ctx->params.D_bytes;
 
     /* ---- common SSA constants ---- */
     ctx->c0 = rocke_b_const_i32(b, 0);
@@ -136,7 +111,8 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->c_BQ = rocke_b_const_i32(b, ctx->BLOCK_Q);
     ctx->c_cpg = rocke_b_const_i32(b, ctx->p.cpg);
     ctx->c_kpg = rocke_b_const_i32(b, ctx->p.kpg);
-    ctx->c_W = rocke_b_const_i32(b, ctx->p.W);
+    /* AOT: the store guard bounds against the runtime output width. */
+    ctx->c_W = ctx->params.p_Wo;
 
     /* c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg) */
     ctx->c_BG_cpg = rocke_b_const_i32(b, ctx->BLOCK_GROUPS * ctx->p.cpg);
@@ -405,50 +381,19 @@ void rocke_dconv16c_build_chunk_meta(rocke_dconv_16c_ctx_t* ctx)
 void rocke_dconv16c_build_descriptors(rocke_dconv_16c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int total_c = rocke_direct_conv_problem_total_c(&ctx->p);
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    rocke_dynamic_tensor_descriptor_t* a_dyn;
 
-    /* ---- input descriptor A[N,H,W,total_c] + 2 embeds ---- */
-    {
-        static const char* const a_coords[4] = {"n", "h", "w", "c"};
-        int a_lengths[4];
-        rocke_tensor_descriptor_t* a_naive;
-        const rocke_transform_t* xforms[2];
-
-        a_lengths[0] = ctx->p.N;
-        a_lengths[1] = ctx->p.H;
-        a_lengths[2] = ctx->p.W;
-        a_lengths[3] = total_c;
-        a_naive = rocke_tensor_descriptor_naive(b, "A", a_lengths, 4, NULL, a_coords, 4);
-
-        /* embed(upper=("y_iter",), into="h", strides=(1,), offset=-PAD, lo=0, hi=H) */
-        {
-            static const char* const h_upper[1] = {"y_iter"};
-            int h_strides[1] = {1};
-            xforms[0]
-                = rocke_embed_bounded(b, h_upper, 1, "h", h_strides, -ctx->p.PAD, 0, ctx->p.H);
-        }
-        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(stride,1),
-         *       offset=-PAD, lo=0, hi=W) */
-        {
-            static const char* const w_upper[2] = {"q_pos", "W_lds_pos"};
-            int w_strides[2];
-            w_strides[0] = ctx->p.stride;
-            w_strides[1] = 1;
-            xforms[1]
-                = rocke_embed_bounded(b, w_upper, 2, "w", w_strides, -ctx->p.PAD, 0, ctx->p.W);
-        }
-        ctx->a_desc = rocke_tensor_descriptor_transform(b, a_naive, xforms, 2);
-    }
-
-    /* ---- output descriptor D[N,H,W,total_k] naive ---- */
-    {
-        static const char* const d_coords[4] = {"n", "h", "w", "k"};
-        int d_lengths[4];
-        d_lengths[0] = ctx->p.N;
-        d_lengths[1] = ctx->p.H;
-        d_lengths[2] = ctx->p.W;
-        d_lengths[3] = total_k;
-        ctx->d_desc = rocke_tensor_descriptor_naive(b, "D", d_lengths, 4, NULL, d_coords, 4);
-    }
+    /* AOT: every extent and base stride comes from the kernarg block; only
+     * PAD and stride stay build-time (they shape the LDS row and the tap
+     * offsets, so they are kernel capabilities rather than shape).
+     *
+     * Only the A descriptor is built here. The output descriptor is built
+     * inside the streaming loop phase, at the point Python builds it -- after
+     * the prologue prefetch -- because its const_i32(1) stride consumes an
+     * SSA id and emitting it early shifts every later value. */
+    a_dyn = rocke_dconv_a_descriptor_dynamic(
+        b, &ctx->params, ctx->p.PAD, ctx->p.stride, "q_pos", "W_lds_pos");
+    if(!a_dyn)
+        return;
+    ctx->a_desc = &a_dyn->base;
 }

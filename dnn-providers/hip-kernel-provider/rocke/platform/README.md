@@ -36,7 +36,8 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 ## Prerequisites
 
 - **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended → `ROCKE_LLVM_FLAVOR=llvm22`; older → `llvm20`). ROCm is a
+  (7.2 recommended). AUTO selects the IR flavor from the loaded COMGR
+  compiler’s LLVM version; ROCm release metadata does not select it. ROCm is a
   system dependency, not a pip package.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
   (3.18+ for the `cpp/bindings` pybind module).

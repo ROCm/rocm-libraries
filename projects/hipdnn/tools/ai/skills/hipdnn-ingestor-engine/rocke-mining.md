@@ -2,7 +2,7 @@
 
 Current builder/dispatcher source and library documentation outrank historical examples.
 For direct-load HIP, extract the same semantic/launch facts from HIP; do not invent a
-rocKE builder or profile. [RUNBOOK.md](RUNBOOK.md) owns execution.
+rocKE builder or engine manifest. [RUNBOOK.md](RUNBOOK.md) owns execution.
 
 ## Source evidence
 
@@ -19,7 +19,7 @@ rocKE builder or profile. [RUNBOOK.md](RUNBOOK.md) owns execution.
 Follow helpers actually consumed by the builder; do not guess naming conventions. An
 empty introspection arch list means unknown, not unsupported. Constructor-valid does not
 imply supported: the real predicate must accept each **final** overridden or promoted
-spec, including isolation and shipping crosses. API failures are not shape declines.
+spec, including shipping crosses. API failures are not shape declines.
 Read [graph-contract.md](graph-contract.md) for graph-only features and fused edges
 absent from the kernel's Python surface.
 
@@ -79,7 +79,7 @@ that record without importing today's producer.
 
 A packed kernel that declares no specialized `metadata_fields` and carries no
 `effective_spec` resolves by producer origin, per RUNBOOK stage 4: `rocke` is a hard
-failure of full verification, while an absent `origin_kind` or `"hip"` is
+failure of full verification, while an absent `origin_kind`, `"hip"` or `"hsaco"` is
 `NOT VERIFIED HERE`. An absent `origin_kind` is **not** rocKE — descriptors packed
 before the field existed, and hand-authored inputs, carry none.
 
@@ -102,8 +102,15 @@ not varlen support. For a **conditional ABI**, C++ must replay presence guards a
 order/types. For a **fixed ABI**, disabled features leave their slots in place; omitting
 an unused argument shifts everything after it.
 
-The dispatcher defines the provisional baseline. Legal knob values and historical
-benchmarks are hypotheses, not shipping evidence. Policy omission versus explicit false
+A rule the native pack restates by hand (tile legality, an LDS budget, a grid formula) is
+an unchecked copy of the Python: `launch_surface.py` checks only that it is declared,
+guarded and tested. Record each one as an unchecked agreement. `hkp_pack` builds unshipped
+spec fields at their current default with the builder's current code, so treat rocKE
+default and builder changes as changes to the shipped engine.
+
+Each registry cell's `select_spec` spec is its `default: true` variant. Other legal knob
+values and historical benchmarks are hypotheses, not shipping evidence; RUNBOOK stage 6
+keeps one only for coverage or measured uplift. Policy omission versus explicit false
 can change binaries even when displayed metadata and counts agree. Retain restriction
 dispositions, layouts, graph mappings, geometry/workspace, ABI and binding use sites;
 unresolved correctness questions block the affected path.

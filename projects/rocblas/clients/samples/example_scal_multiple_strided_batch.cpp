@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #include "client_utility.hpp"
 #include "host_alloc.hpp"
 #include "rocblas_vector.hpp"
+#include "singletons.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -252,6 +253,11 @@ void initialize_x(float* hx, float* hx_gold, int size_x)
 
 int main(int argc, char* argv[])
 {
+    // The device containers below belong to the test harness, which guards every device
+    // allocation with padding it later checks. This sample never checks it, so switch it
+    // off, as rocblas-bench and rocblas-gemm-tune do.
+    d_vector_set_pad_length(0);
+
     // invalid int and float for rocblas_sgemm_strided_batched int and float arguments
     rocblas_int invalid_int   = std::numeric_limits<rocblas_int>::min() + 1;
     float       invalid_float = std::numeric_limits<float>::quiet_NaN();

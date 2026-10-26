@@ -40,8 +40,8 @@ from rocke.helpers.io import (
     store_scalar_from_f32,
     store_vec,
 )
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.spec import kernel_name_join
-from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
 from .fmha_arch import validate_fmha_mfma_atom

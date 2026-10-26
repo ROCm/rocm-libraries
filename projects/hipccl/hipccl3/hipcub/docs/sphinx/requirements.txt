@@ -1,0 +1,1 @@
+-r https://raw.githubusercontent.com/ROCm/rocm-docs-core/new_data/env/sphinx/requirements.txt

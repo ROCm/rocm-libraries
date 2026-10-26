@@ -131,23 +131,135 @@ def test_simple_reference_path_matches(harness):
     assert max(out_err, state_err) <= harness["TOL"]
 
 
-@requires_gfx950
-def test_every_dispatched_tile_is_correct(harness):
-    """Every tile the dispatcher can select must be numerically sound.
+def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
+    """Compile and launch one dispatch result, including state-pool safety.
 
-    A tuning table that can route a request to a wrong kernel is worse than no
-    tuning at all, so the whole table is exercised rather than the default only.
+    ``launchers`` caches by ``compile_key``: the binary depends on arch, ABI and
+    spec only, so every batch that selects the same spec reuses one compile.
+    Only the launch grid changes with batch.
     """
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 
-    for batch in (1, 16, 64, 256):
-        spec = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH)).spec
-        out_err, state_err = harness["check"](spec, batch)
-        assert max(out_err, state_err) <= harness["TOL"], (
-            f"batch {batch} tile "
-            f"({spec.num_warps},{spec.warp_threads_k},{spec.blocks_per_v_dim}) "
-            f"out={out_err:.3e} state={state_err:.3e}"
+    spec = result.spec
+    key = result.kernel_id.compile_key
+    if key not in launchers:
+        artifact = compile_kernel(result.build(), arch=ARCH)
+        launchers[key] = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=result.signature,
         )
+    launcher = launchers[key]
+    inputs = harness["make_inputs"](spec, batch)
+    before = inputs["state"].clone()
+    values, _ = harness["prepare"](spec, inputs, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+    written = inputs["write_indices"].long()
+    untouched = torch.ones(
+        values["state"].shape[0], dtype=torch.bool, device=values["state"].device
+    )
+    untouched[written] = False
+    assert untouched.any(), result.candidate.spec_id
+    assert torch.equal(
+        values["state"][untouched], before[untouched]
+    ), result.candidate.spec_id
+    assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
+    assert torch.isfinite(values["state"][written]).all(), result.candidate.spec_id
+    ref_out, ref_state = harness["ref_fp32"](spec, inputs)
+    out_err = (values["out"].float() - ref_out).abs().max().item()
+    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+    assert max(out_err, state_err) <= harness["TOL"], (
+        f"batch {batch} spec_id={result.candidate.spec_id} "
+        f"out={out_err:.3e} state={state_err:.3e}"
+    )
+
+
+@requires_gfx950
+def test_all_registry_candidates_are_correct(harness, request):
+    """Every legal default-D128 registry candidate matches the FP32 oracle."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+
+    batches = (
+        [request.config.getoption("--gdn-batch")]
+        if request.config.getoption("--gdn-batch")
+        else [1, 16, 64, 256]
+    )
+    selected_id = request.config.getoption("--gdn-spec-id")
+    launchers = {}
+    owners = {}  # compile_key -> every spec_id that used it, across ALL batches
+    for batch in batches:
+        results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
+        if selected_id:
+            results = tuple(
+                result for result in results if result.candidate.spec_id == selected_id
+            )
+            assert len(results) == 1, f"unknown or illegal spec ID {selected_id!r}"
+        else:
+            assert len(results) == 54
+        for result in results:
+            owners.setdefault(result.kernel_id.compile_key, set()).add(
+                result.candidate.spec_id
+            )
+            _assert_dispatch_result_matches_fp32(harness, result, batch, launchers)
+    # One compile per spec, shared by every batch; the key must not merge specs.
+    # Checked per key over every batch seen, so it does not depend on each batch
+    # returning the same candidate set.
+    merged = {key: ids for key, ids in owners.items() if len(ids) > 1}
+    assert not merged, f"compile_key shared by different specs: {merged}"
+    assert len(launchers) == len(owners)
+
+
+@requires_gfx950
+def test_all_d64_registry_candidates_are_correct(harness):
+    """Every explicitly selectable D64 tile is proven on device, not only auto."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+
+    results = dispatch_gdn_decode_all(
+        GdnDecodeRequest(batch=1, arch=ARCH, head_k_dim=64, head_v_dim=64)
+    )
+    assert len(results) == 20
+    for result in results:
+        _assert_dispatch_result_matches_fp32(harness, result, batch=1, launchers={})
+
+
+@requires_gfx950
+def test_dispatcher_auto_smoke(harness):
+    """Compile and launch only through the dispatcher-auto DispatchResult."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    batch = 16
+    result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
+    artifact = compile_kernel(result.build(), arch=ARCH)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=result.signature,
+    )
+    inputs = harness["make_inputs"](result.spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](result.spec, inputs)
+    written = inputs["write_indices"].long()
+    untouched = torch.ones(inputs["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert untouched.any()
+    before = inputs["state"].clone()
+    values, _ = harness["prepare"](result.spec, inputs, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+    assert torch.isfinite(values["out"]).all()
+    assert torch.isfinite(values["state"][written]).all()
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
+    assert torch.equal(values["state"][untouched], before[untouched])
 
 
 @requires_gfx950
@@ -261,11 +373,14 @@ def test_results_are_deterministic(harness):
 
 
 @requires_gfx950
-def test_state_dtype_variant_is_correct(harness):
-    """An f16 recurrent state is a distinct kernel; it must be checked too."""
+@pytest.mark.parametrize("state_dtype", ["f16", "f32"])
+@pytest.mark.parametrize("simple", [False, True])
+def test_state_dtype_variant_is_correct(harness, state_dtype, simple):
+    """Each non-default recurrent-state dtype is a distinct kernel on both
+    emitters; it must be checked too."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
-    spec = dc.replace(GdnDecodeSpec(), state_dtype="f16")
+    spec = dc.replace(GdnDecodeSpec(), state_dtype=state_dtype, simple=simple)
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
     out_err, state_err = harness["check"](spec, 8)
@@ -273,17 +388,46 @@ def test_state_dtype_variant_is_correct(harness):
 
 
 @requires_gfx950
-def test_f16_io_variant_is_correct(harness):
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["f16", "f32"])
+def test_f16_io_variant_is_correct(harness, state_dtype, gate):
     """f16 I/O is an advertised dtype -- ``is_valid_spec`` admits it -- so a
     config the validator says yes to must be numerically checked on device, not
-    just assumed. (The default path is bf16 I/O.)"""
+    just assumed. (The default path is bf16 I/O.) The f32 state is the one
+    state width whose element size differs from the I/O's."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
-    spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="f16")
+    spec = dc.replace(
+        GdnDecodeSpec(), dtype="f16", state_dtype=state_dtype, gate_kind=gate
+    )
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
     out_err, state_err = harness["check"](spec, 8)
     assert max(out_err, state_err) <= harness["TOL"]
+
+
+@requires_gfx950
+def test_f16_io_bf16_state_is_correct(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="bf16")
+    batch = 8
+    inp = harness["make_inputs"](spec, batch)
+    before = inp["state"].clone()
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    written = inp["write_indices"].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert torch.isfinite(values["out"]).all()
+    assert torch.isfinite(values["state"][written]).all()
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
+    assert torch.equal(values["state"][untouched], before[untouched])
 
 
 @requires_gfx950
@@ -353,3 +497,299 @@ def test_end_to_end_through_the_dispatch_result(harness):
         f"dispatch-driven launch disagreed with the reference: "
         f"out={out_err:.3e} state={state_err:.3e}"
     )
+
+
+# (fuse_conv, fuse_out_norm), heads (Hk, Hv). fuse_conv with Hk != Hv is a
+# request error (tested on CPU), so the conv modes run with equal heads only.
+_DISPATCH_CASES = [
+    pytest.param((False, False), (16, 16), id="plain-mha"),
+    pytest.param((False, False), (16, 32), id="plain-gqa"),
+    pytest.param((True, False), (16, 16), id="cv-mha"),
+    pytest.param((False, True), (16, 16), id="rn-mha"),
+    pytest.param((False, True), (16, 32), id="rn-gqa"),
+    pytest.param((True, True), (16, 16), id="cv_rn-mha"),
+]
+
+
+def _check_dispatched_launch(
+    harness, expect_tile=None, relative_state=False, **request
+):
+    """Dispatch ``request`` at two batches, launch each result from the
+    dispatch result alone, and check it against the fp32 reference: the
+    output, the written state, the written conv state, and every untouched
+    page of both pools. ``expect_tile`` pins the tile dispatch must pick.
+    ``relative_state`` takes the state error relative to ``max(1, |ref|)``,
+    as ``out_error`` does for the fused output, for requests whose state
+    grows past the range an absolute ``TOL`` was sized for."""
+    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    tol = harness["TOL"]
+    launchers = {}
+    for batch in (5, 64):
+        result = dispatch_gdn_decode(
+            GdnDecodeRequest(batch=batch, arch=ARCH, **request)
+        )
+        spec = result.spec
+        for field, value in request.items():
+            assert getattr(spec, field) == value, (field, getattr(spec, field))
+        if expect_tile is not None:
+            tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
+            assert tile == expect_tile, tile
+        key = result.kernel_id.compile_key
+        if key not in launchers:
+            artifact = compile_kernel(result.build(), arch=ARCH)
+            launchers[key] = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=result.signature,
+            )
+        launcher = launchers[key]
+        inp = harness["make_inputs"](spec, batch)
+        ref_out, ref_state = harness["ref_fp32"](spec, inp)
+        values, _ = harness["prepare"](spec, inp, batch)
+        cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+        with no_fence():
+            launcher(values, config=cfg)
+        torch.cuda.synchronize()
+
+        written = inp["write_indices"].long()
+        untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched[written] = False
+        assert untouched.any()
+        pools = [("state", ref_state)]
+        if spec.fuse_conv:
+            pools.append(("conv_state", ref_conv_state_after(spec, inp)))
+        out_err = out_error(spec, values["out"], ref_out)
+        assert out_err <= tol, (spec.kernel_name(), batch, out_err)
+        for name, want in pools:
+            # prepare() cloned each pool, so inp[name] is the pre-launch copy.
+            diff = (values[name].float()[written] - want).abs()
+            if relative_state and name == "state":
+                diff = diff / want.abs().clamp(min=1.0)
+            err = diff.max().item()
+            assert err <= tol, (spec.kernel_name(), batch, name, err)
+            assert torch.equal(values[name][untouched], inp[name][untouched]), name
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize("flags,heads", _DISPATCH_CASES)
+def test_request_fields_reach_the_launch(harness, gate, state_dtype, flags, heads):
+    """request -> dispatch -> spec -> launch for the f32 state and the fused
+    modes, driven only by what ``dispatch_gdn_decode`` hands back.
+
+    The request fields must reach the compiled kernel AND the launch: the
+    result's signature packs the fused tensors (``mixed_qkv`` in place of
+    q/k/v, ``conv_state`` / ``conv_weight``, ``out_gate`` / ``norm_weight``)
+    from the builder's inputs. Two batches, since KDA's unfused work table may
+    pick a different tile for each.
+    """
+    conv, norm = flags
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1) if conv or norm else None,
+        gate_kind=gate,
+        num_k_heads=heads[0],
+        num_v_heads=heads[1],
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param((True, False), id="cv"),
+        pytest.param((True, True), id="cv_rn"),
+    ],
+)
+def test_kda_fused_request_reaches_kimi_head_shape(harness, state_dtype, flags):
+    """KDA's real fused-conv deployment shape has Hk == Hv == 32, not 16.
+
+    The generic dispatch matrix above proves the fused ABI at a smaller MHA
+    shape; this pins the request-routed KDA/Kimi head count that the docs name.
+    """
+    conv, norm = flags
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1),
+        gate_kind="kda",
+        num_k_heads=32,
+        num_v_heads=32,
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("gate", ["gdn", "kda"])
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+def test_request_fields_reach_the_launch_without_qk_l2norm(harness, gate, state_dtype):
+    """A fused request with the q/k L2 norm off runs at the fused default.
+
+    Raw (unnormalized) k lets one update grow the state to |S| ~ 18 at these
+    inputs (about 2.5 with the norm on). There one correctly rounded bf16
+    store alone moves a value by up to 0.0625, more than ``TOL``, so the state
+    error is taken relative to ``max(1, |ref|)``, like ``out_error``'s."""
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1),
+        relative_state=True,
+        gate_kind=gate,
+        num_k_heads=16,
+        num_v_heads=16,
+        state_dtype=state_dtype,
+        use_qk_l2norm=False,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+
+
+@requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+def test_request_fields_reach_the_launch_at_the_fused_d64_fallback(
+    harness, state_dtype
+):
+    """GDN D64 cannot run the fused default (it needs head_k_dim % 128 == 0),
+    so dispatch falls back to (1, 1, 1); that tile must still be correct."""
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(1, 1, 1),
+        gate_kind="gdn",
+        num_k_heads=16,
+        num_v_heads=16,
+        head_k_dim=64,
+        head_v_dim=64,
+        state_dtype=state_dtype,
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+
+
+@requires_gfx950
+def test_mismatched_write_skip_leaves_state_untouched(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch, lane = GdnDecodeSpec(), 8, 2
+    inp = harness["make_inputs"](spec, batch)
+    skipped_write = int(inp["write_indices"][lane])
+    inp["write_indices"][lane] = -1
+    before = inp["state"].clone()
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    active_writes = inp["write_indices"][inp["write_indices"] >= 0].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[active_writes] = False
+    assert untouched[skipped_write]
+    assert torch.equal(values["state"][untouched], before[untouched])
+    assert torch.equal(values["out"][lane], torch.zeros_like(values["out"][lane]))
+
+
+@requires_gfx950
+def test_paged_reorder_matches_reference(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    inp["read_indices"] = inp["read_indices"].flip(0).contiguous()
+    inp["write_indices"] = inp["write_indices"].roll(3).contiguous()
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    before = inp["state"].clone()
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+    written = inp["write_indices"].long()
+    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    untouched[written] = False
+    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
+    assert torch.equal(values["state"][untouched], before[untouched])
+
+
+@requires_gfx950
+def test_two_step_continuation(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    inp["write_indices"] = inp["read_indices"].clone()
+    launcher = harness["launcher_for"](spec)
+    for _ in range(2):
+        ref_out, ref_state = harness["ref_fp32"](spec, inp)
+        before = inp["state"].clone()
+        values, cfg = harness["prepare"](spec, inp, batch)
+        harness["launch"](launcher, values, cfg)
+        torch.cuda.synchronize()
+        written = inp["write_indices"].long()
+        untouched = torch.ones(
+            values["state"].shape[0], dtype=torch.bool, device="cuda"
+        )
+        untouched[written] = False
+        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+        assert (
+            values["state"].float()[written] - ref_state
+        ).abs().max().item() <= harness["TOL"]
+        assert torch.equal(values["state"][untouched], before[untouched])
+        inp = dict(inp, state=values["state"].clone())
+
+
+@requires_gfx950
+def test_state_reset_is_bit_exact(harness):
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec, batch = GdnDecodeSpec(), 16
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    launcher = harness["launcher_for"](spec)
+    outputs = []
+    for _ in range(2):
+        before = inp["state"].clone()
+        values, cfg = harness["prepare"](spec, inp, batch)
+        harness["launch"](launcher, values, cfg)
+        torch.cuda.synchronize()
+        written = inp["write_indices"].long()
+        untouched = torch.ones(
+            values["state"].shape[0], dtype=torch.bool, device="cuda"
+        )
+        untouched[written] = False
+        assert torch.isfinite(values["out"]).all()
+        assert torch.isfinite(values["state"][written]).all()
+        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
+        assert (
+            values["state"].float()[written] - ref_state
+        ).abs().max().item() <= harness["TOL"]
+        assert torch.equal(values["state"][untouched], before[untouched])
+        outputs.append((values["out"].clone(), values["state"].clone()))
+    assert torch.equal(outputs[0][0], outputs[1][0])
+    assert torch.equal(outputs[0][1], outputs[1][1])
+
+
+@requires_gfx950
+def test_repeated_checks_do_not_retain_device_memory(harness):
+    """`launch` enqueues under ``no_fence()``, which keeps every launch's tensors
+    alive until the stream is released. A caller that only synchronizes keeps
+    them all: a full tile sweep ran the device out of memory that way. After
+    ``check`` returns, nothing it launched may still be holding device memory.
+    """
+    import torch
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = GdnDecodeSpec()
+    harness["check"](spec, 64)  # compile and allocator warm-up
+    torch.cuda.empty_cache()
+    baseline = torch.cuda.memory_allocated()
+    for _ in range(5):
+        harness["check"](spec, 64)
+    torch.cuda.empty_cache()
+    assert torch.cuda.memory_allocated() <= baseline

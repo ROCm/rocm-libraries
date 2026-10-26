@@ -1,5 +1,8 @@
 # TRANSFORM_DAG.md — Coordinate-Transform DAG over SSA Values
 
+> The tiling layer's coordinate graph is documented in [`tensor_transforms_api.md`](../../python/rocke/helpers/tiling/docs/tensor_transforms_api.md); this doc
+> covers `helpers/transforms.py`.
+
 The `rocke.helpers.transforms` module is the Python counterpart of CK Tile's
 `tensor_descriptor` + `transform_tensor_descriptor` machinery. It's
 the cleanest way to express convolution, attention, and reduction

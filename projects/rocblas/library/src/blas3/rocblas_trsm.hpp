@@ -73,6 +73,34 @@ inline rocblas_status rocblas_trsm_arg_check(rocblas_handle    handle,
     return rocblas_status_continue;
 }
 
+/**************************************************************************
+* The returned status already reports the error, so print details only   *
+* when requested                                                         *
+**************************************************************************/
+inline void rocblas_trsm_print_if_verbose(const rocblas_internal_ostream& msg)
+{
+    static constexpr char varname[] = "ROCBLAS_VERBOSE_ERROR";
+    static const char*    verbose   = getenv(varname);
+    if(verbose)
+    {
+        rocblas_cerr << std::endl << msg << std::endl;
+    }
+}
+
+template <typename... Ss>
+inline void rocblas_internal_trsm_workspace_error(rocblas_handle handle, Ss... sizes)
+{
+    if(rocblas_is_managing_device_memory(handle))
+        return;
+    rocblas_internal_ostream msg;
+    rocblas_trsm_print_if_verbose(
+        msg << "rocBLAS error: Device memory allocation size is too small for TRSM; "
+            << (roundup_device_memory_size(sizes) + ...) << " bytes required, "
+            << handle->get_available_workspace()
+            << " bytes available; increase the workspace, or set a 0-byte workspace to let "
+               "rocBLAS manage it");
+}
+
 template <typename T, typename U>
 rocblas_status set_block_unit(rocblas_handle handle,
                               int64_t        m,

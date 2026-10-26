@@ -15,9 +15,8 @@ backend therefore selects the same shared constants for both, while exposing
 distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
 ``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
 asserts it against the encoder's representable field width
-(:data:`ISABackend._VMCNT_ENCODER_BITS`), so genuinely divergent codegen (e.g.
-gfx908, or a future target whose VMCNT field is wider than the current 6-bit
-encoders emit) fails loudly here instead of silently truncating a partial wait
+(:data:`ISABackend._VMCNT_ENCODER_BITS`), so a future target whose VMCNT
+field is wider than the current 6-bit encoders emit fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
@@ -32,6 +31,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
+from ..ir import I32, Op, VectorType
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -88,9 +88,8 @@ class ISABackend:
     # Widest VMCNT field this backend's encoder can physically represent. The
     # gfx9/10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) emits a
     # 6-bit value; the RDNA contiguous layout (``[15:10]``) is also 6-bit. This
-    # is the *encoder capability*, distinct from any one arch's declared
-    # ``vmcnt_bits`` -- e.g. gfx942 declares a 4-bit field but is lowered
-    # through this 6-bit-capable encoder (HW-verified on MI300X). The guard in
+    # is the *encoder capability*, distinct from any one arch's ``vmcnt_bits``
+    # (the hardware field width; 6 on every target wired today). The guard in
     # :meth:`encode_waitcnt` consults ``arch.vmcnt_bits`` so a future target
     # whose field is *wider* than the encoder can emit fails loudly instead of
     # silently truncating a wait into a full VMEM drain.
@@ -133,9 +132,15 @@ class ISABackend:
         which calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
         (WMMA is an RDNA-only instruction).
         """
-        from ..ir import Op
-
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
+        if gfx1250_scaled_wmma(op_id) is not None:
+            self.emit_scaled_wmma(lowerer, op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -156,6 +161,15 @@ class ISABackend:
         return True
 
     @property
+    def has_fp8_scale_conversion(self) -> bool:
+        """Whether the target has the fused scale-and-convert fp8/bf8
+        instructions (``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``). Only gfx950
+        overrides this to ``True``. Elsewhere LLVM may still select the
+        intrinsic and write an encoding the GPU does not have, so the lowerer
+        refuses the ops rather than emitting them."""
+        return False
+
+    @property
     def has_async_lds_counter(self) -> bool:
         """Whether the target has the gfx1250 dedicated async-DMA counter
         (``s_wait_asynccnt`` + ``global_load_async_to_lds``). Only gfx1250
@@ -168,19 +182,15 @@ class ISABackend:
         transpose-LDS read (logical element ``elem_type``) used to feed the
         MFMA/WMMA B operand.
 
-        Default is the gfx950 ``ds_read_b128_tr_b16`` whose intrinsic returns a
-        type-agnostic ``<8 x i16>``; the lowerer bitcasts those raw 16-bit lanes
-        to the requested ``half`` / ``bfloat`` element, so a single spec serves
-        both f16 and bf16. gfx1250 (gfx1250) overrides with an
-        element-type-specific ``ds_load_tr16_b128`` intrinsic (its wave32
-        per-lane data distribution also differs — kernels must use the layout
-        appropriate to the target). Fail fast for any unsupported element."""
-        if elem_type not in ("f16", "fp16", "bf16"):
-            raise NotImplementedError(
-                f"ds_read_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
-                f"got elem_type={elem_type!r}"
-            )
-        return ("ds.read.tr16.b128", "llvm.amdgcn.ds.read.tr16.b128", "<8 x i16>")
+        Only gfx1250 overrides this, with an element-type-specific
+        ``ds_load_tr16_b128`` intrinsic. No other target has a wide transpose
+        read, and LLVM has no ``llvm.amdgcn.ds.read.tr16.b128``, so the default
+        raises instead of declaring an intrinsic that cannot link. Use two
+        ``ds_read_tr16_b64`` reads on gfx950."""
+        raise NotImplementedError(
+            f"ds_read_tr16_b128 is not available on {self.arch.gfx}: LLVM has no "
+            "ds.read.tr16.b128 intrinsic; use ds_read_tr16_b64"
+        )
 
     def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
         """Emit the memory wait that must precede an LDS workgroup barrier.
@@ -203,6 +213,51 @@ class ISABackend:
             f"(WMMA is an RDNA/gfx11 instruction; this is a CDNA/MFMA target)"
         )
 
+    def emit_scaled_wmma(self, lowerer, op) -> None:
+        """Emit a SCALE/SCALE16 WMMA call for a ``tile.mma`` op.
+
+        The op lowers on any target whose MMA catalog lists its atom and is
+        refused on every other target -- the rule the C++ engine applies too.
+        The intrinsic comes from the resolved operand contract.
+        """
+        spec = gfx1250_scaled_wmma(op.attrs["op_id"])
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        name = f"tile.{spec.op_id}"
+        if self.arch.mma.by_op_id(spec.op_id) is None:
+            raise NotImplementedError(
+                f"{name} is not available on {self.arch.gfx}: "
+                "its MMA catalog does not list it"
+            )
+        if lowerer._flavor != "llvm23":
+            raise NotImplementedError(
+                f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
+            )
+        if len(op.operands) != 5:
+            raise ValueError(f"{name} expects 5 operands, got {len(op.operands)}")
+        # Declarations describe physical signatures, independently of matrix encodings.
+        signature = ScaledWmmaLLVM(spec)
+        decl_key = signature.declaration_key
+        intrinsic = signature.intrinsic
+        scale_ty = signature.scale_type
+        fmt0, fmt1 = spec.matrix_formats
+        a, b, c, a_scale, b_scale = op.operands
+        if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
+            raise ValueError(
+                f"{name} expects {scale_ty} scale operands, got "
+                f"{a_scale.type.name}/{b_scale.type.name}"
+            )
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i1 false, i1 false)"
+        )
+
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"{type(self).__name__}(gfx={self.arch.gfx})"
 
@@ -211,6 +266,11 @@ class Gfx950Backend(ISABackend):
     """CDNA4 / MI350-MI355. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
     160 KB LDS. This is the historical default; its output is the byte-identical
     baseline."""
+
+    @property
+    def has_fp8_scale_conversion(self) -> bool:
+        # gfx950 added ``v_cvt_scalef32_pk_f32_fp8`` / ``_bf8``.
+        return True
 
 
 class Gfx9MfmaBackend(ISABackend):
@@ -359,9 +419,15 @@ class Gfx11RdnaBackend(ISABackend):
         name-keyed lookup keeps working, then emits the WMMA call. This is the
         RDNA half of the neutral-MMA contract; the CDNA base emits MFMA.
         """
-        from ..ir import Op
-
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
+        if gfx1250_scaled_wmma(op_id) is not None:
+            self.emit_scaled_wmma(lowerer, op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -416,15 +482,16 @@ class Gfx11RdnaBackend(ISABackend):
         verified empirically on gfx11-generic (iu8 GEMM probe): passing ``0``
         made the unit compute the **unsigned** dot product (all-positive
         results matching ``A.view(uint8) @ B.view(uint8).T``). Our quantized
-        data is signed, so both flags are ``1``. Operands arrive as
-        ``<N x i32>`` in SSA (int8/int4 packed into i32), so no bitcast is
-        needed; values stay within i32 range -> ``clamp = 0`` (exact wrap).
+        data is signed, so both flags are ``1``. A and B are passed as the
+        intrinsic's ``<N x i32>``; packed bytes of the same width (for example
+        ``<16 x i8>``) are reinterpreted with one bitcast. Values stay within
+        i32 range -> ``clamp = 0`` (exact wrap).
         """
         decl_key, intrinsic, op_vec, acc_vec = spec
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
-        a_arg = lowerer._operand(a)
-        b_arg = lowerer._operand(b)
+        a_arg = lowerer._mma_operand(op, "a", VectorType(I32, op_vec))
+        b_arg = lowerer._mma_operand(op, "b", VectorType(I32, op_vec))
         c_arg = lowerer._operand(c)
         lowerer._current().emit(
             f"  {op.result.name} = call <{acc_vec} x i32> @{intrinsic}("
@@ -560,10 +627,6 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
 
     def emit_wmma(self, lowerer, op) -> None:
-        scale_spec = gfx1250_scaled_wmma(op.name)
-        if scale_spec is not None:
-            self._emit_wmma_scale(lowerer, op)
-            return
         fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
         if fp8_spec is not None:
             self._emit_wmma_fp8(lowerer, op, fp8_spec)
@@ -597,52 +660,21 @@ class Gfx1250Backend(Gfx12RdnaBackend):
     def _emit_wmma_fp8(self, lowerer, op, spec) -> None:
         """Emit a gfx1250 K=64 FP8/BF8 WMMA call.
 
-        The A/B fragments arrive in SSA as ``<8 x i32>`` (32 low-bit bytes per
-        lane). The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the
-        format / reuse immediates pinned to 0 (plain unscaled MMA).
+        A and B are passed as the intrinsic's ``<8 x i32>`` (32 low-bit bytes
+        per lane); a ``<32 x i8>`` fragment is reinterpreted with one bitcast.
+        The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the format /
+        reuse immediates pinned to 0 (plain unscaled MMA).
         """
         decl_key, intrinsic = spec
-        a, b, c = op.operands
+        c = op.operands[2]
         lowerer._need(decl_key)
+        a_arg = lowerer._mma_operand(op, "a", VectorType(I32, 8))
+        b_arg = lowerer._mma_operand(op, "b", VectorType(I32, 8))
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"<8 x i32> {lowerer._operand(a)}, "
-            f"<8 x i32> {lowerer._operand(b)}, "
+            f"<8 x i32> {a_arg}, "
+            f"<8 x i32> {b_arg}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i1 false, i1 false)"
-        )
-
-    def _emit_wmma_scale(self, lowerer, op) -> None:
-        """Emit the gfx1250 SCALE/SCALE16 intrinsic using the resolved operand contract."""
-        if lowerer._flavor != "llvm23":
-            raise NotImplementedError(
-                f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
-            )
-        if len(op.operands) != 5:
-            raise ValueError(f"{op.name} expects 5 operands, got {len(op.operands)}")
-        spec = gfx1250_scaled_wmma(op.name)
-        if spec is None:
-            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
-        # Declarations describe physical signatures, independently of matrix encodings.
-        signature = ScaledWmmaLLVM(spec)
-        decl_key = signature.declaration_key
-        intrinsic = signature.intrinsic
-        scale_ty = signature.scale_type
-        fmt0, fmt1 = spec.matrix_formats
-        a, b, c, a_scale, b_scale = op.operands
-        if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
-            raise ValueError(
-                f"{op.name} expects {scale_ty} scale operands, got "
-                f"{a_scale.type.name}/{b_scale.type.name}"
-            )
-        lowerer._need(decl_key)
-        lowerer._current().emit(
-            f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
-            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
-            f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 
@@ -666,6 +698,7 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx1201": Gfx12RdnaBackend,
     "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
+    "gfx12-generic": Gfx12RdnaBackend,
 }
 
 

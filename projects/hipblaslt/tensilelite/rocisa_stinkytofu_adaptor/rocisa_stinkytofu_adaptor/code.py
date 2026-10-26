@@ -2089,7 +2089,7 @@ class _SignatureKernelDescriptor(Item):
             f"{kd_indent}.amdhsa_group_segment_fixed_size {self.groupSegSize}"
             " // lds bytes\n"
         )
-        if self.getArchCaps()["HasWave32"]:
+        if self.getArchCaps()["HasWavefrontSize32Directive"]:
             wavefront = self.kernel().wavefrontSize
             if wavefront == 32:
                 out += (

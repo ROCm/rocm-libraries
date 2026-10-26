@@ -3,9 +3,11 @@
 """Launch gfx1250 block-scaled GEMM and compare with an independent reference.
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
-Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use FP8/BF8 and E8M0
-scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
-bounded dyadic values, permitting exact comparison after BF16 rounding.
+Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use independent FP8/BF8, FP6/BF6, or FP4 operands and
+encoded scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
+bounded dyadic values, permitting exact comparison after output-type rounding.
+Numerical equality treats positive and negative zero as equal; output zero-sign
+and signed-zero accumulation semantics are not verified.
 
 Run on visible HIP device 0 (must be gfx1250), for example::
 
@@ -27,9 +29,9 @@ import struct
 
 import numpy as np
 
+from ....core.dtypes import normalize_dtype
 from ....helpers import compile_kernel
 from ....helpers.compile import compile_kernel_via_hipcc
-from ....core.dtypes import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import (
     _LOWBIT_DTYPES,
     BlockScaledGemmSpec,
@@ -39,106 +41,33 @@ from ....instances.gfx1250.block_scaled_gemm import (
 )
 from ....runtime.hip_module import Runtime, get_device_arch
 
+# Keep the reference helpers importable from this established example module.
+from ...common.scaled_gemm_reference import (
+    _output_dtype,
+    check_result,
+    decode_e8m0,
+    decode_fp4,
+    decode_fp6,
+    decode_scale,
+    make_case_inputs,
+    pack_fp4_codes,
+    pack_fp6_codes,
+    reference_result,
+)
 
-def decode_e8m0(encoded: np.ndarray) -> np.ndarray:
-    """Decode finite unsigned E8M0 bytes without using kernel packing logic."""
-    if encoded.dtype != np.uint8 or np.any(encoded == 0xFF):
-        raise ValueError("expected finite uint8 E8M0 scales (0xff encodes NaN)")
-    return np.ldexp(np.ones(encoded.shape), encoded.astype(np.int32) - 127)
-
-
-def reference_result(
-    a: np.ndarray,
-    b: np.ndarray,
-    a_scale: np.ndarray,
-    b_scale: np.ndarray,
-    block_k: int,
-    *,
-    native: bool,
-) -> np.ndarray:
-    """Expand scales onto logical A/B elements, multiply, then round to BF16.
-
-    The native fixtures use quarter-integer inputs of magnitude <=1 and
-    scales 2**[-2,3]. At K<=256, even the sum of absolute products fits in
-    2**22 units of 2**-8, so every FP32 partial sum is exact. Float64 host
-    arithmetic and a single BF16 rounding provide an independent oracle.
-    """
-    import ml_dtypes
-
-    sa = decode_e8m0(a_scale) if native else a_scale.astype(np.float64)
-    sb = decode_e8m0(b_scale) if native else b_scale.astype(np.float64)
-    scaled_a = a.astype(np.float64) * np.repeat(sa, block_k, axis=1)
-    scaled_b = b.astype(np.float64) * np.repeat(sb.T, block_k, axis=1)
-    ref = scaled_a @ scaled_b.T
-    if native:
-        ref = ref.astype(ml_dtypes.bfloat16)
-    return ref.astype(np.float32)
-
-
-def make_case_inputs(
-    spec: BlockScaledGemmSpec, case: str
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Create asymmetric mantissas and scales, optionally isolating a K group."""
-    import ml_dtypes
-
-    native = spec.resolved_matrix_path() != "wmma"
-    if native and spec.K not in (128, 256):
-        raise ValueError("exact native fixtures require K=128 or K=256")
-    groups = spec.K // spec.block_k
-    lowbit_types = {
-        "fp8": ml_dtypes.float8_e4m3fn,
-        "fp8e4m3": ml_dtypes.float8_e4m3fn,
-        "bf8": ml_dtypes.float8_e5m2,
-        "bf8e5m2": ml_dtypes.float8_e5m2,
-    }
-    rng = np.random.default_rng(0xB10C)
-    magnitude = 0.25 if native else 0.5
-    a = (rng.integers(-4, 5, size=(spec.M, spec.K)) * magnitude).astype(
-        lowbit_types[spec.dtype_a]
-    )
-    b = (rng.integers(-4, 5, size=(spec.N, spec.K)) * magnitude).astype(
-        lowbit_types[spec.dtype_b]
-    )
-    if native:
-        sa = rng.integers(125, 131, size=(spec.M, groups), dtype=np.uint8)
-        sb = rng.integers(125, 131, size=(groups, spec.N), dtype=np.uint8)
-        neutral = 127
-    else:
-        sa = rng.uniform(0.5, 1.5, size=(spec.M, groups)).astype(np.float32)
-        sb = rng.uniform(0.5, 1.5, size=(groups, spec.N)).astype(np.float32)
-        neutral = 1.0
-    if case in ("neutral", "b-only"):
-        sa.fill(neutral)
-    if case in ("neutral", "a-only"):
-        sb.fill(neutral)
-    if case.startswith("group-"):
-        group = int(case.removeprefix("group-"))
-        if not 0 <= group < groups:
-            raise ValueError(f"scale group {group} outside [0, {groups})")
-        active = (np.arange(spec.K) // spec.block_k) == group
-        a[:, ~active] = 0
-        b[:, ~active] = 0
-    elif case not in ("neutral", "a-only", "b-only", "mixed"):
-        raise ValueError(f"unknown verification case {case!r}")
-    return a, b, sa, sb
-
-
-def check_result(
-    got: np.ndarray, expected: np.ndarray, *, exact: bool, tol: float = 2e-2
-) -> None:
-    """Fail on incomplete/non-finite output or a numerical mismatch."""
-    if got.shape != expected.shape:
-        raise AssertionError(f"output shape {got.shape} != {expected.shape}")
-    if not np.isfinite(expected).all() or not np.isfinite(got).all():
-        raise AssertionError("unexpected non-finite output or reference")
-    diff = np.abs(got.astype(np.float64) - expected.astype(np.float64))
-    bad = got != expected if exact else diff > tol * np.maximum(np.abs(expected), 1)
-    if np.any(bad):
-        worst = np.unravel_index(int(np.argmax(diff)), diff.shape)
-        raise AssertionError(
-            f"bad={np.count_nonzero(bad)}/{diff.size}; worst={worst}: "
-            f"got={got[worst]}, expected={expected[worst]}, diff={diff[worst]}"
-        )
+__all__ = [
+    "check_result",
+    "decode_e8m0",
+    "decode_fp4",
+    "decode_fp6",
+    "decode_scale",
+    "main",
+    "make_case_inputs",
+    "pack_fp4_codes",
+    "pack_fp6_codes",
+    "reference_result",
+    "run_cases",
+]
 
 
 def _u8_buffer(array: np.ndarray):
@@ -147,10 +76,10 @@ def _u8_buffer(array: np.ndarray):
 
 
 def _launch(rt, fn, spec, inputs):
-    import ml_dtypes
+    output_dtype = _output_dtype(spec.dtype_c)
 
     # A NaN sentinel makes missing output stores fail, including expected zeros.
-    out = np.full((spec.M, spec.N), np.nan, dtype=ml_dtypes.bfloat16)
+    out = np.full((spec.M, spec.N), np.nan, dtype=output_dtype)
     allocations = []
     try:
         for array in (*inputs, out):
@@ -163,7 +92,7 @@ def _launch(rt, fn, spec, inputs):
         host_out = (ctypes.c_uint8 * int(out.nbytes))()
         rt.memcpy_d2h(host_out, allocations[-1], out.nbytes)
         return (
-            np.frombuffer(bytes(host_out), dtype=ml_dtypes.bfloat16)
+            np.frombuffer(bytes(host_out), dtype=output_dtype)
             .reshape(spec.M, spec.N)
             .astype(np.float32)
         )
@@ -183,8 +112,6 @@ def run_cases(
     ok, reason = is_valid_spec(spec, arch="gfx1250")
     if not ok:
         raise ValueError(reason)
-    if spec.dtype_c != "bf16":
-        raise ValueError("this verifier requires BF16 output")
     native = spec.resolved_matrix_path() != "wmma"
     if native and spec.K not in (128, 256):
         raise ValueError("exact native fixtures require K=128 or K=256")
@@ -211,10 +138,20 @@ def run_cases(
         fn = module.get_function(art.kernel_name)
         for case in cases:
             inputs = make_case_inputs(spec, case)
-            expected = reference_result(*inputs, spec.block_k, native=native)
+            da, db = spec.resolved_scale_dtypes()
+            expected = reference_result(
+                *inputs,
+                spec.block_k,
+                native=native,
+                dtype_a=spec.dtype_a,
+                dtype_b=spec.dtype_b,
+                dtype_c=spec.dtype_c,
+                scale_dtype_a=da,
+                scale_dtype_b=db,
+            )
             label = (
-                f"{spec.resolved_matrix_path()}/{spec.dtype_a}/{compile_route}/{case} "
-                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
+                f"{spec.resolved_matrix_path()}/{spec.dtype_a}x{spec.dtype_b}/{compile_route}/{case} "
+                f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k} scales={da}/{db}"
             )
             got = _launch(rt, fn, spec, inputs)
             try:
@@ -247,6 +184,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--compile-route", default="comgr", choices=("comgr", "hip"))
     p.add_argument(
+        "--prefetch",
+        action="store_true",
+        help="add the data-prefetch hints (llvm23); results must not change",
+    )
+    p.add_argument(
         "--case",
         default="mixed",
         help="mixed, neutral, a-only, b-only, group-N, or all (including every K group)",
@@ -267,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         scale_dtype="e8m0" if native else "fp32",
         block_k=block_k,
         matrix_path=args.matrix_path,
+        prefetch=args.prefetch,
     )
     ok, reason = is_valid_spec(spec, arch=args.arch)
     if not ok:

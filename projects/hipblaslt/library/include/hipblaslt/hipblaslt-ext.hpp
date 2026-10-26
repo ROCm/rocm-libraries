@@ -74,7 +74,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Set the maximum workspace size in bytes.
+         *  workspaceBytes  Set the maximum workspace size in bytes. algoGetHeuristic clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -185,6 +186,9 @@ namespace hipblaslt_ext
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute data type.
         HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A matrix data order.
         HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
+        //! Set the int4 encoding of A (C API: HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT).
+        //! Throws std::invalid_argument for values outside hipblasLtInt4Encoding_t.
+        HIPBLASLT_EXPORT void setInt4EncodingA(hipblasLtInt4Encoding_t encoding);
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -195,6 +199,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute data type.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
         HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
+        HIPBLASLT_EXPORT hipblasLtInt4Encoding_t
+            getInt4EncodingA() const; //!< How the int4 weights in A are encoded.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
@@ -323,7 +329,7 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleC(const void* scaleC); //!< Set the scale C input pointer.
         HIPBLASLT_EXPORT void setScaleD(const void* scaleD); //!< Set the scale D input pointer.
         HIPBLASLT_EXPORT void
-            setScaleAux(const void* scaleAux); //!< Set the scale aux input pointer.
+            setScaleAux(const void* scaleAux); //!< Not supported; setProblem refuses non-NULL.
         HIPBLASLT_EXPORT void setScaleAlphaVec(
             const void* scaleAlphaVec); //!< Set the scaleAlpha vector input pointer.
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
@@ -430,11 +436,12 @@ namespace hipblaslt_ext
         *  @param[out]
         *  heuristicResults    The algorithm heuristic vector.
         *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies whether
-        * heuristicResults.size > 0 but could have heuristicResults.size < requestedAlgoCount
-        * as a valid state for the status. \retval HIPBLAS_STATUS_NOT_SUPPORTED
+        *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+        * heuristicResults can hold fewer than requestedAlgoCount results, and is empty when
+        * no solution is found. \retval HIPBLAS_STATUS_NOT_SUPPORTED
         * If no heuristic function is available for the current configuration.
-        * \retval HIPBLAS_STATUS_INVALID_VALUE If no solution is found.
+        * \retval HIPBLAS_STATUS_INVALID_VALUE If no problem has been set on this object,
+        * requestedAlgoCount is less than 1, or the solution library could not be loaded.
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t
@@ -488,7 +495,8 @@ namespace hipblaslt_ext
          *  \brief This function sets the maximum workspace size.
          *
          *  @param[in]
-         *  workspaceBytes  Sets the maximum workspace size in bytes.
+         *  workspaceBytes  Sets the maximum workspace size in bytes. initialize clamps
+         *  values above ``UINT32_MAX`` (4 GiB - 1) to ``UINT32_MAX``.
          */
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
@@ -1094,11 +1102,11 @@ namespace hipblaslt_ext
      *  @param[out]
      *  heuristicResults The algorithm heuristic vector.
      *
-     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. Verifies that
-     * returnedAlgoCount > 0 to determine the status of the
-     * results. \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
+     *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful.
+     * heuristicResults is empty when no solution is found.
+     * \retval HIPBLAS_STATUS_NOT_SUPPORTED     If no heuristic function is
      * available for the current configuration. \retval HIPBLAS_STATUS_INVALID_VALUE If
-     * no solution is found.
+     * the solution library could not be loaded.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t getAllAlgos(hipblasLtHandle_t                              handle,

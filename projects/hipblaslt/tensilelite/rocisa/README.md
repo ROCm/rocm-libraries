@@ -35,7 +35,7 @@ incremental rebuild is explicitly desired.
 
 ## Rebuilding after C++ changes
 
-See [tensilelite/README.md — "Rebuilding rocisa after C++ changes"](../README.md#rebuilding-rocisa-after-c-changes)
+See [tensilelite/README.md — "Rebuilding after C++ changes"](../README.md#rebuilding-after-c-changes)
 for the full rebuild instructions, including which cmake build directory to use
 depending on how rocisa was installed.
 

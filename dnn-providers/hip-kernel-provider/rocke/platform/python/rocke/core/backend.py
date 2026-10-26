@@ -257,18 +257,17 @@ def _lower_via_cpp_engine(
     Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
     the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
     before handing it to the engine, rather than passing ``""`` (engine
-    AUTO). The C99 engine's own AUTO resolver only consults
-    ``$ROCKE_LLVM_FLAVOR`` -> ``/opt/rocm/.info/version`` -> default
-    llvm22; it cannot portably introspect ``torch.version.hip``. The Python
-    autodetector adds the torch step in between, which is what the bundled
-    comgr actually keys off. Resolving here makes ``backend="cpp"`` pick the
-    SAME flavor as ``backend="python"`` on a torch-rocm box where
-    ``/opt/rocm`` is absent or a different vintage; without it the two
-    backends emit non-byte-identical IR unless ``ROCKE_LLVM_FLAVOR`` is
-    forced. An explicit ``llvm_flavor`` argument still overrides. On a
-    torch-less box the torch step returns ``None`` and the Python resolver
-    falls through to ``/opt/rocm`` / default exactly as the engine would,
-    so behaviour is unchanged.
+    AUTO). Python queries the COMGR handle retained by its runtime, while
+    standalone native AUTO discovers and queries its own retained candidate.
+    Passing the Python-resolved flavor keeps ``backend="cpp"`` and
+    ``backend="python"`` aligned with the compiler selected by the Python
+    runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
+    argument still overrides automatic selection and supports offline emission.
+    Both core resolvers reject automatic selection when compiler evidence is
+    unavailable; offline emission requires an explicit flavor.
+    A native caller that owns a separate compilation stage must
+    pass a flavor matching its compiler; native AUTO does not share its private
+    handle with that stage.
 
     Raises :class:`BackendError` if the engine extension is unavailable.
     """
@@ -301,6 +300,21 @@ def _lower_via_cpp_engine(
                 f"it (the .so predates the opcode). Loaded from: {so}"
             ) from e
         raise
+
+
+def _effective_flavor(llvm_flavor: Optional[str]) -> str:
+    """The flavor one lowering runs at: the caller's, else what discovery says now.
+
+    Resolved once per lowering and handed to every stage that needs it. Compiler
+    discovery is retryable, so a stage that resolves for itself can land on a
+    different flavor than the one that lowered the IR, and the arch-domain check
+    would then read the wrong column.
+    """
+    if llvm_flavor is not None:
+        return llvm_flavor
+    from .lower_llvm import _resolve_llvm_flavor
+
+    return _resolve_llvm_flavor()
 
 
 def lower_kernel_via_backend(
@@ -337,12 +351,27 @@ def lower_kernel_via_backend(
         back IR that nothing compared while the caller asked for a comparison,
         which is exactly the vacuous green this mode exists to prevent.
     """
+    # Validated here, at the dispatcher every lowering passes through
+    # (lower_kernel_to_llvm, compile_kernel and the per-family wrappers all do),
+    # so a misspelled ROCKE_ARCH_DOMAIN raises for every kernel on every backend.
+    # The Python lowerer reads the mode only for a kernel that demands an
+    # intrinsic and the C++ path only in its post-pass, so one bad value used to
+    # raise for some kernels and some backends and be ignored by the rest.
+    from .lower_llvm import _arch_domain_mode
+
+    _arch_domain_mode()
+
     chosen = resolve_backend()
 
     if chosen == BACKEND_PYTHON:
         return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    _arch = arch or "gfx950"
+    if arch is None:
+        raise ValueError(
+            "lowering requires an explicit gfx target; "
+            "pass arch=... (there is no default)"
+        )
+    _arch = arch
     name = getattr(kernel, "name", "?")
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
@@ -351,12 +380,22 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
-            return _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+            flavor = _effective_flavor(llvm_flavor)
+            out = _lower_via_cpp_engine(ir_text, _arch, flavor)
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
             _record_fallback(name, f"{type(e).__name__}: {e}")
+            # No post-pass: the fallback runs the Python lowerer, whose `_need`
+            # already runs the lane. Adding one here would warn twice.
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+        # The arch-domain lane lives in `_Lowerer._need`, so a successful C++
+        # lowering is the only exit here that never runs it -- and it is the
+        # default path.
+        from .lower_llvm import check_arch_domain_in_ir
+
+        check_arch_domain_in_ir(out, _arch, flavor)
+        return out
 
     # both: differential gate, and the one mode that never falls back. Handing
     # back ``py_ll`` when the C++ engine failed would report a kernel nothing
@@ -366,10 +405,13 @@ def lower_kernel_via_backend(
     # layer can count it as a skip; anything else surfaces unchanged, including
     # ValueError (both engines validate an explicit flavor against the same
     # table, so one rejecting what the other accepted is a real defect).
-    py_ll = python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+    # One flavor for both engines: each resolving for itself could compare IR
+    # lowered at two different flavors and report the gap as a parity failure.
+    flavor = _effective_flavor(llvm_flavor)
+    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
     ir_text = serialize(kernel)
     try:
-        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError
@@ -536,7 +578,7 @@ class GemmLowerResult:
 def lower_universal_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> GemmLowerResult:
@@ -835,6 +877,7 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
         pW=p.pW,
         dH=p.dH,
         dW=p.dW,
+        groups=getattr(p, "groups", 1),
     )
     for f in ("Di", "Z", "sD", "pD", "dD"):
         v = getattr(p, f, None)
@@ -870,6 +913,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         chiplet_chunk_size=spec.chiplet_chunk_size,
         k0_k1_split=spec.k0_k1_split,
         groups=spec.groups,
+        # Changes the emitted kernel and its launch grid; dropped, the engine
+        # would build an unmerged kernel under a merged spec's name and grid.
+        group_merge=getattr(spec, "group_merge", 1),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the
@@ -892,9 +938,14 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 
 def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
-    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` -> flat dict.
-    ``kind`` ("16c"|"4c") selects the binding's spec path. The 16c-only
-    ``double_buffer``/``fold_k32`` fields are forwarded when present."""
+    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec` -> flat dict. ``kind`` ("16c"|"4c"|"generic")
+    selects the binding's spec path. The problem's ``dtype`` is always
+    forwarded; every other kernel field the spec has is forwarded when
+    present: the 16c ``double_buffer``/``fold_k32``, the 4c dgrad knobs
+    (``dgrad_fused_weights``, ``dgrad_weights_lds``, ``stage_rows``,
+    ``waves_q``) and the generic kernel's tiling, persistent-grid,
+    runtime-channel, weight-path and row-stream fields."""
     p = spec.problem
     d = dict(
         kind=kind,
@@ -909,17 +960,124 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
             KW=p.KW,
             PAD=p.PAD,
             stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
         ),
         name=spec.name,
         block_q=spec.block_q,
         block_groups=spec.block_groups,
         wave_size=spec.wave_size,
     )
-    for f in ("double_buffer", "fold_k32"):
+    for f in (
+        "double_buffer",
+        "fold_k32",
+        "dgrad_fused_weights",
+        "dgrad_weights_lds",
+        "stage_rows",
+        "waves_q",
+        # DirectConvSpec (kind "generic").
+        "block_h",
+        "waves_k",
+        "runtime_k_loop",
+        "persistent_grid",
+        "persistent_rounds",
+        "runtime_channels",
+        "k_atoms",
+        "m_tiles",
+        "preload_weights",
+        "waves_per_eu",
+        "row_guard",
+        "prefetch_rows",
+        "lds_only_sync",
+        "waves_m",
+        "xcd_tiles",
+        "lds_pad",
+        "stage_out",
+        "row_exit",
+    ):
         v = getattr(spec, f, None)
         if v is not None:
             d[f] = v
     return d
+
+
+def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectDgradWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        tile_n=spec.tile_n,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
+    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        tile_h=spec.tile_h,
+        tile_w=spec.tile_w,
+        tile_k=spec.tile_k,
+        ck=spec.ck,
+        waves_m=spec.waves_m,
+        waves_n=spec.waves_n,
+        atom=spec.atom,
+        wave_size=spec.wave_size,
+        lds_pad=spec.lds_pad,
+        chiplet_swizzle=spec.chiplet_swizzle,
+        swizzle_wgm=spec.swizzle_wgm,
+        chiplet_chunk=spec.chiplet_chunk,
+        num_xcds=spec.num_xcds,
+        double_buffer=spec.double_buffer,
+        iglp=spec.iglp,
+        waves_per_eu=spec.waves_per_eu,
+        split_c=spec.split_c,
+        grouped=spec.grouped,
+        group_merge=spec.group_merge,
+    )
 
 
 def img2col_spec_to_dict(spec: Any) -> Dict[str, Any]:
@@ -1049,7 +1207,7 @@ def _name_of(spec: Any) -> str:
 def lower_batched_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1086,7 +1244,7 @@ def lower_batched_gemm(
 def lower_grouped_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1123,7 +1281,7 @@ def lower_grouped_gemm(
 def lower_flatmm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1160,7 +1318,7 @@ def lower_flatmm(
 def lower_streamk_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1197,7 +1355,7 @@ def lower_streamk_gemm(
 def lower_block_scale_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1234,7 +1392,7 @@ def lower_block_scale_gemm(
 def lower_mx_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1271,7 +1429,7 @@ def lower_mx_gemm(
 def lower_mfma_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1346,7 +1504,7 @@ def lower_matmul_nbits(
 def lower_gemm_multi_d(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1383,7 +1541,7 @@ def lower_gemm_multi_d(
 def lower_gemm_multi_abd(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1420,7 +1578,7 @@ def lower_gemm_multi_abd(
 def lower_conv_implicit_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1458,21 +1616,26 @@ def lower_conv_direct_grouped(
     spec: Any,
     *,
     kind: str = "16c",
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
-    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec`.
-    ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
+    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec`. ``kind`` ("16c"|"4c"|"generic") selects the
+    kernel variant."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_grouped import (
+            build_direct_conv,
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
         from .lower_llvm import lower_kernel_to_llvm
 
-        build = build_direct_conv_4c if kind == "4c" else build_direct_conv_16c
+        build = {
+            "4c": build_direct_conv_4c,
+            "generic": build_direct_conv,
+        }.get(kind, build_direct_conv_16c)
         k = build(spec, arch=arch)
         ll = lower_kernel_to_llvm(k, arch=arch)
         ir = ""
@@ -1497,10 +1660,84 @@ def lower_conv_direct_grouped(
     )
 
 
+def lower_conv_direct_nongrouped(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectNongroupedConvSpec` (the ``groups == 1`` direct conv)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_conv_nongrouped(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_nongrouped_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_nongrouped",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectDgradWmmaSpec` (the gfx1250 WMMA direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_wmma import build_direct_dgrad_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_dgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_dgrad_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
 def lower_img2col(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1537,7 +1774,7 @@ def lower_img2col(
 def lower_deep_fused_conv_pool(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":

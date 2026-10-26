@@ -13,6 +13,8 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -59,18 +61,19 @@ static int rocke_mma_c_frag_len(const char* op_id)
     return rocke_arch_mma_c_frag_len(op_id);
 }
 
-/* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
- * (target._op_id_c_dtype()[op_id] == "i32"). */
-static bool rocke_mma_is_int_acc(const char* op_id)
+/* The accumulator dtype of op_id, from the arch catalog SSOT
+ * (target._op_id_c_dtype). Op_ids absent from the catalog accumulate in fp32.
+ * Mirrors Python _mma_c_dtype. */
+static const char* rocke_mma_c_dtype(const char* op_id)
 {
     const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
+    return c_dtype != NULL ? c_dtype : "fp32";
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
     const char* family = rocke_arch_mma_op_id_family(op_id);
-    if(family && strcmp(family, "wmma_scaled") == 0)
+    if(family && (strcmp(family, "wmma_scaled") == 0 || strcmp(family, "mfma_scaled") == 0))
         return "mxacc";
     size_t i;
     if(op_id)
@@ -86,7 +89,7 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's inline ternary). */
+/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
 static int rocke_elem_bytes_name(const char* elem_name)
 {
     if(!elem_name)
@@ -98,11 +101,51 @@ static int rocke_elem_bytes_name(const char* elem_name)
     {
         return 1;
     }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0)
+    if(strcmp(elem_name, "f64") == 0)
+    {
+        return 8;
+    }
+    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
+       || strcmp(elem_name, "tf32") == 0)
     {
         return 4;
     }
     return 2;
+}
+
+/* Element types an LDS vector access (smem_load_vN and smem_store_vN) admits,
+ * in the order its refusal lists them (Python core/ir.py
+ * _SMEM_VECTOR_ELEMENTS). One list for both directions keeps the pair
+ * symmetric: whatever one stores as a vector can be loaded back. */
+static const char* const ROCKE_SMEM_VECTOR_ELEMENTS[]
+    = {"f16", "bf16", "i16", "f32", "i32", "tf32", "f64", "fp8e4m3", "bf8e5m2", "i8"};
+
+/* Python _require_smem_vector_element: refuse an LDS vector `access` of an
+ * element outside ROCKE_SMEM_VECTOR_ELEMENTS, listing the admitted types. */
+static void
+    rocke_require_smem_vector_elem(rocke_ir_builder_t* b, const char* access, const char* elem)
+{
+    char admitted[128];
+    size_t used = 0;
+    for(const char* name : ROCKE_SMEM_VECTOR_ELEMENTS)
+    {
+        if(strcmp(elem, name) == 0)
+        {
+            return;
+        }
+    }
+    admitted[0] = '\0';
+    for(const char* name : ROCKE_SMEM_VECTOR_ELEMENTS)
+    {
+        const int n
+            = snprintf(admitted + used, sizeof admitted - used, "%s%s", used ? " / " : "", name);
+        if(n < 0 || (size_t)n >= sizeof admitted - used)
+        {
+            break; /* cannot happen: the list fits; stop rather than overrun */
+        }
+        used += (size_t)n;
+    }
+    rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s supports %s, got %s", access, admitted, elem);
 }
 
 static bool rocke_n_in(int n, const int* allowed, int count)
@@ -238,6 +281,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     const char* elem_name;
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
+    static const int allowed_64bit[] = {2};
     int elem_bytes;
     if(!rocke_i_live(b))
     {
@@ -268,11 +312,21 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
         return;
     }
     elem_name = value->type->elem->name;
+    rocke_require_smem_vector_elem(b, "smem_store_vN", elem_name);
     {
-        bool eight = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-                      || strcmp(elem_name, "bf8e5m2") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 4 : 3;
+        const int* allowed = allowed_other;
+        int acount = 3;
+        if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+           || strcmp(elem_name, "bf8e5m2") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 4;
+        }
+        else if(strcmp(elem_name, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 1;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             rocke_i_set_err(b,
@@ -349,8 +403,10 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
+    static const int allowed_64bit[] = {1, 2};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -361,22 +417,25 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_load_vN dtype is NULL");
     }
     dn = dtype->name;
-    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
-         || strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
-         || strcmp(dn, "i8") == 0))
+    rocke_require_smem_vector_elem(b, "smem_load_vN", dn);
     {
-        return (rocke_value_t*)rocke_i_set_err(
-            b,
-            ROCKE_ERR_VALUE,
-            "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
-            "bf8e5m2 / i8, got %s",
-            dn);
-    }
-    {
-        bool eight
-            = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        const int* allowed = allowed_32bit;
+        int acount = 5;
+        if(strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 6;
+        }
+        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "i16") == 0)
+        {
+            allowed = allowed_16bit;
+            acount = 5;
+        }
+        else if(strcmp(dn, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 2;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(
@@ -553,8 +612,6 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra)
 {
     int c_frag_len;
-    bool is_int_acc;
-    const rocke_type_t* c_elem;
     const rocke_type_t* vt;
     const char* hint;
     rocke_attr_map_t attrs;
@@ -569,25 +626,6 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mma op_id is NULL");
     }
-    /* C has no MmaOp object; op_id is always a bare string, so the frag length
-     * and accumulator element are resolved from the arch SSOT (the Python
-     * bare-string code path). A <= 0 frag length means the op_id is unknown to
-     * the SSOT (the zero-length _frag_info fallback). */
-    c_frag_len = rocke_mma_c_frag_len(op_id);
-    if(c_frag_len <= 0)
-    {
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
-    }
-    is_int_acc = rocke_mma_is_int_acc(op_id);
-    c_elem = is_int_acc ? rocke_i32() : rocke_f32();
-    vt = rocke_vector_type(b, c_elem, c_frag_len);
-    if(!vt)
-    {
-        return NULL;
-    }
-    hint = rocke_mma_result_hint(op_id);
-
     if(num_extra < 0)
     {
         num_extra = 0;
@@ -605,6 +643,32 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         ops[3 + i] = extra[i];
     }
+    /* Operands first, then the op_id, in IRBuilder.mma's order, so both engines
+     * report the same refusal for the same call. */
+    const char* mx_error = rocke_scaled_mfma_error(op_id, ops, nops);
+    if(mx_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx_error);
+    const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
+    if(tf32_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    /* C has no MmaOp object; op_id is always a bare string, so the frag length
+     * and accumulator element are resolved from the arch SSOT (the Python
+     * bare-string code path). A <= 0 frag length means the op_id is unknown to
+     * the SSOT (the zero-length _frag_info fallback). */
+    c_frag_len = rocke_mma_c_frag_len(op_id);
+    if(c_frag_len <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
+    }
+    /* The result element is the instruction's accumulator dtype. C has no MmaOp
+     * argument, so Python's "the MmaOp's own c_dtype" case has no twin here. */
+    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_c_dtype(op_id)), c_frag_len);
+    if(!vt)
+    {
+        return NULL;
+    }
+    hint = rocke_mma_result_hint(op_id);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
@@ -632,6 +696,7 @@ ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_bf16, "mfma_f32_32x32x16_bf16")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_fp8, "mfma_f32_32x32x16_fp8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_bf8, "mfma_f32_32x32x16_bf8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_f16, "mfma_f32_4x4x4_f16")
+ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_bf16, "mfma_f32_4x4x4_bf16")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x128_fp4, "mfma_f32_16x16x128_fp4")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x96_fp6, "mfma_f32_16x16x96_fp6")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_f16, "wmma_f32_16x16x16_f16")
@@ -692,6 +757,39 @@ rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
 /* ===================================================================== */
 /*  inline asm                                                           */
 /* ===================================================================== */
+
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar < ROCKE_SCALAR_I1 || value->type->scalar > ROCKE_SCALAR_BF8E5M2)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "optimization_barrier requires a directly lowerable scalar or i1");
+    }
+    if(value->type->scalar == ROCKE_SCALAR_I1 || value->type->scalar == ROCKE_SCALAR_I8
+       || value->type->scalar == ROCKE_SCALAR_FP8E4M3
+       || value->type->scalar == ROCKE_SCALAR_BF8E5M2)
+    {
+        bool encoded_float = value->type->scalar == ROCKE_SCALAR_FP8E4M3
+                             || value->type->scalar == ROCKE_SCALAR_BF8E5M2;
+        rocke_value_t* raw = encoded_float ? rocke_b_bitcast(b, value, rocke_i8()) : value;
+        rocke_value_t* wide = rocke_b_zext(b, raw, rocke_i32());
+        rocke_value_t* opaque = rocke_b_optimization_barrier(b, wide);
+        rocke_value_t* narrow = rocke_b_trunc(b, opaque, raw->type);
+        return encoded_float ? rocke_b_bitcast(b, narrow, value->type) : narrow;
+    }
+    rocke_inline_asm_opts_t opts = {};
+    opts.sideeffect_set = true;
+    opts.sideeffect = false;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {value->type};
+    rocke_op_t* op = rocke_b_inline_asm(b, "", "=v,0", operands, 1, types, 1, &opts);
+    return op ? op->results[0] : NULL;
+}
 
 rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const char* asm_template,

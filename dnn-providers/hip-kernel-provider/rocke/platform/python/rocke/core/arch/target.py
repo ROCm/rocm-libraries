@@ -30,6 +30,146 @@ from ..dtypes import normalize_dtype
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
+# A bounded family declaration, rather than a general catalog templating DSL.
+# Version 1 freezes the shipped axes and historical enumeration order.
+_GFX1250_SCALED_FAMILY = {
+    "generate": "gfx1250_wmma_scaled_v1",
+    "family": "wmma_scaled",
+    "input_dtypes": ["fp8", "bf8", "fp6", "bf6", "fp4"],
+    "scale_dtypes": ["e8m0", "e5m3", "e4m3"],
+    "block_k": [32, 16],
+    "shape": [16, 16, 128],
+    "c": "fp32",
+}
+
+
+def _gfx1250_scale_combination_valid(a: str, b: str, sa: str, sb: str) -> bool:
+    """Supported matrix/scale combinations, independent of compiler version.
+
+    Mirrors LLVM's isValidWMMAScaleFmtCombination:
+    https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+    """
+    a, b = normalize_dtype(a), normalize_dtype(b)
+    return (
+        (a == "fp4e2m1" or sa == "e8m0")
+        and (b == "fp4e2m1" or sb == "e8m0")
+        and (a != "fp4e2m1" or b != "fp4e2m1" or sa == sb)
+    )
+
+
+def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
+    """Expand supported families to ordinary rows; reject duplicate identities."""
+    if not isinstance(declarations, list):
+        raise ValueError(f"MMA declarations for {gfx} must be a list")
+    out = []
+    ids = set()
+    for declaration in declarations:
+        if not isinstance(declaration, dict) or (
+            "generate" not in declaration and "op_id" not in declaration
+        ):
+            raise ValueError(f"invalid MMA declaration for {gfx}: {declaration!r}")
+        if "generate" not in declaration:
+            rows = [declaration]
+        else:
+            # JSON text comparison also rejects bools masquerading as integers.
+            # Admitted by content: any arch may declare the family.
+            if json.dumps(declaration, sort_keys=True) != json.dumps(
+                _GFX1250_SCALED_FAMILY, sort_keys=True
+            ):
+                raise ValueError(
+                    f"unsupported MMA family declaration for {gfx}: {declaration!r}"
+                )
+            rows = _gfx1250_scaled_rows(declaration)
+        for row in rows:
+            if row["op_id"] in ids:
+                raise ValueError(f"duplicate MMA op_id for {gfx}: {row['op_id']}")
+            ids.add(row["op_id"])
+            out.append(row)
+    return out
+
+
+def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
+    inputs = declaration["input_dtypes"]
+    scales = declaration["scale_dtypes"]
+    blocks = declaration["block_k"]
+    # Original homogeneous E8M0 atoms precede mixed E8M0 and supported FP4
+    # alternative encodings.
+    homogeneous = [
+        (0, 32),
+        (2, 32),
+        (3, 32),
+        (1, 32),
+        (0, 16),
+        (2, 16),
+        (3, 16),
+        (4, 32),
+        (4, 16),
+        (1, 16),
+    ]
+    keys = [(inputs[i], inputs[i], scales[0], scales[0], k) for i, k in homogeneous]
+    keys.extend(
+        (a, b, scales[0], scales[0], k)
+        for k in blocks
+        for a in inputs
+        for b in inputs
+        if a != b
+    )
+    for k in blocks:
+        keys.extend(
+            (a, inputs[4], scales[0], sb, k) for a in inputs[:4] for sb in scales[1:]
+        )
+        keys.extend(
+            (inputs[4], b, sa, scales[0], k) for b in inputs[:4] for sa in scales[1:]
+        )
+        keys.extend((inputs[4], inputs[4], scale, scale, k) for scale in scales[1:])
+    rows = []
+    # Preserve the supported atoms' historical order and reject unsupported pairs.
+    for a, b, sa, sb, block_k in dict.fromkeys(keys):
+        if not _gfx1250_scale_combination_valid(a, b, sa, sb):
+            continue
+        m, n, k = declaration["shape"]
+        rows.append(
+            {
+                "family": declaration["family"],
+                "a": a,
+                "b": b,
+                "c": declaration["c"],
+                "a_scale_dtype": sa,
+                "b_scale_dtype": sb,
+                "scale_block_k": block_k,
+                "m": m,
+                "n": n,
+                "k": k,
+                "op_id": f"wmma_gfx1250_f32_{m}x{n}x{k}_{a}_{b}_scale_{sa}_{sb}_k{block_k}",
+            }
+        )
+    return rows
+
+
+@lru_cache(maxsize=1)
+def _load_doc() -> dict:
+    # Pin UTF-8 for embedded interpreters whose default codec is ASCII.
+    with open(_DATA_FILE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> Dict[str, dict]:
+    arches = _load_doc()["arches"]
+    for gfx, spec in arches.items():
+        spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
+    return arches
+
+
+@lru_cache(maxsize=1)
+def _load_generic_targets() -> Dict[str, Tuple[str, ...]]:
+    return {
+        generic: tuple(members)
+        for generic, members in _load_doc()["generic_targets"].items()
+        if not generic.startswith("_")
+    }
+
+
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
 # index arithmetic for the two tile coordinates of that fragment element and
@@ -129,6 +269,56 @@ class MmaScaleBlockK(IntEnum):
     K32 = 32
 
 
+class MmaEmulationRecipe(str, Enum):
+    """How an emulated atom is expanded into physical matrix instructions."""
+
+    # Three BF16 MMAs over a Dekker-style split of the fp32 payload each TF32
+    # operand carries into a bf16 "big" part and a bf16 "small" remainder,
+    # threading one fp32 accumulator. All 32 payload bits are used -- unlike a
+    # native XF32 instruction, nothing is dropped from the operand -- so the
+    # result tracks the exact product of the payload: more accurate than the
+    # native atom on raw fp32 operands. On operands already rounded to TF32
+    # precision the native atom is exact and this is not: the omitted
+    # small*small cross term is below 2^-16 of a product (and reaches 99% of
+    # that at an operand halfway between two bf16 values), the same order as
+    # the split's own representation error.
+    #
+    # Every 32-bit payload splits: the leading bf16 is capped at the largest
+    # finite value so the top 2^-9 of the finite range does not round to an
+    # infinity, and an infinity or NaN makes every output it feeds non-finite.
+    BF16X3 = "bf16x3"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def operand_dtype(self) -> str:
+        """The logical dtype of the A/B operands this recipe emulates."""
+        return "tf32"
+
+
+@dataclass(frozen=True)
+class MmaEmulation:
+    """An atom's expansion into a physical atom, when it has no native encoding.
+
+    ``physical_op_id`` names the atom actually issued. It is the SSOT for the
+    emulated atom's fragment lengths and layout maps: those are *derived* from
+    it at load time rather than restated, so the logical row and the instruction
+    it lowers to can never drift apart. Only the element type differs between
+    them -- the logical A fragment occupies the same ``(row, k)`` coordinates.
+    """
+
+    recipe: MmaEmulationRecipe
+    physical_op_id: str
+
+    def __post_init__(self) -> None:
+        # Spelled recipes are validated here rather than at use: an unknown one
+        # must fail at catalog load, not silently reach the lowering.
+        object.__setattr__(self, "recipe", MmaEmulationRecipe(self.recipe))
+        if not self.physical_op_id:
+            raise ValueError("MMA emulation requires a physical_op_id")
+
+
 def _normalize_mma_scales(
     a_dtype: str | None, b_dtype: str | None, block_k: int | None
 ) -> tuple[MmaScaleDType | None, MmaScaleDType | None, MmaScaleBlockK | None]:
@@ -160,6 +350,12 @@ class MmaOp:
     from ``(op_id, family, shape)`` at load time via :data:`_MMA_FRAGMENT_INFO`;
     op_ids without verified layout maps still carry frag lengths but raise from
     the accessor until a map is added.
+
+    ``emulation`` is ``None`` for an atom the hardware encodes directly. When
+    set, the atom has no native encoding and the lowering expands it into
+    repeated issues of ``emulation.physical_op_id``; the frag lengths and layout
+    maps on this row are inherited from that physical atom. Prefer
+    :attr:`is_native` over testing the field.
     """
 
     family: str  # "mma" | "wmma" | "wmma_scaled"
@@ -196,6 +392,10 @@ class MmaOp:
         default=None, repr=False, compare=False
     )
 
+    # ``None`` means natively encoded. See the class docstring; read through
+    # :attr:`is_native` when all you need is "does the hardware do this".
+    emulation: Optional[MmaEmulation] = None
+
     def __post_init__(self) -> None:
         a, b, block_k = _normalize_mma_scales(
             self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
@@ -219,6 +419,11 @@ class MmaOp:
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
+
+    @property
+    def is_native(self) -> bool:
+        """True when the hardware encodes this atom directly (no expansion)."""
+        return self.emulation is None
 
     # --- physical-layout accessors ---------------------------------------
     def a_layout(self) -> LayoutMap:
@@ -330,8 +535,40 @@ def _mfma_b_16x16(builder, lane, slot):
     return k, n_in_atom
 
 
-def _mfma_a_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
+def _mfma_a_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
+
+
+def _mfma_a_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
+
+
+def _mfma_a_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 A operand: each lane holds one scalar.
 
     row = lane % 16, k = lane // 16 (slot is always 0 — a_frag_len == 1).
     Returns ``(row, k)``.
@@ -342,8 +579,8 @@ def _mfma_a_16x16x4_f32(builder, lane, slot):
     return m_in_atom, k
 
 
-def _mfma_b_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 B operand: each lane holds one fp32 scalar.
+def _mfma_b_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 B operand: each lane holds one scalar.
 
     col = lane % 16, k = lane // 16 (slot is always 0 — b_frag_len == 1).
     Returns ``(k, col)``.
@@ -376,6 +613,46 @@ def _mfma_b_32x32x2_f32(builder, lane, slot):
     n_in_atom = builder.mod(lane, c32)
     k = builder.div(lane, c32)
     return k, n_in_atom
+
+
+def _mfma_acc_16x16x4_f64(builder, lane, slot):
+    """MFMA 16x16x4 f64 accumulator: slot ``i`` -> ``(i*4 + lane // 16, lane % 16)``.
+
+    Unlike ``_mfma_acc_16x16``, consecutive slots of a lane are 4 rows apart.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    m_blk = builder.div(lane, c16)
+    row = builder.add(builder.const_i32(slot * 4), m_blk)
+    return row, n_in_atom
+
+
+def _mfma_b_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 B operand (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*k + 4*blk + n`` holds
+    ``(blk*4 + k, n)``. Returns ``(blk*4 + k, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    k = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), k)
+    return row, n_in_blk
+
+
+def _mfma_acc_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 accumulator (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*m + 4*blk + n`` holds
+    ``(blk*4 + m, n)``. Returns ``(blk*4 + m, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    m = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), m)
+    return row, n_in_blk
 
 
 def _mfma_a_32x32x8(builder, lane, slot):
@@ -539,8 +816,8 @@ def _wmma_b_16x16_iu4(builder, lane, slot):
 # ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
 # the two lane-halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The
 # accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
-# registers index rows. These maps are the *hypothesis* verified empirically by
-# examples/gfx1201/wmma_probe.py before matmul_nbits is trusted on gfx1201.
+# registers index rows. The WMMA attention numeric suite exercises these maps on
+# gfx1200/gfx1201 hardware; examples/gfx1201/wmma_probe.py probes single atoms.
 def _wmma_gfx12_acc_16x16(builder, lane, slot):
     """RDNA4 WMMA 16x16x16 accumulator (wave32): ``<8 x float>`` per lane;
     slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns
@@ -659,14 +936,31 @@ class _FragInfo:
 # layout-map functions are populated for the atoms whose lane math is verified.
 # Adding a new atom is one row here.
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
+    "mfma_f32_32x32x4_xf32": _FragInfo(
+        2, 2, 16, 64, _mfma_a_32x32x4_xf32, _mfma_b_32x32x4_xf32, _mfma_acc_32x32
+    ),
+    "mfma_f32_16x16x8_xf32": _FragInfo(
+        2, 2, 4, 64, _mfma_a_16x16x8_xf32, _mfma_b_16x16x8_xf32, _mfma_acc_16x16
+    ),
     # --- MFMA fp32 (wave64) -----------------------------------------------
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
     "mfma_f32_16x16x4_f32": _FragInfo(
-        1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_acc_16x16
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16
     ),
     "mfma_f32_32x32x2_f32": _FragInfo(
         1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_acc_32x32
+    ),
+    # --- MFMA fp64 (wave64) -----------------------------------------------
+    # A/B are scalar double per lane in the same layout as fp32 16x16x4; the
+    # accumulator has its own f64 layout (c_frag_len=4).
+    "mfma_f64_16x16x4_f64": _FragInfo(
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16x4_f64
+    ),
+    # 4x4x4 is four independent 4x4x4 blocks stacked along rows (16x4 A, B and
+    # C/D). A matches the 16x16x4 A map.
+    "mfma_f64_4x4x4_f64": _FragInfo(
+        1, 1, 1, 64, _mfma_a_16x16x4, _mfma_b_4x4x4_f64, _mfma_acc_4x4x4_f64
     ),
     # --- MFMA f16 (wave64) ------------------------------------------------
     "mfma_f32_16x16x16_f16": _FragInfo(
@@ -682,6 +976,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     "mfma_f32_4x4x4_f16": _FragInfo(4, 4, 4, 64),
+    "mfma_f32_4x4x4_bf16": _FragInfo(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
     "mfma_f32_16x16x16_bf16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
@@ -821,61 +1116,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane as <16 x i32>.
-    # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
-    # bytes in i64. Both share the gfx12 column-distributed accumulator.
-    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
         16,
@@ -888,8 +1128,97 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 }
 
 
+# Scaled operands share the padded <16 x i32> ABI, byte-carrier scales,
+# and gfx12 accumulator map. Derive every ID from the expanded catalog of
+# every arch that lists the family.
+for _row in (row for spec in _load_specs().values() for row in spec["mma"]):
+    if _row["family"] == "wmma_scaled":
+        _scale_frag_len = 128 // _row["scale_block_k"]
+        _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
+            16,
+            16,
+            8,
+            32,
+            None,
+            None,
+            _wmma_gfx12_acc_16x16,
+            a_scale_frag_len=_scale_frag_len,
+            b_scale_frag_len=_scale_frag_len,
+            a_scale_fn=_wmma_gfx1250_a_scale,
+            b_scale_fn=_wmma_gfx1250_b_scale,
+        )
+del _row, _scale_frag_len
+
+
+def _mfma_scaled_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(32)),
+        builder.const_i32(slot),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(16)),
+        builder.const_i32((slot // 16) * 32 + slot % 16),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_b(builder, lane, slot):
+    row, k = _mfma_scaled_f8_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_b(builder, lane, slot):
+    row, k = _mfma_scaled_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_scale_a(builder, lane, slot):
+    return builder.mod(lane, builder.const_i32(32)), builder.div(
+        lane, builder.const_i32(32)
+    )
+
+
+def _mfma_scaled_scale_b(builder, lane, slot):
+    row, k = _mfma_scaled_scale_a(builder, lane, slot)
+    return k, row
+
+
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+            32,
+            32,
+            16,
+            64,
+            _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
+            _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
+            _mfma_acc_32x32,
+            1,
+            1,
+            _mfma_scaled_scale_a,
+            _mfma_scaled_scale_b,
+        )
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
+    if info is None:
+        # An emulated atom has no fragment of its own: it borrows the one
+        # belonging to the instruction it issues, so a bare logical op_id
+        # resolves through its physical atom. One hop only -- the catalog
+        # refuses an expansion chain (see _build_mma_emulation).
+        physical = _op_id_physical_op_id().get(op_id)
+        info = _MMA_FRAGMENT_INFO.get(physical) if physical else None
     if info is None:
         # Unknown atoms still load (e.g. a future JSON-only op_id); they carry
         # zero frag lengths and no maps until registered here.
@@ -904,6 +1233,18 @@ class MemoryCapabilities:
     has_ds_read_tr: bool
     has_tdm: bool
     buffer_load_max_dwords: int
+    # Widest per-lane DRAM->LDS DMA the ``buffer_load_lds`` family can do, in
+    # dwords (0 where the arch has no such instruction). Distinct from
+    # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
+    # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
+    async_lds_max_dwords: int
+    # Feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the lowerers admit the feature's operations
+    # only on a target that sets it.
+    has_scalar_data_prefetch: bool = False
+    has_global_prefetch: bool = False
+    has_cluster_launch: bool = False
+    has_multicast_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -912,6 +1253,33 @@ class ResourceLimits:
     vgprs: int
     agprs: int
     sgprs: int
+
+
+def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
+    """Drop emulated atoms that a native atom of the same shape already covers.
+
+    A native atom is always the better choice at equal shape: the emulated one
+    costs several instructions to produce a result no more accurate. Filtering
+    per shape rather than globally keeps an emulated shape the hardware has no
+    native encoding for.
+
+    Order is preserved, and a list with no emulated atoms is returned unchanged
+    -- which is every query against the pre-XF32 catalog, so this cannot perturb
+    existing selection.
+
+    The key is the full shape ``(m, n, k)``, so a native atom of a *different* K
+    does not shadow an emulated one -- and :meth:`MmaCatalog.select_largest_k`
+    then prefers the larger K, which is the emulated atom whenever its K is the
+    larger. That cannot happen today because no arch lists a native and an
+    emulated atom for the same ``(a, b, c, m, n)``: gfx942 has only native TF32
+    atoms and gfx950 only emulated ones, and
+    ``test_no_arch_mixes_native_and_emulated_tf32`` pins it. Re-key this on
+    ``(m, n)`` before an arch breaks that.
+    """
+    if all(op.is_native for op in ops):
+        return ops
+    native_shapes = {op.shape for op in ops if op.is_native}
+    return [op for op in ops if op.is_native or op.shape not in native_shapes]
 
 
 class MmaCatalog:
@@ -966,7 +1334,7 @@ class MmaCatalog:
             if n is not None and op.n != n:
                 continue
             out.append(op)
-        return out
+        return _prefer_native(out)
 
     def has_shape(
         self,
@@ -1104,8 +1472,27 @@ class ArchTarget:
         return self.memory.buffer_load_max_dwords
 
     @property
+    def async_lds_max_dwords(self) -> int:
+        """Widest per-lane DRAM->LDS DMA this arch can do, in dwords (0 = none).
+
+        Every ``buffer_load_lds`` emitter must clamp to this. The backend does
+        not diagnose an over-wide one -- it aborts the whole process.
+        """
+        return self.memory.async_lds_max_dwords
+
+    @property
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
+
+    @property
+    def has_dpp_row_xmask(self) -> bool:
+        """Whether DPP has ``row_xmask`` (an XOR with any mask 1..15 inside a
+        16-lane row). It is a gfx10+ encoding: gfx11, gfx12 and gfx1250 have
+        it; the gfx9 CDNA targets (``gfx9_mfma``, ``gfx950``) do not. An
+        allow-list, so a new family gets the base-DPP encodings (valid on
+        every target) until someone adds it here. Mirrored by
+        ``rocke_arch_has_dpp_row_xmask`` in the C++ engine."""
+        return self.target_family in ("gfx11_rdna", "gfx12_rdna", "gfx12_cdna")
 
     @staticmethod
     def from_gfx(gfx: str) -> "ArchTarget":
@@ -1115,15 +1502,6 @@ class ArchTarget:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
-
-
-@lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
-    # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
-    # arch_specs.json contains non-ASCII bytes.
-    with open(_DATA_FILE, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    return doc["arches"]
 
 
 @lru_cache(maxsize=1)
@@ -1166,6 +1544,105 @@ def _op_id_c_dtype() -> Dict[str, str]:
 
 
 @lru_cache(maxsize=1)
+def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
+    """``op_id -> (a_frag_len, b_frag_len, c_frag_len)`` for each emulated TF32 atom.
+
+    The operand contract the verifier enforces for an atom the hardware does not
+    encode: A and B are ``vec<tf32xN>``, N being the fragment length the atom
+    borrows from the physical atom it expands into, and the accumulator is
+    ``vec<f32xM>``. Read from the catalog rather than restated, so a new emulated
+    row needs no verifier edit. Same first-hit and raise-on-drift contract as
+    :func:`_op_id_c_dtype` -- an op_id names a specific atom, so its fragments
+    must be invariant across the arches that list it. Mirrored by
+    ``rocke_arch_mma_op_id_emulated_operands`` in ``query.cpp``.
+    """
+    out: Dict[str, Tuple[int, int, int]] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            emulation = o.get("emulation")
+            if emulation is None:
+                continue
+            if (normalize_dtype(o["a"]), normalize_dtype(o["b"])) != ("tf32", "tf32"):
+                continue
+            info = _frag_info(emulation["physical_op_id"])
+            lens = (info.a_frag_len, info.b_frag_len, info.c_frag_len)
+            if not all(lens):
+                # _frag_info answers zeros for an op_id it does not know, and the
+                # verifier would then demand vec<tf32x0>. Refuse here, where the
+                # catalog row is still in view, rather than at a confusing use site.
+                raise ValueError(
+                    f"emulated atom {o['op_id']!r} expands into "
+                    f"{emulation['physical_op_id']!r}, which has no fragment metadata"
+                )
+            prev = out.setdefault(o["op_id"], lens)  # first hit wins
+            if prev != lens:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {o['op_id']!r} "
+                    f"has inconsistent operand fragments across arches "
+                    f"({prev!r} vs {lens!r}). An op_id names a specific atom, so "
+                    f"its fragments must be invariant across the arches that list "
+                    f"it; fix the catalog so every row agrees."
+                )
+    return out
+
+
+def emulated_tf32_operand_lens(op_id: str) -> Optional[Tuple[int, int, int]]:
+    """Operand fragment lengths ``(a, b, c)`` if ``op_id`` is an emulated TF32 atom.
+
+    ``None`` for every atom the hardware encodes, which is the answer for every
+    ordinary MMA, so the verifier's hot path is one dict miss.
+    """
+    return _op_id_emulated_tf32_operands().get(op_id)
+
+
+@lru_cache(maxsize=1)
+def _op_id_physical_op_id() -> Dict[str, str]:
+    """``op_id -> physical op_id`` for every emulated atom in the JSON catalog.
+
+    The bare-op_id twin of ``MmaOp.emulation.physical_op_id``. A caller holding
+    only a logical op_id string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) needs
+    it to size a fragment the emulated atom borrows rather than owns. Natively
+    encoded rows contribute nothing. Same first-hit and raise-on-drift contract
+    as :func:`_op_id_c_dtype` — an op_id names a specific atom, so the
+    instruction it expands into must be invariant across the arches listing it.
+    Mirrored by ``rocke_arch_mma_op_id_physical_op_id`` in ``query.cpp``.
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            emulation = o.get("emulation")
+            if emulation is None:
+                continue
+            op_id, physical = o["op_id"], emulation["physical_op_id"]
+            prev = out.setdefault(op_id, physical)  # first hit wins
+            if prev != physical:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} "
+                    f"expands into different physical atoms across arches "
+                    f"({prev!r} vs {physical!r}). An op_id names a specific atom, "
+                    f"so its expansion must be invariant across the arches that "
+                    f"list it; fix the catalog so every row agrees."
+                )
+    return out
+
+
+def _mma_op_by_id(op_id: str) -> MmaOp | None:
+    """The catalog atom named ``op_id``, or ``None`` when no arch lists it.
+
+    For a caller that holds only an op_id, such as the operand contract of a
+    scaled atom, which does not depend on the target lowering it. An op_id
+    names one atom, so every arch that lists it holds the same row; the first
+    hit in :func:`known_arches` order is returned. Mirrored by
+    ``rocke_arch_mma_op_by_id`` in ``query.cpp``.
+    """
+    for gfx in known_arches():
+        atom = _build_target(gfx).mma.by_op_id(op_id)
+        if atom is not None:
+            return atom
+    return None
+
+
+@lru_cache(maxsize=1)
 def _op_id_family() -> Dict[str, str]:
     """Resolve operation families without selecting a target or parsing IDs."""
     out: Dict[str, str] = {}
@@ -1185,17 +1662,32 @@ def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
     op_id = o["op_id"]
-    info = _frag_info(op_id)
+    emulation = _build_mma_emulation(o.get("emulation"))
+    # An emulated atom has no fragment layout of its own: it borrows the one
+    # belonging to the instruction it actually issues. Deriving here (rather
+    # than duplicating a row in _MMA_FRAGMENT_INFO) is what makes it impossible
+    # for the logical atom and its physical atom to drift apart.
+    info = _frag_info(emulation.physical_op_id if emulation else op_id)
 
     def _mk(role: str, frag_len: int, fn: _LaneCoordFn) -> Optional[LayoutMap]:
         if fn is None or frag_len <= 0:
             return None
         return LayoutMap(role=role, frag_len=frag_len, wave_size=info.wave_size, fn=fn)
 
+    a_dtype, b_dtype = normalize_dtype(o["a"]), normalize_dtype(o["b"])
+    if emulation is not None and (
+        a_dtype != emulation.recipe.operand_dtype
+        or b_dtype != emulation.recipe.operand_dtype
+    ):
+        raise ValueError(
+            f"MMA emulation recipe {str(emulation.recipe)!r} emulates "
+            f"{emulation.recipe.operand_dtype} operands; row {op_id!r} has "
+            f"{a_dtype}/{b_dtype}"
+        )
     return MmaOp(
         family=o["family"],
-        a_dtype=normalize_dtype(o["a"]),
-        b_dtype=normalize_dtype(o["b"]),
+        a_dtype=a_dtype,
+        b_dtype=b_dtype,
         c_dtype=normalize_dtype(o["c"]),
         m=o["m"],
         n=o["n"],
@@ -1215,7 +1707,44 @@ def _build_mma_op(o: dict) -> MmaOp:
         b_scale_frag_len=info.b_scale_frag_len,
         _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
         _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
+        emulation=emulation,
     )
+
+
+def _build_mma_emulation(spec: Optional[dict]) -> Optional[MmaEmulation]:
+    """Build the emulation descriptor for one catalog row, if it has one.
+
+    An absent ``emulation`` key means the atom is natively encoded, which is
+    every atom the catalog shipped before XF32.
+    """
+    if spec is None:
+        return None
+    unknown = set(spec) - {"recipe", "physical_op_id"}
+    if unknown:
+        raise ValueError(f"unknown MMA emulation keys: {sorted(unknown)}")
+    try:
+        spelling, physical_op_id = spec["recipe"], spec["physical_op_id"]
+    except KeyError as exc:
+        raise ValueError(f"MMA emulation is missing required key {exc}") from None
+    # Only the enum lookup is "an unknown recipe". Parsing it on its own keeps the
+    # descriptor's other checks, such as an empty physical_op_id, reporting what
+    # they actually found instead of blaming a recipe that is perfectly valid.
+    try:
+        recipe = MmaEmulationRecipe(spelling)
+    except ValueError:
+        raise ValueError(
+            f"unknown MMA emulation recipe {spelling!r}; expected one of "
+            f"{[str(r) for r in MmaEmulationRecipe]}"
+        ) from None
+    emulation = MmaEmulation(recipe=recipe, physical_op_id=physical_op_id)
+    # The physical atom must be frag-registered, or the emulated row would
+    # silently inherit the zero-length fallback and produce wrong vector widths.
+    if emulation.physical_op_id not in _MMA_FRAGMENT_INFO:
+        raise ValueError(
+            f"MMA emulation physical_op_id {emulation.physical_op_id!r} is not "
+            f"registered in _MMA_FRAGMENT_INFO; add its fragment metadata first"
+        )
+    return emulation
 
 
 @lru_cache(maxsize=None)
@@ -1228,6 +1757,20 @@ def _build_target(gfx: str) -> ArchTarget:
         )
     row = specs[gfx]
     mma = MmaCatalog([_build_mma_op(o) for o in row["mma"]])
+    for op in mma.ops:
+        if op.emulation is None:
+            continue
+        # The physical atom is checked against _MMA_FRAGMENT_INFO at row load,
+        # which is global. Whether *this* arch can issue it is a per-arch
+        # question, and answering it wrongly makes the catalog claim support the
+        # compiler then rejects ("Cannot select") at codegen.
+        physical = mma.by_op_id(op.emulation.physical_op_id)
+        if physical is None or not physical.is_native:
+            raise ValueError(
+                f"{gfx}: emulated atom {op.op_id!r} expands into "
+                f"{op.emulation.physical_op_id!r}, which is not a natively "
+                f"encoded atom of {gfx}"
+            )
     mem = row["memory"]
     lim = row["limits"]
     has_mfma = any(op.family == "mma" for op in mma.ops)
@@ -1246,6 +1789,11 @@ def _build_target(gfx: str) -> ArchTarget:
             has_ds_read_tr=mem["has_ds_read_tr"],
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
+            async_lds_max_dwords=mem["async_lds_max_dwords"],
+            has_scalar_data_prefetch=mem.get("has_scalar_data_prefetch", False),
+            has_global_prefetch=mem.get("has_global_prefetch", False),
+            has_cluster_launch=mem.get("has_cluster_launch", False),
+            has_multicast_load=mem.get("has_multicast_load", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],
@@ -1292,18 +1840,8 @@ def target_id_from_isa(isa: str) -> str:
     return isa[start:] if start >= 0 else isa
 
 
-def base_arch_from_target_id(target_id: str) -> str:
-    """Derive the architecture name used for rocKE catalog lookup and lowering.
-
-    Removes features after ``:`` and profile suffixes such as ``-strict``:
-    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
-    ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved.
-
-    An unknown name is reduced to its leading ``gfx`` token when possible.
-    This does not check support; :meth:`ArchTarget.from_gfx` requires a
-    matching catalog entry.
-    """
+def _processor_from_target_id(target_id: str) -> str:
+    """Extract the processor token before any profile or feature suffix."""
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -1312,29 +1850,87 @@ def base_arch_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
+    for members in _load_generic_targets().values():
+        for processor in members:
+            if (
+                target_without_features == processor
+                or target_without_features.startswith(f"{processor}-")
+            ):
+                return processor
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved. A concrete processor in one of LLVM's
+    documented generic compatibility domains (``generic_targets``: gfx1100 ->
+    ``gfx11-generic``, gfx1200 -> ``gfx12-generic``) uses that generic rocKE
+    catalog row unless rocKE has a more-specific row; exact rows such as
+    ``gfx1151`` and ``gfx1201`` therefore take precedence.
+
+    Any other unknown name is reduced to its leading ``gfx`` token when
+    possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
+    a matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    processor = _processor_from_target_id(target_id)
+    if processor in known_arches():
+        return processor
+    for generic, members in _load_generic_targets().items():
+        if processor in members and (
+            target_without_features == processor
+            or target_without_features.startswith(f"{processor}-")
+        ):
+            return generic
+    return processor
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
     """Derive the target name that the compile helpers pass to COMGR or hipcc.
 
-    Removes profile suffixes such as ``-strict`` using
-    :func:`base_arch_from_target_id`, but keeps features after ``:``.
-    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
-    ``gfx942:sramecc+:xnack-`` stays unchanged.
+    Removes profile suffixes such as ``-strict`` from the processor token, but
+    keeps features after ``:``. Catalog selection remains independent, so a
+    concrete processor may compile for itself while lowering through a generic
+    rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
+    while ``gfx942:sramecc+:xnack-`` stays unchanged.
 
     This only converts the string. COMGR or hipcc checks whether the target
     and its features are supported when compilation runs.
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    base_arch = base_arch_from_target_id(target_id)
-    if target_without_features.startswith(f"{base_arch}-"):
-        target_without_features = base_arch
+    processor = _processor_from_target_id(target_id)
+    if target_without_features.startswith(f"{processor}-"):
+        target_without_features = processor
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features
+
+
+def generic_arch_from_target_id(target_id: str) -> Optional[str]:
+    """Return the catalogued LLVM generic target that runs on ``target_id``.
+
+    A code object built for the returned generic processor loads on the device
+    named by ``target_id``. ``gfx1100`` and ``gfx1151:xnack-`` both become
+    ``gfx11-generic``, and a generic name maps to itself. Returns ``None`` when
+    no catalogued generic target covers the processor.
+
+    This only converts the string; it never queries a GPU. Unlike
+    :func:`base_arch_from_target_id`, it deliberately replaces a concrete name,
+    so call it only where one generic code object should serve the family.
+    """
+
+    base_arch = base_arch_from_target_id(target_id)
+    for generic, members in _load_generic_targets().items():
+        if base_arch == generic or base_arch in members:
+            return generic
+    return None
 
 
 def arch_from_isa(isa: str) -> str:

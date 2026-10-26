@@ -2,6 +2,18 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## Composable Kernel 1.3.0 for ROCm 10.2.0
+
+### Added
+
+* Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
+* Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
+* Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
+
+### Optimized
+
+* Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
+
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
 ### Added
@@ -42,6 +54,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results in the B preshuffle dequantized GEMM pipeline caused by the C transpose setting being ignored.
 * Fixed incorrect results from the CK Tile compute v3 intrawave GEMM pipeline with eight-warp block arrangements on gfx1250.
 * Fixed out-of-bounds asynchronous loads in the CK Tile compute async WMMA GEMM pipeline caused by a missing element validity check.
+* Fixed incorrect results in the CK Tile TDM GEMM pipelines on gfx1250 for tile shapes where the TDM loads and the LDS reads used different LDS padding layouts, such as tiles whose LDS rows are not a power of two.
 * Fixed accuracy loss in the bf16 fast GELU element-wise operation on gfx1250 by using the non-native implementation.
 * Fixed a build failure caused by the compiler change from vector to ext_vector types.
 * Fixed a CMake failure when building instance libraries for multiple offload targets.

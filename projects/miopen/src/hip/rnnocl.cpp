@@ -987,6 +987,16 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
     // stage 0 bias and input preload
     // stage 0.2 first chunk compute and preload
     {
+        // Add the bias on the root stream, after the memset and before any side stream starts.
+        // call_bias_add (beta = 0, in place) and the x GEMMs (beta = 1) are both
+        // read-modify-write on the same gate buffer in extra_space, so they must not run
+        // concurrently on different streams.
+        if(biasMode != 0u)
+        {
+            for(int layer_id = 0; layer_id < nLayers; layer_id++)
+                call_bias_add(layer_id);
+        }
+
         ms_controller.AllStreamsWaitRoot();
         const auto first_layer_id  = 0;
         const auto stream_id       = 1; // 1
@@ -994,18 +1004,9 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
 
         ms_controller.ChangeActiveStream(stream_id);
 
-        if(biasMode != 0u)
-            call_bias_add(first_layer_id);
-
         call_next_chunk_compute(first_layer_id, stream_id);
 
         ms_controller.ChangeActiveStream(extra_stream_id);
-
-        if(biasMode != 0u)
-        {
-            for(int layer_id = 1; layer_id < nLayers; layer_id++)
-                call_bias_add(layer_id);
-        }
 
         call_inx_next_chunk_preload(first_layer_id);
 

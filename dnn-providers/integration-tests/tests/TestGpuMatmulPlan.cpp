@@ -7,6 +7,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -24,6 +25,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuMatmulPlanBuilder, PlanConstruction)
 {
@@ -501,8 +503,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
     Tensor<BType> bTensor(bDims, bStrides);
 
     constexpr unsigned int SEED = 42;
-    aTensor.fillWithRandomValues(static_cast<AType>(-1.0), static_cast<AType>(1.0), SEED);
-    bTensor.fillWithRandomValues(static_cast<BType>(-1.0), static_cast<BType>(1.0), SEED + 1);
+    fillWithRandomValues(aTensor, static_cast<AType>(-1.0), static_cast<AType>(1.0), SEED);
+    fillWithRandomValues(bTensor, static_cast<BType>(-1.0), static_cast<BType>(1.0), SEED + 1);
 
     Tensor<CType> gpuC(cDims, cStrides);
     Tensor<CType> cpuC(cDims, cStrides);

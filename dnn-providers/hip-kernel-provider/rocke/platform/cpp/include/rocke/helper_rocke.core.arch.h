@@ -129,6 +129,11 @@ bool rocke_archtarget_supports_dtype_combo(
  * as in Python: width gated by the buffer-load path). */
 int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const char* dtype);
 
+/* ArchTarget.async_lds_max_dwords property: the widest per-lane DRAM->LDS DMA
+ * this arch can do, in dwords (0 = no buffer_load_lds at all). NOT the same as
+ * max_vector_load_dwords, which is the register vector buffer-load width. */
+int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t);
+
 /* ArchTarget.max_threads_per_block property. */
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t);
 

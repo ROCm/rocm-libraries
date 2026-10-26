@@ -91,6 +91,17 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
+# The explicit-GEMM families (1x1 and patch embedding) are backed by hipBLASLt.
+# Off by default so a build takes on that dependency only when it asks for it,
+# and so a framework providing its own GEMM-based convolutions can drop the code.
+#
+# An option() for this was lost in the arch-registry rewrite (350e6ef), leaving the
+# `if(HIPCONV_ENABLE_EXPLICIT_GEMM)` guards below reading an undeclared variable.
+# Declaring it here restores `cmake -LH` discoverability and the misspelling check;
+# the default matches what the build has actually been doing since then.
+option(HIPCONV_ENABLE_EXPLICIT_GEMM
+    "Build the hipBLASLt-backed explicit-GEMM convolution paths (1x1 and patch embedding)" OFF)
+
 option(HIPCONV_LINE_TABLES "Emit DWARF line tables for device code (-gline-tables-only)" OFF)
 if(HIPCONV_LINE_TABLES)
     string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
@@ -140,22 +151,40 @@ hipconv_make_arch_registry("${_arch_targets}" "${_arch_registry}")
 set(_hipconv_srcs
     src/conv_params.cpp
     src/conv_kernel.cpp
+    src/data_type_field.cpp
+    src/direction_field.cpp
     src/kv_descriptor.cpp
     src/registry.cpp
     src/tolerance.cpp
     "${_arch_registry}"
 )
-if(HIPCONV_ENABLE_POINTWISE)
+if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     find_package(hipblaslt REQUIRED)
     list(APPEND _hipconv_srcs
-        src/pointwise/pointwise_conv.cpp
-        src/pointwise/pointwise_fp16bf16.cpp
-        src/pointwise/hipblaslt_matmul.cpp
+        src/explicit_gemm/explicit_gemm_algorithm.cpp
+        src/explicit_gemm/pointwise/pointwise_kernel.cpp
+        src/explicit_gemm/hipblaslt_matmul.cpp
+        src/explicit_gemm/patch_embed/patch_embed.cpp
     )
 endif()
 
+# hipconv::version(), regenerated at build time so a new commit needs no reconfigure;
+# cmake/write_version.cmake says where the version comes from.
+set(_version_cpp "${CMAKE_CURRENT_BINARY_DIR}/version.cpp")
+add_custom_target(hipconv_version
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cpp.in"
+            "-DOUTPUT=${_version_cpp}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/write_version.cmake"
+    BYPRODUCTS "${_version_cpp}"
+    VERBATIM)
+list(APPEND _hipconv_srcs "${_version_cpp}")
+
 add_library(hipconv STATIC ${_hipconv_srcs} "${_reg_gen}")
 set_source_files_properties(${_hipconv_srcs} "${_reg_gen}" PROPERTIES LANGUAGE HIP)
+set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
+add_dependencies(hipconv hipconv_version)
 foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
 endforeach()
@@ -169,7 +198,7 @@ set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
 target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
                                        ${HIPCONV_DEVICE_COMPILE_OPTIONS})
-if(HIPCONV_ENABLE_POINTWISE)
+if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
-    target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)
+    target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_EXPLICIT_GEMM)
 endif()

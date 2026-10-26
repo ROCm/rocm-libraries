@@ -3,9 +3,8 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceReduction.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
@@ -22,34 +21,6 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefReductionArgs.h> // NOLINT(misc-include-cleaner)
-
-void launchKernel(hipFunction_t function, int64_t gridSize, void* argsPtr, size_t argsSize)
-{
-    // Check the device limits for grid size
-    detail::assertValidGridSize(gridSize, 1, 1);
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(gridSize),
-                                                  1,
-                                                  1,
-                                                  GpuFpReferenceReduction::BLOCK_SIZE,
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
 
 } // namespace
 
@@ -149,9 +120,10 @@ void GpuFpReferenceReduction::launchReduction(
         }
     }
 
-    launchKernel(
+    detail::launchKernel1d(
         kernel.function(),
         std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>()),
+        BLOCK_SIZE,
         &args,
         sizeof(args));
 }

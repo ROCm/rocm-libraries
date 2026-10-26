@@ -1,1 +1,0 @@
-../../hipdnn-superbuild/scripts/comgr_stage.py

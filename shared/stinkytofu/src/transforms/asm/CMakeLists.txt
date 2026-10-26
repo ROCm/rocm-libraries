@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     BuildDefUseChain.cpp
     DefUseAnalysisCleanup.cpp
     CFGBuilderPass.cpp
+    FlattenCFGPass.cpp
     StinkyUnreachableBlockElimPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
@@ -21,16 +22,17 @@ target_sources(stinkytofu_objs PRIVATE
     AsmMovePropagationPass.cpp
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
+    TieExecMaskedWritesPass.cpp
     StinkyDAGSchedulerPass.cpp
     dag/RegionDAG.cpp
     dag/SchedulingKnobHeuristics.cpp
-    WaitAwareScheduleRepairPass.cpp
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
     Gfx1250HazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
+    waitcnt/WmmaRunWaitMerge.cpp
     StinkyRemoveWaitCntPass.cpp
     RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
@@ -47,6 +49,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
+    PrefetchBridgeSubstitutionPass.cpp
     InsertWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp

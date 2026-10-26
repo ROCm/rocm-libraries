@@ -77,6 +77,11 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPooling2d<OpType> is called, but it is not "
             "implemented.");
+        // Unreachable, but required: the compiler's -Werror,-Wmissing-noreturn
+        // wants a return on this bool virtual, while cppcheck flags it as an
+        // unreachable statement after the throw -- suppress the latter.
+        // cppcheck-suppress duplicateBreak
+        return false;
     }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPooling2d& other) const;
@@ -147,12 +152,22 @@ struct PerformanceConfigPoolingNd : PerfConfigBase<PerformanceConfigPoolingNd<Op
         throw std::runtime_error(
             "SetNextValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "
             "implemented.");
+        // Unreachable, but required: the compiler's -Werror,-Wmissing-noreturn
+        // wants a return on this bool virtual, while cppcheck flags it as an
+        // unreachable statement after the throw -- suppress the latter.
+        // cppcheck-suppress duplicateBreak
+        return false;
     }
     virtual bool IsValidValue() const
     {
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "
             "implemented.");
+        // Unreachable, but required: the compiler's -Werror,-Wmissing-noreturn
+        // wants a return on this bool virtual, while cppcheck flags it as an
+        // unreachable statement after the throw -- suppress the latter.
+        // cppcheck-suppress duplicateBreak
+        return false;
     }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPoolingNd& other) const;

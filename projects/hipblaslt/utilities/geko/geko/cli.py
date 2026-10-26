@@ -19,13 +19,15 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 import yaml
 
 from geko import logger, _set_log_level
-from geko.config_generator.load_input_config import load_prepared_config_from_yaml
-from geko.constants import SUPPORTED_ARCH
+import geko.device as device
+from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
+from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
+from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
@@ -46,14 +48,22 @@ def _alloc_run_root() -> Path:
     return root
 
 
-def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> List[dict]:
-    """Flatten GemmProblems from load_prepared_config_from_yaml to workload-log dicts."""
+def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> Tuple[List[dict], Dict[str, Any]]:
+    """Flatten GemmProblems from load_prepared_config_from_yaml to workload-log dicts.
+
+    Returns:
+        Tuple of (rows, config_overrides), where config_overrides holds the
+        LIST_FORWARDED_KEYS present in the prepared config (e.g. EPILOGUES,
+        LIBRARY_TYPE) for forwarding into optim.configure.
+    """
     prepared = load_prepared_config_from_yaml(config_path=path, arch=arch)
+    resolved_arch = prepared["ARCH"]
     problems: List[GemmConfig] = prepared["GemmProblems"]
     rows: List[dict] = []
     for gc in problems:
-        rows.extend(gc.workload_log_rows())
-    return rows
+        rows.extend(gc.workload_log_rows(mx_scale=mx_scale_code(resolved_arch, mx_format(gc, resolved_arch))))
+    config_overrides = {k: prepared[k] for k in LIST_FORWARDED_KEYS if k in prepared}
+    return rows, config_overrides
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,12 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workload_src.add_argument(
         "--inline",
-        nargs=9,
-        metavar=("M", "N", "batch", "K", "DataType", "DestDataType", "ComputeDataType", "transA", "transB"),
+        nargs="+",
+        metavar="ARG",
         help=(
-            "Single GEMM: M N batch_count K, Tensile DataType / DestDataType / ComputeDataType "
-            "(e.g. B B S), transA and transB each N, T, or C (conjugate-transpose, complex only) "
-            "(e.g. --inline 1024 1024 1 1024 B B S N T)"
+            "Single GEMM: M N batch_count K DataType DestDataType ComputeDataType transA transB [MX]. "
+            "DataType/DestDataType/ComputeDataType are Tensile letters (e.g. B B S). "
+            "transA/transB: N, T, or C (conjugate-transpose, complex only). "
+            "Optional 10th arg 'MX' enables Microscaling mode (only for F8/F4); requires --arch. "
+            "Example: --inline 1024 1024 1 1024 F8 S S N T MX --arch gfx950"
         ),
     )
     parser.add_argument(
@@ -104,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--arch",
-        type=str,
+        type=canonical_arch,
         default=None,
         choices=SUPPORTED_ARCH,
         metavar="ARCH",
@@ -153,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--search-space",
         type=str,
         default=None,
-        choices=["heuristic", "generic"],
+        choices=["heuristic", "generic", "subtile"],
         dest="search_space",
         help="Search space strategy. Defaults to 'generic' for ductile, 'heuristic' for tensile (only used with --tune)",
     )
@@ -219,6 +231,20 @@ def build_parser() -> argparse.ArgumentParser:
             "collection / output overhead during offline tuning."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
     return parser
 
 
@@ -231,7 +257,7 @@ class CliArgs:
     search: bool
     workload: str | None
     gemm_config: str | None
-    inline: tuple[int, int, int, int, str, str, str, str, str] | None
+    inline: tuple[int, int, int, int, str, str, str, str, str, bool] | None
     arch: str | None
     hipblaslt: str | None
     verbose: int
@@ -248,6 +274,7 @@ class CliArgs:
     custom_lib_dir: str | None
     retry: bool
     bench_freq: bool
+    skip_gpu_check: bool = False
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -269,9 +296,20 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         if not p.is_file():
             parser.error(f"--list file not found: {p} (example: {_SAMPLE_GEMM_LIST_YAML})")
 
-    inline: tuple[int, int, int, int, str, str, str, str, str] | None = None
+    inline: tuple[int, int, int, int, str, str, str, str, str, bool] | None = None
     if inline_raw is not None:
-        m_s, n_s, b_s, k_s, data_t, dest_t, comp_t, ta, tb = inline_raw
+        if len(inline_raw) not in (9, 10):
+            parser.error("--inline requires 9 args (M N batch K DataType DestDataType ComputeDataType transA transB) "
+                         "plus an optional 10th arg 'MX'")
+        m_s, n_s, b_s, k_s, data_t, dest_t, comp_t, ta, tb = inline_raw[:9]
+        inline_mx = False
+        if len(inline_raw) == 10:
+            mx_arg = str(inline_raw[9]).strip().upper()
+            if mx_arg != "MX":
+                parser.error(f"--inline: optional 10th argument must be 'MX', got '{inline_raw[9]}'")
+            inline_mx = True
+            if ns.arch is None:
+                parser.error("--arch is required when using --inline ... MX")
         try:
             m_i, n_i, b_i, k_i = int(m_s), int(n_s), int(b_s), int(k_s)
         except ValueError:
@@ -281,7 +319,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         if trans_a not in ("N", "T", "C") or trans_b not in ("N", "T", "C"):
             parser.error("--inline: transA and transB must each be N, T, or C")
         dt, dd, cd = str(data_t).strip(), str(dest_t).strip(), str(comp_t).strip()
-        inline = (m_i, n_i, b_i, k_i, dt, dd, cd, trans_a, trans_b)
+        inline = (m_i, n_i, b_i, k_i, dt, dd, cd, trans_a, trans_b, inline_mx)
 
     if ns.tune and ns.arch is None:
         parser.error("--arch is required with --tune")
@@ -316,6 +354,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         custom_lib_dir=ns.custom_lib_dir,
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
+        skip_gpu_check=ns.skip_gpu_check,
     )
 
 
@@ -339,12 +378,22 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     logger.info(f"Run directory: {run_root_str}")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
 
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(args.devices))
+        if gpu_check_rc == 1:
+            logger.error("GPU check: device enumeration timed out; aborting.")
+            return 1
+        if gpu_check_rc == 2:
+            logger.error("GPU check: insufficient GPU devices found; aborting.")
+            return 2
+
     log_path: Path
+    config_overrides: Dict[str, Any] = {}
     if args.workload is not None:
         log_path = Path(args.workload)
     elif args.gemm_config is not None:
         try:
-            rows = _rows_from_gemm_config_yaml(Path(args.gemm_config), args.arch)
+            rows, config_overrides = _rows_from_gemm_config_yaml(Path(args.gemm_config), args.arch)
         except (ValueError, FileNotFoundError) as e:
             logger.error(str(e))
             logger.error("Example tuning YAML: %s", _SAMPLE_GEMM_LIST_YAML)
@@ -353,10 +402,13 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
         with log_path.open("w") as f:
             yaml.safe_dump(rows, f, default_flow_style=None, sort_keys=False, width=5000)
     elif args.inline is not None:
-        m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b = args.inline
+        m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b, inline_mx = args.inline
         try:
             gtype = GemmType.from_tensile(trans_a, trans_b, data_t, dest_t, comp_t)
-            rows = GemmConfig(gtype, [[m, n, batch_count, k]]).workload_log_rows()
+            gconfig = GemmConfig(gtype, [[m, n, batch_count, k]], mx=inline_mx)
+            if args.arch is not None:
+                validate_mx_arch_support([gconfig], args.arch)
+            rows = gconfig.workload_log_rows(mx_scale=mx_scale_code(args.arch, mx_format(gconfig, args.arch)))
         except ValueError as e:
             logger.error(str(e))
             return 1
@@ -405,12 +457,14 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             workdir=run_root_str,
             verbose=args.verbose,
             bench_freq=args.bench_freq,
+            config_overrides=config_overrides,
         )
         run_optimize(
             hipblaslt_path,
             workdir=run_root_str,
             devices=args.devices,
             n_slots=args.n_slots,
+            up_thr=args.up_thr,
             retry=args.retry,
             verbose=args.verbose,
             bench_freq=args.bench_freq,

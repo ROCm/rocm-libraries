@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -144,8 +144,7 @@ namespace rocalution
         this->ncol_ = ncol;
         this->nnz_  = nnz;
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.row = *row;
         this->mat_.col = *col;
@@ -159,8 +158,7 @@ namespace rocalution
         assert(this->ncol_ >= 0);
         assert(this->nnz_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         // see free_host function for details
         *row = this->mat_.row;
@@ -818,6 +816,7 @@ namespace rocalution
             allocate_hip(this->nnz_, &perm);
             status = rocsparse_create_identity_permutation(
                 ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle), this->nnz_, perm);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             status
                 = rocsparse_coosort_by_row(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),

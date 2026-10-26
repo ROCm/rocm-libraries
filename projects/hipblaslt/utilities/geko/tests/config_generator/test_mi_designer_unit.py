@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from geko.config_generator import mi_designer as mid
-from geko.schemas import GemmType
+from geko.schemas import GemmConfig, GemmType
 
 
 def _config(streamk: bool = False) -> dict:
@@ -16,7 +16,7 @@ def _config(streamk: bool = False) -> dict:
         "CUs": 256,
         "MI_FILTER": 1,
         "StreamK": streamk,
-        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]]),
     }
 
 

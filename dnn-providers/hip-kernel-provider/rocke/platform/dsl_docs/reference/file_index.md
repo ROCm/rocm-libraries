@@ -20,7 +20,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `core/ir.py` | Typed SSA IR. `Type`, `VectorType`, `PtrType`, `SmemType`; singletons (`I1`, `I8`, `I32`, `I64`, `F16`, `BF16`, `F32`, `FP8E4M3`, `BF8E5M2`); cache-hint constants (`CACHE_ALL`, `CACHE_GLOBAL`, `CACHE_STREAM`, `NON_TEMPORAL`); `Value`, `Op`, `Region`, `Param`, `KernelDef`; `IRBuilder`. IRBuilder methods added in : `cvt_bf8_to_f32`, `cvt_f32_to_{fp8, bf8, i8_sat}`, `clamp_f32`, `global_atomic_add`, `lds_atomic_add`. |
 | `core/ir_print.py` | `print_ir(kernel)` — MLIR-style textual IR dump. |
 | `core/passes.py` | `optimize_kernel`, `canonicalize_region`, `eliminate_dead_pure_ops`, `PassStats`. Conservative constant fold + CSE + DCE. |
-| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
+| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel, *, arch) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
 | `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`ROCKE_BACKEND`), auto-falling back to the native Python lowerer when the `rocke_engine` extension is not built. |
 | `core/ir_serialize.py` | `serialize` / round-trip of the `ck.dsl.ir/v1` artifact — the family-agnostic interchange the C++ engine lowers from. |
 | `core/arch/` | `ArchTarget`, `MmaOp`, `LayoutMap`, `known_arches`, the per-arch spec table (`arch_specs.json`), and the MFMA/WMMA layout-map SSOT. Supported targets: `gfx942`, `gfx950` (CDNA, wave64) and `gfx1151`, `gfx1201` (RDNA, wave32). |
@@ -34,7 +34,8 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 |-------------------------------|--------------------------------------------------------------------------------------------------------|
 | `runtime/runtime_coexistence.py` | `_candidate_lib_paths`, `_rocm_root_libdirs`, `_torch_bundled_lib`, ... . Which ROCm runtime we bind to, and whose (torch-bundled vs system). Shared by `comgr` + `hip_module`. |
 | `runtime/_ctypes_bind.py` | `_LazyFn`. Lazy ctypes function binder shared by `comgr` + `hip_module`. |
-| `runtime/comgr.py` | `build_hsaco_from_llvm_ir(ir_text, isa=..., options=...) -> (bytes, ComgrTimings)`. Ctypes over `libamd_comgr`. |
+| `runtime/comgr.py` | `build_hsaco_from_llvm_ir(ir_text, isa=..., options=..., fresh_process=False) -> (bytes, ComgrTimings)`. Ctypes over `libamd_comgr`; `fresh_process=True` compiles in a new process that compiles nothing else (`ComgrProcessDied` if it dies). |
+| `runtime/_comgr_fresh_process.py` | `main()`. The child process of `fresh_process=True`: compiles one module and exits. |
 | `runtime/hip_module.py` | `Runtime`, `Module`, `Event`, `HipError`. Ctypes over `libamdhip64`. Per-stream pending-args queue. |
 | `runtime/packing.py` | `pack_args`, `pack_args_kernelparams`, `_as_ptr`. Torch-agnostic AMDGPU kernarg packing. |
 | `runtime/torch_interop.py` | `resolve_stream`, `empty_workspace`, `launch_torch_kernel`, `TorchLaunchSummary`. Torch-tensor launch glue. |
@@ -46,6 +47,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 |---------------------------------------|-------------------------------------------------------------------------------------------------|
 | `helpers/__init__.py` | Re-exports for the helper layer. |
 | `helpers/transforms.py` | Coordinate-transform DAG: `CoordVar`, `Transform`, `PassThrough`, `Pad`, `PadDynamic`, `Embed`, `Merge`, `Unmerge`, `Indirect`, `TensorDescriptor`, constructors (`pass_through`, `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, `indirect`). Re-exported at the top level (`from rocke import ...`) and via `from rocke.helpers.transforms import ...`. |
+| `helpers/magic_division.py` | `calculate_magic_numbers`, `do_magic_division`, `do_magic_division_dynamic`. Unsigned integer divide as mul-hi, add, shift with a host-computed `(multiplier, shift)` pair (CK Tile `magic_div.hpp`). Import via `from rocke.helpers.magic_division import ...`. |
 | `helpers/atoms.py` | `MfmaAtom`, `WmmaAtom`, `mfma_atom(dtype, m, n, k)`, `wmma_atom(dtype, m, n, k)`. MFMA catalogs (wave64): `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, `MFMA_FP8_ATOMS` (fp8 / bf8, incl. the wide-K `fp8_16x16x128` hero), `MFMA_MX_ATOMS` (fp4 / fp6), and the unified `MFMA_ATOMS`. WMMA catalogs (RDNA wave32): `WMMA_F16_ATOMS`, `WMMA_BF16_ATOMS`, `WMMA_ATOMS`. |
 | `helpers/geometry.py` | `WarpGrid` — block/warp/lane decomposition. |
 | `helpers/loads.py` | `CoalescedTileLoader`, `AsyncTileLoader`, `AsyncTileLoaderSlot`, `DescriptorFn`, `lane_contiguous_descriptor`. |
@@ -53,15 +55,15 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/schedule.py` | `SchedulePolicy`. `sched_group_barrier`, `s_setprio`, named schedule flavors. |
 | `helpers/pipeline.py` | `SoftwarePipeline.run_ping_pong(...)`. |
 | `helpers/epilogues.py` | `DirectEpilogue`, `CShuffleEpilogue`. |
-| `helpers/attention.py` | `Attention2DConfig`, `Attention3DConfig`, `OnlineSoftmaxState`, `PagedKvDescriptor`, `apply_softcap_log2`, `apply_softcap_scalar`, `binary_search_seq_idx`, `causal_mask`, `sliding_window_mask`, `mfma_16x16x16_for_dtype`, `mfma_16x16x32_for_dtype`, `select_2d_config`, `select_3d_config`, `use_2d_kernel`, `warp_xor_reduce_max`, `warp_xor_reduce_sum`. |
+| `helpers/attention.py` | `Attention2DConfig`, `Attention3DConfig`, `OnlineSoftmaxState`, `PagedKvDescriptor`, `apply_softcap_log2`, `apply_softcap_scalar`, `binary_search_seq_idx`, `binary_search_seq_idx_iters`, `causal_mask`, `sliding_window_mask`, `mfma_16x16x16_for_dtype`, `mfma_16x16x32_for_dtype`, `select_2d_config`, `select_3d_config`, `use_2d_kernel`, `warp_xor_reduce_max`, `warp_xor_reduce_sum`. |
 | `helpers/compile.py` | `compile_kernel`, `KernelArtifact`. |
-| `helpers/manifest.py` | `MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"`, `attention_args_signature`, `conv_args_signature`, `gemm_args_signature`, `make_attention_manifest`, `make_conv_manifest`, `make_gemm_manifest`, `make_simple_op_manifest`, `write_artifact`. |
+| `helpers/manifest.py` | `MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"`, `attention_args_signature`, `gemm_args_signature`, `make_attention_manifest`, `make_conv_manifest`, `make_gemm_manifest`, `make_simple_op_manifest`, `write_artifact`. |
 | `helpers/tensor_view.py` | `TensorDescriptor`, `TensorView`, `TileWindow`, `TensorCoordinate`, `BufferResource`; constructors `make_global_view`, `make_lds_view`, `make_buffer_resource`, `make_buffer_view`, `make_naive_tensor_descriptor_packed`, `make_naive_tensor_view_packed`, `make_tile_window`, `make_tensor_coordinate`, `move_tensor_coordinate`, `view_from_transforms_descriptor`. |
 | `helpers/distribution.py` | `TileDistributionEncoding`, `TileDistribution`, `StaticDistributedTensor`, `LoadStoreTraits`, `make_static_tile_distribution`, `make_load_store_traits`, `make_static_distributed_tensor`, `load_tile`, `store_tile`. |
 | `helpers/sweep.py` | `sweep_row_chunks`, `pass2_row_chunks`, `RowChunkSweepResult`. |
 | `helpers/io.py` | `io_ir_type`, `load_scalar`, `load_scalar_as_f32`, `load_vec`, `load_vec_as_f32`, `pack_f32_to`, `store_scalar`, `store_scalar_from_f32`, `store_vec`. |
 | `helpers/reduction.py` | `ReduceCombine`, `block_lds_reduce`. |
-| `helpers/spec.py` | `IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`, `ptr_type_str`, `sig_param`, `sig_scalar`. |
+| `helpers/spec.py` | `IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`, `ptr_type_str`, `sig_param`, `sig_scalar`; host integer and naming utilities (no IR): `ceil_div`, `align_up`, `non_default_fields`, `salted_kernel_name`. |
 | `helpers/quant.py` | `QDType`, `QUANT_MAX_ABS`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
 | `helpers/scan.py` | `lds_zero_i32`, `block_histogram_i32`, `block_exclusive_scan_i32`. Block-wide cooperative scan + histogram primitives. |
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
@@ -85,6 +87,10 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/fusion_memory.py` | `WorkspaceAllocation`, `WorkspacePlanner`, `materialize_plan`. |
 | `helpers/fusion_scheduler.py` | `GreedyFusionScheduler`, `RegionCost`. |
 | `helpers/fusion_validation.py` | `BackendTiming`, `BenchmarkCase`, `FusionMatrixRunner`, `ValidationReport`, `run_fusion_validation_matrix`. |
+| `helpers/attention_fwd_ext.py` | `AttnFwdExt`, `emit_rows_epilogue`, `score_stage`, `last_index`. Opt-in (default-off) extension points of the MFMA / WMMA attention forward inner body: score and epilogue hooks (the attention backward's LSE output uses them); the forward default IR is unchanged. |
+| `helpers/attention_band.py` | `AttnRuntimeBounds`, `BandEmitter`, `I32_FAR` (the limit past every row, key and bound). Runtime two-sided diagonal band for attention shells: per-cell keep, per-row validity, k-tile range. |
+| `helpers/wmma_attention.py` | The wave32 WMMA FMHA-forward inner body (moved out of `mfma_attention.py`, which dispatches to it and re-exports its names). |
+| `helpers/_attention_shared.py` | Pieces shared by the MFMA and WMMA attention forward bodies (online-softmax row reduction, K-tile size, dtype mapping); a leaf module that breaks the import cycle. |
 
 ## `analysis/` And `benchmark/`
 
@@ -113,6 +119,7 @@ prefix for brevity).
 | `instances/grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `build_grouped_gemm`, `grouped_gemm_signature`, `GroupedGemmLauncher`, `grouped_gemm_problems`. |
 | `instances/conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec`, `make_a_descriptor`, `make_b_descriptor`, `make_d_descriptor`, `build_implicit_gemm_conv`. |
 | `instances/conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec`, `build_direct_conv_16c`, `build_direct_conv_4c`. |
+| `instances/conv_direct_nongrouped.py` | `DirectNongroupedConvSpec`, `is_valid_nongrouped_spec`, `build_direct_conv_nongrouped`, `nongrouped_specs`, `nongrouped_knobs`, `tile_w_candidates` (`groups == 1`; AOT, `C`/`K` runtime). |
 | `instances/img2col.py` | `Img2ColSpec`, `build_img2col`, `img2col_grid`, `img2col_signature`. (CK Tile 04.) |
 | `instances/pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp`, `build_pooling2d`, `pooling2d_grid`, `pooling2d_signature`. (CK Tile 36.) |
 | `instances/permute_nd.py` | `PermuteSpec`, `build_permute`, `permute_grid`, `permute_signature`. Rank-up-to-8 n-D permute. (CK Tile 06.) |
@@ -154,6 +161,32 @@ prefix for brevity).
 | `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
 | `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
 | `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
+| `kernels/gfx1151/wmma_fmha_fwd_v2.py` | `WmmaFmhaFwdV2Spec`, `build_wmma_fmha_fwd_v2`, `is_valid_spec`, `wmma_fmha_fwd_v2_grid`, `wmma_fmha_fwd_v2_signature`. gfx11/gfx12 multi-wave WMMA FMHA prefill (body in `rocke/helpers/rdna_attention.py`). |
+| `kernels/gfx1151/wmma_fmha_decode.py` | `WmmaFmhaDecodeSpec`, `build_wmma_fmha_decode`, `build_wmma_fmha_decode_module`, split/grid/workspace host helpers. gfx11/gfx12 split-KV, GQA-packed WMMA decode plus merge. |
+
+## `numeric/` — References
+
+| Path | Primary contents |
+|---|---|
+| `numeric/sdpa_reference.py` | `sdpa_reference`, `sdpa_reference_bwd`, `resolve_diagonal_band`. Torch-free float64 SDPA forward and backward oracle (bands, GQA, padded and ragged layouts, natural-log LSE; the hipDNN CPU reference semantics). |
+
+## Library: attention backward (`library/`, paths from the rocke root)
+
+Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/attention_bwd.md` section 0.3). Design doc `dsl_docs/instances/attention_bwd.md`; unified (paged KV) contract `dsl_docs/instances/attention_bwd_unified.md`.
+
+| Path | Primary contents |
+|---|---|
+| `library/kernels/common/attention_bwd.py` | `AttnBwdSpec`, `validate_attn_bwd_spec`, `build_attn_bwd_main`, `attn_bwd_params`, `lds_plan`. Layout-general main kernel. |
+| `library/kernels/common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `validate_attn_bwd_dq_spec`, `build_attn_bwd_dq`. Split dQ kernel. |
+| `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep / convert / reduce / page-role builders. |
+| `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy`, `shipped_policy`, `attn_bwd_tuning_key`. |
+| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); torch-free production comgr pin. |
+| `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | Unified (paged KV) spec, builder, request, predicate, plan, launch glue. |
+| `library/kernels/common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`, `_attention_dense_bwd_shell.py`; `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | Dense (shape-specialised) family: spec (incl. `ArchAttentionDenseBwdSpec`, the target-parameterised spec the per-arch specs bind), plan, dense split dQ kernel, shell, per-arch builders. |
+| `library/kernels/common/_attention_bwd_*.py`, `_lse_store.py` | Family glue: tile step (`_body`), block GEMM (`_gemm`), fragments (`_frag`), LDS planner (`_lds`), rings (`_ring`), counted waits (`_counted`), VALU levers (`_valu`), tiles (`_tiles`), split dQ body (`_dqbody`), arch capabilities (`_caps`), band (`_band`), addressing (`_addr`), paged addressing (`_paged`), sinks (`_sinks`), CTA decode (`_worklist`), stage tables (`_sched`), resource refusals (`_refusals`); the forward LSE store. |
+| `library/dispatch/attention_bwd/` | `tuning_common.py` (knob registry, `backward_spec_legality`, `BWD_KNOWN_WRONG_KNOBS`), `dense_tuning.py`, `unified_tuning.py` (unified axes, `unified_spec_legality`), `gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py` (`plan_attention_bwd`, `routed_policy`, `attention_bwd_declaration`), `registry.py` (`ATTENTION_BWD_REGISTRY`, `attention_bwd_ranker`, `dispatch_attention_bwd`, `run_attention_bwd`). |
+| `library/benchmarks/common/attention_bwd_sweep.py`, `attention_bwd_bench.py`, `attention_bwd_compile.py`, `attention_bwd_rocke_arm.py`, `attention_bwd_unified_bench.py`, `attention_bwd_census.json` | Funnel sweep, paired timing harness, compile cache and crash isolation, rocKE arm, unified bench, shape census (no measurements). |
+| `library/tests/test_attention_bwd_ir_golden.py`, `library/tests/golden/attention_bwd_ir_sha256.json`; `library/tests/parity/barrier_fence_emit.py` | Backward IR golden hashes; the barrier-fence parity emitter. |
 
 ## `examples/`
 
@@ -165,7 +198,14 @@ prefix for brevity).
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
 | `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
-| `examples/gfx950/attention/parity_unified_attention.py` | Triton vs CK DSL attention parity harness (all paths). |
+
+The attention parity harnesses are not examples; they live in the library, one
+per arch:
+
+- `library/builders/gfx950/attention/prefill/parity_unified_attention.py` —
+  Triton vs rocKE attention parity harness (all paths).
+- `library/builders/gfx942/attention/prefill/parity_unified_attention.py` —
+  rocKE vs a fp32 torch reference (no Triton/AITER).
 
 ## `example/ck_tile/dsl/<N>_*/gen.py`
 
@@ -195,5 +235,5 @@ Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The 
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `dsl_docs/fusion/adding_fused_kernels.md` | Fused-kernel decision guide: when a fusion pays, when it doesn't, how to land one. |
 | `dsl_docs/` | This documentation tree. |
-| `python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
+| `library/builders/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

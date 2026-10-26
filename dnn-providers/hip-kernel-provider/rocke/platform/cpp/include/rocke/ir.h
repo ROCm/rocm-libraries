@@ -105,6 +105,16 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_F32,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
+    ROCKE_SCALAR_FP4E2M1,
+    ROCKE_SCALAR_FP6E2M3,
+    ROCKE_SCALAR_FP6E3M2,
+    ROCKE_SCALAR_E8M0,
+    ROCKE_SCALAR_E5M3,
+    ROCKE_SCALAR_TF32,
+    ROCKE_SCALAR_F64,
+    ROCKE_SCALAR_I4,
+    ROCKE_SCALAR_U4,
+    ROCKE_SCALAR_U8,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -191,7 +201,12 @@ typedef struct rocke_attr_map
 
 /* One enumerator per distinct op name string in rocke.core.ir. Every lowerer
  * dispatches on this enum instead of Python getattr(self, "_op_"+name). The
- * canonical dotted name string is recovered with rocke_opcode_name(). */
+ * canonical dotted name string is recovered with rocke_opcode_name().
+ *
+ * A new opcode goes at the end, just before ROCKE_OP__COUNT. Inserting one
+ * anywhere else renumbers every opcode after it, which breaks the C ABI (see
+ * "when to bump" in rocke/abi.h). tests/core/test_opcode_values.cpp pins the
+ * value of every existing opcode. */
 typedef enum rocke_opcode
 {
     ROCKE_OP_INVALID = 0,
@@ -265,6 +280,11 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
+    ROCKE_OP_GPU_CLUSTER_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -361,6 +381,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
     ROCKE_OP_TILE_QUAD_PERM,
+    ROCKE_OP_TILE_DPP_XOR,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -399,6 +420,15 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_WAIT_ASYNCMARK,
     ROCKE_OP_TILE_S_WAIT_EVENT,
     ROCKE_OP_TILE_S_PREFETCH_INST,
+    ROCKE_OP_TILE_S_SETREG,
+    ROCKE_OP_TILE_S_PREFETCH_DATA,
+    ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA,
+    ROCKE_OP_TILE_GLOBAL_PREFETCH,
+    ROCKE_OP_TILE_FLAT_PREFETCH,
+    ROCKE_OP_TILE_CLUSTER_BARRIER,
+    ROCKE_OP_TILE_CLUSTER_LOAD,
+    ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_PTR_TO_I64,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -416,6 +446,31 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_IF_ELSE,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
+
+    /* memref.* cross-workgroup synchronisation (stream-K fixup). Appended
+     * after the control-flow block so no existing opcode index shifts. */
+    ROCKE_OP_MEMREF_FENCE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
+    ROCKE_OP_VECTOR_UNDEF,
+    ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
+
+    /* arith.* f32 <-> f64 conversions */
+    ROCKE_OP_ARITH_CVT_F32_TO_F64,
+    ROCKE_OP_ARITH_CVT_F64_TO_F32,
+
+    /* arith.* unsigned (u8) ops. Appended so no existing opcode index shifts. */
+    ROCKE_OP_ARITH_UMAX,
+    ROCKE_OP_ARITH_UMIN,
+    ROCKE_OP_ARITH_UITOFP_F32,
+    ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
+
+    /* Range marker (Python IRBuilder._assume_range): its result is its first
+     * operand; it emits no instruction. Appended so no existing index shifts. */
+    ROCKE_OP_ARITH_ASSUME_RANGE,
+
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -560,11 +615,49 @@ typedef struct rocke_inline_asm_opts
     bool convergent_set;
 } rocke_inline_asm_opts_t;
 
+/* Temporal hint for vector global memory ops (Python rocke.core.ir.TemporalHint).
+ * It states intent; the backend picks the cache bits per arch. */
+typedef enum rocke_temporal_hint
+{
+    ROCKE_TEMPORAL_DEFAULT = 0, /* existing cache policy; IR unchanged          */
+    ROCKE_TEMPORAL_STREAMING = 1 /* read/written once: lowers to LLVM !nontemporal */
+} rocke_temporal_hint_t;
+
+/* Options for vector global memory ops (rocke_b_global_load_vN_ex,
+ * rocke_b_global_store_vN_ex, and the io helpers' _ex forms).
+ *
+ * opts == NULL means all defaults. Otherwise initialize with
+ * ROCKE_MEM_OPTS_INIT, which records sizeof(rocke_mem_opts_t) as the caller's
+ * compiler saw it, then set the fields you need:
+ *
+ *     rocke_mem_opts_t o = ROCKE_MEM_OPTS_INIT;
+ *     o.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+ *
+ * Extension contract: new fields are only appended, and every field's 0 value
+ * means "default". The library reads a field only when it lies inside
+ * struct_size and uses the default otherwise, so a caller built against an
+ * older, shorter struct keeps working with a newer library. struct_size == 0
+ * (e.g. `= {}` without the macro) is rejected with ROCKE_ERR_VALUE rather than
+ * silently ignoring the caller's settings. */
+typedef struct rocke_mem_opts
+{
+    uint32_t struct_size; /* sizeof(rocke_mem_opts_t) at the caller's compile time */
+    rocke_temporal_hint_t temporal_hint;
+} rocke_mem_opts_t;
+
+#define ROCKE_MEM_OPTS_INIT                                        \
+    {                                                              \
+        (uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT \
+    }
+
 /* ============================== TYPE SYSTEM ============================== */
 
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
  * never NULL; never arena-owned (static storage). */
 const rocke_type_t* rocke_i1(void);
+const rocke_type_t* rocke_i4(void);
+const rocke_type_t* rocke_u4(void);
+const rocke_type_t* rocke_u8(void);
 const rocke_type_t* rocke_i8(void);
 const rocke_type_t* rocke_i16(void);
 const rocke_type_t* rocke_i32(void);
@@ -572,8 +665,18 @@ const rocke_type_t* rocke_i64(void);
 const rocke_type_t* rocke_bf16(void);
 const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
+const rocke_type_t* rocke_tf32(void);
+const rocke_type_t* rocke_f64(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
+const rocke_type_t* rocke_fp4e2m1(void);
+const rocke_type_t* rocke_fp6e2m3(void);
+const rocke_type_t* rocke_fp6e3m2(void);
+const rocke_type_t* rocke_e8m0(void);
+const rocke_type_t* rocke_e5m3(void);
+
+/* Logical dtype resolver; NULL for unknown or unrepresented encodings. */
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype);
 
 /* Look up a scalar singleton by canonical name ("i32",...); NULL if unknown. */
 const rocke_type_t* rocke_scalar_by_name(const char* name);
@@ -592,14 +695,25 @@ const rocke_type_t* rocke_smem_type(
  * canonical name, which encodes kind + components). */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
 
-/* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
+/* True when `t`, or the element of a vector `t`, is an unsigned integer (u8,
+ * u4). The twin of core/ir.py::_is_unsigned: every op whose result depends on
+ * signedness asks it which form to emit. NULL-safe. */
+bool rocke_type_is_unsigned(const rocke_type_t* t);
+
+/* AMDGPU buffer-load cache-policy bits (the AUX operand; Python module
+ * constants). Bit 0 (1) is GLC on gfx90a and SC0 on gfx942/gfx950; bit 1 (2) is
+ * SLC on gfx90a and NT (streaming) on gfx942/gfx950. */
 typedef enum rocke_cache_policy
 {
-    ROCKE_CACHE_ALL = 0,
-    ROCKE_CACHE_GLOBAL = 1,
-    ROCKE_CACHE_STREAM = 2,
-    ROCKE_NON_TEMPORAL = 3
+    ROCKE_CACHE_ALL = 0, /* no bits: the default caching */
+    ROCKE_CACHE_GLOBAL = 1, /* GLC / SC0 */
+    ROCKE_CACHE_STREAM = 2, /* SLC / NT */
+    ROCKE_NON_TEMPORAL = 3 /* GLC + SLC / SC0 + NT */
 } rocke_cache_policy_t;
+
+/* The bits of a cache-policy name ("all", "global", "stream", "nt"; Python
+ * cache_policy_from_name). Returns false for any other name. */
+bool rocke_cache_policy_from_name(const char* name, rocke_cache_policy_t* out);
 
 /* ============================== ATTR MAP ================================ */
 
@@ -617,6 +731,9 @@ bool rocke_attr_get_int(const rocke_attr_map_t* m, const char* key, int64_t* out
 bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* out);
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
+
+/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
+bool rocke_scheduler_strategy_is_valid(const char* strategy);
 
 /* ============================ OPCODE TABLE ============================== */
 
@@ -681,12 +798,16 @@ rocke_value_t* rocke_b_get_param(rocke_ir_builder_t* b, const char* name);
 rocke_value_t* rocke_b_const_i32(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_i64(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_f32(rocke_ir_builder_t* b, double value);
+rocke_value_t* rocke_b_const_f64(rocke_ir_builder_t* b, double value);
 rocke_value_t* rocke_b_fp16_zero(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_zero_vec_f32(rocke_ir_builder_t* b, int n);
 rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
 
 /* ----- arith integer / logic ----- */
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python add_nuw: integer a + c that does not wrap as unsigned ("add nuw").
+ * Operands are two i32 or two i64 values. */
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_mul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_div(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -694,8 +815,12 @@ rocke_value_t* rocke_b_mod(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
 rocke_value_t* rocke_b_land(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a);
+/* Signed max / min; an unsigned operand is refused (TypeError). */
 rocke_value_t* rocke_b_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Unsigned max / min of two u8 values. */
+rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -710,6 +835,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -728,6 +856,9 @@ rocke_value_t* rocke_b_cmp_gt(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
+ * values. */
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
@@ -746,6 +877,8 @@ rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
+/* Bitcast to a type of the same bit width; another width (ValueError) or a
+ * pointer (TypeError) is refused before any op is built. */
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_select(rocke_ir_builder_t* b,
                               rocke_value_t* cond,
@@ -762,22 +895,59 @@ rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* u8 -> f32 (LLVM uitofp). Exact. */
+rocke_value_t* rocke_b_uitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 <-> f64 have their own opcodes; cast_to_f32 / cast_f32_to reject f64. */
+rocke_value_t* rocke_b_cvt_f32_to_f64(rocke_ir_builder_t* b, rocke_value_t* v);
+rocke_value_t* rocke_b_cvt_f64_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
+/* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
+rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> u8, round to nearest even and saturate to [0, 255]; NaN gives 0. */
+rocke_value_t* rocke_b_cvt_f32_to_u8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
+
+/* ----- cross-workgroup synchronisation (stream-K fixup) ----- */
+/* IRBuilder.fence: scope in {workgroup, agent, system}; ordering in
+ * {acquire, release, acq_rel, seq_cst}. NULL selects the Python defaults
+ * (agent / acq_rel). */
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering);
+/* IRBuilder.global_flag_store: atomic i32 ptr[idx] = value. NULL scope /
+ * ordering select agent / release. */
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering);
+/* IRBuilder.global_flag_wait_eq: spin until ptr[idx] == expect (acquire).
+ * NULL scope selects agent. */
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -807,6 +977,16 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+
+/* gfx1250 workgroup clusters. `axis` is "x", "y" or "z". Without a cluster
+ * launch every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. cluster_size composes max_id + 1. */
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis);
 
 /* ----- global memory ----- */
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
@@ -848,6 +1028,10 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
 rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -879,6 +1063,21 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n,
                                       int align /* <=0 => default */);
+/* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
+ * and the plain rocke_b_global_load_vN forwards here with NULL.
+ * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
+ * LLVM `!nontemporal`); on gfx942 / gfx950 the backend sets only `nt`, i.e.
+ * ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). Lowering a
+ * streaming op for any other target fails with ROCKE_ERR_VALUE. An
+ * out-of-range temporal_hint puts the builder in its error state
+ * (ROCKE_ERR_VALUE). */
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         const rocke_mem_opts_t* opts);
 rocke_value_t* rocke_b_global_load_vN_f16(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
@@ -955,6 +1154,14 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra);
 
 /* ----- inline asm ----- */
+/* Value-preserving optimization boundary for i1/i8/i16/i32/i64/bf16/f16/f32/
+ * fp8e4m3/bf8e5m2. Packed FP4/FP6 and scale formats use integer storage/carriers.
+ * Use the returned value; unused results may be eliminated. Empty tied
+ * VGPR asm hides the producer from consumers without memory/thread ordering.
+ * Predicates and byte storage bridge through i32. Pointers/vectors are rejected. Register moves
+ * may still be required. */
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value);
+
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */
@@ -982,6 +1189,10 @@ rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b,
                                 int num_components,
                                 const rocke_type_t* elem);
 rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb);
+/* Freeze-poison base for a vector that will be fully overwritten by inserts
+ * (never a zero substitute). Port of Python IRBuilder.undef_vec / the pinned
+ * PR9710 vector.undef op. */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
@@ -1039,6 +1250,10 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
                                               rocke_value_t* a,
                                               rocke_value_t* bb,
@@ -1135,6 +1350,22 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
  * fixed at 15, 15 by the lowerers. */
 rocke_value_t*
     rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
+/* dpp_xor (tile.dpp_xor): lane i of each 16-lane row reads lane i ^ xor_mask
+ * of the same row; xor_mask in 1..15, i32 data only. Low-level op behind
+ * rocke_b_warp_shuffle_xor_dpp. The IR carries only the mask; the lowerers
+ * pick the DPP control word per target (rocke_i_dpp_xor_ctrl): 0x160|mask
+ * (row_xmask) on gfx11/gfx12/gfx1250; on gfx9 CDNA 1/2/3 -> quad_perm,
+ * 7 -> row_half_mirror (lane i of each 8-lane half-row reads 7-i == i^7),
+ * 8 -> row_ror:8, 15 -> row_mirror (lane i reads 15-i == i^15), and any
+ * other mask fails to lower with ROCKE_ERR_VALUE. See IRBuilder.dpp_xor. */
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+/* warp_shuffle_xor_dpp: the kernel-facing VALU XOR shuffle (CUDA
+ * __shfl_xor_sync within a 16-lane row): lane l gets v from lane l ^ lane_xor,
+ * lane_xor in 1..15, one rocke_b_dpp_xor (f32 bitcast through i32, as
+ * rocke_b_warp_shuffle_xor). Per 16-lane row, never crosses a row; every lane
+ * of the row must be active for a butterfly reduction. See
+ * IRBuilder.warp_shuffle_xor_dpp for the mask -> instruction table. */
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,
@@ -1180,6 +1411,8 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
                                      const rocke_type_t* dtype /* NULL=>fp8e4m3 */);
 
 /* ----- vector bitcast / packed f32->f16 conversion ----- */
+/* Reinterpret a vector as another vector type of the same bit width; another
+ * width (ValueError) or a pointer (TypeError) is refused before any op is built. */
 rocke_value_t*
     rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1254,6 +1487,8 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* 64-bit address of a global pointer (``ptrtoint``). */
+rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
     rocke_b_buffer_rsrc(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* num_bytes);
 rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
@@ -1261,10 +1496,26 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* voffset,
                                           rocke_value_t* soffset,
                                           int dwords);
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
+ * <n x dtype>; out-of-range offsets read zero. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
+ * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
+ * the pinned PR9710 tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset);
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1332,6 +1583,16 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align /* <=0 => default */);
+/* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
+ * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
+ * (gfx942 / gfx950: `nt` only; other targets fail at lowering). */
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                const rocke_mem_opts_t* opts);
 void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* ptr,
                                  rocke_value_t* idx,
@@ -1353,6 +1614,13 @@ void rocke_b_sync(rocke_ir_builder_t* b);
 void rocke_b_s_barrier_bare(rocke_ir_builder_t* b);
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector);
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): mode "compiler"
+ * follows the barrier with a compiler memory barrier, "workgroup" also
+ * brackets it with workgroup-scope release / acquire fences; NULL or "none" is
+ * the plain op. Any other mode records ROCKE_ERR_VALUE. */
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode);
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
@@ -1372,6 +1640,59 @@ void rocke_b_asyncmark(rocke_ir_builder_t* b);
 void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+
+/* gfx1250 data prefetch. S_SETREG's SIMM16 packs id | offset<<6 | (size-1)<<11
+ * (Python rocke.core.ir.hwreg). The MODE bit that enables scalar data
+ * prefetch is taken from the CDNA5 ISA MODE register description; LLVM has no
+ * symbolic name for it, so it cannot be cross-checked against the toolchain.
+ * Must match rocke.core.ir.MODE_SCALAR_PREFETCH_EN_BIT. */
+#define ROCKE_HW_REG_MODE 1
+#define ROCKE_MODE_SCALAR_PREFETCH_EN_BIT 24
+#define ROCKE_HWREG(id, offset, size) ((id) | ((offset) << 6) | (((size) - 1) << 11))
+void rocke_b_s_setreg(rocke_ir_builder_t* b, int simm16, rocke_value_t* value);
+void rocke_b_enable_scalar_prefetch(rocke_ir_builder_t* b);
+void rocke_b_s_prefetch_data(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* length,
+                                    int offset);
+void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+/* gfx1250 cluster barrier: cluster-scope release fence, s.cluster.barrier,
+ * cluster-scope acquire fence. */
+void rocke_b_cluster_barrier(rocke_ir_builder_t* b);
+/* gfx1250 cluster multicast loads. mask (i32, wave-uniform) selects the
+ * receiving workgroups by cluster flat id (M0[15:0]). cluster_load returns i32
+ * (4 bytes), vec<i32x2> (8) or vec<i32x4> (16). */
+rocke_value_t* rocke_b_cluster_load(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* mask,
+                                    int width_bytes,
+                                    int cachepolicy);
+void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
+                                       rocke_value_t* src_ptr,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* mask,
+                                       int width_bytes,
+                                       int offset_bytes,
+                                       int cachepolicy);
+/* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
+ * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
+ * sets the builder error and returns 0. */
+int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
+                              rocke_value_t* global_ptr,
+                              rocke_value_t* lds_addr,
+                              int elem_bytes,
+                              rocke_value_t* tensor_dim0,
+                              rocke_value_t* tensor_dim1,
+                              rocke_value_t* row_stride,
+                              int tile_dim0,
+                              int tile_dim1,
+                              int workgroup_mask,
+                              int pad_interval,
+                              int pad_amount,
+                              rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

@@ -13,12 +13,14 @@
 // process-global state.
 //
 // Compiled only into the public wrapper library; never installed.
-#ifndef MIOPEN_PRIVATE_ROUTING_HPP
-#define MIOPEN_PRIVATE_ROUTING_HPP
+#pragma once
 
 #include <cstddef>
 #include <iosfwd>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -35,6 +37,23 @@ enum class Route
 {
     Miopen, // the MIOpen implementation (the _impl symbol in libMIOpen_private.so)
     Hipdnn, // forwarded to hipDNN
+};
+
+// Why a call landed on the route it did. Carried alongside the route rather than
+// recomputed for the trace line, so the two cannot drift apart.
+enum class RouteReason
+{
+    ForwardingOff,      // MIOPEN_HIPDNN_FORWARDING is not enabled
+    NotInForwardingSet, // this build does not forward this entry point
+    DisabledByEnv,      // MIOPEN_DISABLE_HIPDNN_FOR named it, or named *
+    HipdnnUnavailable,  // hipDNN missing or reporting an unsupported version
+    InForwardingSet,    // forwarded
+};
+
+struct RouteDecision
+{
+    Route route;
+    RouteReason reason;
 };
 
 // Resolves a raw MIOPEN_HIPDNN_FORWARDING value; null means unset. Accepts the
@@ -95,7 +114,93 @@ ForwardingSet DefaultForwardingSet();
 bool IsInForwardingSet(const char* entryPoint, ForwardingSet set);
 bool IsInForwardingSet(const char* entryPoint);
 
-// Route::Hipdnn only when mode is Enabled AND entryPoint is in the set.
+// Entry points the user has taken back off the hipDNN path via
+// MIOPEN_DISABLE_HIPDNN_FOR. Owns its storage because the names come from the
+// environment rather than a compile-time table.
+class DisabledSet
+{
+public:
+    DisabledSet() = default;
+    explicit DisabledSet(bool disableAll) : disableAll_(disableAll) {}
+
+    bool Contains(const char* entryPoint) const;
+    bool DisablesEverything() const { return disableAll_; }
+
+    void Add(std::string name) { names_.push_back(std::move(name)); }
+    void SetDisableAll() { disableAll_ = true; }
+
+private:
+    std::vector<std::string> names_;
+    bool disableAll_ = false;
+};
+
+// Parses a raw MIOPEN_DISABLE_HIPDNN_FOR value; null or empty disables nothing.
+// "*" anywhere in the list disables every entry point. A name that is not in the
+// build's forwarding set is reported to diagnostics and otherwise ignored: it is
+// almost always a typo, and silently accepting it would leave the user believing
+// they had turned something off.
+//
+// Names are matched case-sensitively because they are C identifiers; whitespace
+// around each element is trimmed. There is deliberately no opt-in counterpart:
+// the forwarding set is compile-time, and the only runtime controls are the
+// master switch and this list.
+DisabledSet ParseDisabledSet(const char* value, ForwardingSet set, std::ostream& diagnostics);
+
+// Parsed from MIOPEN_DISABLE_HIPDNN_FOR on first use and cached for the process.
+//
+// Reading it once is what keeps the dispatch macros' per-entry-point route cache
+// honest: a list that could change mid-process would silently stop having any
+// effect after each entry point's first call.
+const DisabledSet& GetDisabledSet();
+
+// Parses MIOPEN_LOG_LEVEL as MIOpen does (strtoull, base 0, trailing text
+// ignored) so both agree on what a value means. Unset or unparsable is 0,
+// MIOpen's default level. The result is not range-limited; the two checks below
+// narrow it to int, as MIOpen does.
+unsigned long long ParseLogLevel(const char* value);
+
+// Level 6 (Info2) and above, not only 7 (Trace): the route lines are Info2
+// detail, and each MIOpen level includes the ones below it.
+bool RouteTraceEnabledFor(unsigned long long level);
+
+// True at 0 (default) and from 3 (Error) up. False at 1 (Quiet), 2 (Fatal) and
+// for a value MIOpen reads as negative, all of which hide MIOpen's errors.
+bool ErrorLoggingEnabledFor(unsigned long long level);
+
+// The same checks on this process's MIOPEN_LOG_LEVEL, read once. The wrapper
+// reads the environment because it cannot reach MIOpen's logging code, so
+// MIOpen's test-only quiet switch does not apply here.
+bool RouteTraceEnabled();
+bool ErrorLoggingEnabled();
+
+// Writes one "[MIOpen] hipDNN routing: ..." line describing the decision.
+void ReportRouteDecision(const char* entryPoint,
+                         ForwardingMode mode,
+                         RouteDecision decision,
+                         std::ostream& diagnostics);
+
+// Writes one "[MIOpen] hipDNN forwarded: <entryPoint>" line.
+void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
+
+// Writes ReportForwardedCall's line to stderr when MIOPEN_ENABLE_LOGGING is on.
+// A forwarded call skips its own _impl function, which is what prints its API
+// call log entry, so without this it would be missing from the log.
+void LogForwardedCall(const char* entryPoint) noexcept;
+
+// Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
+// deny list does not name it. hipdnnAvailable false still routes away from
+// MIOpen: an enabled-but-unavailable hipDNN has to fail loudly, and a route back
+// to the MIOpen implementation would instead make it look like success.
+RouteDecision ResolveRouteWithReason(ForwardingMode mode,
+                                     const char* entryPoint,
+                                     ForwardingSet set,
+                                     const DisabledSet& disabled,
+                                     bool hipdnnAvailable);
+
+Route ResolveRoute(ForwardingMode mode,
+                   const char* entryPoint,
+                   ForwardingSet set,
+                   const DisabledSet& disabled);
 Route ResolveRoute(ForwardingMode mode, const char* entryPoint, ForwardingSet set);
 Route ResolveRoute(ForwardingMode mode, const char* entryPoint);
 
@@ -104,8 +209,8 @@ Route ResolveRoute(ForwardingMode mode, const char* entryPoint);
 ForwardingMode GetForwardingMode();
 
 // Route for one wrapped call, e.g. entryPoint "miopenConvolutionForward".
-// Wrapper stubs should use MIOPEN_WRAPPER_DISPATCH below instead, which resolves
-// the route once per entry point rather than on every call.
+// Wrapper stubs should use the dispatch macros below instead, which resolve the
+// route once per entry point rather than on every call.
 Route Dispatch(const char* entryPoint);
 
 // True when entryPoint names the same function as enclosingFunction (a __func__
@@ -119,12 +224,16 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 } // namespace wrapper
 } // namespace miopen
 
-// Dispatch hook, used as the first statement of the stub for entry point `fn`:
+// The dispatch seam, used as the first statement of the stub for entry point
+// `fn`. `expr` is what the hipDNN route returns, and is evaluated only on that
+// route, so the stub's arguments are untouched when the call is served by
+// MIOpen:
 //
-//     extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
+//     extern "C" miopenStatus_t miopenConvolutionForward(miopenHandle_t handle, ...)
 //     {
-//         MIOPEN_WRAPPER_DISPATCH(miopenCreate);
-//         return miopenCreate_impl(handle);
+//         MIOPEN_WRAPPER_FORWARD(miopenConvolutionForward,
+//                                ::miopen::wrapper::hipdnn::ConvolutionForward(handle, ...));
+//         return miopenConvolutionForward_impl(handle, ...);
 //     }
 //
 // Takes the function token, not a string, so the name can be checked against
@@ -137,15 +246,44 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // miopenSetTensorDescriptor about as cheap as the plain tail-call they were
 // before the seam existed.
 //
-// Requires a `forward_to_hipdnn(const char*)` returning the enclosing function's
-// return type to be in scope; wrapper.cpp defines it.
-#define MIOPEN_WRAPPER_DISPATCH(fn)                                   \
-    do                                                                \
-    {                                                                 \
-        static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
-            ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
-        if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
-            return forward_to_hipdnn(#fn);                            \
+// Both the route lookup and `expr` can throw, and an exception must not leave
+// an extern "C" function, so both sit inside the try. The MIOpen route needs no
+// catch: every _impl function catches its own exceptions.
+//
+// Each route clears the last recorded hipDNN failure before the call, so a
+// callee that records none cannot leave the previous call's failure in place.
+//
+// Requires hipdnn_graph.hpp, for ClearForwardedFailure and
+// RecordCurrentException.
+#define MIOPEN_WRAPPER_FORWARD(fn, expr)                                  \
+    do                                                                    \
+    {                                                                     \
+        try                                                               \
+        {                                                                 \
+            static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
+                ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
+            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
+            {                                                             \
+                ::miopen::wrapper::hipdnn::ClearForwardedFailure();       \
+                ::miopen::wrapper::LogForwardedCall(#fn);                 \
+                return (expr);                                            \
+            }                                                             \
+        }                                                                 \
+        catch(...)                                                        \
+        {                                                                 \
+            return ::miopen::wrapper::hipdnn::RecordCurrentException();   \
+        }                                                                 \
+        ::miopen::wrapper::hipdnn::ClearForwardedFailure();               \
     } while(false)
 
-#endif // MIOPEN_PRIVATE_ROUTING_HPP
+// The same seam for the stubs with nowhere to forward to yet:
+//
+//     extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
+//     {
+//         MIOPEN_WRAPPER_DISPATCH(miopenCreate);
+//         return miopenCreate_impl(handle);
+//     }
+//
+// Requires a `forward_to_hipdnn(const char*)` returning the enclosing function's
+// return type to be in scope; wrapper.cpp defines it.
+#define MIOPEN_WRAPPER_DISPATCH(fn) MIOPEN_WRAPPER_FORWARD(fn, forward_to_hipdnn(#fn))

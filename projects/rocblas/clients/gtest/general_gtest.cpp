@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,8 +29,14 @@
 
 #include "client_utility.hpp"
 
+#include <vector>
+
 #include "../../library/src/include/check_numerics_matrix.hpp"
 #include "../../library/src/include/check_numerics_vector.hpp"
+
+#ifdef BUILD_WITH_TENSILE
+#include "../../library/src/include/tensile_host.hpp"
+#endif
 
 namespace
 {
@@ -298,6 +304,116 @@ namespace
             rocblas_simple_dispatch<helper_utilities_testing>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(helper_utilities);
+
+    //
+    // version and commit-hash string queries
+
+    template <typename SizeFn, typename CopyFn>
+    void expect_get_string_rejects_short_buffer(SizeFn size_fn, CopyFn copy_fn)
+    {
+        size_t size = 0;
+        EXPECT_ROCBLAS_STATUS(size_fn(&size), rocblas_status_success);
+        ASSERT_GT(size, 1u);
+
+        std::vector<char> buf(size - 1, 'x');
+        std::vector<char> before = buf;
+        EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), rocblas_status_invalid_size);
+        EXPECT_EQ(before, buf);
+    }
+
+    template <typename...>
+    struct testing_get_string : rocblas_test_valid
+    {
+        void operator()(const Arguments&)
+        {
+            expect_get_string_rejects_short_buffer(rocblas_get_version_string_size,
+                                                   rocblas_get_version_string);
+            expect_get_string_rejects_short_buffer(rocblas_get_commit_hash_string_size,
+                                                   rocblas_get_commit_hash_string);
+        }
+    };
+
+    struct get_string : RocBLAS_Test<get_string, testing_get_string>
+    {
+        static bool type_filter(const Arguments&)
+        {
+            return true;
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "get_string");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return RocBLAS_TestName<get_string>(arg.name);
+        }
+    };
+
+    TEST_P(get_string, auxiliary)
+    {
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_get_string<>{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(get_string);
+
+    // Tensile library-file name matching
+#ifdef BUILD_WITH_TENSILE
+    template <typename...>
+    struct testing_tensile_library_filename : rocblas_test_valid
+    {
+        void operator()(const Arguments&)
+        {
+            // Lazy-loading scheme: only TensileLibrary_lazy* filenames match.
+            EXPECT_TRUE(
+                rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", true));
+            EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_lazy.dat", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", true));
+
+            // Per-arch scheme: only TensileLibrary_gfx* filenames match.
+            EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", false));
+            EXPECT_FALSE(
+                rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", false));
+
+            // Unrelated names never match, in either scheme.
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("README.md", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("README.md", false));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("", true));
+
+            // The filename is only ever compared literally — characters that are
+            // regex metacharacters (the original crash trigger) are treated as
+            // plain text and must not match the library prefixes.
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("x-deploy", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("\\x-deploy", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("c:\\deploy", false));
+        }
+    };
+
+    struct tensile_library_filename
+        : RocBLAS_Test<tensile_library_filename, testing_tensile_library_filename>
+    {
+        static bool type_filter(const Arguments&)
+        {
+            return true;
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_library_filename");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return RocBLAS_TestName<tensile_library_filename>(arg.name);
+        }
+    };
+
+    TEST_P(tensile_library_filename, auxiliary)
+    {
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_tensile_library_filename<>{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_library_filename);
+#endif // BUILD_WITH_TENSILE
 
     //
     // check numerics

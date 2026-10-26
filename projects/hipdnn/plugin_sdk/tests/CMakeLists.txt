@@ -12,6 +12,32 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# TestUhdGenArtifact runs tools/uhd_gen and loads its output, so it needs the trainer's Python
+# dependencies. Build it only when they import, and warn otherwise so the gap stays visible;
+# HIPDNN_REQUIRE_UHD_GEN_TESTS makes the gap a configure error instead.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_uhd_gen_missing_severity ${HIPDNN_UHD_GEN_MISSING_SEVERITY})
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import ${HIPDNN_UHD_GEN_PYTHON_MODULES}"
+            RESULT_VARIABLE _uhd_gen_deps_missing
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_uhd_gen_deps_missing EQUAL 0)
+            set(HIPDNN_UHD_GEN_RUNNABLE ON)
+        else()
+            message(${_uhd_gen_missing_severity}
+                    "TestUhdGenArtifact NOT built: uhd_gen's dependencies are not importable "
+                    "by ${Python3_EXECUTABLE}. Nothing then checks that a real uhd_gen "
+                    "artifact loads at run time. Install "
+                    "projects/hipdnn/tools/uhd_gen/requirements.txt into that interpreter.")
+        endif()
+    else()
+        message(${_uhd_gen_missing_severity}
+                "TestUhdGenArtifact NOT built: no Python3 interpreter found")
+    endif()
+endif()
+
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
     TestArchMatch.cpp
@@ -35,22 +61,112 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCategoricalEncoding.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCustomLibraryAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestInlineExpressions.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestNativeAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestScoreTransform.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTableAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestSha256.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdAdapters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestEnginePredictor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdParser.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
+    $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericTargets.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelDefinition.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelIngestorStateManager.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestStagedApplicability.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBenchmarkPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:DigitGroupingLocale.cpp>
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
+# The standard library looks a locale facet up through its type information, so the one
+# source that defines a facet is built with RTTI; the code under test stays RTTI-free.
+set_source_files_properties(
+    DigitGroupingLocale.cpp
+    PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/GR,-frtti>"
+)
+
+# Test resources are found from the test binary (TestResourcePaths.hpp): the build and
+# install trees keep them at the same offset from it, and TheRock runs the installed
+# binary on a runner that has neither the build nor the source tree.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Loaded by the custom_library adapter tests.
+    add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
+    set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_test_scorer_lib)
+
+    set_target_properties(
+        hipdnn_test_scorer_lib
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+    )
+
+    install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+            RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+    )
+
+    # The committed uhd_gen output TestUhdGeneratedModel loads. Only what the runtime reads;
+    # the training inputs beside it stay in the source tree.
+    set(_uhd_fixture_subdir "uhd_generated_fixtures")
+    set(_uhd_fixture_files
+        tile_selector.uhd.json
+        model.bin
+        dtype_selector/dtype_selector.uhd.json
+        dtype_selector/model.bin
+    )
+    set(_uhd_fixture_outputs "")
+    foreach(_file IN LISTS _uhd_fixture_files)
+        set(_source "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures/${_file}")
+        set(_staged "${HIPDNN_TEST_DATA_DIR}/${_uhd_fixture_subdir}/${_file}")
+        get_filename_component(_staged_dir "${_staged}" DIRECTORY)
+        add_custom_command(
+            OUTPUT "${_staged}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_staged_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_source}" "${_staged}"
+            DEPENDS "${_source}"
+            COMMENT "Staging UHD test fixture ${_file}"
+            VERBATIM
+        )
+        list(APPEND _uhd_fixture_outputs "${_staged}")
+
+        get_filename_component(_subdir "${_file}" DIRECTORY)
+        install(FILES "${_source}"
+                DESTINATION "${HIPDNN_TEST_DATA_INSTALL_DIR}/${_uhd_fixture_subdir}/${_subdir}"
+        )
+    endforeach()
+    add_custom_target(
+        hipdnn_plugin_sdk_test_uhd_fixtures
+        DEPENDS ${_uhd_fixture_outputs}
+        COMMENT "Staging UHD test fixtures beside the test data"
+    )
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_plugin_sdk_test_uhd_fixtures)
+
+    target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
+        HIPDNN_TEST_PLUGIN_RELDIR="${HIPDNN_TEST_PLUGIN_RELDIR}"
+        HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
+        HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR="${_uhd_fixture_subdir}")
+endif()
 
 target_link_libraries(
     hipdnn_plugin_sdk_tests
@@ -67,9 +183,42 @@ target_link_libraries(
 # include path exposes cross-SDK test headers, so add it explicitly.
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
+if(HIPDNN_UHD_GEN_RUNNABLE)
+    # The interpreter that passed the probe above, and the directory `python -m uhd_gen`
+    # imports from (the tool is a source tree, not an installed package). Both are paths on
+    # this machine, so the test skips where they do not exist. It finds hipdnn_uhd_features
+    # beside itself: both are built into and installed to the same bin directory.
+    get_filename_component(_uhd_gen_tools_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tools" ABSOLUTE)
+    # Forward slashes: these become C string literals, where a Windows path's `\r` or `\t`
+    # would be an escape.
+    string(REPLACE "\\" "/" _uhd_gen_python "${Python3_EXECUTABLE}")
+    string(REPLACE "\\" "/" _uhd_gen_tools_dir "${_uhd_gen_tools_dir}")
+    target_compile_definitions(hipdnn_plugin_sdk_tests
+        PRIVATE HIPDNN_UHD_GEN_PYTHON="${_uhd_gen_python}"
+                HIPDNN_UHD_GEN_TOOLS_DIR="${_uhd_gen_tools_dir}")
+
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
+endif()
+
+
+# Fault the HIP boundary without adding hooks to the installed SDK.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES)
+    target_link_options(hipdnn_plugin_sdk_tests PRIVATE
+        "LINKER:--wrap=hipStreamWaitValue32"
+        "LINKER:--wrap=hipDeviceGetAttribute"
+        "LINKER:--wrap=hipEventElapsedTime")
+endif()
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# The installed CTestTestfile.cmake does not carry this, so an installed test on a runner
+# without the source tree still skips TestUhdGenArtifact rather than failing it.
+if(HIPDNN_UHD_GEN_RUNNABLE AND HIPDNN_REQUIRE_UHD_GEN_TESTS)
+    set_property(TEST hipdnn_plugin_sdk_tests APPEND PROPERTY ENVIRONMENT
+                 "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+endif()
 
 # Cross-process coverage: one process writes a winner record, a SECOND process reads it
 # back. Two ctest invocations of the same binary, sequenced with
@@ -186,3 +335,64 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_property(GLOBAL APPEND_STRING PROPERTY
                  HIPDNN_INSTALLED_CTEST_STAGING "${_disk_cache_installed_tests}")
 endif()
+
+# Validator tests for data/gpu_generic_targets.json; build tree only (not staged into the
+# installed CTestTestfile.cmake). PASS_REGULAR_EXPRESSION rather than WILL_FAIL so a crash
+# does not pass. CMake wraps messages at spaces, so spaces match any whitespace run.
+set(_generic_targets_check "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckGpuGenericTargets.cmake")
+
+add_test(
+    NAME hipdnn_gpu_generic_targets_accepts_real_table
+    COMMAND ${CMAKE_COMMAND} -DGENERIC_TARGETS_JSON=${HIPDNN_GPU_GENERIC_TARGETS_JSON_SOURCE} -P
+            ${_generic_targets_check}
+)
+set_tests_properties(
+    hipdnn_gpu_generic_targets_accepts_real_table PROPERTIES PASS_REGULAR_EXPRESSION
+                                                             "gpu_generic_targets: valid"
+)
+_apply_hipdnn_test_category_labels(hipdnn_gpu_generic_targets_accepts_real_table)
+
+# Registers a build-tree test: mutate the real table, expect the validator to reject it with expected_text.
+function(_hipdnn_add_generic_targets_rejection_test case op path value expected_text)
+    string(REPLACE " " "[ \n]+" expected_regex "${expected_text}")
+    set(test_name hipdnn_gpu_generic_targets_rejects_${case})
+    add_test(
+        NAME ${test_name}
+        COMMAND
+            ${CMAKE_COMMAND} -DGENERIC_TARGETS_JSON=${HIPDNN_GPU_GENERIC_TARGETS_JSON_SOURCE}
+            -DMUTATION_OP=${op} -DMUTATION_PATH=${path} "-DMUTATION_VALUE=${value}"
+            -DMUTATED_JSON=${CMAKE_CURRENT_BINARY_DIR}/generic_targets_cases/${case}.json -P
+            ${_generic_targets_check}
+    )
+    set_tests_properties(
+        ${test_name}
+        PROPERTIES PASS_REGULAR_EXPRESSION "${expected_regex}" FAIL_REGULAR_EXPRESSION
+                   "gpu_generic_targets: valid"
+    )
+    _apply_hipdnn_test_category_labels(${test_name})
+endfunction()
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generic_targets_cases")
+_hipdnn_add_generic_targets_rejection_test(not_json RAW "" "{ not json" "not valid JSON")
+_hipdnn_add_generic_targets_rejection_test(
+    wrong_schema_version SET_JSON schemaVersion 2 "'schemaVersion' must be 1, got '2'"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    empty_generics SET_JSON generics "{}" "'generics' must be non-empty"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    empty_members SET_JSON generics.gfx12-generic "[]"
+    "generics.gfx12-generic must list at least one member"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    duplicate_member SET_JSON generics.gfx12-generic "[\"gfx1200\",\"gfx1200\"]"
+    "member 'gfx1200' is listed twice in gfx12-generic"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    bad_generic_name SET_JSON generics "{\"gfx12generic\":[\"gfx1200\"]}"
+    "generic name 'gfx12generic' does not match"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    bad_member SET_STRING generics.gfx12-generic.0 gfx12zz
+    "member 'gfx12zz' of gfx12-generic does not match"
+)

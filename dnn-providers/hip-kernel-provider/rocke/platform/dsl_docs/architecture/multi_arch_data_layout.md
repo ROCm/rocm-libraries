@@ -283,7 +283,7 @@ That vocabulary is pipeline policy and lives in `instances/` — see
 - supported MMA or WMMA shapes by dtype combination, including mixed-dtype
   variants (`fp8_bf8_fp32`, `bf8_fp8_fp32`) and packed-fp4
   (`pk_fp4_pk_fp4_fp32` on gfx950);
-- waitcnt encoding variant (4-bit vs 6-bit VMCNT);
+- waitcnt encoding variant and VMCNT field width;
 - kernel attribute policy;
 - architecture-specific resource limits (VGPRs, AGPRs, SGPRs, occupancy
   math, max-block-size) usable by any kernel family;
@@ -302,6 +302,69 @@ What `ArchTarget` does **not** carry:
 Those are kernel-authoring concerns. New arches are added by updating
 hardware facts only; they do not need to enumerate every existing kernel
 family's pipelines.
+
+### Residency — the occupancy model, and the inputs it still needs
+
+"Occupancy math" above means this model, and it belongs here rather than in
+`lds_banks.md`: residency touches capacity and resource limits, never banks.
+
+**Residency is an UPPER BOUND from a model, not a definition, and it is
+arch-dependent:** `min(LDS bound, register bound, wave-cap bound)`.
+
+- **UNKNOWN bounds are EXCLUDED from the minimum**, and the result is labelled
+  by which bounds it covers — "≤ 4 workgroups, wave-cap bound only; LDS and
+  register bounds UNKNOWN".
+- **If no bound is sourced, residency reads UNKNOWN** — not zero, not
+  unbounded. That empty case is the common one on a target nobody owns, and
+  leaving it unstated produces a `0` or an `inf` in a ranking column.
+- **Never say a bound *binds*.** With one bound sourced you may say "≤ N by the
+  wave cap"; you may not say "the wave cap binds", because something UNKNOWN
+  may bind tighter. Binding is a MEASURED property.
+- **Lead with the ORDERING, which needs no arch constants at all** — LDS bytes
+  are monotone arithmetic, so candidates can be ranked against each other long
+  before any bound computes. Treat the absolute bounds as a bonus that
+  populates as constants get registered.
+
+**Honest status.** Three fields the model needs are published hardware
+constants that are simply not registered yet, which is why two of the three
+bounds are permanently UNKNOWN today:
+
+| missing field | blocks |
+|---|---|
+| LDS bytes per CU (distinct from per-workgroup) | the LDS bound |
+| register allocation granularity | the register bound |
+| max waves per SIMD / per CU | the register bound |
+
+These are hardware facts, not kernel-authoring concerns, so they sit on the
+carry side of the list above. Registering them makes all three bounds
+computable from registered data. Note also that **"registers" is not one
+number** — some targets carry a separate accumulator file and some do not
+(measured: `agprs=256` on gfx90a, `agprs=0` on gfx1201), so the register bound
+must read both.
+
+Registering these does not retire the exclude-UNKNOWN rule: provenance
+degrades permanently when designing for a target nobody owns, so
+device-sourced facts stay UNKNOWN however complete the registry gets. The rule
+becomes rare instead of universal.
+
+### Resolving a target against the MMA catalog
+
+`ArchTarget` is documented above as carrying the supported MMA/WMMA shapes, so
+the arch↔catalog key relationship is this document's design question. Two
+constraints on the fix:
+
+- **Resolve ONCE into a target object that carries its match keys, and query
+  every registry with that object — never with a raw string.** A raw string
+  with exact membership cannot express a target that resolves under a family
+  umbrella.
+- A **match-key set is arch vocabulary, not kernel-family vocabulary**, so it
+  belongs on the carry side and does not violate the "does not carry" list
+  above. (Worth stating, because the rule reads as forbidding it at a glance.)
+
+The *measured* state of that relationship per target — which targets resolve in
+which registry — is a status finding, not a plan, and is audited in
+`gfx_support_audit.md` under Known issues. This document says what the layering
+should be; that one records where it currently is not.
 
 ROCm version is a separate axis. `_DATALAYOUT` in `lower_llvm.py` is keyed by
 both gfx and ROCm release. The backend interface threads ROCm version
@@ -760,9 +823,9 @@ drives backend selection.
 
 | gfx | async LDS | fp8/bf8 MFMA | bf16 atom | VMCNT bits | LDS KB | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| gfx908 | no | no | classic | 4 | 64 | MI100 |
-| gfx90a | no | no | `.1k` | 4 | 64 | MI200 |
-| gfx942 | yes | yes | `.1k` | 4 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
+| gfx908 | no | no | classic | 6 | 64 | MI100 |
+| gfx90a | no | no | `.1k` | 6 | 64 | MI200 |
+| gfx942 | yes | yes | `.1k` | 6 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
 | gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
 | gfx1100 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3, wave32 |
 | gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5 (Strix Halo), wave32; shipped RDNA target |
@@ -782,10 +845,10 @@ This collapses into the following concrete backend classes:
 
 ```text
 Gfx908Backend         (no async, no fp8, classic bf16)
-Gfx9MfmaBackend       (gfx90a, gfx942: 4-bit VMCNT, .1k bf16)
+Gfx9MfmaBackend       (gfx90a, gfx942: .1k bf16)
                       flag: async_lds = (gfx != gfx90a)
                       flag: fp8       = (gfx in {gfx942})
-Gfx950Backend         (6-bit VMCNT, fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
+Gfx950Backend         (fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
 Gfx11RdnaBackend      (RDNA3, wave32, WMMA)
 Gfx12RdnaBackend      (RDNA4, wave32, WMMA)
 ```

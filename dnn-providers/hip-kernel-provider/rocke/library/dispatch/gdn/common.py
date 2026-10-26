@@ -13,6 +13,7 @@ arch does not touch this file.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from numbers import Integral
 
 from kernels.gfx950.gdn_decode import (
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
@@ -20,6 +21,8 @@ from kernels.gfx950.gdn_decode import (
     # direction that fails silently, rejecting a shape the kernel has since
     # learned to run.
     GDN_DTYPES,
+    STATE_DTYPES,
+    fuse_conv_heads_error,
 )
 from rocke.dispatch.core import (
     OperatorRequest,
@@ -32,12 +35,19 @@ FAMILY = "gdn_decode"
 # an older layout can never be reused against a newer launcher.
 GDN_ABI_VERSION = "rocke-gdn-decode/v1"
 
+# Shared by both GDN families. The f32 spellings exist for decode's
+# ``state_dtype``; GDN prefill normalizes its ``dtype`` through the same map
+# and still rejects f32 (bf16 only), so for prefill they change only how
+# ``normalized()`` spells a dtype that is rejected either way.
 _DTYPE_ALIASES = {
     "bf16": "bf16",
     "bfloat16": "bf16",
     "f16": "f16",
     "fp16": "f16",
     "float16": "f16",
+    "f32": "f32",
+    "fp32": "f32",
+    "float32": "f32",
 }
 
 
@@ -50,10 +60,32 @@ def normalize_dtype(dtype: str) -> str:
 class GdnDecodeRequest(OperatorRequest):
     """One gated-delta-rule single-token decode step.
 
-    ``batch`` is the number of *active* sequences this step, which is the only
-    dimension the tuned tile selection depends on: it sets how much natural
-    parallelism the launch already has, and therefore whether the kernel needs
-    to manufacture more by splitting each head's V dimension across workgroups.
+    ``batch`` is the number of *active* sequences this step. It always
+    contributes to the launch grid.
+
+    For ``gate_kind="gdn"``, ``auto`` uses the static ``DEFAULT_TILE`` whenever
+    it is legal; otherwise dispatch chooses a validator-admitted fallback.
+    Neither ``batch`` nor ``num_v_heads`` chooses GDN's auto tile.
+
+    For ``gate_kind="kda"``, ``auto`` is keyed on ``batch * num_v_heads`` -- the
+    "work" -- so tensor parallelism selects the tile for heads local to a rank.
+
+    ``state_dtype`` may be ``"f32"`` as well as a 16-bit dtype, for both gate
+    kinds; only the recurrent state widens, so ``dtype`` stays 16-bit.
+
+    ``fuse_conv`` / ``fuse_out_norm`` select the optional fused modes: a
+    causal conv1d + SiLU on the packed q/k/v row (in-place conv-state shift)
+    and a gated RMSNorm on the output. Fused requests run one workgroup per
+    head, so only ``blocks_per_v_dim == 1`` tiles are legal, and ``auto`` uses
+    the static ``FUSED_DEFAULT_TILE`` for both gate kinds whenever it is legal.
+    ``fuse_conv`` also requires ``num_k_heads == num_v_heads``. Both flags
+    change the kernel ABI, so they (and ``use_qk_l2norm``) must be real bools,
+    and ``batch`` and the head counts and dims must be real ints: a request is
+    rejected, never coerced into a different one.
+
+    ``gate_kind`` selects the forget-gate granularity: ``"gdn"`` (one scalar
+    decay per head) or ``"kda"`` (a per-channel decay). It reaches the spec and
+    therefore the kernel name, so the two never share a compile-cache entry.
 
     ``seq_len`` is not a field. This family is decode-only -- one token per
     sequence -- and a request carrying any other sequence length would be a
@@ -71,22 +103,33 @@ class GdnDecodeRequest(OperatorRequest):
     state_dtype: str = "bf16"
     use_qk_l2norm: bool = True
     algorithm: str = "auto"
+    gate_kind: str = "gdn"
     spec_id: str = "auto"
+    fuse_conv: bool = False
+    fuse_out_norm: bool = False
 
     def normalized(self) -> dict:
         d = asdict(self)
         d["dtype"] = normalize_dtype(self.dtype)
         d["state_dtype"] = normalize_dtype(self.state_dtype)
+        # Canonicalize the dims for the identity payload: a validated request
+        # may carry numpy integers (Integral), which are real ints but do not
+        # serialize to JSON. Only an Integral that is not a bool converts, so
+        # malformed values (``batch=None``, ``batch=2.5``) survive raw for
+        # request_errors to name -- Capability.check() calls this before
+        # request_errors, and the identity hash only runs on a request that
+        # passed it.
+        for name in GDN_DIM_VOCABULARY:
+            value = d.get(name)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                continue
+            d[name] = int(value)
         return d
 
     def dims(self) -> dict:
-        return {
-            "batch": int(self.batch),
-            "num_k_heads": int(self.num_k_heads),
-            "num_v_heads": int(self.num_v_heads),
-            "head_k_dim": int(self.head_k_dim),
-            "head_v_dim": int(self.head_v_dim),
-        }
+        # Raw values: the capability prefilter reads these before
+        # request_errors, which rejects a non-int one by name.
+        return {name: getattr(self, name) for name in GDN_DIM_VOCABULARY}
 
 
 GDN_DIM_VOCABULARY = (
@@ -103,6 +146,23 @@ def request_errors(req: OperatorRequest) -> list:
     if not isinstance(req, GdnDecodeRequest):
         return [f"expected GdnDecodeRequest, got {type(req).__name__}"]
     errors = []
+    # Type checks first, and stop on any: every rule below compares these
+    # fields, and the spec builder copies them onto the spec as given. Reject,
+    # never normalize -- ``batch=2.5`` would launch 2 sequences, and a truthy
+    # non-bool (``fuse_conv="false"``) would select a different kernel ABI.
+    for field in GDN_DIM_VOCABULARY:
+        value = getattr(req, field)
+        # Integral, not int: an ``np.int64(4)`` is an integer and the old
+        # ``int()`` coercion accepted it. ``bool`` is an Integral subclass but
+        # a flag, never a count or a dim.
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            errors.append(f"{field} must be an int, got {value!r}")
+    for field in ("use_qk_l2norm", "fuse_conv", "fuse_out_norm"):
+        value = getattr(req, field)
+        if type(value) is not bool:
+            errors.append(f"{field} must be a bool, got {value!r}")
+    if errors:
+        return errors
     if req.batch <= 0:
         errors.append(f"batch must be positive, got {req.batch}")
     if req.num_k_heads <= 0 or req.num_v_heads <= 0:
@@ -116,8 +176,22 @@ def request_errors(req: OperatorRequest) -> list:
         errors.append("head dims must be positive")
     if normalize_dtype(req.dtype) not in GDN_DTYPES:
         errors.append(f"unsupported dtype {req.dtype!r}")
-    if normalize_dtype(req.state_dtype) not in GDN_DTYPES:
+    if normalize_dtype(req.state_dtype) not in STATE_DTYPES:
         errors.append(f"unsupported state_dtype {req.state_dtype!r}")
+    if req.gate_kind not in ("gdn", "kda"):
+        errors.append(
+            f"unsupported gate_kind {req.gate_kind!r} (expected 'gdn' or 'kda')"
+        )
+    if req.gate_kind == "kda" and (req.head_k_dim != 128 or req.head_v_dim != 128):
+        errors.append(
+            "NOT_YET_IMPLEMENTED: KDA decode currently requires "
+            "head_k_dim == head_v_dim == 128"
+        )
+    if req.fuse_conv:
+        # The kernel's own rule, shared so the two cannot drift.
+        why = fuse_conv_heads_error(req.num_k_heads, req.num_v_heads)
+        if why is not None:
+            errors.append(why)
     return errors
 
 

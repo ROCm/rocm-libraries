@@ -217,10 +217,10 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
 }
 
 // ---------------------------------------------------------------------------
-// Single graph: a cell that loses support leaves no permanent CLAIM_BROKEN
+// Single graph: a cell that loses support stays CLAIM_BROKEN
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWrite)
+TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportStaysBrokenAfterReWrite)
 {
     const ScopedDirectory dir = claimScratchDirectory("test_round_trip_");
     const auto bundlePath = dir.path() / "Small.json";
@@ -230,26 +230,29 @@ TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWri
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
     });
     ASSERT_TRUE(std::filesystem::exists(sidecarPath));
+    const auto contentAfterClaim = readFile(sidecarPath);
 
-    // The engine stops accepting the graph. Judged against the stale file this
-    // is CLAIM_BROKEN, which is exactly the failure re-authoring exists to fix.
+    // The engine stops accepting the graph. The claim on disk still says yes, so
+    // the disagreement surfaces as CLAIM_BROKEN.
     {
         const auto verdicts
             = judge(singleGraphClaimLocator(bundlePath), /*rankedIds=*/{}, "gfx942", "linux");
         EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_BROKEN);
     }
 
-    writeObservedSupportClaims({
+    const auto reWrite = writeObservedSupportClaims({
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
     });
+    EXPECT_EQ(reWrite.filesWritten, 0u);
+    EXPECT_EQ(readFile(sidecarPath), contentAfterClaim);
 
     {
         const auto verdicts
             = judge(singleGraphClaimLocator(bundlePath), /*rankedIds=*/{}, "gfx942", "linux");
-        expectNoSurprises(verdicts);
-        // The claim is gone and the engine declines: nothing left to enforce, so
-        // no verdict is recorded at all.
-        EXPECT_FALSE(verdictFor(verdicts, "MIOPEN_ENGINE").has_value());
+        // Re-authoring cannot talk the engine back into supporting the graph, and
+        // it does not quietly take the claim away either. The verdict is what a
+        // reviewer acts on.
+        EXPECT_EQ(verdictFor(verdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_BROKEN);
     }
 }
 
@@ -348,28 +351,30 @@ TEST(TestSupportClaimRoundTrip, SweepDivergingCaseKeepsItsOwnVerdict)
     });
     ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
-    // case_b regresses; case_a does not. The two must part ways in the file.
+    // case_b regresses; case_a does not. Both claims stay on disk.
+    const auto contentAfterClaims = readFile(sidecarPath);
     writeObservedSupportClaims({
         sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", false),
     });
+    EXPECT_EQ(readFile(sidecarPath), contentAfterClaims);
 
     const auto caseAVerdicts
         = judge(sweepCaseClaimLocator(sweepPath, "case_a"), {MIOPEN_ID}, "gfx942", "linux");
     expectNoSurprises(caseAVerdicts);
     EXPECT_EQ(verdictFor(caseAVerdicts, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
 
-    // case_b is unclaimed now, so a query that still says yes reports the file
-    // is behind rather than passing silently.
-    const auto caseBVerdicts
-        = judge(sweepCaseClaimLocator(sweepPath, "case_b"), {MIOPEN_ID}, "gfx942", "linux");
-    EXPECT_EQ(verdictFor(caseBVerdicts, "MIOPEN_ENGINE"), SupportVerdict::UNCLAIMED_SUPPORT);
-
-    // ...and a query that agrees with the withdrawal is simply silent: nothing
-    // claimed, nothing ranked, so no verdict is recorded at all.
+    // case_b shares a group entry with case_a, but it is judged on its own cell:
+    // its claim survived the regression, so the decline reads CLAIM_BROKEN.
     const auto caseBDeclined
         = judge(sweepCaseClaimLocator(sweepPath, "case_b"), /*rankedIds=*/{}, "gfx942", "linux");
-    expectNoSurprises(caseBDeclined);
-    EXPECT_FALSE(verdictFor(caseBDeclined, "MIOPEN_ENGINE").has_value());
+    EXPECT_EQ(verdictFor(caseBDeclined, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_BROKEN);
+
+    // ...and once the engine takes case_b back, the same claim reads clean again
+    // with no edit to the file in between.
+    const auto caseBRecovered
+        = judge(sweepCaseClaimLocator(sweepPath, "case_b"), {MIOPEN_ID}, "gfx942", "linux");
+    expectNoSurprises(caseBRecovered);
+    EXPECT_EQ(verdictFor(caseBRecovered, "MIOPEN_ENGINE"), SupportVerdict::CLAIM_ACCEPTED);
 }
 
 // NOLINTEND(readability-identifier-naming)

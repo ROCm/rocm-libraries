@@ -26,6 +26,24 @@ The bf16 16x16x16 path uses the `_1k` variant (`mfma.f32.16x16x16bf16.1k` with `
 
 The wide-K / MX atoms (`fp8_16x16x128`, `fp4_16x16x128`, `fp6_16x16x96`) are gfx950-only — they map onto the `f8f6f4` / MX-scaled MFMA instructions that only the CDNA4 target exposes.
 
+## Native gfx950 32x32x64 Scaled MFMA
+
+The `helpers.atoms.MfmaAtom` table above is separate from the target catalog's
+`mfma_scaled` family. On gfx950, that family exposes 32x32x64 operations for
+all 25 ordered FP8/BF8/FP6/BF6/FP4 pairs, with independent A/B E8M0 scales
+over K32 and 16 FP32 accumulator values per lane. Select the complete contract
+with `ArchTarget.mma.op_for_shape(...)`, then emit it with `IRBuilder.mma(...)`.
+
+`MfmaAtom.emit_scaled()` remains a fixed 16x16x128 wrapper; it does not select
+the 32x32x64 operation. The existing `fp8_16x16x128` atom uses `emit()` and
+the scaled intrinsic with constant in-instruction scales. The gfx950 FP8
+fused-MoE dispatcher uses that atom and applies its FP32 block scales outside
+the MFMA. The 32x32x64 family currently has direct GEMM examples.
+
+See [MMA selection, emission and dispatcher paths](mma_metadata.md#selection-ir-emission-and-dispatch),
+the [gfx950 GEMM contract](../instances/gfx950_block_scaled_gemm.md), and
+[runnable scaled-GEMM examples](../../python/rocke/examples/gfx950/gemm/README.md).
+
 ## Lane Layouts (Output)
 
 The kernel epilogue must agree with `MfmaAtom.lane_to_output(b, lane, i)`. The layouts below come from `helpers/atoms.py`.
@@ -67,6 +85,11 @@ For i in 0..3:
 ```
 
 The batch index is composed by the caller. `lane_to_output` returns only the in-atom `(row, col)`.
+
+The bf16 twin is the bare `IRBuilder.mfma_f32_4x4x4_bf16` op (not an `MfmaAtom`
+catalog entry). It uses the same lane layout and lowers through the `_1k`
+intrinsic `llvm.amdgcn.mfma.f32.4x4x4bf16.1k` with `<4 x i16>` operands
+(`v_mfma_f32_4x4x4_16b_bf16` on gfx950).
 
 ## Per-Lane K-Slice Layouts (Input A)
 
@@ -137,3 +160,44 @@ A `tile_m=128, tile_n=128, warp_m=2, warp_n=2, warp_tile_m=32, warp_tile_n=32` G
 - Using `f16_16x16x32` or `f16_32x32x16` on gfx940/gfx942: link-time failure (intrinsic absent).
 - Using bf16 atoms without going through `mfma_16x16x16_for_dtype`: declaration mismatch (plain `bf16.16x16x16` doesn't exist; must use the `_1k` variant).
 - `4x4x4` epilogue stores not compositing `batch_idx` into the per-group offset: 16 batches collide on the same outputs.
+
+Logical `tf32` on gfx942 has two native atoms: `mfma_f32_16x16x8_xf32` and
+`mfma_f32_32x32x4_xf32`. Both use two TF32 operands per lane for each input,
+stored as two I32 words; accumulator sizes are four and sixteen FP32 values.
+The [numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+demonstrates raw input transport and explicit RNE preparation. These atoms do
+not alter ordinary FP32 selection or enable TF32 production GEMM dispatch.
+
+On gfx950, which has no native XF32 instruction, logical `tf32` selects two emulated
+atoms, `mfma_f32_16x16x32_xf32` and `mfma_f32_32x32x16_xf32`. They take the same TF32
+operands (`vec<tf32x8>`, one I32 word per element) and FP32 accumulators (four and
+sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
+`mfma_f32_32x32x16_bf16`; see the
+[emulation description](../architecture/xf32_bf16x3_emulation.md).
+
+gfx942 declares two f64 atoms in the arch catalog. Both hold one f64 value per
+lane for A and B.
+
+`mfma_f64_16x16x4_f64` uses the fp32 16x16x4 A/B lane maps
+(`row`/`col = lane % 16`, `k = lane / 16`). C/D hold four f64 values per lane
+in a different output layout from the f32 16x16 atoms:
+
+```text
+For i in 0..3:
+  row = i * 4 + lane / 16
+  col = lane % 16
+```
+
+An epilogue written for the f32 16x16 layout stores f64 results to the wrong
+rows. Take the layout from the atom's `c_layout()`.
+
+`mfma_f64_4x4x4_f64` computes four independent 4x4x4 products per wave. The
+catalog describes the blocks stacked along rows, so A, B, and C/D are each
+16x4 and block `blk` occupies rows `blk*4 .. blk*4 + 3`. C/D hold one f64
+value per lane (`IRBuilder.mma` returns `<1 x f64>`):
+
+```text
+A:   lane = 16*k + 4*blk + m  ->  (blk*4 + m, k)
+B:   lane = 16*k + 4*blk + n  ->  (blk*4 + k, n)
+C/D: lane = 16*m + 4*blk + n  ->  (blk*4 + m, n)
+```

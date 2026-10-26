@@ -39,11 +39,11 @@ extern "C" {
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
-*  Note that for matrix products with more than 4096 non-zero entries per row,
-*  an additional temporary storage buffer is allocated by the algorithm.
-*  \note
-*  Note that for matrix products with more than 8192 intermediate products per
-*  row, an additional temporary storage buffer is allocated by the algorithm.
+*  Note that for rows of \f$C\f$ whose hash table does not fit in shared memory,
+*  \ref rocsparse_csrgemm_nnz(), \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()",
+*  \ref rocsparse_csrgemm_symbolic() and
+*  \ref rocsparse_scsrgemm_numeric "rocsparse_Xcsrgemm_numeric()" allocate additional
+*  device memory. This memory is not part of the temporary storage buffer.
 *  \note
 *  Currently, only \p trans_A == \p trans_B == \ref rocsparse_operation_none is
 *  supported.
@@ -236,8 +236,9 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 *  rocsparse_zcsrgemm_buffer_size(), respectively.
 *
 *  \note
-*  Note that for matrix products with more than 8192 intermediate products per
-*  row, an additional temporary storage buffer is allocated by the algorithm.
+*  Note that for rows of \f$C\f$ whose hash table does not fit in shared memory,
+*  the algorithm allocates additional device memory during the call.
+*  \ref rocsparse_status_memory_error is returned if it cannot be allocated.
 *  \note
 *  This function supports unsorted CSR matrices as input, while output will be sorted.
 *  Note that matrices B and D can only be unsorted up to 8192 intermediate
@@ -329,6 +330,8 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 *          \p csr_row_ptr_C, \p nnz_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
+*  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted and
+*          a row of \f$C\f$ has a hash table that does not fit in shared memory.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
 *          \p trans_B != \ref rocsparse_operation_none, or
@@ -411,8 +414,9 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Note that for matrix products with more than 4096 non-zero entries per
-*  row, an additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for rows of \f$C\f$ whose hash table does not fit in shared
+*  memory, the algorithm allocates additional device memory during the call.
+*  \ref rocsparse_status_memory_error is returned if it cannot be allocated.
 *  \note
 *  This function supports unsorted CSR matrices as input, while output will be sorted.
 *  Note that matrices B and D can only be unsorted up to 4096 non-zero entries
@@ -513,6 +517,8 @@ rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          handle,
 *          \p csr_col_ind_C, \p info_C, or \p temp_buffer are invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
+*  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted and
+*          a row of \f$C\f$ has a hash table that does not fit in shared memory.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
 *          \p trans_B != \ref rocsparse_operation_none, or
@@ -808,8 +814,9 @@ rocsparse_status rocsparse_zcsrgemm(rocsparse_handle                handle,
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Note that for matrix products with more than 4096 non-zero entries per
-*  row, an additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for rows of \f$C\f$ whose hash table does not fit in shared
+*  memory, the algorithm allocates additional device memory during the call.
+*  \ref rocsparse_status_memory_error is returned if it cannot be allocated.
 *  \note This function is blocking with respect to the host.
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -893,6 +900,8 @@ rocsparse_status rocsparse_zcsrgemm(rocsparse_handle                handle,
 *          \p csr_col_ind_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
+*  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted and
+*          a row of \f$C\f$ has a hash table that does not fit in shared memory.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
 *          \p trans_B != \ref rocsparse_operation_none, or
@@ -1091,8 +1100,11 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \ref rocsparse_matrix_type_general is supported.
-*  \note Note that for matrix products with more than 4096 non-zero entries per
-*  row, an additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for rows of \f$C\f$ whose hash table does not fit in shared
+*  memory, the algorithm allocates additional device memory during the call.
+*  \ref rocsparse_status_memory_error is returned if it cannot be allocated. Such
+*  rows also need \f$B\f$, \f$D\f$ and \f$C\f$ to be sorted; otherwise
+*  \ref rocsparse_status_requires_sorted_storage is returned.
 *  \note This function is blocking with respect to the host.
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -1189,6 +1201,9 @@ rocsparse_status rocsparse_csrgemm_symbolic(rocsparse_handle          handle,
 *          \p csr_col_ind_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
+*  \retval rocsparse_status_requires_sorted_storage \f$B\f$, \f$D\f$ or \f$C\f$ is
+*          unsorted and a row of \f$C\f$ has a hash table that does not fit in shared
+*          memory.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
 *          \p trans_B != \ref rocsparse_operation_none, or

@@ -510,6 +510,8 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipSetDevice(d));
                 HIP_CHECK_EXC(hipStreamCreate(&streams[d]));
                 adapters[d] = std::make_shared<hip::SolutionAdapter>();
+                // Primary loads can enter recovery before helpers are loaded.
+                adapters[d]->setLazyLoadingContext(hardware->archName(), libraryDirectory);
                 for(auto const& co : codeObjectFiles)
                 {
                     (void)adapters[d]->loadCodeObjectFile(co);
