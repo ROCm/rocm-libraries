@@ -183,7 +183,7 @@ operation graph is built. These differ from cuDNN:
 | Case | Shim behavior |
 |---|---|
 | NaN propagation on pointwise and resample descriptors | stored and ignored; hipDNN has no equivalent setting |
-| Pointwise ReLU clips and lower-clip slope, ELU alpha, softplus beta, swish beta | narrowed to `float` when the graph is built; values beyond the float range saturate to ±`FLT_MAX`. Parameters left at their defaults are not sent, except the ReLU lower clip, which is always sent unless a slope is set (hipBLASLt's ReLU epilogue requires it) |
+| Pointwise ReLU clips and lower-clip slope, ELU alpha, softplus beta, swish beta | narrowed to `float` when the graph is built; values beyond the float range saturate to ±`FLT_MAX`. Parameters left at their defaults are not sent, so plain ReLU reaches hipDNN with no parameters. A matmul followed by plain ReLU or ReLU6 needs a hipBLASLt provider that reads an unset lower clip as 0 (rocm-libraries#14363) |
 | `MatMulDescBuilder::setPaddingValue` | `NOT_SUPPORTED` at `MatMulDescBuilder::build()` |
 | `RngDescBuilder` | builds, but an `RNG` operation is `NOT_SUPPORTED` (see [Operations](#operations)) |
 
@@ -249,7 +249,7 @@ These differ from cuDNN:
 | Plan JSON format (`getJsonRepresentation`, `loadFromJson`) | the shim's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, knob choices and, when hipDNN can serialize the plan, a base64 payload. Notes and knob types are the shim's enum values. JSON written by cuDNN or by another tool makes `loadFromJson` fail with `BAD_PARAM` |
 | Loading a plan without `"payload"` | `NOT_SUPPORTED` from `loadFromJson`; engines whose plans hipDNN cannot serialize cannot be reloaded |
 | Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it |
-| `cudnnBackendExecute` handle | not checked: hipDNN runs the plan on the handle it is given, with that handle's stream, including a handle other than the one the plan's graph was built on or, for a loaded plan, the one it was loaded with. `ExecutionPlanBuilder::setHandle` is ignored by `build()`, as upstream never sends it, and required by `loadFromJson` |
+| `cudnnBackendExecute` handle | not checked by the shim: hipDNN runs the plan on the handle it is given, with that handle's stream, including a handle other than the one the plan's graph was built on or, for a loaded plan, the one it was loaded with. A handle whose stream is on another device is not checked either, and whether that run fails depends on the provider, until hipDNN rejects it with `BAD_PARAM` (rocm-libraries#14364). `ExecutionPlanBuilder::setHandle` is ignored by `build()`, as upstream never sends it, and required by `loadFromJson` |
 | Variant packs (`VariantPackBuilder::build()`) | the hipDNN variant pack is built here; missing or empty data pointers or UIDs, or the two with different element counts, are `BAD_PARAM` |
 | Per-call overhead | `cudnnBackendExecute` is one hipDNN call. `VariantPackBuilder::build()` also builds the hipDNN variant pack on every call. Both stay within the budgets of RFC 0021 §2 over calling hipDNN directly on the same plan, as measured by `samples/cudnn_shim/ConvFpropV8.cpp --overhead` |
 

@@ -178,7 +178,7 @@ Evidence: conv ops route the parameter attributes to `setConvolutionAttribute`
 | `CUDNN_ATTR_POINTWISE_MODE` (PW.h:231) | `=`, on the op | translated by name; `COS`, `MOD`, `POW` have no hipDNN mode and fail closed |
 | `CUDNN_ATTR_POINTWISE_MATH_PREC` (PW.h:253) | `=`, on the op | forwarded |
 | `CUDNN_ATTR_POINTWISE_NAN_PROPAGATION` (PW.h:267) | **MISSING** | stored and ignored (divergence) |
-| `CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP` / `RELU_UPPER_CLIP` / `RELU_LOWER_CLIP_SLOPE` / `ELU_ALPHA` / `SOFTPLUS_BETA` / `SWISH_BETA` (PW.h:280-362, double) | `=`, T! (hipDNN requires float) | value equal to cuDNN's default for the mode → not set, except `RELU_LOWER_CLIP`, which is always sent unless a slope is set (hipBLASLt's ReLU epilogue requires it); otherwise narrowed to float, clips saturate at ±`FLT_MAX`, non-finite slope/beta → `BAD_PARAM` |
+| `CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP` / `RELU_UPPER_CLIP` / `RELU_LOWER_CLIP_SLOPE` / `ELU_ALPHA` / `SOFTPLUS_BETA` / `SWISH_BETA` (PW.h:280-362, double) | `=`, T! (hipDNN requires float) | value equal to cuDNN's default for the mode → not set; otherwise narrowed to float, clips saturate at ±`FLT_MAX`, non-finite slope/beta → `BAD_PARAM` |
 | `CUDNN_ATTR_POINTWISE_AXIS` (PW.h:372) | `=` | default (−1) not set; otherwise forwarded |
 | `CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR` (:455) | **MISSING** | consumed by the shim |
 | `CUDNN_ATTR_OPERATION_POINTWISE_XDESC` / `BDESC` / `TDESC` / `YDESC` (:468, :552, :567, :482) | `≈` `HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT` / `IN_1_EXT` / `IN_2_EXT` / `OUT_0_EXT` | X→IN_0, B→IN_1, T→IN_2, Y→OUT_0 |

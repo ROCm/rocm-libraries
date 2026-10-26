@@ -203,11 +203,10 @@ runs no heuristics and needs no GPU.
 
 **Other rules**
 
-- **Pointwise defaults are not forwarded, except the ReLU lower clip.** Upstream sets every parameter
-  of the mode, including defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. The
-  lower clip is always sent unless a slope is set, because hipBLASLt's ReLU epilogue requires it; every
-  engine reads 0 as standard ReLU. Beside a slope a lower clip of 0 is not sent, so hipBLASLt cannot
-  mistake leaky ReLU for plain ReLU. Non-default values are narrowed to float.
+- **Pointwise defaults are not forwarded.** Upstream sets every parameter of the mode, including
+  defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. Plain ReLU therefore
+  reaches hipDNN with no parameters, as from the v9 API, and relies on the providers reading an unset
+  lower clip as 0 (§9 R10). Non-default values are narrowed to float.
 - **Alpha / beta.** Alpha ≠ 1 or beta ≠ 0 on any op → `NOT_SUPPORTED`. No hipDNN engine accepts the
   alternative (an extra scalar multiply).
 - **Store and ignore:** NaN propagation (hipDNN has no equivalent).
@@ -223,10 +222,13 @@ runs no heuristics and needs no GPU.
   order; building heuristics makes no further hipDNN call.
 - **Engine index.** cuDNN engines are small integers; the shim numbers hipDNN engines `0..N-1` by sorted
   engine ID. Ranking is conveyed by result order only. Indices survive ranking changes but not changes
-  to the set of engines (new provider, different GPU).
+  to the set of engines (new provider, different GPU). Only plan tags and `setGlobalEngineIdx` use the
+  index; plan JSON identifies the engine by ID, so a saved plan still loads after the set changes.
 - **Notes.** Behavior notes map by name. `NONDETERMINISTIC` is reported for every engine not known to be
   deterministic, so deterministic filtering works; hipDNN's numerical-note attribute is never queried.
-  No other numerical notes are reported.
+  No other numerical notes are reported. The allowlist is the v9 shim's (`isDeterminismClaimed`), so both
+  shims keep the same engines. v0.x filtering runs in the caller, so an empty result reaches it as an
+  empty list where the v9 shim returns `GRAPH_NOT_SUPPORTED`.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
   hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob
   is shown and accepts `-1`. `EngineConfigBuilder::build()` checks the choices and builds the config's
@@ -323,7 +325,7 @@ runs no heuristics and needs no GPU.
 | Decision | Benefit | Cost |
 |---|---|---|
 | Builders over hipDNN through an internal core; no emulated C API | One descriptor model; hipDNN descriptors pass through unchanged | Raw C callers (XLA) don't compile; builders' backend-facing members differ from upstream |
-| `cudnnBackendExecute` passes straight through | One hipDNN call; plans run on any handle | No check that the handle matches the plan's |
+| `cudnnBackendExecute` passes straight through | One hipDNN call; plans run on any handle | No check that the handle or its device matches the plan's (§5) |
 | Validate at each `build()`, lower at `OperationGraphBuilder::build()` | Errors where upstream raises them; tensors merged across ops | Shim manages record lifetimes |
 | Shim-owned, alphabetical, append-only enum values | No proprietary numbering; stable persisted data | No ABI compatibility |
 | Skip pointwise defaults and alignment ≥ 16 | Target graphs find engines | Must track cuDNN defaults |
@@ -343,6 +345,8 @@ runs no heuristics and needs no GPU.
 | Lifetime bugs | Records own hipDNN descriptors and objects hold views; tests destroy everything but the plan and execute it; ASan run |
 | Core exceptions escaping builders (PyTorch catches only `cudnnException`) | `guarded` at every public entry; tested in the throwing and the `NV_CUDNN_DISABLE_EXCEPTION` binaries |
 | A plan executed on another thread's handle (PyTorch's quantized ops cache plans process-wide) | Runs on that handle, pinned by unit and integration tests; documented in `KNOWN_DIVERGENCES.md` |
+| Plain ReLU and ReLU6 after a matmul need the hipBLASLt provider to read an unset lower clip as 0 (§9 R10) | The provider change ships separately (rocm-libraries#14363); until it is installed those graphs have no hipBLASLt engine |
+| A plan executed on a handle for another device | Not checked by the shim; whether it fails depends on the provider (hip-kernel-provider throws). PyTorch keys every v8 plan cache on the device, so it never does this. hipDNN rejects it with `BAD_PARAM` once rocm-libraries#14364 lands (§8) |
 | Upstream drift | Pin `static_assert`; re-diff in RFC 0012 §6.1's quarterly upstream review, guided by the Reference §2.6 member list |
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~7.7k ported lines and ~7k of core and type mapping | Same owner as the RFC 0012 shim |
@@ -396,6 +400,9 @@ Phases 1–4 built the emulated C API that phases 12–15 replaced.
 
 - Alpha / beta, once a provider accepts scalar operands in pointwise fusions.
 - Numerical notes, if providers start declaring them.
+- A device check in hipDNN's `hipdnnBackendExecute` (rocm-libraries#14364): record the plan's device when
+  it is finalized or deserialized and reject a handle whose stream is on another device. It covers native,
+  v9 and v8 users, where a shim check would see only the raw plan and cover v8 alone.
 - More operations (gen-stats, BN finalize, RNG, reshape, instance / group norm) as hipDNN gains them.
 - A split umbrella if compile time becomes a problem.
 - A read-only descriptor query for raw C callers such as XLA, only on a concrete request.
@@ -417,8 +424,9 @@ records the decisions.
 | R5 | Error messages may change. Builder messages name the builder and the rule, not attribute enums; the legacy-corpus anchors and test message checks are re-pinned |
 | R6 | `cudnnBackendDescriptorType_t` stays whole: PyTorch's plan-cache key, Paddle's template argument and `OperationBuilder`'s constructor argument |
 | R7 | `cudnnGetLastErrorString` is hipDNN's; see §3.6 |
-| R8 | Unchanged: plan JSON format, tags (including `_k<type>=<value>`), dense engine index, knob projection, `-1` unset knob, ReLU-clip rule, default elision, UID merge, stable sort, disconnected graphs, every status code except R2's |
+| R8 | Unchanged: plan JSON format, tags (including `_k<type>=<value>`), dense engine index, knob projection, `-1` unset knob, default elision, UID merge, stable sort, disconnected graphs, every status code except R2's |
 | R9 | Per-call overhead re-measured on the new implementation: `VariantPackBuilder::build()` + `cudnnBackendExecute` p50 0.76–0.97 µs on an idle host, p90 about 1.4 µs. The gate stays at 5 µs (not 1 µs) so a shared CI runner does not flake; see §2 |
+| R10 | The ReLU lower-clip rule is dropped: a lower clip of 0 is no longer always sent, it is elided like every other default. The rule existed because hipBLASLt rejected ReLU without a lower clip; the providers now accept every equivalent ReLU encoding instead (rocm-libraries#14363: hipBLASLt reads an unset lower clip as 0 and rejects a non-zero slope, MIOpen reads a slope of 0 as none), which also fixes the same graphs for v9 and native users |
 
 Also amended by this section: §3.7's "every identifier is declared" now excludes R4's removals, and
 §3.8's "port upstream headers unchanged in behavior" is now "unchanged public API and verbatim
