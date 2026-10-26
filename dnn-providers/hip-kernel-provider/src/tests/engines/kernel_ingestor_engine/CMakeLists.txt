@@ -70,6 +70,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
     )
     # The architectures each op has objects for, so a device case that finds none
@@ -78,7 +79,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
     # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
-                       sdpa_rdna sdpa_rdna_decode sdpa_aiw)
+                       sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_bwd_merged sdpa_bwd_prep
+                       sdpa_bwd_dkdv sdpa_bwd_dq)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
