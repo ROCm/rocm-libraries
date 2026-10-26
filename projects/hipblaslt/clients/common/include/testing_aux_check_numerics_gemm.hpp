@@ -35,8 +35,10 @@
 
 #include "hipblaslt_test.hpp"
 
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -431,13 +433,18 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // 128x128x128 fp32 matches matmul_pointer_array_distinct_c_d_layout_smoke,
     // which has pointer-array solutions on every architecture that runs it.
     constexpr int kNoNanBatch = -1;
-    auto run_pointer_array_scenario = [&](int nan_batch, uint32_t* out_reported) {
+    auto run_pointer_array_scenario = [&](int       nan_batch,
+                                          int64_t   d_offset,
+                                          bool      prefix_nan,
+                                          bool      use_cpp,
+                                          uint32_t* out_reported) {
         ASSERT_NE(out_reported, nullptr);
         *out_reported = ~uint32_t(0);
 
         constexpr int     M = 128, N = 128, K = 128;
         constexpr int32_t kBatch = 3;
         ASSERT_LT(nan_batch, kBatch);
+        ASSERT_GE(d_offset, 0);
 
         hipblasLtHandle_t handle = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
@@ -446,8 +453,14 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 
         std::vector<float> A_clean(M * K, 1.0f);
         std::vector<float> A_dirty = A_clean;
-        A_dirty[0]                 = std::numeric_limits<float>::quiet_NaN();
+        A_dirty[M - 1]             = std::numeric_limits<float>::quiet_NaN();
         std::vector<float> B_h(K * N, 1.0f);
+
+        std::vector<float> D_initial(d_offset + M * N, 0.0f);
+        if(prefix_nan)
+            std::fill(D_initial.begin(),
+                      D_initial.begin() + d_offset,
+                      std::numeric_limits<float>::quiet_NaN());
 
         std::vector<float*> hA(kBatch, nullptr), hB(kBatch, nullptr), hC(kBatch, nullptr),
             hD(kBatch, nullptr);
@@ -456,7 +469,9 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             CHECK_HIP_ERROR(hipMalloc(&hA[b], sizeof(float) * M * K));
             CHECK_HIP_ERROR(hipMalloc(&hB[b], sizeof(float) * K * N));
             CHECK_HIP_ERROR(hipMalloc(&hC[b], sizeof(float) * M * N));
-            CHECK_HIP_ERROR(hipMalloc(&hD[b], sizeof(float) * M * N));
+            CHECK_HIP_ERROR(hipMalloc(&hD[b], sizeof(float) * (d_offset + M * N)));
+            CHECK_HIP_ERROR(hipMemcpy(
+                hD[b], D_initial.data(), sizeof(float) * D_initial.size(), hipMemcpyHostToDevice));
             const float* srcA = (b == nan_batch) ? A_dirty.data() : A_clean.data();
             CHECK_HIP_ERROR(
                 hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
@@ -498,6 +513,10 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
                 HIPBLAS_STATUS_SUCCESS);
         }
 
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                                  lD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &d_offset, sizeof(d_offset)),
+                              HIPBLAS_STATUS_SUCCESS);
+
         hipblasLtMatmulDesc_t md = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescCreate(&md, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                               HIPBLAS_STATUS_SUCCESS);
@@ -531,24 +550,42 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             CHECK_HIP_ERROR(hipMalloc(&dW, heur[0].workspaceSize));
 
         float alpha = 1.0f, beta = 0.0f;
-        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                              md,
-                                              &alpha,
-                                              dA,
-                                              lA,
-                                              dB,
-                                              lB,
-                                              &beta,
-                                              dC,
-                                              lC,
-                                              dD,
-                                              lD,
-                                              &heur[0].algo,
-                                              dW,
-                                              heur[0].workspaceSize,
-                                              stream),
-                              HIPBLAS_STATUS_SUCCESS);
+        if(use_cpp)
+        {
+            hipblaslt_ext::Gemm gemm(handle, md, &alpha, dA, lA, dB, lB, &beta, dC, lC, dD, lD);
+            gemm.setMaxWorkspaceBytes(heur[0].workspaceSize);
+            EXPECT_HIPBLAS_STATUS(gemm.initialize(heur[0].algo, dW), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS(gemm.run(stream), HIPBLAS_STATUS_SUCCESS);
+        }
+        else
+        {
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                  md,
+                                                  &alpha,
+                                                  dA,
+                                                  lA,
+                                                  dB,
+                                                  lB,
+                                                  &beta,
+                                                  dC,
+                                                  lC,
+                                                  dD,
+                                                  lD,
+                                                  &heur[0].algo,
+                                                  dW,
+                                                  heur[0].workspaceSize,
+                                                  stream),
+                                  HIPBLAS_STATUS_SUCCESS);
+        }
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+        std::vector<float> D_actual(M * N);
+        CHECK_HIP_ERROR(hipMemcpy(D_actual.data(),
+                                  hD[kBatch - 1] + d_offset,
+                                  sizeof(float) * M * N,
+                                  hipMemcpyDeviceToHost));
+        ASSERT_EQ(D_actual[0], 128.0f);
+        ASSERT_EQ(std::isnan(D_actual.back()), nan_batch == kBatch - 1);
 
         EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(handle, out_reported),
                               HIPBLAS_STATUS_SUCCESS);
@@ -576,13 +613,41 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 
     reset_env();
     setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-    run_pointer_array_scenario(/*nan_batch=*/2, &reported);
+    run_pointer_array_scenario(/*nan_batch=*/2,
+                               /*d_offset=*/0,
+                               /*prefix_nan=*/false,
+                               /*use_cpp=*/false,
+                               &reported);
     EXPECT_EQ(reported, 1u) << "NaN in the last pointer-array batch must be reported";
 
     reset_env();
     setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-    run_pointer_array_scenario(kNoNanBatch, &reported);
+    run_pointer_array_scenario(kNoNanBatch,
+                               /*d_offset=*/0,
+                               /*prefix_nan=*/false,
+                               /*use_cpp=*/false,
+                               &reported);
     EXPECT_EQ(reported, 0u) << "clean pointer-array matmul must not be flagged";
+
+    // HIPBLASLT_MATRIX_LAYOUT_OFFSET places each output after a full matrix of
+    // unused data. Check both a NaN at the output's end and NaNs confined to
+    // that unused prefix, through the C API and the extension API.
+    constexpr int64_t kDOffset = 128 * 128;
+    for(bool use_cpp : {false, true})
+    {
+        SCOPED_TRACE(use_cpp ? "extension API" : "C API");
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        run_pointer_array_scenario(
+            /*nan_batch=*/2, kDOffset, /*prefix_nan=*/false, use_cpp, &reported);
+        EXPECT_EQ(reported, 1u) << "NaN in offset pointer-array output must be reported";
+
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        run_pointer_array_scenario(
+            kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
+        EXPECT_EQ(reported, 0u) << "NaNs before offset pointer-array output must be ignored";
+    }
 
     reset_env();
 }

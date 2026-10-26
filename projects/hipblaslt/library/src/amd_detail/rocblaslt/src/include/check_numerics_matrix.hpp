@@ -78,6 +78,7 @@ inline std::string hipblaslt_check_numerics_ts()
 // this call's id via atomicCAS(0, call_id); subsequent NaNs no-op so the slot
 // retains the FIRST call_id that observed a NaN. With ptr_array set, D is a
 // device array holding one matrix pointer per batch and stride_d is unused.
+// offset_d is added to each matrix pointer in elements.
 template <int DIM_X, int DIM_Y, typename T>
 __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               n,
@@ -86,6 +87,7 @@ __global__ void hipblaslt_check_nan_kernel(int64_t               m,
                                            int64_t               stride_d,
                                            int                   row_major,
                                            int                   ptr_array,
+                                           int64_t               offset_d,
                                            int32_t               batch_base,
                                            uint32_t* __restrict__ flag,
                                            uint32_t              call_id)
@@ -96,7 +98,7 @@ __global__ void hipblaslt_check_nan_kernel(int64_t               m,
     if(tx < m && ty < n)
     {
         const int32_t batch   = batch_base + (int32_t)blockIdx.z;
-        const T*      batch_D = ptr_array ? static_cast<const T* const*>(D)[batch]
+        const T*      batch_D = ptr_array ? static_cast<const T* const*>(D)[batch] + offset_d
                                           : static_cast<const T*>(D) + (int64_t)batch * stride_d;
         const int64_t offset  = row_major ? (tx * ldd + ty) : (tx + ldd * ty);
         if(hipblaslt_isnan(batch_D[offset]))
@@ -113,6 +115,7 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
                                                     int64_t     stride_d,
                                                     bool        row_major,
                                                     bool        ptr_array,
+                                                    int64_t     offset_d,
                                                     uint32_t*   d_flag,
                                                     uint32_t    call_id,
                                                     hipStream_t stream)
@@ -137,6 +140,7 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
                            ldd, stride_d,
                            row_major ? 1 : 0,
                            ptr_array ? 1 : 0,
+                           offset_d,
                            base,
                            d_flag,
                            call_id);
@@ -151,6 +155,7 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
 // scanned matmul with a NaN in D (0 = none). nullptr disables scanning.
 // ptr_array: D is a device array of per-batch matrix pointers
 // (HIPBLASLT_BATCH_MODE_POINTER_ARRAY) rather than one strided buffer.
+// offset_d: element offset within each pointer-array matrix; ignored for strided D.
 inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
                                                           int64_t     m,
                                                           int64_t     n,
@@ -165,7 +170,8 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
                                                           uint32_t    scan_every,
                                                           uint32_t    scan_from,
                                                           uint32_t    scan_until,
-                                                          bool        ptr_array = false)
+                                                          bool        ptr_array = false,
+                                                          int64_t     offset_d  = 0)
 {
     if(!d_flag || !D || m == 0 || n == 0 || batch == 0)
         return rocblaslt_status_success;
@@ -188,28 +194,28 @@ inline rocblaslt_status hipblaslt_check_numerics_output_D(hipStream_t stream,
     {
     case HIP_R_32F:
         return hipblaslt_launch_nan_kernel<float>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_64F:
         return hipblaslt_launch_nan_kernel<double>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_16F:
         return hipblaslt_launch_nan_kernel<hipblasLtHalf>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_16BF:
         return hipblaslt_launch_nan_kernel<hip_bfloat16>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_8F_E4M3_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_8F_E5M2_FNUZ:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8_fnuz>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_8F_E4M3:
         return hipblaslt_launch_nan_kernel<hipblaslt_f8>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     case HIP_R_8F_E5M2:
         return hipblaslt_launch_nan_kernel<hipblaslt_bf8>(
-            m, n, batch, D, ldd, stride_d, row_major, ptr_array, d_flag, call_id, stream);
+            m, n, batch, D, ldd, stride_d, row_major, ptr_array, offset_d, d_flag, call_id, stream);
     default:
         return rocblaslt_status_success;
     }
@@ -368,7 +374,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
                                                         int64_t          ldd,
                                                         int64_t          stride_d,
                                                         bool             row_major,
-                                                        bool             ptr_array = false)
+                                                        bool             ptr_array = false,
+                                                        int64_t          offset_d  = 0)
 {
     if(!handle || !handle->check_numerics)
         return rocblaslt_status_success;
@@ -425,7 +432,8 @@ inline rocblaslt_status hipblaslt_check_numerics_scan_D(rocblaslt_handle handle,
                                              handle->check_numerics_scan_every,
                                              handle->check_numerics_scan_from,
                                              handle->check_numerics_scan_until,
-                                             ptr_array);
+                                             ptr_array,
+                                             offset_d);
 }
 
 // Public on-demand drain (hipblasLtCheckNumericsDrain). Forces sync+read+reset

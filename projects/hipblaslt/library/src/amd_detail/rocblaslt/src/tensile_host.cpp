@@ -575,10 +575,10 @@ namespace
         rocblaslt_handle                           handle,
         hipStream_t                                stream,
         const TensileLite::ContractionProblemGemm& prob,
-        const void*                                D,
+        const TensileLite::ContractionInputs&      inputs,
         uint32_t                                   call_id)
     {
-        if(!handle || !handle->check_numerics || !D || call_id == 0)
+        if(!handle || !handle->check_numerics || (!inputs.d && !inputs.batchD) || call_id == 0)
             return rocblaslt_status_success;
 
         const int64_t m        = prob.c().sizes()[0];
@@ -591,6 +591,15 @@ namespace
         const hipDataType type_d    = tensile2HipType(prob.d().dataType());
         const bool        ptr_array
             = (prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+        const void* D
+            = ptr_array && inputs.batchD ? static_cast<const void*>(inputs.batchD) : inputs.d;
+        // Tensile stores offsets in bytes; the scanner adds an element offset.
+        const int64_t offset_d
+            = ptr_array && inputs.batchOffsetD != 0
+                  ? inputs.batchOffsetD
+                        / static_cast<int64_t>(
+                            TensileLite::DataTypeInfo::Get(prob.d().dataType()).elementSize)
+                  : 0;
 
         return hipblaslt_check_numerics_scan_D(handle,
                                                stream,
@@ -601,7 +610,8 @@ namespace
                                                ldd,
                                                stride_d,
                                                row_major,
-                                               ptr_array);
+                                               ptr_array,
+                                               offset_d);
     }
 
     // Post-launch hook shared by single- and grouped-GEMM. Acquires one
@@ -616,9 +626,10 @@ namespace
             return rocblaslt_status_success;
         rocblaslt_status agg = rocblaslt_status_success;
         enumerate(call_id,
-                  [&](const TensileLite::ContractionProblemGemm& prob, const void* d) {
+                  [&](const TensileLite::ContractionProblemGemm& prob,
+                      const TensileLite::ContractionInputs&      inputs) {
                       const auto st = maybe_check_numerics_problem(
-                          handle, stream, prob, d, call_id);
+                          handle, stream, prob, inputs, call_id);
                       if(st != rocblaslt_status_success && agg == rocblaslt_status_success)
                           agg = st;
                   });
@@ -4670,7 +4681,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             {
                 auto st = check_numerics_post_launch(
                     handle, stream, [&](uint32_t /*cid*/, auto visit) {
-                        visit(data->problem, data->inputs.d);
+                        visit(data->problem, data->inputs);
                     });
                 if(st != rocblaslt_status_success)
                     status = st;
@@ -4740,7 +4751,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                         const size_t N = std::min(data->problem.gemms.size(),
                                                   data->inputs.grouped.size());
                         for(size_t i = 0; i < N; ++i)
-                            visit(data->problem.gemms[i], data->inputs.grouped[i].d);
+                            visit(data->problem.gemms[i], data->inputs.grouped[i]);
                     });
                 if(st != rocblaslt_status_success && status == rocblaslt_status_success)
                     status = st;
