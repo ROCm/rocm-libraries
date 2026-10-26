@@ -1867,4 +1867,118 @@ namespace
                 matmulDesc, &alpha, a.ptr, Adesc, b.ptr, Bdesc, &beta, d.ptr, Ddesc, d.ptr, Ddesc),
             HIPBLAS_STATUS_INVALID_VALUE);
     }
+
+    // BF16 values drawn from {-1, 0, 1}.
+    std::vector<uint16_t> smallIntegerBf16(size_t count, uint32_t seed)
+    {
+        std::vector<uint16_t> values(count);
+        uint32_t              state = seed;
+        for(uint16_t& v : values)
+        {
+            state         = state * 1664525u + 1013904223u;
+            const float f = float(int((state >> 16) % 3) - 1);
+            uint32_t    bits;
+            memcpy(&bits, &f, sizeof(bits));
+            v = uint16_t(bits >> 16);
+        }
+        return values;
+    }
+
+    TEST_F(FusedA2APrologueDispatch_pre_checkin, OneRankMatchesAPlainMatmul)
+    {
+        constexpr int64_t kRunM = 512;
+        constexpr int64_t kRunN = 512;
+        constexpr int64_t kRunK = 1024;
+        ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+        Adesc = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kRunK, kRunM, kRunK),
+                  HIPBLAS_STATUS_SUCCESS);
+        makeB(kRunK, kRunN, kRunK);
+        makeD(HIP_R_16BF, kRunM, kRunN);
+
+        const size_t aBytes = kRunK * kRunM * 2, bBytes = kRunK * kRunN * 2;
+        const size_t dBytes = kRunM * kRunN * 2;
+        DeviceBuffer a(aBytes), b(bBytes), gather(bBytes), plainD(dBytes), fusedD(dBytes);
+        ASSERT_TRUE(a.ptr && b.ptr && gather.ptr && plainD.ptr && fusedD.ptr);
+        std::vector<uint16_t> hostA = smallIntegerBf16(kRunK * kRunM, 1);
+        std::vector<uint16_t> hostB = smallIntegerBf16(kRunK * kRunN, 2);
+        ASSERT_EQ(hipMemcpy(a.ptr, hostA.data(), aBytes, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(b.ptr, hostB.data(), bBytes, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemset(gather.ptr, 0xff, bBytes), hipSuccess);
+
+        hipblasLtMatmulHeuristicResult_t plain    = {};
+        int                              returned = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, matmulDesc, Adesc, Bdesc, Ddesc, Ddesc, pref, 1, &plain, &returned),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(returned, 1);
+
+        registerOneRank();
+        ASSERT_EQ(setPeerBPtrs({b.ptr}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setGatherBuffer(gather.ptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(setQueues({hipblasLtSdmaQueue_t{}}), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        returned                                     = 0;
+        ASSERT_EQ(
+            hipblasLtMatmulAlgoGetHeuristic(
+                handle, matmulDesc, Adesc, Bdesc, Ddesc, Ddesc, pref, 1, &fusedResult, &returned),
+            HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no A2AGemm BF16 TN solution in the loaded library";
+        ASSERT_EQ(fusedResult.workspaceSize, 0u);
+
+        const float alpha = 1.f;
+        const float beta  = 0.f;
+        ASSERT_EQ(hipblasLtMatmul(handle,
+                                  matmulDesc,
+                                  &alpha,
+                                  a.ptr,
+                                  Adesc,
+                                  b.ptr,
+                                  Bdesc,
+                                  &beta,
+                                  fusedD.ptr,
+                                  Ddesc,
+                                  fusedD.ptr,
+                                  Ddesc,
+                                  &fusedResult.algo,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, nullptr), HIPBLAS_STATUS_SUCCESS);
+        DeviceBuffer ws(plain.workspaceSize);
+        ASSERT_TRUE(plain.workspaceSize == 0 || ws.ptr);
+        ASSERT_EQ(hipblasLtMatmul(handle,
+                                  matmulDesc,
+                                  &alpha,
+                                  a.ptr,
+                                  Adesc,
+                                  b.ptr,
+                                  Bdesc,
+                                  &beta,
+                                  plainD.ptr,
+                                  Ddesc,
+                                  plainD.ptr,
+                                  Ddesc,
+                                  &plain.algo,
+                                  ws.ptr,
+                                  plain.workspaceSize,
+                                  nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        std::vector<uint16_t> hostPlain(kRunM * kRunN), hostFused(kRunM * kRunN);
+        ASSERT_EQ(hipMemcpy(hostPlain.data(), plainD.ptr, dBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(hostFused.data(), fusedD.ptr, dBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        size_t mismatches = 0;
+        for(size_t i = 0; i < hostPlain.size(); ++i)
+            mismatches += hostPlain[i] != hostFused[i];
+        EXPECT_EQ(mismatches, 0u);
+    }
 }
