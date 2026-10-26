@@ -44,8 +44,21 @@ def _request(arch, **overrides):
         ({"sliding_window": 1024}, "attention_gfx950_dense_persist"),
         ({"use_sinks": True}, "attention_gfx950_dense_persist"),
         ({"hdim_q": 64, "hdim_v": 64}, "attention_gfx950_dense_persist"),
-        # Too few work items for 256 persistent CTAs.
-        ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_grid"),
+        # Too few work items for 256 persistent CTAs: plain causal D128 still
+        # takes wide DMA (at the half-height tile); anything else takes grid.
+        ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_persist_widedma"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "sliding_window": 128},
+            "attention_gfx950_dense_grid",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64},
+            "attention_gfx950_dense_grid",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "mask_type": 0},
+            "attention_gfx950_dense_grid",
+        ),
         # The moving bottom-right diagonal runs only on the grid body.
         (
             {"seqlen_q": 512, "seqlen_k": 8192, "mask_type": 2},
