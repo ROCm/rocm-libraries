@@ -89,6 +89,38 @@ class TestSplitKGate(unittest.TestCase):
         )
         self.assertFalse(ok)
 
+    def test_non_identity_acc_epilogue_is_rejected(self):
+        # Stage 1 stores raw partials and the reduction only adds them: a bias
+        # would be added once per slice, ReLU / clamp applied before the sum.
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+
+        for epi in (
+            ConvAccumulatorEpilogue(bias=1.0),
+            ConvAccumulatorEpilogue(scale=2.0),
+            ConvAccumulatorEpilogue(relu=True),
+            ConvAccumulatorEpilogue(clamp_min=-1.0, clamp_max=1.0),
+        ):
+            for kw in (
+                dict(split_k=2),
+                dict(split_k=2, split_k_cluster=4, pipeline="mem"),
+            ):
+                with self.subTest(epi=epi, **kw):
+                    ok, why = is_valid_spec(_spec(acc_epilogue=epi, **kw), "gfx1250")
+                    self.assertFalse(ok)
+                    self.assertIn("identity acc_epilogue", why)
+        # The unsplit kernel keeps its fused epilogue.
+        ok, why = is_valid_spec(
+            _spec(acc_epilogue=ConvAccumulatorEpilogue(relu=True)), "gfx1250"
+        )
+        self.assertTrue(ok, why)
+
+    def test_nonpositive_split_k_is_rejected(self):
+        for sk in (0, -1, -4):
+            with self.subTest(split_k=sk):
+                ok, why = is_valid_spec(_spec(split_k=sk), "gfx1250")
+                self.assertFalse(ok)
+                self.assertIn("split_k must be >= 1", why)
+
     def test_name_tags_the_variant(self):
         self.assertTrue(_spec(split_k=2).kernel_name().endswith("_splitk"))
         self.assertNotIn("splitk", _spec().kernel_name())
@@ -133,6 +165,65 @@ class TestClusterSplitKGate(unittest.TestCase):
     def test_off_by_default(self):
         kernel = build_implicit_gemm_conv(_spec(split_k=2), arch="gfx1250")
         self.assertIsNone(kernel.cluster_dims)
+
+    def test_target_without_cluster_launch_is_rejected(self):
+        spec = _spec(split_k=2, split_k_cluster=4, pipeline="mem", warp_tile_k=16)
+        ok, why = is_valid_spec(spec, "gfx1201")
+        self.assertFalse(ok)
+        self.assertIn("workgroup-cluster launch", why)
+        # The two-stage split-K form needs no cluster.
+        ok, why = is_valid_spec(_spec(split_k=2, warp_tile_k=16), "gfx1201")
+        self.assertTrue(ok, why)
+
+    def test_channels_not_a_multiple_of_4_are_rejected(self):
+        # The fold reads 4-channel quads bounded by their first channel: with
+        # kpg = 10 the quad at channel 8 would run past the row.
+        for problem in (
+            ConvProblem(N=1, Hi=7, Wi=7, C=256, K=10, Y=3, X=3, pH=1, pW=1),
+            ConvProblem(N=1, Hi=7, Wi=7, C=128, K=20, Y=3, X=3, pH=1, pW=1, groups=2),
+        ):
+            with self.subTest(K=problem.K, groups=problem.groups):
+                spec = _spec(
+                    problem=problem,
+                    split_k=2,
+                    split_k_cluster=4,
+                    pipeline="mem",
+                    vector_size_c=2,
+                )
+                ok, why = is_valid_spec(spec, "gfx1250")
+                self.assertFalse(ok)
+                self.assertIn("multiples of 4", why)
+
+    def test_launch_admission_checks_the_launched_problem(self):
+        # The binary is shape-generic: a spec built on a good problem must
+        # still refuse a launched one whose channels break the quad rule.
+        from kernels.common.conv_implicit_gemm import is_valid_spec_for_problem
+        from kernels.conv.kernel_identity import (
+            KernelIdentity,
+            identity_supports_problem,
+        )
+
+        spec = _spec(split_k=2, split_k_cluster=4, pipeline="mem", vector_size_c=2)
+        good = ConvProblem(N=1, Hi=7, Wi=7, C=256, K=12, Y=3, X=3, pH=1, pW=1)
+        odd = ConvProblem(N=1, Hi=7, Wi=7, C=256, K=10, Y=3, X=3, pH=1, pW=1)
+        grouped_odd = ConvProblem(
+            N=1, Hi=7, Wi=7, C=256, K=12, Y=3, X=3, pH=1, pW=1, groups=2
+        )
+        self.assertEqual(is_valid_spec_for_problem(spec, good, "gfx1250"), (True, "ok"))
+        for problem in (odd, grouped_odd):
+            ok, why = is_valid_spec_for_problem(spec, problem, "gfx1250")
+            self.assertFalse(ok)
+            self.assertIn("multiples of 4", why)
+
+        ident = KernelIdentity.from_label(
+            "fwd-implicit_gemm-bf16-2d-t16x16x64-w1x1-a16x16x32-v8x8x2-mem-"
+            "cshuffle-grp-sk2-skc4-2stage-wave32-gfx1250-llvm23"
+        )
+        self.assertTrue(identity_supports_problem(ident, good, "llvm23")[0])
+        for problem in (odd, grouped_odd):
+            ok, why = identity_supports_problem(ident, problem, "llvm23")
+            self.assertFalse(ok)
+            self.assertIn("multiples of 4", why)
 
 
 class TestClusterSplitKCache(unittest.TestCase):
@@ -201,6 +292,98 @@ class TestClusterSplitKCache(unittest.TestCase):
         self.assertEqual(_runtime_split_ks(small, ident), (4,))
         self.assertEqual(_runtime_split_ks(small, ident, 8), ())
         self.assertEqual(_runtime_split_ks(many_tiles, ident), ())
+        # The fold's quad rule holds at launch too.
+        odd = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=510, Y=3, X=3, pH=1, pW=1)
+        self.assertEqual(_runtime_split_ks(odd, ident), ())
+
+
+class TestSplitKDegrees(unittest.TestCase):
+    """``--split-k`` / ``--split-k-degrees`` on a cached split-K forward binary."""
+
+    def test_explicit_sweep_uses_the_given_degrees(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import (
+            _FWD_SPLIT_K_AUTO,
+            _runtime_split_ks,
+        )
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(
+            "fwd-implicit_gemm-bf16-2d-t16x16x64-w1x1-a16x16x32-v8x8x8-wavelet-"
+            "cshuffle-grp-sk2-2stage-wave32-gfx1250-llvm23"
+        )
+        # 9*512 = 4608 = 72 K tiles of 64: every degree below fits.
+        small = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=64, Y=3, X=3, pH=1, pW=1)
+        self.assertEqual(_runtime_split_ks(small, ident, 0, (3,)), (3,))
+        self.assertEqual(_runtime_split_ks(small, ident, 0, (5, 3)), (5, 3))
+        # Auto keeps the forward ladder whatever the list says.
+        self.assertEqual(
+            _runtime_split_ks(small, ident, -1, (3,)),
+            tuple(sorted(_FWD_SPLIT_K_AUTO, reverse=True)),
+        )
+        self.assertEqual(_runtime_split_ks(small, ident, 6, (3,)), (6,))
+
+
+class TestSplitKAotScope(unittest.TestCase):
+    """The AOT grid builds split-K forward jobs only where they are supported:
+    gfx1250, and the cluster ones only at the flavor that lowers clusters.
+    ``count_jobs`` agrees with the walk in every case."""
+
+    def _walk(self, arch, flavor):
+        from rocke.core.arch import ArchTarget
+
+        from kernels.conv import aot_jobs as aj
+
+        target = ArchTarget.from_gfx(arch)
+        jobs = list(
+            aj._fwd_jobs(
+                arch, "bf16", target.wave_size, "wmma", target, llvm_flavor=flavor
+            )
+        )
+        counted = aj.count_jobs(
+            dtype="bf16", target=target, directions=["fwd"], llvm_flavor=flavor
+        )
+        split = [j for j in jobs if j.identity.split_k > 1]
+        cluster = [j for j in split if j.identity.split_k_cluster]
+        return len(jobs), counted, len(split), len(cluster)
+
+    def test_gfx1250_llvm23_has_both(self):
+        walked, counted, split, cluster = self._walk("gfx1250", "llvm23")
+        self.assertEqual(walked, counted)
+        self.assertGreater(cluster, 0)
+        self.assertGreater(split, cluster)
+
+    def test_gfx1250_llvm22_has_no_cluster_jobs(self):
+        walked, counted, split, cluster = self._walk("gfx1250", "llvm22")
+        self.assertEqual(walked, counted)
+        self.assertGreater(split, 0)
+        self.assertEqual(cluster, 0)
+
+    def test_other_wmma_targets_have_no_split_jobs(self):
+        for arch in ("gfx1201", "gfx1151"):
+            with self.subTest(arch=arch):
+                walked, counted, split, _ = self._walk(arch, "llvm23")
+                self.assertEqual(walked, counted)
+                self.assertEqual(split, 0)
+
+
+class TestSplitKReduceEngine(unittest.TestCase):
+    """The C++ Stage 2 builder fails cleanly on a name it cannot hold."""
+
+    def test_overlong_name_is_an_error_not_a_stale_builder(self):
+        try:
+            import rocke_engine  # type: ignore
+        except ImportError:
+            self.skipTest("rocke_engine (the C++ engine extension) is not built")
+        spec = dict(dtype_d="bf16", vec=4, name="x" * 300)
+        with self.assertRaisesRegex(Exception, "kernel name does not fit"):
+            rocke_engine.conv_fwd_split_k_reduce_lower_llvm(spec, arch="gfx1250")
+        with self.assertRaisesRegex(Exception, "kernel name does not fit"):
+            rocke_engine.conv_fwd_split_k_reduce_serialize_ir(spec, arch="gfx1250")
+        # A name that fits still builds.
+        ll = rocke_engine.conv_fwd_split_k_reduce_lower_llvm(
+            dict(dtype_d="bf16", vec=4), arch="gfx1250"
+        )
+        self.assertIn("conv_fwd_splitk_reduce", ll)
 
 
 # ---------------------------------------------------------------------------

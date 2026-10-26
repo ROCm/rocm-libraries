@@ -50,7 +50,7 @@ rocke_status_t rocke_fwd_split_k_reduce_kernel_name(const rocke_fwd_split_k_redu
     char s_buf[24];
     const char* parts[4];
     int n_parts = 0;
-    if(spec == NULL || out == NULL)
+    if(spec == NULL || out == NULL || spec->dtype_d == NULL)
         return ROCKE_ERR_VALUE;
     snprintf(v_buf, sizeof(v_buf), "v%d", spec->vec);
     snprintf(b_buf, sizeof(b_buf), "b%d", spec->block_size);
@@ -61,7 +61,7 @@ rocke_status_t rocke_fwd_split_k_reduce_kernel_name(const rocke_fwd_split_k_redu
         snprintf(s_buf, sizeof(s_buf), "s%d", spec->degree);
         parts[n_parts++] = s_buf;
     }
-    parts[n_parts++] = spec->dtype_d ? spec->dtype_d : "bf16";
+    parts[n_parts++] = spec->dtype_d;
     return rocke_kernel_name_join(spec->name ? spec->name : "conv_fwd_splitk_reduce",
                                   parts,
                                   (size_t)n_parts,
@@ -90,7 +90,15 @@ bool rocke_fwd_split_k_reduce_is_valid_spec(const rocke_fwd_split_k_reduce_spec_
             snprintf(reason, reason_cap, "vec must be 1, 2 or 4 (got %d)", spec->vec);
         return false;
     }
-    dtype_d = spec->dtype_d ? spec->dtype_d : "bf16";
+    /* Python validate() rejects dtype_d=None; NULL is not a request for the
+     * default (rocke_fwd_split_k_reduce_spec_default sets that). */
+    dtype_d = spec->dtype_d;
+    if(dtype_d == NULL)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "dtype_d must be fp16 or bf16 (got None)");
+        return false;
+    }
     if(strcmp(dtype_d, "fp16") != 0 && strcmp(dtype_d, "bf16") != 0)
     {
         if(reason && reason_cap > 0)
@@ -137,7 +145,7 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
     }
 
     const int vec = spec->vec;
-    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "bf16";
+    const char* dtype_d = spec->dtype_d; /* non-NULL: validated above */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
 
     /* ---- params ---------------------------------------------------------- */
@@ -261,12 +269,34 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
 rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce_new(
     rocke_ir_builder_t* b, const rocke_fwd_split_k_reduce_spec_t* spec, const char* arch)
 {
+    if(b != NULL)
+    {
+        /* Zero first, so every early return below leaves a builder the caller
+         * can safely query and rocke_ir_builder_free(). */
+        memset(b, 0, sizeof(*b));
+    }
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
-        if(b == NULL || spec == NULL)
-            return NULL;
         char name[256];
-        if(rocke_fwd_split_k_reduce_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        char reason[256];
+        if(b == NULL)
             return NULL;
+        if(spec == NULL)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_conv_fwd_split_k_reduce: null spec");
+            return NULL;
+        }
+        /* Python: spec.validate() runs before IRBuilder(spec.kernel_name()). */
+        if(!rocke_fwd_split_k_reduce_is_valid_spec(spec, reason, sizeof(reason)))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "fwd_split_k_reduce: %s", reason);
+            return NULL;
+        }
+        if(rocke_fwd_split_k_reduce_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            rocke_i_set_err_msg(
+                b, ROCKE_ERR_VALUE, "build_conv_fwd_split_k_reduce: kernel name does not fit");
+            return NULL;
+        }
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
             return NULL;
         return rocke_build_conv_fwd_split_k_reduce(b, spec, arch);
@@ -293,13 +323,14 @@ rocke_status_t rocke_fwd_split_k_reduce_signature(rocke_arena_t* arena,
 {
     rocke_signature_builder_t sb;
     rocke_status_t st;
-    if(arena == NULL || spec == NULL || out_items == NULL || out_count == NULL)
+    if(arena == NULL || spec == NULL || spec->dtype_d == NULL || out_items == NULL
+       || out_count == NULL)
         return ROCKE_ERR_VALUE;
     st = rocke_signature_builder_init(&sb, arena);
     if(st != ROCKE_OK)
         return st;
     rocke_signature_builder_ptr(&sb, "ws_ptr", "fp32", NULL);
-    rocke_signature_builder_ptr(&sb, "d_ptr", spec->dtype_d ? spec->dtype_d : "bf16", NULL);
+    rocke_signature_builder_ptr(&sb, "d_ptr", spec->dtype_d, NULL);
     rocke_signature_builder_scalar(&sb, "elems", "i32");
     rocke_signature_builder_scalar(&sb, "ws_bytes", "i32");
     rocke_signature_builder_scalar(&sb, "d_bytes", "i32");

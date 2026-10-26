@@ -359,7 +359,11 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
  *   42: cluster S=15, mem/cshuffle, 16x16x64 tile
  *   43: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
  *   44: cluster S=12, mem/default, 32x32x32 tile
- *   45: split_k=2 on gfx950 (MFMA): rejected by both engines */
+ *   45: split_k=2 on gfx950 (MFMA): rejected by both engines
+ *   46: split_k=2 with a bias acc_epilogue: rejected by both engines
+ *   47: split_k=0: rejected by both engines
+ *   48: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+ *   49: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines */
 static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     const rocke_conv_problem_t small_m
@@ -370,6 +374,8 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         = rocke_conv_problem_make(1, 9, 9, 64, 40, 3, 3, 1, 1, 1, 1, 1, 1);
     rocke_conv_problem_t grouped
         = rocke_conv_problem_make(1, 10, 10, 128, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t odd_k
+        = rocke_conv_problem_make(1, 7, 7, 256, 10, 3, 3, 1, 1, 1, 1, 1, 1);
     grouped.groups = 2;
 
     *spec = rocke_implicit_gemm_conv_spec_default();
@@ -453,6 +459,28 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->pipeline = "mem";
         *arch = "gfx950";
         return 0;
+    case 46:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->acc_epilogue.bias = 1.0;
+        return 0;
+    case 47:
+        spec->problem = small_m;
+        spec->split_k = 0;
+        return 0;
+    case 48:
+        spec->problem = odd_k;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = 4;
+        spec->vector_size_c = 2;
+        return 0;
+    case 49:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = 4;
+        spec->warp_tile_k = 16;
+        *arch = "gfx1201";
+        return 0;
     default:
         return -1;
     }
@@ -465,7 +493,7 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
  * conv_implicit_gemm_emit.py. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(idx >= 36 && idx <= 45)
+    if(idx >= 36 && idx <= 49)
     {
         if(make_cfg_split_k(idx, spec, arch) != 0)
             return -1;

@@ -5459,16 +5459,15 @@ def _fwd_cluster_split_pays(problem, ident) -> bool:
     """Is ``problem`` a small-output / deep-reduction layer the cluster
     split-K forward binary ``ident`` is for?"""
     from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_implicit_gemm import fwd_split_k_cluster_problem_reason
 
     args_ = ConvArgs.from_problem(
         problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
     )
     tiles = args_.num_pid_m * args_.num_pid_n * max(1, problem.groups)
-    kpg = problem.K // max(1, problem.groups)
     return (
         # The fold walks 4-channel quads of the packed [M][K] output.
-        problem.K % 4 == 0
-        and kpg % 4 == 0
+        fwd_split_k_cluster_problem_reason(problem) is None
         and tiles < _FWD_SPLIT_K_CLUSTER_MAX_TILES
         and args_.gemm_k >= _FWD_SPLIT_K_CLUSTER_MIN_GEMM_K
     )
@@ -5477,12 +5476,13 @@ def _fwd_cluster_split_pays(problem, ident) -> bool:
 def _runtime_split_ks(
     problem, ident, requested: int = 0, degrees: tuple = _SPLIT_K_AUTO
 ) -> tuple:
-    """Degrees to launch a cached split-K wgrad binary at.
+    """Degrees to launch a cached split-K wgrad or forward binary at.
 
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
     sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
     pick, -1 launches at the resolver's pick only, and a positive value pins
-    that degree. The cache records ``split_k=2`` only as a marker that the
+    that degree. The forward split has no resolver: there 0 sweeps
+    ``degrees`` alone and -1 sweeps the forward ladder. The cache records ``split_k=2`` only as a marker that the
     binary is the split-K one -- the degree itself is a kernarg -- so nothing
     here is baked in and every mode is reachable at launch.
 
@@ -5514,8 +5514,15 @@ def _runtime_split_ks(
             direction="fwd",
         )
     if ident.direction == "fwd":
-        # No resolver for the forward split: -1 sweeps the forward ladder like
-        # 0, a positive value pins the degree.
+        # No resolver for the forward split: 0 sweeps ``degrees`` as for
+        # wgrad, -1 sweeps the forward ladder, a positive value pins the
+        # degree.
+        if requested == 0:
+            swept = degrees
+        elif requested == -1:
+            swept = _FWD_SPLIT_K_AUTO
+        else:
+            swept = (requested,)
         return _split_k_degrees(
             problem,
             arch=ident.arch,
@@ -5526,7 +5533,7 @@ def _runtime_split_ks(
             block_size=ident.warp_m * ident.warp_n * ident.wave_size,
             group_merge=1,
             two_stage=True,
-            degrees=_FWD_SPLIT_K_AUTO if requested in (0, -1) else (requested,),
+            degrees=swept,
             include_resolved=False,
             direction="fwd",
         )

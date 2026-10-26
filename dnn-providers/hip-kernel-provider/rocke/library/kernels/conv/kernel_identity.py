@@ -508,6 +508,18 @@ def identity_supports_problem(
     if not identity.is_direct and problem_grouped and not identity.grouped:
         return False, "kernel is ungrouped, problem is grouped"
 
+    # The cluster split-K forward folds 4-channel quads bounded by their first
+    # channel; the binary takes K and kpg as kernargs, so the launched problem
+    # is checked with the same predicate the spec validator uses.
+    if identity.direction == "fwd" and identity.split_k_cluster:
+        from kernels.common.conv_implicit_gemm import (
+            fwd_split_k_cluster_problem_reason,
+        )
+
+        why = fwd_split_k_cluster_problem_reason(problem)
+        if why is not None:
+            return False, why
+
     # Split-K wgrad without two-stage atomic-adds straight into dW. For a
     # 16-bit dW that is a packed <2 x dtype> atomic, which needs an even
     # dW row (wg_N = [Z*]Y*X*cpg) and store width; on an odd row it

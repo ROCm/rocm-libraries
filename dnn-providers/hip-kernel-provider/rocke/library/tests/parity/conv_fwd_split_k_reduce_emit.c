@@ -21,6 +21,7 @@
  *   7  fp16, vec 4, block 128, unrolled fold, degree 8, gfx1250
  *   8  bf16, vec 4, runtime slab loop, gfx950
  *   9  vec 3 (rejected by both engines)
+ *   10 dtype_d NULL (rejected by both engines, not defaulted)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,7 @@ static int make_cfg(int idx, rocke_fwd_split_k_reduce_spec_t* spec, const char**
         {"fp16", 4, 128, 8, "gfx1250"},
         {"bf16", 4, 256, 0, "gfx950"},
         {"bf16", 3, 256, 0, "gfx1250"},
+        {NULL, 4, 256, 0, "gfx1250"},
     };
     if(idx < 0 || idx >= (int)(sizeof(kCfgs) / sizeof(kCfgs[0])))
         return -1;

@@ -518,6 +518,31 @@ int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spe
     return s->problem.groups / gm;
 }
 
+/* Mirrors Python fwd_split_k_cluster_problem_reason: the cluster fold walks
+ * 4-channel quads bounded by their first channel, so K and kpg must be
+ * multiples of 4. Checked on the build problem and on every launched one. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap)
+{
+    const int groups = p->groups > 1 ? p->groups : 1;
+    const int kpg = p->K / groups;
+    if(p->K % 4 != 0 || kpg % 4 != 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "split_k_cluster folds 4-channel quads: K (%d) and the "
+                     "per-group channels (%d) must be multiples of 4",
+                     p->K,
+                     kpg);
+        }
+        return false;
+    }
+    return true;
+}
+
 /* ---- split-K forward admission ------------------------------------------ *
  *
  * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
@@ -526,6 +551,7 @@ int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spe
  * groups, or take the pointwise fast path are not wired for it. */
 bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                                       const char* family,
+                                      const char* arch,
                                       char* reason,
                                       size_t reason_cap)
 {
@@ -546,6 +572,11 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
     if(family == NULL || strcmp(family, "wmma") != 0)
     {
         ROCKE_SPLITK_REJECT("split-K forward is WMMA-only (built and tested on wave32)");
+    }
+    if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
+    {
+        ROCKE_SPLITK_REJECT("split-K forward supports only the identity acc_epilogue: the "
+                            "partial sums are reduced after the per-slice accumulation");
     }
     {
         const struct
@@ -591,6 +622,19 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
         if(s->tile_n % 4)
         {
             ROCKE_SPLITK_REJECT("split_k_cluster folds 4-channel quads (tile_n %% 4 == 0)");
+        }
+        if(arch != NULL)
+        {
+            const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+            if(target != NULL && !target->memory.has_cluster_launch)
+            {
+                ROCKE_SPLITK_REJECT(
+                    "split_k_cluster needs workgroup-cluster launch, which %s lacks", target->gfx);
+            }
+        }
+        if(!rocke_conv_fwd_split_k_cluster_problem_ok(&s->problem, reason, reason_cap))
+        {
+            return false;
         }
     }
     return true;
@@ -1226,9 +1270,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
-    if(s->split_k > 1 || s->split_k_cluster)
+    if(s->split_k != 1 || s->split_k_cluster)
     {
-        if(!rocke_conv_fwd_split_k_available(s, family, reason, reason_cap))
+        if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
         {
             return false;
         }

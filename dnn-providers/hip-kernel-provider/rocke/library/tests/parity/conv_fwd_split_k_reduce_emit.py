@@ -20,6 +20,7 @@
 #   7  -- fp16, vec 4, block 128, unrolled fold, degree 8, gfx1250
 #   8  -- bf16, vec 4, runtime slab loop, gfx950
 #   9  -- vec 3 (rejected by both engines)
+#   10 -- dtype_d None / NULL (rejected by both engines, not defaulted)
 from kernels.common.conv_fwd_split_k_reduce import (
     FwdSplitKReduceSpec,
     build_conv_fwd_split_k_reduce,
@@ -37,6 +38,7 @@ _CONFIGS = {
     7: (dict(dtype_d="fp16", vec=4, block_size=128, degree=8), "gfx1250"),
     8: (dict(dtype_d="bf16", vec=4), "gfx950"),
     9: (dict(dtype_d="bf16", vec=3), "gfx1250"),
+    10: (dict(dtype_d=None, vec=4), "gfx1250"),
 }
 
 

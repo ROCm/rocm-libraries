@@ -250,6 +250,7 @@ def enumerate_jobs(
             split_ks=split_ks,
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
+            llvm_flavor=flavor,
         )
         log(f"  {total} candidates to check with {jobs} process(es)")
 

@@ -518,7 +518,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
  * Fold the cluster's S slabs of this tile into D (spec.split_k_cluster).
  * Slice s owns rows [s*R, (s+1)*R) of the tile, R = ceil(TM / S); each
  * thread walks 4-channel quads of those rows (D and the slabs are packed
- * [M][K]; the host checks K % 4 == 0 and kpg % 4 == 0). Every SSA value is
+ * [M][K]; rocke_conv_fwd_split_k_cluster_problem_ok requires K % 4 == 0 and
+ * kpg % 4 == 0 at build and launch admission). Every SSA value is
  * bound in Python's left-to-right evaluation order.
  * ===================================================================== */
 static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)

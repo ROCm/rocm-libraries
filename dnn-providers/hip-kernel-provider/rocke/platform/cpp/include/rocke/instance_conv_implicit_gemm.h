@@ -267,14 +267,24 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
                                           char* reason,
                                           size_t reason_cap);
 
-/* Admission gate for spec.split_k > 1 / spec.split_k_cluster, called from
+/* Admission gate for spec.split_k != 1 / spec.split_k_cluster, called from
  * rocke_implicit_gemm_conv_is_valid_spec after the WMMA gates. `family` is the
- * MMA family ("wmma" / "mma"). Returns true when the split-K forward can be
- * built; on false writes the reason. Mirrors Python fwd_split_k_reason. */
+ * MMA family ("wmma" / "mma"); `arch` (NULL = unchecked, Python target=None)
+ * gates the cluster form on workgroup-cluster launch. Returns true when the
+ * split-K forward can be built; on false writes the reason. Mirrors Python
+ * fwd_split_k_reason. */
 bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                                       const char* family,
+                                      const char* arch,
                                       char* reason,
                                       size_t reason_cap);
+
+/* The cluster split-K forward's problem rule (K and kpg multiples of 4), on
+ * the build problem and on every launched one. Mirrors Python
+ * fwd_split_k_cluster_problem_reason; returns true when `p` can run. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). Returns
  * ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

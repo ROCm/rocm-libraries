@@ -9,6 +9,7 @@
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared
 # with the C emitter conv_implicit_gemm_emit.c.
 from kernels.common.conv_implicit_gemm import (
+    ConvAccumulatorEpilogue,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -554,7 +555,7 @@ def _spec_raw(idx: int):
             ),
             "gfx1250",
         )
-    if 36 <= idx <= 45:
+    if 36 <= idx <= 49:
         return _split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
@@ -572,10 +573,15 @@ def _spec_raw(idx: int):
 #   43: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
 #   44: cluster S=12, mem/default, 32x32x32 tile
 #   45: split_k=2 on gfx950 (MFMA): rejected by both engines
+#   46: split_k=2 with a bias acc_epilogue: rejected by both engines
+#   47: split_k=0: rejected by both engines
+#   48: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+#   49: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines
 _SMALL_M = dict(N=1, Hi=7, Wi=7, C=256, K=64, fy=3, fx=3, pH=1, pW=1)
 _CSH_64 = dict(N=2, Hi=12, Wi=12, C=128, K=96, fy=3, fx=3, pH=1, pW=1)
 _DEFAULT = dict(N=1, Hi=9, Wi=9, C=64, K=40, fy=3, fx=3, pH=1, pW=1)
 _GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=64, fy=3, fx=3, pH=1, pW=1, groups=2)
+_ODD_K = dict(N=1, Hi=7, Wi=7, C=256, K=10, fy=3, fx=3, pH=1, pW=1)
 
 
 def _split_k_spec(idx: int):
@@ -641,11 +647,18 @@ def _split_k_spec(idx: int):
                 pipeline="mem",
             ),
         ),
+        46: (
+            _SMALL_M,
+            dict(pipeline="mem", acc_epilogue=ConvAccumulatorEpilogue(bias=1.0)),
+        ),
+        47: (_SMALL_M, dict(split_k=0)),
+        48: (_ODD_K, dict(pipeline="mem", split_k_cluster=4, vector_size_c=2)),
+        49: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4, warp_tile_k=16)),
     }[idx]
     cfg = dict(base, **kw)
     return (
         ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
-        "gfx950" if idx == 45 else "gfx1250",
+        {45: "gfx950", 49: "gfx1201"}.get(idx, "gfx1250"),
     )
 
 

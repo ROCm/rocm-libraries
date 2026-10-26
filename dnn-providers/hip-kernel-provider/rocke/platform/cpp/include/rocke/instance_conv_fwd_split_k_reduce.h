@@ -52,7 +52,7 @@ extern "C" {
  */
 typedef struct rocke_fwd_split_k_reduce_spec
 {
-    const char* dtype_d; /* default "bf16" */
+    const char* dtype_d; /* default "bf16" (spec_default); NULL is rejected */
     int vec; /* default 4 */
     int block_size; /* default 256 */
     int degree; /* default 0 */
@@ -62,7 +62,8 @@ typedef struct rocke_fwd_split_k_reduce_spec
 /* Default-constructed spec (every field == the Python dataclass default). */
 rocke_fwd_split_k_reduce_spec_t rocke_fwd_split_k_reduce_spec_default(void);
 
-/* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). */
+/* spec.kernel_name() -> NUL-terminated into out (capacity out_cap).
+ * ROCKE_ERR_VALUE on a NULL dtype_d or a name that does not fit. */
 rocke_status_t rocke_fwd_split_k_reduce_kernel_name(const rocke_fwd_split_k_reduce_spec_t* spec,
                                                     char* out,
                                                     size_t out_cap);
@@ -78,7 +79,9 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
                                                         const rocke_fwd_split_k_reduce_spec_t* spec,
                                                         const char* arch);
 
-/* Init b with spec.kernel_name(), then build. */
+/* Validate spec, init b with spec.kernel_name(), then build. b is zeroed
+ * first, so on any failure (including a name that does not fit) it holds the
+ * error and can be queried and rocke_ir_builder_free()d. */
 rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce_new(
     rocke_ir_builder_t* b, const rocke_fwd_split_k_reduce_spec_t* spec, const char* arch);
 

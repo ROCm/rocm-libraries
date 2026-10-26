@@ -41,10 +41,12 @@ Per direction, on top of that:
   group-merged depthwise kernels (``group_merge`` in 4..64, cshuffle, plain
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
   subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
-  depthwise problems whose merged GEMM-N fits the tile. Plus, on WMMA, the
-  split-K kernel (``split_k`` > 1, recorded as 2 with ``two_stage``; fp32
-  workspace slabs + the Stage 2 fold, the degree a kernarg swept at launch)
-  on the small tiles, pipelines and widths of ``CACHE_FWD_SPLIT_K_*``.
+  depthwise problems whose merged GEMM-N fits the tile. Plus, on the
+  ``CACHE_FWD_SPLIT_K_ARCHS`` targets, the split-K kernel (``split_k`` > 1,
+  recorded as 2 with ``two_stage``; fp32 workspace slabs + the Stage 2 fold,
+  the degree a kernarg swept at launch) on the small tiles, pipelines and
+  widths of ``CACHE_FWD_SPLIT_K_*``, and its cluster form where the target
+  launches workgroup clusters and the flavor lowers them.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -338,6 +340,11 @@ CACHE_FWD_SPLIT_K_CLUSTER_TILES: Tuple[Tuple[int, int, int, int], ...] = (
 )
 CACHE_FWD_SPLIT_K_CLUSTER_TILE_K = 64
 CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
+# Targets the split-K forward kernels are cached for: the ones they were
+# validated on. The cluster form also needs workgroup-cluster launch on the
+# target and the LLVM flavor that lowers the cluster attribute and barrier.
+CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = ("gfx1250",)
+CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS: Tuple[str, ...] = ("llvm23",)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -711,15 +718,30 @@ def _fwd_jobs(
             wave_size,
             (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
         )
-        yield from _fwd_split_jobs(
-            arch,
-            da,
-            db,
-            dd,
-            flavor,
-            wave_size,
-            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
-        )
+        if _fwd_split_target(arch):
+            yield from _fwd_split_jobs(
+                arch,
+                da,
+                db,
+                dd,
+                flavor,
+                wave_size,
+                (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+                cluster=_fwd_split_cluster_target(target, flavor),
+            )
+
+
+def _fwd_split_target(arch: str) -> bool:
+    """Whether split-K forward kernels are cached for ``arch`` at all."""
+    return arch in CACHE_FWD_SPLIT_K_ARCHS
+
+
+def _fwd_split_cluster_target(target, flavor: str) -> bool:
+    """Whether cluster split-K forward kernels are cached for ``target`` and
+    ``flavor``: workgroup-cluster launch and an LLVM that lowers it."""
+    return (
+        target.memory.has_cluster_launch and flavor in CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS
+    )
 
 
 def _fwd_split_geometry(geometry: tuple) -> bool:
@@ -755,10 +777,15 @@ def _fwd_split_jobs(
     flavor: str,
     wave_size: int,
     geometry: tuple,
+    *,
+    cluster: bool,
 ) -> Iterator[BuildJob]:
-    """Split-K forward kernels for one geometry (see ``CACHE_FWD_SPLIT_K_*``)."""
+    """Split-K forward kernels for one geometry (see ``CACHE_FWD_SPLIT_K_*``).
+
+    ``cluster`` adds the cluster binaries (see :func:`_fwd_split_cluster_target`).
+    """
     tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
-    if _fwd_split_cluster_geometry(geometry):
+    if cluster and _fwd_split_cluster_geometry(geometry):
         vec = CACHE_FWD_SPLIT_K_CLUSTER_VEC
         for degree in CACHE_FWD_SPLIT_K_CLUSTER_DEGREES:
             cfg = dict(
@@ -1655,9 +1682,13 @@ def count_jobs(
     split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    llvm_flavor: Optional[str] = None,
 ) -> int:
     """Raw candidate count ``kernel_sweep.enumerate_jobs`` walks, before
     dedup/validation.
+
+    ``llvm_flavor`` is the flavor the enumeration records (see
+    :func:`_job_flavor`); it gates the cluster split-K forward jobs.
 
     Cheap: it runs only the geometry filter and multiplies out the inner axes,
     without building a single identity -- which is where enumeration spends
@@ -1672,6 +1703,10 @@ def count_jobs(
     layouts = len(_layout_caps())
     merged = sum(1 for sk in split_ks if sk > 1) * len(_WGRAD_GROUP_MERGES)
     wave_size = target.wave_size
+    fwd_split = _fwd_split_target(target.gfx)
+    fwd_cluster = fwd_split and _fwd_split_cluster_target(
+        target, _job_flavor(llvm_flavor)
+    )
     total = 0
     for direction in directions:
         if direction not in _AOT_ALIAS_PIPELINES:
@@ -1684,9 +1719,9 @@ def count_jobs(
                 total += vecs * len(_fwd_k_loops(pipeline)) * layouts
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
-                if _fwd_split_geometry(geo):
+                if fwd_split and _fwd_split_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
-                if _fwd_split_cluster_geometry(geo):
+                if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
                 total += (

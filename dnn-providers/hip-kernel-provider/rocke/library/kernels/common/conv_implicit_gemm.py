@@ -630,19 +630,47 @@ def fwd_group_merge_available(
 # ---------------------------------------------------------------------
 
 
-def fwd_split_k_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
+def fwd_split_k_cluster_problem_reason(problem: ConvProblem) -> Optional[str]:
+    """Why the cluster split-K forward cannot run ``problem``, or ``None``.
+
+    The cluster fold walks 4-channel quads of the packed ``[M][K]`` output and
+    workspace, bounded only by the quad's first channel, so every quad has to
+    lie inside one group's channels: ``K`` and the per-group ``kpg`` must be
+    multiples of 4. The binary is shape-generic (K and kpg are kernargs), so
+    this is checked both on the build problem and on every launched problem.
+    """
+    kpg = problem.K // max(1, problem.groups)
+    if problem.K % 4 or kpg % 4:
+        return (
+            f"split_k_cluster folds 4-channel quads: K ({problem.K}) and the "
+            f"per-group channels ({kpg}) must be multiples of 4"
+        )
+    return None
+
+
+def fwd_split_k_reason(
+    spec: ImplicitGemmConvSpec, family: str, target=None
+) -> Optional[str]:
     """Why ``spec``'s split-K forward cannot be built, or ``None``.
 
     The split-K body is the plain WMMA K loop (``mem`` / ``wavelet``) run over
     one slice, with an fp32 store into the workspace slab. The paths that drive
     the K loop differently (async DMA, ``unroll_k``), remap the grid
     (``chiplet_swizzle``), merge groups, or take the pointwise fast path are not
-    wired for it.
+    wired for it. Stage 1 stores raw partial sums and the reduction (Stage 2
+    or the cluster fold) only adds and casts them, so the accumulator
+    epilogue (bias / scale / ReLU / clamp) must be the identity. ``target``
+    (an ``ArchTarget``) gates the cluster form on workgroup-cluster launch.
     """
     if spec.split_k < 1:
         return f"split_k must be >= 1 (got {spec.split_k})"
     if family != "wmma":
         return "split-K forward is WMMA-only (built and tested on wave32)"
+    if not spec.acc_epilogue.is_identity():
+        return (
+            "split-K forward supports only the identity acc_epilogue: the "
+            "partial sums are reduced after the per-slice accumulation"
+        )
     for flag, label in (
         (spec.async_dma, "async_dma"),
         (spec.unroll_k, "unroll_k"),
@@ -664,6 +692,11 @@ def fwd_split_k_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]
             return "split_k_cluster is wired for the mem pipeline only"
         if spec.tile_n % 4:
             return "split_k_cluster folds 4-channel quads (tile_n % 4 == 0)"
+        if target is not None and not target.memory.has_cluster_launch:
+            return f"split_k_cluster needs workgroup-cluster launch, which {target.gfx} lacks"
+        _why = fwd_split_k_cluster_problem_reason(spec.problem)
+        if _why is not None:
+            return _why
     return None
 
 
@@ -679,6 +712,12 @@ def is_valid_spec_for_problem(
     ok, reason = is_valid_spec(spec, arch)
     if not ok:
         return False, reason
+    if spec.split_k_cluster:
+        # The cluster binary takes K and kpg as kernargs: the launched problem
+        # has to satisfy the fold's quad rule, not only the build problem.
+        _why = fwd_split_k_cluster_problem_reason(problem)
+        if _why is not None:
+            return False, _why
 
     # caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
     # to gridDim.y so reject specs whose grid would silently truncate and
@@ -916,8 +955,8 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
-    if spec.split_k > 1 or spec.split_k_cluster:
-        _why = fwd_split_k_reason(spec, family)
+    if spec.split_k != 1 or spec.split_k_cluster:
+        _why = fwd_split_k_reason(spec, family, target)
         if _why is not None:
             return False, _why
 
@@ -2422,7 +2461,9 @@ def _emit_cluster_fold(
 
     Slice ``s`` owns rows ``[s*R, (s+1)*R)`` of the tile, R = ceil(TM / S);
     each thread walks 4-channel quads of those rows (D and the slabs are
-    packed ``[M][K]``; the host checks K % 4 == 0 and kpg % 4 == 0).
+    packed ``[M][K]``; :func:`fwd_split_k_cluster_problem_reason` requires
+    K % 4 == 0 and kpg % 4 == 0 at build and launch admission, so a quad
+    whose first channel is in bounds lies wholly in its group).
     """
     from rocke.helpers.io import pack_f32_to
 
