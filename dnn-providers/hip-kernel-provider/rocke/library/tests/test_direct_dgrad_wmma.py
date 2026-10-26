@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Tests for the wave32 WMMA direct dgrad (``conv_direct_dgrad_wmma``).
 
-CPU: the spec validator, the AOT grid (gfx1250 only) and the shape filter of
-``direct_spec_for_problem``. GPU (gfx1250): every spec branch -- edges and
+CPU: the spec validator, the AOT grid (gfx1250 only), the shape filter of
+``direct_spec_for_problem`` and the shipped path: ``direct_plans`` over a
+gfx1250 cache of placeholder binaries (capability match, re-validation, launch
+grid, block and kernargs). GPU (gfx1250): every spec branch -- edges and
 ragged tiles, groups, PAD 0 / 5x5, several images per block, a 3-deep ring,
 two WMMA k-steps per chunk, fragment prefetch, the upper VGPR banks -- checked
 numerically against torch's dgrad.
@@ -16,6 +18,7 @@ Run:
 from __future__ import annotations
 
 import ctypes
+import json
 import importlib.util
 import unittest
 
@@ -335,6 +338,169 @@ class TestDgradWmmaSpec(unittest.TestCase):
         )
         self.assertIsNone(spec)
         self.assertIn("tile efficiency", why)
+
+
+# ---------------------------------------------------------------------------
+# The shipped path: the gfx1250 AOT cache (placeholder binaries, no GPU) and
+# direct_plans, which matches capabilities, re-validates the knobs on the
+# real problem and plans the launch.
+# ---------------------------------------------------------------------------
+_ARCH = "gfx1250"
+_WMMA = "direct_dgrad_wmma"
+
+
+@pytest.fixture(scope="module")
+def wmma_cache(tmp_path_factory):
+    """Every cached direct_dgrad_wmma job of the gfx1250 grid, each holding a
+    placeholder HSACO."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from benchmarks.common.kernel_cache import KernelCache
+    from rocke.core.arch import ArchTarget
+
+    jobs = [
+        j
+        for j in dks.enumerate_direct_jobs(
+            arch=_ARCH, target=ArchTarget.from_gfx(_ARCH), directions=("dgrad",)
+        )
+        if j.identity.algorithm == _WMMA
+    ]
+    assert jobs
+    cache = KernelCache(tmp_path_factory.mktemp("dgrad_wmma_cache"), _ARCH)
+    for job in jobs:
+        meta = {"kernel_name": job.identity.label(), "spec_wave_size": 32}
+        cache.put(job.identity, b"placeholder", meta)
+    return cache
+
+
+def _wmma_plans(cache, problem):
+    from benchmarks.common import direct_kernel_sweep as dks
+
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _ARCH)
+    return (
+        [p for p in plans if p.identity.algorithm == _WMMA],
+        [(i, why) for i, why in rejected if i.algorithm == _WMMA],
+    )
+
+
+def _cache_problem(**kw):
+    # The cache is built at the direct-conv AOT dtype.
+    from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPE
+
+    return _problem(**dict(dict(N=2, H=28, W=28, dtype=DIRECT_DTYPE), **kw))
+
+
+def _ceil(a, b):
+    return -(-a // b)
+
+
+@pytest.mark.parametrize(
+    "pkw, pack",
+    [
+        (dict(C=128, K=128), 1),
+        (dict(C=64, K=96, PAD=0), 1),
+        (dict(C=64, K=64, groups=2), 1),
+        (dict(C=64, K=64, stride=2), 1),
+        (dict(C=64, K=64, KH=2, PAD=0, stride=2), 1),
+        (dict(C=64, K=64, PAD=2, dil_w=2), 1),
+        (dict(C=64, K=64, PAD=1, dil_h=3), 1),
+        (dict(C=64, K=64, PAD=2, dil_h=2, dil_w=2), 1),
+        (dict(C=128, K=128, groups=32), 8),
+        (dict(C=256, K=256, groups=32), 4),
+        (dict(C=256, K=256, groups=16), 2),
+    ],
+)
+def test_aot_cache_plans_launch(wmma_cache, pkw, pack):
+    """A gfx1250 dgrad problem gets direct_dgrad_wmma binaries built for its
+    exact filter, padding, stride and dilation (and, for small groups, its
+    baked channel counts with 32 // cpg packed groups); each plan is one
+    dgrad-ABI launch over dY, W, dX whose grid, block and kernargs follow the
+    runtime problem."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.common.conv_args import ConvArgs
+
+    problem = _cache_problem(**pkw)
+    plans, _ = _wmma_plans(wmma_cache, problem)
+    assert plans, pkw
+    assert pack in {json.loads(p.identity.knobs).get("pack_groups", 1) for p in plans}
+    S = problem.stride
+    for plan in plans:
+        ident = plan.identity
+        assert (ident.filter_h, ident.filter_w) == (problem.KH, problem.KW)
+        assert (ident.pad_h, ident.stride_h) == (problem.PAD, S)
+        assert (ident.dilation_h, ident.dilation_w) == (problem.dil_h, problem.dil_w)
+        knobs = json.loads(ident.knobs)
+        # cpg 8 and 16 are served by the runtime-channel binaries too.
+        g = knobs.get("pack_groups", 1)
+        assert g in (1, pack)
+        assert (ident.cpg, ident.kpg) == (
+            (problem.cpg, problem.kpg) if g > 1 else (0, 0)
+        )
+        (step,) = plan.steps
+        assert step.buffers == ("dy", "w", "dx")
+        assert step.views is None or not any(step.views)
+        threads = knobs["waves_c"] * knobs["waves_p"] * 32
+        assert step.block == (threads, 1, 1)
+        tile_n = knobs.get("tile_n", 1)
+        block_p = knobs["waves_p"] * knobs["tiles_p"] * 16
+        tile_h = block_p // (knobs["tile_w"] * tile_n)
+        block_c = knobs["waves_c"] * knobs["tiles_c"] * 16
+        assert step.grid == (
+            _ceil(problem.N, tile_n)
+            * (problem.groups // g)
+            * _ceil(_ceil(problem.H, S), tile_h)
+            * _ceil(_ceil(problem.W, S), knobs["tile_w"])
+            * _ceil(g * problem.cpg, block_c),
+            1,
+            1,
+        ), ident.label()
+        assert step.conv_args == ConvArgs.from_problem(problem, direction="dgrad")
+        values = dks.launch_values(
+            step,
+            {"dy": 1 << 20, "w": 2 << 20, "dx": 3 << 20},
+            {"dy": 1, "w": 2, "dx": 3},
+        )
+        assert (values["A"], values["B"], values["D"]) == (1 << 20, 2 << 20, 3 << 20)
+        assert (values["p_Ho"], values["p_Wo"]) == (problem.Ho, problem.Wo)
+        # The kernel divides the runtime group count by pack_groups itself.
+        assert values["p_groups"] == problem.groups
+        assert values["p_total_c"] == problem.total_c
+        assert values["p_total_k"] == problem.total_k
+
+
+@pytest.mark.parametrize(
+    "pkw, needle",
+    [
+        # 12 groups of 4 channels: the cpg-4 binaries pack 8 groups.
+        (dict(C=48, K=48, groups=12), "not a multiple of pack_groups"),
+        # 6 groups of 8: the cpg-8 binaries pack 4.
+        (dict(C=48, K=48, groups=6), "not a multiple of pack_groups"),
+    ],
+)
+def test_aot_cache_rejects_unpackable_group_counts(wmma_cache, pkw, needle):
+    plans, rejected = _wmma_plans(wmma_cache, _cache_problem(**pkw))
+    assert plans == []
+    packed = [why for i, why in rejected if json.loads(i.knobs).get("pack_groups")]
+    assert packed and all(needle in why for why in packed)
+
+
+@pytest.mark.parametrize(
+    "pkw",
+    [
+        # Dilations the cache has no binary for.
+        dict(C=64, K=64, PAD=3, dil_h=3, dil_w=3),
+        dict(C=64, K=64, PAD=2, dil_h=2),
+        # A strided dilated dgrad is not supported.
+        dict(C=64, K=64, PAD=2, dil_h=2, dil_w=2, stride=2),
+        # Stride 2 with "valid" padding: only "same" 3x3 is cached.
+        dict(C=64, K=64, PAD=0, stride=2),
+    ],
+)
+def test_aot_cache_offers_nothing_for_uncached_geometry(wmma_cache, pkw):
+    """No binary of another dilation, stride or padding is offered (the
+    capability match is exact), so these problems get no direct_dgrad_wmma
+    plan at all."""
+    plans, rejected = _wmma_plans(wmma_cache, _cache_problem(**pkw))
+    assert plans == [] and rejected == []
 
 
 def _gpu_skip() -> str:
