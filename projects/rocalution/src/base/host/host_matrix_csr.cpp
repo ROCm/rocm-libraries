@@ -2221,17 +2221,15 @@ namespace rocalution
         int nrow = this->nrow_;
         int ncol = this->ncol_;
 
-        int64_t nnz = std::min(2 * maxrow, nrow) * nrow;
-
-        int64_t remaining_nnz = nnz;
+        int64_t nnz = std::min(2 * static_cast<int64_t>(maxrow), static_cast<int64_t>(nrow)) * nrow;
 
         PtrType*   row_offset = NULL;
         int*       col        = NULL;
         ValueType* val        = NULL;
 
         allocate_host(nrow + 1, &row_offset);
-        col = (int*)malloc(nnz * sizeof(int));
-        val = (ValueType*)malloc(nnz * sizeof(ValueType));
+        allocate_host(nnz, &col);
+        allocate_host(nnz, &val);
 
         void*    buffer            = NULL;
         PtrType* temp_pivot_buffer = NULL;
@@ -2304,32 +2302,28 @@ namespace rocalution
             // store elements
             int store_size = driver.row_size();
 
-            if(remaining_nnz < store_size)
+            if(row_offset[i] + store_size > nnz)
             {
-                int64_t grow = static_cast<int64_t>(nnz * 1.5f);
-                nnz += grow;
-                remaining_nnz += grow;
+                int64_t new_nnz
+                    = std::max(nnz + nnz / 2, static_cast<int64_t>(row_offset[i]) + store_size);
 
                 LOG_INFO("ILUTFactorize reallocating");
 
-                int*       col_tmp = (int*)realloc(col, nnz * sizeof(int));
-                ValueType* val_tmp = (ValueType*)realloc(val, nnz * sizeof(ValueType));
+                int*       new_col = NULL;
+                ValueType* new_val = NULL;
 
-                if(col_tmp == NULL || val_tmp == NULL)
-                {
-                    // LCOV_EXCL_START
-                    free(col);
-                    free(val);
+                allocate_host(new_nnz, &new_col);
+                allocate_host(new_nnz, &new_val);
 
-                    LOG_INFO("ILUTFactorize failed on realloc");
-                    FATAL_ERROR(__FILE__, __LINE__);
-                    // LCOV_EXCL_STOP
-                }
-                else
-                {
-                    col = col_tmp;
-                    val = val_tmp;
-                }
+                copy_h2h(row_offset[i], col, new_col);
+                copy_h2h(row_offset[i], val, new_val);
+
+                free_host(&col);
+                free_host(&val);
+
+                col = new_col;
+                val = new_val;
+                nnz = new_nnz;
             }
 
             int diag_in;
@@ -2343,7 +2337,6 @@ namespace rocalution
             }
 
             row_offset[i + 1] = row_offset[i] + store_size;
-            remaining_nnz -= store_size;
         }
 
         free(buffer);
@@ -2361,8 +2354,8 @@ namespace rocalution
         copy_h2h(nnz, col, p_col);
         copy_h2h(nnz, val, p_val);
 
-        free(col);
-        free(val);
+        free_host(&col);
+        free_host(&val);
 
         this->Clear();
         this->SetDataPtrCSR(&row_offset, &p_col, &p_val, nnz, nrow, ncol);
