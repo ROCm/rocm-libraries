@@ -164,7 +164,8 @@ def run_search(
     up_thr: float = 1.03,
     workdir: str = "workdir",
     verbose: int = 1,
-    duration: float = 0.04,
+    duration: float = 5.0,
+    adaptive: bool = True,
     bench_freq: bool = False,
     custom_lib_src: str | Path | None = None,
 ) -> None:
@@ -194,8 +195,10 @@ def run_search(
             absent. Defaults to "workdir".
         verbose (int, optional): Logging verbosity passed to
             _set_log_level (0 = WARNING, 1 = INFO). Defaults to 1.
-        duration (float, optional): Per-config benchmark duration (seconds)
-            used by search.configure. Defaults to 0.04.
+        duration (float, optional): Adaptive measurement floor in MILLISECONDS
+            (``measure_time``) used by search.configure. Defaults to 5.0.
+        adaptive (bool, optional): Emit hipblaslt-bench ``--adaptive`` configs
+            (timing knobs derived from ``duration``). Defaults to True.
         bench_freq (bool, optional): Forwarded to bench.log.summarize,
             search.run, and optim.analyze (controls HIPBLASLT_BENCH_FREQ).
             Defaults to False.
@@ -263,7 +266,7 @@ def run_search(
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
         return
 
-    configs = search.configure(summary_df, duration=duration)
+    configs = search.configure(summary_df, duration=duration, adaptive=adaptive)
     state.configured = True
     state.optimized = False
     state.dump(state_path)
