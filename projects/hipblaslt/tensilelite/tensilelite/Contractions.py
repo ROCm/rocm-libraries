@@ -299,6 +299,8 @@ class ProblemType:
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
+        if rv.useScaleAB == "Block":
+            rv.useScaleAB = ""
         # W4A16 group scaling is independent of scalar/vector operand scales.
         # Required for int4 A: one entry = fixed group; several = runtime group.
         groups = d.get('ScaleBlockSizesA', [])

@@ -378,6 +378,10 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressScaleB", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+            # w4a16 asymmetric: packed int4 zero-points, appended right after
+            # scaleB to match ContractionSolution's argument order.
+            if kernel["ProblemType"]["ScaleZeroPointA"]:
+                signature.addArg("AddressScaleZeroA", SVK.SIG_GLOBALBUFFER, "void", "generic")
         userArgumentsInfo.scaleASize += 8
         userArgumentsInfo.scaleBSize += 8
         if kernel["ProblemType"]["UseScaleCD"]:
@@ -461,6 +465,11 @@ class SignatureDefault(Signature):
             writer.states.batchOffsetBKernArgOffset = signature.offset - commonArgsSize
             signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
             userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
+
+        if len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1:
+            writer.states.scaleGroupKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
+            signature.addArg("groupSize", SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
 
         # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
         # tail. See fusedA2AKernArgLayout() for the offset contract.
