@@ -477,7 +477,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     // The all-to-all stage is available through hipblasLtMatmul only.
     RocblasltFusedEpilogueInfo fused_info;
     if(rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, fused_info)
-       && fused_info.hasA2APrefix)
+       && fused_info.mode != RocblasltFusedEpilogueInfo::Mode::Disabled)
     {
         log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
         return rocblaslt_status_invalid_value;

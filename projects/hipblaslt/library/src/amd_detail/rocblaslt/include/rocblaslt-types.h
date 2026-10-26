@@ -745,7 +745,13 @@ struct RocblasltContractionProblem
 // Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
-    bool                         hasA2APrefix      = false;
+    enum class Mode
+    {
+        Disabled,
+        GemmA2A,
+    };
+
+    Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
     int64_t                      a2aExtent         = 0;
