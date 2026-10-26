@@ -96,7 +96,9 @@ class TestHipLaunches:
         "launches, field, value",
         [
             pytest.param(_HIP_LAUNCHES, "entry", "c", id="hip-entry"),
+            pytest.param(_HIP_LAUNCHES, "source", "other.hip", id="hip-source"),
             pytest.param(_HSACO_LAUNCHES, "symbol", "c", id="hsaco-symbol"),
+            pytest.param(_HSACO_LAUNCHES, "file", "other.co", id="hsaco-file"),
         ],
     )
     def test_launches_differing_only_in_one_field_are_distinct_binaries(
