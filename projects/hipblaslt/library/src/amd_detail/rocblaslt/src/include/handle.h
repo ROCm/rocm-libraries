@@ -38,17 +38,19 @@
 
 /********************************************************************************
  * \brief Internal definition of the opaque hipblasLtEmulationDescriptor type.
- * Emulation is enabled by attaching the descriptor to a matmul descriptor.
+ * Attached to a matmul descriptor via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+ * Attaching it does not enable emulation (that is done by the compute type or
+ * the HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION env var); it only tunes settings.
  * Use force_off (internal only) to prevent re-entry from the native-GEMM fallback.
  *******************************************************************************/
 struct hipblasLtEmulationDescriptor
 {
     hipblasEmulationStrategy_t             emulation_strategy   = HIPBLAS_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
-    hipEmulationSpecialValuesSupport_t emulation_sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
-    int emulation_fixedpoint_mantissa_control            = 0;   /**< Not used at the moment */
-    int emulation_fixedpoint_max_mantissa_bits           = 0;   /**< 0=inherit, 1..52=explicit bit count */
-    int emulation_fixedpoint_mantissa_bit_offset         = 0;   /**< Not used at the moment */
-    int emulation_fixedpoint_mantissa_bit_count_pointer  = 0;   /**< Not used at the moment */
+    uint32_t emulation_sv_support = 0xFFFF; /**< Special-values bitmask (bit 0 = Inf, bit 1 = NaN; 0 = none; 0xFFFF = DEFAULT = detect both). Same layout as cudaEmulationSpecialValuesSupport. */
+    int32_t  emulation_fixedpoint_mantissa_control           = 0;       /**< Stored and returned by Get; not used by the emulation yet */
+    int32_t  emulation_fixedpoint_max_mantissa_bits          = 0;       /**< 0 = inherit env var; 1..52 for FP64 (1..23 for FP32) */
+    int32_t  emulation_fixedpoint_mantissa_bit_offset        = 0;       /**< Stored and returned by Get; not used by the emulation yet */
+    int32_t* emulation_fixedpoint_mantissa_bit_count_pointer = nullptr; /**< Stored as-is and returned by Get; never dereferenced */
     /** Internal use only: set by native_gemm_fallback to prevent recursive re-entry.
      *  Not accessible via any public API. Must not be set from user code. */
     bool force_off = false;

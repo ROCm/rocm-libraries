@@ -894,15 +894,32 @@ rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t
         {
             int32_t v = 0;
             memcpy(&v, buf, sizeof(int32_t));
-            if(v < 0 || v > 3)
+            /* Bitmask (bit 0 = Inf, bit 1 = NaN); DEFAULT = 0xFFFF. Accept any 16-bit
+             * mask like CUDA; bits beyond Inf/NaN are ignored by the emulation. */
+            if(v < 0 || v > 0xFFFF)
                 return rocblaslt_status_invalid_value;
-            desc->emulation_sv_support = static_cast<hipEmulationSpecialValuesSupport_t>(v);
+            desc->emulation_sv_support = static_cast<uint32_t>(v);
         }
         break;
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:           /* not used at the moment */
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:        /* not used at the moment */
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER: /* not used at the moment */
-        return rocblaslt_status_invalid_value;
+    /* Attributes 2, 4 and 5 are not used by the emulation yet.  Their values are
+     * stored (without range checks) so Get returns what was set, and so future
+     * use does not change the API behaviour. */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_control, buf, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_bit_offset, buf, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER:
+        /* The pointer value is stored as-is; it is never dereferenced. */
+        if(sizeInBytes < sizeof(int32_t*))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_bit_count_pointer, buf, sizeof(int32_t*));
+        break;
     case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
         if(sizeInBytes < sizeof(int32_t))
             return rocblaslt_status_invalid_value;
@@ -928,8 +945,13 @@ rocblaslt_status rocblaslt_emulation_desc_get_attribute(hipblasLtEmulationDesc_t
 {
     if(desc == nullptr || (sizeInBytes != 0 && buf == nullptr))
         return rocblaslt_status_invalid_value;
-    if(sizeWritten) *sizeWritten = sizeof(int32_t);
-    if(sizeInBytes < sizeof(int32_t)) return rocblaslt_status_invalid_value;
+    const size_t required = (attr == HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER)
+                                ? sizeof(int32_t*)
+                                : sizeof(int32_t);
+    if(sizeWritten)
+        *sizeWritten = required;
+    if(sizeInBytes < required)
+        return rocblaslt_status_invalid_value;
     switch(attr)
     {
     case HIPBLASLT_EMULATION_DESC_STRATEGY:
@@ -941,10 +963,15 @@ rocblaslt_status rocblaslt_emulation_desc_get_attribute(hipblasLtEmulationDesc_t
     case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
         memcpy(buf, &desc->emulation_fixedpoint_max_mantissa_bits, sizeof(int32_t));
         break;
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:           /* not used at the moment */
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:        /* not used at the moment */
-    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER: /* not used at the moment */
-        return rocblaslt_status_invalid_value;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_control, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_bit_offset, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_bit_count_pointer, sizeof(int32_t*));
+        break;
     default:
         return rocblaslt_status_invalid_value;
     }
@@ -2486,7 +2513,7 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 if(sizeWritten) *sizeWritten = sizeof(hipblasLtEmulationDesc_t);
                 if(sizeInBytes < sizeof(hipblasLtEmulationDesc_t)) { log_error(__func__, "invalid emulation_desc buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
                 memcpy(buf, &matmulDesc->emulation_desc, sizeof(hipblasLtEmulationDesc_t));
-
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;

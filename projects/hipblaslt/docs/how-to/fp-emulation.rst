@@ -69,8 +69,8 @@ following the cuBLAS model:
      - FP32 GEMM explicitly requested to use fixed-point emulation.
        This has **no cuBLAS equivalent** (cuBLAS emulates FP32 with BF16x9).
    * - ``HIPBLAS_COMPUTE_64F`` / ``HIPBLAS_COMPUTE_32F``
-     - Native GEMM, unless ``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` /
-       ``HIPBLASLT_EMULATE_SINGLE_PRECISION=1`` is set, in which case the
+     - Native GEMM, unless ``HIPBLAS_EMULATE_DOUBLE_PRECISION=1`` /
+       ``HIPBLAS_EMULATE_SINGLE_PRECISION=1`` is set, in which case the
        GEMM is transparently emulated (no code changes needed).
 
 With an emulated compute type, the A, B, C and D matrices must all be
@@ -137,11 +137,15 @@ and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
        ``0`` = inherit from env var (default = full precision).
    * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - ``int32_t``
-     - Inf/NaN detection support level.  See ``hipEmulationSpecialValuesSupport_t``:
-       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT`` (0) = inherit from env var (default = Inf+NaN);
-       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE`` (1) = skip detection;
-       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY`` (2) = Inf only;
-       ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
+     - Inf/NaN detection support level.
+       A bitmask (bit 0 = Inf, bit 1 = NaN) with the same bit layout as
+       ``HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``
+       (values match CUDA's ``cudaEmulationSpecialValuesSupport``):
+       ``0`` = skip detection;
+       ``1`` = detect Inf;
+       ``2`` = detect NaN;
+       ``3`` = detect both;
+       ``0xFFFF`` (default) = detect both.
 
 **Attaching to a matmul descriptor** — use the single matmul attribute
 ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``:
@@ -261,19 +265,19 @@ A typical enable-and-tune sequence:
 
    # Transparently emulate all plain HIPBLAS_COMPUTE_64F GEMMs, and only take
    # emulation when it is predicted to win.
-   export HIPBLASLT_EMULATE_DOUBLE_PRECISION=1
-   export HIPBLASLT_EMULATION_STRATEGY=performant
+   export HIPBLAS_EMULATE_DOUBLE_PRECISION=1
+   export HIPBLAS_EMULATION_STRATEGY=performant
 
    # Trade accuracy for speed: ~1e-8 instead of full FP64 precision.
-   export HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT=26
+   export HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT=26
 
 Setting precedence
 ==================
 
 Whether emulation is enabled is decided by the compute type
 (``*_EMULATED_FIXEDPOINT`` always requests it) or, for plain ``64F`` / ``32F``
-compute types, by ``HIPBLASLT_EMULATE_DOUBLE_PRECISION`` /
-``HIPBLASLT_EMULATE_SINGLE_PRECISION``.  The emulation descriptor never
+compute types, by ``HIPBLAS_EMULATE_DOUBLE_PRECISION`` /
+``HIPBLAS_EMULATE_SINGLE_PRECISION``.  The emulation descriptor never
 enables emulation.
 
 For each emulation tuning parameter (strategy, target precision,
@@ -299,16 +303,16 @@ ways to enable emulation, mirroring the library behaviour described in
   to ``f32_r``).  No environment variable is needed, and only that problem is
   emulated.
 * **Transparent mode (environment variable)** — keep the plain ``f64_r`` /
-  ``f32_r`` compute type and set ``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` /
-  ``HIPBLASLT_EMULATE_SINGLE_PRECISION=1``.  Every FP64 / FP32 GEMM in the
+  ``f32_r`` compute type and set ``HIPBLAS_EMULATE_DOUBLE_PRECISION=1`` /
+  ``HIPBLAS_EMULATE_SINGLE_PRECISION=1``.  Every FP64 / FP32 GEMM in the
   process is then emulated.
 
 In both cases the tuning environment variables (for example
-``HIPBLASLT_EMULATION_STRATEGY`` and
-``HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT``) apply, since hipblaslt-bench
+``HIPBLAS_EMULATION_STRATEGY`` and
+``HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT``) apply, since hipblaslt-bench
 does not attach an emulation descriptor.  Note that with the default
 ``performant`` strategy small problems run natively; set
-``HIPBLASLT_EMULATION_STRATEGY=eager`` to force emulation regardless of size.
+``HIPBLAS_EMULATION_STRATEGY=eager`` to force emulation regardless of size.
 
 The benchmark must also be given a workspace buffer large enough for the
 emulation algorithm; 32 GiB is sufficient for large problem sizes on MI355X.
@@ -356,7 +360,7 @@ Transparent mode, emulating a plain FP64 GEMM via the environment variable:
 
 .. code-block:: bash
 
-   HIPBLASLT_EMULATE_DOUBLE_PRECISION=1 ./hipblaslt-bench \
+   HIPBLAS_EMULATE_DOUBLE_PRECISION=1 ./hipblaslt-bench \
        --function matmul \
        --a_type f64_r --b_type f64_r --c_type f64_r --d_type f64_r \
        --compute_type f64_r --scale_type f64_r \
@@ -385,7 +389,7 @@ Then run:
    hipblaslt-bench --yaml problems.yaml
 
 Alternatively, use ``compute_type: c_f64_r`` in the YAML file and run with
-``HIPBLASLT_EMULATE_DOUBLE_PRECISION=1`` (transparent mode).
+``HIPBLAS_EMULATE_DOUBLE_PRECISION=1`` (transparent mode).
 
 Limitations
 ===========
@@ -395,7 +399,7 @@ Limitations
   compatible with emulation.
 * IEEE 754 compliance is not guaranteed; rounding behaviour may differ from
   the native implementation.
-* Performance is hardware-specific; use ``HIPBLASLT_EMULATION_STRATEGY=performant``
+* Performance is hardware-specific; use ``HIPBLAS_EMULATION_STRATEGY=performant``
   (the default) to only emulate when it outperforms native GEMM.
 * If the dynamic range of the input is too large for the configured moduli
   count, or if Inf/NaN is detected in the input (with detection enabled),

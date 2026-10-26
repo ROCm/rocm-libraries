@@ -89,11 +89,14 @@ typedef enum
     HIPBLAS_COMPUTE_32F_FAST_8F8BF_FNUZ = 102, /**< 32-bit compute using f8bf8 mfma instruction */
     HIPBLAS_COMPUTE_32F_FAST_8BF8F_FNUZ = 103, /**< 32-bit compute using bf8f8 mfma instruction */
     HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT = 200, /**< 64-bit GEMM computed with fixed-point emulation */
-    HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT = 201, /**< 32-bit GEMM computed with fixed-point emulation */
+    HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT = 201, /**< 32-bit GEMM computed with fixed-point emulation. No cuBLAS equivalent (cuBLAS emulates FP32 with BF16x9). */
 } hipblasComputeType_t;
 
-/*! \brief Emulation strategy for reduced-precision GEMM emulation (e.g. FP64 GEMM via Ozaki
- *         Scheme II). Shared across the hipBLAS family (hipBLAS, hipBLASLt). */
+/*! \brief Emulation strategy for the hipBLAS family (hipBLAS, hipBLASLt).
+ *
+ *  Counterpart of cuBLAS's ``cublasEmulationStrategy_t``. Its values are identical to
+ *  ``hipEmulationStrategy`` (the counterpart of ``cudaEmulationStrategy``), but the two are
+ *  kept as distinct types, mirroring CUDA, where the cuBLAS enum predates the CUDA-wide one. */
 typedef enum
 {
     HIPBLAS_EMULATION_STRATEGY_DEFAULT
@@ -103,36 +106,5 @@ typedef enum
     HIPBLAS_EMULATION_STRATEGY_EAGER
     = 2, /**< Emulate whenever the data types and epilogue are supported, regardless of problem size. */
 } hipblasEmulationStrategy_t;
-
-/*! \brief Controls which special floating-point values (Inf, NaN) are detected during
- *         reduced-precision GEMM emulation.
- *
- *  \note This is a HIP-family type that the HIP runtime may define in a future release.
- *  Any such definition MUST reuse the guard macro
- *  ``HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DECLARED`` and keep these exact enumerator
- *  values; the ``static_assert`` branch below enforces that when both definitions are
- *  visible in the same translation unit. */
-#ifndef HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DECLARED
-#define HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DECLARED
-typedef enum
-{
-    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT
-    = 0, /**< Detect both Inf and NaN values (default behavior). */
-    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE
-    = 1, /**< Skip Inf/NaN detection entirely (faster, but unsupported input values silently corrupt output). */
-    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 2, /**< Detect Inf values only. */
-    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 3, /**< Detect NaN values only. */
-} hipEmulationSpecialValuesSupport_t;
-
-#elif __cplusplus >= 201103L
-static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT == 0,
-              "Inconsistent declaration of HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT");
-static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE == 1,
-              "Inconsistent declaration of HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE");
-static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY == 2,
-              "Inconsistent declaration of HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY");
-static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN == 3,
-              "Inconsistent declaration of HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN");
-#endif // HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DECLARED
 
 #endif

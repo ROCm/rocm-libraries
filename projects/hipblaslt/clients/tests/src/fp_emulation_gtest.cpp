@@ -269,13 +269,13 @@ namespace
 
     // An attached emulation descriptor alone must NOT enable emulation: with a
     // plain 64F/32F compute type, emulation is only enabled through
-    // HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1.
+    // HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1.
     TEST_F(FixedPointEmulationTest, WouldApply_DescriptorAloneDoesNotEnable)
     {
         set_enabled(false); /* plain compute type, emulation descriptor still attached */
         set_strategy(HIPBLAS_EMULATION_STRATEGY_EAGER);
         if(fixedPointEmulationIsEnabled(HIP_R_64F))
-            GTEST_SKIP() << "HIPBLASLT_EMULATE_DOUBLE_PRECISION is set";
+            GTEST_SKIP() << "HIPBLAS_EMULATE_DOUBLE_PRECISION is set";
         EXPECT_FALSE(would_apply(HIP_R_64F, 4096, 4096, 4096, 1));
         if(!fixedPointEmulationIsEnabled(HIP_R_32F))
             EXPECT_FALSE(would_apply(HIP_R_32F, 4096, 4096, 4096, 1));
@@ -374,7 +374,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; // skip Inf/NaN check (faster, inputs are finite)
+        settings.sv_support = 0u /* special values: none */; // skip Inf/NaN check (faster, inputs are finite)
         const size_t _ws_size_A = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_ws_A = nullptr;
@@ -696,7 +696,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy             = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
         emu_settings.adp_mantissa_bits = p.mantissa_bits;
-        emu_settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
+        emu_settings.sv_support = 0u /* special values: none */; /* skip Inf/NaN detection */
         /* Allocate workspace for this GEMM configuration */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _emu_ws_sz = [&]() -> size_t {
@@ -1093,7 +1093,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
+        emu_settings.sv_support = 0u /* special values: none */; /* skip Inf/NaN detection */
         /* Allocate workspace for ADP test */
         const size_t _adp_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, n, n, n, 1);
@@ -1231,7 +1231,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+        emu_settings.sv_support = 0u /* special values: none */;
         /* Allocate workspace for Demmel test */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _dem_ws_sz = [&]() -> size_t {
@@ -1653,7 +1653,7 @@ namespace
         FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        emu_settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+        emu_settings.sv_support = 0u /* special values: none */;
         const size_t _struct_ws_sz = [&]() -> size_t {
             hipblasLtMatmulDesc_t    _wd  = nullptr;
             hipblasLtEmulationDesc_t _wed = nullptr;
@@ -1852,7 +1852,7 @@ namespace
             FixedPointEmulationSettings emu{};
             emu.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-            emu.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+            emu.sv_support = 0u /* special values: none */;
             const size_t _adpx_ws_sz = hipblasLtEmulationWorkspaceSize(
                 m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
             void* _d_adpx_ws = nullptr;
@@ -2149,7 +2149,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* inputs are finite — no Inf/NaN flag needed */
+        settings.sv_support = 0u /* special values: none */; /* inputs are finite — no Inf/NaN flag needed */
         const size_t _bv1_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, M, N, K, 1);
         void* _d_bv1_ws = nullptr;
@@ -2479,7 +2479,7 @@ namespace
         FixedPointEmulationSettings emu{};
         emu.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        emu.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+        emu.sv_support = 0u /* special values: none */;
         const size_t _nul_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, M, N, K, 1);
         void* _d_nul_ws = nullptr;
@@ -2574,7 +2574,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; /* enable Inf detection */
+        settings.sv_support = 1u /* special values: Inf */; /* enable Inf detection */
         const size_t _sv_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_sv_ws = nullptr;
@@ -2700,7 +2700,7 @@ namespace
         FixedPointEmulationSettings emu{};
         emu.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        emu.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
+        emu.sv_support = 0u /* special values: none */;
         const size_t _alm_ws_sz = hipblasLtEmulationWorkspaceSize(
             m_handle, m_emul_desc, HIP_R_64F, N, N, N, 1);
         void* _d_alm_ws = nullptr;
@@ -2806,7 +2806,7 @@ namespace
 
     TEST(FixedPointEmulationFp32EnvVar, AdpMantissaBitsDefaultFp64)
     {
-        /* Without HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT set, default should be 52. */
+        /* Without HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT set, default should be 52. */
         const int bits = fixedPointEmulationAdpMantissaBits(HIP_R_64F);
         EXPECT_EQ(bits, 52);
     }
@@ -2893,7 +2893,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* no NaN check in this test */
+        settings.sv_support = 0u /* special values: none */; /* no NaN check in this test */
         settings.workspace       = d_ws;
         settings.workspace_bytes = ws_sz;
 
@@ -3010,7 +3010,7 @@ namespace
         FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
-        settings.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /* NaN + Inf detection enabled */
+        settings.sv_support = 0xFFFFu /* special values: default (Inf + NaN) */; /* NaN + Inf detection enabled */
         settings.workspace       = d_ws;
         settings.workspace_bytes = ws_sz;
 
@@ -3050,7 +3050,7 @@ namespace
     /* isEnabled dispatches correctly for FP32 and FP64 independently. */
     TEST(FixedPointEmulationFp32EnvVar, IsEnabledDispatch)
     {
-        /* Without HIPBLASLT_EMULATE_SINGLE_PRECISION=1 set in environment,
+        /* Without HIPBLAS_EMULATE_SINGLE_PRECISION=1 set in environment,
      * FP32 emulation should not be enabled by default. */
         const bool fp32_enabled = fixedPointEmulationIsEnabled(HIP_R_32F);
         /* We can't assert the value without knowing the environment, but
@@ -3064,6 +3064,105 @@ namespace
         /* The two types must query independently (no cross-contamination). */
         /* This test mainly validates that both calls compile and don't assert. */
         SUCCEED();
+    }
+
+    /* Attributes 2, 4 and 5 are not used by the emulation yet, but Set must
+     * accept them and Get must return the stored values. */
+    TEST(FixedPointEmulationDescAttributes, UnusedAttributesRoundTrip)
+    {
+        hipblasLtEmulationDesc_t ed = nullptr;
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&ed), HIPBLAS_STATUS_SUCCESS);
+
+        size_t written = 0;
+
+        /* Defaults: 0, 0, NULL. */
+        int32_t  i32 = -1;
+        int32_t* ptr = reinterpret_cast<int32_t*>(0x1);
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL, &i32, sizeof(i32), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(i32, 0);
+        EXPECT_EQ(written, sizeof(int32_t));
+        i32 = -1;
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET, &i32, sizeof(i32), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(i32, 0);
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER, &ptr, sizeof(ptr), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(ptr, nullptr);
+        EXPECT_EQ(written, sizeof(int32_t*));
+
+        /* Set arbitrary values (no range checks) and read them back. */
+        int32_t control = 7, offset = -3, bitCount = 42;
+        int32_t* bitCountPtr = &bitCount;
+        EXPECT_EQ(hipblasLtEmulationDescSetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL, &control, sizeof(control)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtEmulationDescSetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET, &offset, sizeof(offset)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtEmulationDescSetAttribute(ed,
+                                                     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER,
+                                                     &bitCountPtr,
+                                                     sizeof(bitCountPtr)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL, &i32, sizeof(i32), nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(i32, control);
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET, &i32, sizeof(i32), nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(i32, offset);
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER, &ptr, sizeof(ptr), nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(ptr, bitCountPtr);
+        EXPECT_EQ(bitCount, 42) << "the stored pointer must never be dereferenced";
+
+        /* Too-small buffers are still rejected. */
+        int16_t small = 0;
+        EXPECT_EQ(hipblasLtEmulationDescSetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL, &small, sizeof(small)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtEmulationDescSetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER, &i32, sizeof(i32)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtEmulationDescGetAttribute(
+                      ed, HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER, &i32, sizeof(i32), &written),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(written, sizeof(int32_t*));
+
+        hipblasLtEmulationDescDestroy(ed);
+    }
+
+    /* The matmul descriptor returns the attached emulation descriptor. */
+    TEST(FixedPointEmulationDescAttributes, MatmulDescGetEmulationDescriptor)
+    {
+        hipblasLtMatmulDesc_t matmul_desc = nullptr;
+        if(hipblasLtMatmulDescCreate(&matmul_desc, HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT, HIP_R_64F)
+           != HIPBLAS_STATUS_SUCCESS)
+            GTEST_SKIP() << "hipblasLtMatmulDescCreate failed";
+        hipblasLtEmulationDesc_t ed = nullptr;
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&ed), HIPBLAS_STATUS_SUCCESS);
+        emulAttach(matmul_desc, ed);
+
+        hipblasLtEmulationDesc_t got     = nullptr;
+        size_t                   written = 0;
+        EXPECT_EQ(hipblasLtMatmulDescGetAttribute(matmul_desc,
+                                                  HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+                                                  &got,
+                                                  sizeof(got),
+                                                  &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(got, ed);
+        EXPECT_EQ(written, sizeof(hipblasLtEmulationDesc_t));
+
+        hipblasLtMatmulDescDestroy(matmul_desc);
+        hipblasLtEmulationDescDestroy(ed);
     }
 
 } // namespace

@@ -81,9 +81,11 @@
 /*! \ingroup types_module
  *  \brief Attributes of a ``hipblasLtEmulationDesc_t`` descriptor.
  *
- *  \note The emulation value enums ``hipblasEmulationStrategy_t`` and
- *  ``hipEmulationSpecialValuesSupport_t`` are defined in ``hipblas-common``
- *  (shared across the hipBLAS family) and are consumed by the attributes below.
+ *  \note The strategy attribute takes ``hipblasEmulationStrategy_t`` (defined in
+ *  ``hipblas-common``, counterpart of ``cublasEmulationStrategy_t``). The special-values
+ *  attribute takes an ``int32_t`` bitmask (bit 0 = Inf, bit 1 = NaN) with the same values as
+ *  CUDA's ``cudaEmulationSpecialValuesSupport``; a matching ``hipEmulationSpecialValuesSupport_t``
+ *  type is planned for the HIP headers.
  *
  *  \details
  *  Used with ``hipblasLtEmulationDescSetAttribute`` and
@@ -94,15 +96,15 @@
  *  not enable emulation: emulation is requested by the compute type
  *  (``HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT``) or, for plain
  *  ``HIPBLAS_COMPUTE_{64F,32F}``, by setting the environment variable
- *  ``HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1``.
+ *  ``HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1``.
  */
 typedef enum {
     HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate. Default: ``DEFAULT``. */
-    HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` (``hipEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
-    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL           = 2, /**<Not used at the moment. */
+    HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` bitmask (bit 0 = Inf, bit 1 = NaN; values match ``cudaEmulationSpecialValuesSupport``). ``0`` = skip detection; ``1`` = Inf; ``2`` = NaN; ``3`` = both; ``0xFFFF`` (default) = both. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL           = 2, /**<Not used at the moment: the value is stored and returned by ``hipblasLtEmulationDescGetAttribute``, but has no effect. Data type: ``int32_t``. Default: ``0``. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT     = 3, /**<ADP precision target in mantissa bits. Data type: ``int32_t``. ``1``..``52`` for FP64 (``1``..``23`` for FP32); ``0`` = inherit from env var (default). Only affects ADP mode. */
-    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET        = 4, /**<Not used at the moment. */
-    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER = 5, /**<Not used at the moment. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET        = 4, /**<Not used at the moment: the value is stored and returned by ``hipblasLtEmulationDescGetAttribute``, but has no effect. Data type: ``int32_t``. Default: ``0``. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER = 5, /**<Not used at the moment: the pointer is stored as-is (never dereferenced) and returned by ``hipblasLtEmulationDescGetAttribute``, but has no effect. Data type: ``int32_t*``. Default: ``NULL``. */
 } hipblasLtEmulationDescAttributes_t;
 
 

@@ -138,7 +138,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //
     // Conditions for emulation:
     //   • Compute type is HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT, or
-    //     plain 64F/32F with HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1
+    //     plain 64F/32F with HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1
     //     (A/B/C/D types are validated against the compute type)
     //   • Non-batched (batch_count == 1)
     //   • Plain GEMM epilogue (no activation, no bias, no auxiliary outputs)

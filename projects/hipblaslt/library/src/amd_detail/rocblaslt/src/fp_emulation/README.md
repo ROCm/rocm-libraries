@@ -77,7 +77,7 @@ Emulation is requested through the **compute type** of the matmul descriptor:
 | --- | --- |
 | `HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT` | FP64 GEMM requested to use fixed-point emulation (A/B/C/D and scale type `HIP_R_64F`). |
 | `HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT` | FP32 GEMM requested to use fixed-point emulation (A/B/C/D and scale type `HIP_R_32F`). |
-| `HIPBLAS_COMPUTE_64F` / `HIPBLAS_COMPUTE_32F` | Native GEMM, unless `HIPBLASLT_EMULATE_DOUBLE_PRECISION=1` / `HIPBLASLT_EMULATE_SINGLE_PRECISION=1` is set ("transparent mode"). |
+| `HIPBLAS_COMPUTE_64F` / `HIPBLAS_COMPUTE_32F` | Native GEMM, unless `HIPBLAS_EMULATE_DOUBLE_PRECISION=1` / `HIPBLAS_EMULATE_SINGLE_PRECISION=1` is set ("transparent mode"). |
 
 An emulated compute type *requests* emulation. Whether a call is actually
 emulated still depends on the strategy, device support, `batch_count = 1`,
@@ -91,12 +91,13 @@ match the `hipblasComputeType_t` enumerators.
 
 | Variable | Values | Meaning |
 | --- | --- | --- |
-| `HIPBLASLT_EMULATE_DOUBLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_64F` GEMMs. |
-| `HIPBLASLT_EMULATE_SINGLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_32F` GEMMs. |
-| `HIPBLASLT_EMULATION_STRATEGY` | `performant` (default) / `eager` | `performant` emulates only when the performance model predicts a speedup; `eager` always emulates when supported. |
-| `HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK` | hex bitmask, default `0x3` | Bit 0 = detect Inf, bit 1 = detect NaN. `0` skips detection (unsupported values silently corrupt the output). |
-| `HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | ADP precision target for FP64. Fewer bits mean fewer moduli and faster execution. |
-| `HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. |
+| `HIPBLAS_EMULATE_DOUBLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_64F` GEMMs. |
+| `HIPBLAS_EMULATE_SINGLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_32F` GEMMs. |
+| `HIPBLAS_EMULATION_STRATEGY` | `performant` (default) / `eager` | `performant` emulates only when the performance model predicts a speedup; `eager` always emulates when supported. |
+| `HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK` | hex bitmask, default `0x3` | Bit 0 = detect Inf, bit 1 = detect NaN. `0` skips detection (unsupported values silently corrupt the output). |
+| `HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | ADP precision target for FP64. Fewer bits mean fewer moduli and faster execution. Takes precedence over the generic variable below. |
+| `HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | Same as the FP64 variable, used only when that one is unset; FP64 only. CUDA-compatible name (`CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT`), but sets the ADP target rather than a fixed bit count. |
+| `HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT` | `1`..`23`, default `23` | ADP precision target for FP32. |
 | `HIPBLASLT_EMULATION_NUM_MODULI` | `2`..`20` | **Testing only.** Overrides the ADP-selected moduli count; accuracy is not guaranteed below the ADP choice. |
 | `HIPBLASLT_EMULATION_PROFILE` | file path | Append per-call profiling CSV rows to this file. |
 
@@ -132,9 +133,11 @@ Emulation descriptor attributes (`hipblasLtEmulationDescAttributes_t`):
 | Attribute | Type | Meaning |
 | --- | --- | --- |
 | `HIPBLASLT_EMULATION_DESC_STRATEGY` | `int32_t` (`hipblasEmulationStrategy_t`) | `DEFAULT` (0) = inherit env var, `PERFORMANT` (1), `EAGER` (2). |
-| `HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT` | `int32_t` (`hipEmulationSpecialValuesSupport_t`) | `DEFAULT` (0) = Inf+NaN, `NONE` (1), `INFINITY` (2), `NAN` (3). |
+| `HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT` | `int32_t` bitmask | Bit 0 = Inf, bit 1 = NaN; same layout as the env var: `0` = none, `1` = Inf, `2` = NaN, `3` = both, `0xFFFF` (default) = both. Values match CUDA's `cudaEmulationSpecialValuesSupport`. Stored internally as a `uint32_t`. |
 | `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT` | `int32_t` | ADP precision target in mantissa bits; `0` = inherit env var. |
-| `..._FIXEDPOINT_MANTISSA_CONTROL`, `..._FIXEDPOINT_MANTISSA_BIT_OFFSET`, `..._FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER` | — | Not used at the moment; setting them returns an error. |
+| `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL` | `int32_t` | Not used at the moment; the value is stored and returned by Get, but has no effect. Default `0`. |
+| `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET` | `int32_t` | Not used at the moment; the value is stored and returned by Get, but has no effect. Default `0`. |
+| `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER` | `int32_t*` | Not used at the moment; the pointer is stored as-is (never dereferenced) and returned by Get, but has no effect. Default `NULL`. |
 
 The matmul descriptor stores only a pointer to the emulation descriptor, so the
 emulation descriptor must outlive every matmul call that uses it. Set the

@@ -11,22 +11,26 @@
  * from plain C++ translation units.
  *
  * Environment variables:
- *   HIPBLASLT_EMULATE_DOUBLE_PRECISION=0|1  enables FP64 emulation.
- *   HIPBLASLT_EMULATE_SINGLE_PRECISION=0|1  enables FP32 emulation.
+ *   HIPBLAS_EMULATE_DOUBLE_PRECISION=0|1  enables FP64 emulation.
+ *   HIPBLAS_EMULATE_SINGLE_PRECISION=0|1  enables FP32 emulation.
  *   HIPBLASLT_EMULATION_NUM_MODULI=N        post-ADP testing override [2..20].
  *     After ADP selects the minimum sufficient s, this env var overrides it.
  *     Useful for testing specific moduli counts; accuracy is not guaranteed
  *     for all inputs when set below the ADP-selected value.
- *   HIPBLASLT_EMULATION_STRATEGY=performant|eager
+ *   HIPBLAS_EMULATION_STRATEGY=performant|eager
  *     performant (default): use emulation only when predicted to outperform native GEMM.
  *     eager: always emulate regardless of problem size or arithmetic intensity.
- *   HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK=<hex>
+ *   HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK=<hex>
  *     bitmask controlling NaN/Inf detection: bit 0 = Inf, bit 1 = NaN.  Default 0x3.
  *     Set to 0 to skip special-value detection entirely.
- *   HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT=N
+ *   HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT=N
  *     ADP precision target for FP64 inputs in mantissa bits [1..52].
  *     Default 52 (full IEEE 754 FP64 precision).  Lower values -> fewer moduli -> faster.
- *   HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT=N
+ *   HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT=N
+ *     Same as the FP64 variable above (CUDA-compatible name, counterpart of
+ *     CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT); used for FP64 only, and
+ *     only when HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT is unset.
+ *   HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT=N
  *     ADP precision target for FP32 inputs in mantissa bits [1..23].
  *     Default 23 (full IEEE 754 FP32 precision).  Lower values -> fewer moduli -> faster.
  *   HIPBLASLT_EMULATION_PROFILE=<path>
@@ -68,7 +72,7 @@ FixedPointEmulationEnvValue fixedPointEmulationParseEnabledEnv(const char* value
 FixedPointEmulationEnvValue fixedPointEmulationParseStrategyEnv(const char* value);
 FixedPointEmulationEnvValue fixedPointEmulationParseSpecialValuesMaskEnv(const char* value);
 FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* value);
-/* Parser for HIPBLASLT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
+/* Parser for HIPBLAS_FIXEDPOINT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
  * Accepts decimal integers in [1..52]; returns INVALID for out-of-range.  */
 FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const char* value);
 
@@ -78,8 +82,8 @@ struct _rocblaslt_handle;
 struct _rocblaslt_matmul_desc;
 
 /* Returns true when emulation is enabled for the given type.
- *   type_a == HIP_R_64F: reads HIPBLASLT_EMULATE_DOUBLE_PRECISION
- *   type_a == HIP_R_32F: reads HIPBLASLT_EMULATE_SINGLE_PRECISION
+ *   type_a == HIP_R_64F: reads HIPBLAS_EMULATE_DOUBLE_PRECISION
+ *   type_a == HIP_R_32F: reads HIPBLAS_EMULATE_SINGLE_PRECISION
  * Env var is read once and cached per type.
  * Any value other than "1" (including absent) returns false.              */
 bool fixedPointEmulationIsEnabled(hipDataType type_a);
@@ -100,13 +104,13 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
                                          int64_t                       k,
                                          size_t                        workspace_bytes);
 
-/* Returns true when HIPBLASLT_EMULATION_STRATEGY=eager is set, or when the
+/* Returns true when HIPBLAS_EMULATION_STRATEGY=eager is set, or when the
  * per-matmul desc requests EAGER strategy.
  * Shared for both FP32 and FP64.  Env var cached on first call.           */
 bool fixedPointEmulationIsEager();
 
 /* Returns the special-values support mask from
- * HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK (default: 0x3).
+ * HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK (default: 0x3).
  *   bit 0 = Inf detection enabled
  *   bit 1 = NaN detection enabled
  * A return value of 0 means no Inf/NaN checking is performed.
@@ -123,10 +127,11 @@ unsigned fixedPointEmulationNumModuli();
 
 /* Returns the ADP target mantissa-bit count for the given input type.
  *   type_a == HIP_R_64F:
- *     1. Reads HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT.
- *     2. Default: 52 (full IEEE 754 FP64 precision).
+ *     1. Reads HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT.
+ *     2. Reads HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT.
+ *     3. Default: 52 (full IEEE 754 FP64 precision).
  *   type_a == HIP_R_32F:
- *     1. Reads HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT.
+ *     1. Reads HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT.
  *     2. Default: 23 (full IEEE 754 FP32 precision).
  * Value range: [1..52] for FP64, [1..23] for FP32.
  * Cached on first call per type.  Only consulted in ADP (dynamic) mode.   */
@@ -143,14 +148,14 @@ struct FixedPointEmulationSettings
 {
     rocblaslt_status                         status;      /* invalid_value on bad env            */
     bool                                     apply;       /* true -> use emulation; false -> native path */
-    hipEmulationSpecialValuesSupport_t sv_support;  /* resolved special-values handling    */
+    uint32_t                                 sv_support;  /* resolved special-values bitmask (bit 0 = Inf, bit 1 = NaN) */
     hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
     void*                                    workspace;   /* caller workspace ptr; nullptr until filled before GEMM dispatch */
     size_t                                   workspace_bytes; /* caller workspace size; ~size_t{0} = no budget constraint */
     /* ADP target precision in mantissa bits.
      * 52 = full IEEE 754 FP64 precision; 23 = full IEEE 754 FP32 precision.
      * Derived from the per-matmul desc attribute, then from the type-specific
-     * env var (FP64/FP32_MANTISSA_BIT_COUNT).                               */
+     * env var (HIPBLAS_FIXEDPOINT_EMULATION_[FP64_|FP32_]MANTISSA_BIT_COUNT). */
     int adp_mantissa_bits; /* [1..52] for FP64, [1..23] for FP32; type default = full precision */
 };
 
@@ -161,7 +166,7 @@ struct FixedPointEmulationSettings
  *   - rocblaslt_compute_{f64,f32}_emulated_fixedpoint: emulation requested
  *     explicitly (like CUBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT).
  *   - rocblaslt_compute_{f64,f32}: emulation only when the env var
- *     HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 is set.
+ *     HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 is set.
  *   - anything else: never emulated.
  * An attached emulation descriptor only tunes the settings (strategy,
  * special values, mantissa bits); it does not enable emulation by itself.

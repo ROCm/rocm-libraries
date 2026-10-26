@@ -1247,16 +1247,9 @@ namespace FixedPointEmulation
         const bool tA = (opA != HIPBLAS_OP_N);
         const bool tB = (opB != HIPBLAS_OP_N);
 
-        /* Translate hipEmulationSpecialValuesSupport_t enum to bitmask:
-         * DEFAULT(0)=both(0x3), NONE(1)=0x0, INFINITY(2)=0x1, NAN(3)=0x2 */
-        uint32_t svmask;
-        switch(decision.sv_support)
-        {
-        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     svmask = 0x0u; break;
-        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: svmask = 0x1u; break;
-        case HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      svmask = 0x2u; break;
-        default: /* HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT */ svmask = 0x3u; break;
-        }
+        /* sv_support is a bitmask (bit 0 = Inf, bit 1 = NaN; DEFAULT = 0xFFFF),
+         * so keep only the bits the kernels understand. */
+        const uint32_t svmask = decision.sv_support & 0x3u;
 
         if(svmask != 0u)
         {
@@ -1766,7 +1759,7 @@ bool fixedPointEmulationIsEager()
 {
     static const bool v = []() -> bool {
         const auto parsed
-            = fixedPointEmulationParseStrategyEnv(std::getenv("HIPBLASLT_EMULATION_STRATEGY"));
+            = fixedPointEmulationParseStrategyEnv(std::getenv("HIPBLAS_EMULATION_STRATEGY"));
         return parsed.state == FIXED_POINT_EMULATION_ENV_VALID
                && parsed.value == static_cast<unsigned>(HIPBLAS_EMULATION_STRATEGY_EAGER);
     }();
@@ -1777,7 +1770,7 @@ uint32_t fixedPointEmulationSpecialValuesMask()
 {
     static const uint32_t v = []() -> uint32_t {
         const auto parsed = fixedPointEmulationParseSpecialValuesMaskEnv(
-            std::getenv("HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK"));
+            std::getenv("HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK"));
         return (parsed.state == FIXED_POINT_EMULATION_ENV_VALID) ? parsed.value : 0x3u;
     }();
     return v;
@@ -1864,14 +1857,10 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     result.workspace = nullptr;
     /* Resolve sv_support from env var (default: both Inf+NaN). */
     {
+        /* The env-var mask uses the same bit layout as the descriptor attribute
+         * (bit 0 = Inf, bit 1 = NaN), matching cudaEmulationSpecialValuesSupport. */
         const uint32_t env_mask = fixedPointEmulationSpecialValuesMask();
-        switch(env_mask)
-        {
-        case 0x0u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;     break;
-        case 0x1u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; break;
-        case 0x2u: result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN;      break;
-        default:   result.sv_support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;  break;
-        }
+        result.sv_support       = env_mask & 0x3u;
     }
 
     /* Type and batch-count pre-checks (no env-var validation needed). */
@@ -1887,7 +1876,7 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     /* Emulation enabled:
      *   - compute type is {64F,32F}_EMULATED_FIXEDPOINT -> explicitly requested;
      *   - plain 64F / 32F compute type -> only via the env var
-     *     HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 (transparent mode).
+     *     HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1 (transparent mode).
      * The emulation descriptor only tunes settings; it never enables. */
     const bool emulEnabled = isFixedPointEmulatedComputeType(compute_type)
                              || fixedPointEmulationIsEnabled(type_a);
@@ -2232,7 +2221,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
     return st;
 }
 
-/* Parser for HIPBLASLT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
+/* Parser for HIPBLAS_FIXEDPOINT_EMULATION_FP{32,64}_MANTISSA_BIT_COUNT.
  * Accepts decimal integers in [1..52]; values outside that range return INVALID. */
 FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const char* value)
 {
@@ -2247,8 +2236,8 @@ FixedPointEmulationEnvValue fixedPointEmulationParseMantissaBitCountEnv(const ch
 }
 
 /* Returns true when emulation is enabled for the given type.
- *   HIP_R_64F: reads HIPBLASLT_EMULATE_DOUBLE_PRECISION
- *   HIP_R_32F: reads HIPBLASLT_EMULATE_SINGLE_PRECISION
+ *   HIP_R_64F: reads HIPBLAS_EMULATE_DOUBLE_PRECISION
+ *   HIP_R_32F: reads HIPBLAS_EMULATE_SINGLE_PRECISION
  * Cached separately per type on first call.                                 */
 bool fixedPointEmulationIsEnabled(hipDataType type_a)
 {
@@ -2256,7 +2245,7 @@ bool fixedPointEmulationIsEnabled(hipDataType type_a)
     {
         static const bool v = []() -> bool {
             const auto parsed = fixedPointEmulationParseEnabledEnv(
-                std::getenv("HIPBLASLT_EMULATE_DOUBLE_PRECISION"));
+                std::getenv("HIPBLAS_EMULATE_DOUBLE_PRECISION"));
             return parsed.state == FIXED_POINT_EMULATION_ENV_VALID && parsed.value != 0u;
         }();
         return v;
@@ -2265,7 +2254,7 @@ bool fixedPointEmulationIsEnabled(hipDataType type_a)
     {
         static const bool v = []() -> bool {
             const auto parsed = fixedPointEmulationParseEnabledEnv(
-                std::getenv("HIPBLASLT_EMULATE_SINGLE_PRECISION"));
+                std::getenv("HIPBLAS_EMULATE_SINGLE_PRECISION"));
             return parsed.state == FIXED_POINT_EMULATION_ENV_VALID && parsed.value != 0u;
         }();
         return v;
@@ -2274,21 +2263,29 @@ bool fixedPointEmulationIsEnabled(hipDataType type_a)
 }
 
 /* Returns the ADP target mantissa-bit count for the given type.
- * FP64: checks HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT (integer bits),
- *       then defaults to 52 (full IEEE 754 FP64 precision).
- * FP32: checks HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT (integer bits),
+ * FP64: checks HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT, then
+ *       HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT (same name as CUDA's
+ *       CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT), then defaults to 52
+ *       (full IEEE 754 FP64 precision).
+ * FP32: checks HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT (integer bits),
  *       then defaults to 23 (full IEEE 754 FP32 precision).               */
 int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
 {
     if(type_a == HIP_R_64F)
     {
         static const int v = []() -> int {
-            /* 1. Per-type bit-count env var. */
+            /* 1. FP64-specific bit-count env var. */
             const auto p = fixedPointEmulationParseMantissaBitCountEnv(
-                std::getenv("HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT"));
+                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT"));
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
-            /* 2. Default: full IEEE 754 FP64 precision = 52 mantissa bits. */
+            /* 2. Generic bit-count env var (CUDA-compatible name; FP64 only, like
+             *    cuBLAS, where fixed-point emulation is only used for FP64). */
+            const auto g = fixedPointEmulationParseMantissaBitCountEnv(
+                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT"));
+            if(g.state == FIXED_POINT_EMULATION_ENV_VALID)
+                return static_cast<int>(g.value);
+            /* 3. Default: full IEEE 754 FP64 precision = 52 mantissa bits. */
             return 52;
         }();
         return v;
@@ -2298,7 +2295,7 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
         static const int v = []() -> int {
             /* 1. Per-type bit-count env var. */
             const auto p = fixedPointEmulationParseMantissaBitCountEnv(
-                std::getenv("HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT"));
+                std::getenv("HIPBLAS_FIXEDPOINT_EMULATION_FP32_MANTISSA_BIT_COUNT"));
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
             /* 2. Default: full IEEE 754 FP32 precision = 23 mantissa bits. */
