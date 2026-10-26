@@ -15,13 +15,10 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace roc::hostnumerics {
-class Layout;
-
 namespace detail {
 enum class LayoutError {
     ExtentOutOfRange,
@@ -33,28 +30,6 @@ enum class LayoutError {
     CoordinateRankMismatch,
     CoordinateOutOfRange,
 };
-
-inline constexpr std::string_view message(LayoutError error) noexcept {
-    switch (error) {
-        case LayoutError::ExtentOutOfRange:
-            return "Tensor extent exceeds ptrdiff_t.";
-        case LayoutError::ContiguousStrideOverflow:
-            return "Tensor contiguous stride overflow.";
-        case LayoutError::OffsetMultiplyOverflow:
-            return "Tensor layout offset multiplication overflow.";
-        case LayoutError::OffsetAddOverflow:
-            return "Tensor layout offset addition overflow.";
-        case LayoutError::OrderRankMismatch:
-            return "Tensor layout order rank does not match shape rank.";
-        case LayoutError::InvalidOrder:
-            return "Tensor layout order must contain each dimension once.";
-        case LayoutError::CoordinateRankMismatch:
-            return "Tensor coordinate rank does not match shape rank.";
-        case LayoutError::CoordinateOutOfRange:
-            return "Tensor coordinate is outside the shape.";
-    }
-    return "Unknown LayoutError failure.";
-}
 
 // Rank failures carry the supplied and expected ranks in value and limit.
 // Other failures identify an axis, or an invalid order entry's position, in
@@ -78,12 +53,14 @@ struct LayoutFailure {
                 return "Tensor extent " + std::to_string(value) + " in dimension " +
                        std::to_string(dimension) + " exceeds ptrdiff_t.";
             case LayoutError::ContiguousStrideOverflow:
+                return "Tensor contiguous stride overflow in dimension " +
+                       std::to_string(dimension) + ".";
             case LayoutError::OffsetMultiplyOverflow:
-            case LayoutError::OffsetAddOverflow: {
-                std::string result(detail::message(error));
-                result.pop_back();
-                return result + " in dimension " + std::to_string(dimension) + ".";
-            }
+                return "Tensor layout offset multiplication overflow in dimension " +
+                       std::to_string(dimension) + ".";
+            case LayoutError::OffsetAddOverflow:
+                return "Tensor layout offset addition overflow in dimension " +
+                       std::to_string(dimension) + ".";
             case LayoutError::CoordinateRankMismatch:
                 return "Tensor coordinate rank " + std::to_string(value) +
                        " does not match shape rank " + std::to_string(limit) + ".";
@@ -92,7 +69,7 @@ struct LayoutFailure {
                        std::to_string(dimension) + " is outside [0, " + std::to_string(limit) +
                        ").";
             default:
-                return std::string(detail::message(error));
+                return "Unknown LayoutError failure.";
         }
     }
 };
