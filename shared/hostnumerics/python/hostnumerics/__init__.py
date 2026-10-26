@@ -3,7 +3,10 @@
 
 from ._hostnumerics import (
     IndexSelection,
-    IndexSelectionKind,
+    IndexRange,
+    LastDimensionFastest,
+    prime_index_range,
+    Layout,
     ScalarCategory,
     ScalarType,
     ScalarTypeInfo,
@@ -21,5 +24,8 @@ __all__ = [
     "Permutation",
     "Shape",
     "IndexSelection",
-    "IndexSelectionKind",
+    "IndexRange",
+    "LastDimensionFastest",
+    "prime_index_range",
+    "Layout",
 ]
