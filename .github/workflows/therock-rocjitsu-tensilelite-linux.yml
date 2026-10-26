@@ -60,7 +60,6 @@ jobs:
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
-        --user 0:0
         --ulimit memlock=-1:-1
         --security-opt seccomp=unconfined
     defaults:
@@ -184,8 +183,7 @@ jobs:
         if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         run: |
           set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends build-essential libdrm-dev
+          # The image provides C++ build tools; rocjitsu vendors its DRM headers.
           build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
           cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
