@@ -140,6 +140,43 @@ TEST_F(ConjugateUnclamped, matches_host)
 
 namespace
 {
+    // Owns the capture stream and graph so an early ASSERT return cannot leave
+    // the capture open or the stream set on the handle.
+    struct CaptureGuard
+    {
+        rocsparse_handle handle;
+        hipStream_t      stream = nullptr;
+        hipGraph_t       graph  = nullptr;
+
+        explicit CaptureGuard(rocsparse_handle h)
+            : handle(h)
+        {
+        }
+
+        ~CaptureGuard()
+        {
+            hipStreamCaptureStatus capturing = hipStreamCaptureStatusNone;
+            if(stream != nullptr && hipStreamIsCapturing(stream, &capturing) == hipSuccess
+               && capturing == hipStreamCaptureStatusActive)
+            {
+                (void)hipStreamEndCapture(stream, &graph);
+            }
+            if(graph != nullptr)
+            {
+                (void)hipGraphDestroy(graph);
+            }
+            (void)rocsparse_set_stream(handle, nullptr);
+            if(stream != nullptr)
+            {
+                (void)hipStreamDestroy(stream);
+            }
+        }
+
+        CaptureGuard(const CaptureGuard&) = delete;
+
+        CaptureGuard& operator=(const CaptureGuard&) = delete;
+    };
+
     template <typename T>
     void check_conjugate_real_is_noop(rocsparse_handle handle)
     {
@@ -155,25 +192,25 @@ namespace
         ASSERT_TRUE(d.ptr);
 
         // Under capture nothing executes; a launch would show up as a graph node.
-        hipStream_t stream;
-        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-        ASSERT_EQ(rocsparse_set_stream(handle, stream), rocsparse_status_success);
-        ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed), hipSuccess);
-
-        const rocsparse_status status_single  = rocsparse::conjugate(handle, LENGTH, d.ptr);
-        const rocsparse_status status_batched = rocsparse::conjugate_strided_batched(
-            handle, batch_count, LENGTH, rocsparse::get_datatype<T>(), d.ptr, stride);
-
-        hipGraph_t graph = nullptr;
-        ASSERT_EQ(hipStreamEndCapture(stream, &graph), hipSuccess);
         size_t num_nodes = 0;
-        ASSERT_EQ(hipGraphGetNodes(graph, nullptr, &num_nodes), hipSuccess);
-        ASSERT_EQ(hipGraphDestroy(graph), hipSuccess);
-        ASSERT_EQ(rocsparse_set_stream(handle, nullptr), rocsparse_status_success);
-        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        {
+            CaptureGuard capture(handle);
+            ASSERT_EQ(hipStreamCreate(&capture.stream), hipSuccess);
+            ASSERT_EQ(rocsparse_set_stream(handle, capture.stream), rocsparse_status_success);
+            ASSERT_EQ(hipStreamBeginCapture(capture.stream, hipStreamCaptureModeRelaxed),
+                      hipSuccess);
 
-        EXPECT_EQ(status_single, rocsparse_status_success);
-        EXPECT_EQ(status_batched, rocsparse_status_success);
+            const rocsparse_status status_single  = rocsparse::conjugate(handle, LENGTH, d.ptr);
+            const rocsparse_status status_batched = rocsparse::conjugate_strided_batched(
+                handle, batch_count, LENGTH, rocsparse::get_datatype<T>(), d.ptr, stride);
+
+            ASSERT_EQ(hipStreamEndCapture(capture.stream, &capture.graph), hipSuccess);
+            ASSERT_EQ(hipGraphGetNodes(capture.graph, nullptr, &num_nodes), hipSuccess);
+
+            EXPECT_EQ(status_single, rocsparse_status_success);
+            EXPECT_EQ(status_batched, rocsparse_status_success);
+        }
+
         EXPECT_EQ(num_nodes, size_t(0));
 
         const std::vector<T> h_out = to_host(d);
