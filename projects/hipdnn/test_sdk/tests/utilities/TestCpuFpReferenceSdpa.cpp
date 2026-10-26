@@ -3303,14 +3303,14 @@ TEST(TestCpuFpReferenceSdpaFp8, DescalesComposeWithCausalBand)
     Tensor<fp8_e4m3> v({1, 1, seqKv, headDim});
     Tensor<bfloat16> o({1, 1, seqQ, headDim});
     q.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
-    const float kRow[2] = {0.25f, 0.5f};
-    const float vRow[2] = {0.75f, 0.25f};
+    const std::array<float, 2> kRow = {0.25f, 0.5f};
+    const std::array<float, 2> vRow = {0.75f, 0.25f};
     for(int64_t j = 0; j < seqKv; ++j)
     {
         for(int64_t d = 0; d < headDim; ++d)
         {
-            k.setHostValue(safeTestTypeCast<fp8_e4m3>(kRow[j]), 0, 0, j, d);
-            v.setHostValue(safeTestTypeCast<fp8_e4m3>(vRow[j]), 0, 0, j, d);
+            k.setHostValue(safeTestTypeCast<fp8_e4m3>(kRow[static_cast<size_t>(j)]), 0, 0, j, d);
+            v.setHostValue(safeTestTypeCast<fp8_e4m3>(vRow[static_cast<size_t>(j)]), 0, 0, j, d);
         }
     }
 
@@ -3338,7 +3338,7 @@ TEST(TestCpuFpReferenceSdpaFp8, DescalesComposeWithCausalBand)
     const auto v0 = static_cast<double>(vRow[0]);
     const auto v1 = static_cast<double>(vRow[1]);
     const double p1 = 1.0 / (1.0 + std::exp(slope * (k0 - k1)));
-    const double expected[2] = {4.0 * v0, 4.0 * ((1.0 - p1) * v0 + p1 * v1)};
+    const std::array<double, 2> expected = {4.0 * v0, 4.0 * ((1.0 - p1) * v0 + p1 * v1)};
     // bf16 output: half an ulp at 3.0 is 2^-7.
     const float tol = 1e-2f;
     for(int64_t s = 0; s < seqQ; ++s)
@@ -3346,7 +3346,7 @@ TEST(TestCpuFpReferenceSdpaFp8, DescalesComposeWithCausalBand)
         for(int64_t d = 0; d < headDim; ++d)
         {
             EXPECT_NEAR(static_cast<float>(o.getHostValue(0, 0, s, d)),
-                        static_cast<float>(expected[s]),
+                        static_cast<float>(expected[static_cast<size_t>(s)]),
                         tol)
                 << "mismatch at (sq=" << s << ", dv=" << d << ")";
         }
