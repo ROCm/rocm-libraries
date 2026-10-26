@@ -250,11 +250,11 @@ namespace rocsparse
                 base < ell_width;
                 base += static_cast<int64_t>(hipGridDim_x) * NUM_ELL_COLUMNS_PER_BLOCK)
             {
-                const I ell_column_index = static_cast<I>(base + wavefront_index);
+                const int64_t ell_column_index = base + static_cast<int64_t>(wavefront_index);
 
                 if(ell_column_index < ell_width)
                 {
-                    sample_column(ell_column_index);
+                    sample_column(static_cast<I>(ell_column_index));
                 }
             }
         }

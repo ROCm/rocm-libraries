@@ -322,11 +322,12 @@ namespace rocsparse
 
         for(int64_t base = initial; base < bound; base += stride)
         {
-            const J gwid = static_cast<J>(base + static_cast<int64_t>(wid));
-            if(static_cast<int64_t>(gwid) >= bound)
+            const int64_t gwid64 = base + static_cast<int64_t>(wid);
+            if(gwid64 >= bound)
             {
                 continue;
             }
+            const J gwid = static_cast<J>(gwid64);
 
             const I start = csx_ptr[gwid] - csx_base;
             const I end   = csx_ptr[gwid + 1] - csx_base;
