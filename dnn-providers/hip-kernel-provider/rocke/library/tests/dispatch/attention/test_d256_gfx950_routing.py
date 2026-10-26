@@ -105,6 +105,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         "use_kq_lds_pad",
         "kq_lds_pad_halves",
         "use_qblock_reverse",
+        "use_exp2_fast",
     }
 
     def setUp(self):
@@ -119,6 +120,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         self.assertEqual(set(ov), self.EXPECTED_KEYS)
         self.assertIs(ov["use_softmax_mfma_interleave"], False)
         self.assertIs(ov["use_transposed_half_local_pv"], True)
+        self.assertIs(ov["use_exp2_fast"], True)
         self.assertIs(ov["use_register_pv"], False)
         self.assertIs(ov["use_qblock_reverse"], True)
 

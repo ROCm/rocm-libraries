@@ -1101,6 +1101,32 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->num_seqs = 2;
         s->use_qblock_reverse = true;
         break;
+    /* Native softmax exp2 (no range guard) on the D256 32x32 transposed
+     * half-local-PV body (four waves, T=32). */
+    case 64:
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_exp2_fast = true;
+        break;
 
     default:
         return -1;

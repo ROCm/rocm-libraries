@@ -1651,6 +1651,11 @@ class _Lowerer:
         # we promote to f32 first.
         self._math1(op, "exp2f")
 
+    def _op_math_exp2_fast(self, op: Op) -> None:
+        # Native single-instruction exp2 (v_exp_f32) with no range guard; the
+        # HIP twin of the LLVM path's ``llvm.amdgcn.exp2.f32``.
+        self._math1(op, "__builtin_amdgcn_exp2f")
+
     def _op_math_log2(self, op: Op) -> None:
         # ``log2f`` is HIP's device runtime base-2 log entry point; for
         # fp16/bf16 we promote to f32 first (same promote-compute-demote

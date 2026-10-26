@@ -967,7 +967,8 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
 def _d256_gfx950_spec_overrides() -> dict:
     """Single source of truth for the D256 gfx950 bf16 prefill knob constellation.
 
-    The 32x32 transposed + half-local PV + slab-padded K_lds codegen pins. Consumed by BOTH the builder override in
+    The 32x32 transposed + half-local PV + slab-padded K_lds + native softmax
+    exp2 codegen pins. Consumed by BOTH the builder override in
     ``builders.common.attention_spec_builder._tiled_spec_from_problem`` (the
     production path) and the ``dispatch.attention`` gfx950 D256 candidate, so the
     dispatched spec and the built kernel cannot drift.
@@ -995,6 +996,8 @@ def _d256_gfx950_spec_overrides() -> dict:
         kq_lds_pad_halves=16,
         # Longest-first causal query blocks: the long-block tail dominated.
         use_qblock_reverse=True,
+        # Native softmax exp2: drops the dead range guard (~30% of loop VALU).
+        use_exp2_fast=True,
     )
 
 

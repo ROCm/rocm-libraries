@@ -777,6 +777,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_grouped_kv2_softmax",
             "use_causal_mask_phase_split",
             "use_mask_phase_split",
+            "use_exp2_fast",
             # MFMA atom and PV register path.
             "use_register_pv",
             "use_mfma_32x32",
