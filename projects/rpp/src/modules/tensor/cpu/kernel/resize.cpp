@@ -33,13 +33,56 @@ inline void set_zeros_avx(__m256* pVecs, Rpp32s numVecs) {
     for (int i = 0; i < numVecs; i++) pVecs[i] = avx_p0;
 }
 
+// Safe load of 4 consecutive floats with full boundary clamping (left and right edges)
+// Handles both negative indices (left edge) and indices exceeding maxIdx (right edge)
+inline __m128 rpp_safe_load_4f32_clamped(Rpp32f* ptr, Rpp32s startIdx, Rpp32s maxIdx,
+                                         __m128 pFirstVal, __m128 pLastVal) {
+    // If all 4 indices are negative, return pFirstVal (left edge case)
+    if (startIdx + 3 < 0) {
+        return pFirstVal;
+    }
+    // If all 4 indices exceed maxIdx, return pLastVal (right edge case)
+    if (startIdx > maxIdx) {
+        return pLastVal;
+    }
+    // If all 4 indices are within valid range, do normal load
+    if (startIdx >= 0 && startIdx + 3 <= maxIdx) {
+        return _mm_loadu_ps(ptr + startIdx);
+    }
+    // Mixed case: some indices out of bounds (either side)
+    // Build the result by clamping each index
+    alignas(16) float vals[4];
+    Rpp32f firstValScalar = _mm_cvtss_f32(pFirstVal);
+    Rpp32f lastValScalar = _mm_cvtss_f32(pLastVal);
+    for (int i = 0; i < 4; i++) {
+        Rpp32s idx = startIdx + i;
+        if (idx < 0) {
+            vals[i] = firstValScalar;
+        } else if (idx > maxIdx) {
+            vals[i] = lastValScalar;
+        } else {
+            vals[i] = ptr[idx];
+        }
+    }
+    return _mm_loadu_ps(vals);  // Use unaligned load for safety
+}
+
+// Backward compatible version for left-edge-only clamping (pLastVal defaults to same as pFirstVal
+// behavior)
+inline __m128 rpp_safe_load_4f32_clamped(Rpp32f* ptr, Rpp32s startIdx, Rpp32s maxIdx,
+                                         __m128 pFirstVal) {
+    __m128 pLastVal = _mm_set1_ps(ptr[maxIdx]);
+    return rpp_safe_load_4f32_clamped(ptr, startIdx, maxIdx, pFirstVal, pLastVal);
+}
+
 // Perform resampling along the rows
 template <typename T>
 inline void compute_separable_vertical_resample(T* inputPtr, Rpp32f* outputPtr,
                                                 RpptDescPtr inputDescPtr, RpptDescPtr outputDescPtr,
                                                 RpptImagePatch inputImgSize,
                                                 RpptImagePatch outputImgSize, Rpp32s* index,
-                                                Rpp32f* coeffs, GenericFilter& filter) {
+                                                Rpp32f* coeffs, GenericFilter& filter,
+                                                Rpp32u intraThreads) {
     static constexpr Rpp32s maxNumLanes =
         16;  // Maximum number of pixels that can be present in a vector for U8 type
     static constexpr Rpp32s loadLanes = maxNumLanes / sizeof(T);
@@ -55,10 +98,11 @@ inline void compute_separable_vertical_resample(T* inputPtr, Rpp32f* outputPtr,
 
     // For PLN3 inputs/outputs
     if (inputDescPtr->c == 3 && inputDescPtr->layout == RpptLayout::NCHW) {
-        T* inRowPtrR[filter.size];
-        T* inRowPtrG[filter.size];
-        T* inRowPtrB[filter.size];
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int outLocRow = 0; outLocRow < outputImgSize.height; outLocRow++) {
+            T* inRowPtrR[filter.size];
+            T* inRowPtrG[filter.size];
+            T* inRowPtrB[filter.size];
             Rpp32f* outRowPtrR = outputPtr + outLocRow * outputDescPtr->strides.hStride;
             Rpp32f* outRowPtrG = outRowPtrR + outputDescPtr->strides.cStride;
             Rpp32f* outRowPtrB = outRowPtrG + outputDescPtr->strides.cStride;
@@ -130,8 +174,9 @@ inline void compute_separable_vertical_resample(T* inputPtr, Rpp32f* outputPtr,
     }
     // For PKD3 and PLN1 inputs/outputs
     else {
-        T* inRowPtr[filter.size];
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int outLocRow = 0; outLocRow < outputImgSize.height; outLocRow++) {
+            T* inRowPtr[filter.size];
             __m128 pCoeff[filter.size];
             Rpp32s k0 = outLocRow * filter.size;
             Rpp32f* outRowPtr = outputPtr + outLocRow * outputDescPtr->strides.hStride;
@@ -181,12 +226,10 @@ inline void compute_separable_vertical_resample(T* inputPtr, Rpp32f* outputPtr,
 // Remap, resize, rotate, warp affine, persp - geometric for interpolation be part of separate
 // headers Perform resampling along the columns
 template <typename T>
-inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr,
-                                                  RpptDescPtr inputDescPtr,
-                                                  RpptDescPtr outputDescPtr,
-                                                  RpptImagePatch inputImgSize,
-                                                  RpptImagePatch outputImgSize, Rpp32s* index,
-                                                  Rpp32f* coeffs, GenericFilter& filter) {
+inline void compute_separable_horizontal_resample(
+    Rpp32f* inputPtr, T* outputPtr, RpptDescPtr inputDescPtr, RpptDescPtr outputDescPtr,
+    RpptImagePatch inputImgSize, RpptImagePatch outputImgSize, Rpp32s* index, Rpp32f* coeffs,
+    GenericFilter& filter, Rpp32u intraThreads) {
     static constexpr Rpp32s maxNumLanes =
         16;  // Maximum number of pixels that can be present in a vector
     static constexpr Rpp32s numLanes =
@@ -197,12 +240,12 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
     Rpp32s numOutPixels, filterKernelStride;
     numOutPixels = filterKernelStride = 4;
     Rpp32s filterKernelSizeOverStride = filter.size % filterKernelStride;
-    Rpp32s filterKernelRadiusWStrided = (Rpp32s)(filter.radius) * inputDescPtr->strides.wStride;
 
     Rpp32s inputWidthLimit = (inputImgSize.width - 1) * inputDescPtr->strides.wStride;
 
     // For PLN3 inputs
     if (inputDescPtr->c == 3 && inputDescPtr->layout == RpptLayout::NCHW) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int outLocRow = 0; outLocRow < outputImgSize.height; outLocRow++) {
             T* outRowPtrR = outputPtr + outLocRow * outputDescPtr->strides.hStride;
             T* outRowPtrG = outRowPtrR + outputDescPtr->strides.cStride;
@@ -215,7 +258,9 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
             __m128 pFirstValR = _mm_set1_ps(inRowPtrR[0]);
             __m128 pFirstValG = _mm_set1_ps(inRowPtrG[0]);
             __m128 pFirstValB = _mm_set1_ps(inRowPtrB[0]);
-            bool breakLoop = false;
+            __m128 pLastValR = _mm_set1_ps(inRowPtrR[inputWidthLimit]);
+            __m128 pLastValG = _mm_set1_ps(inRowPtrG[inputWidthLimit]);
+            __m128 pLastValB = _mm_set1_ps(inRowPtrB[inputWidthLimit]);
             Rpp32s outLocCol = 0;
 
             // Load filter.size consecutive pixels from a location in the row
@@ -230,104 +275,45 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
                 __m128* pOutputB = pOutputChannel + (numVecs * 2);
                 for (int vec = 0, x = outLocCol; vec < numVecs; vec++, x += numOutPixels) {
                     Rpp32s coeffIdx = (x * filter.size);
-                    if (index[x] < 0) {
-                        __m128i pxIdx[numOutPixels];
-                        pxIdx[0] = _mm_set1_epi32(index[x]);
-                        pxIdx[1] = _mm_set1_epi32(index[x + 1]);
-                        pxIdx[2] = _mm_set1_epi32(index[x + 2]);
-                        pxIdx[3] = _mm_set1_epi32(index[x + 3]);
-                        for (int k = 0; k < filter.size; k += filterKernelStride) {
-                            // Generate mask to determine the negative indices in the iteration
-                            __m128 pNegativeIndexMask[numOutPixels];
-                            __m128i pxKernelIdx = _mm_set1_epi32(k);
-                            __m128 pInputR[numOutPixels], pInputG[numOutPixels],
-                                pInputB[numOutPixels], pCoeffs[numOutPixels];
-                            Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
-                                                   ? filterKernelSizeOverStride
-                                                   : filterKernelStride;
-                            set_zeros(pInputR, numOutPixels);
-                            set_zeros(pInputG, numOutPixels);
-                            set_zeros(pInputB, numOutPixels);
-                            set_zeros(pCoeffs, numOutPixels);
+                    // Use safe boundary-clamped loads for all cases to handle both left and right
+                    // edges
+                    for (int k = 0; k < filter.size; k += filterKernelStride) {
+                        __m128 pInputR[numOutPixels], pInputG[numOutPixels], pInputB[numOutPixels],
+                            pCoeffs[numOutPixels];
+                        Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
+                                               ? filterKernelSizeOverStride
+                                               : filterKernelStride;
+                        set_zeros(pInputR, numOutPixels);
+                        set_zeros(pInputG, numOutPixels);
+                        set_zeros(pInputB, numOutPixels);
+                        set_zeros(pCoeffs, numOutPixels);
 
-                            for (int l = 0; l < numOutPixels; l++) {
-                                pNegativeIndexMask[l] = _mm_castsi128_ps(_mm_cmplt_epi32(
-                                    _mm_add_epi32(_mm_add_epi32(pxIdx[l], pxKernelIdx),
-                                                  xmm_pxDstLocInit),
-                                    xmm_px0));  // Generate mask to determine the negative indices
-                                                // in the iteration
-                                Rpp32s srcx = index[x + l] + k;
+                        for (int l = 0; l < numOutPixels; l++) {
+                            Rpp32s srcx = index[x + l] + k;
+                            pCoeffs[l] = _mm_loadu_ps(
+                                &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
 
-                                // Load filterKernelStride(4) consecutive pixels
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrR + srcx, pInputR + l);
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrG + srcx, pInputG + l);
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrB + srcx, pInputB + l);
-                                pCoeffs[l] = _mm_loadu_ps(
-                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
-
-                                // If negative index is present replace the input pixel value with
-                                // first value in the row
-                                pInputR[l] =
-                                    _mm_blendv_ps(pInputR[l], pFirstValR, pNegativeIndexMask[l]);
-                                pInputG[l] =
-                                    _mm_blendv_ps(pInputG[l], pFirstValG, pNegativeIndexMask[l]);
-                                pInputB[l] =
-                                    _mm_blendv_ps(pInputB[l], pFirstValB, pNegativeIndexMask[l]);
-                            }
-
-                            // Perform transpose operation to arrange input pixels from different
-                            // output locations in each vector
-                            _MM_TRANSPOSE4_PS(pInputR[0], pInputR[1], pInputR[2], pInputR[3]);
-                            _MM_TRANSPOSE4_PS(pInputG[0], pInputG[1], pInputG[2], pInputG[3]);
-                            _MM_TRANSPOSE4_PS(pInputB[0], pInputB[1], pInputB[2], pInputB[3]);
-                            for (int l = 0; l < kernelAdd; l++) {
-                                pOutputR[vec] = _mm_fmadd_ps(pCoeffs[l], pInputR[l], pOutputR[vec]);
-                                pOutputG[vec] = _mm_fmadd_ps(pCoeffs[l], pInputG[l], pOutputG[vec]);
-                                pOutputB[vec] = _mm_fmadd_ps(pCoeffs[l], pInputB[l], pOutputB[vec]);
-                            }
+                            // Safe load with boundary clamping for both left and right edges
+                            pInputR[l] = rpp_safe_load_4f32_clamped(
+                                inRowPtrR, srcx, inputWidthLimit, pFirstValR, pLastValR);
+                            pInputG[l] = rpp_safe_load_4f32_clamped(
+                                inRowPtrG, srcx, inputWidthLimit, pFirstValG, pLastValG);
+                            pInputB[l] = rpp_safe_load_4f32_clamped(
+                                inRowPtrB, srcx, inputWidthLimit, pFirstValB, pLastValB);
                         }
-                    } else if (index[x + 3] >=
-                               (inputWidthLimit -
-                                filterKernelRadiusWStrided))  // If the index value exceeds the
-                                                              // limit, break the loop
-                    {
-                        breakLoop = true;
-                        break;
-                    } else {
-                        // Considers a 4x1 window for computation each time
-                        for (int k = 0; k < filter.size; k += filterKernelStride) {
-                            __m128 pInputR[numOutPixels], pInputG[numOutPixels],
-                                pInputB[numOutPixels];
-                            __m128 pCoeffs[numOutPixels];
-                            Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
-                                                   ? filterKernelSizeOverStride
-                                                   : filterKernelStride;
-                            for (int l = 0; l < numOutPixels; l++) {
-                                pInputR[l] = pInputG[l] = pInputB[l] = pCoeffs[l] = xmm_p0;
-                                pCoeffs[l] = _mm_loadu_ps(
-                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
-                                Rpp32s srcx = index[x + l] + k;
-                                srcx = std::min(std::max(srcx, 0), inputWidthLimit);
-                                // Load filterKernelStride(4) consecutive pixels
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrR + srcx, pInputR + l);
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrG + srcx, pInputG + l);
-                                rpp_simd_load(rpp_load4_f32_to_f32, inRowPtrB + srcx, pInputB + l);
-                            }
 
-                            // Perform transpose operation to arrange input pixels from different
-                            // output locations in each vector
-                            _MM_TRANSPOSE4_PS(pInputR[0], pInputR[1], pInputR[2], pInputR[3]);
-                            _MM_TRANSPOSE4_PS(pInputG[0], pInputG[1], pInputG[2], pInputG[3]);
-                            _MM_TRANSPOSE4_PS(pInputB[0], pInputB[1], pInputB[2], pInputB[3]);
-                            for (int l = 0; l < kernelAdd; l++) {
-                                pOutputR[vec] = _mm_fmadd_ps(pCoeffs[l], pInputR[l], pOutputR[vec]);
-                                pOutputG[vec] = _mm_fmadd_ps(pCoeffs[l], pInputG[l], pOutputG[vec]);
-                                pOutputB[vec] = _mm_fmadd_ps(pCoeffs[l], pInputB[l], pOutputB[vec]);
-                            }
+                        // Perform transpose operation to arrange input pixels from different
+                        // output locations in each vector
+                        _MM_TRANSPOSE4_PS(pInputR[0], pInputR[1], pInputR[2], pInputR[3]);
+                        _MM_TRANSPOSE4_PS(pInputG[0], pInputG[1], pInputG[2], pInputG[3]);
+                        _MM_TRANSPOSE4_PS(pInputB[0], pInputB[1], pInputB[2], pInputB[3]);
+                        for (int l = 0; l < kernelAdd; l++) {
+                            pOutputR[vec] = _mm_fmadd_ps(pCoeffs[l], pInputR[l], pOutputR[vec]);
+                            pOutputG[vec] = _mm_fmadd_ps(pCoeffs[l], pInputG[l], pOutputG[vec]);
+                            pOutputB[vec] = _mm_fmadd_ps(pCoeffs[l], pInputB[l], pOutputB[vec]);
                         }
                     }
                 }
-                if (breakLoop) break;
                 Rpp32s xStride = outLocCol * outputDescPtr->strides.wStride;
                 if (outputDescPtr->layout == RpptLayout::NCHW)  // For PLN3 outputs
                     rpp_resize_store_pln3(outRowPtrR + xStride, outRowPtrG + xStride,
@@ -361,6 +347,7 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
     }
     // For PKD3 inputs
     else if (inputDescPtr->c == 3 && inputDescPtr->layout == RpptLayout::NHWC) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int outLocRow = 0; outLocRow < outputImgSize.height; outLocRow++) {
             T* outRowPtrR = outputPtr + outLocRow * outputDescPtr->strides.hStride;
             T* outRowPtrG = outRowPtrR + outputDescPtr->strides.cStride;
@@ -434,13 +421,14 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
             }
         }
     } else {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int outLocRow = 0; outLocRow < outputImgSize.height; outLocRow++) {
             T* out_row = outputPtr + outLocRow * outputDescPtr->strides.hStride;
             Rpp32f* inRowPtr = inputPtr + outLocRow * inputDescPtr->strides.hStride;
             Rpp32s bufferLength = outputImgSize.width;
             Rpp32s alignedLength = bufferLength & ~(numLanes - 1);
             __m128 pFirstVal = _mm_set1_ps(inRowPtr[0]);
-            bool breakLoop = false;
+            __m128 pLastVal = _mm_set1_ps(inRowPtr[inputWidthLimit]);
             Rpp32s outLocCol = 0;
 
             // Load filter.size consecutive pixels from a location in the row
@@ -450,80 +438,35 @@ inline void compute_separable_horizontal_resample(Rpp32f* inputPtr, T* outputPtr
                 set_zeros(pOutput, numVecs);
                 for (int vec = 0, x = outLocCol; vec < numVecs; vec++, x += numOutPixels) {
                     Rpp32s coeffIdx = (x * filter.size);
-                    if (index[x] < 0) {
-                        __m128i pxIdx[numOutPixels];
-                        pxIdx[0] = _mm_set1_epi32(index[x]);
-                        pxIdx[1] = _mm_set1_epi32(index[x + 1]);
-                        pxIdx[2] = _mm_set1_epi32(index[x + 2]);
-                        pxIdx[3] = _mm_set1_epi32(index[x + 3]);
-                        for (int k = 0; k < filter.size; k += filterKernelStride) {
-                            __m128 pNegativeIndexMask[numOutPixels];
-                            __m128i pxKernelIdx = _mm_set1_epi32(k);
-                            __m128 pInput[numOutPixels], pCoeffs[numOutPixels];
-                            Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
-                                                   ? filterKernelSizeOverStride
-                                                   : filterKernelStride;
-                            set_zeros(pInput, numOutPixels);
-                            set_zeros(pCoeffs, numOutPixels);
-                            for (int l = 0; l < numOutPixels; l++) {
-                                pNegativeIndexMask[l] = _mm_castsi128_ps(_mm_cmplt_epi32(
-                                    _mm_add_epi32(_mm_add_epi32(pxIdx[l], pxKernelIdx),
-                                                  xmm_pxDstLocInit),
-                                    xmm_px0));  // Generate mask to determine the negative indices
-                                                // in the iteration
-                                rpp_simd_load(
-                                    rpp_load4_f32_to_f32, &inRowPtr[index[x + l] + k],
-                                    &pInput[l]);  // Load filterKernelStride(4) consecutive pixels
-                                pCoeffs[l] = _mm_loadu_ps(
-                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
-                                pInput[l] = _mm_blendv_ps(
-                                    pInput[l], pFirstVal,
-                                    pNegativeIndexMask[l]);  // If negative index is present replace
-                                                             // the pixel value with first value in
-                                                             // the row
-                            }
-                            _MM_TRANSPOSE4_PS(
-                                pInput[0], pInput[1], pInput[2],
-                                pInput[3]);  // Perform transpose operation to arrange input pixels
-                                             // from different output locations in each vector
-                            for (int l = 0; l < kernelAdd; l++)
-                                pOutput[vec] = _mm_fmadd_ps(pCoeffs[l], pInput[l], pOutput[vec]);
+                    // Use safe boundary-clamped loads for all cases to handle both left and right
+                    // edges
+                    for (int k = 0; k < filter.size; k += filterKernelStride) {
+                        __m128 pInput[numOutPixels], pCoeffs[numOutPixels];
+                        Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
+                                               ? filterKernelSizeOverStride
+                                               : filterKernelStride;
+                        set_zeros(pInput, numOutPixels);
+                        set_zeros(pCoeffs, numOutPixels);
+                        for (int l = 0; l < numOutPixels; l++) {
+                            Rpp32s srcx = index[x + l] + k;
+                            pCoeffs[l] = _mm_loadu_ps(
+                                &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
+
+                            // Safe load with boundary clamping for both left and right edges
+                            pInput[l] = rpp_safe_load_4f32_clamped(inRowPtr, srcx, inputWidthLimit,
+                                                                   pFirstVal, pLastVal);
                         }
-                    } else if (index[x + 3] >=
-                               (inputWidthLimit -
-                                filterKernelRadiusWStrided))  // If the index value exceeds the
-                                                              // limit, break the loop
-                    {
-                        breakLoop = true;
-                        break;
-                    } else {
-                        for (int k = 0; k < filter.size; k += filterKernelStride) {
-                            __m128 pInput[numOutPixels], pCoeffs[numOutPixels];
-                            Rpp32s kernelAdd = (k + filterKernelStride) > filter.size
-                                                   ? filterKernelSizeOverStride
-                                                   : filterKernelStride;
-                            for (int l = 0; l < numOutPixels; l++) {
-                                pInput[l] = pCoeffs[l] = xmm_p0;
-                                pCoeffs[l] = _mm_loadu_ps(
-                                    &(coeffs[coeffIdx + ((l + k) * 4)]));  // Load coefficients
-                                Rpp32s srcx = index[x + l] + k;
-                                srcx = std::min(std::max(srcx, 0), inputWidthLimit);
-                                rpp_simd_load(
-                                    rpp_load4_f32_to_f32, inRowPtr + srcx,
-                                    pInput + l);  // Load filterKernelStride(4) consecutive pixels
-                            }
-                            _MM_TRANSPOSE4_PS(
-                                pInput[0], pInput[1], pInput[2],
-                                pInput[3]);  // Perform transpose operation to arrange input pixels
-                                             // from different output locations in each vector
-                            for (int l = 0; l < kernelAdd; l++)
-                                pOutput[vec] = _mm_fmadd_ps(pCoeffs[l], pInput[l], pOutput[vec]);
-                        }
+                        _MM_TRANSPOSE4_PS(
+                            pInput[0], pInput[1], pInput[2],
+                            pInput[3]);  // Perform transpose operation to arrange input pixels
+                                         // from different output locations in each vector
+                        for (int l = 0; l < kernelAdd; l++)
+                            pOutput[vec] = _mm_fmadd_ps(pCoeffs[l], pInput[l], pOutput[vec]);
                     }
                 }
-                if (breakLoop) break;
                 rpp_resize_store(out_row + outLocCol, pOutput);
             }
+
             Rpp32s k0 = 0;
             for (; outLocCol < bufferLength; outLocCol++) {
                 Rpp32s x0 = index[outLocCol];
@@ -629,7 +572,8 @@ inline void compute_col_coefficients(RpptInterpolationType interpolationType, Ge
 static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
                                                   Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
                                                   RpptROI roi, RpptImagePatch dstImgSize,
-                                                  RppLayoutParams srcLayoutParams) {
+                                                  RppLayoutParams srcLayoutParams,
+                                                  Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -647,12 +591,12 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
 
     Rpp32u alignedLength =
         dstImgSize.width & ~3;  // Align dst width to process 4 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 16-byte SSE store writes 4 extra bytes, so leave last 4 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 4) ? (alignedLength - 4) : 0;
     __m128 pWRatio = _mm_set1_ps(wRatio);
     __m128 pWidthLimit = _mm_set1_ps((float)widthLimit);
     __m128 pWOffset = _mm_set1_ps(wOffset);
-    __m128 pDstLoc;
-    Rpp32s srcLocationColumnArray[4] = {0};  // Since 4 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -664,11 +608,15 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB, *srcPtrTemp;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcRowPtr + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -692,25 +640,24 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
                 *dstPtrTempG++ = (Rpp8u) * (srcPtrTemp + srcLocationColumn + 1);
                 *dstPtrTempB++ = (Rpp8u) * (srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp8u* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
-        srcPtrRowR = srcPtrChannel;
-        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
+            Rpp8u* dstPtrRow = dstPtrChannel;
+            Rpp8u* srcPtrRowR = srcPtrChannel;
+            Rpp8u* srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            Rpp8u* srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+
             Rpp8u *dstPtrTemp, *srcPtrTempR, *srcPtrTempG, *srcPtrTempB;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTempR = srcPtrRowR + srcLocationRow * srcDescPtr->strides.hStride;
             srcPtrTempG = srcPtrRowG + srcLocationRow * srcDescPtr->strides.hStride;
@@ -718,7 +665,8 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
             pDstLoc = xmm_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m128i pRow[3];
                 compute_resize_nn_src_loc_sse(pDstLoc, pWRatio, pWidthLimit, srcLocationColumnArray,
                                               pWOffset);
@@ -731,6 +679,7 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
                 rpp_simd_store(rpp_store12_u8pln3_to_u8pkd3, dstPtrTemp, pRow);
                 dstPtrTemp += vectorIncrementPkd;
             }
+
             for (; vectorLoopCount < dstImgSize.width; vectorLoopCount++) {
                 compute_resize_nn_src_loc(vectorLoopCount, wRatio, widthLimit, srcLocationColumn,
                                           wOffset);
@@ -738,7 +687,6 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
                 *dstPtrTemp++ = (Rpp8u) * (srcPtrTempG + srcLocationColumn);
                 *dstPtrTemp++ = (Rpp8u) * (srcPtrTempB + srcLocationColumn);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -750,15 +698,20 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
         Rpp8u* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8u *dstPtrTemp, *srcPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m128i pRow;
                 compute_resize_nn_src_loc_sse(pDstLoc, pWRatio, pWidthLimit, srcLocationColumnArray,
                                               pWOffset, true);
@@ -773,7 +726,6 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
                 *dstPtrTemp++ = (Rpp8u) * (srcPtrTemp + srcLocationColumn + 1);
                 *dstPtrTemp++ = (Rpp8u) * (srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -783,9 +735,13 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
         srcPtrRow = srcPtrChannel;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8u *srcPtrTemp, *dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -820,7 +776,6 @@ static inline RppStatus resize_nn_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPt
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -832,18 +787,20 @@ RppStatus resize_nn_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp
                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                       RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_nn_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                  dstImgSize[batchCount], srcLayoutParams);
+                                  dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -852,7 +809,8 @@ RppStatus resize_nn_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp
 static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
                                                     Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
                                                     RpptROI roi, RpptImagePatch dstImgSize,
-                                                    RppLayoutParams srcLayoutParams) {
+                                                    RppLayoutParams srcLayoutParams,
+                                                    Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -870,12 +828,11 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
 
     Rpp32u alignedLength =
         dstImgSize.width & ~3;  // Align dst width to process 4 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    Rpp32u alignedLengthPkd = (alignedLength > 4) ? (alignedLength - 4) : 0;
     __m128 pWRatio = _mm_set1_ps(wRatio);
     __m128 pWidthLimit = _mm_set1_ps((float)widthLimit);
     __m128 pWOffset = _mm_set1_ps(wOffset);
-    __m128 pDstLoc;
-    Rpp32s srcLocationColumnArray[4] = {0};  // Since 4 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -887,11 +844,15 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB, *srcPtrTemp;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcRowPtr + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -916,25 +877,23 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
                 *dstPtrTempG++ = (Rpp32f) * (srcPtrTemp + srcLocationColumn + 1);
                 *dstPtrTempB++ = (Rpp32f) * (srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp32f* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
-        srcPtrRowR = srcPtrChannel;
-        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
+            Rpp32f* dstPtrRow = dstPtrChannel;
+            Rpp32f* srcPtrRowR = srcPtrChannel;
+            Rpp32f* srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            Rpp32f* srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             Rpp32f *dstPtrTemp, *srcPtrTempR, *srcPtrTempG, *srcPtrTempB;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTempR = srcPtrRowR + srcLocationRow * srcDescPtr->strides.hStride;
             srcPtrTempG = srcPtrRowG + srcLocationRow * srcDescPtr->strides.hStride;
@@ -942,7 +901,8 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
             pDstLoc = xmm_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m128 pRow[4];
                 compute_resize_nn_src_loc_sse(pDstLoc, pWRatio, pWidthLimit, srcLocationColumnArray,
                                               pWOffset);
@@ -962,7 +922,6 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
                 *dstPtrTemp++ = (Rpp32f) * (srcPtrTempG + srcLocationColumn);
                 *dstPtrTemp++ = (Rpp32f) * (srcPtrTempB + srcLocationColumn);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -974,22 +933,22 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
         Rpp32f* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp32f *dstPtrTemp, *srcPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
 
-            int vectorLoopCount = 0;
-            for (; vectorLoopCount < dstImgSize.width; vectorLoopCount++) {
-                __m128 pRow;
+            for (int vectorLoopCount = 0; vectorLoopCount < dstImgSize.width; vectorLoopCount++) {
                 compute_resize_nn_src_loc(vectorLoopCount, wRatio, widthLimit, srcLocationColumn,
                                           wOffset, srcDescPtr->strides.wStride);
-                rpp_simd_load(rpp_load4_f32_to_f32, (srcPtrTemp + srcLocationColumn), &pRow);
-                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, &pRow);
-                dstPtrTemp += 3;
+                // Use scalar stores to avoid buffer overrun at row boundaries
+                *dstPtrTemp++ = *(srcPtrTemp + srcLocationColumn);
+                *dstPtrTemp++ = *(srcPtrTemp + srcLocationColumn + 1);
+                *dstPtrTemp++ = *(srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -999,9 +958,13 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
         srcPtrRow = srcPtrChannel;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp32f *srcPtrTemp, *dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -1036,7 +999,6 @@ static inline RppStatus resize_nn_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDes
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1048,18 +1010,20 @@ RppStatus resize_nn_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, 
                                         RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                         RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_nn_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                    dstImgSize[batchCount], srcLayoutParams);
+                                    dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -1068,7 +1032,8 @@ RppStatus resize_nn_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, 
 static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
                                                   Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
                                                   RpptROI roi, RpptImagePatch dstImgSize,
-                                                  RppLayoutParams srcLayoutParams) {
+                                                  RppLayoutParams srcLayoutParams,
+                                                  Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -1086,12 +1051,12 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
 
     Rpp32u alignedLength =
         dstImgSize.width & ~3;  // Align dst width to process 4 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 16-byte SSE store writes 4 extra bytes, so leave last 4 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 4) ? (alignedLength - 4) : 0;
     __m128 pWRatio = _mm_set1_ps(wRatio);
     __m128 pWidthLimit = _mm_set1_ps((float)widthLimit);
     __m128 pWOffset = _mm_set1_ps(wOffset);
-    __m128 pDstLoc;
-    Rpp32s srcLocationColumnArray[4] = {0};  // Since 4 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -1103,11 +1068,15 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB, *srcPtrTemp;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcRowPtr + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -1131,25 +1100,24 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
                 *dstPtrTempG++ = (Rpp8s) * (srcPtrTemp + srcLocationColumn + 1);
                 *dstPtrTempB++ = (Rpp8s) * (srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp8s* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
-        srcPtrRowR = srcPtrChannel;
-        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
+            Rpp8s* dstPtrRow = dstPtrChannel;
+            Rpp8s* srcPtrRowR = srcPtrChannel;
+            Rpp8s* srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+            Rpp8s* srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+
             Rpp8s *dstPtrTemp, *srcPtrTempR, *srcPtrTempG, *srcPtrTempB;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTempR = srcPtrRowR + srcLocationRow * srcDescPtr->strides.hStride;
             srcPtrTempG = srcPtrRowG + srcLocationRow * srcDescPtr->strides.hStride;
@@ -1157,7 +1125,8 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
             pDstLoc = xmm_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m128i pRow[3];
                 compute_resize_nn_src_loc_sse(pDstLoc, pWRatio, pWidthLimit, srcLocationColumnArray,
                                               pWOffset);
@@ -1177,7 +1146,6 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
                 *dstPtrTemp++ = (Rpp8s) * (srcPtrTempG + srcLocationColumn);
                 *dstPtrTemp++ = (Rpp8s) * (srcPtrTempB + srcLocationColumn);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1189,15 +1157,20 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
         Rpp8s* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8s *dstPtrTemp, *srcPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m128i pRow;
                 compute_resize_nn_src_loc_sse(pDstLoc, pWRatio, pWidthLimit, srcLocationColumnArray,
                                               pWOffset, true);
@@ -1212,7 +1185,6 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
                 *dstPtrTemp++ = (Rpp8s) * (srcPtrTemp + srcLocationColumn + 1);
                 *dstPtrTemp++ = (Rpp8s) * (srcPtrTemp + srcLocationColumn + 2);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1222,9 +1194,13 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
         srcPtrRow = srcPtrChannel;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp8s *srcPtrTemp, *dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            Rpp32s srcLocationColumnArray[4] = {0};
+            __m128 pDstLoc;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
             pDstLoc = xmm_pDstLocInit;
@@ -1259,7 +1235,6 @@ static inline RppStatus resize_nn_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPt
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1271,18 +1246,20 @@ RppStatus resize_nn_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp
                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                       RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_nn_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                  dstImgSize[batchCount], srcLayoutParams);
+                                  dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -1291,7 +1268,8 @@ RppStatus resize_nn_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp
 static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
                                                     Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
                                                     RpptROI roi, RpptImagePatch dstImgSize,
-                                                    RppLayoutParams srcLayoutParams) {
+                                                    RppLayoutParams srcLayoutParams,
+                                                    Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -1305,10 +1283,6 @@ static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDes
                     (roi.xywhROI.xy.x * srcLayoutParams.bufferMultiplier);
     dstPtrChannel = dstPtrImage;
 
-    // Rpp32u alignedLength = dstImgSize.width & ~3;
-    // Rpp32s srcLocationColumnArray[4] = {0};
-    Rpp32s srcLocationRow, srcLocationColumn;
-
     // Resize with 3 channel inputs and outputs
     if (srcDescPtr->c == 3 && dstDescPtr->c == 3) {
         Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
@@ -1320,17 +1294,19 @@ static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDes
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB, *srcPtrTempR, *srcPtrTempG,
                 *srcPtrTempB;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
-            srcLocationRow = srcLocationRow * srcDescPtr->strides.hStride;
-            srcPtrTempR = srcPtrRowR + srcLocationRow;
-            srcPtrTempG = srcPtrRowG + srcLocationRow;
-            srcPtrTempB = srcPtrRowB + srcLocationRow;
+            Rpp32s srcLocationRowStride = srcLocationRow * srcDescPtr->strides.hStride;
+            srcPtrTempR = srcPtrRowR + srcLocationRowStride;
+            srcPtrTempG = srcPtrRowG + srcLocationRowStride;
+            srcPtrTempB = srcPtrRowB + srcLocationRowStride;
 
             int vectorLoopCount = 0;
             for (; vectorLoopCount < dstImgSize.width; vectorLoopCount++) {
@@ -1343,9 +1319,6 @@ static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDes
                 dstPtrTempG = dstPtrTempG + dstDescPtr->strides.wStride;
                 dstPtrTempB = dstPtrTempB + dstDescPtr->strides.wStride;
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1355,9 +1328,11 @@ static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDes
         srcPtrRow = srcPtrChannel;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < dstImgSize.height; i++) {
             Rpp16f *srcPtrTemp, *dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
             compute_resize_nn_src_loc(i, hRatio, heightLimit, srcLocationRow, hOffset);
             srcPtrTemp = srcPtrRow + srcLocationRow * srcDescPtr->strides.hStride;
 
@@ -1367,7 +1342,6 @@ static inline RppStatus resize_nn_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDes
                                           wOffset);
                 *dstPtrTemp++ = (Rpp16f) * (srcPtrTemp + srcLocationColumn);
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1379,18 +1353,20 @@ RppStatus resize_nn_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, 
                                         RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                         RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_nn_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                    dstImgSize[batchCount], srcLayoutParams);
+                                    dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -1405,8 +1381,9 @@ RppStatus resize_nn_u8_u8_host_single_image(Rpp8u* srcPtr, RpptDescPtr srcDescPt
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_nn_u8_u8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                     srcLayoutParams);
+                                     srcLayoutParams, intraThreads);
 }
 
 RppStatus resize_nn_f32_f32_host_single_image(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
@@ -1418,8 +1395,9 @@ RppStatus resize_nn_f32_f32_host_single_image(Rpp32f* srcPtr, RpptDescPtr srcDes
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_nn_f32_f32_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                       srcLayoutParams);
+                                       srcLayoutParams, intraThreads);
 }
 
 RppStatus resize_nn_i8_i8_host_single_image(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -1429,8 +1407,9 @@ RppStatus resize_nn_i8_i8_host_single_image(Rpp8s* srcPtr, RpptDescPtr srcDescPt
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_nn_i8_i8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                     srcLayoutParams);
+                                     srcLayoutParams, intraThreads);
 }
 
 RppStatus resize_nn_f16_f16_host_single_image(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
@@ -1442,8 +1421,9 @@ RppStatus resize_nn_f16_f16_host_single_image(Rpp16f* srcPtr, RpptDescPtr srcDes
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_nn_f16_f16_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                       srcLayoutParams);
+                                       srcLayoutParams, intraThreads);
 }
 
 /************* BILINEAR INTERPOLATION *************/
@@ -1451,7 +1431,8 @@ RppStatus resize_nn_f16_f16_host_single_image(Rpp16f* srcPtr, RpptDescPtr srcDes
 static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
                                                         Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
                                                         RpptROI roi, RpptImagePatch dstImgSize,
-                                                        RppLayoutParams srcLayoutParams) {
+                                                        RppLayoutParams srcLayoutParams,
+                                                        Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -1461,8 +1442,8 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
     Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 2) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
-    Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
-    Rpp32s noOfCoeffs = 4;       // kernelSize * kernelSize
+    Rpp32f kernelRadius = 1.0f;       // kernelSize / 2
+    constexpr Rpp32s noOfCoeffs = 4;  // kernelSize * kernelSize
     Rpp32f hOffset = (hRatio - 1) * 0.5f - kernelRadius;
     Rpp32f wOffset = (wRatio - 1) * 0.5f - kernelRadius;
     Rpp32s vectorIncrementPerChannel = 8;
@@ -1475,13 +1456,12 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
 
     Rpp32u alignedLength =
         dstImgSize.width & ~7;  // Align dst width to process 8 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 32-byte AVX store writes 8 extra bytes, so leave last 8 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 8) ? (alignedLength - 8) : 0;
     __m256 pWRatio = _mm256_set1_ps(wRatio);
     __m256 pWOffset = _mm256_set1_ps(wOffset);
     __m256i pxMaxSrcLoc = _mm256_set1_epi32(maxWidthLimitMinusStride);
-    __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
-    Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
-    Rpp32s srcLocationColumnArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -1491,11 +1471,16 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTempR = dstPtrRowR + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8u* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1543,21 +1528,21 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
                 dstPtrTempG++;
                 dstPtrTempB++;
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp8u* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
+            Rpp8u* dstPtrRow = dstPtrChannel;
             Rpp8u* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8u* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1571,7 +1556,8 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -1607,7 +1593,6 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1616,9 +1601,15 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
              (dstDescPtr->layout == RpptLayout::NHWC)) {
         Rpp8u* dstPtrRow;
         dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8u* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8u* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1632,7 +1623,8 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -1664,7 +1656,6 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
 
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1672,9 +1663,16 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
     else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
         Rpp8u* dstPtrRow;
         dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8u* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
+
             Rpp8u* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
                 dstLocRow, hRatio, srcLocationRow, &weightParams[0],
@@ -1728,7 +1726,6 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -1740,18 +1737,19 @@ RppStatus resize_bilinear_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPt
                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                             RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_bilinear_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                        dstImgSize[batchCount], srcLayoutParams);
+                                        dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -1766,13 +1764,14 @@ RppStatus resize_bilinear_u8_u8_host_single_image(Rpp8u* srcPtr, RpptDescPtr src
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_bilinear_u8_u8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                           srcLayoutParams);
+                                           srcLayoutParams, intraThreads);
 }
 
 static inline RppStatus resize_bilinear_f32_f32_host_impl(
     Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr, Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
-    RpptROI roi, RpptImagePatch dstImgSize, RppLayoutParams srcLayoutParams) {
+    RpptROI roi, RpptImagePatch dstImgSize, RppLayoutParams srcLayoutParams, Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -1782,8 +1781,8 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
     Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 2) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
-    Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
-    Rpp32s noOfCoeffs = 4;       // kernelSize * kernelSize
+    Rpp32f kernelRadius = 1.0f;       // kernelSize / 2
+    constexpr Rpp32s noOfCoeffs = 4;  // kernelSize * kernelSize
     Rpp32f hOffset = (hRatio - 1) * 0.5f - kernelRadius;
     Rpp32f wOffset = (wRatio - 1) * 0.5f - kernelRadius;
     Rpp32s vectorIncrementPerChannel = 8;
@@ -1796,13 +1795,12 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
 
     Rpp32u alignedLength =
         dstImgSize.width & ~7;  // Align dst width to process 8 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 32-byte AVX store writes 8 extra bytes, so leave last 8 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 8) ? (alignedLength - 8) : 0;
     __m256 pWRatio = _mm256_set1_ps(wRatio);
     __m256 pWOffset = _mm256_set1_ps(wOffset);
     __m256i pxMaxSrcLoc = _mm256_set1_epi32(maxWidthLimitMinusStride);
-    __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
-    Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
-    Rpp32s srcLocationColumnArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -1812,11 +1810,16 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTempR = dstPtrRowR + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp32f* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1864,21 +1867,21 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
                 dstPtrTempG++;
                 dstPtrTempB++;
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp32f* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
+            Rpp32f* dstPtrRow = dstPtrChannel;
             Rpp32f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp32f* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1892,7 +1895,8 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[4];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -1928,19 +1932,21 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize without fused output-layout toggle (NHWC -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp32f* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
+            Rpp32f* dstPtrRow = dstPtrChannel;
             Rpp32f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp32f* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -1954,7 +1960,8 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[4];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -1985,18 +1992,20 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize without fused output-layout toggle (NCHW -> NCHW for 1 channel and 3 channel)
     else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
-        Rpp32f* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
+            Rpp32f* dstPtrRow = dstPtrChannel;
             Rpp32f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp32f* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2051,7 +2060,6 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2066,17 +2074,17 @@ RppStatus resize_bilinear_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDes
                                               rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_bilinear_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                          dstImgSize[batchCount], srcLayoutParams);
+                                          dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -2091,13 +2099,14 @@ RppStatus resize_bilinear_f32_f32_host_single_image(Rpp32f* srcPtr, RpptDescPtr 
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_bilinear_f32_f32_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi,
-                                             *dstImgSize, srcLayoutParams);
+                                             *dstImgSize, srcLayoutParams, intraThreads);
 }
 
 static inline RppStatus resize_bilinear_f16_f16_host_impl(
     Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr, Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
-    RpptROI roi, RpptImagePatch dstImgSize, RppLayoutParams srcLayoutParams) {
+    RpptROI roi, RpptImagePatch dstImgSize, RppLayoutParams srcLayoutParams, Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -2105,8 +2114,8 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
     Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 1) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
-    Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
-    Rpp32s noOfCoeffs = 4;       // kernelSize * kernelSize
+    Rpp32f kernelRadius = 1.0f;       // kernelSize / 2
+    constexpr Rpp32s noOfCoeffs = 4;  // kernelSize * kernelSize
     Rpp32f hOffset = (hRatio - 1) * 0.5f - kernelRadius;
     Rpp32f wOffset = (wRatio - 1) * 0.5f - kernelRadius;
     Rpp32s vectorIncrementPerChannel = 8;
@@ -2119,13 +2128,12 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
 
     Rpp32u alignedLength =
         dstImgSize.width & ~7;  // Align dst width to process 8 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 32-byte AVX store writes 8 extra bytes, so leave last 8 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 8) ? (alignedLength - 8) : 0;
     __m256 pWRatio = _mm256_set1_ps(wRatio);
     __m256 pWOffset = _mm256_set1_ps(wOffset);
     __m256i pxMaxSrcLoc = _mm256_set1_epi32(maxWidthLimitMinusStride);
-    __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
-    Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
-    Rpp32s srcLocationColumnArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -2135,11 +2143,16 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTempR = dstPtrRowR + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp16f* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2187,9 +2200,6 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
                 dstPtrTempG++;
                 dstPtrTempB++;
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2199,9 +2209,14 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
         Rpp16f* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp16f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp16f* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2251,7 +2266,6 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2261,9 +2275,14 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
         Rpp16f* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp16f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp16f* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2277,7 +2296,8 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -2308,7 +2328,6 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2317,9 +2336,14 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
         Rpp16f* dstPtrRow;
         dstPtrRow = dstPtrChannel;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp16f* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp16f* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2375,7 +2399,6 @@ static inline RppStatus resize_bilinear_f16_f16_host_impl(
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2390,17 +2413,17 @@ RppStatus resize_bilinear_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDes
                                               rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_bilinear_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                          dstImgSize[batchCount], srcLayoutParams);
+                                          dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -2415,14 +2438,16 @@ RppStatus resize_bilinear_f16_f16_host_single_image(Rpp16f* srcPtr, RpptDescPtr 
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_bilinear_f16_f16_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi,
-                                             *dstImgSize, srcLayoutParams);
+                                             *dstImgSize, srcLayoutParams, intraThreads);
 }
 
 static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
                                                         Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
                                                         RpptROI roi, RpptImagePatch dstImgSize,
-                                                        RppLayoutParams srcLayoutParams) {
+                                                        RppLayoutParams srcLayoutParams,
+                                                        Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -2430,8 +2455,8 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
     Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 1) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
-    Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
-    Rpp32s noOfCoeffs = 4;       // kernelSize * kernelSize
+    Rpp32f kernelRadius = 1.0f;       // kernelSize / 2
+    constexpr Rpp32s noOfCoeffs = 4;  // kernelSize * kernelSize
     Rpp32f hOffset = (hRatio - 1) * 0.5f - kernelRadius;
     Rpp32f wOffset = (wRatio - 1) * 0.5f - kernelRadius;
     Rpp32s vectorIncrementPerChannel = 8;
@@ -2444,13 +2469,12 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
 
     Rpp32u alignedLength =
         dstImgSize.width & ~7;  // Align dst width to process 8 dst pixels per iteration
+    // For packed output (NHWC), reduce alignedLength to avoid SIMD store overflow at row boundaries
+    // The 32-byte AVX store writes 8 extra bytes, so leave last 8 pixels for scalar loop
+    Rpp32u alignedLengthPkd = (alignedLength > 8) ? (alignedLength - 8) : 0;
     __m256 pWRatio = _mm256_set1_ps(wRatio);
     __m256 pWOffset = _mm256_set1_ps(wOffset);
     __m256i pxMaxSrcLoc = _mm256_set1_epi32(maxWidthLimitMinusStride);
-    __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
-    Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
-    Rpp32s srcLocationColumnArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-    Rpp32s srcLocationRow, srcLocationColumn;
 
     // Resize with fused output-layout toggle (NHWC -> NCHW)
     if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
@@ -2460,11 +2484,16 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
         dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
         dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-            dstPtrTempR = dstPtrRowR;
-            dstPtrTempG = dstPtrRowG;
-            dstPtrTempB = dstPtrRowB;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTempR = dstPtrRowR + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + dstLocRow * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8s* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2512,21 +2541,21 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
                 dstPtrTempG++;
                 dstPtrTempB++;
             }
-            dstPtrRowR += dstDescPtr->strides.hStride;
-            dstPtrRowG += dstDescPtr->strides.hStride;
-            dstPtrRowB += dstDescPtr->strides.hStride;
         }
     }
 
     // Resize with fused output-layout toggle (NCHW -> NHWC)
     else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
              (dstDescPtr->layout == RpptLayout::NHWC)) {
-        Rpp8s* dstPtrRow;
-        dstPtrRow = dstPtrChannel;
-
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
+            Rpp8s* dstPtrRow = dstPtrChannel;
             Rpp8s* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8s* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2540,7 +2569,8 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -2576,7 +2606,6 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2585,9 +2614,15 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
              (dstDescPtr->layout == RpptLayout::NHWC)) {
         Rpp8s* dstPtrRow;
         dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8s* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
 
             Rpp8s* srcRowPtrsForInterp[2];  // kernelSize(2)
             compute_resize_bilinear_src_loc_and_weights(
@@ -2601,7 +2636,8 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
             pDstLoc = avx_pDstLocInit;
 
             int vectorLoopCount = 0;
-            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
                 __m256 pSrc[12], pDst[3];
                 __m256i pxSrcLoc;
                 compute_resize_bilinear_src_loc_and_weights_avx(
@@ -2632,8 +2668,6 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
                     &dstPtrTemp[2]);  // Compute Bilinear interpolation
                 dstPtrTemp += dstDescPtr->c;
             }
-
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2641,9 +2675,16 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
     else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
         Rpp8s* dstPtrRow;
         dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int dstLocRow = 0; dstLocRow < dstImgSize.height; dstLocRow++) {
             Rpp8s* dstPtrTemp;
-            dstPtrTemp = dstPtrRow;
+            __m256 pWeightParams[noOfCoeffs], pBilinearCoeffs[noOfCoeffs], pDstLoc;
+            Rpp32f weightParams[noOfCoeffs], bilinearCoeffs[noOfCoeffs];
+            Rpp32s srcLocationColumnArray[8] = {0};
+            Rpp32s srcLocationRow, srcLocationColumn;
+            dstPtrTemp = dstPtrRow + dstLocRow * dstDescPtr->strides.hStride;
+
             Rpp8s* srcRowPtrsForInterp[6];  // kernelSize(2) * numOfPlanes(3)
             compute_resize_bilinear_src_loc_and_weights(
                 dstLocRow, hRatio, srcLocationRow, &weightParams[0],
@@ -2698,7 +2739,6 @@ static inline RppStatus resize_bilinear_i8_i8_host_impl(Rpp8s* srcPtrImage, Rppt
                 }
                 dstPtrTemp++;
             }
-            dstPtrRow += dstDescPtr->strides.hStride;
         }
     }
 
@@ -2711,17 +2751,17 @@ RppStatus resize_bilinear_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPt
                                             RppLayoutParams srcLayoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         resize_bilinear_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
-                                        dstImgSize[batchCount], srcLayoutParams);
+                                        dstImgSize[batchCount], srcLayoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -2736,17 +2776,16 @@ RppStatus resize_bilinear_i8_i8_host_single_image(Rpp8s* srcPtr, RpptDescPtr src
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_bilinear_i8_i8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, roi, *dstImgSize,
-                                           srcLayoutParams);
+                                           srcLayoutParams, intraThreads);
 }
 
 template <typename T>
-static inline RppStatus resize_separable_host_impl(T* srcPtrImage, RpptDescPtr srcDescPtr,
-                                                   T* dstPtrImage, RpptDescPtr dstDescPtr,
-                                                   Rpp32f* tempPtrImage, RpptDescPtr tempDescPtr,
-                                                   RpptROI roi, RpptImagePatch dstImgSize,
-                                                   RppLayoutParams srcLayoutParams,
-                                                   RpptInterpolationType interpolationType) {
+static inline RppStatus resize_separable_host_impl(
+    T* srcPtrImage, RpptDescPtr srcDescPtr, T* dstPtrImage, RpptDescPtr dstDescPtr,
+    Rpp32f* tempPtrImage, RpptDescPtr tempDescPtr, RpptROI roi, RpptImagePatch dstImgSize,
+    RppLayoutParams srcLayoutParams, RpptInterpolationType interpolationType, Rpp32u intraThreads) {
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
@@ -2791,9 +2830,11 @@ static inline RppStatus resize_separable_host_impl(T* srcPtrImage, RpptDescPtr s
     tempImgSize.height = dstImgSize.height;
 
     compute_separable_vertical_resample(srcPtrImage, tempPtrImage, srcDescPtr, tempDescPtr,
-                                        srcImgSize, tempImgSize, rowIndex, rowCoeffs, vFilter);
+                                        srcImgSize, tempImgSize, rowIndex, rowCoeffs, vFilter,
+                                        intraThreads);
     compute_separable_horizontal_resample(tempPtrImage, dstPtrImage, tempDescPtr, dstDescPtr,
-                                          tempImgSize, dstImgSize, colIndex, colCoeffs, hFilter);
+                                          tempImgSize, dstImgSize, colIndex, colCoeffs, hFilter,
+                                          intraThreads);
 
     return RPP_SUCCESS;
 }
@@ -2808,8 +2849,7 @@ RppStatus resize_separable_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                        rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
@@ -2818,9 +2858,11 @@ RppStatus resize_separable_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
         T* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         T* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
         Rpp32f* tempPtrImage = tempPtr + batchCount * tempDescPtr->strides.nStride;
+        Rpp32u intraThreads =
+            get_intra_image_threads(handle, dstDescPtr->n, dstImgSize[batchCount].height);
         resize_separable_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, tempPtrImage,
                                    tempDescPtr, roi, dstImgSize[batchCount], srcLayoutParams,
-                                   interpolationType);
+                                   interpolationType, intraThreads);
     }
 
     return RPP_SUCCESS;
@@ -2837,8 +2879,10 @@ RppStatus resize_separable_host_single_image(T* srcPtr, RpptDescPtr srcDescPtr, 
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     RpptROI roi;
     compute_roi_validation_host(roiTensorPtrSrc, &roi, &roiDefault, roiType);
+    Rpp32u intraThreads = get_intra_image_threads(handle, 1, roi.xywhROI.roiHeight);
     return resize_separable_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, tempPtr, tempDescPtr,
-                                      roi, *dstImgSize, srcLayoutParams, interpolationType);
+                                      roi, *dstImgSize, srcLayoutParams, interpolationType,
+                                      intraThreads);
 }
 
 template RppStatus resize_separable_host_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr,
