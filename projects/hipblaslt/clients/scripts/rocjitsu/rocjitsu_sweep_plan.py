@@ -1,0 +1,431 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Plan a race sweep over original solution indices in a tested artifact."""
+
+import hashlib
+import json
+import math
+import re
+from collections import Counter
+from pathlib import Path
+
+from tensilelite.Utilities.BinaryLibraryIO import iterSolutionRecords
+from tensilelite.Utilities.gemm_problem_bench import UnsupportedBenchProblem, bench_yaml
+from tensilelite.Utilities.gemm_problem_for_solution import (
+    LibraryMetadata,
+    UnsupportedSolution,
+    _size_predicates,
+)
+
+POLICY = "tile-depth-v1"
+REGULAR_POLICY = "regular-v1"
+
+# Keep these directed relationships aligned with ChipIdRegistry in
+# tensilelite/include/Tensile/AMDGPUPredicates.hpp.
+CHIP_FALLBACKS = {
+    chip: (0x75A0,) for chip in (0x75B0, 0x75A2, 0x75B2, 0x75A3, 0x75B3, 0x75A8, 0x75B8)
+}
+
+
+def validate_profile(config, target):
+    """Check that an explicitly supplied profile describes one device consistently."""
+    device = config["vm"]["gpu"]["device"]
+    if device["gfx_target_version"] != {"gfx942": 90402, "gfx950": 90500}[target]:
+        raise ValueError("Profile architecture does not match the requested target")
+    simds, per_cu = device["simd_count"], device["simd_per_cu"]
+    if min(simds, per_cu) <= 0 or simds % per_cu:
+        raise ValueError("Profile SIMD count must be a positive multiple of SIMD per CU")
+    cus = simds // per_cu
+    per_partition = (
+        device["num_shader_engines"]
+        * device["num_shader_arrays_per_engine"]
+        * device["num_cu_per_sh"]
+    )
+    if per_partition <= 0 or cus % per_partition:
+        raise ValueError("Profile CU count disagrees with shader resources")
+    if target == "gfx950" and device["device_id"] not in (0x75A0, *CHIP_FALLBACKS):
+        raise ValueError("Unregistered gfx950 PCI chip ID in profile")
+
+    def topology_cus(node):
+        match = re.search(r"\[(\d+):(\d+)\]$", node["name"])
+        repetitions = int(match[2]) - int(match[1]) if match else 1
+        if repetitions <= 0:
+            raise ValueError("Empty profile topology range")
+        children = sum(topology_cus(n) for n in node.get("children", []))
+        return repetitions * (1 if node["type"] == "compute_unit" else children)
+
+    if topology_cus(config["topology"]["root"]) != cus:
+        raise ValueError("Profile topology CU count disagrees with device resources")
+
+
+def regular_problem(solution, directory, target):
+    record = {
+        **solution,
+        "sizePredicates": _size_predicates(solution["problemPredicate"]),
+    }
+    metadata = LibraryMetadata(directory, target, (solution["index"],), {solution["index"]: record})
+    return metadata.choose_single_problem(solution["index"], reduction_blocks=8)
+
+
+def sha256(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def matches_hardware(predicate, target, device):
+    kind, value = predicate["type"], predicate.get("value")
+    if kind == "AMDGPU":
+        return matches_hardware(value, target, device)
+    if kind in {"And", "Or"}:
+        results = [matches_hardware(p, target, device) for p in value]
+        return all(results) if kind == "And" else any(results)
+    if kind == "True":
+        return True
+    if kind == "Processor":
+        return value == target
+    if kind == "PciChipId":
+        chip = device.get("device_id")
+        return (
+            target == "gfx950"
+            and chip is not None
+            and (value == chip or value in CHIP_FALLBACKS.get(chip, ()))
+        )
+    if kind == "CUCount":
+        return value == device["simd_count"] // device["simd_per_cu"]
+    return False
+
+
+def ordinary_problem(problem):
+    # Both adapters implement this same initial feature scope. Rejections are
+    # counted in the manifest; unsupported features are never silently coerced.
+    if any(
+        problem.get(k, False)
+        for k in (
+            "groupedGemm",
+            "fusedGemmA2A",
+            "sparse",
+            "useGradient",
+            "useE",
+            "useGateResidual",
+            "mxBlockA",
+            "mxBlockB",
+            "useInitialStridesAB",
+            "useInitialStridesCD",
+            "swizzleTensorA",
+            "swizzleTensorB",
+            "mirrorDimsA",
+            "mirrorDimsB",
+        )
+    ):
+        return False
+    allowed = {"Half", "BFloat16", "Float", "Float8", "BFloat8", "Int8", "Int32"}
+    return (
+        all(problem[k] in allowed for k in ("aType", "bType", "cType", "dType"))
+        and problem["cType"] == problem["dType"]
+        and problem.get("computeType", "Float") in {"Float", "Int32"}
+        and problem.get("activationType", "None") in {"None", "All", "Hipblaslt_all"}
+        and problem.get("useScaleAB", "") in {"", "Scalar", "Vector"}
+        and problem.get("stridedBatched", True)
+        and problem.get("operationIdentifier", "")
+        in {f"Contraction_l_A{a}_B{b}_Cijk_Dijk" for a in ("ilk", "lik") for b in ("jlk", "ljk")}
+    )
+
+
+def conjuncts(predicate):
+    if predicate["type"] == "And":
+        for child in predicate["value"]:
+            yield from conjuncts(child)
+    else:
+        yield predicate
+
+
+def derive_cases(solution):
+    """Generate four distinct tile/depth-relative candidates, keeping native checks.
+
+    This handles common dimensional constraints, not every native predicate.
+    The clients remain authoritative for layout, workspace and device support.
+    Failure to generate a bounded case is recorded for the selected index.
+    """
+    mapping = solution["sizeMapping"]
+    mt_m, mt_n = mapping["macroTile"][:2]
+    depth = mapping["depthU"]
+    if min(mt_m, mt_n, depth) <= 0:
+        raise ValueError("Non-positive macro tile or DepthU")
+    minimum, maximum, multiple = [1] * 4, [8192] * 4, [1] * 4
+    fixed = {}
+    for p in conjuncts(solution["problemPredicate"]):
+        kind, value, index = p["type"], p.get("value"), p.get("index", 0)
+        dimension = {
+            "Free0SizeMultiple": 0,
+            "Free1SizeMultiple": 1,
+            "BatchSizeMultiple": 2,
+            "BoundSizeMultiple": 3,
+            "LeadingFree0SizesGreaterOrEqual": 0,
+            "LeadingFree1SizesGreaterOrEqual": 1,
+            "BatchSizeEqual": 2,
+        }.get(kind, index)
+        if kind in {
+            "SizeMultiple",
+            "Free0SizeMultiple",
+            "Free1SizeMultiple",
+            "BatchSizeMultiple",
+            "BoundSizeMultiple",
+        }:
+            multiple[dimension] = math.lcm(multiple[dimension], value)
+        elif kind in {
+            "LeadingFree0SizesGreaterOrEqual",
+            "LeadingFree1SizesGreaterOrEqual",
+            "SizeGreaterThan",
+        }:
+            minimum[dimension] = max(minimum[dimension], value + (kind == "SizeGreaterThan"))
+        elif kind == "SizeLessThan":
+            maximum[dimension] = min(maximum[dimension], value - 1)
+        elif kind in {"SizeEqual", "ProblemSizeEqual", "BatchSizeEqual"}:
+            if dimension in fixed and fixed[dimension] != value:
+                raise ValueError("Contradictory size equalities")
+            fixed[dimension] = value
+        elif kind == "GlobalSplitUCheckMinK" and value[1] > 1:
+            minimum[3] = max(minimum[3], value[0] * value[1])
+        elif kind in {"Or", "Not"}:
+            raise ValueError(f"Case policy cannot solve {kind} size predicates")
+
+    def fit(shape):
+        result = []
+        for d, wanted in enumerate(shape):
+            n = fixed.get(d, math.ceil(max(wanted, minimum[d]) / multiple[d]) * multiple[d])
+            if not minimum[d] <= n <= maximum[d] or n % multiple[d]:
+                raise ValueError("Size constraints exceed bounded case policy")
+            result.append(n)
+        m, n, batch, k = result
+        # Conservative host/device/reference buffer allowance, independent of
+        # datatype. Workspace remains separately bounded in the native clients.
+        if batch * (m * k + n * k + 2 * m * n) * 16 > 128 * 1024 * 1024:
+            raise ValueError("Case exceeds 128 MiB estimated data-buffer budget")
+        return result
+
+    proposals = [
+        ("tile", [mt_m, mt_n, 1, depth]),
+        ("multi_tile", [2 * mt_m, 3 * mt_n, 1, 2 * depth]),
+        ("mn_edge", [mt_m + multiple[0], mt_n + multiple[1], 1, 4 * depth]),
+        ("k_remainder", [2 * mt_m, 2 * mt_n, 1, 4 * depth + multiple[3]]),
+    ]
+    cases = []
+    for label, proposal in proposals:
+        shape = fit(proposal)
+        # Equalities/minima can collapse candidates. Preserve distinct cases by
+        # growing an unfixed dimension; never silently run duplicates four times.
+        for d in (3, 0, 1):
+            if shape not in [c["shape"] for c in cases]:
+                break
+            if d not in fixed:
+                shape[d] += max(multiple[d], depth if d == 3 else (mt_m, mt_n)[d])
+                shape = fit(shape)
+        if shape in [c["shape"] for c in cases]:
+            raise ValueError("Cannot generate four distinct bounded cases")
+        cases.append(
+            {
+                "id": label,
+                "shape": shape,
+                "m_tail": bool(shape[0] % mt_m),
+                "n_tail": bool(shape[1] % mt_n),
+                "k_tail": bool(shape[3] % depth),
+            }
+        )
+    return cases
+
+
+def make_plan(
+    library_dir,
+    target,
+    device,
+    range_begin=0,
+    range_end=None,
+    policy=POLICY,
+    profiles=None,
+):
+    if type(range_begin) is not int or not 0 <= range_begin < (1 << 31):
+        raise ValueError("Solution index range begin must be a nonnegative native index")
+    if range_end is not None and (
+        type(range_end) is not int or not range_begin < range_end <= (1 << 31)
+    ):
+        raise ValueError("Solution index range end must be greater than begin and at most 2**31")
+    if policy not in (POLICY, REGULAR_POLICY):
+        raise ValueError(f"Unknown case policy: {policy}")
+    library_dir = library_dir / target if (library_dir / target).is_dir() else library_dir
+    # Prefer compressed metadata just as the native loader does; do not inventory
+    # both representations of a shard if an artifact happens to contain both.
+    libraries = {
+        p.name.removesuffix(".zlib"): p
+        for p in sorted(library_dir.glob(f"*{target}.dat*"))
+        if p.name.endswith((".dat", ".dat.zlib"))
+    }
+    if not libraries:
+        raise ValueError(f"No {target} packaged metadata under {library_dir}")
+    counts, inputs, coverage_gaps = Counter(), {}, Counter()
+    names, eligible_names = set(), set()
+    indices, requested = set(), {}
+    profiles = profiles or {"default": device}
+
+    def profile_for(solution):
+        return next(
+            (
+                name
+                for name, resources in profiles.items()
+                if matches_hardware(solution["hardwarePredicate"], target, resources)
+            ),
+            None,
+        )
+
+    def inventory():
+        for path in sorted(libraries.values()):
+            inputs[path.name] = sha256(path)
+            for _, solution in iterSolutionRecords(path):
+                if solution["index"] in indices:
+                    raise ValueError(f"Duplicate solution index {solution['index']} in {path}")
+                indices.add(solution["index"])
+                counts["solutions"] += 1
+                if range_begin <= solution["index"] and (
+                    range_end is None or solution["index"] < range_end
+                ):
+                    requested[solution["index"]] = (path, solution)
+                name = hashlib.sha256(solution["kernelName"].encode()).digest()
+                names.add(name)
+                if profile_for(solution) is None:
+                    counts["other_or_unknown_hardware"] += 1
+                elif policy == REGULAR_POLICY:
+                    # Only explicitly unimplemented features are coverage gaps.
+                    # Missing fields and malformed metadata must fail preparation.
+                    try:
+                        problem = regular_problem(solution, library_dir, target)
+                        bench_yaml([problem])
+                    except (UnsupportedSolution, UnsupportedBenchProblem) as error:
+                        counts["outside_adapter_scope"] += 1
+                        reasons = (
+                            error.reasons
+                            if isinstance(error, UnsupportedSolution)
+                            else (error.reason,)
+                        )
+                        coverage_gaps.update(reasons)
+                    else:
+                        counts["eligible_solutions"] += 1
+                        eligible_names.add(name)
+                elif not ordinary_problem(solution["problemType"]):
+                    counts["outside_adapter_scope"] += 1
+                else:
+                    counts["eligible_solutions"] += 1
+                    eligible_names.add(name)
+
+    inventory()
+    selected = [requested[i] for i in sorted(requested)]
+    if not selected:
+        raise ValueError("No solution indices in the requested range")
+    counts.update(unique_kernel_names=len(names), eligible_kernel_names=len(eligible_names))
+    jobs = []
+    for job_id, (metadata, s) in enumerate(selected):
+        job = {
+            "id": job_id,
+            "profile": profile_for(s),
+            "library": str(metadata),
+            "problem_type": s["problemType"],
+            "hardware_predicate": s["hardwarePredicate"],
+            "problem_predicate": s["problemPredicate"],
+            "size_mapping": s["sizeMapping"],
+            "solutions": [{"index": s["index"], "name": s["name"], "kernel": s["kernelName"]}],
+        }
+        try:
+            if job["profile"] is None:
+                job["planning_outcome"] = "EXCLUDED_HARDWARE"
+                raise ValueError("Requested solution does not match the emulated hardware")
+            if policy == REGULAR_POLICY:
+                problem = regular_problem(s, library_dir, target)
+                job["bench_yaml"] = bench_yaml([problem])
+                job["target_dispatches_per_case"] = 1
+                job["cases"] = [{"id": "regular", "shape": [problem.m, problem.n, 1, problem.k]}]
+                if (
+                    problem.m * problem.k + problem.n * problem.k + 2 * problem.m * problem.n
+                ) * 16 > 128 * 1024 * 1024:
+                    raise ValueError("Case exceeds 128 MiB estimated data-buffer budget")
+            elif not ordinary_problem(s["problemType"]):
+                job["planning_outcome"] = "UNSUPPORTED_FEATURE"
+                raise ValueError("Requested solution is outside the client adapter scope")
+            else:
+                job["cases"] = derive_cases(s)
+        except (
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+            UnsupportedSolution,
+            UnsupportedBenchProblem,
+        ) as error:
+            job.setdefault(
+                "planning_outcome",
+                (
+                    "UNSUPPORTED_FEATURE"
+                    if isinstance(error, (UnsupportedSolution, UnsupportedBenchProblem))
+                    else "INVALID_INPUT"
+                ),
+            )
+            job["cases"] = [
+                {"id": label, "shape": None}
+                for label in (
+                    ("regular",)
+                    if policy == REGULAR_POLICY
+                    else ("tile", "multi_tile", "mn_edge", "k_remainder")
+                )
+            ]
+            job["planning_error"] = str(error)
+        main_object = metadata.with_name(
+            metadata.name.removesuffix(".zlib").removesuffix(".dat") + ".co"
+        )
+        helpers = [
+            library_dir / f"Kernels.so-000-{target}.hsaco",
+            library_dir / f"hipblasltTransform_{target}.hsaco",
+        ]
+        job["code_objects"] = [str(main_object)] + [str(p) for p in helpers if p.is_file()]
+        for p in map(Path, job["code_objects"]):
+            if not p.is_file():
+                job["planning_error"] = f"Missing selected code object: {p.name}"
+                job["planning_outcome"] = "MISSING_CODE_OBJECT"
+            elif p.name not in inputs:
+                inputs[p.name] = sha256(p)
+        jobs.append(job)
+    fingerprint = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+    return {
+        "policy": policy,
+        "coverage_gaps": dict(coverage_gaps),
+        "target": target,
+        "selection": "solution-index-range",
+        "solution_index_range": {"begin": range_begin, "end": range_end},
+        "solutions": len(selected),
+        "kernels": len({s["kernelName"] for _, s in selected}),
+        "planned_cases": sum(len(job["cases"]) for job in jobs),
+        "inventory": dict(counts),
+        "input_sha256": inputs,
+        "artifact_fingerprint": fingerprint,
+        "library_dir": str(library_dir),
+        "jobs": jobs,
+    }
+
+
+def make_batches(jobs, size, *, group_by_shard):
+    """Order shards within each profile and keep one profile per native process."""
+    if size < 1:
+        raise ValueError("Batch size must be positive")
+    if group_by_shard:
+        # Shards occupy disjoint index ranges in the packaged lazy library.
+        # Their first selected indices give the same ordering as their range starts.
+        first_index = {}
+        for job in jobs:
+            index = job["solutions"][0]["index"]
+            shard = job["library"]
+            first_index[shard] = min(first_index.get(shard, index), index)
+        jobs = sorted(jobs, key=lambda j: (first_index[j["library"]], j["library"]))
+    groups = {}
+    for job in jobs:
+        groups.setdefault(job.get("profile", "default"), []).append(job)
+    return [
+        group[start : start + size]
+        for group in groups.values()
+        for start in range(0, len(group), size)
+    ]
