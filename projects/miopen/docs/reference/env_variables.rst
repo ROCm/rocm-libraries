@@ -119,12 +119,15 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | that, the next naive evaluation waits for one to finish rather
         | than timing a kernel that shares a hardware queue with it.
         |
-        | A skipped kernel's scratch buffer is released at the next MIOpen
-        | kernel launch, allocation, or find on the handle that runs after
-        | the kernel finishes and outside a HIP graph capture. Replaying a
-        | captured graph does not release it, so a workload that only
-        | replays after capture keeps the buffer until the next such call
-        | or until the handle is destroyed.
+        | A skipped kernel's scratch buffer is released as soon as the
+        | kernel finishes, by a background thread MIOpen starts for the
+        | handle on the first skip; no further MIOpen call is needed, so
+        | a workload that only replays a captured HIP graph releases it
+        | too. A deallocator installed with ``miopenSetAllocator`` is
+        | therefore called from that thread, possibly while another
+        | thread is capturing. It must not make calls HIP refuses during
+        | any capture, such as a synchronous ``hipMemcpy`` or
+        | ``hipMemset``: those invalidate every capture in the process.
         |
         | Limitation: a skipped kernel keeps reading the caller's input
         | tensors until it finishes. Its results are discarded, so stale

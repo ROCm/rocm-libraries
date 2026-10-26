@@ -7,8 +7,6 @@
 #include <miopen/handle.hpp>
 #include <miopen/hipoc_kernel.hpp>
 #include <miopen/stream_tracker.hpp>
-#include <miopen/tensor.hpp>
-#include <miopen/tensor_ops.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -59,56 +57,33 @@ protected:
     miopen::StreamTracker tracker{kTestMaxDraining};
 };
 
-/// Drives reclaim through the Handle entry points rather than the tracker: the
-/// fix for issue #12121 lives in Handle::Run, and nothing short of a real launch
-/// on a capturing handle stream exercises it. The handle gets its own stream
-/// because the default handle's null stream cannot be captured.
-class GPU_StreamTrackerHandle_FP32 : public ::testing::Test
+/// Abandoned scratch is released by the tracker's worker thread, microseconds
+/// after its kernel retires. The bound is generous so a loaded machine is not a
+/// failure; a release that never comes still is.
+bool ReleasedWithin(const std::weak_ptr<miopen::ScratchAllocation>& scratch,
+                    std::chrono::milliseconds limit = std::chrono::seconds(10))
 {
-protected:
-    void SetUp() override
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while(!scratch.expired())
     {
-        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
-        handle = std::make_unique<miopen::Handle>(stream);
-        ASSERT_EQ(hipMalloc(&data, desc.GetElementSpace() * sizeof(float)), hipSuccess);
-
-        // Compile and load the kernel now: neither is legal mid-capture.
-        Launch();
-        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        if(std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    return true;
+}
 
-    void TearDown() override
-    {
-        handle.reset();
-        (void)hipFree(data);
-        (void)hipStreamDestroy(stream);
-    }
-
-    /// A kernel launch through Handle::Run on the handle's stream.
-    void Launch()
-    {
-        const float value = 1.0f;
-        miopen::SetTensor(*handle, desc, data, &value);
-    }
-
-    /// Abandons an idle slot on the handle's own tracker whose scratch nothing
-    /// else references, so a reclaim actually frees it. Idle means any reclaim
-    /// that runs will take it; whether one runs is what the tests check.
-    std::weak_ptr<miopen::ScratchAllocation> AbandonIdleSlotHoldingScratch()
-    {
-        auto& tracker                                    = handle->GetStreamTracker();
-        auto slot                                        = tracker.acquire(*handle);
-        slot.scratch                                     = handle->GetScratchBuffer(65536);
-        std::weak_ptr<miopen::ScratchAllocation> scratch = slot.scratch;
-        tracker.abandon(std::move(slot));
-        return scratch;
-    }
-
-    hipStream_t stream = nullptr;
-    std::unique_ptr<miopen::Handle> handle;
-    miopen::TensorDescriptor desc{miopenFloat, {1, 1, 1, 256}};
-    void* data = nullptr;
-};
+/// A scratch buffer no other test holds, so its only owner is the slot it is
+/// given to and its release is observable. Call it before gating any stream:
+/// dropping the probe buffer frees it with hipFree, which waits for every
+/// stream on the device, a gated one included.
+std::shared_ptr<miopen::ScratchAllocation> FreshScratch(miopen::Handle& handle)
+{
+    auto prev     = handle.GetScratchBuffer(1);
+    const auto sz = (prev ? prev->size : 0) + 65536;
+    prev.reset();
+    return handle.GetScratchBuffer(sz);
+}
 
 } // namespace
 
@@ -231,82 +206,57 @@ TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
     }
 }
 
-TEST_F(GPU_StreamTracker_FP32, SweepReclaimsIdleStream)
+TEST_F(GPU_StreamTracker_FP32, AbandonedScratchIsReleasedWhenItsKernelRetires)
 {
-    auto slot                   = tracker.acquire(handle);
-    const auto abandoned_stream = slot.stream;
-    tracker.abandon(std::move(slot));
-
-    tracker.sweep();
-
-    auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.stream, abandoned_stream);
-    tracker.release(reclaimed);
-}
-
-TEST_F(GPU_StreamTracker_FP32, SweepLeavesBusyStreamDraining)
-{
-    auto slot = tracker.acquire(handle);
-
+    // The release must not wait for a later MIOpen call: a caller that finds,
+    // captures, and from then on only replays the graph makes none (issue
+    // #12121). Nothing below touches the tracker or the handle after abandon().
+    auto slot    = tracker.acquire(handle);
+    slot.scratch = FreshScratch(handle);
+    ASSERT_NE(slot.scratch, nullptr);
+    const std::weak_ptr<miopen::ScratchAllocation> scratch = slot.scratch;
     StreamGate gate;
     ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
-
-    auto busy_stream = slot.stream;
     tracker.abandon(std::move(slot));
 
-    tracker.sweep();
-
-    // Still gated, so the slot must not have been reclaimed
-    auto next = tracker.acquire(handle);
-    EXPECT_NE(next.stream, busy_stream);
-    tracker.release(next);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(scratch.expired()) << "released while its kernel was still running";
 
     gate.open();
-    ASSERT_EQ(hipStreamSynchronize(busy_stream), hipSuccess);
-
-    tracker.sweep();
-
-    // available_ is LIFO, so the just-swept slot is on top
-    auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.stream, busy_stream);
-    tracker.release(reclaimed);
+    EXPECT_TRUE(ReleasedWithin(scratch)) << "scratch not released after its kernel retired";
 }
 
-TEST_F(GPU_StreamTracker_FP32, SweepDoesNotInvalidateAnUnrelatedGraphCapture)
+TEST_F(GPU_StreamTracker_FP32, ReleaseDuringAnUnrelatedGlobalCaptureLeavesItValid)
 {
-    // Regression for issue #12121. Reclaiming polls abandoned streams with
-    // hipStreamQuery. Under the default global capture mode HIP rejects that
-    // call from any thread while any capture is in flight, and the rejection
-    // invalidates the capture - so a stream abandoned by one find used to break
-    // a graph capture belonging to an entirely unrelated caller.
-    auto slot = tracker.acquire(handle);
-
+    // Regression for issue #12121. The release runs on the tracker's worker
+    // whenever the kernel retires, so it can land inside anyone's capture. Under
+    // the default global mode HIP refuses the deallocator's hipFree from any
+    // thread while any capture is open, and the refusal invalidates that capture.
+    auto slot    = tracker.acquire(handle);
+    slot.scratch = FreshScratch(handle);
+    ASSERT_NE(slot.scratch, nullptr);
+    const std::weak_ptr<miopen::ScratchAllocation> scratch = slot.scratch;
     StreamGate gate;
     ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
-    const auto busy_stream = slot.stream;
     tracker.abandon(std::move(slot));
 
     // Allocate before the capture opens: hipMalloc is itself illegal during one.
     void* dev_ptr = nullptr;
     ASSERT_EQ(hipMalloc(&dev_ptr, 64), hipSuccess);
-
     hipStream_t capture_stream = nullptr;
     ASSERT_EQ(hipStreamCreateWithFlags(&capture_stream, hipStreamNonBlocking), hipSuccess);
 
     ASSERT_EQ(hipStreamBeginCapture(capture_stream, hipStreamCaptureModeGlobal), hipSuccess);
     ASSERT_EQ(hipMemsetAsync(dev_ptr, 0, 64, capture_stream), hipSuccess);
 
-    // The call under test, standing in for the reclaim that used to ride along
-    // on every kernel launch.
-    tracker.sweep();
+    gate.open();
+    const bool released = ReleasedWithin(scratch);
 
     hipGraph_t graph      = nullptr;
     const auto end_status = hipStreamEndCapture(capture_stream, &graph);
 
-    gate.open();
-    ASSERT_EQ(hipStreamSynchronize(busy_stream), hipSuccess);
-
-    EXPECT_EQ(end_status, hipSuccess) << "sweep() invalidated an unrelated capture";
+    EXPECT_TRUE(released) << "scratch not released during the capture";
+    EXPECT_EQ(end_status, hipSuccess) << "the release invalidated an unrelated capture";
     EXPECT_NE(graph, nullptr);
 
     if(graph != nullptr)
@@ -359,8 +309,8 @@ TEST_F(GPU_StreamTracker_FP32, AcquireWaitsOutABacklogRatherThanGrowOrDecline)
 
 TEST_F(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
 {
-    // A slot carrying a completion event is reclaimed on that event rather than
-    // on a stream poll, and not before it signals.
+    // A slot is not reclaimed before its completion event signals, and comes
+    // back with the spent event cleared.
     auto slot = tracker.acquire(handle);
 
     StreamGate gate;
@@ -374,7 +324,6 @@ TEST_F(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
     tracker.abandon(std::move(slot));
 
     // Event is queued behind the gate, so nothing may be reclaimed yet.
-    tracker.sweep();
     auto other = tracker.acquire(handle);
     EXPECT_NE(other.stream, gated_stream);
     tracker.release(other);
@@ -382,89 +331,10 @@ TEST_F(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
     gate.open();
     ASSERT_EQ(hipStreamSynchronize(gated_stream), hipSuccess);
 
-    tracker.sweep();
     auto reclaimed = tracker.acquire(handle);
     EXPECT_EQ(reclaimed.stream, gated_stream);
     EXPECT_EQ(reclaimed.done, nullptr) << "reclaim left the spent event on the slot";
     tracker.release(reclaimed);
-}
-
-TEST_F(GPU_StreamTracker_FP32, PinnedScratchGatesTheLaunchPathAndClearsWithTheBuffer)
-{
-    auto prev     = handle.GetScratchBuffer(1);
-    const auto sz = (prev ? prev->size : 0) + 65536;
-    prev.reset();
-
-    auto scratch = handle.GetScratchBuffer(sz);
-    ASSERT_NE(scratch, nullptr);
-    EXPECT_FALSE(tracker.HasPinnedScratch());
-
-    auto slot    = tracker.acquire(handle);
-    slot.scratch = scratch;
-    tracker.abandon(std::move(slot));
-    EXPECT_TRUE(tracker.HasPinnedScratch()) << "launch path would skip a pinned buffer";
-
-    tracker.sweep();
-
-    // Buffer handed back, so the launch-path test goes quiet again even though
-    // the slot itself lives on in the pool.
-    EXPECT_EQ(scratch.use_count(), 1);
-    EXPECT_FALSE(tracker.HasPinnedScratch()) << "launch path still paying after the release";
-}
-
-TEST_F(GPU_StreamTracker_FP32, ReclaimIsSkippedWhileTheGivenStreamIsCapturing)
-{
-    // The launch-path entry point reclaims only outside a capture: the release
-    // ends in a deallocator call, which has no business running mid-recording.
-    auto scratch = handle.GetScratchBuffer(65536);
-    ASSERT_NE(scratch, nullptr);
-
-    auto slot    = tracker.acquire(handle);
-    slot.scratch = scratch;
-    tracker.abandon(std::move(slot)); // stream is idle, so a sweep would reclaim
-
-    void* dev_ptr = nullptr;
-    ASSERT_EQ(hipMalloc(&dev_ptr, 64), hipSuccess);
-    hipStream_t capture_stream = nullptr;
-    ASSERT_EQ(hipStreamCreateWithFlags(&capture_stream, hipStreamNonBlocking), hipSuccess);
-
-    ASSERT_EQ(hipStreamBeginCapture(capture_stream, hipStreamCaptureModeGlobal), hipSuccess);
-    ASSERT_EQ(hipMemsetAsync(dev_ptr, 0, 64, capture_stream), hipSuccess);
-
-    tracker.SweepUnlessCapturing(capture_stream);
-    EXPECT_TRUE(tracker.HasPinnedScratch()) << "released a buffer mid-capture";
-
-    hipGraph_t graph = nullptr;
-    EXPECT_EQ(hipStreamEndCapture(capture_stream, &graph), hipSuccess);
-
-    // Same call once the capture is closed does reclaim.
-    tracker.SweepUnlessCapturing(handle.GetStream());
-    EXPECT_FALSE(tracker.HasPinnedScratch()) << "failed to reclaim outside a capture";
-
-    if(graph != nullptr)
-        (void)hipGraphDestroy(graph);
-    (void)hipStreamDestroy(capture_stream);
-    ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
-}
-
-TEST_F(GPU_StreamTracker_FP32, SweepReleasesScratch)
-{
-    auto prev     = handle.GetScratchBuffer(1);
-    const auto sz = (prev ? prev->size : 0) + 65536;
-    prev.reset();
-
-    auto scratch = handle.GetScratchBuffer(sz);
-    ASSERT_NE(scratch, nullptr);
-    ASSERT_EQ(scratch.use_count(), 1);
-
-    auto slot    = tracker.acquire(handle);
-    slot.scratch = scratch;
-    tracker.abandon(std::move(slot));
-    ASSERT_EQ(scratch.use_count(), 2); // local + draining slot
-
-    // No work on the stream, so sweep reclaims and drops the slot's reference
-    tracker.sweep();
-    EXPECT_EQ(scratch.use_count(), 1);
 }
 
 TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
@@ -517,74 +387,6 @@ TEST_F(GPU_StreamTracker_FP32, ScratchReturnsNullOnZero)
 {
     auto s = handle.GetScratchBuffer(0);
     EXPECT_EQ(s, nullptr);
-}
-
-TEST_F(GPU_StreamTracker_FP32, ScratchSurvivesAbandon)
-{
-    auto prev     = handle.GetScratchBuffer(1);
-    const auto sz = (prev ? prev->size : 0) + 65536;
-    prev.reset();
-
-    auto scratch = handle.GetScratchBuffer(sz);
-    ASSERT_NE(scratch, nullptr);
-    // Handle holds weak_ptr only; local is the sole strong ref
-    EXPECT_EQ(scratch.use_count(), 1);
-
-    auto slot    = tracker.acquire(handle);
-    slot.scratch = scratch;
-    EXPECT_EQ(scratch.use_count(), 2); // local + slot
-
-    tracker.abandon(std::move(slot));
-    EXPECT_EQ(scratch.use_count(), 2); // local + draining slot
-
-    // No work on stream → hipStreamQuery succeeds → reclaim resets scratch
-    auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(scratch.use_count(), 1); // draining slot scratch reset; only local remains
-    tracker.release(reclaimed);
-}
-
-TEST_F(GPU_StreamTrackerHandle_FP32, CapturedLaunchKeepsScratchPinnedAndTheCaptureValid)
-{
-    // Regression for issue #12121 at the launch path itself. A launch recorded
-    // into a graph must neither poll the abandoned stream nor free its scratch:
-    // either breaks the caller's capture.
-    for(const auto mode : {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal})
-    {
-        SCOPED_TRACE(mode == hipStreamCaptureModeGlobal ? "global capture mode"
-                                                        : "thread-local capture mode");
-        const auto scratch = AbandonIdleSlotHoldingScratch();
-        ASSERT_TRUE(handle->GetStreamTracker().HasPinnedScratch());
-
-        ASSERT_EQ(hipStreamBeginCapture(stream, mode), hipSuccess);
-        Launch();
-        const bool released_mid_capture = scratch.expired();
-        hipGraph_t graph                = nullptr;
-        const auto end_status           = hipStreamEndCapture(stream, &graph);
-
-        EXPECT_FALSE(released_mid_capture) << "Handle::Run reclaimed during a capture";
-        EXPECT_TRUE(handle->GetStreamTracker().HasPinnedScratch());
-        EXPECT_EQ(end_status, hipSuccess) << "Handle::Run invalidated the capture";
-        EXPECT_NE(graph, nullptr);
-        if(graph != nullptr)
-            (void)hipGraphDestroy(graph);
-
-        // The first launch outside the capture is what hands the buffer back.
-        Launch();
-        EXPECT_TRUE(scratch.expired()) << "uncaptured launch left the scratch pinned";
-        EXPECT_FALSE(handle->GetStreamTracker().HasPinnedScratch());
-    }
-}
-
-TEST_F(GPU_StreamTrackerHandle_FP32, CreateReleasesPinnedScratch)
-{
-    // Allocation is the other reclaim point, for callers that never launch
-    // again after a find.
-    const auto scratch = AbandonIdleSlotHoldingScratch();
-    ASSERT_FALSE(scratch.expired());
-
-    const auto buffer = handle->Create(64);
-    EXPECT_TRUE(scratch.expired()) << "Handle::Create left the scratch pinned";
-    EXPECT_FALSE(handle->GetStreamTracker().HasPinnedScratch());
 }
 
 TEST(CPU_StreamTracker_NONE, ZeroCapIsRaisedToOne)
