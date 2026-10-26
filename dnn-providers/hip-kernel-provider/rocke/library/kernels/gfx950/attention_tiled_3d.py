@@ -27,15 +27,19 @@ This module re-uses every MFMA / async DMA / softmax helper from the
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._lse_store import lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -56,6 +60,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     mfma_16x16x32_for_dtype as _mfma_16x16x32,
@@ -131,6 +136,7 @@ class UnifiedAttention3DTiledSpec:
     num_segments: int
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
     # register-pressure-bound; setting this to 2 or 3 tightens the
@@ -201,6 +207,11 @@ class UnifiedAttention3DTiledSpec:
     right_bound: int = 0
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -222,6 +233,8 @@ class UnifiedAttention3DTiledSpec:
                 "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
                 "(their offsets are defined on the causal diagonal)"
             )
+        if self.kv_layout == "strided" and self.use_additive_bias:
+            raise ValueError("strided KV does not support use_additive_bias")
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -287,9 +300,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -309,6 +320,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
             "kvswz" if self.use_kv_lds_swizzle else "",
@@ -331,8 +343,9 @@ def supports_tiled_3d(
     num_queries_per_kv: int,
     use_alibi: bool,
     use_qq_bias: bool,
-    use_fp8: bool,
-    q_dtype,
+    use_additive_bias: bool = False,
+    use_fp8: bool = False,
+    q_dtype=None,
     kv_storage_dtype: Optional[str] = None,
     arch: str = "gfx950",
 ) -> Tuple[bool, str]:
@@ -423,6 +436,7 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     # 64-bit paged-KV addressing for caches > 2 GiB (see spec docstring).
     I64_KV_ADDR = spec.use_i64_kv_addr
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
@@ -497,6 +511,9 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
@@ -1217,25 +1234,47 @@ def build_unified_attention_3d_tiled(
                         align=4,
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
+                if USE_ADDITIVE_BIAS:
+                    # Per-row query head (GQA-correct). Under ``m_ok``, padding
+                    # rows and tail columns (col_abs >= seq_len) load element 0
+                    # instead of an out-of-range index.
+                    s_scaled = add_additive_bias(
+                        b,
+                        s_scaled,
+                        additive_bias,
+                        seq_idx=seq_idx,
+                        q_head=qh_r,
+                        q_row=qp_r,
+                        col=col_abs,
+                        mask=m_ok,
+                        rcp_ln2=rcp_ln2,
+                    )
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-        # other 3 lanes.
+        # other 3 lanes. m_new is the running max (m_val included), so
+        # alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+        # tile-local max would overflow alpha once a tile scores ~128 log2 units
+        # below an earlier one. Until the row has an unmasked key (or, in
+        # segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+        # instead, so P and alpha are 0, not NaN. A row with neither in the
+        # segment stores m = -inf, which the reduce kernel weights by 0.
         local_max = neg_inf
         for v in masked.values():
             local_max = b.fmax(local_max, v)
-        full_max_raw = _row_reduce(local_max, b.fmax)
-        ok = b.fcmp("ogt", full_max_raw, neg_inf)
-        m_new = b.select(ok, full_max_raw, zero_f)
+        tile_max = _row_reduce(local_max, b.fmax)
+        m_new = b.fmax(m_val, tile_max)
+        ok = b.fcmp("ogt", m_new, neg_inf)
+        m_safe = b.select(ok, m_new, zero_f)
         p_regs = {}
         sum_p = zero_f
         for key, v in masked.items():
-            p = b.exp2_fast(b.fsub(v, m_new))
+            p = b.exp2_fast(b.fsub(v, m_safe))
             p_regs[key] = p
             sum_p = b.fadd(sum_p, p)
         l_local = _row_reduce(sum_p, b.fadd)
 
-        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        alpha = b.exp2_fast(b.fsub(m_val, m_safe))
         new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.
@@ -1338,8 +1377,18 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
+    #   still differs from before LSE existed: the masked-segment merge fix below
+    #   applies with LSE on or off.)
+    emit_lse: bool = field(default=False, kw_only=True)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1350,13 +1399,15 @@ class UnifiedAttentionReduceTiledSpec:
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            "rocke_uattn_reduce_tiled",
+        parts = [
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
-        )
+        ]
+        if self.emit_lse:
+            parts.append("lse")
+        return kernel_name_join("rocke_uattn_reduce_tiled", *parts)
 
 
 def build_unified_attention_reduce_tiled(
@@ -1374,7 +1425,8 @@ def build_unified_attention_reduce_tiled(
     Grid: ``(total_q, num_query_heads, 1)``.  Each CTA reduces over the
     ``NUM_SEGMENTS`` segments for one (token, head):
 
-      1. overall_max = max(segm_max)
+      1. overall_max = max(segm_max) over segments with segm_expsum > 0 (a
+         segment masked for the row stores max=0, sum=0 and is treated as -inf)
       2. overall_expsum = sum(segm_expsum * exp2(segm_max - overall_max))
       3. acc[d] = sum_s segm_output[s,d] * exp2(segm_max[s] - overall_max)
       4. output[d] = acc[d] / overall_expsum  (with 0/0 -> 0)
@@ -1402,6 +1454,17 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     q_token = b.block_id_x()
     q_head = b.block_id_y()
@@ -1475,6 +1538,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)
@@ -1537,6 +1605,22 @@ def build_unified_attention_reduce_tiled(
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
         out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
+
+    if spec.emit_lse:
+        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
+        # lane writes. overall_max is in log2 units (segm_max carries
+        # scale*log2e); lse_store converts to natural log and writes -inf for a
+        # row with no mass (every segment empty), whose O is already 0.
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_store(
+                b,
+                lse,
+                lse_index,
+                overall_max,
+                overall_expsum,
+                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+            )
 
     return b.kernel
 

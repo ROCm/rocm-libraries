@@ -29,6 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_local_sliced_ell.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -71,8 +73,7 @@ void testing_spmv_sell_bad_arg(const Arguments& argus)
 #endif
 #endif
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * safe_size), device_free};
     auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(J) * safe_size), device_free};
@@ -87,9 +88,6 @@ void testing_spmv_sell_bad_arg(const Arguments& argus)
     X*    dx   = (X*)dx_managed.get();
     Y*    dy   = (Y*)dy_managed.get();
     void* dbuf = (void*)dbuf_managed.get();
-
-    // SpMV structures
-    hipsparseDnVecDescr_t x, y;
 
     size_t bsize;
 
@@ -106,8 +104,8 @@ void testing_spmv_sell_bad_arg(const Arguments& argus)
                                  sellColInIdxType,
                                  idxBase,
                                  aType);
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, n, dx, xType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, yType), "success");
+    hipsparseLocalDnVec     x(n, dx, xType);
+    hipsparseLocalDnVec     y(m, dy, yType);
 
     // SpMV buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpMV_bufferSize(
@@ -186,10 +184,6 @@ void testing_spmv_sell_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
@@ -216,8 +210,7 @@ void testing_spmv_sell(Arguments argus)
     hipDataType          computeType = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr;
@@ -304,10 +297,9 @@ void testing_spmv_sell(Arguments argus)
         m, n, nnz, sell_colval_size, slice_size, dptr, dcol, dval, typeI, typeJ, idx_base, aType);
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, xType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, yType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, yType));
+    hipsparseLocalDnVec x(n, dx, xType);
+    hipsparseLocalDnVec y1(m, dy_1, yType);
+    hipsparseLocalDnVec y2(m, dy_2, yType);
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -414,9 +406,6 @@ void testing_spmv_sell(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 

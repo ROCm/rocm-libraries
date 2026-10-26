@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_coo.hpp"
 #include "hipsparse_local_csr.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -47,7 +48,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
     // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int64_t              m         = 100;
     int64_t              n         = 100;
@@ -64,8 +65,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpGEAMAlg_t alg       = HIPSPARSE_SPGEAM_ALG1;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
@@ -273,7 +273,7 @@ template <typename T>
 void testing_spgeam_csr(Arguments argus)
 {
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     int                  m        = argus.M;
     int                  n        = argus.N;
@@ -292,8 +292,7 @@ void testing_spgeam_csr(Arguments argus)
     hipsparseIndexType_t typeJ = HIPSPARSE_INDEX_32I;
     hipDataType          typeT = getDataType<T>();
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
     hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
