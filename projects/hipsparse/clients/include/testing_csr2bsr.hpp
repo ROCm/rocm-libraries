@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -53,15 +54,14 @@ void testing_csr2bsr_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t bsr_idx_base = HIPSPARSE_INDEX_BASE_ZERO;
     hipsparseDirection_t dir          = HIPSPARSE_DIRECTION_ROW;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
-    std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
-    hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
-    hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
+    hipsparseLocalHandle_t        handle;
+    std::unique_ptr<descr_struct> unique_ptr_csr_descr(new descr_struct);
+    hipsparseMatDescr_t           csr_descr = unique_ptr_csr_descr->descr;
+    std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
+    hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     auto csr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * (safe_size + 1)), device_free};
@@ -378,15 +378,14 @@ void testing_csr2bsr(Arguments argus)
     hipsparseDirection_t dir          = argus.dirA;
     std::string          filename     = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
-    std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
-    hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
-    hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
+    hipsparseLocalHandle_t        handle(argus);
+    std::unique_ptr<descr_struct> unique_ptr_csr_descr(new descr_struct);
+    hipsparseMatDescr_t           csr_descr = unique_ptr_csr_descr->descr;
+    std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
+    hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     srand(12345ULL);
 
