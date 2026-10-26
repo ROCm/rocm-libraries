@@ -63,29 +63,6 @@ namespace
     constexpr int64_t Y_STRIDE     = Y_SIZE + 13;
     constexpr int64_t X_VAL_STRIDE = NNZ + 11;
 
-    // Temporarily shrink the grid.y limit that get_grid_size_y clamps against.
-    struct ScopedMaxGridSizeY
-    {
-        rocsparse_handle handle;
-        int              saved;
-
-        ScopedMaxGridSizeY(rocsparse_handle h, int limit)
-            : handle(h)
-            , saved(h->properties.maxGridSize[1])
-        {
-            handle->properties.maxGridSize[1] = limit;
-        }
-
-        ~ScopedMaxGridSizeY()
-        {
-            handle->properties.maxGridSize[1] = saved;
-        }
-
-        ScopedMaxGridSizeY(const ScopedMaxGridSizeY&) = delete;
-
-        ScopedMaxGridSizeY& operator=(const ScopedMaxGridSizeY&) = delete;
-    };
-
     template <typename T>
     T make_value(int64_t i)
     {
