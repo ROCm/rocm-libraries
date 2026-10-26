@@ -476,7 +476,9 @@ importable → CTest). **CI does not run
 the packaged wheels. Its registered pytest entries include the platform suite
 and selected library host/GPU suites. Test registration is authoritative in
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt); the provider's external
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), which includes the library
+suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.cmake);
+the provider's external
 test-category YAML and TheRock's tier selection determine which registered
 tests actually execute. Check the selected list in the job log or with CTest's
 verbose listing. Registration alone does not establish CI coverage.

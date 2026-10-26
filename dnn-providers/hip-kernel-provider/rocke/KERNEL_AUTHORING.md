@@ -65,7 +65,12 @@ The two invariants that gate every process below:
    2D/3D bodies) exactly like every other family, and additionally carries
    `.py`/`.c` emitter pairs under
    [library/tests/parity/](library/tests/parity/) that are byte-compared per
-   config.
+   config. A library family's C++ mirror may instead live in
+   [library/cpp/](library/cpp/) (`rocke_library_core`, bound into
+   `rocke_library_engine`), gated by the same `check_byte_identity.py`; new
+   library families put it there, so the library owns both halves. Their
+   byte-identity golden is
+   [library/tests/parity/golden/](library/tests/parity/golden/).
 2. **One-way dependency.** `library → platform` only. `platform` never imports
    `kernels` / `builders` / `dispatch`, and stays standalone-installable.
    Anything reusable across families belongs in platform (see

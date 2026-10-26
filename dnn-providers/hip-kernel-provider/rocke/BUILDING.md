@@ -145,4 +145,7 @@ Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
 
 The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its
 `rocke_engine` pybind binding are built by CMake, not pip, and are intentionally
-not part of any wheel. See `platform/BUILD.md`.
+not part of any wheel. See `platform/BUILD.md`. The same configure also builds
+the library families' C++ mirrors (`library/cpp/` → `librocke_library.a`, beside
+`librocke_core.a`) and, with `ROCKE_BUILD_PYBIND=ON`, their `rocke_library_engine`
+binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.

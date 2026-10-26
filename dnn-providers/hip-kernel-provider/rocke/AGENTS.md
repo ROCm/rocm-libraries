@@ -21,7 +21,8 @@ artifact, and treat uncertainty as confidential until a human resolves it:
 ## The #1 invariant: byte-identity
 
 The Python engine (`platform/python/rocke/core/lower_llvm.py`) and the C++ engine
-(`platform/cpp/`) **MUST emit the same LLVM-IR bytes** for every kernel family. Any
+(`platform/cpp/`, plus `library/cpp/` for library-owned families) **MUST emit the
+same LLVM-IR bytes** for every kernel family. Any
 op / instance / atom / fusion / arch change must be made in **both** engines in the
 same change; if output is meant to change, re-bless the golden in the same change.
 
@@ -46,7 +47,16 @@ rocke/
 │   └── tools/ tests/ cmake/
 └── library/         # the SDPA product — build-time-only Python (NOT installed, no wheel)
     ├── kernels/ builders/ dispatch/ benchmarks/ tests/
+    └── cpp/           C++ mirrors of library families (librocke_library.a + rocke_library_engine)
 ```
+
+A library family owns both halves of its byte-identity contract: the Python
+builder in `library/kernels/` and its C++ mirror in `library/cpp/`, with parity
+emitters and their golden in `library/tests/parity/`. `platform/CMakeLists.txt`
+adds `library/cpp` when the sibling tree exists; its targets link `rocke_core`,
+never the reverse, and `tools/check_byte_identity.py` gates them with the
+engine's own families. Library tests enrol in CI through
+`library/tests/ctest_lists.cmake`.
 
 One-way dependency: **`library → platform` only**; platform never imports
 `kernels`/`builders`/`dispatch` and stays standalone-installable.
@@ -140,7 +150,8 @@ Hard rule from the runbook: **never report speed without correctness** — run t
 relevant parity/verify harness (attention → `library/builders/**/parity_*.py`;
 non-attention → `platform/python/rocke/examples/common/*parity*.py`) and stay within
 the runbook §1.4 tolerances before claiming any win. Leave a replayable case study in
-the relevant `examples/<arch>/<workload>/` folder.
+the relevant `examples/<arch>/<workload>/` folder (`library/builders/<arch>/<workload>/`
+for a library family).
 
 ## Deeper material
 

@@ -74,6 +74,7 @@ agrees.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from dataclasses import dataclass
@@ -435,8 +436,12 @@ def lower_kernel_via_backend(
 # ------------------------------------------------------------------ binding
 
 
-def _import_engine():
-    """Import and return the ``rocke_engine`` extension module.
+def import_engine(module: str = "rocke_engine"):
+    """Import and return a C++ engine extension module.
+
+    ``rocke_engine`` carries the engine's own families. Library-owned families
+    (``library/cpp``) bind into ``rocke_library_engine``, which the same build
+    places beside it; their bridges pass that name.
 
     Raises :class:`BackendError` with actionable build guidance when the
     extension is not importable (it is built out-of-tree into a temporary
@@ -444,15 +449,19 @@ def _import_engine():
     package must be installed alongside the built extension).
     """
     try:
-        import rocke_engine  # type: ignore
+        return importlib.import_module(module)
     except ImportError as e:
         raise BackendError(
-            "the C++ engine extension 'rocke_engine' is not importable: "
+            f"the C++ engine extension {module!r} is not importable: "
             f"{e}. Build it from cpp/bindings/ (see its README) and put "
             "the resulting build directory on sys.path, then retry with "
             "backend='cpp' or backend='both'."
         ) from e
-    return rocke_engine
+
+
+def _import_engine():
+    """Import and return the ``rocke_engine`` extension module."""
+    return import_engine()
 
 
 # ------------------------------------------------- spec dict serialization
@@ -1162,7 +1171,7 @@ def _diff_and_pick(
     return GemmLowerResult(BACKEND_BOTH, py_ll, py_ir if want_ir else "")
 
 
-def _lower_family(
+def lower_family(
     family: str,
     spec: Any,
     arch: str,
@@ -1176,9 +1185,12 @@ def _lower_family(
     """The family-agnostic python/cpp/both driver.
 
     ``py_fn(want_ir) -> (ll, ir)`` runs the native Python engine.
-    ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the ``rocke_engine``
-    binding for this family. The selection precedence and the differential
-    comparison are identical to :func:`lower_universal_gemm`.
+    ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the C++ binding for
+    this family. The selection precedence and the differential comparison are
+    identical to :func:`lower_universal_gemm`.
+
+    Public so a library-owned family's bridge (``library/kernels``) drives its
+    ``rocke_library_engine`` binding through the same selection and diff.
     """
     chosen = resolve_backend(backend)
 
@@ -1200,8 +1212,15 @@ def _lower_family(
     )
 
 
-def _name_of(spec: Any) -> str:
+_lower_family = lower_family
+
+
+def name_of(spec: Any) -> str:
+    """The spec's kernel name, for backend mismatch reports."""
     return getattr(spec, "name", "?")
+
+
+_name_of = name_of
 
 
 def lower_batched_gemm(
