@@ -29,11 +29,6 @@
 /* Put experimental APIs here. */
 /* Not part of the public C API: miopen.h does not include this header. */
 
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextern-c-compat"
-#endif
-
 #include <stddef.h>
 #include <miopen/miopen.h>
 
@@ -77,10 +72,6 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
 
 #ifdef __cplusplus
 }
-#endif
-
-#ifdef __clang__
-#pragma clang diagnostic pop
 #endif
 
 #endif // GUARD_MIOPEN_INTERNAL_H_
