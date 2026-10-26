@@ -25,6 +25,7 @@
 #include <array>
 #include <climits>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -42,14 +43,25 @@ enum class StinkyErrorCode : int {
 ///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query
 ///       it.
 struct GemmTileConfig {
+    // Every member carries a default initializer. Only `arch` used to, so a
+    // default-initialized GemmTileConfig left the rest holding whatever was on
+    // the stack. Passes read these (NumWaves in RemoveDscntPass and in the CDNA5
+    // ds issue-cost model), so scheduling could depend on leftover memory --
+    // quiet, and different between runs. Sanitizers flag it as a read of an
+    // uninitialized value.
+    //
+    // NumWaves defaults to 1 rather than 0 because 1 is a real occupancy: a
+    // reader gets single-wave behaviour, not a sentinel it has to special-case.
+    // The tile sizes default to 0, which is NOT a valid tile, so 0 there means
+    // "nobody configured this" and is worth complaining about.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
-    uint32_t TileA0;                   ///< Tile size for A dimension 0
-    uint32_t TileB0;                   ///< Tile size for B dimension 0
-    uint32_t TileM0;                   ///< Tile size for M dimension 0
-    uint32_t NumGRA;                   ///< Number of global read A
-    uint32_t NumGRB;                   ///< Number of global read B
-    uint32_t NumGRM;                   ///< Number of global read M
-    uint32_t NumWaves;                 ///< Number of waves
+    uint32_t TileA0 = 0;               ///< Tile size for A dimension 0; 0 = unset
+    uint32_t TileB0 = 0;               ///< Tile size for B dimension 0; 0 = unset
+    uint32_t TileM0 = 0;               ///< Tile size for M dimension 0; 0 = unset
+    uint32_t NumGRA = 0;               ///< Number of global read A
+    uint32_t NumGRB = 0;               ///< Number of global read B
+    uint32_t NumGRM = 0;               ///< Number of global read M
+    uint32_t NumWaves = 1;             ///< Number of waves; 1 = single wave
 };
 
 /// Pass-specific feature configuration
@@ -69,6 +81,11 @@ struct PassFeatureConfig {
         AscendingCache,  ///< Zigzag for cache reuse: A0 B0 B1 A1
     };
 
+    enum class WmmaRefillMode : int {
+        Fixed = 0,    ///< A refill issues wmmaBatchSize WMMAs
+        Dynamic = 1,  ///< A refill issues WMMAs until the queued cover reaches wmmaRefillToCycles
+    };
+
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -80,34 +97,92 @@ struct PassFeatureConfig {
         int globalReadDrainLatency = 0;
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
-        int dsReadThrottleLatency = 0;
-        /// Fraction of the full throttle interval used for the first
-        /// dsReadThrottleTransitionEntries issued beyond the queue depth.
-        /// Clamped to [0, 1]; 1.0 applies full throttling.
-        double dsReadThrottleTransitionFactor = 1.0;
-        /// Number of entries beyond queue depth that use the transition factor
-        /// before full throttling begins. 0 disables the transition; negative
-        /// means one queue depth.
-        int dsReadThrottleTransitionEntries = 0;
-        int dsReadPerWmma = INT_MAX;
         int tensorLoadWmmaSpace = 0;
+        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
+        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
+        /// of waiting for the previous one to finish. 1 = the single-window model.
+        int wmmaQueueDepth = 1;
+        /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
+        /// filler, tensor_load) may issue; below it, and with room in the queue, the next
+        /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
+        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        int wmmaQueueCoverCycles = 0;
+        /// How many WMMAs one refill issues once the queue drops below the refill line
+        /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
+        /// for the queued cover to reach wmmaRefillToCycles, counted from the live timeline.
+        WmmaRefillMode wmmaRefillMode = WmmaRefillMode::Fixed;
+        /// Fixed mode: WMMAs per refill. <= 0 is treated as 1.
+        int wmmaBatchSize = 1;
+        /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
+        /// (wmmaQueueDepth * the WMMA latency).
+        int wmmaRefillToCycles = 0;
+        /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
+        /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
+        /// ds_loads issue as soon as they are ready and a credit is free.
+        bool dsSpread = true;
+        /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
+        /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
+        /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are
+        /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
+        /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
+        int wmmaBarrierCoverCycles = -1;
+        /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
+        /// queue depth). The windows the ds_loads in front of a barrier need are at least
+        /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
+        int dsReadCyclesPerLoad = 0;
+        /// ds_loads a WMMA batch (dsBatchWmmas WMMAs) may take above the region's even share when
+        /// the batch began behind the even line (a dependency delayed its loads), so the region
+        /// closes the gap gradually. 0 = no catching up.
+        int dsCatchUpPace = 2;
+        /// WMMAs per ds_load pacing batch (independent of the queue refill batch wmmaBatchSize).
+        int dsBatchWmmas = 4;
+        /// Extra cycles kept between an after-barrier and the before-side
+        /// ds_loads when exclusive overlap uses gap placement. Converted to
+        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
+        int tensorLoadDsLoadGapCycles = 64;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
-        /// Run the per-window WMMA hide-budget policy at the top of each
-        /// scheduling region. The budget gates WMMA selection until enough
-        /// non-WMMA work has issued. The gfx1250 production backend enables it;
-        /// standalone/custom pass pipelines opt in explicitly.
-        bool enableWmmaHideBudgetPrescan = false;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
+        /// share a PSEUDO memory token are chained into dsReadPriority order.
+        /// Loads on different tokens are not ordered against each other. Set
+        /// false to leave a ready lower-priority ds_load free to issue first.
+        bool lockDsReadOrder = true;
+        /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
+        /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
+        bool enableESM2TrackValuVsrc = false;
+        /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
+        /// owed ceil(fillers / WMMAs) of its region and closes once that quota
+        /// is met, instead of being padded to its full co-issue length. ds_load
+        /// selection and coexec hazard padding are unaffected. See
+        /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
+        bool evenSpreadFillers = false;
+        /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
+        /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
+        /// query) is held until just before the next s_barrier_wait; < 0 = off.
+        int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
+        /// this many WMMA windows before the tensor_load it precedes, staggered over its
+        /// group; below 8 marks a single-stage loop (whole group at the load's window,
+        /// ahead of the stage barrier); 0 = off.
+        int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no multi-stage
+        /// prefetch lead (8 or more); a single-stage lead (below 8) is kept.
+        int prefetchLeadMinStageWmmas = 64;
+        /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
+        /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
+        int warGateWmmas = 0;
     };
 
     LoopConfig loopConfig;

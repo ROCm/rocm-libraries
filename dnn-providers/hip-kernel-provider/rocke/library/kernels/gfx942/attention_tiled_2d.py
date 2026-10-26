@@ -35,15 +35,12 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import os
 from typing import Optional, Tuple
 
 from rocke.core.ir import (
     BF16,
-    CACHE_ALL,
-    CACHE_GLOBAL,
-    CACHE_STREAM,
+    CACHE_POLICY_NAMES,
     F16,
     F32,
     FP8E4M3,
@@ -52,15 +49,16 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    NON_TEMPORAL,
     Type,
     Value,
     VectorType,
+    cache_policy_from_name,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -778,11 +776,26 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "8-wave mw32 v1 requires direct-Q + cfvst to stay within LDS"
                 )
-        if self.kv_cache_policy not in ("all", "global", "stream", "nt"):
+        if self.kv_cache_policy not in CACHE_POLICY_NAMES:
             raise ValueError(
-                "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
+                f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
+        if self.use_k_hbm_direct:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_k_hbm_direct requires transposed-x8 "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                    "the 16x16 QK loop always reads K_lds"
+                )
+            if self.use_k_sliced_ring:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring"
+                )
+            if self.use_global_load_lds_k:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
@@ -951,11 +964,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -972,6 +983,7 @@ class UnifiedAttention2DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "fnuz" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
@@ -1429,12 +1441,7 @@ def build_unified_attention_2d_tiled(
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
-    kv_cache_aux = {
-        "all": CACHE_ALL,
-        "global": CACHE_GLOBAL,
-        "stream": CACHE_STREAM,
-        "nt": NON_TEMPORAL,
-    }[spec.kv_cache_policy]
+    kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy)
 
     # gfx942 32x32x8 wide-fragment path (correctness-first flash foundation).
     # ``use_mfma_32x32`` (K=16) stays rejected in the spec; ``use_mfma_32x32x8``
@@ -6005,6 +6012,14 @@ def build_gfx942_4warp_gqa(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    if spec.use_i64_kv_addr:
+        # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
+        # under a spec that claims i64; dispatch keeps the flag off through
+        # kv_addr_width_for_builder.
+        raise NotImplementedError(
+            "4-warp GQA kernel does not support use_i64_kv_addr: its K/V are i32 "
+            "element offsets, correct up to 2^31 elements of the cache dtype"
+        )
     if spec.dtype not in ("bf16", "fp16"):
         raise NotImplementedError("4-warp GQA kernel supports dtype in {bf16, fp16}")
     dtype = spec.dtype_ir
@@ -6541,3 +6556,57 @@ def build_gfx942_4warp_gqa(
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
     return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d`` (gfx942 variant).
+
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The flags
+    below size the LDS estimate, so each one is forwarded: a spec is judged by
+    the layout it will be built with, not by the predicate's defaults.
+    ``use_d256_fast`` is derived from the builder, not the spec: see
+    :func:`supports_gfx942_4warp_gqa_spec`.
+    """
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=False)
+
+
+def supports_gfx942_4warp_gqa_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """:func:`supports_tiled_2d_spec` for ``build_gfx942_4warp_gqa``, the
+    ``use_d256_fast=True`` path."""
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=True)
+
+
+def _supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str, use_d256_fast: bool
+) -> Tuple[bool, str]:
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
+        use_d256_fast=use_d256_fast,
+    )

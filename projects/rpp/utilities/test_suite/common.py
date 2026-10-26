@@ -591,7 +591,8 @@ def print_qa_tests_summary(qaFilePath, supportedCaseList, nonQACaseList, fileNam
             + ").",
             file=sys.stderr,
         )
-        sys.exit(1)
+    # Reported by the caller through finalize_test_run so that the error log is printed first
+    return numLines - numPassed
 
 
 # Read the data from performance logs, process the data and print the results as a summary
@@ -871,3 +872,39 @@ def log_detected(result, errorLog, caseName, functionBitDepth, functionSpecificN
                 + get_signal_name_from_return_code(exitCode)
             )
             errorLog.append(msg)
+
+
+# Print the log of variants that were requested but did not run, then exit non-zero if any
+# variant failed. Exit code 250 (functionality not implemented in RPP) is not a failure.
+def finalize_test_run(errorLog, displayName, suiteName, qaFailures=0):
+    numFailedVariants = len(errorLog) - 1
+    notExecutedFunctionality = errorLog[0]["notExecutedFunctionality"]
+    if numFailedVariants != 0 or notExecutedFunctionality != 0:
+        print(
+            "\n---------------------------------- Log of function variants requested but not run - "
+            + displayName
+            + " ----------------------------------\n"
+        )
+        for i in range(1, len(errorLog)):
+            print(errorLog[i])
+        if notExecutedFunctionality != 0:
+            print(
+                str(notExecutedFunctionality)
+                + " functionality variants requested by "
+                + suiteName
+                + " were not executed since these sub-variants are not currently supported in RPP.\n"
+            )
+        print(
+            "-----------------------------------------------------------------------------------------------"
+        )
+    if numFailedVariants != 0:
+        print(
+            "ERROR: "
+            + str(numFailedVariants)
+            + " function variant(s) exited with a non-zero status in "
+            + suiteName
+            + ".",
+            file=sys.stderr,
+        )
+    if numFailedVariants != 0 or qaFailures != 0:
+        sys.exit(1)

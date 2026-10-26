@@ -83,7 +83,6 @@
 #define LIMITED_MEMORY_STRING "Error: Attempting to allocate more memory than available."
 #define TOO_MANY_DEVICES_STRING "Error: Too many devices requested."
 #define HMM_NOT_SUPPORTED "Error: HMM not supported."
-#define KNOWN_BUG_STRING "Known bug for current GPU platform (see known_bugs.yaml)."
 
 // TODO: This is dependent on internal gtest behaviour.
 // Compared with result.message() when a test ended. Note that "Succeeded\n" is
@@ -91,9 +90,6 @@
 #define LIMITED_MEMORY_STRING_GTEST "Succeeded\n" LIMITED_MEMORY_STRING
 #define TOO_MANY_DEVICES_STRING_GTEST "Succeeded\n" TOO_MANY_DEVICES_STRING
 #define HMM_NOT_SUPPORTED_GTEST "Succeeded\n" HMM_NOT_SUPPORTED
-// GTEST_SKIP() prefixes "Skipped\n"; the listener uses strstr() to detect this
-// substring, so trailing details (e.g. matched platforms) can be appended via <<.
-#define KNOWN_BUG_STRING_GTEST "Skipped\n" KNOWN_BUG_STRING
 
 inline bool is_bias_enabled(hipblasLtEpilogue_t value_)
 {
@@ -360,141 +356,6 @@ const char* read_env_var(const char* env_var);
 /* ============================================================================================ */
 /* Compute strided batched matrix allocation size allowing for strides smaller than full matrix */
 size_t strided_batched_matrix_size(int rows, int cols, int lda, int64_t stride, int batch_count);
-
-/* ============================================================================================ */
-/*! \brief  Debugging purpose, print out CPU and GPU result matrix, not valid in complex number  */
-template <typename T>
-inline void hipblaslt_print_matrix(
-    std::vector<T> CPU_result, std::vector<T> GPU_result, size_t m, size_t n, size_t lda)
-{
-    for(size_t i = 0; i < m; i++)
-        for(size_t j = 0; j < n; j++)
-        {
-            hipblaslt_cout << "matrix  col " << i << ", row " << j
-                           << ", CPU result=" << CPU_result[j + i * lda]
-                           << ", GPU result=" << GPU_result[j + i * lda] << "\n";
-        }
-}
-
-template <typename T>
-void hipblaslt_print_matrix(const char* name, T* A, size_t m, size_t n, size_t lda)
-{
-    hipblaslt_cout << "---------- " << name << " ----------\n";
-    for(size_t i = 0; i < m; i++)
-    {
-        for(size_t j = 0; j < n; j++)
-            hipblaslt_cout << std::setprecision(0) << std::setw(5) << A[i + j * lda] << " ";
-        hipblaslt_cout << std::endl;
-    }
-}
-
-/* ============================================================================= */
-/*! \brief For testing purposes, to convert a regular matrix to a banded matrix. */
-template <typename T>
-inline void regular_to_banded(
-    bool upper, const T* A, int64_t lda, T* AB, int64_t ldab, int64_t n, int64_t k)
-{
-    // convert regular hA matrix to banded hAB matrix
-    for(int j = 0; j < n; j++)
-    {
-        int64_t min1 = upper ? std::max(0, static_cast<int>(j - k)) : j;
-        int64_t max1 = upper ? j : std::min(static_cast<int>(n - 1), static_cast<int>(j + k));
-        int64_t m    = upper ? k - j : -j;
-
-        // Move bands of hA into new banded hAB format.
-        for(int i = min1; i <= max1; i++)
-            AB[j * ldab + (m + i)] = A[j * lda + i];
-
-        min1 = upper ? k + 1 : std::min(k + 1, n - j);
-        max1 = ldab - 1;
-
-        // fill in bottom with random data to ensure we aren't using it.
-        // for !upper, fill in bottom right triangle as well.
-        for(int i = min1; i <= max1; i++)
-            hipblaslt_init<T>(AB + j * ldab + i, 1, 1, 1);
-
-        // for upper, fill in top left triangle with random data to ensure
-        // we aren't using it.
-        if(upper)
-        {
-            for(int i = 0; i < m; i++)
-                hipblaslt_init<T>(AB + j * ldab + i, 1, 1, 1);
-        }
-    }
-}
-
-/* =============================================================================== */
-/*! \brief For testing purposes, zeros out elements not needed in a banded matrix. */
-template <typename T>
-inline void banded_matrix_setup(bool upper, T* A, int64_t lda, int64_t n, int64_t k)
-{
-    // Made A a banded matrix with k sub/super-diagonals
-    for(int i = 0; i < n; i++)
-    {
-        for(int j = 0; j < n; j++)
-        {
-            if(upper && (j > k + i || i > j))
-                A[j * n + i] = T(0);
-            else if(!upper && (i > k + j || j > i))
-                A[j * n + i] = T(0);
-        }
-    }
-}
-
-/* ============================================================================================= */
-/*! \brief For testing purposes, to convert a regular matrix to a packed matrix.                  */
-template <typename T>
-inline void regular_to_packed(bool upper, const T* A, T* AP, int64_t n)
-{
-    int index = 0;
-    if(upper)
-    {
-        for(int i = 0; i < n; i++)
-        {
-            for(int j = 0; j <= i; j++)
-            {
-                AP[index++] = A[j + i * n];
-            }
-        }
-    }
-    else
-    {
-        for(int i = 0; i < n; i++)
-        {
-            for(int j = i; j < n; j++)
-            {
-                AP[index++] = A[j + i * n];
-            }
-        }
-    }
-}
-
-template <typename T>
-void print_strided_batched(
-    const char* name, T* A, int64_t n1, int64_t n2, int64_t n3, int64_t s1, int64_t s2, int64_t s3)
-{
-    constexpr bool is_int = std::is_same<T, int8_t>();
-    using Tp              = std::conditional_t<is_int, int32_t, float>;
-    // n1, n2, n3 are matrix dimensions, sometimes called m, n, batch_count
-    // s1, s1, s3 are matrix strides, sometimes called 1, lda, stride_a
-    hipblaslt_cout << "---------- " << name << " ----------\n";
-    int max_size = 128;
-
-    for(int i3 = 0; i3 < n3 && i3 < max_size; i3++)
-    {
-        for(int i1 = 0; i1 < n1 && i1 < max_size; i1++)
-        {
-            for(int i2 = 0; i2 < n2 && i2 < max_size; i2++)
-            {
-                hipblaslt_cout << static_cast<Tp>(A[(i1 * s1) + (i2 * s2) + (i3 * s3)]) << "|";
-            }
-            hipblaslt_cout << "\n";
-        }
-        if(i3 < (n3 - 1) && i3 < (max_size - 1))
-            hipblaslt_cout << "\n";
-    }
-    hipblaslt_cout << std::flush;
-}
 
 /* ===================================================================== */
 /*! \brief For special numerical types, to convert a value to such type. */

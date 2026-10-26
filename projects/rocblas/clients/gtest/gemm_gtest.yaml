@@ -3739,4 +3739,18 @@ Tests:
   beta: 0
   api: [ C_64 ]
   os_flags: LINUX
+
+# ROCM-30989: skinny ZGEMM with huge K. transA=C makes k the unit-stride index of
+# both A and B, so no 32-bit element offset can overflow and k must not be chunked.
+# Chunking it produced 26372 launches of a k=71 GEMM.
+- name: gemm_large_k_skinny_complex
+  category: stress
+  function:
+    gemm: *double_precision_complex
+    gemm_ex: *double_precision_complex
+  arguments:
+    - { transA: C, transB: N, M: 64, N: 9, K: 16384, lda: 16384, ldb: 16384, ldc: 64, ldd: 64 }
+  alpha: 1
+  beta: 0
+  os_flags: LINUX
 ...

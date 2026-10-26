@@ -1,25 +1,59 @@
 # Generic Ownership (broadest rules first)
 **/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
-./CMakeLists.txt                                    @ROCm/rocm-math-lib-build-infra
-./CMakePresets.json                                 @ROCm/rocm-math-lib-build-infra
+/CMakeLists.txt                                     @ROCm/rocm-math-lib-build-infra
+/CMakePresets.json                                  @ROCm/rocm-math-lib-build-infra
 /cmake/
 
 # CI ownership
-/.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
+/.github/workflows/clang-tidy.yml                   @ROCm/rocm-math-lib-build-infra
+/.github/workflows/pre-commit.yml                   @ROCm/rocm-math-lib-build-infra
+/.github/workflows/shared-ctest-ci.yml              @ROCm/rocm-math-lib-build-infra
+
+# Team specific CI ownership
+/.github/workflows/*docs*.yml                       @ROCm/rocm-documentation
+/.github/docs-config.json                           @ROCm/rocm-documentation
+/.github/workflows/*hipblaslt*.yml                  @ROCm/hipblaslt-reviewers
+/.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-reviewers
+/.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-reviewers
+/.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
+/.github/workflows/*therock*.yml                    @ROCm/therock-infra-write @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-rocjitsu-race-check-linux.yml   @ROCm/therock-infra-write @ROCm/hipblaslt-reviewers
+
+# Component CI ownership
+/.github/workflows/*component-ci*.yml               @ROCm/rocm-math-lib-build-infra
+/.github/workflows/component-ci-geko.yml            @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/.github/workflows/component-ci-miopen.yml          @ROCm/rocm-math-lib-build-infra @ROCm/miopen-reviewers
+/.github/workflows/component-ci-rocisa.yml          @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/.github/workflows/component-ci-stinkytofu.yml      @ROCm/rocm-math-lib-build-infra @ROCm/stinkytofu-reviewers
+/.github/workflows/component-ci-tensilelite-coverage.yml   @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+
+# Individual contributors
+/.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/pr-base-freshness.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/libraries-pr-bot.yml             @samathew121 @amd-shiraz
+/.github/workflows/issue-import.yml                 @jayhawk-commits @ammallya
+/.github/workflows/multiple_pr_import.yml           @jayhawk-commits @ammallya
+/.github/workflows/pr-import.yml                    @jayhawk-commits @ammallya
+/.github/workflows/pr-merge-sync-patches-manual.yml @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/pr-merge-sync-patches.yml        @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/pr-org-label.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
+/.github/workflows/update-subtrees.yml              @ROCm/rocm-libraries-reviewers @jayhawk-commits
+
+# GitHub Copilot custom review instructions
+/.github/instructions/                                           @ROCm/rocm-math-lib-build-infra
+/.github/instructions/hipblaslt-pr-quality.instructions.md       @ROCm/hipblaslt-reviewers
+/.github/instructions/projects-rocblas-testing.instructions.md   @ROCm/rocblas-reviewers
+/.github/instructions/rocke-pr-review.instructions.md            @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 
 # Project-specific ownership
-/dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
-/dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
-/dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/                                     @ROCm/hipdnn-reviewers
 # Shared rocke root (docs, build glue, tools) -- must precede the platform/style/library
 # lines below, since CODEOWNERS is last-match-wins and this would otherwise swallow them.
-/dnn-providers/hip-kernel-provider/rocke/           @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
-/dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
+/dnn-providers/hip-kernel-provider/rocke/           @ROCm/rocke-platform @ROCm/rocke-lib
+/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform
+/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform
+/dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib
 /projects/composablekernel/                         @ROCm/ck-reviewers
 /projects/composablekernel/**/*conv_*               @ROCm/ck-convolution @ROCm/ck-reviewers
 /projects/composablekernel/**/*conv_*/**            @ROCm/ck-convolution @ROCm/ck-reviewers
@@ -60,8 +94,9 @@
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
+/projects/hipccl/                                   @ROCm/prims-rands-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
-/projects/hipdnn/                                   @ROCm/hipdnn-core
+/projects/hipdnn/                                   @ROCm/hipdnn-reviewers
 /projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
 /projects/hipsolver/                                @ROCm/solvers-reviewers
@@ -69,6 +104,7 @@
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
 /projects/hiptensor/                                @ROCm/hiptensor-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
+/projects/rocalution/                               @ROCm/sparses-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
 /projects/rocfft/                                   @ROCm/fft-reviewers
 /projects/rocprim/                                  @ROCm/prims-rands-reviewers
@@ -80,6 +116,7 @@
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
+/shared/hostnumerics/                               @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -97,6 +134,10 @@
 
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+
+/shared/hostnumerics/**/*.cmake                     @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake.in                  @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
 
 /shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
 /shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
@@ -140,8 +181,13 @@
 /projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 
 # Internal engineering decision logs, not user-facing docs: skip the docs-reviewers group.
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
+
+/projects/hipccl/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 
 /projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
@@ -178,10 +224,14 @@
 /projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 
-/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
-/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+
+/projects/rocalution/**/*.md                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/**/*.rst                       @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/**/.readthedocs.yaml           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocalution/docs/                          @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 
 /projects/rocblas/**/*.md                           @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/**/*.rst                          @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers

@@ -25,14 +25,11 @@
 #ifndef TESTING_SPMV_BSR_HPP
 #define TESTING_SPMV_BSR_HPP
 
-#include <hipsparse/hipsparse-config.h>
-
-#ifdef HIPSPARSE_WITH_SPMV_BSR
-
 #include "display.hpp"
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -64,8 +61,7 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     hipDataType          yType       = getDataType<Y>();
     hipDataType          computeType = getDataType<T>();
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * safe_size), device_free};
     auto dcol_managed = hipsparse_unique_ptr{device_malloc(sizeof(J) * safe_size), device_free};
@@ -222,8 +218,7 @@ void testing_spmv_bsr(Arguments argus)
     hipDataType          computeType = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host CSR structures (used as the source for the BSR conversion).
     std::vector<I> hcsr_row_ptr;
@@ -455,7 +450,5 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
-
-#endif // HIPSPARSE_WITH_SPMV_BSR
 
 #endif // TESTING_SPMV_BSR_HPP

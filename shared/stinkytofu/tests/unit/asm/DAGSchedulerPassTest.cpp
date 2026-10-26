@@ -22,14 +22,17 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <sstream>
+#include <string_view>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
-#include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -134,9 +137,24 @@ class DAGSchedulerPassTest : public ::testing::Test {
     AnalysisManager am;
 
     void SetUp() override {
+        // Reset both wholesale. Some tests call SetUp() again mid-test to get a
+        // fresh block (DsIssueCostSharesThePipeBetweenWaves runs three
+        // configurations that way), so anything not cleared here leaks from one
+        // run into the next.
+        //
+        // am in particular: analyses are cached by BasicBlock*, and the old
+        // Function is freed just below before the new one is allocated, so the
+        // new "entry" block frequently lands on the address the previous one
+        // had. Reusing the manager then serves that stale cache entry for a
+        // block that only looks like the old one. Whether the address is
+        // actually recycled depends on the allocation history of everything
+        // that ran before, which is why it surfaced as an order-dependent
+        // failure rather than a reliable one.
+        config = GemmTileConfig{};
         config.arch[0] = 12;
         config.arch[1] = 5;
         config.arch[2] = 0;
+        am = AnalysisManager{};
         func = std::make_unique<Function>("dag_sched_test");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
@@ -156,11 +174,12 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    void runPassWithUnrollGemm() {
+    void runPassWithUnrollGemm(bool dsSpread = true) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = dsSpread;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -180,25 +199,15 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // Run with ds_read queue-depth + throttled-issue controls enabled.
-    // perWmma is held generously high by default so the separate per-WMMA-window
-    // ds cap never binds. throttleLatency drives queue-full pacing; drainLatency
-    // is kept for paths that still model data-return/drain behavior (e.g. barrier
-    // timing).
-    void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
-                                   int drainLatency = -1, double transitionFactor = 0.5,
-                                   int transitionEntries = -1) {
+    // Run with the ds_read credit queue sized to queueDepth. drainLatency feeds the barrier
+    // timing only.
+    void runPassWithDsCredits(int queueDepth, int drainLatency = 64) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsReadQueueDepth = queueDepth;
-        pfc.dagFeatures.dsReadThrottleLatency = throttleLatency;
-        pfc.dagFeatures.dsReadThrottleTransitionFactor = transitionFactor;
-        pfc.dagFeatures.dsReadThrottleTransitionEntries = transitionEntries;
-        if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
-        pfc.dagFeatures.dsReadPerWmma = perWmma;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -300,10 +309,39 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return createWmmaScaleF8_in(bb, destStart, src0Start);
     }
 
+    // Same opcode as createWmmaScaleF8, but FP4/FP4 operands: costOverride
+    // (Gfx1250Instructions.def) drops its cost from {1,8} to {1,4}.
+    StinkyInstruction* createWmmaScaleF4(int destStart, int src0Start) {
+        AsmIRBuilder builder(*bb, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_scale_f32_16x16x128_f8f6f4, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addDestReg(StinkyRegister("v", destStart, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", destStart, 8));
+        MatrixFmtModifiers fmtMod;
+        fmtMod.fmtA = MatrixFmt::FP4;
+        fmtMod.fmtB = MatrixFmt::FP4;
+        inst->addModifier(fmtMod);
+        // builder.create() does not re-run this on a modifier added after the
+        // fact (only updateHwInstDesc() does); without it latencyCycles stays
+        // the base 8 and the FP4 override never takes effect.
+        inst->resolveMatrixFmtOverrides();
+        return inst;
+    }
+
     StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
         StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
         inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
         return inst;
+    }
+
+    // ds_loads on tokens no barrier carries. They raise the region's ds_load count so the
+    // even-spread density (wmmaTotal / dsTotal windows per ds_load) drops to about one window.
+    void createUnrelatedDsLoads(int count) {
+        for (int i = 0; i < count; ++i)
+            createMovableDsLoad(/*destReg=*/2000 + i * 4, /*addrReg=*/900 + i, /*ldsToken=*/50 + i);
     }
 
     // A tensor_load_to_lds with an LDS pseudo dest-reg so the DAG scheduler
@@ -334,6 +372,8 @@ class DAGSchedulerPassTest : public ::testing::Test {
 
     // Run with the cluster-barrier SCC rule on/off. distributeGlobalRead mirrors
     // the gfx1250 pipeline so tensor loads take their normal queue.
+    // Run with the cluster-barrier SCC rule on/off. distributeGlobalRead mirrors
+    // the gfx1250 pipeline so tensor loads take their normal queue.
     void runPassWithClusterBarrier(bool clusterBarrier) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -341,6 +381,8 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.distributeGlobalRead = true;
         pfc.dagFeatures.clusterBarrier = clusterBarrier;
+        // The SCC / barrier rule is under test, not the ds_load pace: the setup ds_loads burst.
+        pfc.dagFeatures.dsSpread = false;
         ctx.setPassFeatureConfig(pfc);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")
@@ -651,94 +693,64 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
     sideEffecting->erase();
 }
 
-TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDistributesBarrierWorkPerWindow) {
-    for (int i = 0; i < 4; ++i)
-        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16,
-                                    /*src0Start=*/200 + i * 16);
-
-    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
-    const std::vector<WmmaHideBudgetBarrierInfo> barriers{
-        {/*barrier=*/nullptr, WmmaHideBudgetBarrierPosition::Before,
-         /*threshold=*/2, /*dsLoadCount=*/5, /*dsLoadWmmaNeeded=*/0},
-        {/*barrier=*/nullptr, WmmaHideBudgetBarrierPosition::After,
-         /*threshold=*/3, /*dsLoadCount=*/3, /*dsLoadWmmaNeeded=*/2},
+// ---------------------------------------------------------------------------
+// HWModel::Lds::wavesPerDsIssuePipe (the ds issue pipe shared between waves)
+// is TEMPORARILY DISABLED -- see HWModel.cpp -- after real hardware measured
+// it costing f8_tn_medium/mxf4_tn_medium real throughput. With it disabled,
+// NumWaves has no effect on ds issue cost end-to-end; the sharing math itself
+// stays covered at the unit level, re-enabled on a local HWModel copy
+// (HWModelDsIssue.FourWavesRunAsPairsSoTheCostDoubles and neighbors).
+//
+// The credit queue is deep enough never to bind, so what is measured is the window filling up.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingIsDisabled) {
+    auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
+        SetUp();  // fresh block per run
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
+        createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
+        for (int i = 0; i < 12; ++i)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
+        config.NumWaves = numWaves;
+        runPassWithDsCredits(/*queueDepth=*/64);
+        int count = 0;
+        bool seenFirstWmma = false;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* in = cast<StinkyInstruction>(&ir);
+            if (isMatrixInstruction(*in)) {
+                if (seenFirstWmma) break;  // second WMMA closes the first window
+                seenFirstWmma = true;
+                continue;
+            }
+            if (seenFirstWmma && isDSRead(*in)) ++count;
+        }
+        return count;
     };
 
-    const RegionHideBudget budget =
-        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0);
+    const int oneWave = dsInFirstWmmaWindow(1);
+    const int twoWaves = dsInFirstWmmaWindow(2);
+    const int fourWaves = dsInFirstWmmaWindow(4);
 
-    ASSERT_EQ(budget.windows.size(), 4u);
-    EXPECT_TRUE(budget.issueBudgetByWmmaIndex);
-    EXPECT_EQ(budget.windows[0].issueBudget, 2);
-    EXPECT_EQ(budget.windows[1].issueBudget, 1);
-    EXPECT_EQ(budget.windows[2].issueBudget, 3);
-    EXPECT_EQ(budget.windows[3].issueBudget, 2);
-}
-
-TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycles) {
-    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
-    StinkyInstruction* wideIssue = createVAddInBlock(bb, arch, /*destReg=*/300, /*src0Reg=*/301,
-                                                     /*src1Reg=*/302);
-    wideIssue->issueCycles = 7;
-    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
-    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
-
-    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
-    const RegionHideBudget budget = analyzeWmmaHideBudget(regionDag, /*barriers=*/{},
-                                                          /*wmmaHideBudgetBase=*/100);
-
-    ASSERT_EQ(budget.windows.size(), 2u);
-    EXPECT_EQ(budget.nonWmmaInstructionCount, 3);
-    EXPECT_EQ(budget.nonDsLoadInstructionCount, 3);
-    EXPECT_EQ(budget.windows[0].issueBudget, 3);
-}
-
-TEST_F(DAGSchedulerPassTest, WmmaHideBudgetHoldsNextWmmaUntilAssignedWorkIssues) {
-    auto createNoCoissueWmma = [&](int destStart, int srcStart) {
-        AsmIRBuilder builder(*bb, arch);
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x4_f32, arch));
-        inst->addDestReg(StinkyRegister("v", destStart, 8));
-        inst->addSrcReg(StinkyRegister("v", srcStart, 4));
-        inst->addSrcReg(StinkyRegister("v", srcStart + 4, 4));
-        inst->addSrcReg(StinkyRegister("v", destStart, 8));
-        return inst;
-    };
-
-    StinkyInstruction* firstWmma = createNoCoissueWmma(/*destStart=*/100, /*srcStart=*/200);
-    std::vector<StinkyInstruction*> fillers;
-    fillers.reserve(4);
-    for (int i = 0; i < 4; ++i)
-        fillers.push_back(createVAddInBlock(bb, arch, /*destReg=*/300 + i,
-                                            /*src0Reg=*/400 + i * 2,
-                                            /*src1Reg=*/401 + i * 2));
-    StinkyInstruction* secondWmma = createNoCoissueWmma(/*destStart=*/120, /*srcStart=*/220);
-    createNoCoissueWmma(/*destStart=*/140, /*srcStart=*/240);
-
-    PassContext ctx;
-    ctx.setGemmTileConfig(config);
-    PassFeatureConfig pfc;
-    pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.enableWmmaHideBudgetPrescan = true;
-    ctx.setPassFeatureConfig(pfc);
-    pass->run(*func, ctx, am);
-
-    EXPECT_LT(positionOf(*bb, firstWmma), positionOf(*bb, secondWmma));
-    for (StinkyInstruction* filler : fillers) {
-        EXPECT_GT(positionOf(*bb, filler), positionOf(*bb, firstWmma));
-        EXPECT_LT(positionOf(*bb, filler), positionOf(*bb, secondWmma));
-    }
+    EXPECT_EQ(oneWave, fourWaves)
+        << "pipe sharing is disabled, so NumWaves must not change how many "
+           "ds_loads fit in a WMMA's co-issue window (see HWModel.cpp)";
+    EXPECT_EQ(twoWaves, fourWaves);
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindows) {
     bb->addSuccessor(bb);
 
-    // The raw per-WMMA budgets place the exclusive-after and exclusive-before
-    // intervals in separate windows, so Layer 2 must not reconcile the groups.
-    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    // Layer 2 after claim is wmmaWindowsNeeded + latencyWmmaBudget, so
+    // afterBegin = max(0, lastOverlap - wmmaWindowsNeeded). Seed enough
+    // WMMAs that src-overlap the after-side ds_load dest to push afterBegin
+    // past the exclusive-before window; Layer 2 must not reconcile.
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
     auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
     auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+    createUnrelatedDsLoads(6);  // 8 ds_loads over 8 WMMAs: one window per ds_load
 
     runPassWithUnrollGemm();
 
@@ -749,6 +761,61 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_FALSE(overlaps->contains(afterWait, beforeSignal));
     EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
     EXPECT_FALSE(overlaps->contains(beforeSignal, afterSignal));
+
+    // Without a published Layer 2 overlap, MergeBarrier must keep both pairs.
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.mergeBarrierThreshold = 100000;
+    ctx.setPassFeatureConfig(pfc);
+    createStinkyMergeBarrierPass()->run(*func, ctx, am);
+
+    int signals = 0;
+    int waits = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        signals += isBarrierSignal(*inst);
+        waits += isBarrierWait(*inst);
+    }
+    EXPECT_EQ(signals, 2);
+    EXPECT_EQ(waits, 2);
+}
+
+// A non-overlapping pair stays on one threshold and issues together.
+TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    for (int i = 0; i < 22; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+
+    runPassWithUnrollGemm();
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    EXPECT_EQ(positionOf(*bb, afterWait), positionOf(*bb, afterSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 0) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, beforeWait), positionOf(*bb, beforeSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
@@ -817,70 +884,75 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     EXPECT_EQ(waits, 2);
 }
 
-TEST_F(DAGSchedulerPassTest, Layer2KeepsSeparateBudgetWindowsUnmergedEndToEnd) {
+// LockDsReadOrder chains ds_loads that share a memory token into
+// dsReadPriority order. Both loads here use LDS token 0. `high` feeds an
+// earlier WMMA than `low`, but three WMMAs that already read its dest keep
+// it unready while `low` is free. No barrier is involved. The stinkytofu
+// default is on; this test turns it off explicitly for the second case,
+// which lets `low` issue first.
+TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
+    auto schedule = [&](bool lockDsReadOrder) {
+        am.clear();
+        func = std::make_unique<Function>(lockDsReadOrder ? "lock_ds_order" : "free_ds_order");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        StinkyInstruction* low =
+            createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/0);
+        for (int i = 0; i < 3; ++i)
+            createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+        StinkyInstruction* high =
+            createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.lockDsReadOrder = lockDsReadOrder;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        return std::pair{positionOf(*bb, high), positionOf(*bb, low)};
+    };
+
+    const auto [lockedHigh, lockedLow] = schedule(/*lockDsReadOrder=*/true);
+    EXPECT_LT(lockedHigh, lockedLow)
+        << "LockDsReadOrder must issue same-token ds_loads in dsReadPriority order";
+
+    const auto [freeHigh, freeLow] = schedule(/*lockDsReadOrder=*/false);
+    EXPECT_LT(freeLow, freeHigh)
+        << "without LockDsReadOrder a ready lower-priority ds_load may issue first";
+}
+
+// Same readiness shape as AllDsLoadsIssueInDsReadPriorityOrder, but the two
+// ds_loads carry different LDS tokens. Priority would still like `high` first.
+// Per-token chaining must not hold the already-ready `low` behind `high`.
+TEST_F(DAGSchedulerPassTest, LockDsReadOrderDoesNotCrossMemoryTokens) {
+    am.clear();
+    func = std::make_unique<Function>("lock_ds_order_per_token");
+    setFunctionArch(*func, arch);
+    bb = func->createBasicBlock("loop_body");
     bb->addSuccessor(bb);
 
-    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
-    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
-    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
-    createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
-    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+    StinkyInstruction* low = createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/1);
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+    StinkyInstruction* high = createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
 
-    PassManager pm;
-    registerAllAnalyses(pm.getAnalysisManager());
-    pm.setGemmTileConfig(config);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.mergeBarrierThreshold = 100000;
-    pm.setPassFeatureConfig(pfc);
-    pm.addPass(createStinkyDAGSchedulerPass());
-    pm.addPass(createStinkyMergeBarrierPass());
-    pm.run(*func);
+    pfc.dagFeatures.lockDsReadOrder = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
 
-    int signals = 0;
-    int waits = 0;
-    for (const IRBase& ir : *bb) {
-        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst == nullptr) continue;
-        signals += isBarrierSignal(*inst);
-        waits += isBarrierWait(*inst);
-    }
-    EXPECT_EQ(signals, 2);
-    EXPECT_EQ(waits, 2);
-}
-
-// Empty block: pass should not crash
-TEST_F(DAGSchedulerPassTest, EmptyBlock_DoesNotCrash) {
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), 0);
-}
-
-// Single instruction: pass should not crash
-TEST_F(DAGSchedulerPassTest, SingleInstruction_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
-}
-
-// A few independent instructions: pass should not crash, count unchanged
-TEST_F(DAGSchedulerPassTest, IndependentInstructions_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);
-    createVAddInBlock(bb, arch, 3, 4, 5);
-    createVAddInBlock(bb, arch, 6, 7, 8);
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
-}
-
-// Chain of dependencies: pass should not crash, count unchanged
-TEST_F(DAGSchedulerPassTest, DependentInstructions_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);  // v0 = v1 + v2
-    createVAddInBlock(bb, arch, 3, 0, 4);  // v3 = v0 + v4
-    createVAddInBlock(bb, arch, 5, 3, 6);  // v5 = v3 + v6
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
+    EXPECT_LT(positionOf(*bb, low), positionOf(*bb, high))
+        << "ds_loads on different memory tokens must not be chained together";
 }
 
 // DS reads + WMMAs: scheduler must not issue WMMAs back-to-back when other
@@ -1105,7 +1177,7 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
         createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
 
     int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithUnrollGemm(/*dsSpread=*/false);
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "hazard deferral must not drop instructions";
 
@@ -1226,64 +1298,64 @@ TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
 }
 
 // ---------------------------------------------------------------------------
-// Property: per-WMMA-window DS cap — after a WMMA fires,
-// at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
-// because back-to-back ds_load issue cost doubles.
+// Property: evenSpreadFillers spreads SALU fillers one per WMMA window.
+//
+// Region: 4 independent WMMAs + 4 independent SALUs, so the quota is
+// ceil(4 / 4) = 1 filler per window.
+//   off: the first WMMA's window stays open for its full co-issue length, so
+//        the scheduler packs several SALUs into it and starves later windows.
+//   on:  each window closes after 1 SALU and the next WMMA issues, giving
+//        wmma, s, wmma, s, ... with at most 1 SALU between WMMAs.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DSWindowCap_VALUInterleaveAfter3) {
-    const int addrReg = 80;
-    // 5 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
-    createMovableDsLoad(0, addrReg, 1);
-    createMovableDsLoad(4, addrReg, 2);
-    createMovableDsLoad(8, addrReg, 3);
-    createMovableDsLoad(12, addrReg, 4);
-    createMovableDsLoad(16, addrReg, 5);
-    // 2 independent VALUs
-    createVAddInBlock(bb, arch, 60, 61, 62);
-    createVAddInBlock(bb, arch, 63, 64, 65);
-    // 2 independent WMMAs (fire first, create co-issue window)
-    createWmmaF32_16x16x16_bf16(20, 28);
-    createWmmaF32_16x16x16_bf16(36, 44);
+TEST_F(DAGSchedulerPassTest, EvenSpreadFillersPlacesOneSaluPerWmmaWindow) {
+    auto saluCountsBetweenWmmas = [&](bool evenSpread) {
+        am.clear();
+        func = std::make_unique<Function>("even_spread");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
 
-    runPassWithUnrollGemm();
-
-    int consecutiveDs = 0;
-    int maxConsecutiveDs = 0;
-    for (const IRBase& ir : *bb) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        const auto* inst = cast<StinkyInstruction>(&ir);
-        const HwInstDesc* hw = inst->getHwInstDesc();
-        if (!hw || !hw->mnemonic) continue;
-        std::string_view mnem(hw->mnemonic);
-        if (mnem.find("ds_load") != std::string_view::npos) {
-            consecutiveDs++;
-            maxConsecutiveDs = std::max(maxConsecutiveDs, consecutiveDs);
-        } else {
-            consecutiveDs = 0;
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/12 + i * 16, /*src0Start=*/200 + i * 16);
+        for (int i = 0; i < 4; ++i) {
+            AsmIRBuilder builder(*bb, arch);
+            StinkyInstruction* s = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+            s->addDestReg(StinkyRegister("s", 100 + i, 1));
+            s->addSrcReg(StinkyRegister("s", 0, 1));
+            s->addSrcReg(StinkyRegister("s", 1, 1));
         }
-    }
+        const int before = countStinkyInstructions(*bb);
 
-    EXPECT_LE(maxConsecutiveDs, 3) << "DS window cap violated: found " << maxConsecutiveDs
-                                   << " consecutive ds_loads (max 3 per WMMA window)";
-}
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.evenSpreadFillers = evenSpread;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        EXPECT_EQ(countStinkyInstructions(*bb), before) << "must not drop instructions";
 
-// ---------------------------------------------------------------------------
-// Property: all original instructions are preserved.
-// ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DSWindowCap_InstructionCountPreserved) {
-    const int addrReg = 100;
-    // 6 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
-    for (int i = 0; i < 6; i++) createMovableDsLoad(i * 4, addrReg, i + 1);
-    // 4 independent VALUs
-    for (int i = 0; i < 4; i++) createVAddInBlock(bb, arch, 30 + i, 40 + i, 50 + i);
-    // 3 independent WMMAs
-    for (int i = 0; i < 3; i++) createWmmaF32_16x16x16_bf16(60 + i * 8, 84 + i * 8);
+        // counts[k] = SALUs issued after WMMA #k and before WMMA #k+1.
+        std::vector<int> counts;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || inst->getHwInstDesc() == nullptr) continue;
+            if (isMatrixInstruction(*inst))
+                counts.push_back(0);
+            else if (!counts.empty() &&
+                     std::string_view(inst->getHwInstDesc()->mnemonic).rfind("s_", 0) == 0)
+                ++counts.back();
+        }
+        return counts;
+    };
 
-    int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
-    int afterCount = countStinkyInstructions(*bb);
+    const std::vector<int> off = saluCountsBetweenWmmas(/*evenSpread=*/false);
+    EXPECT_GT(*std::max_element(off.begin(), off.end()), 1)
+        << "baseline packs several SALUs into one window (else this test proves nothing)";
 
-    EXPECT_EQ(afterCount, beforeCount) << "Scheduler must preserve instruction count";
+    const std::vector<int> on = saluCountsBetweenWmmas(/*evenSpread=*/true);
+    EXPECT_EQ(on, (std::vector<int>{1, 1, 1, 1}))
+        << "each WMMA window must get exactly its quota of 1 SALU";
 }
 
 // ---------------------------------------------------------------------------
@@ -1618,178 +1690,8 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
 }
 
 // ---------------------------------------------------------------------------
-// dsReadQueueDepth / dsReadThrottleLatency / dsReadPerWmma: queue-full pacing
-// and in-flight depth control for ds_read_b128 (analogous to global-read
-// queue throttling, but with DS-specific queue + WMMA interactions). Unlike
-// global-read throttling, the ds_read gate additionally requires a WMMA to have
-// been picked at least once (it seeds maxDsPerWmmaWindow_), so each test below
-// includes one WMMA read (with dest/src registers disjoint from the ds_reads,
-// so its DS-latency gate is trivially satisfied and it issues first).
+// dsReadQueueDepth: the ds_load credit queue (analogous to the global-read credit pool).
 // ---------------------------------------------------------------------------
-
-// Depth 2: exactly 2 ds_reads issue back-to-back, then VALU must interleave.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth2_RespectsQueueDepth) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
-    for (int i = 0; i < 4; i++)
-        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                            /*ldsToken=*/i + 1);
-    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
-
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
-
-    std::vector<std::string> seq = mnemonicSequence(*body);
-    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
-        << "depth=2: at most 2 ds_reads in flight before an interleave is forced";
-}
-
-// Depth 1: degenerate cap — every ds_read must be separated by other work.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
-    for (int i = 0; i < 4; i++)
-        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                            /*ldsToken=*/i + 1);
-    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
-
-    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8);
-
-    std::vector<std::string> seq = mnemonicSequence(*body);
-    EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
-}
-
-// Queue-full ds_read pacing is controlled by dsReadThrottleLatency. In a
-// barrier-free region, changing dsReadDrainLatency alone should not change the
-// ds_read interleave pattern.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
-    auto runCase = [&](int drainLatency) {
-        // Reusing `am` across a new Function: without clearing, cached analysis
-        // results (e.g. loop info) from the previous (now-destroyed) Function can
-        // be reused if the allocator hands the new Function the same address —
-        // undetectable in isolation, but corrupts scheduling amid a full suite run.
-        am.clear();
-        func = std::make_unique<Function>("dag_sched_test_ds_throttle_drain_split");
-        setFunctionArch(*func, arch);
-        bb = func->createBasicBlock("loop_body");
-        bb->addSuccessor(bb);
-
-        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
-        for (int i = 0; i < 4; i++)
-            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                                /*ldsToken=*/i + 1);
-        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
-
-        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8,
-                                  /*perWmma=*/100,
-                                  /*drainLatency=*/drainLatency);
-        return mnemonicSequence(*bb);
-    };
-
-    const std::vector<std::string> seqDrain8 = runCase(/*drainLatency=*/8);
-    const std::vector<std::string> seqDrain80 = runCase(/*drainLatency=*/80);
-    EXPECT_EQ(maxConsecutiveDsReads(seqDrain8), 2);
-    EXPECT_EQ(maxConsecutiveDsReads(seqDrain80), 2);
-    EXPECT_EQ(seqDrain8, seqDrain80)
-        << "drainLatency must not change queue pacing order when throttleLatency "
-           "is fixed";
-}
-
-// A zero configured and hardware throttle latency derives four cycles per queue
-// entry.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_ZeroLatencyUsesHardwareDefault) {
-    auto runCase = [&](int throttleLatency) {
-        am.clear();
-        func = std::make_unique<Function>("dag_sched_test_ds_throttle_default");
-        setFunctionArch(*func, arch);
-        bb = func->createBasicBlock("loop_body");
-        bb->addSuccessor(bb);
-
-        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
-        for (int i = 0; i < 8; i++)
-            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                                /*ldsToken=*/i + 1);
-        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
-
-        runPassWithDsReadThrottle(/*queueDepth=*/2, throttleLatency,
-                                  /*perWmma=*/100,
-                                  /*drainLatency=*/80);
-        return mnemonicSequence(*bb);
-    };
-
-    EXPECT_EQ(runCase(/*throttleLatency=*/0), runCase(/*throttleLatency=*/72));
-}
-
-// Smaller dsReadThrottleLatency should allow more aggressive ds_read bursts
-// under the same queue depth.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
-    auto runCase = [&](int throttleLatency) {
-        // See the am.clear() comment in
-        // DsReadThrottle_QueuePacingIgnoresDrainLatency above — same
-        // reused-`am`-across-a-new-Function hazard.
-        am.clear();
-        func = std::make_unique<Function>("dag_sched_test_ds_throttle_interval");
-        setFunctionArch(*func, arch);
-        bb = func->createBasicBlock("loop_body");
-        bb->addSuccessor(bb);
-
-        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
-        for (int i = 0; i < 4; i++)
-            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                                /*ldsToken=*/i + 1);
-        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
-
-        runPassWithDsReadThrottle(/*queueDepth=*/2,
-                                  /*throttleLatency=*/throttleLatency,
-                                  /*perWmma=*/100, /*drainLatency=*/80);
-        return mnemonicSequence(*bb);
-    };
-
-    const std::vector<std::string> seqSlow = runCase(/*throttleLatency=*/8);
-    const std::vector<std::string> seqFast = runCase(/*throttleLatency=*/2);
-    const int burstSlow = maxConsecutiveDsReads(seqSlow);
-    const int burstFast = maxConsecutiveDsReads(seqFast);
-    EXPECT_EQ(burstSlow, 2);
-    EXPECT_GE(burstFast, burstSlow)
-        << "smaller throttleLatency should not reduce ds_read burst capacity";
-    EXPECT_GT(burstFast, burstSlow)
-        << "smaller throttleLatency should increase ds_read burst length under "
-           "same queue depth";
-}
-
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_TransitionConfigControlsBurstLength) {
-    auto runCase = [&](double transitionFactor, int transitionEntries) {
-        am.clear();
-        func = std::make_unique<Function>("dag_sched_test_ds_throttle_transition");
-        setFunctionArch(*func, arch);
-        bb = func->createBasicBlock("loop_body");
-        bb->addSuccessor(bb);
-
-        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
-        for (int i = 0; i < 6; i++)
-            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
-                                /*ldsToken=*/i + 1);
-        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
-
-        runPassWithDsReadThrottle(
-            /*queueDepth=*/2, /*throttleLatency=*/8, /*perWmma=*/100,
-            /*drainLatency=*/80, transitionFactor, transitionEntries);
-        return maxConsecutiveDsReads(mnemonicSequence(*bb));
-    };
-
-    const int defaultBurst = runCase(/*transitionFactor=*/0.5, /*transitionEntries=*/-1);
-    const int unpacedTransitionBurst = runCase(/*transitionFactor=*/0.0, /*transitionEntries=*/4);
-    EXPECT_GT(unpacedTransitionBurst, defaultBurst);
-}
-
-// NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
-// per-WMMA-window cap with a single WMMA. That predated the ds_load in-flight
-// queue; now the cap only binds while a WMMA window is active (covered by
-// DSWindowCap_VALUInterleaveAfter3, which keeps two WMMAs pending), and the
-// no-WMMA case is bounded by the in-flight queue (covered by
-// DsReadThrottle_Depth2_RespectsQueueDepth). No standalone single-WMMA cap test
-// is kept — it would assert behavior the cap no longer has.
 
 // Regression (see image(2).png bug): with no WMMA to issue and a chain of
 // ds_loads each consumed by a VALU (RAW), the scheduler must NOT interleave
@@ -1798,7 +1700,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_TransitionConfigControlsBurstLength)
 // (up to queue depth) before the consumer VALUs run: the consumers RAW-depend
 // on the loads and are hazard-deferred until the load latency clears. Assert
 // the loads front-load ahead of every consumer VALU.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu) {
+TEST_F(DAGSchedulerPassTest, DsCredits_NoWmma_LoadsDrainBeforeConsumerValu) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
     // 6 ds_loads (movable via LDS token) on the same address register; each VALU
@@ -1810,10 +1712,8 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu)
         createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4,
                           /*src1=*/i * 4 + 1);
 
-    // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no
-    // WMMA).
-    runPassWithDsReadThrottle(/*queueDepth=*/6, /*throttleLatency=*/8,
-                              /*perWmma=*/100);
+    // Queue depth 6 so all loads can be in flight at once.
+    runPassWithDsCredits(/*queueDepth=*/6);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     // Every ds_load must precede every v_add: find the last load and first valu.
@@ -2165,6 +2065,11 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_GuardingBarrierNeverSplitsCha
     createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
 
     const int beforeCount = countStinkyInstructions(*body);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
     runPassWithClusterBarrier(/*clusterBarrier=*/true);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
@@ -2194,6 +2099,11 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitChain
     createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
     createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
 
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
     runPassWithClusterBarrier(/*clusterBarrier=*/false);
 
     const int signalPos = firstBarrierSignalPosition(*body);
@@ -2226,6 +2136,11 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierStaysWhole)
     StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
     StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
 
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
     runPassWithClusterBarrier(/*clusterBarrier=*/true);
 
     EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
@@ -2257,6 +2172,11 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledSplitsChainBehindBarr
     StinkyInstruction* tensorLoad = createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48,
                                                             /*ldsToken=*/1);
 
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
     runPassWithClusterBarrier(/*clusterBarrier=*/false);
 
     const std::string order = scheduleOrder(*body);
@@ -2288,6 +2208,11 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierHoistsWhole
                                                             /*ldsToken=*/1);
 
     const int beforeCount = countStinkyInstructions(*body);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
     runPassWithClusterBarrier(/*clusterBarrier=*/true);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
@@ -2448,8 +2373,8 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInSccReaderWithoutDefAbor
         "region has SCC reader\\(s\\) but no SCC writer");
 }
 
-// All instructions are preserved regardless of throttle (count invariant).
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
+// All instructions are preserved whatever the ds credit depth (count invariant).
+TEST_F(DAGSchedulerPassTest, DsCredits_PreserveInstructionCount) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
     createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
@@ -2459,6 +2384,233 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
     int beforeCount = countStinkyInstructions(*body);
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
-    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
+    runPassWithDsCredits(/*queueDepth=*/2);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "credits must not drop instructions";
+}
+
+// WMMA issue queue. Registers stay below v256 (one VGPR MSB bank).
+namespace {
+// "W" for a WMMA, "d" for a ds_load, "." for anything else.
+std::string wdShape(const std::vector<std::string>& seq) {
+    std::string s;
+    for (const std::string& m : seq) {
+        s += m.find("wmma") != std::string::npos ? 'W' : m.find("ds_load") == 0 ? 'd' : '.';
+    }
+    return s;
+}
+}  // namespace
+
+// The queue model needs depth > 1 and a cover > 0. With either one off the schedule is the
+// original single-window one, whatever the other queue field says.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_OffIsTheOriginalSchedule) {
+    struct Variant {
+        int depth, cover;
+    };
+    const Variant variants[] = {{0, 0}, {8, 0}, {1, 32}, {1, 0}};
+    std::string shapes[4];
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = variants[v].depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = variants[v].cover;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    for (int v = 1; v < 4; ++v) EXPECT_EQ(shapes[0], shapes[v]) << "variant " << v;
+    // While ds_loads are ready each WMMA window is filled, so the first two are not adjacent.
+    EXPECT_NE(shapes[0].substr(0, 2), "WW") << shapes[0];
+}
+
+// A long queue run (more than 64 cycles of pipe window) keeps every instruction and
+// issues all WMMAs: exercises the window compaction.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
+    for (int i = 0; i < 24; i++) createWmmaF32_16x16x16_bf16(8 * (i % 12), 100 + 8 * i);
+    for (int i = 0; i < 12; i++) createMovableDsLoad(400 + i * 4, 80, i + 1);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'W'), 24) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 12) << shape;
+}
+
+// Depth 4, cover 16: ds_loads go while at least 16 cycles of WMMA work are queued, and the
+// next WMMA goes first once less is, so the queue never runs dry.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWdddddd");
+}
+
+// A ready ds_load that carries no wait does not wait for the queue to refill: the first WMMA
+// opens the window and the ds_loads follow it at once (free credits), where a refill-first rule
+// would issue WMMAs until the queued cover is met.
+TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQueueFills) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape.substr(0, 2), "Wd") << shape;
+    EXPECT_EQ(shape, "WdddddddWdWWWWWW");
+}
+
+// Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
+// for a credit: a ds queue of 2). Fixed issues wmmaBatchSize WMMAs per refill, Dynamic up to the
+// refill target in cycles; a refill that finds the queue still low starts again.
+TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * (i % 6), 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Fixed;
+    pfc.dagFeatures.wmmaBatchSize = 4;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
+}
+
+TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * (i % 6), 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Dynamic;
+    pfc.dagFeatures.wmmaRefillToCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
+}
+
+// Even ds_load spread: the ds_loads follow the WMMAs instead of bursting at the start.
+TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        // Destination registers outside what the WMMAs write (100 .. 476), so no WMMA has to wait
+        // for a load and the WMMAs stay in program order whatever the loads do.
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
+        for (int i = 0; i < 48; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.dsSpread = v == 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    auto longestRun = [](const std::string& s) {
+        size_t best = 0, run = 0;
+        for (char c : s) {
+            run = c == 'd' ? run + 1 : 0;
+            best = std::max(best, run);
+        }
+        return best;
+    };
+    // Greedy bursts the loads; the spread keeps them at most two to a window and, with no barrier
+    // ahead of the loads, spreads them to the region's end (no drain there).
+    EXPECT_GE(longestRun(shapes[0]), 5u) << shapes[0];
+    EXPECT_LE(longestRun(shapes[1]), 2u) << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8);
+    EXPECT_GE(shapes[1].find_last_of('d') + 10, shapes[1].size()) << shapes[1];
+}
+
+// The plan counts WMMA positions in program order, so the scheduler must issue the WMMAs in that
+// order: a WMMA waiting for a load does not let a later, independent WMMA pass it (the ready queue
+// is first come first serve, so without the DAG edge it could).
+TEST_F(DAGSchedulerPassTest, DsSpread_KeepsTheWmmasInProgramOrder) {
+    // A reads what the load writes (it waits for the load); B and C are independent of it.
+    createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/600);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/140, /*src0Start=*/8);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.dsSpread = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    std::vector<int> wmmaDests;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* in = cast<StinkyInstruction>(&ir);
+        if (isMatrixInstruction(*in))
+            wmmaDests.push_back(static_cast<int>(in->getDestRegs()[0].reg.idx));
+    }
+    EXPECT_EQ(wmmaDests, (std::vector<int>{100, 120, 140}));
+}
+
+// Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.
+TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+        pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
+        pfc.dagFeatures.wmmaQueueDepth = 4;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        if (v == 1) pfc.dagFeatures.wmmaBatchSize = 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0], shapes[1]);
+    EXPECT_EQ(shapes[0], "WddWWWWWWWdddddd");
 }

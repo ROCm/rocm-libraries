@@ -22,6 +22,8 @@ Datatypes:
         bf6_r: 32
         f4_r: 33
         e5m3_r: 34
+        # HIP_R_4I: signed int4, two elements per byte (w4a16 weights).
+        i4_r: 16
         hipblaslt_datatype_invalid: 255
   - hipblasComputeType_t:
       bases: [ c_int ]
@@ -603,6 +605,7 @@ Arguments:
   - ldc: c_int64*32
   - ldd: c_int64*32
   - lde: c_int64*32
+  - a2a_extent: c_int64
   - batch_count: c_int32
   - batch_mode: c_int32
   - batch_offset_a: c_int64
@@ -634,17 +637,26 @@ Arguments:
   - compute_input_typeB: hipDataType
   - scale_type: hipDataType
   - initialization: hipblaslt_initialization
-  - gpu_arch: c_char*16
-  - gpu_arch_exclude: c_char*16
+  - gpu_arch: c_char*32
+  - gpu_arch_exclude: c_char*32
   - pad: c_uint32
   - grouped_gemm: c_int32
   - threads: c_uint16
   - streams: c_uint16
   - devices: c_uint8
+  - a2a_world: c_uint8
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
   - ulp_check: c_int8
+  - fast_check: c_int8
+  - placement: c_char*16
+  - placement_offset: c_size_t
+  - fast_check_repeat: c_int32
+  - fast_check_inject: c_int32
+  - requires_streamk: c_int8
+  - integer_exact_pattern: c_char*16
+  - allow_no_solution: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -658,6 +670,7 @@ Arguments:
   - bias_stride: c_int32
   - scaleA: hipblaslt_scaling_format
   - scaleB: hipblaslt_scaling_format
+  - int4_encoding: c_int32
   - scaleC: c_bool
   - scaleD: c_bool
   - scaleE: c_bool
@@ -745,12 +758,22 @@ Defaults:
   threads: 0
   streams: 0
   devices: 0
+  a2a_world: 1
+  a2a_extent: 0
   gpu_arch: ''
   gpu_arch_exclude: ''
   norm_check: 0
   allclose_check: 0
   unit_check: 1
   ulp_check: 0
+  fast_check: 0
+  placement: ''
+  placement_offset: 0
+  fast_check_repeat: 1
+  fast_check_inject: -1
+  requires_streamk: 0
+  integer_exact_pattern: ''
+  allow_no_solution: 0
   timing: 0
   iters: 10
   cold_iters: 2
@@ -789,6 +812,7 @@ Defaults:
   bias_vector: false
   scaleA: none
   scaleB: none
+  int4_encoding: 0
   scaleC: false
   scaleD: false
   scaleE: false

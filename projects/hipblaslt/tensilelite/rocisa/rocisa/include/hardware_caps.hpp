@@ -48,6 +48,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     {
         cmd.push_back(o);
     }
+    // Assemble only: linking writes a.out into the working directory, which may be read-only.
+    cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
@@ -350,6 +352,10 @@ inline std::map<std::string, int>
                                               assemblerPath,
                                               "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
                                               isDebug);
+    rv["HasVMaximumMinimumF32"] = tryAssembler(isaVersion,
+                                               assemblerPath,
+                                               "v_maximumminimum_f32 v0, v1, v2, v3",
+                                               isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
@@ -390,6 +396,17 @@ inline std::map<std::string, int>
           || tryAssembler(isaVersion,
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
+                          isDebug);
+    // Packed 2xBF16 atomic add (gfx950 / gfx1250+). gfx950 takes the literal 0
+    // soffset form, gfx1250 requires null, so probe both as HasAtomicAdd does.
+    rv["HasAtomicPkAddBF16"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], 0 offen offset:0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
@@ -571,6 +588,10 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LdsGranularity"]     = isaVersion[0] == 11 ? 1024 : 256;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep HasWave32 for solution selection and validation.
+    rv["HasWavefrontSize32Directive"]
+        = rv["HasWave32"] && !(isaVersion[0] == 12 && isaVersion[1] == 5);
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
@@ -585,13 +606,27 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
+    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12;
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
+    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
+    // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
+    // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+    int arbStallBit = -1;
+    if(checkInList(isaVersion, {{12, 5, 0}}))
+        arbStallBit = 2;
+    rv["WmmaArbStallBitOffset"] = arbStallBit;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    // F32X (xf32/TF32) emulation Inf handling. The 3xBF16 split makes an Inf
+    // input produce Inf - Inf = NaN in the low-bits residual, so an extra
+    // v_cmp_class Inf guard is required to keep Inf inputs producing Inf. This is
+    // a hardware/platform behavior decision (not a perf-tuning knob), so it lives
+    // in the arch caps: enabled only on archs that require correct Inf handling
+    // under emulation. gfx950's MFMA emulation path leaves it off (the guard adds
+    // VALU ops in the pack path and regresses perf ~10%+).
+    rv["F32XEmulationInfSupport"] = checkInList(isaVersion, {{12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
 
@@ -608,6 +643,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // sequence must emit `global_inv scope:SCOPE_DEV; s_wait_loadcnt 0` after
     // the flag load.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
+
+    // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
+    // VMEM flags with glc+slc and waitcnt fences for cross-XCD coherence;
+    // gfx1250 uses HasInvWbDevFences (global_wb / global_inv) instead.
+    rv["HasXCDSplitL2"]                = checkInList(isaVersion, {{9, 5, 0}});
 
     // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
@@ -641,10 +681,13 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     std::map<std::string, int> rv;
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
-    // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106).
+    rv["MaxSgpr"] = isaVersion[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
-    rv["PhysicalMaxSgpr"]   = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
     rv["GlobalPrefetchSize"] = 256;
 
@@ -654,7 +697,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     {
         // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
         // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
-        // other gfx11 part has 1024.
+        // other gfx11 part (e.g. gfx1102, gfx1103, gfx115X, gfx117X) has 1024.
         const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
                                  || (isaVersion[1] == 5 && isaVersion[2] == 1);
         const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;

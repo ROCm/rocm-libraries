@@ -36,11 +36,11 @@ struct StockhamKernelCR : public StockhamKernel
     //
     // locals
     //
-    Variable tile_index{"tile_index", "size_t"};
-    Variable tile_length{"tile_length", "size_t"};
+    Variable tile_index{"tile_index", "integer_type"};
+    Variable tile_length{"tile_length", "integer_type"};
     Variable in_bound{"in_bound", "bool"};
-    Variable thread{"thread", "unsigned int"}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", "unsigned int"};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)};
 
     std::string tiling_name() override
     {
@@ -110,10 +110,10 @@ struct StockhamKernelCR : public StockhamKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", "int"};
-        Variable index_along_d{"index_along_d", "size_t"};
-        Variable remaining{"remaining", "size_t"};
-        Variable plength{"plength", "size_t"};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
 
         StatementList stmts;
         stmts += Declaration{tile_index};
@@ -349,7 +349,7 @@ struct StockhamKernelCR : public StockhamKernel
             }
 
             StatementList edge_store;
-            Variable      t{"t", "unsigned int"};
+            Variable      t{"t", rtc_kint_type(KIntType::U32)};
             if(divisible)
             {
                 Expression buf_idx = tid_hor * stride0 + (thread + t) * stride[1];

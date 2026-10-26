@@ -28,17 +28,23 @@ Definitions:
     - { M: 131071, N:  63, lda:   131071, stride_a:  8257473 }
 
   - &skinny_m_matrix_size_range
-    # transA == N, short output and long reduction: the split applies for
-    # m <= 512 (m <= 256 for double-complex) with at least 2^20 elements.
-    # Boundary rows sit deliberately outside the gate so the unsplit path is
-    # covered by the same cases.
-    - { M:    40, N:  81920, lda:    40, stride_a:  3276800 }
-    - { M:    63, N: 131071, lda:    64, stride_a:  8388544 }
-    - { M:   256, N:   4096, lda:   256, stride_a:  1048576 } # zc crossover
-    - { M:   512, N:   2048, lda:   512, stride_a:  1048576 } # real/c crossover
-    - { M:   300, N:   4099, lda:   301, stride_a:  1233799 } # n not a multiple of the split chunk
-    - { M:   513, N:   2048, lda:   513, stride_a:  1050624 } # m above the real/c crossover
-    - { M:     7, N:  20480, lda:     7, stride_a:   143360 } # below the element floor
+    # transA == N, short output and long reduction. m*n >= 2^20 and EITHER:
+    #   A. output_tiles(m) <= 8 AND n_split(n) >= 2, or
+    #   B. m <= crossover (512 real/c-float, 128 double-complex).
+    # output_tiles = (m-1)/(DIM_X*4)+1 for real/c-float, (m-1)/DIM_X+1 for zc,
+    # DIM_X = 32 (real/c-float tile edge at m=1024, zc tile edge at m=256).
+    # n_split = ceil(n / 4096), capped at 256.
+    # Shapes below cover both clauses for both type families; the out-of-gate
+    # rows exercise the unmodified single-stage path.
+    - { M:    40, N:  32768, lda:    40, stride_a:   1310720 } # B: tiny m, all types
+    - { M:   256, N:   4096, lda:   256, stride_a:   1048576 } # B: real crossover, n_split=1 (short-output win, e.g. gfx950)
+    - { M:   512, N:   2048, lda:   512, stride_a:   1048576 } # B: real crossover edge m=512, n_split=1
+    - { M:  1024, N:  12289, lda:  1024, stride_a:  12583936 } # A: real/c-float tile edge m=1024, n_split=4
+    - { M:  1024, N:   6145, lda:  1024, stride_a:   6292480 } # A: real/c-float at split floor n_split=2
+    - { M:   200, N:   8192, lda:   256, stride_a:   2097152 } # A: zc (tiles=7, n_split=2); real via B; lda > M
+    - { M:  1024, N:   2048, lda:  1024, stride_a:   2097152 } # outside gate: m>512, tiles=8, n_split=1 < 2
+    - { M:  1025, N:  12289, lda:  1025, stride_a:  12596225 } # outside gate: real tiles=9 > 8
+    - { M:     7, N:  20480, lda:     7, stride_a:    143360 } # outside gate: m*n < 2^20
 
   - &double_buffered_loads_size_range
     # (n <= 3000 && n >= m) || (n %128 == 0 && m==n)
@@ -217,6 +223,20 @@ Definitions:
     - { M: 3, N: 3, lda: 3, incx: 1, incy: *c_pos_x2_overflow_int32 }
     - { M: 3, N: 3, lda: 3, incx: 1, incy: *c_neg_x2_overflow_int32 }
 
+  # Transpose: n past rocblas_limit_grid_x for the 256-thread one-block-per-column
+  # gemvt kernels. (2^32-1)/256 = 16777215, and 16777216 * 256 == 2^32, which HIP
+  # rejects. m == 1 keeps A to a single row. gfx90a and gfx942-float take the
+  # fat-n row-vectorized kernel instead; its tiled grid stays under the limit.
+  - &gemvt_grid_x_workitem_limit_range
+    - { M: 1, N: 16777216, lda: 1, stride_a: 16777216 }
+
+  # Transpose gemvt: n and incy each fit in int32, but the y index (n-1)*incy does not.
+  # 16777215 * 129 = 2164260735 > 2147483647. col * incy overflows signed int32 if the
+  # int64 widening is not present. n is also past the 256-thread grid cap. Float keeps
+  # y near 8 GiB. gfx90a and gfx942-float take the fat-n kernel; it uses the same widening.
+  - &gemvt_n_incy_int32_range
+    - { M: 1, N: 16777216, lda: 1, incx: 1, incy: -129, stride_a: 16777216 }
+
 Tests:
 # Regular gemv
 - name: gemv_bad_arg
@@ -331,6 +351,23 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
   gpu_arch: '9??'
+
+- name: gemv_grid_x_workitem_limit
+  category: nightly
+  function: gemv
+  precision: *single_double_precisions_complex_real
+  transA: [ T, C ]
+  matrix_size: *gemvt_grid_x_workitem_limit_range
+  incx_incy: *incx_incy_unity
+  alpha_beta: *alpha_beta_range_small
+
+- name: gemv_gemvt_n_incy_int32
+  category: nightly
+  function: gemv
+  precision: *single_precision
+  transA: [ T, C ]
+  matrix_size: *gemvt_n_incy_int32_range
+  alpha_beta: *alpha_beta_range_small
 
 - name: gemv_skinny_n
   category: pre_checkin

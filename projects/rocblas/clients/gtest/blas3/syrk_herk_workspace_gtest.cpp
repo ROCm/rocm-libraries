@@ -27,8 +27,10 @@
 #include "rocblas_data.hpp"
 #include "rocblas_datatype2string.hpp"
 #include "rocblas_test.hpp"
+#include "type_dispatch.hpp"
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -475,8 +477,23 @@ namespace
             FAIL() << "unexpected function " << fn;
     }
 
-    template <typename...>
-    struct testing_syrk_herk_workspace_fun : rocblas_test_valid
+    // By default, this test does not apply to any types.
+    // The unnamed second parameter is used for enable_if_t below.
+    template <typename, typename = void>
+    struct testing_syrk_herk_workspace_fun : rocblas_test_invalid
+    {
+    };
+
+    // When the condition in the second argument is satisfied, the type combination
+    // is valid. When the condition is false, this specialization does not apply.
+    template <typename T>
+    struct testing_syrk_herk_workspace_fun<
+        T,
+        std::enable_if_t<
+            std::is_same_v<
+                T,
+                float> || std::is_same_v<T, double> || std::is_same_v<T, rocblas_float_complex> || std::is_same_v<T, rocblas_double_complex>>>
+        : rocblas_test_valid
     {
         void operator()(const Arguments& arg)
         {
@@ -487,9 +504,9 @@ namespace
     struct syrk_herk_workspace_gtest
         : RocBLAS_Test<syrk_herk_workspace_gtest, testing_syrk_herk_workspace_fun>
     {
-        static bool type_filter(const Arguments&)
+        static bool type_filter(const Arguments& arg)
         {
-            return true;
+            return rocblas_simple_dispatch<type_filter_functor>(arg);
         }
 
         static bool function_filter(const Arguments& arg)
@@ -508,7 +525,8 @@ namespace
 
     TEST_P(syrk_herk_workspace_gtest, pre_checkin)
     {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(testing_syrk_herk_workspace_fun<>{}(GetParam()));
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
+            rocblas_simple_dispatch<testing_syrk_herk_workspace_fun>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(syrk_herk_workspace_gtest)
 } // namespace

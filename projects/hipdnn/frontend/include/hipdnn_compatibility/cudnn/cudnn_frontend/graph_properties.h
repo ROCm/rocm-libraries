@@ -1,20 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN frontend
-// (include/cudnn_frontend/graph_properties.h), used under the MIT license.
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend/graph_properties.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file graph_properties.h
- * @brief Graph attribute-type aliases for the hipDNN cuDNN-compatibility shim.
- *
- * Brings hipDNN's v9 graph attribute types into `<shim_ns>::graph` by aliasing
- * them with `using` declarations — zero overhead, no shim-side state. A tensor
- * configured through the shim therefore *is* a hipDNN `TensorAttributes` and
- * flows into a wrapped hipDNN graph with no conversion (UID handling stays on
- * the hipDNN side).
- *
- * @note Internal-to-shim; pulled in by the umbrella `cudnn_frontend.h`.
+ * @brief cuDNN FE tensor and node attribute types, aliased 1:1 to hipDNN types.
  */
 
 #pragma once
@@ -42,16 +37,16 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {
 
+/// @brief Alias of hipdnn_frontend::half.
 using hipdnn_frontend::half;
 using hipdnn_frontend::graph::ScalarType;
 using hipdnn_frontend::graph::Tensor_attributes;
+/// @brief hipDNN spelling of Tensor_attributes.
 using hipdnn_frontend::graph::TensorAttributes;
+/// @brief Alias of hipdnn_frontend::bfloat16.
 using nv_bfloat16 = hipdnn_frontend::bfloat16;
 
-// Tier-1 node attribute types: each cuDNN v9
-// *_attributes class with an exact hipDNN counterpart is aliased 1:1 — zero
-// overhead, no wrapper. The matching Graph::* node method forwards straight to
-// the wrapped hipDNN graph (see detail/graph_wrapper.h).
+// Node attribute types with an exact hipDNN counterpart, aliased 1:1.
 using hipdnn_frontend::graph::Batchnorm_attributes;
 using hipdnn_frontend::graph::Batchnorm_backward_attributes;
 using hipdnn_frontend::graph::Batchnorm_inference_attributes;

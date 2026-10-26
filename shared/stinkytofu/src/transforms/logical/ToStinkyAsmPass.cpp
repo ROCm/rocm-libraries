@@ -362,6 +362,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->vop3.has_value()) {
         asmInst->addModifier<VOP3PModifiers>(irInst->vop3.value());
     }
+    if (irInst->true16.has_value()) {
+        asmInst->addModifier<True16Modifiers>(irInst->true16.value());
+    }
     if (irInst->memtoken.has_value()) {
         asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
     }
@@ -517,9 +520,9 @@ class ToStinkyAsmPassImpl : public Pass {
                     // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
                     // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
                     if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
-                        legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSStoreB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
-                        legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSLoadB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
                         // gfx1250 has no plain s_barrier; it must split into
                         // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky

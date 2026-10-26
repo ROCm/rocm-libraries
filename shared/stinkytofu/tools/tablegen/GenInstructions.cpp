@@ -92,6 +92,10 @@ struct ArchDef {
     int maxAGPR = 0;
     int totalVgprPerSimd = 0;
     int vgprAllocGranule = 0;
+    int maxWavesPerSimd = 0;
+    // Work-item ID packing at kernel launch: 1 when X, Y and Z share v0, so
+    // exactly one VGPR arrives filled however many dimensions are enabled.
+    int packedWorkitemId = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
     // ECC presence: D16 VMEM zero-fills the non-data half and True16 VALU does
@@ -185,6 +189,9 @@ struct InstructionDef {
     // -1 = not specified (inherit from format); end-anchored mask of window cycles no
     // pipe can issue into (bit 0 = last cycle)
     int blockedScale = -1;
+    // 0 = not specified. Per-opcode LDS-burst drain model params (see HwInstDesc).
+    int dsMaxDrain = 0;
+    int dsThroughput = 0;
     std::vector<CostOverrideEntry> costOverrides;        // modifier-keyed overrides
     std::vector<CoIssueOverrideEntry> coIssueOverrides;  // modifier-keyed co-issue overrides
     std::vector<OperandSpec> operands;                   // Operand specifications
@@ -498,6 +505,8 @@ class DefTParser {
                     parseFieldInt(block, ".maxAGPR", arch_.maxAGPR);
                     parseFieldInt(block, ".totalVgprPerSimd", arch_.totalVgprPerSimd);
                     parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
+                    parseFieldInt(block, ".maxWavesPerSimd", arch_.maxWavesPerSimd);
+                    parseFieldInt(block, ".packedWorkitemId", arch_.packedWorkitemId);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
                     parseFieldInt(block, ".d16Writes32BitVgpr", arch_.d16Writes32BitVgpr);
@@ -785,6 +794,8 @@ class DefTParser {
                 parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
                 parseFieldIntAuto(entryFields, ".coissue", inst.coIssueWindow);
                 parseFieldIntAuto(entryFields, ".blockedScale", inst.blockedScale);
+                parseFieldInt(entryFields, ".dsMaxDrain", inst.dsMaxDrain);
+                parseFieldInt(entryFields, ".dsThroughput", inst.dsThroughput);
                 parseFieldCostOverrides(entryFields, inst.costOverrides);
                 parseFieldCoIssueOverrides(entryFields, inst.coIssueOverrides);
                 parseFieldOperandFields(entryFields, ".operand_fields", inst.operandFields);
@@ -924,6 +935,8 @@ class DefTParser {
             parseFieldCost(block, ".cost", inst.cycle, inst.latency);
             parseFieldIntAuto(block, ".coissue", inst.coIssueWindow);
             parseFieldIntAuto(block, ".blockedScale", inst.blockedScale);
+            parseFieldInt(block, ".dsMaxDrain", inst.dsMaxDrain);
+            parseFieldInt(block, ".dsThroughput", inst.dsThroughput);
             parseFieldCostOverrides(block, inst.costOverrides);
             parseFieldCoIssueOverrides(block, inst.coIssueOverrides);
             parseFieldFlags(block, ".flags", inst.flags);
@@ -1832,8 +1845,9 @@ static bool emitArchIsaFile(const std::string& arch,
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_OPCODE_ENUMERATION\n\n";
 
-    // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, mnemonic, flags, microcode,
-    // encoding bits, unit, operandFields placeholder)
+    // MCIDTable (HwInstDesc: isaOpcode, unifiedOpcode, issue, latency, coissue,
+    // blockedScale, mnemonic, flags, microcode, encoding, unit, dsMaxDrain,
+    // dsThroughput, operandFields placeholder)
     EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
     out << "// MCIDTable: operandFields set by ArchInfo getMCIDTable()\n"
         << "static HwInstDesc MCIDTable[] = {\n";
@@ -1851,7 +1865,8 @@ static bool emitArchIsaFile(const std::string& arch,
             << (inst.blockedScale >= 0 ? inst.blockedScale : 0) << std::dec << std::setfill(' ')
             << ", " << "\"" << inst.mnemonic << "\", " << "makeFlagSet({"
             << (flagStr.empty() ? "" : flagStr) << "}), " << microcodeToCpp(inst.finalMicrocode)
-            << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", " << "{} },\n";
+            << ", " << inst.finalEncoding << ", " << unitToCpp(inst.finalUnit) << ", "
+            << inst.dsMaxDrain << ", " << inst.dsThroughput << ", " << "{} },\n";
     }
     out << "};\n\n";
     out << "#endif // GET_ISAINFO_HWINSTDESC_TABLE\n\n";
@@ -1968,9 +1983,10 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "        : ArchInfo(\"" << lowerName << "\" /* name */" << ", " << arch.major << ", "
         << arch.minor << ", " << arch.stepping << ", " << arch.wavefront << " /* waveFrontSize */"
         << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
-        << arch.vgprAllocGranule << " /* vgprAllocGranule */" << ", " << arch.maxVGPR
-        << " /* maxVGPR */" << ", " << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR
-        << " /* maxAGPR */)\n"
+        << arch.vgprAllocGranule << " /* vgprAllocGranule */" << ", " << arch.maxWavesPerSimd
+        << " /* maxWavesPerSimd */" << ", " << arch.maxVGPR << " /* maxVGPR */" << ", "
+        << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR << " /* maxAGPR */" << ", "
+        << arch.packedWorkitemId << " /* packedWorkitemId */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"

@@ -93,7 +93,7 @@ try
         ("iters,i",
          value<rocblas_int>(&argus.iters)->default_value(10),
             "Iterations to run inside the GPU timing loop.\n"
-            "                           Reported time will be the average.\n"
+            "                           Reported time will be the median.\n"
             "                           ")
 
         ("mem_query",
@@ -338,6 +338,14 @@ try
             "                           Indicates how the right singular vectors are to be calculated and stored.\n"
             "                           ")
 
+        // trtri options
+        ("diag",
+         value<char>()->default_value('N'),
+            "N = non-unit triangular, U = unit triangular.\n"
+            "                           Indicates whether the diagonal elements of a triangular matrix are assumed to be one.\n"
+            "                           Only applicable to trtri.\n"
+            "                           ")
+
         // partial eigenvalue/singular value decomposition options
         ("il",
          value<rocblas_int>(),
@@ -504,6 +512,7 @@ try
     argus.validate_operation("trans");
     argus.validate_side("side");
     argus.validate_fill("uplo");
+    argus.validate_diag("diag");
     argus.validate_direct("direct");
     argus.validate_storev("storev");
     argus.validate_svect("jobu");

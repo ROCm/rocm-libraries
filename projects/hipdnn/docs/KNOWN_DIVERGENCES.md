@@ -1,196 +1,132 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-This document describes intentional behavioral differences between NVIDIA cuDNN
-frontend v9 and hipDNN's cuDNN-shaped compatibility shim. The shim is source
-compatibility for supported v9 graph-API translation units, not ABI compatibility
-and not a full cuDNN backend implementation.
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
-## Scope
+NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
-The shim targets the cuDNN frontend v9 graph API surface exposed by
-`<hipdnn_compatibility/cudnn/cudnn_frontend.h>`. The v0.x / v8 builder and backend
-descriptor API surface is out of scope.
-
-## hipDNN extensions
-
-The shim exposes one method with no cuDNN frontend equivalent:
-
-`Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})` is a
-lightweight applicability probe forwarding to the native hipDNN method of the same
-name. It returns `OK` when at least one engine can run the graph and
-`GRAPH_NOT_SUPPORTED` when none can. Like the native method it auto-builds the
-operation graph when needed; it neither creates nor invalidates execution plans, so
-it may be called before or after `create_execution_plans`. A node-less graph has
-nothing to probe and is reported supported.
-
-Because it has no cuDNN counterpart, source that must also compile against real
-cuDNN cannot use it.
+Errors that a setter or filter "records" are returned by the next `validate()`, `build_operation_graph()`, `create_execution_plans()`, `check_support()`, or `build_plans()`.
 
 ## Heuristic modes
 
-The shim accepts every cuDNN frontend `HeurMode_t` value, including `A`, `B`,
-`FALLBACK`, and `OPENSOURCE`. hipDNN does not currently expose matching cuDNN
-heuristic modes, so non-`FALLBACK` modes are accepted but are not honored as
-cuDNN heuristics. The shim logs a warning and forwards selection to hipDNN's
-fallback/default engine-selection path.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` logs a warning and uses hipDNN's default engine selection. Plan choice and performance can differ from cuDNN.
 
-Impact: plan choice and performance may differ from cuDNN for the same requested
-heuristic mode.
+## Note filters
 
-## Numerical-note filters
+hipDNN has no per-plan numerical-note metadata and reports only its own behavior notes, so the shim triages each note by what ignoring it could do. These tables are canonical; `detail/note_triage.h` and `TestCudnnShimNoteTriageTable` follow them.
 
-hipDNN does not currently expose per-plan numerical-note metadata. The shim
-therefore triages numerical-note filters by whether dropping the filter can change
-correctness.
+| Action | Effect |
+|---|---|
+| no-op | accepted silently |
+| warn | logged as a warning, otherwise ignored |
+| map | honored by filtering applicable engines; logged at info |
+| error | records `GRAPH_NOT_SUPPORTED` |
 
-| Note | `select_numeric_notes` | `deselect_numeric_notes` |
-|---|---|---|
-| `NOT_SET` | no-op | no-op |
-| `NONDETERMINISTIC` | warn and ignore | error |
-| `REDUCED_PRECISION_REDUCTION` | warn and ignore | error |
-| `TENSOR_CORE` | warn and ignore | warn and ignore |
-| `DOWN_CONVERT_INPUTS` | warn and ignore | warn and ignore |
-| `FFT` | warn and ignore | warn and ignore |
-| `WINOGRAD` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_4x4` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_6x6` | warn and ignore | warn and ignore |
-| `WINOGRAD_TILE_13x13` | warn and ignore | warn and ignore |
-| `STRICT_NAN_PROP` | warn and ignore | warn and ignore |
+### Numerical notes
 
-`deselect_numeric_notes({NONDETERMINISTIC})` is treated as a request for a
-deterministic plan. `deselect_numeric_notes({REDUCED_PRECISION_REDUCTION})` is
-treated as a request for full-precision reduction. The shim cannot guarantee
-either without backend metadata, so it records an error rather than silently
-returning an unfiltered plan.
+| Note | `select_numeric_notes` | `deselect_numeric_notes` | Why |
+|---|---|---|---|
+| `NOT_SET` | no-op | no-op | placeholder |
+| `TENSOR_CORE` | warn | warn | performance only |
+| `DOWN_CONVERT_INPUTS` | warn | error | excluding it is a precision guarantee the shim cannot check |
+| `REDUCED_PRECISION_REDUCTION` | warn | error | excluding it is a precision guarantee the shim cannot check |
+| `FFT` | warn | warn | algorithm class |
+| `NONDETERMINISTIC` | warn | map | deselect keeps only engines that claim determinism (see [Determinism](#determinism)) |
+| `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13` | warn | warn | algorithm class |
+| `STRICT_NAN_PROP` | error | warn | selecting it is a NaN-propagation guarantee the shim cannot check; excluding it only relaxes |
+| out-of-range value | error | error | unclassifiable |
 
-## Behavior-note filters
+Deselecting an out-of-range value is an error here but a no-op in cuDNN: without numerical metadata the shim cannot show the exclusion excludes nothing.
 
-hipDNN exposes some per-engine behavior notes, but not cuDNN's CUDA-specific
-behavior notes. The shim stores known hipDNN behavior-note filters and applies
-them after native plan creation by querying applicable engine behavior metadata.
+### Behavior notes
 
-cuDNN-only behavior notes (below) are never emitted by hipDNN engines. The shim
-triages them by whether ignoring the filter can violate the caller's request:
+Notes hipDNN engines report map for both select and deselect. Any other value, including cuDNN's CUDA-specific notes, is an error on select (no hipDNN engine can satisfy it) and a warning on deselect (it excludes nothing).
 
-- `deselect_behavior_notes({<cuDNN-only note>})` asks to *exclude* engines that
-  report the note. No hipDNN engine reports it, so nothing is excluded — the
-  filter is a safe no-op. The shim logs a warning and continues.
-- `select_behavior_notes({<cuDNN-only note>})` asks to *require* the note. No
-  hipDNN engine can satisfy it, so the request is unsatisfiable. The shim records
-  `GRAPH_NOT_SUPPORTED` rather than returning a plan that silently ignores the
-  requirement.
+| Note | `select_behavior_notes` | `deselect_behavior_notes` | Why |
+|---|---|---|---|
+| `NOT_SET` | no-op | no-op | placeholder |
+| `RUNTIME_COMPILATION` | map | map | hipDNN note |
+| `REQUIRES_LAYOUT_TRANSFORM` | map | map | hipDNN note |
+| `SUPPORTS_GRAPH_CAPTURE` | map | map | hipDNN note |
+| `EXTERNAL_LIBRARY_DEPENDENCY` | map | map | hipDNN note |
+| `SUPPORTS_EXECUTION_PLAN_SERIALIZATION` | map | map | hipDNN note |
+| `REQUIRES_FILTER_INT8x32_REORDER` | error | warn | cuDNN only |
+| `REQUIRES_BIAS_INT8x32_REORDER` | error | warn | cuDNN only |
+| `SUPPORTS_CUDA_GRAPH_NATIVE_API` | error | warn | cuDNN only; `populate_cuda_graph` is unsupported, and this is not stream capture (`SUPPORTS_GRAPH_CAPTURE`) |
+| `CUBLASLT_DEPENDENCY` | error | warn | cuDNN only; not equivalent to `EXTERNAL_LIBRARY_DEPENDENCY` |
+| out-of-range value | error | warn | reported by no hipDNN engine |
 
-The cuDNN-only behavior notes handled this way:
+### Determinism
 
-- `REQUIRES_FILTER_INT8x32_REORDER`
-- `REQUIRES_BIAS_INT8x32_REORDER`
-- `SUPPORTS_CUDA_GRAPH_NATIVE_API`
-- `CUBLASLT_DEPENDENCY`
+`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
 
-For behavior notes hipDNN *does* expose, both filters apply after native plan
-creation. If known behavior-note filters remove every applicable hipDNN engine,
-plan creation returns `GRAPH_NOT_SUPPORTED`.
+## Engine filtering
 
-When a filter bars only some engines, the shim narrows the candidate set the way
-cuDNN does: `build_plans(HEURISTICS_CHOICE)` retargets onto the top-ranked
-surviving plan rather than failing because the top-ranked one was barred.
+`deselect_engines`, the behavior-note filters, and the determinism filter are applied to the applicable engines after plan creation. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, or `build_plan_at_index()`, including for plans already created.
 
-## Engine IDs
+If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan, as cuDNN does, instead of failing because the top-ranked engine was barred.
 
-cuDNN frontend presents integer engine IDs as dense graph-local indices bounded
-by `get_engine_count()`.
+If no created plan survives, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine.
 
-hipDNN native engine IDs are stable hashes of engine names. The shim therefore
-maintains a graph-local mapping:
+## Engine indices
 
-```text
-cuDNN-shaped engine index -> native hipDNN engine ID
-```
-
-`get_engine_count()` refreshes this map from hipDNN's ranked applicable engine
-list. `get_knobs_for_engine`, `create_execution_plan`, and
-`deselect_engines(vector<int64_t>)` translate cuDNN-shaped dense indices through
-that map before calling native hipDNN APIs.
-
-Impact: ordering follows hipDNN's ranked applicable engine list, not cuDNN's
-backend ordering.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
 
 ## Knobs
 
-cuDNN frontend exposes knobs as a fixed `KnobType_t` enum plus integer
-`minValue`, `maxValue`, and `stride` metadata. hipDNN native knobs use provider-
-defined string IDs, variant-valued settings, descriptions, and richer constraints.
-The shim uses explicit conversion rather than aliasing these incompatible models.
+hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment, case-insensitively (`tile_size` and `miopen.tile_size` both map to `TILE_SIZE`). `workspace_size_limit` maps to `WORKSPACE`.
 
-hipDNN knob IDs are namespaced (for example `global.workspace_size_limit`) while
-cuDNN's `KnobType_t` is flat. The shim matches on the final dot-separated segment,
-so both `tile_size` and `provider.tile_size` project onto the same cuDNN knob.
-Matching is case-insensitive, and `workspace_size_limit` is the one bare name that
-differs from its cuDNN counterpart (`workspace`).
+`get_knobs_for_engine` reports a hipDNN knob only if its ID maps to a `KnobType_t`, its value type is `int64`, and its constraint fits `minValue` / `maxValue` / `stride`. Others are omitted with a warning.
 
-When returning knobs from `get_knobs_for_engine`, native hipDNN knobs are projected
-to cuDNN-shaped knobs only when all of the following are true:
+`create_execution_plan` returns `INVALID_VALUE` when a `KnobType_t` key is not exposed by the engine, maps to more than one of its knobs, or has a value the knob cannot hold (string knob, or above 2^53 for a float knob). Integer values are converted to `double` for float knobs.
 
-- the native string knob ID maps to a known cuDNN `KnobType_t`
-- the native knob value type is `int64`
-- the native constraint can be represented as `minValue` / `maxValue` / `stride`
+## Graph setters
 
-Native knobs that cannot be represented this way are omitted with a warning.
+| Setter | Behavior |
+|---|---|
+| `set_dynamic_shape_enabled`, `set_kernel_cache` | Log, ignore. |
+| `set_sm_count`, `set_sm_version`, `set_device_properties` | Record `INVALID_VALUE`. |
+| `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
+| `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
 
-When creating a plan, each cuDNN `KnobType_t` key is resolved against the knobs the
-target engine actually exposes, so a choice lands on the provider's own knob ID (for
-example `miopen.tile_size`) rather than on a guessed bare name. A knob choice is
-never silently dropped: `INVALID_VALUE` is returned for a key the engine does not
-expose, for a key that more than one of the engine's knobs maps onto, and for a value
-the native knob cannot hold (a string-valued knob, or a magnitude past 2^53 for a
-float-valued knob). Integer choices are widened to `double` for float-valued knobs.
+## Build and execute
 
-## Workspace and shared-memory caps
+- `build_operation_graph()` without a handle succeeds only for a graph with no nodes.
+- `build_plans(..., do_multithreaded_builds = true)` builds serially.
+- `get_workspace_size*` with non-empty runtime shape overrides returns `GRAPH_NOT_SUPPORTED`. `execute` with overrides requires hipDNN built with `HIPDNN_ENABLE_SDPA`; otherwise it returns `INVALID_VALUE`.
+- `execute(cudnnHandle_t, void**, int, void*)` returns `INVALID_VALUE`; the shim cannot recover tensor UIDs from a flat pointer array.
+- `warmup(handle, tensor map, workspace)` runs plan 0 once. cuDNN FE's `warmup(handle)` signature is not provided.
+- `populate_cuda_graph` and `update_cuda_graph` return `GRAPH_NOT_SUPPORTED`.
+- `get_behavior_notes_for_plan_at_index` resolves the plan's engine from its name: built-in engines by name hash, others (including plugin engines) by the `0x`-prefixed hexadecimal ID hipDNN reports for them.
+- `print()` on a graph whose operation graph is not built prints an empty object.
+- `deserialize` ignores `enforce_precompiled`.
 
-`deselect_workspace_greater_than` is forwarded to hipDNN and reapplied after plan
-creation because native plan creation resets native filters.
+## hipDNN extensions
 
-`deselect_shared_mem_greater_than(0)` is a no-op. Any non-zero value records
-`GRAPH_NOT_SUPPORTED`; hipDNN does not currently expose per-plan shared-memory
-usage metadata for the shim to filter on.
+- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
+- `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
+- `Graph::deserialize(data, enforce_precompiled)` without a handle.
+- `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
 
-## Plan and engine introspection
+Code that must also compile against NVIDIA cuDNN cannot use these.
 
-The shim forwards plan-name, plan-workspace, per-plan execution, knob query,
-autotune, and current-plan behavior-note APIs where native hipDNN exposes an
-equivalent.
+## Versions
 
-`get_behavior_notes_for_plan_at_index` is best-effort. Native hipDNN exposes plan
-name by index but not engine ID by index, so the shim resolves registered engine
-names back to IDs. Unknown engine names fail rather than fabricating behavior
-notes.
+| Macro / function | Value |
+|---|---|
+| `CUDNN_FRONTEND_VERSION` | 12400 (v1.24.0) |
+| `CUDNN_VERSION`, `cudnnGetVersion()`, `detail::get_backend_version()` | 92200 (9.22.0) |
+| `CUDNN_CUDART_VERSION`, `cudnnGetCudartVersion()` | 12000 |
 
-`warmup` is implemented as `execute_plan_at_index(..., 0)`.
-
-## CUDA graph capture
-
-`populate_cuda_graph` and `update_cuda_graph` are compile-time-present runtime
-error stubs. They return `GRAPH_NOT_SUPPORTED` because there is no in-scope
-HIP-graph capture analogue in the shim.
-
-## Execute overloads
-
-The UID-map and tensor-attribute-map execute overloads forward to native hipDNN.
-The flat pointer-array `execute(cudnnHandle_t, void**, int, void*)` overload is
-present for source compatibility but returns `INVALID_VALUE`; the shim cannot
-safely reconstruct the required tensor UID mapping from a flat pointer array.
+These are claims for consumers that gate on version; there is no cuDNN or CUDA runtime behind them.
 
 ## Logging
 
-`cudnnCreate()` performs a best-effort bridge from cuDNN frontend logging
-environment variables to hipDNN logging configuration before creating the hipDNN
-handle:
+Every `cudnnCreate()` call maps cuDNN FE logging environment variables to hipDNN before creating the handle. If any of `CUDNN_FRONTEND_LOG_INFO`, `CUDNN_FRONTEND_LOG_FILE`, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` is set, the mapping overrides any `HIPDNN_LOG_LEVEL` / `HIPDNN_LOG_FILE` already set:
 
-- enabled cuDNN logging maps to `HIPDNN_LOG_LEVEL=info`
-- file-path `CUDNN_FRONTEND_LOG_FILE` maps to `HIPDNN_LOG_FILE`
-- `stdout` / `stderr` targets enable hipDNN logging but do not set `HIPDNN_LOG_FILE`
-- disabled or no-target cases map to `HIPDNN_LOG_LEVEL=off`
+| cuDNN FE | hipDNN |
+|---|---|
+| `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=<path>` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE=<path>` |
+| `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=stdout` or `stderr` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE` unset; both log to stderr |
+| any other combination, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` set to a non-zero value | `HIPDNN_LOG_LEVEL=off`, `HIPDNN_LOG_FILE` unset |
 
-The bridge is effective only if it runs before hipDNN backend logging initializes.
-The `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging macros; they do not
-own a separate cuDNN frontend stream logger.
+Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, when its logging initializes: if that happens before `cudnnCreate()` (for example, on an earlier hipDNN call), the file mapping is ignored, and if the level was off at that point there is no console output either. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.

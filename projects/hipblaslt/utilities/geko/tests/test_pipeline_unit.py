@@ -218,6 +218,26 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
     assert called["devices"] == [2]
 
 
+def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    monkeypatch.setattr(
+        pipeline.bench.log,
+        "summarize",
+        lambda *_args, **kwargs: (pd.DataFrame(), pd.DataFrame([{"M": 16}])),
+    )
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    monkeypatch.setattr(pipeline, "gemm_configs_from_gemm_dataframe", lambda _df: [gc])
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        pipeline.run_configure(str(hip), str(workload), devices=[0], arch="gfx942", workdir=str(tmp_path / "w"))
+
+
 def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
@@ -230,6 +250,26 @@ def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch,
     )
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(tmp_path / "w"))
+
+
+def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    called = {}
+
+    def _fake_summarize(*_args, **kwargs):
+        called["force_benchmark"] = kwargs.get("force_benchmark")
+        called["keep_thr"] = kwargs.get("keep_thr")
+        return pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
+
+    pipeline.run_search(str(hip), str(workload), devices=[0], keep_thr=0.0, workdir=str(tmp_path / "w"))
+
+    assert called["force_benchmark"] is True
+    assert called["keep_thr"] == 0.0
 
 
 def test_run_search_raises_when_no_winners(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -302,7 +342,7 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
@@ -385,7 +425,7 @@ def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
@@ -684,3 +724,25 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()
     assert (workdir / "benchmarks" / "keep.txt").is_file()
+
+
+def test_mx_detected_from_scale_columns_in_workload(tmp_path: Path) -> None:
+    """MX should be detected per-GEMM from scaleA/scaleB in workload log."""
+    from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+    import pandas as pd
+
+    df = pd.DataFrame([
+        {"transA": "T", "transB": "N", "a_type": "f8_r", "b_type": "f8_r",
+         "c_type": "f32_r", "compute_type": "f32_r", "m": 256, "n": 256,
+         "batch_count": 1, "k": 256, "d_type": "f32_r", "scaleA": 3, "scaleB": 3},
+        {"transA": "N", "transB": "N", "a_type": "bf16_r", "b_type": "bf16_r",
+         "c_type": "bf16_r", "compute_type": "f32_r", "m": 512, "n": 512,
+         "batch_count": 1, "k": 256, "d_type": "bf16_r", "scaleA": 1, "scaleB": 1},
+    ])
+    gcs = gemm_configs_from_gemm_dataframe(df)
+    assert len(gcs) == 2
+    mx_gcs = [gc for gc in gcs if gc.mx]
+    non_mx_gcs = [gc for gc in gcs if not gc.mx]
+    assert len(mx_gcs) == 1
+    assert mx_gcs[0].gemm_type.data_type == "F8"
+    assert len(non_mx_gcs) == 1
