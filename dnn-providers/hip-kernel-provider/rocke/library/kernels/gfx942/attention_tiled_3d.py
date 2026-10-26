@@ -30,8 +30,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_strided_kv import (
@@ -39,6 +38,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._lse_store import lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -60,6 +60,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     wave64_reduce_max as _wave64_reduce_max,
@@ -126,12 +127,10 @@ class UnifiedAttention3DTiledSpec:
     # instructions -> less VMEM issue pressure on the memory-bound decode segment.
     # fp16/bf16 only (the fp8 path already loads wide). Signature-tracked.
     use_wide_kv_load: bool = False
-    # 64-bit paged-KV addressing for caches > 2 GiB. Accepted for signature
-    # parity with the shared dispatch spec builder and the gfx950 spec; the
-    # gfx942 narrow segment loaders do not key on it yet (the gfx942 >2 GiB
-    # decode path is a separate follow-on), so a True value here would be a
-    # no-op on gfx942 -- guard it so the dispatcher cannot silently build an
-    # uncorrected gfx942 kernel for an oversized cache.
+    # 64-bit paged-KV addressing. Accepted for signature parity with the gfx950
+    # spec, but this kernel has no i64 path: the builders set it only for a
+    # cache past what the K/V loader reads (``i32_kv_cache_bytes``), and it is
+    # refused below so an oversized cache cannot build a kernel that misreads it.
     use_i64_kv_addr: bool = False
     # Direct non-paged [B,H,S,D] addressing; D remains contiguous.
     kv_layout: str = "paged"
@@ -232,9 +231,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -319,6 +316,30 @@ def supports_tiled_3d(
     if 16 % num_queries_per_kv != 0:
         return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
     return True, "supported"
+
+
+# The wide K/V loader moves 8 halves per lane over the 64-lane wave; a tile it
+# cannot split evenly falls back to the async copies.
+_WIDE_KV_ELEMS = 8
+
+
+def wide_kv_load_fits(tile_size: int, head_size: int) -> bool:
+    """True when ``use_wide_kv_load`` takes effect for this tile."""
+    return (tile_size * head_size) % (64 * _WIDE_KV_ELEMS) == 0
+
+
+def i32_kv_cache_bytes(
+    *, kv_fp8: bool, use_wide_kv_load: bool, tile_size: int, head_size: int
+) -> int:
+    """Largest paged K/V cache, in bytes, the selected K/V loader reads.
+
+    This kernel has no i64 KV path. The fp8 dequant and wide loaders are flat
+    global loads indexed by an i32 byte offset, correct below 2^31 bytes. The
+    async copies read through a buffer resource bounded at 0x7FFF0000 bytes.
+    """
+    if kv_fp8 or (use_wide_kv_load and wide_kv_load_fits(tile_size, head_size)):
+        return 0x8000_0000
+    return 0x7FFF_0000
 
 
 def build_unified_attention_3d_tiled(
@@ -802,8 +823,8 @@ def build_unified_attention_3d_tiled(
     # 1 DWORD to 4 DWORDs, cutting load-instruction count 4x. The dim axis is
     # contiguous in the paged cache (stride = KV_BYTES) so 8 consecutive halves
     # are a legal coalesced b128 load.
-    WIDE_ELEMS = 8
-    WIDE_OK = (T * HD) % (THREADS * WIDE_ELEMS) == 0
+    WIDE_ELEMS = _WIDE_KV_ELEMS
+    WIDE_OK = wide_kv_load_fits(T, HD)
     wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
 
     def _kv_col(row: Value, col: Value) -> Value:
@@ -1142,22 +1163,29 @@ def build_unified_attention_3d_tiled(
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-        # other 3 lanes.
+        # other 3 lanes. m_new is the running max (m_val included), so
+        # alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+        # tile-local max would overflow alpha once a tile scores ~128 log2 units
+        # below an earlier one. Until the row has an unmasked key (or, in
+        # segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+        # instead, so P and alpha are 0, not NaN. A row with neither in the
+        # segment stores m = -inf, which the reduce kernel weights by 0.
         local_max = neg_inf
         for v in masked.values():
             local_max = b.fmax(local_max, v)
-        full_max_raw = _row_reduce(local_max, b.fmax)
-        ok = b.fcmp("ogt", full_max_raw, neg_inf)
-        m_new = b.select(ok, full_max_raw, zero_f)
+        tile_max = _row_reduce(local_max, b.fmax)
+        m_new = b.fmax(m_val, tile_max)
+        ok = b.fcmp("ogt", m_new, neg_inf)
+        m_safe = b.select(ok, m_new, zero_f)
         p_regs = {}
         sum_p = zero_f
         for key, v in masked.items():
-            p = b.exp2_fast(b.fsub(v, m_new))
+            p = b.exp2_fast(b.fsub(v, m_safe))
             p_regs[key] = p
             sum_p = b.fadd(sum_p, p)
         l_local = _row_reduce(sum_p, b.fadd)
 
-        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        alpha = b.exp2_fast(b.fsub(m_val, m_safe))
         new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.
@@ -1245,8 +1273,18 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
+    #   still differs from before LSE existed: the masked-segment merge fix below
+    #   applies with LSE on or off.)
+    emit_lse: bool = field(default=False, kw_only=True)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1257,13 +1295,15 @@ class UnifiedAttentionReduceTiledSpec:
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            "rocke_uattn_reduce_tiled_gfx942",
+        parts = [
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
-        )
+        ]
+        if self.emit_lse:
+            parts.append("lse")
+        return kernel_name_join("rocke_uattn_reduce_tiled_gfx942", *parts)
 
 
 def build_unified_attention_reduce_tiled(
@@ -1295,6 +1335,17 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     q_token = b.block_id_x()
     q_head = b.block_id_y()
@@ -1343,6 +1394,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)
@@ -1396,6 +1452,22 @@ def build_unified_attention_reduce_tiled(
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
         out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
+
+    if spec.emit_lse:
+        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
+        # lane writes. overall_max is in log2 units (segm_max carries
+        # scale*log2e); lse_store converts to natural log and writes -inf for a
+        # row with no mass (every segment empty), whose O is already 0.
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_store(
+                b,
+                lse,
+                lse_index,
+                overall_max,
+                overall_expsum,
+                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+            )
 
     return b.kernel
 

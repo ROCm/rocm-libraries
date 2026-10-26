@@ -5,8 +5,15 @@
 UUID cross-reference threading, allow-listed JSON keys, the UMD policy and the shape
 of the gtest cases the emitted C++ stubs carry."""
 
+import copy
+import dataclasses
 import json
+import os
 import re
+import shutil
+import subprocess
+import uuid
+from pathlib import Path
 
 import pytest
 
@@ -19,9 +26,29 @@ from codegen.generator import (
     build_ued,
     emitted_inventory,
     mint_ids,
+    resolve_ids,
 )
-from codegen.models import DEFAULT_FIXTURE_ARCH, KernelSource, KmdField
-from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
+from codegen.models import (
+    DEFAULT_FIXTURE_ARCH,
+    DIALECT_PACKAGED,
+    KernelSource,
+    KmdField,
+)
+from codegen.prior_ids import discover_siblings, find_engine, read_prior_bundle
+from tests.helpers import (
+    all_ids,
+    home_and_satellite,
+    json_bytes,
+    kdps,
+    make_engine,
+    make_kernel,
+    make_minimal_config,
+    make_pack,
+    make_packaged_config,
+    make_rocke_kernel,
+    read_docs,
+    render_resolved,
+)
 
 
 def _distinct_from(value):
@@ -53,10 +80,11 @@ class TestUuidThreading:
         ued = build_ued(scale_add_config, ids)
         assert ued["metadata"] == ids["kmd"]
 
-    def test_ued_heuristic_references_uhd_id(self, scale_add_config):
+    def test_ued_sort_kernel_catalog_references_uhd_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
         ued = build_ued(scale_add_config, ids)
-        assert ued["heuristic"] == ids["uhd"]
+        assert ued["sort_kernel_catalog"] == {"default": ids["uhd"]}
+        assert "heuristic" not in ued
 
     def test_kdp_engine_references_ued_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
@@ -96,24 +124,18 @@ class TestUuidThreading:
         assert len(kernel_ids) == len(set(kernel_ids))
         assert kdp["id"] not in kernel_ids
 
-    def test_ids_are_minted_fresh_per_call(self, scale_add_config):
-        """One mint per RUN, not one globally; within a run every id must still be
-        unique."""
-        ids_a = mint_ids(scale_add_config)
-        ids_b = mint_ids(scale_add_config)
-        assert ids_a["ued"] != ids_b["ued"]
-
     def test_every_minted_id_is_distinct(self, binary_ops_config):
-        """Neither kernel names nor pack names are unique by the config, so no id may be
-        derived from one."""
+        """Pack names, and kernel names off the `load_config` path, are not unique, so
+        no id may be derived from one."""
         ids = mint_ids(binary_ops_config)
         values = list(ids.values())
         assert len(values) == len(set(values))
 
 
 class TestDuplicateKernelNamesAreSurvivable:
-    """Kernel names are NOT validated unique, so nothing may be keyed on them: two
-    variants sharing an id lose one with no error, and ids are random."""
+    """Kernel names are unique on the ``load_config`` path but nothing else enforces
+    it, so a programmatic config can repeat one. Neither ids nor their reuse may key
+    on a name: two variants sharing an id lose one with no error."""
 
     def test_same_name_different_metadata_gets_distinct_ids(self, scale_add_config):
         import copy
@@ -379,7 +401,7 @@ class TestAllowListedKeys:
         "id",
         "name",
         "graph_match",
-        "heuristic",
+        "sort_kernel_catalog",
         "metadata",
         "knobs",
         "behavior_notes",
@@ -388,7 +410,7 @@ class TestAllowListedKeys:
     }
     _UMD_KEYS = {"version", "id", "name", "scope", "match_symbol"}
     _UDD_KEYS = {"version", "id", "name", "dispatch_symbol"}
-    _UHD_KEYS = {"version", "id", "name", "kind", "payload"}
+    _UHD_KEYS = {"version", "id", "name", "adapter", "objective", "native"}
     _KDP_KEYS = {
         "version",
         "id",
@@ -581,7 +603,7 @@ class TestSpecializationContractEmission:
     @staticmethod
     def _consumers(kdp):
         """What each kernel of this KDP resolves to, through the real reader."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         return [
@@ -665,7 +687,7 @@ class TestSpecializationContractEmission:
     ):
         """Asserting the shape here and hoping it matches ``hkp_pack`` is how the two
         drift."""
-        agreement = _import_agreement()
+        agreement = _import_hkp_pack("agreement")
         if agreement is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         ids = mint_ids(scale_add_config)
@@ -676,9 +698,30 @@ class TestSpecializationContractEmission:
             assert len(consumers) == 1
             agreement.validate_consumer(consumers[0], kmd)
 
+    def test_the_packaged_bundle_passes_the_packers_load(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        """hkp_pack loads the rendered tree as it would at pack time: every id and
+        cross-reference a packed bundle carries (the UED's `id` and `metadata` among
+        them) must be a UUID the packer resolves."""
+        descriptors = _import_hkp_pack("descriptors")
+        generic_targets = _import_hkp_pack("generic_targets")
+        if descriptors is None or generic_targets is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
+        config = gfx950_attention_dense_config
+        generator.render(config, tmp_path)
+        # The shipped generic target table, as the packer loads it at pack time.
+        flat = descriptors.load_flat_input(
+            tmp_path / config.descriptor_dir,
+            generic_targets.GenericTargets.load(generic_targets.DEFAULT_TABLE_PATH),
+            log=lambda _message: None,
+        )
+        # A wrong root would load nothing and pass vacuously.
+        assert flat.by_type("ued") and flat.by_type("kmd")
 
-def _import_agreement():
-    """``hkp_pack.agreement``, or ``None`` where the provider tree is absent: descriptor
+
+def _import_hkp_pack(module: str):
+    """``hkp_pack.<module>``, or ``None`` where the provider tree is absent: descriptor
     generation must not require the kernel toolchain, so this is a test-only bridge."""
     import importlib
     import sys
@@ -686,12 +729,12 @@ def _import_agreement():
 
     root = Path(__file__).resolve().parents[5]
     package = root / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
-    if not (package / "hkp_pack" / "agreement.py").exists():
+    if not (package / "hkp_pack" / f"{module}.py").exists():
         return None
     if str(package) not in sys.path:
         sys.path.insert(0, str(package))
     try:
-        return importlib.import_module("hkp_pack.agreement")
+        return importlib.import_module(f"hkp_pack.{module}")
     except ImportError:
         return None
 
@@ -1684,8 +1727,8 @@ class TestPlaceholderGateOnUnreadableFiles:
         target = "packs/ScaleAddNative.cpp"
 
         class GeneratorThatLosesAFileAfterWriting(generate.IngestorGenerator):
-            def render(self, config, output_dir):
-                written = super().render(config, output_dir)
+            def render(self, config, output_dir, **kwargs):
+                written = super().render(config, output_dir, **kwargs)
                 (output_dir / target).write_bytes(b"// \xff\xfe not utf-8\n")
                 return written
 
@@ -1796,3 +1839,1632 @@ class TestPackagedHsacoKdp:
             {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureAdd"},
             {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureScale"},
         ]
+
+
+# ---------------------------------------------------------------------------
+# Stable descriptor ids
+# ---------------------------------------------------------------------------
+
+
+def _kernel_ids(docs: dict) -> dict:
+    """Kernel name -> id over every KDP; only meaningful where names are unique."""
+    return {
+        entry["name"]: entry["id"]
+        for kdp in kdps(docs)
+        for entry in kdp["kernelDescriptors"]
+    }
+
+
+def _copy_bundle(source: Path, root: Path, config) -> Path:
+    """A copy of a descriptor directory at ``config.descriptor_dir`` under ``root``,
+    so an edited copy still passes for that bundle's own directory."""
+    target = root / config.descriptor_dir
+    shutil.copytree(source, target)
+    return target
+
+
+def _regenerated(generator, before, after, tmp_path):
+    """Render ``before``, regenerate ``after`` over that tree and return both trees'
+    documents, ``(before_docs, after_docs)``. Both configs share one descriptor
+    directory."""
+    directory = before.descriptor_dir
+    generator.render(before, tmp_path / "before")
+    render_resolved(
+        generator, after, tmp_path / "after", ids_from=tmp_path / "before" / directory
+    )
+    return (
+        read_docs(tmp_path / "before" / directory),
+        read_docs(tmp_path / "after" / directory),
+    )
+
+
+def _edit_json(path: Path, **changes) -> None:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc.update(changes)
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
+class TestStableIds:
+    """Regenerating a bundle keeps the id of every descriptor that is still there.
+
+    Ids are reused, never derived: a descriptor that is new gets a fresh ``uuid4``,
+    and an id that is no longer used is never handed to a different descriptor.
+    """
+
+    @pytest.mark.parametrize("fixture", ["scale_add_config", "binary_ops_config"])
+    def test_regenerating_an_unchanged_config_rewrites_nothing(
+        self, generator, request, tmp_path, fixture
+    ):
+        """No flag is passed: the output tree itself is the previous version."""
+        config = request.getfixturevalue(fixture)
+        written = generator.render(config, tmp_path)
+        directory = tmp_path / config.descriptor_dir
+        first = json_bytes(directory)
+        assert {f"{config.descriptor_dir}/{name}" for name in first} == {
+            rel for rel in written if rel.endswith(".json")
+        }
+        assert config.is_multi_pack == any(
+            name.startswith("operation_is_") for name in first
+        ), "the multi-pack case must cover the operation UMDs' ids"
+
+        generator.render(config, tmp_path)
+
+        assert json_bytes(directory) == first
+        assert all(b"\r" not in data for data in first.values()), (
+            "descriptors must be LF on every platform, or an unchanged bundle "
+            "differs from its git blob and its DVC object"
+        )
+
+    def test_adding_a_kernel_changes_only_the_added_kernels_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        grown = copy.deepcopy(scale_add_config)
+        added = copy.deepcopy(grown.packs[0].kernels[0])
+        added.name = "scale_add.f32_block128"
+        added.metadata["block_size"] = 128
+        # In front of the others: ids keyed on position would all shift.
+        grown.packs[0].kernels.insert(0, added)
+        before, after = _regenerated(generator, scale_add_config, grown, tmp_path)
+        for name, doc in before.items():
+            if not name.endswith(".kdp.json"):
+                assert after[name] == doc, f"{name} changed for an added kernel"
+        (kdp_before,) = kdps(before)
+        (kdp_after,) = kdps(after)
+        assert kdp_after["id"] == kdp_before["id"]
+        assert kdp_after["kernelDescriptors"][0]["name"] == added.name
+        ids_before, ids_after = _kernel_ids(before), _kernel_ids(after)
+        for name, kernel_id in ids_before.items():
+            assert ids_after[name] == kernel_id, f"{name} was renumbered"
+        new_id = ids_after[added.name]
+        assert new_id not in all_ids(before)
+        assert uuid.UUID(new_id).version == 4, "a new id is minted, not derived"
+
+    def test_a_renamed_kernel_keeps_its_id(self, generator, scale_add_config, tmp_path):
+        """A name is not part of the catalog identity, so renaming changes no id."""
+        renamed = copy.deepcopy(scale_add_config)
+        renamed.packs[0].kernels[0].name = "scale_add.renamed"
+        before, after = map(
+            _kernel_ids, _regenerated(generator, scale_add_config, renamed, tmp_path)
+        )
+        assert list(after.values()) == list(before.values())
+        assert "scale_add.renamed" in after
+
+    def test_a_retuned_kernel_gets_a_new_id_and_the_rest_keep_theirs(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The same tuple built from different compiled bytes is not the kernel it
+        replaces: an id kept across it would resolve to other code for anything that
+        recorded the id."""
+        config = copy.deepcopy(scale_add_config)
+        extra = copy.deepcopy(config.packs[0].kernels[0])
+        extra.name = "scale_add.f32_block128"
+        extra.metadata["block_size"] = 128
+        config.packs[0].kernels.append(extra)
+        retuned = copy.deepcopy(config)
+        retuned.packs[0].kernels[0].kernel_source.entry_point = "ScaleAddRetuned"
+        before, after = map(
+            _kernel_ids, _regenerated(generator, config, retuned, tmp_path)
+        )
+        first, second = config.packs[0].kernels[0].name, "scale_add.f32_block128"
+        assert after[first] != before[first]
+        assert after[second] == before[second]
+
+    def test_a_retune_that_also_moves_the_arch_still_gets_a_new_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        moved = copy.deepcopy(scale_add_config)
+        moved.packs[0].arch = [*moved.packs[0].arch, "gfx950"]
+        moved.packs[0].kernels[0].kernel_source.entry_point = "ScaleAddRetuned"
+        before, after = map(
+            _kernel_ids, _regenerated(generator, scale_add_config, moved, tmp_path)
+        )
+        name = scale_add_config.packs[0].kernels[0].name
+        assert after[name] != before[name]
+
+    @pytest.mark.parametrize(
+        "knob, keeps",
+        [
+            ({"block": 64}, True),
+            ({"block": 64, "stage": 2}, True),
+            ({"block": 128}, False),
+            ({"stage": 2}, False),
+        ],
+        ids=["unchanged", "gained-a-field", "changed-a-field", "dropped-a-field"],
+    )
+    def test_only_a_changed_or_dropped_spec_field_is_a_retune(
+        self, generator, tmp_path, knob, keeps
+    ):
+        """A registry that starts stating a knob it used to omit must not remint
+        every kernel, but a value the prior stated and the new one changes or drops
+        is different code."""
+        before = make_packaged_config("rocKE/a", [64])
+        after = copy.deepcopy(before)
+        after.packs[0].kernels[0].kernel_source.spec = dict(knob)
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert (now == kept) is keeps
+
+    def test_a_source_field_outside_spec_is_a_retune(self, generator, tmp_path):
+        """A newly stated ``target`` changes what is compiled; only ``spec`` may grow
+        without changing the kernel."""
+        before = make_packaged_config("rocKE/a", [64])
+        after = copy.deepcopy(before)
+        after.packs[0].kernels[0].kernel_source.target = "generic"
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert now != kept
+
+    def test_a_retuned_kernel_keeps_the_id_minted_for_it_across_reruns(
+        self, generator, tmp_path
+    ):
+        """The installed bundle holds the kernel at its old source; each rerun into
+        the scratch directory must hand the retune the id the first run minted."""
+        before = make_packaged_config("rocKE/a", [64, 128])
+        generator.render(before, tmp_path / "installed")
+        installed = tmp_path / "installed" / before.descriptor_dir
+        retuned = copy.deepcopy(before)
+        retuned.packs[0].kernels[0].kernel_source.spec = {"block": 99}
+        scratch = tmp_path / "scratch"
+        runs = []
+        for _ in range(3):
+            render_resolved(
+                generator,
+                retuned,
+                scratch,
+                ids_from=installed,
+                also_from=scratch / retuned.descriptor_dir,
+            )
+            runs.append(_kernel_ids(read_docs(scratch / retuned.descriptor_dir)))
+
+        first, other = (k.name for k in retuned.packs[0].kernels)
+        installed_ids = _kernel_ids(read_docs(installed))
+        assert runs[0] == runs[1] == runs[2]
+        assert runs[0][first] not in installed_ids.values()
+        assert runs[0][other] == installed_ids[other]
+
+    def test_the_installed_id_wins_over_a_scratch_pass_of_the_same_source(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        generator.render(before, tmp_path / "installed")
+        installed = tmp_path / "installed" / before.descriptor_dir
+        scratch_dir = tmp_path / "scratch" / before.descriptor_dir
+        shutil.copytree(installed, scratch_dir)
+        scratch_kdp = next(scratch_dir.glob("*.kdp.json"))
+        scratch_id = str(uuid.uuid4())
+        _edit_json(
+            scratch_kdp,
+            kernelDescriptors=[
+                {**entry, "id": scratch_id}
+                for entry in read_docs(scratch_dir)[scratch_kdp.name][
+                    "kernelDescriptors"
+                ]
+            ],
+        )
+        (installed_id,) = _kernel_ids(read_docs(installed)).values()
+
+        resolution = resolve_ids(
+            before, tmp_path / "again", ids_from=installed, also_from=scratch_dir
+        )
+
+        assert resolution.ids[("kernel", 0, 0)] == installed_id
+
+    def test_a_duplicate_the_deduplication_drops_does_not_make_an_arch_move_ambiguous(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        after = copy.deepcopy(before)
+        after.packs[0].arch = ["gfx950", "gfx942"]
+        twin = copy.deepcopy(after.packs[0].kernels[0])
+        twin.name = "a.twin"
+        after.packs[0].kernels.append(twin)
+        docs_before, docs_after = _regenerated(generator, before, after, tmp_path)
+        assert [
+            e["name"] for k in kdps(docs_after) for e in k["kernelDescriptors"]
+        ] == [before.packs[0].kernels[0].name]
+        assert _kernel_ids(docs_after) == _kernel_ids(docs_before)
+
+    def test_a_kernel_moved_to_another_pack_keeps_its_id(
+        self, generator, binary_ops_config, tmp_path
+    ):
+        """The key is the catalog entry, not the pack it sits in."""
+        before_config = copy.deepcopy(binary_ops_config)
+        extra = copy.deepcopy(before_config.packs[0].kernels[0])
+        extra.name = "binary_ops_add.f32_block128"
+        extra.metadata["block_size"] = 128
+        before_config.packs[0].kernels.append(extra)
+        moved = copy.deepcopy(before_config)
+        moved.packs[1].kernels.append(moved.packs[0].kernels.pop())
+        before, after = _regenerated(generator, before_config, moved, tmp_path)
+        assert _kernel_ids(after) == _kernel_ids(before)
+        assert {n: d["id"] for n, d in after.items()} == {
+            n: d["id"] for n, d in before.items()
+        }
+
+    def test_a_removed_kernels_id_is_not_handed_to_a_new_kernel(
+        self, generator, scale_add_config, tmp_path
+    ):
+        changed = copy.deepcopy(scale_add_config)
+        pack = changed.packs[0]
+        removed = pack.kernels.pop(1)
+        replacement = copy.deepcopy(removed)
+        replacement.name = "scale_add.f32_block512"
+        replacement.metadata["block_size"] = 512
+        pack.kernels.append(replacement)
+        before, after = _regenerated(generator, scale_add_config, changed, tmp_path)
+        ids_before, ids_after = _kernel_ids(before), _kernel_ids(after)
+        assert ids_before[removed.name] not in all_ids(after)
+        survivor = pack.kernels[0].name
+        assert ids_after[survivor] == ids_before[survivor]
+        assert ids_after[replacement.name] not in all_ids(before)
+
+    def test_same_named_kernels_keep_their_own_ids_when_reordered(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """Neither position nor name identifies a kernel: here two share a name and
+        only the metadata tells them apart."""
+        before_config = copy.deepcopy(scale_add_config)
+        pack = before_config.packs[0]
+        twin = copy.deepcopy(pack.kernels[0])
+        twin.metadata["block_size"] = 512
+        pack.kernels.append(twin)
+        assert twin.name == pack.kernels[0].name
+        reordered = copy.deepcopy(before_config)
+        reordered.packs[0].kernels.reverse()
+
+        def by_block(docs):
+            (kdp,) = kdps(docs)
+            return {
+                e["metadata"]["block_size"]: e["id"] for e in kdp["kernelDescriptors"]
+            }
+
+        before, after = map(
+            by_block, _regenerated(generator, before_config, reordered, tmp_path)
+        )
+        assert len(set(before.values())) == 3
+        assert after == before
+
+    def test_two_packs_with_one_name_still_get_distinct_ids(self, generator, tmp_path):
+        """Pack names are not validated unique either, so a prior pack id is claimed
+        once: the second pack of that name cannot share it."""
+
+        def build(pack_names):
+            return make_minimal_config(
+                packs=[
+                    make_pack(
+                        name=name,
+                        discriminator=f"d{index}",
+                        kernels=[
+                            make_kernel(
+                                name=f"k{index}",
+                                metadata={
+                                    "block_size": 64 * (index + 1),
+                                    "dtype": "FLOAT",
+                                },
+                            )
+                        ],
+                    )
+                    for index, name in enumerate(pack_names)
+                ]
+            )
+
+        first = build(["x", "dup"])
+        generator.render(first, tmp_path / "first")
+        prior = read_docs(tmp_path / "first" / first.descriptor_dir)
+        prior_dup_id = prior[f"{first.kdp_stem(first.packs[1])}.kdp.json"]["id"]
+
+        second = build(["dup", "dup"])
+        resolution = resolve_ids(
+            second,
+            tmp_path / "second",
+            ids_from=tmp_path / "first" / first.descriptor_dir,
+        )
+
+        ids = resolution.ids
+        assert [ids[("pack", 0)], ids[("pack", 1)]].count(prior_dup_id) == 1
+        values = list(ids.values())
+        assert len(values) == len(set(values)), "two descriptors share an id"
+
+    def test_a_new_defaulted_kmd_field_keeps_every_kernel_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A kernel's key completes its metadata with the CURRENT KMD, on both sides:
+        the prior entry, which never stated the field, is the same catalog entry as one
+        that states the new field's default."""
+        before_root = tmp_path / "before"
+        directory = scale_add_config.descriptor_dir
+        generator.render(scale_add_config, before_root)
+        before = read_docs(before_root / directory)
+        odd_name = scale_add_config.packs[0].kernels[1].name
+
+        def regenerate(label, overrides):
+            config = copy.deepcopy(scale_add_config)
+            config.kmd_fields.append(KmdField(name="gain", type="int", default_value=7))
+            for kernel in config.packs[0].kernels:
+                kernel.metadata["gain"] = overrides.get(kernel.name, 7)
+            root = tmp_path / label
+            render_resolved(generator, config, root, ids_from=before_root / directory)
+            return read_docs(root / directory)
+
+        same = regenerate("same", {})
+        assert _kernel_ids(same) == _kernel_ids(before)
+        assert same["scale_add.kmd.json"]["id"] == before["scale_add.kmd.json"]["id"]
+
+        odd = regenerate("odd", {odd_name: 8})
+        ids_before, ids_odd = _kernel_ids(before), _kernel_ids(odd)
+        assert {n for n in ids_before if ids_odd[n] != ids_before[n]} == {odd_name}
+
+    def test_dropping_a_kmd_field_does_not_reuse_an_ambiguous_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """Two kernels that differed only in a field the KMD no longer has now share a
+        key. Generation still succeeds, and neither id is reused for the survivor."""
+        before_config = copy.deepcopy(scale_add_config)
+        before_config.kmd_fields.append(
+            KmdField(name="gain", type="int", default_value=0)
+        )
+        pack = before_config.packs[0]
+        first = pack.kernels[0]
+        first.metadata["gain"] = 1
+        second = copy.deepcopy(first)
+        second.name = "scale_add.f32_block64_gain2"
+        second.metadata["gain"] = 2
+        pack.kernels = [first, second]
+        after_config = copy.deepcopy(before_config)
+        after_config.kmd_fields = [
+            f for f in after_config.kmd_fields if f.name != "gain"
+        ]
+        survivor = after_config.packs[0].kernels[0]
+        survivor.metadata.pop("gain")
+        after_config.packs[0].kernels = [survivor]
+        before, after = _regenerated(generator, before_config, after_config, tmp_path)
+
+        prior_kernel_ids = set(_kernel_ids(before).values())
+        assert prior_kernel_ids.isdisjoint(all_ids(after))
+        (survivor_id,) = _kernel_ids(after).values()
+        assert uuid.UUID(survivor_id).version == 4
+
+    def test_an_explicit_ids_from_wins_over_the_output_directory(
+        self, generator, scale_add_config, tmp_path
+    ):
+        first, second = tmp_path / "first", tmp_path / "second"
+        directory = scale_add_config.descriptor_dir
+        generator.render(scale_add_config, first)
+        generator.render(scale_add_config, second)
+        wanted = read_docs(first / directory)
+        assert (
+            read_docs(second / directory)["scale_add.ued.json"]["id"]
+            != wanted["scale_add.ued.json"]["id"]
+        ), "the two trees must differ for the test to mean anything"
+
+        render_resolved(generator, scale_add_config, second, ids_from=first / directory)
+
+        assert read_docs(second / directory) == wanted
+
+    def test_a_satellite_shares_the_engine_and_ships_only_its_kdp(
+        self, generator, tmp_path
+    ):
+        """A second bundle of one engine is a satellite: it reuses the home's engine
+        level ids so the loader sees one engine, but its own KDP is a new id (two KDPs
+        sharing one would conflict) and it writes no engine-level file (hkp_pack
+        rejects a repeated id, identical content or not)."""
+        bundles = home_and_satellite(generator, tmp_path)
+        resolution = bundles.satellite_resolution
+        home = read_docs(bundles.home_dir)
+        satellite = read_docs(bundles.satellite_dir)
+
+        assert resolution.satellite
+        assert resolution.ids["ued"] == home["test.ued.json"]["id"]
+        assert resolution.ids["kmd"] == home["test.kmd.json"]["id"]
+        assert resolution.ids["udd"] == home["test.udd.json"]["id"]
+        assert resolution.ids["uhd"] == home["test.uhd.json"]["id"]
+        assert (
+            resolution.ids["kernel_match"]
+            == home["kernel_dtype_matches_graph.umd.json"]["id"]
+        )
+
+        assert sorted(satellite) == ["test.kdp.json"]
+        (kdp,) = kdps(satellite)
+        (home_kdp,) = kdps(home)
+        assert kdp["engine"] == home["test.ued.json"]["id"]
+        assert kdp["dispatch"] == home["test.udd.json"]["id"]
+        assert home["kernel_dtype_matches_graph.umd.json"]["id"] in kdp["matchers"]
+        (consumer,) = kdp["provenance"]["specialization_contract"]["consumers"]
+        assert consumer["kmd_id"] == home["test.kmd.json"]["id"]
+        assert kdp["id"] != home_kdp["id"]
+        assert set(_kernel_ids(satellite).values()).isdisjoint(
+            _kernel_ids(home).values()
+        )
+
+        descriptors = [w for w in bundles.satellite_written if w.endswith(".json")]
+        assert descriptors == [f"{bundles.satellite.descriptor_dir}/test.kdp.json"]
+        preview = generator.preview_files(bundles.satellite, resolution=resolution)
+        assert preview == [f"{bundles.satellite.descriptor_dir}/test.kdp.json"]
+
+    def test_a_satellite_drops_a_kernel_its_sibling_already_ships(
+        self, generator, tmp_path
+    ):
+        """The overlap (block 128) is one catalog entry to the loader, which would
+        refuse the engine on a duplicate tuple."""
+        bundles = home_and_satellite(generator, tmp_path)
+        (kdp,) = kdps(read_docs(bundles.satellite_dir))
+        assert [k["name"] for k in kdp["kernelDescriptors"]] == ["b.b256"]
+
+    def test_a_home_regeneration_sees_the_satellites_kernels(self, generator, tmp_path):
+        """The seed runs both ways: the home may not add what a satellite ships."""
+        bundles = home_and_satellite(generator, tmp_path)
+        grown = copy.deepcopy(bundles.home)
+        grown.packs[0].kernels.append(make_rocke_kernel("a.dup_of_b", 256))
+
+        render_resolved(
+            generator,
+            grown,
+            bundles.home_root,
+            engine_ids_from=[bundles.satellite_dir],
+        )
+
+        (kdp,) = kdps(read_docs(bundles.home_dir))
+        assert [k["name"] for k in kdp["kernelDescriptors"]] == ["a.b64", "a.b128"]
+
+    def test_a_home_regeneration_with_satellites_still_writes_the_engine_files(
+        self, generator, tmp_path
+    ):
+        """Only a satellite drops its engine-level files: a home that has satellites
+        is the one bundle that holds them. Rendered into a tree that holds none of
+        its files, so a skipped write cannot hide behind an earlier run."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        fresh = tmp_path / "fresh"
+
+        resolution, _written = render_resolved(
+            generator,
+            bundles.home,
+            fresh,
+            ids_from=bundles.home_dir,
+            engine_ids_from=[bundles.satellite_dir],
+        )
+
+        assert not resolution.satellite
+        home = read_docs(bundles.home_dir)
+        emitted = read_docs(fresh / bundles.home.descriptor_dir)
+        assert sorted(emitted) == sorted(home)
+        assert {
+            "test.kmd.json",
+            "test.ued.json",
+            "test.udd.json",
+            "test.uhd.json",
+            "kernel_dtype_matches_graph.umd.json",
+        } <= set(emitted)
+        assert emitted == home
+
+    def test_a_satellite_refuses_a_competing_different_candidate(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        clash = make_packaged_config("rocKE/b", [128, 256])
+        clash.packs[0].kernels[0].kernel_source.spec["block"] = 999
+        with pytest.raises(ValueError, match="catalog tuple"):
+            resolve_ids(clash, tmp_path / "clash", engine_ids_from=[bundles.home_dir])
+
+    def test_a_refused_candidate_names_the_pack_of_the_sibling_it_clashes_with(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        clash = make_packaged_config("rocKE/b", [128, 256])
+        clash.packs[0].kernels[0].kernel_source.spec["block"] = 999
+        (home_kdp,) = kdps(read_docs(bundles.home_dir))
+        with pytest.raises(ValueError) as refused:
+            resolve_ids(clash, tmp_path / "clash", engine_ids_from=[bundles.home_dir])
+        assert f"(pack {home_kdp['name']!r})" in str(refused.value)
+
+    def test_a_kernel_differing_from_the_siblings_only_in_priority_is_refused(
+        self, generator, tmp_path
+    ):
+        """Priority is part of what a candidate is, so the same binary at another
+        priority is not the sibling's kernel and may not share its tuple."""
+        home = make_packaged_config("rocKE/a", [64, 128])
+        home.packs[0].kernels[1].priority = 5
+        home_root = tmp_path / "a"
+        generator.render(home, home_root)
+        satellite = make_packaged_config("rocKE/b", [128, 256])
+        with pytest.raises(ValueError, match="not the same candidate"):
+            resolve_ids(
+                satellite,
+                tmp_path / "b",
+                engine_ids_from=[home_root / home.descriptor_dir],
+            )
+
+    def test_a_satellite_whose_kmd_differs_from_the_homes_is_refused(
+        self, generator, tmp_path
+    ):
+        """Its KDPs are completed against, and point at, the home's KMD."""
+        bundles = home_and_satellite(generator, tmp_path)
+        drifted = make_packaged_config("rocKE/b", [128, 256])
+        drifted.kmd_fields[0] = KmdField(
+            name="block_size", type="int", default_value=65
+        )
+        with pytest.raises(ValueError, match="(?i)kmd"):
+            resolve_ids(drifted, tmp_path / "drift", engine_ids_from=[bundles.home_dir])
+
+    @pytest.mark.parametrize(
+        ("document", "field", "name"),
+        [
+            ("test.ued.json", "sdk_version", "ued"),
+            ("test.udd.json", "dispatch_symbol", "udd"),
+            ("kernel_dtype_matches_graph.umd.json", "match_symbol", "kernel match UMD"),
+            ("test.uhd.json", "payload", "uhd"),
+        ],
+        ids=["ued", "udd", "kernel-match-umd", "uhd"],
+    )
+    def test_a_satellite_whose_engine_document_differs_from_the_homes_is_refused(
+        self, generator, tmp_path, document, field, name
+    ):
+        """Each engine-level document of a satellite is the home's, or the satellite
+        was generated from a different engine block."""
+        bundles = home_and_satellite(generator, tmp_path)
+        _edit_json(bundles.home_dir / document, **{field: "changed-in-the-home"})
+        with pytest.raises(
+            ValueError, match=f"this config's {name} differs from the home"
+        ):
+            resolve_ids(
+                bundles.satellite,
+                tmp_path / "again",
+                engine_ids_from=[bundles.home_dir],
+            )
+
+    def test_a_home_and_a_satellite_pack_into_one_engine(self, generator, tmp_path):
+        """The packer walks one source root and refuses a repeated id anywhere in it."""
+        import importlib
+        import sys
+
+        package = (
+            Path(__file__).resolve().parents[5]
+            / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
+        )
+        if not (package / "hkp_pack" / "descriptors.py").exists():
+            pytest.skip("hkp_pack is not importable from this checkout")
+        if str(package) not in sys.path:
+            sys.path.insert(0, str(package))
+        descriptors = importlib.import_module("hkp_pack.descriptors")
+        targets = importlib.import_module("hkp_pack.generic_targets")
+
+        bundles = home_and_satellite(generator, tmp_path)
+        root = tmp_path / "source"
+        shutil.copytree(bundles.home_root / "descriptors", root)
+        shutil.copytree(
+            bundles.satellite_root / "descriptors", root, dirs_exist_ok=True
+        )
+
+        flat = descriptors.load_flat_input(
+            root,
+            targets.GenericTargets.load(targets.DEFAULT_TABLE_PATH),
+            log=lambda *_: None,
+        )
+
+        assert len(flat.kdps()) == 2
+        assert [d.type for d in flat.descriptors].count("ued") == 1
+
+    # -- reader and resolution errors -------------------------------------------
+
+    def test_an_explicit_ids_from_without_the_engine_is_refused(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        other = _copy_bundle(bundles.home_dir, tmp_path / "x", bundles.home)
+        _edit_json(other / "test.ued.json", name="hipkernel:Other")
+        with pytest.raises(ValueError, match="no UED"):
+            resolve_ids(bundles.home, tmp_path / "y", ids_from=other)
+
+    def test_two_ueds_of_one_name_in_a_root_are_ambiguous(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        doubled = _copy_bundle(bundles.home_dir, tmp_path / "x", bundles.home)
+        shutil.copy(doubled / "test.ued.json", doubled / "other.ued.json")
+        _edit_json(doubled / "other.ued.json", id=str(uuid.uuid4()))
+        with pytest.raises(ValueError, match="ambiguous"):
+            resolve_ids(bundles.home, tmp_path / "y", ids_from=doubled)
+
+    def test_the_engines_ued_in_two_roots_is_refused(self, generator, tmp_path):
+        """Two homes: packing would reject the second set of engine-level files, and
+        the loader drops both UEDs of one name."""
+        bundles = home_and_satellite(generator, tmp_path)
+        other = make_packaged_config("rocKE/c", [512])
+        other_root = tmp_path / "c"
+        generator.render(other, other_root)
+        with pytest.raises(ValueError, match="UED"):
+            resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                engine_ids_from=[other_root / other.descriptor_dir],
+            )
+
+    def test_siblings_none_of_which_holds_the_ued_are_refused(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        third = make_packaged_config("rocKE/c", [512])
+        with pytest.raises(ValueError, match="no sibling"):
+            resolve_ids(third, tmp_path / "c", engine_ids_from=[bundles.satellite_dir])
+
+    def test_an_explicit_satellite_prior_must_belong_to_the_homes_engine(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        stray = _copy_bundle(bundles.satellite_dir, tmp_path / "x", bundles.satellite)
+        _edit_json(stray / "test.kdp.json", engine=str(uuid.uuid4()))
+        with pytest.raises(ValueError, match="(?i)kdp"):
+            resolve_ids(
+                bundles.satellite,
+                tmp_path / "y",
+                ids_from=stray,
+                engine_ids_from=[bundles.home_dir],
+            )
+
+    @pytest.mark.parametrize("explicit", [True, False], ids=["ids-from", "fallback"])
+    def test_a_ued_without_its_kdp_names_the_dvc_pointer(
+        self, generator, tmp_path, explicit
+    ):
+        """gfx950's KDP is DVC-only. Without it every kernel id would be reminted
+        silently, so both ways of finding the prior refuse and say where it is."""
+        bundles = home_and_satellite(generator, tmp_path)
+        root = tmp_path / "stub"
+        stub = _copy_bundle(bundles.home_dir, root, bundles.home)
+        (stub / "test.kdp.json").unlink()
+        (stub / "artifacts.dvc").write_text("outs: []\n", encoding="utf-8")
+        kwargs = {"ids_from": stub} if explicit else {}
+        with pytest.raises(ValueError, match=r"\.dvc"):
+            resolve_ids(bundles.home, root, **kwargs)
+
+    def test_kdps_of_one_engine_must_agree_on_the_dispatch(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        doubled = _copy_bundle(bundles.home_dir, tmp_path / "x", bundles.home)
+        extra = json.loads((doubled / "test.kdp.json").read_text(encoding="utf-8"))
+        extra.update(id=str(uuid.uuid4()), name="hipkernel:extra")
+        extra["dispatch"] = str(uuid.uuid4())
+        for entry in extra["kernelDescriptors"]:
+            entry["id"] = str(uuid.uuid4())
+        (doubled / "extra.kdp.json").write_text(json.dumps(extra), encoding="utf-8")
+        with pytest.raises(ValueError, match="dispatch"):
+            resolve_ids(bundles.home, tmp_path / "y", ids_from=doubled)
+
+    def test_a_satellite_kdp_must_use_the_homes_dispatch(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        stray = _copy_bundle(bundles.satellite_dir, tmp_path / "x", bundles.satellite)
+        _edit_json(stray / "test.kdp.json", dispatch=str(uuid.uuid4()))
+        with pytest.raises(ValueError, match="dispatch"):
+            resolve_ids(bundles.home, bundles.home_root, engine_ids_from=[stray])
+
+    def test_a_sibling_that_is_this_bundle_is_refused(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        with pytest.raises(ValueError, match="(?i)sibling"):
+            resolve_ids(
+                bundles.home, bundles.home_root, engine_ids_from=[bundles.home_dir]
+            )
+
+    def test_a_kernel_id_shared_by_the_own_prior_and_a_sibling_is_refused(
+        self, generator, tmp_path
+    ):
+        """Two kernels of one id are rejected at pack time, so the run says which two
+        files hold it rather than carrying the id into the new descriptors."""
+        bundles = home_and_satellite(generator, tmp_path)
+        (satellite_kernel,) = (
+            e["id"]
+            for kdp in kdps(read_docs(bundles.satellite_dir))
+            for e in kdp["kernelDescriptors"]
+        )
+        home_kdp = bundles.home_dir / "test.kdp.json"
+        document = json.loads(home_kdp.read_text(encoding="utf-8"))
+        document["kernelDescriptors"][0]["id"] = satellite_kernel
+        home_kdp.write_text(json.dumps(document), encoding="utf-8")
+        with pytest.raises(ValueError, match="also in") as refused:
+            resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir],
+            )
+        assert str(bundles.home_dir / "test.kdp.json") in str(refused.value)
+        assert str(bundles.satellite_dir / "test.kdp.json") in str(refused.value)
+
+    @pytest.mark.parametrize("field", ["name", "kernel_source"])
+    def test_a_sibling_kernel_missing_a_required_field_is_refused_naming_the_file(
+        self, generator, tmp_path, field
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        satellite_kdp = bundles.satellite_dir / "test.kdp.json"
+        document = json.loads(satellite_kdp.read_text(encoding="utf-8"))
+        del document["kernelDescriptors"][0][field]
+        satellite_kdp.write_text(json.dumps(document), encoding="utf-8")
+        with pytest.raises(ValueError, match=field) as refused:
+            resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir],
+            )
+        assert str(satellite_kdp) in str(refused.value)
+
+    def test_a_sibling_under_a_linked_descriptors_directory_is_found(
+        self, generator, tmp_path
+    ):
+        """The family folder is read from the path as given: a ``descriptors``
+        directory that is a link to a tree of another name is still the family
+        folder's parent."""
+        home = make_packaged_config("rocKE/a", [64, 128])
+        generator.render(home, tmp_path / "real")
+        target = tmp_path / "linked_target"
+        shutil.copytree(tmp_path / "real" / "descriptors", target)
+        link = tmp_path / "installed" / "descriptors"
+        link.parent.mkdir()
+        try:
+            os.symlink(target, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            made = (
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                    capture_output=True,
+                )
+                if os.name == "nt"
+                else None
+            )
+            if made is None or made.returncode != 0:
+                pytest.skip("neither a symlink nor a junction can be created here")
+        satellite = make_packaged_config("rocKE/b", [128, 256])
+
+        resolution = resolve_ids(
+            satellite,
+            tmp_path / "out",
+            engine_ids_from=[link / "rocKE" / "a"],
+        )
+
+        assert resolution.satellite
+
+    def test_a_sibling_that_is_a_copy_of_another_sibling_is_refused(
+        self, generator, tmp_path
+    ):
+        """Two KDPs of one id are a conflict at load, whatever folder they sit in."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        copied = _copy_bundle(bundles.satellite_dir, tmp_path / "x", bundles.satellite)
+        with pytest.raises(ValueError, match="KDP id .* is in both"):
+            resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir, copied],
+            )
+
+    def test_a_sibling_with_a_graph_scope_operation_matcher_is_refused(
+        self, generator, tmp_path
+    ):
+        """A graph-scope matcher names a symbol only its own bundle registers, so a
+        multi-pack bundle cannot be a sibling."""
+        bundles = home_and_satellite(generator, tmp_path)
+        stray = _copy_bundle(bundles.satellite_dir, tmp_path / "x", bundles.satellite)
+        matcher_id = str(uuid.uuid4())
+        (stray / "operation_is_b.umd.json").write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": matcher_id,
+                    "name": "graph operation is b",
+                    "scope": "graph",
+                    "match_symbol": "OperationIsB",
+                }
+            ),
+            encoding="utf-8",
+        )
+        kdp = json.loads((stray / "test.kdp.json").read_text(encoding="utf-8"))
+        _edit_json(stray / "test.kdp.json", matchers=[matcher_id, *kdp["matchers"]])
+        with pytest.raises(ValueError, match="graph-scope operation matcher"):
+            resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                ids_from=bundles.home_dir,
+                engine_ids_from=[stray],
+            )
+
+    def test_a_sibling_in_this_bundles_folder_is_refused(self, generator, tmp_path):
+        """A copied config writes its KDP into the home's folder."""
+        bundles = home_and_satellite(generator, tmp_path)
+        inside = tmp_path / "s" / bundles.home.descriptor_dir
+        inside.mkdir(parents=True)
+        shutil.copy(bundles.satellite_dir / "test.kdp.json", inside)
+        with pytest.raises(ValueError, match="authored_subpath"):
+            resolve_ids(bundles.home, bundles.home_root, engine_ids_from=[inside])
+
+    def test_ids_from_must_be_this_bundles_directory(self, generator, tmp_path):
+        """A sibling passed with the wrong flag would lend this bundle its KDP id."""
+        bundles = home_and_satellite(generator, tmp_path)
+        with pytest.raises(ValueError, match="(?i)this bundle"):
+            resolve_ids(bundles.home, bundles.home_root, ids_from=bundles.satellite_dir)
+
+    def test_siblings_need_a_packaged_config(self, scale_add_config, tmp_path):
+        with pytest.raises(ValueError, match="packaged"):
+            resolve_ids(scale_add_config, tmp_path / "o", engine_ids_from=[tmp_path])
+
+    def test_siblings_need_a_single_pack_config(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path)
+        multi = make_minimal_config(
+            dialect=DIALECT_PACKAGED,
+            kernel_source_kind="rocke",
+            authored_subpath="rocKE/m",
+            packs=[
+                make_pack(
+                    name=name,
+                    discriminator=name,
+                    kernels=[make_rocke_kernel(f"m.{name}", block)],
+                    arch=["gfx950"],
+                )
+                for name, block in (("p", 512), ("q", 1024))
+            ],
+        )
+        with pytest.raises(ValueError, match="(?i)multi-pack|single-pack"):
+            resolve_ids(multi, tmp_path / "m", engine_ids_from=[bundles.home_dir])
+
+    def test_a_satellite_must_sit_in_the_homes_family_folder(self, generator, tmp_path):
+        """A disabled family folder is dropped whole by the packer, which would leave
+        the satellite's references dangling."""
+        bundles = home_and_satellite(generator, tmp_path)
+        outside = make_packaged_config("hip/b", [256])
+        with pytest.raises(ValueError, match="(?i)family"):
+            resolve_ids(outside, tmp_path / "z", engine_ids_from=[bundles.home_dir])
+
+    def test_a_home_outside_any_descriptors_tree_is_refused(self, generator, tmp_path):
+        """The family folder is read from the path, so a home copied out of the
+        ``descriptors/`` tree gives the satellite nothing to compare against."""
+        bundles = home_and_satellite(generator, tmp_path)
+        plain = tmp_path / "plain"
+        shutil.copytree(bundles.home_dir, plain)
+        with pytest.raises(ValueError, match="no 'descriptors/<family>' component"):
+            resolve_ids(bundles.satellite, tmp_path / "z", engine_ids_from=[plain])
+
+    def test_a_satellites_output_tree_without_its_siblings_is_refused(
+        self, generator, tmp_path
+    ):
+        """Regenerating a satellite while forgetting its sibling would mint a second
+        UED of the same name, and the loader drops both."""
+        bundles = home_and_satellite(generator, tmp_path)
+        with pytest.raises(ValueError, match="satellite"):
+            resolve_ids(bundles.satellite, bundles.satellite_root)
+
+    def test_an_empty_descriptor_dir_is_not_a_prior(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A failed first run leaves one behind; it must not brick the rerun."""
+        (tmp_path / scale_add_config.descriptor_dir).mkdir(parents=True)
+
+        resolution = resolve_ids(scale_add_config, tmp_path)
+
+        assert sum(resolution.report.reused.values()) == 0
+        generator.render(scale_add_config, tmp_path, resolution=resolution)
+        assert (
+            tmp_path / scale_add_config.descriptor_dir / "scale_add.ued.json"
+        ).is_file()
+
+    # -- kernel matching across an arch change ----------------------------------
+
+    @pytest.mark.parametrize(
+        ("before_arch", "after_arch"),
+        [
+            (["gfx942"], ["gfx942", "gfx90a"]),
+            (["gfx942", "gfx90a"], ["gfx942"]),
+            (["gfx942"], ["gfx90a"]),
+        ],
+        ids=["widened", "narrowed", "moved"],
+    )
+    def test_changing_a_packs_arch_keeps_every_kernel_id(
+        self, generator, scale_add_config, tmp_path, before_arch, after_arch
+    ):
+        """Tuples are unique here, so the tuple alone tells the kernels apart."""
+        before = copy.deepcopy(scale_add_config)
+        before.packs[0].arch = before_arch
+        after = copy.deepcopy(scale_add_config)
+        after.packs[0].arch = after_arch
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, before, after, tmp_path)
+        )
+        assert len(set(ids_before.values())) == 2
+        assert ids_after == ids_before
+
+    def test_changing_one_kernels_arch_keeps_every_kernel_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        after = copy.deepcopy(scale_add_config)
+        after.packs[0].kernels[0].arch = ["gfx90a"]
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, scale_add_config, after, tmp_path)
+        )
+        assert ids_after == ids_before
+
+    @staticmethod
+    def _one_tuple_at_two_arches(config, arch_x, arch_y):
+        """Two kernels with ONE completed tuple, told apart by arch alone."""
+        config = copy.deepcopy(config)
+        pack = config.packs[0]
+        pack.arch = []
+        x = pack.kernels[0]
+        x.arch = arch_x
+        y = copy.deepcopy(x)
+        y.name = "scale_add.f32_block64_other_arch"
+        y.arch = arch_y
+        pack.kernels = [x, y]
+        return config
+
+    @pytest.mark.parametrize("moved", ["neither", "x", "y"])
+    def test_one_tuple_at_disjoint_arches_keeps_each_kernels_own_id(
+        self, generator, scale_add_config, tmp_path, moved
+    ):
+        """The whole key pairs the kernel whose arch stayed, which leaves the other
+        the only candidate for its tuple; without that, a swap of the two ids would
+        go unnoticed."""
+        before = self._one_tuple_at_two_arches(scale_add_config, ["gfx942"], ["gfx90a"])
+        after = self._one_tuple_at_two_arches(
+            scale_add_config,
+            ["gfx908"] if moved == "x" else ["gfx942"],
+            ["gfx908"] if moved == "y" else ["gfx90a"],
+        )
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, before, after, tmp_path)
+        )
+        assert len(set(ids_before.values())) == 2
+        assert ids_after == ids_before
+
+    def test_two_new_kernels_for_one_prior_kernel_of_the_tuple_both_get_new_ids(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """Which of the two the prior id belonged to is a guess, so neither takes it."""
+        before = self._one_tuple_at_two_arches(scale_add_config, ["gfx942"], ["gfx90a"])
+        before.packs[0].kernels.pop()
+        after = self._one_tuple_at_two_arches(scale_add_config, ["gfx90a"], ["gfx908"])
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, before, after, tmp_path)
+        )
+        prior = set(ids_before.values())
+        assert len(ids_after) == 2
+        assert prior.isdisjoint(ids_after.values())
+        assert all(uuid.UUID(i).version == 4 for i in ids_after.values())
+
+    def test_the_order_an_arch_list_is_written_in_does_not_identify_a_kernel(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """Two kernels of one tuple, each at two arches: only the arch set tells them
+        apart, so a reordered list must still pair with its own prior id."""
+        before = self._one_tuple_at_two_arches(
+            scale_add_config, ["gfx942", "gfx90a"], ["gfx908", "gfx950"]
+        )
+        after = self._one_tuple_at_two_arches(
+            scale_add_config, ["gfx90a", "gfx942"], ["gfx950", "gfx908"]
+        )
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, before, after, tmp_path)
+        )
+        assert len(set(ids_before.values())) == 2
+        assert ids_after == ids_before
+
+    def test_a_kernel_stating_no_arch_is_keyed_by_its_packs(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """One tuple at the pack's arch (stated by none of its kernels) and at a
+        second arch that moves: the inheriting kernel keeps its id by its whole key,
+        which leaves the moved kernel the one candidate for its tuple."""
+        before = self._one_tuple_at_two_arches(scale_add_config, None, ["gfx90a"])
+        before.packs[0].arch = ["gfx942"]
+        after = self._one_tuple_at_two_arches(scale_add_config, None, ["gfx908"])
+        after.packs[0].arch = ["gfx942"]
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, before, after, tmp_path)
+        )
+        assert len(set(ids_before.values())) == 2
+        assert ids_after == ids_before
+
+    def test_a_metadata_fix_remints_only_that_kernels_id(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A different tuple is a different catalog entry, whatever its arch."""
+        after = copy.deepcopy(scale_add_config)
+        fixed, untouched = after.packs[0].kernels
+        fixed.metadata["block_size"] = 65
+        ids_before, ids_after = map(
+            _kernel_ids, _regenerated(generator, scale_add_config, after, tmp_path)
+        )
+        assert ids_after[untouched.name] == ids_before[untouched.name]
+        assert ids_after[fixed.name] not in ids_before.values()
+
+    # -- fresh ids --------------------------------------------------------------
+
+    def test_fresh_ids_ignore_the_bundle_already_in_the_output_directory(
+        self, generator, scale_add_config, tmp_path
+    ):
+        generator.render(scale_add_config, tmp_path)
+        directory = tmp_path / scale_add_config.descriptor_dir
+        existing = read_docs(directory)
+
+        reused = resolve_ids(scale_add_config, tmp_path)
+        assert set(reused.ids.values()) <= all_ids(existing)
+
+        resolution = resolve_ids(scale_add_config, tmp_path, fresh=True)
+
+        assert set(resolution.ids.values()).isdisjoint(all_ids(existing))
+        assert sum(resolution.report.reused.values()) == 0
+        generator.render(scale_add_config, tmp_path, resolution=resolution)
+        assert all_ids(read_docs(directory)).isdisjoint(all_ids(existing))
+
+    @pytest.mark.parametrize("flag", ["ids_from", "engine_ids_from"])
+    def test_fresh_ids_contradict_the_reuse_inputs(
+        self, generator, scale_add_config, tmp_path, flag
+    ):
+        generator.render(scale_add_config, tmp_path)
+        given = tmp_path / scale_add_config.descriptor_dir
+        kwargs = {flag: given if flag == "ids_from" else [given]}
+        with pytest.raises(ValueError, match="fresh"):
+            resolve_ids(scale_add_config, tmp_path / "other", fresh=True, **kwargs)
+
+    # -- warnings ---------------------------------------------------------------
+
+    def test_a_sibling_left_unnamed_in_the_family_folder_is_warned_about(
+        self, generator, tmp_path
+    ):
+        """Left out, the sibling's kernels fall out of the engine-wide duplicate check
+        and a tuple competing with one of them drops the whole engine at load."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+
+        forgot = resolve_ids(bundles.home, bundles.home_root, ids_from=bundles.home_dir)
+        named = resolve_ids(
+            bundles.home,
+            bundles.home_root,
+            ids_from=bundles.home_dir,
+            engine_ids_from=[bundles.satellite_dir],
+        )
+
+        assert any(str(bundles.satellite_dir) in w for w in forgot.report.warnings)
+        assert named.report.warnings == ()
+
+    @staticmethod
+    def _dvc_pointer(directory: Path, tracked: Path) -> None:
+        import hashlib
+
+        (directory / f"{tracked.name}.dvc").write_text(
+            "outs:\n"
+            f"- md5: {hashlib.md5(tracked.read_bytes()).hexdigest()}\n"
+            f"  size: {tracked.stat().st_size}\n"
+            f"  path: {tracked.name}\n",
+            encoding="utf-8",
+        )
+
+    def test_an_edited_dvc_tracked_file_is_reported_and_an_untouched_one_is_not(
+        self, tmp_path
+    ):
+        from codegen.prior_ids import dvc_mismatches
+
+        tracked = tmp_path / "kernels.kdp.json"
+        tracked.write_bytes(b'{"id": "x"}\n')
+        self._dvc_pointer(tmp_path, tracked)
+        assert dvc_mismatches(tmp_path) == []
+
+        tracked.write_bytes(b'{"id": "y"}\n')
+
+        (message,) = dvc_mismatches(tmp_path)
+        assert str(tracked) in message
+
+    def test_a_stale_prior_artifact_is_a_warning_not_a_refusal(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        kdp = bundles.home_dir / "test.kdp.json"
+        self._dvc_pointer(bundles.home_dir, kdp)
+        assert resolve_ids(bundles.home, bundles.home_root).report.warnings == ()
+
+        kdp.write_bytes(kdp.read_bytes() + b"\n")
+
+        resolution = resolve_ids(bundles.home, bundles.home_root)
+        assert [str(kdp) in w for w in resolution.report.warnings] == [True]
+        assert sum(resolution.report.reused.values()) > 0
+
+    def test_the_shipped_gfx950_artifact_matches_its_dvc_pointer(self, tmp_path):
+        """The directory recipe: the pointer records a manifest hash of ``artifacts/``,
+        which only holds once the KDP has been fetched."""
+        from codegen.prior_ids import dvc_mismatches
+
+        shipped = (
+            Path(__file__).resolve().parents[5]
+            / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+            / "descriptors/rocKE/gfx950_attention_dense"
+        )
+        kdp = shipped / "artifacts" / "gfx950_attention_dense.kdp.json"
+        if not kdp.is_file():
+            pytest.skip(f"shipped KDP not in this checkout: {kdp}")
+        assert dvc_mismatches(shipped) == []
+
+        copy_dir = tmp_path / "gfx950"
+        shutil.copytree(shipped, copy_dir)
+        edited = copy_dir / "artifacts" / kdp.name
+        edited.write_bytes(edited.read_bytes() + b"\n")
+
+        (message,) = dvc_mismatches(copy_dir)
+        assert str(edited.parent) in message
+
+
+class TestDiscoverSiblings:
+    """The other bundles of an engine, found among the directories beside one."""
+
+    ENGINE = "hipkernel:Test"
+
+    def test_a_satellite_finds_the_home(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.satellite_dir
+        )
+        assert found == [bundles.home_dir]
+
+    def test_a_bundle_not_installed_yet_finds_the_home_and_the_satellites(
+        self, generator, tmp_path
+    ):
+        """The home holds the UED; the satellite is found through the KDP naming it."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.home_dir.parent / "c"
+        )
+        assert found == [bundles.home_dir, bundles.satellite_dir]
+
+    def test_a_home_finds_its_satellites_through_its_own_ued(self, generator, tmp_path):
+        """No other directory holds a UED, so the satellite is only found because the
+        home's own directory is searched for the engine's id."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.home_dir
+        )
+        assert found == [bundles.satellite_dir]
+
+    def test_another_engines_bundle_is_not_a_sibling(self, generator, tmp_path):
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        other = make_packaged_config(
+            "rocKE/o", [7], engine=make_engine(name="hipkernel:Other")
+        )
+        render_resolved(generator, other, bundles.home_root)
+
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.home_dir
+        )
+
+        assert found == [bundles.satellite_dir]
+
+    @pytest.mark.parametrize(
+        ("file", "content"),
+        [
+            ("x.kdp.json", '[{{"engine": "{id}"}}]'),
+            ("x.kdp.json", '{{"engine": "{id}"'),
+            ("x.ued.json", '[{{"name": "hipkernel:Test", "id": "{id}"}}]'),
+            ("x.ued.json", '{{"name": "hipkernel:Test", "id": "{id}"'),
+        ],
+        ids=[
+            "kdp-not-an-object",
+            "kdp-unparseable",
+            "ued-not-an-object",
+            "ued-unparseable",
+        ],
+    )
+    def test_a_malformed_document_names_no_engine(
+        self, generator, tmp_path, file, content
+    ):
+        """A malformed descriptor beside the bundle, even one holding the engine's
+        name and id, is skipped rather than raised on."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        ued = json.loads((bundles.home_dir / "test.ued.json").read_text("utf-8"))
+        stray = bundles.home_dir.parent / "stray"
+        stray.mkdir()
+        (stray / file).write_text(content.format(id=ued["id"]), encoding="utf-8")
+
+        found = discover_siblings(
+            bundles.home_dir.parent, self.ENGINE, bundles.home_dir
+        )
+
+        assert found == [bundles.satellite_dir]
+
+    def test_nothing_is_found_without_the_engines_ued(self, tmp_path):
+        (tmp_path / "x").mkdir()
+        (tmp_path / "own").mkdir()
+        assert (
+            discover_siblings(tmp_path / "missing", self.ENGINE, tmp_path / "own") == []
+        )
+        assert discover_siblings(tmp_path, self.ENGINE, tmp_path / "own") == []
+
+
+def _prior_bundle(config, root: Path):
+    """The previous version of ``config``'s bundle under ``root``, as the reader sees
+    it."""
+    directory = root / config.descriptor_dir
+    engine = find_engine(directory, config.engine.name)
+    return read_prior_bundle(directory, engine.ued["id"], engine.kernel_match_umd["id"])
+
+
+class TestSupplementAndReport:
+    """A second previous version that only fills gaps, and what the report says."""
+
+    def test_a_supplement_fills_gaps_and_never_overrides_the_primary(
+        self, generator, scale_add_config, tmp_path
+    ):
+        primary_config = copy.deepcopy(scale_add_config)
+        primary_config.packs[0].kernels = primary_config.packs[0].kernels[:1]
+        generator.render(primary_config, tmp_path / "primary")
+        generator.render(scale_add_config, tmp_path / "supplement")
+        primary = _prior_bundle(scale_add_config, tmp_path / "primary")
+        supplement = _prior_bundle(scale_add_config, tmp_path / "supplement")
+        shared, gap = scale_add_config.packs[0].kernels
+        extra = copy.deepcopy(gap)
+        extra.name, extra.metadata["block_size"] = "scale_add.f32_block512", 512
+        config = copy.deepcopy(scale_add_config)
+        config.packs[0].kernels.append(extra)
+
+        ids = mint_ids(config, primary, supplement=supplement)
+
+        primary_ids = {e["name"]: e["id"] for e in primary.kdps[0].entries}
+        supplement_ids = {e["name"]: e["id"] for e in supplement.kdps[0].entries}
+        assert ids[("kernel", 0, 0)] == primary_ids[shared.name]
+        assert primary_ids[shared.name] != supplement_ids[shared.name]
+        assert ids[("kernel", 0, 1)] == supplement_ids[gap.name]
+        assert ids[("kernel", 0, 2)] not in {
+            *primary.all_ids,
+            *supplement.all_ids,
+        }
+        assert ids["ued"] == primary.engine.ued["id"]
+        assert len(set(ids.values())) == len(ids)
+
+    def test_a_pack_the_primary_lacks_takes_its_ids_from_the_supplement(
+        self, generator, binary_ops_config, tmp_path
+    ):
+        primary_config = copy.deepcopy(binary_ops_config)
+        primary_config.packs[1].name = "elsewhere"
+        generator.render(primary_config, tmp_path / "primary")
+        generator.render(binary_ops_config, tmp_path / "supplement")
+        primary = _prior_bundle(binary_ops_config, tmp_path / "primary")
+        supplement = _prior_bundle(binary_ops_config, tmp_path / "supplement")
+        wanted = f"{binary_ops_config.engine.namespace}:" + binary_ops_config.kdp_stem(
+            binary_ops_config.packs[1]
+        )
+        (held,) = (k for k in supplement.kdps if k.name == wanted)
+        assert wanted not in {k.name for k in primary.kdps}
+
+        ids = mint_ids(binary_ops_config, primary, supplement=supplement)
+
+        assert ids[("pack", 1)] == held.id
+        assert ids[("operation_umd", 1)] == held.operation_umd_id
+
+    def test_a_supplement_id_the_primary_holds_for_another_kernel_stays_with_it(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The supplement fills gaps only: an id the primary already shipped for one
+        kernel is not handed to a different kernel, whichever the config lists
+        first."""
+        shared, gap = scale_add_config.packs[0].kernels
+        primary_config = copy.deepcopy(scale_add_config)
+        primary_config.packs[0].kernels = [shared]
+        generator.render(primary_config, tmp_path / "primary")
+        generator.render(scale_add_config, tmp_path / "supplement")
+        primary = _prior_bundle(scale_add_config, tmp_path / "primary")
+        (shared_id,) = (e["id"] for e in primary.kdps[0].entries)
+        supplement_kdp = tmp_path / "supplement" / scale_add_config.descriptor_dir
+        supplement_kdp = next(supplement_kdp.glob("*.kdp.json"))
+        document = json.loads(supplement_kdp.read_text(encoding="utf-8"))
+        for entry in document["kernelDescriptors"]:
+            if entry["name"] == gap.name:
+                entry["id"] = shared_id
+        supplement_kdp.write_text(json.dumps(document), encoding="utf-8")
+        supplement = _prior_bundle(scale_add_config, tmp_path / "supplement")
+        config = copy.deepcopy(scale_add_config)
+        config.packs[0].kernels.reverse()
+
+        ids = mint_ids(config, primary, supplement=supplement)
+
+        assert ids[("kernel", 0, 1)] == shared_id
+        assert ids[("kernel", 0, 0)] != shared_id
+
+    def test_a_pack_arch_widening_is_reported_and_an_unchanged_arch_is_not(
+        self, generator, scale_add_config, tmp_path
+    ):
+        import generate
+
+        directory = scale_add_config.descriptor_dir
+        generator.render(scale_add_config, tmp_path / "before")
+        same = resolve_ids(
+            scale_add_config, tmp_path / "x", ids_from=tmp_path / "before" / directory
+        )
+        assert same.report.arch_moved == ()
+        assert "arch change" not in generate.describe_ids(same.report)
+
+        wider = copy.deepcopy(scale_add_config)
+        wider.packs[0].arch = ["gfx942", "gfx90a"]
+        resolution = resolve_ids(
+            wider, tmp_path / "x", ids_from=tmp_path / "before" / directory
+        )
+
+        names = tuple(k.name for k in scale_add_config.packs[0].kernels)
+        assert resolution.report.arch_moved == names
+        summary = generate.describe_ids(resolution.report)
+        assert "2 kept an id across an arch change" in summary
+        assert names[0] in summary
+
+    def test_an_unfetched_dvc_artifact_beside_the_bundle_is_warned_about(
+        self, generator, tmp_path
+    ):
+        """A satellite whose KDP is a DVC object that was never pulled has no
+        descriptor discovery could find, so its kernels would silently fall out of
+        the duplicate check."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        unpulled = bundles.home_dir.parent / "c"
+        unpulled.mkdir()
+        pointer = unpulled / "artifacts.dvc"
+        pointer.write_text(
+            "outs:\n- md5: abc.dir\n  path: artifacts\n", encoding="utf-8"
+        )
+
+        def warnings():
+            return resolve_ids(
+                bundles.home,
+                bundles.home_root,
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir],
+            ).report.warnings
+
+        (warning,) = warnings()
+        assert str(pointer) in warning
+
+        (unpulled / "artifacts").mkdir()
+        assert warnings() == ()
+
+    def test_an_unfetched_artifact_in_an_identified_directory_is_not_repeated(
+        self, generator, tmp_path
+    ):
+        """A directory holding a UED or a KDP is some engine's bundle already, and a
+        missing artifact there is reported when that bundle is read."""
+        bundles = home_and_satellite(generator, tmp_path, same_tree=True)
+        other = make_packaged_config(
+            "rocKE/o", [7], engine=make_engine(name="hipkernel:Other")
+        )
+        render_resolved(generator, other, bundles.home_root)
+        (bundles.home_root / other.descriptor_dir / "artifacts.dvc").write_text(
+            "outs:\n- md5: abc.dir\n  path: artifacts\n", encoding="utf-8"
+        )
+
+        resolution = resolve_ids(
+            bundles.home,
+            bundles.home_root,
+            ids_from=bundles.home_dir,
+            engine_ids_from=[bundles.satellite_dir],
+        )
+
+        assert resolution.report.warnings == ()
+
+    def test_an_empty_prior_kdp_is_warned_about(
+        self, generator, scale_add_config, tmp_path
+    ):
+        generator.render(scale_add_config, tmp_path)
+        directory = tmp_path / scale_add_config.descriptor_dir
+        assert not any(
+            "holds no kernels" in w
+            for w in resolve_ids(scale_add_config, tmp_path).report.warnings
+        )
+        kdp = directory / "scale_add.kdp.json"
+        _edit_json(kdp, kernelDescriptors=[])
+
+        resolution = resolve_ids(scale_add_config, tmp_path)
+
+        (warning,) = (w for w in resolution.report.warnings if "holds no kernels" in w)
+        assert str(kdp) in warning
+
+    def test_the_report_names_a_retired_kernel(
+        self, generator, scale_add_config, tmp_path
+    ):
+        generator.render(scale_add_config, tmp_path / "before")
+        after = copy.deepcopy(scale_add_config)
+        removed = after.packs[0].kernels.pop()
+
+        resolution = resolve_ids(
+            after,
+            tmp_path / "after",
+            ids_from=tmp_path / "before" / after.descriptor_dir,
+        )
+
+        assert resolution.report.retired == (removed.name,)
+
+    def test_the_report_names_a_retired_pack(
+        self, generator, binary_ops_config, tmp_path
+    ):
+        generator.render(binary_ops_config, tmp_path / "before")
+        after = copy.deepcopy(binary_ops_config)
+        gone = f"{after.engine.namespace}:{after.kdp_stem(after.packs[1])}"
+        after.packs[1].name = "elsewhere"
+
+        resolution = resolve_ids(
+            after,
+            tmp_path / "after",
+            ids_from=tmp_path / "before" / after.descriptor_dir,
+        )
+
+        assert resolution.report.retired == (gone,)
+
+    def test_the_report_counts_the_operation_matchers_it_reused(
+        self, generator, binary_ops_config, tmp_path
+    ):
+        generator.render(binary_ops_config, tmp_path / "before")
+
+        resolution = resolve_ids(
+            binary_ops_config,
+            tmp_path / "after",
+            ids_from=tmp_path / "before" / binary_ops_config.descriptor_dir,
+        )
+
+        assert resolution.report.reused["operation_umds"] == len(
+            binary_ops_config.packs
+        )
+
+    def test_a_retired_kernel_is_counted_once_across_both_previous_versions(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The installed bundle and a scratch pass of it hold the same kernel; it is
+        one retired kernel, not two."""
+        generator.render(scale_add_config, tmp_path / "before")
+        directory = scale_add_config.descriptor_dir
+        shutil.copytree(
+            tmp_path / "before" / directory, tmp_path / "scratch" / directory
+        )
+        after = copy.deepcopy(scale_add_config)
+        removed = after.packs[0].kernels.pop()
+
+        resolution = resolve_ids(
+            after,
+            tmp_path / "after",
+            ids_from=tmp_path / "before" / directory,
+            also_from=tmp_path / "scratch" / directory,
+        )
+
+        assert resolution.report.retired == (removed.name,)
+
+
+def _two_launches(config) -> None:
+    """Give every kernel of ``config`` a ``segment`` and a ``reduce`` launch."""
+    for kernel in config.packs[0].kernels:
+        source = kernel.kernel_source
+        kernel.kernel_source = dataclasses.replace(
+            source,
+            launches={
+                "segment": source,
+                "reduce": dataclasses.replace(source, role="reduce"),
+            },
+        )
+
+
+class TestMultiLaunchIds:
+    """A kernel with ``launches`` is written as ``sources``; its ids follow the same
+    rules as a single-source kernel, launch by launch."""
+
+    @staticmethod
+    def _config(blocks=(64, 128), subpath="rocKE/a"):
+        config = make_packaged_config(subpath, list(blocks))
+        _two_launches(config)
+        return config
+
+    def test_regenerating_an_unchanged_multi_launch_bundle_keeps_every_id(
+        self, generator, tmp_path
+    ):
+        config = self._config()
+        generator.render(config, tmp_path)
+        first = json_bytes(tmp_path / config.descriptor_dir)
+
+        resolution = resolve_ids(config, tmp_path)
+        generator.render(config, tmp_path, resolution=resolution)
+
+        assert (
+            "sources"
+            in kdps(read_docs(tmp_path / config.descriptor_dir))[0][
+                "kernelDescriptors"
+            ][0]
+        )
+        assert resolution.report.minted == 0
+        assert json_bytes(tmp_path / config.descriptor_dir) == first
+
+    @pytest.mark.parametrize(
+        "change, keeps",
+        [
+            (lambda launches: None, True),
+            (lambda launches: launches["reduce"].spec.update(stage=2), True),
+            (lambda launches: setattr(launches["reduce"], "role", "other"), False),
+            (lambda launches: setattr(launches["reduce"], "target", "generic"), False),
+            (lambda launches: launches["reduce"].spec.update(block=7), False),
+            (lambda launches: launches.pop("reduce"), False),
+            (lambda launches: launches.update(extra=launches["segment"]), False),
+        ],
+        ids=[
+            "unchanged",
+            "launch-spec-gains-a-field",
+            "launch-role-changed",
+            "launch-gains-a-target",
+            "launch-spec-value-changed",
+            "launch-dropped",
+            "launch-added",
+        ],
+    )
+    def test_each_launch_is_judged_alone(self, generator, tmp_path, change, keeps):
+        before = self._config(blocks=(64,))
+        after = self._config(blocks=(64,))
+        source = after.packs[0].kernels[0].kernel_source
+        source.launches = {
+            name: dataclasses.replace(launch, spec=dict(launch.spec))
+            for name, launch in source.launches.items()
+        }
+        change(source.launches)
+        if len(source.launches) < 2:
+            source.launches["other"] = dataclasses.replace(
+                source.launches["segment"], role="other"
+            )
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert (now == kept) is keeps
+
+    def test_a_single_source_kernel_that_gains_launches_is_a_retune(
+        self, generator, tmp_path
+    ):
+        before = make_packaged_config("rocKE/a", [64])
+        after = self._config(blocks=(64,))
+        (kept,), (now,) = (
+            _kernel_ids(docs).values()
+            for docs in _regenerated(generator, before, after, tmp_path)
+        )
+        assert now != kept
+
+    def test_a_satellite_deduplicates_against_a_multi_launch_home(
+        self, generator, tmp_path
+    ):
+        home = self._config(blocks=(64, 128), subpath="rocKE/a")
+        home_root = tmp_path / "a"
+        render_resolved(generator, home, home_root)
+        home_dir = home_root / home.descriptor_dir
+        satellite = self._config(blocks=(128, 256), subpath="rocKE/b")
+
+        resolution, _written = render_resolved(
+            generator, satellite, tmp_path / "b", engine_ids_from=[home_dir]
+        )
+
+        (document,) = (kdp for _pack, kdp in resolution.kdp_documents)
+        names = [e["name"] for e in document["kernelDescriptors"]]
+        assert names == [satellite.packs[0].kernels[1].name]
+
+    def test_a_sibling_kernel_naming_neither_source_key_is_refused(
+        self, generator, tmp_path
+    ):
+        bundles = home_and_satellite(generator, tmp_path)
+        kdp_path = next(bundles.satellite_dir.glob("*.kdp.json"))
+        document = json.loads(kdp_path.read_text(encoding="utf-8"))
+        del document["kernelDescriptors"][0]["kernel_source"]
+        kdp_path.write_text(json.dumps(document), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="kernel_source"):
+            resolve_ids(
+                bundles.home,
+                tmp_path / "a",
+                ids_from=bundles.home_dir,
+                engine_ids_from=[bundles.satellite_dir],
+            )

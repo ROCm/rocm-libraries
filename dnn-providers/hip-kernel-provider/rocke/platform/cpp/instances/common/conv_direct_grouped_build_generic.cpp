@@ -16,7 +16,15 @@
  * locals; here those locals live in a TU-private context struct and the
  * closures are static helpers over it. The persistent-grid path re-binds n,
  * g, h_tile_start and the q-tile starts inside its cell loop, which the
- * closures read at call time -- the ctx fields are updated at the same point.
+ * closures read at call time -- the ctx fields are updated at the same point
+ * (and xcd_tiles re-binds bx / by / bz before any of them is read).
+ *
+ * Every DirectConvSpec form is mirrored: plain-weight runtime loops, the
+ * runtime K-atom loop, waves_q / waves_k (with the cross-wave reduction),
+ * the persistent grid, runtime channels, fold_k32, and the fused-weight dgrad
+ * and row-stream knobs (preload_weights, dgrad_fused_weights,
+ * dgrad_weights_lds, waves_per_eu, row_guard, prefetch_rows, lds_only_sync,
+ * waves_m, xcd_tiles, lds_pad, stage_out, row_exit).
  *
  * Every helper emits in PYTHON EVALUATION ORDER (arguments left-to-right,
  * innermost call first): C argument evaluation order is unspecified, so every
@@ -30,6 +38,7 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.grid.h" /* chiplet_transform_chunked_runtime */
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
@@ -60,6 +69,7 @@ typedef struct dconv_gen_ctx
     const rocke_type_t* io_type;
     int LOAD_VEC;
     int PASSES;
+    int LDS_PAD;
 
     rocke_dconv_params_t params;
     rocke_value_t* c0;
@@ -191,6 +201,12 @@ static bool dconv_issue_dram_load(dconv_gen_ctx_t* ctx,
         }
         out_vec[i] = a_vec;
         out_idx[i] = rocke_b_mul(b, cm->chunk_idx, rocke_b_const_i32(b, ctx->LOAD_VEC));
+        if(ctx->LDS_PAD)
+        {
+            /* Column W_lds starts LDS_PAD * W_lds elements later. */
+            rocke_value_t* pad = rocke_b_mul(b, cm->W_lds, rocke_b_const_i32(b, ctx->LDS_PAD));
+            out_idx[i] = rocke_b_add(b, out_idx[i], pad);
+        }
     }
     return true;
 }
@@ -305,6 +321,8 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         N_K_ATOMS = (p.cpg + K_ATOM_SIZE - 1) / K_ATOM_SIZE;
     const int N_K_LOCAL = N_K_ATOMS / WAVES_K;
     const int N_M_TILES = RTC ? spec->m_tiles : (p.kpg + 15) / 16;
+    const int WAVES_M = spec->waves_m;
+    const int M_LOCAL = N_M_TILES / WAVES_M; /* M-tiles owned by one wave */
     const int CPG_LDS = RTC ? N_K_ATOMS * K_ATOM_SIZE : p.cpg;
     const int N_VECS = CPG_LDS / LOAD_VEC;
     const int BLOCK_Q_WAVE = BLOCK_Q / WAVES_Q;
@@ -312,7 +330,15 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     const int LDS_W = (BLOCK_Q - 1) * p.stride + p.KW;
     const int NUM_CHUNKS = LDS_W * BLOCK_GROUPS * N_VECS;
     const int PASSES = (NUM_CHUNKS + THREADS - 1) / THREADS;
-    const int lds_total = PASSES * THREADS * LOAD_VEC;
+    /* lds_pad: LDS_PAD extra elements after every staged input column; room
+     * for every column the passes can touch. */
+    const int LDS_PAD = spec->lds_pad;
+    int lds_total = PASSES * THREADS * LOAD_VEC;
+    if(LDS_PAD)
+    {
+        const int col_vecs = BLOCK_GROUPS * N_VECS;
+        lds_total += ((PASSES * THREADS + col_vecs - 1) / col_vecs + 1) * LDS_PAD;
+    }
     const int BLOCK_H = spec->block_h;
     const bool PERSISTENT = spec->persistent_grid;
     const int KH = p.KH;
@@ -321,6 +347,8 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
      * channels any cpg may leave one, against the runtime bound -- except
      * under fold_k32, whose cpg is a multiple of the atom (validated). */
     const bool mask_k_tail = RTC ? !FOLD_K32 : (p.cpg % K_ATOM_SIZE) != 0;
+    /* The preloads_weights property. */
+    const bool PRELOADS = WAVES_K > 1 || spec->preload_weights || spec->dgrad_fused_weights;
 
     if(PASSES > DCONV_GEN_MAX_PASSES)
     {
@@ -334,8 +362,11 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     }
     ctx->LOAD_VEC = LOAD_VEC;
     ctx->PASSES = PASSES;
+    ctx->LDS_PAD = LDS_PAD;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
+    if(spec->waves_per_eu > 0)
+        rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", (int64_t)spec->waves_per_eu);
     rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     rocke_dconv_params_t* params = &ctx->params;
     rocke_value_t* p_Hi = params->p_Hi;
@@ -365,7 +396,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     if(RTC)
         c_BG_cpg = rocke_b_mul(b, c_cpg, rocke_b_const_i32(b, BLOCK_GROUPS));
     else
-        c_BG_cpg = rocke_b_const_i32(b, BLOCK_GROUPS * p.cpg);
+        c_BG_cpg = rocke_b_const_i32(b, BLOCK_GROUPS * p.cpg + LDS_PAD);
     rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
 
@@ -381,6 +412,18 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         = rocke_b_div(b, wave_id_full, rocke_b_const_i32(b, waves_per_group));
     rocke_value_t* wave_id_q = rocke_b_div(b, wave_id_in_group, rocke_b_const_i32(b, WAVES_K));
     rocke_value_t* wave_id_k = rocke_b_mod(b, wave_id_in_group, rocke_b_const_i32(b, WAVES_K));
+    rocke_value_t* wm_base16 = NULL;
+    if(WAVES_M > 1)
+    {
+        /* waves_q == waves_k == 1 (validated): the in-group wave index is the
+         * M-wave, which owns output channels [wave_id_m * M_LOCAL * 16,
+         * +16 * M_LOCAL) of its group. */
+        wave_group_idx = rocke_b_div(b, wave_id_full, rocke_b_const_i32(b, WAVES_M));
+        rocke_value_t* wave_id_m = rocke_b_mod(b, wave_id_full, rocke_b_const_i32(b, WAVES_M));
+        wave_id_q = c0;
+        wave_id_k = c0;
+        wm_base16 = rocke_b_mul(b, wave_id_m, rocke_b_const_i32(b, M_LOCAL * 16));
+    }
     rocke_value_t* k_atom_base = rocke_b_mul(b, wave_id_k, rocke_b_const_i32(b, N_K_LOCAL));
 
     rocke_value_t* lane = rocke_b_mod(b, tid, c_wave);
@@ -442,6 +485,44 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             rocke_value_t* s = rocke_b_add(b, p_Hi, c_r);
             c_n_h_tiles = rocke_b_div(b, s, c_block_h);
         }
+        if(spec->xcd_tiles)
+        {
+            /* Launch order is q tile fastest, then group tile, then image row
+             * band (n, h_tile). Remap it so each run of q_tiles * group_tiles
+             * workgroups -- one row band -- lands on one XCD. Grid and chunk
+             * come from the kernargs; only the XCD count is baked. */
+            rocke_value_t* xc_gx;
+            {
+                rocke_value_t* c_r = rocke_b_const_i32(b, BLOCK_Q - 1);
+                rocke_value_t* s = rocke_b_add(b, p_Wo, c_r);
+                xc_gx = rocke_b_div(b, s, c_BQ);
+            }
+            rocke_value_t* xc_gy = rocke_b_div(b, params->p_groups, c_BG);
+            rocke_value_t* xc_gxy = rocke_b_mul(b, xc_gx, xc_gy);
+            rocke_value_t* xc_lin;
+            {
+                rocke_value_t* m1 = rocke_b_mul(b, by, xc_gx);
+                rocke_value_t* m2 = rocke_b_mul(b, bz, xc_gxy);
+                rocke_value_t* a1 = rocke_b_add(b, m1, m2);
+                xc_lin = rocke_b_add(b, bx, a1);
+            }
+            rocke_value_t* num_wgs;
+            {
+                rocke_value_t* m1 = rocke_b_mul(b, params->p_N, c_n_h_tiles);
+                num_wgs = rocke_b_mul(b, xc_gxy, m1);
+            }
+            /* _XCD_TILES_ARCHES[arch]: is_valid_spec admits gfx950 only. */
+            xc_lin = rocke_chiplet_transform_chunked_runtime(
+                b, xc_lin, num_wgs, DCONV_GEN_NUM_XCD, xc_gxy);
+            if(xc_lin == NULL)
+                return NULL;
+            bx = rocke_b_mod(b, xc_lin, xc_gx);
+            {
+                rocke_value_t* d = rocke_b_div(b, xc_lin, xc_gx);
+                by = rocke_b_mod(b, d, xc_gy);
+            }
+            bz = rocke_b_div(b, xc_lin, xc_gxy);
+        }
         n = rocke_b_div(b, bz, c_n_h_tiles);
         rocke_value_t* h_tile_idx = rocke_b_mod(b, bz, c_n_h_tiles);
         h_tile_start = rocke_b_mul(b, h_tile_idx, c_block_h);
@@ -464,16 +545,23 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     }
     rocke_value_t* q_tile_start_lds = block_q_start;
 
-    rocke_value_t* A_smem;
-    rocke_value_t* B_smem;
-    {
-        int shape[2];
-        shape[0] = 1;
-        shape[1] = lds_total;
-        A_smem = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_a");
-        B_smem
-            = spec->double_buffer ? rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "lds_b") : A_smem;
-    }
+    /* _alloc_row_buffers(). With dgrad_weights_lds they are allocated after
+     * the weight transpose reads, so their live ranges start after lds_w dies
+     * and the pool packer overlays them. */
+    rocke_value_t* A_smem = NULL;
+    rocke_value_t* B_smem = NULL;
+    int row_shape[2];
+    row_shape[0] = 1;
+    row_shape[1] = lds_total;
+#define DCONV_GEN_ALLOC_ROW_BUFFERS()                                                             \
+    do                                                                                            \
+    {                                                                                             \
+        A_smem = rocke_b_smem_alloc(b, ctx->io_type, row_shape, 2, "lds_a");                      \
+        B_smem = spec->double_buffer ? rocke_b_smem_alloc(b, ctx->io_type, row_shape, 2, "lds_b") \
+                                     : A_smem;                                                    \
+    } while(0)
+    if(!spec->dgrad_weights_lds)
+        DCONV_GEN_ALLOC_ROW_BUFFERS();
 
     rocke_value_t* red_lds = NULL;
     rocke_value_t* lds_row_idx = NULL;
@@ -655,18 +743,81 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         ctx->q_tile_start_lds = q_tile_start_lds;
     }
 
-    rocke_value_t** ld_vec
-        = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)PASSES * sizeof(rocke_value_t*));
-    rocke_value_t** ld_idx
-        = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)PASSES * sizeof(rocke_value_t*));
-    if(ld_vec == NULL || ld_idx == NULL)
+    /* Row loads in flight: slot y holds the PASSES (vec, lds_idx) of input
+     * row y of the tile (slot 0 is the prologue row). */
+    const int n_iters = BLOCK_H + KH - 1;
+    rocke_value_t** row_vec = (rocke_value_t**)rocke_arena_alloc(
+        &b->arena, (size_t)(n_iters + 1) * PASSES * sizeof(rocke_value_t*));
+    rocke_value_t** row_idx = (rocke_value_t**)rocke_arena_alloc(
+        &b->arena, (size_t)(n_iters + 1) * PASSES * sizeof(rocke_value_t*));
+    if(row_vec == NULL || row_idx == NULL)
         return NULL;
+#define DCONV_GEN_ROW_VEC(y) (row_vec + (size_t)(y) * PASSES)
+#define DCONV_GEN_ROW_IDX(y) (row_idx + (size_t)(y) * PASSES)
 
     rocke_value_t* load_g_tile = PERSISTENT ? pg_gt_v : NULL;
-    if(!dconv_issue_dram_load(ctx, h_tile_start, load_g_tile, ld_vec, ld_idx))
-        return NULL;
-    dconv_store_to_lds(ctx, ld_vec, ld_idx, A_smem);
-    rocke_b_sync(b);
+    rocke_value_t* prologue_y = h_tile_start; /* BLOCK_H > 0 (validated) */
+    /* dgrad_weights_lds: the staged weight slice (lds_w) and its geometry. */
+    const int WL_GROUP = p.cpg * KH * KW * p.kpg; /* elements per group */
+    rocke_value_t* wl_lds = NULL;
+    if(spec->dgrad_weights_lds)
+    {
+        /* Stage the raw weight slice of this workgroup's BLOCK_GROUPS groups:
+         * W[(g_tile*BG .. +BG)*cpg, KH, KW, kpg] is one contiguous run of
+         * BG * cpg*KH*KW*kpg elements, copied 1:1 with 16-byte loads. */
+        const int WL_VECS = BLOCK_GROUPS * WL_GROUP / 8;
+        const int WL_PASSES = (WL_VECS + THREADS - 1) / THREADS;
+        int wl_shape[2];
+        wl_shape[0] = 1;
+        wl_shape[1] = WL_PASSES * THREADS * 8;
+        wl_lds = rocke_b_smem_alloc(b, ctx->io_type, wl_shape, 2, "lds_w");
+        rocke_value_t* wl_base = rocke_b_mul(b, by, rocke_b_const_i32(b, BLOCK_GROUPS * WL_GROUP));
+        rocke_value_t** wl_vec = (rocke_value_t**)rocke_arena_alloc(
+            &b->arena, (size_t)WL_PASSES * sizeof(rocke_value_t*));
+        rocke_value_t** wl_ix = (rocke_value_t**)rocke_arena_alloc(
+            &b->arena, (size_t)WL_PASSES * sizeof(rocke_value_t*));
+        if(wl_vec == NULL || wl_ix == NULL)
+            return NULL;
+        for(int pi = 0; pi < WL_PASSES; ++pi)
+        {
+            rocke_value_t* wl_v = rocke_b_add(b, tid, rocke_b_const_i32(b, pi * THREADS));
+            rocke_value_t* wl_off;
+            {
+                rocke_value_t* m8 = rocke_b_mul(b, wl_v, rocke_b_const_i32(b, 8));
+                rocke_value_t* a1 = rocke_b_add(b, wl_base, m8);
+                wl_off = rocke_b_mul(b, a1, c_half_bytes);
+            }
+            if((pi + 1) * THREADS > WL_VECS)
+            {
+                rocke_value_t* lt = rocke_b_cmp_lt(b, wl_v, rocke_b_const_i32(b, WL_VECS));
+                wl_off = rocke_b_select(b, lt, wl_off, oob_sentinel);
+            }
+            wl_vec[pi] = dconv_gen_buf_load(ctx, b_rsrc, wl_off, 4);
+            wl_ix[pi] = rocke_b_mul(b, wl_v, rocke_b_const_i32(b, 8));
+        }
+        /* The first input row is fetched now but published to LDS only after
+         * the transpose reads: lds_w is dead by then, so the smem pool packer
+         * overlays it with the input row buffers. */
+        if(!dconv_issue_dram_load(
+               ctx, prologue_y, load_g_tile, DCONV_GEN_ROW_VEC(0), DCONV_GEN_ROW_IDX(0)))
+            return NULL;
+        for(int pi = 0; pi < WL_PASSES; ++pi)
+        {
+            rocke_value_t* ix[2];
+            ix[0] = c0;
+            ix[1] = wl_ix[pi];
+            rocke_b_smem_store_vN(b, wl_lds, ix, 2, wl_vec[pi], 8);
+        }
+        rocke_b_sync(b);
+    }
+    else
+    {
+        if(!dconv_issue_dram_load(
+               ctx, prologue_y, load_g_tile, DCONV_GEN_ROW_VEC(0), DCONV_GEN_ROW_IDX(0)))
+            return NULL;
+        dconv_store_to_lds(ctx, DCONV_GEN_ROW_VEC(0), DCONV_GEN_ROW_IDX(0), A_smem);
+        rocke_b_sync(b);
+    }
 
     /* acc_tiles[qt][m][slot] */
     const int n_acc = q_subtiles * N_M_TILES * KH;
@@ -734,9 +885,278 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             }
         }
     }
+    else if(PRELOADS)
+    {
+        /* ---- Weight preloading (WAVES_K == 1) ----
+         * Every (r, s, atom, m) fragment is loaded once here and stays in
+         * registers for the whole row loop. dgrad_fused_weights: B is the
+         * original dgrad weight W[groups*cpg, KH, KW, kpg] (transposed-problem
+         * terms), gathered with flipped taps and k<->c transposed addressing;
+         * dgrad_weights_lds builds each fragment with transpose reads of the
+         * staged slice instead. */
+        const size_t n_pw = (size_t)KH * KW * N_K_LOCAL * N_M_TILES;
+        preloaded = (rocke_value_t**)rocke_arena_calloc(&b->arena, n_pw * sizeof(rocke_value_t*));
+        if(preloaded == NULL)
+            return NULL;
+        const int c4_step_pl = K_ATOM_SIZE / 4;
+        const int fw_k_stride = KH * KW * p.kpg; /* elements between W rows k, k+1 */
+        rocke_value_t* wl_lane_row = NULL;
+        rocke_value_t* wl_lane_col = NULL;
+        rocke_value_t* wl_grp_off = NULL;
+        rocke_value_t* c_wl_row = NULL;
+        rocke_value_t* c_fw_k_stride = NULL;
+        if(spec->dgrad_weights_lds)
+        {
+            /* Transpose-read lane address pieces: the ch_off term already
+             * carries c4 * KS; add the in-chunk row (lane // 4) % 4 and the
+             * 4-column group (lane % 4) * 4. */
+            {
+                rocke_value_t* d = rocke_b_div(b, lane, rocke_b_const_i32(b, 4));
+                wl_lane_row = rocke_b_mod(b, d, rocke_b_const_i32(b, 4));
+            }
+            {
+                rocke_value_t* md = rocke_b_mod(b, lane, rocke_b_const_i32(b, 4));
+                wl_lane_col = rocke_b_mul(b, md, rocke_b_const_i32(b, 4));
+            }
+            wl_grp_off = rocke_b_mul(b, wave_group_idx, rocke_b_const_i32(b, WL_GROUP));
+            c_wl_row = rocke_b_const_i32(b, KH * KW * p.kpg);
+        }
+        else if(spec->dgrad_fused_weights)
+            c_fw_k_stride = rocke_b_const_i32(b, fw_k_stride);
+        for(int r = 0; r < KH; ++r)
+        {
+            for(int s = 0; s < KW; ++s)
+            {
+                for(int la = 0; la < N_K_LOCAL; ++la)
+                {
+                    rocke_value_t* ch_off_pl;
+                    {
+                        rocke_value_t* m1
+                            = rocke_b_mul(b, k_atom_base, rocke_b_const_i32(b, K_ATOM_SIZE));
+                        rocke_value_t* c_la = rocke_b_const_i32(b, la * K_ATOM_SIZE);
+                        rocke_value_t* m2 = rocke_b_mul(b, c4, rocke_b_const_i32(b, c4_step_pl));
+                        rocke_value_t* a1 = rocke_b_add(b, c_la, m2);
+                        ch_off_pl = rocke_b_add(b, m1, a1);
+                    }
+                    /* Flipped tap (KH-1-r, KW-1-s) column offset of M-tile m. */
+                    const int flip_base = ((KH - 1 - r) * KW + (KW - 1 - s)) * p.kpg;
+                    for(int m = 0; m < M_LOCAL; ++m)
+                    {
+                        rocke_value_t* w_frag;
+                        if(m * 16 >= p.kpg)
+                        {
+                            DCONV_GEN_PW(r, s, la, m) = NULL;
+                            continue;
+                        }
+                        if(spec->dgrad_weights_lds)
+                        {
+                            /* Lane (c4, q) needs W[k0 + c4*KS + j, flip, c=m*16+q];
+                             * ds_read_b64_tr_b16 hands lane 16h+4a+b element b of
+                             * lane 16h+4j+a's 8-byte read, so lane 16h+4j'+a'
+                             * reads row k0+h*KS+j', columns m*16+4a'..+3 of the
+                             * staged W slice. */
+                            rocke_value_t* wl_row = rocke_b_add(b, ch_off_pl, wl_lane_row);
+                            rocke_value_t* wl_idx;
+                            {
+                                rocke_value_t* m1 = rocke_b_mul(b, wl_row, c_wl_row);
+                                rocke_value_t* a1 = rocke_b_add(b, wl_grp_off, m1);
+                                rocke_value_t* c_f = rocke_b_const_i32(b, flip_base + m * 16);
+                                rocke_value_t* a2 = rocke_b_add(b, c_f, wl_lane_col);
+                                wl_idx = rocke_b_add(b, a1, a2);
+                            }
+                            if(wm_base16 != NULL)
+                                wl_idx = rocke_b_add(b, wl_idx, wm_base16);
+                            {
+                                rocke_value_t* ix[2];
+                                ix[0] = c0;
+                                ix[1] = wl_idx;
+                                w_frag = rocke_b_ds_read_tr16_b64(b, wl_lds, ix, 2, ctx->io_type);
+                            }
+                            for(int rd = 1; rd < LOAD_VEC / 4; ++rd)
+                            {
+                                rocke_value_t* ix[2];
+                                rocke_value_t* c_rd
+                                    = rocke_b_const_i32(b, 4 * rd * KH * KW * p.kpg);
+                                ix[0] = c0;
+                                ix[1] = rocke_b_add(b, wl_idx, c_rd);
+                                rocke_value_t* hi
+                                    = rocke_b_ds_read_tr16_b64(b, wl_lds, ix, 2, ctx->io_type);
+                                w_frag = rocke_b_vec_concat(b, w_frag, hi);
+                            }
+                            if(mask_k_tail)
+                            {
+                                rocke_value_t* oob = rocke_b_cmp_ge(
+                                    b, ch_off_pl, k_tail_bound(b, RTC, c_cpg, p.cpg));
+                                rocke_value_t* zero = rocke_b_zero_vec(b, ctx->io_type, LOAD_VEC);
+                                w_frag = rocke_b_select(b, oob, zero, w_frag);
+                            }
+                        }
+                        else if(spec->dgrad_fused_weights)
+                        {
+                            /* W[(g*cpg + ch_off) row, KH-1-r, KW-1-s, m*16 + q] */
+                            rocke_value_t* fw_row;
+                            {
+                                rocke_value_t* m1 = rocke_b_mul(b, g, c_cpg);
+                                fw_row = rocke_b_add(b, m1, ch_off_pl);
+                            }
+                            rocke_value_t* fw_off;
+                            {
+                                rocke_value_t* m1 = rocke_b_mul(b, fw_row, c_fw_k_stride);
+                                rocke_value_t* c_f = rocke_b_const_i32(b, flip_base + m * 16);
+                                rocke_value_t* a1 = rocke_b_add(b, c_f, q_in_lane);
+                                fw_off = rocke_b_add(b, m1, a1);
+                            }
+                            if(wm_base16 != NULL)
+                                fw_off = rocke_b_add(b, fw_off, wm_base16);
+                            rocke_value_t* elems[8];
+                            for(int e = 0; e < LOAD_VEC; ++e)
+                            {
+                                rocke_value_t* e_off;
+                                {
+                                    rocke_value_t* c_e = rocke_b_const_i32(b, e * fw_k_stride);
+                                    rocke_value_t* a1 = rocke_b_add(b, fw_off, c_e);
+                                    e_off = rocke_b_mul(b, a1, c_half_bytes);
+                                }
+                                if(mask_k_tail)
+                                {
+                                    rocke_value_t* a1
+                                        = rocke_b_add(b, ch_off_pl, rocke_b_const_i32(b, e));
+                                    rocke_value_t* e_ok
+                                        = rocke_b_cmp_lt(b, a1, k_tail_bound(b, RTC, c_cpg, p.cpg));
+                                    e_off = rocke_b_select(b, e_ok, e_off, oob_sentinel);
+                                }
+                                elems[e] = ctx->is_bf16
+                                               ? rocke_b_buffer_load_bf16(b, b_rsrc, e_off, c0)
+                                               : rocke_b_buffer_load_f16(b, b_rsrc, e_off, c0);
+                            }
+                            w_frag = rocke_b_vec_pack(b, elems, LOAD_VEC, ctx->io_type);
+                        }
+                        else
+                        {
+                            rocke_value_t* k_out_pl;
+                            {
+                                rocke_value_t* m1 = rocke_b_mul(b, g, c_kpg);
+                                rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
+                                rocke_value_t* a1 = rocke_b_add(b, c_m, q_in_lane);
+                                k_out_pl = rocke_b_add(b, m1, a1);
+                            }
+                            if(wm_base16 != NULL)
+                                k_out_pl = rocke_b_add(b, k_out_pl, wm_base16);
+                            rocke_value_t* w_off = NULL;
+                            rocke_value_t* w_valid = NULL;
+                            const char* names[4] = {"k_out", "r", "s", "c"};
+                            rocke_value_t* values[4];
+                            values[0] = k_out_pl;
+                            values[1] = rocke_b_const_i32(b, r);
+                            values[2] = rocke_b_const_i32(b, s);
+                            values[3] = ch_off_pl;
+                            if(!rocke_transforms_descriptor_offset(
+                                   b, b_desc, names, values, 4, &w_off, &w_valid))
+                                return NULL;
+                            rocke_value_t* off_bytes = rocke_b_mul(b, w_off, c_half_bytes);
+                            w_frag = dconv_gen_buf_load(ctx, b_rsrc, off_bytes, LOAD_VEC / 2);
+                            if(mask_k_tail)
+                            {
+                                rocke_value_t* oob = rocke_b_cmp_ge(
+                                    b, ch_off_pl, k_tail_bound(b, RTC, c_cpg, p.cpg));
+                                rocke_value_t* zero = rocke_b_zero_vec(b, ctx->io_type, LOAD_VEC);
+                                w_frag = rocke_b_select(b, oob, zero, w_frag);
+                            }
+                        }
+                        DCONV_GEN_PW(r, s, la, m) = w_frag;
+                    }
+                }
+            }
+        }
+        if(spec->dgrad_weights_lds)
+        {
+            /* Every wave's transpose reads complete before any wave overwrites
+             * the (pool-aliased) bytes with the first input row. */
+            rocke_b_sync(b);
+            DCONV_GEN_ALLOC_ROW_BUFFERS();
+            dconv_store_to_lds(ctx, DCONV_GEN_ROW_VEC(0), DCONV_GEN_ROW_IDX(0), A_smem);
+            rocke_b_sync(b);
+        }
+    }
 
-    const int n_iters = BLOCK_H + KH - 1;
     const int c4_step = K_ATOM_SIZE / 4;
+    const int PF = spec->prefetch_rows > 1 ? spec->prefetch_rows : 1;
+
+    /* stage_out: two LDS output-row tiles [BLOCK_Q, SO_CH + 8]. A finished row
+     * is written in the MFMA layout before the row barrier, then read back as
+     * 16-byte vectors over the workgroup's contiguous channel span and stored
+     * after it; the global offsets come from the output stride kernargs. */
+    rocke_value_t* so_bufs[2] = {NULL, NULL};
+    rocke_value_t* c_so_stride = NULL;
+    int so_n = 0;
+    rocke_value_t** so_ok = NULL;
+    rocke_value_t** so_gel = NULL;
+    rocke_value_t** so_lidx = NULL;
+    if(spec->stage_out)
+    {
+        const int SO_CH = BLOCK_GROUPS * p.kpg; /* output channels per workgroup */
+        const int SO_STRIDE = (int)(BLOCK_GROUPS * p.kpg + 8); /* direct_conv_stage_out_stride */
+        const int SO_VPC = SO_CH / 8;
+        const int SO_VECS = BLOCK_Q * SO_VPC;
+        for(int i = 0; i < 2; ++i)
+        {
+            int so_shape[2];
+            so_shape[0] = 1;
+            so_shape[1] = BLOCK_Q * SO_STRIDE;
+            so_bufs[i] = rocke_b_smem_alloc(
+                b, ctx->io_type, so_shape, 2, i == 0 ? "lds_out0" : "lds_out1");
+        }
+        c_so_stride = rocke_b_const_i32(b, SO_STRIDE);
+        rocke_value_t* so_n_base = rocke_b_mul(b, n, params->p_D_stride_n);
+        so_n = (SO_VECS + THREADS - 1) / THREADS;
+        so_ok
+            = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)so_n * sizeof(rocke_value_t*));
+        so_gel
+            = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)so_n * sizeof(rocke_value_t*));
+        so_lidx
+            = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)so_n * sizeof(rocke_value_t*));
+        if(so_ok == NULL || so_gel == NULL || so_lidx == NULL)
+            return NULL;
+        for(int pi = 0; pi < so_n; ++pi)
+        {
+            rocke_value_t* t = rocke_b_add(b, tid, rocke_b_const_i32(b, pi * THREADS));
+            rocke_value_t* q = rocke_b_div(b, t, rocke_b_const_i32(b, SO_VPC));
+            rocke_value_t* v = rocke_b_mod(b, t, rocke_b_const_i32(b, SO_VPC));
+            rocke_value_t* qg = rocke_b_add(b, block_q_start, q);
+            rocke_value_t* ok = rocke_b_cmp_lt(b, qg, c_W);
+            if((pi + 1) * THREADS > SO_VECS)
+            {
+                rocke_value_t* lt = rocke_b_cmp_lt(b, t, rocke_b_const_i32(b, SO_VECS));
+                ok = rocke_b_land(b, ok, lt);
+            }
+            {
+                rocke_value_t* m1 = rocke_b_mul(b, qg, params->p_D_stride_wo);
+                rocke_value_t* a1 = rocke_b_add(b, so_n_base, m1);
+                rocke_value_t* m2 = rocke_b_mul(b, by, rocke_b_const_i32(b, SO_CH));
+                rocke_value_t* m3 = rocke_b_mul(b, v, rocke_b_const_i32(b, 8));
+                rocke_value_t* a2 = rocke_b_add(b, m2, m3);
+                so_gel[pi] = rocke_b_add(b, a1, a2);
+            }
+            {
+                rocke_value_t* m1 = rocke_b_mul(b, q, c_so_stride);
+                rocke_value_t* m2 = rocke_b_mul(b, v, rocke_b_const_i32(b, 8));
+                so_lidx[pi] = rocke_b_add(b, m1, m2);
+            }
+            so_ok[pi] = ok;
+        }
+    }
+
+    /* prefetch_rows > 1: rows 1 .. PF-1 are in flight before the loop; row
+     * y + PF is issued at row y and committed to LDS at the end of row
+     * y + PF - 1. */
+    for(int y_l = 1; y_l < (PF < n_iters ? PF : n_iters); ++y_l)
+    {
+        rocke_value_t* row_y = rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_l));
+        if(!dconv_issue_dram_load(
+               ctx, row_y, load_g_tile, DCONV_GEN_ROW_VEC(y_l), DCONV_GEN_ROW_IDX(y_l)))
+            return NULL;
+    }
+
     for(int y_local = 0; y_local < n_iters; ++y_local)
     {
         (void)rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_local)); /* y */
@@ -745,12 +1165,74 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         rocke_value_t* nxt = even ? B_smem : A_smem;
 
         bool have_next = false;
-        if(y_local + 1 < n_iters)
+        if(PF > 1)
+        {
+            if(y_local + PF < n_iters)
+            {
+                rocke_value_t* row_y
+                    = rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_local + PF));
+                if(!dconv_issue_dram_load(ctx,
+                                          row_y,
+                                          load_g_tile,
+                                          DCONV_GEN_ROW_VEC(y_local + PF),
+                                          DCONV_GEN_ROW_IDX(y_local + PF)))
+                    return NULL;
+            }
+            have_next = y_local + 1 < n_iters;
+        }
+        else if(y_local + 1 < n_iters)
         {
             rocke_value_t* next_y = rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_local + 1));
-            if(!dconv_issue_dram_load(ctx, next_y, load_g_tile, ld_vec, ld_idx))
+            if(!dconv_issue_dram_load(ctx,
+                                      next_y,
+                                      load_g_tile,
+                                      DCONV_GEN_ROW_VEC(y_local + 1),
+                                      DCONV_GEN_ROW_IDX(y_local + 1)))
                 return NULL;
             have_next = true;
+        }
+
+        /* row_guard: input row h_tile_start + y_local - PAD past the image adds
+         * nothing, so the row's MFMAs run in a block-uniform one-trip loop
+         * carrying the accumulators they touch. Rows y_local <= PAD are never
+         * past the image (a tile starts inside it). */
+        rocke_for_t guard_loop;
+        bool guarded = false;
+        int n_guard = 0;
+        int* guard_keys = NULL; /* flat acc indices */
+        if(spec->row_guard && y_local > p.PAD)
+        {
+            guard_keys = (int*)rocke_arena_alloc(&b->arena,
+                                                 (size_t)q_subtiles * M_LOCAL * KH * sizeof(int));
+            if(guard_keys == NULL)
+                return NULL;
+            for(int qt = 0; qt < q_subtiles; ++qt)
+                for(int m = 0; m < M_LOCAL; ++m)
+                {
+                    if(m * 16 >= p.kpg)
+                        continue;
+                    for(int slot = 0; slot < KH; ++slot)
+                        guard_keys[n_guard++] = (qt * N_M_TILES + m) * KH + slot;
+                }
+            rocke_value_t* in_row
+                = rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_local - p.PAD));
+            rocke_value_t* lt = rocke_b_cmp_lt(b, in_row, p_Hi);
+            rocke_value_t* trip = rocke_b_select(b, lt, c1, c0);
+            rocke_iter_arg_t* g_args = (rocke_iter_arg_t*)rocke_arena_alloc(
+                &b->arena, (size_t)(n_guard > 0 ? n_guard : 1) * sizeof(rocke_iter_arg_t));
+            if(g_args == NULL)
+                return NULL;
+            for(int i = 0; i < n_guard; ++i)
+            {
+                g_args[i].name = rocke_arena_printf(&b->arena, "rg_y%d_%d", y_local, i);
+                g_args[i].init = acc[guard_keys[i]];
+            }
+            const char* g_iv = rocke_arena_printf(&b->arena, "rg_y%d", y_local);
+            guard_loop = rocke_b_scf_for_iter(b, c0, trip, c1, g_args, n_guard, g_iv, false, true);
+            rocke_b_region_enter(b, guard_loop.body);
+            for(int i = 0; i < n_guard; ++i)
+                acc[guard_keys[i]] = guard_loop.iter_vars[i];
+            guarded = true;
         }
 
         for(int qt = 0; qt < q_subtiles; ++qt)
@@ -761,7 +1243,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                 const int p_idx = dconv_gen_pymod(y_local - r, KH);
                 rocke_value_t* r_i = rocke_b_const_i32(b, r);
 
-                if(WAVES_K > 1)
+                if(PRELOADS)
                 {
                     for(int s = 0; s < KW; ++s)
                     {
@@ -800,7 +1282,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                                 rocke_value_t* zero = rocke_b_zero_vec(b, ctx->io_type, LOAD_VEC);
                                 x_frag = rocke_b_select(b, oob, zero, x_frag);
                             }
-                            for(int m = 0; m < N_M_TILES; ++m)
+                            for(int m = 0; m < M_LOCAL; ++m)
                             {
                                 if(m * 16 >= p.kpg)
                                     continue;
@@ -1021,13 +1503,68 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             }
         }
 
+        if(guarded)
+        {
+            rocke_value_t** yv = (rocke_value_t**)rocke_arena_alloc(
+                &b->arena, (size_t)(n_guard > 0 ? n_guard : 1) * sizeof(rocke_value_t*));
+            if(yv == NULL)
+                return NULL;
+            for(int i = 0; i < n_guard; ++i)
+                yv[i] = acc[guard_keys[i]];
+            rocke_b_scf_yield(b, yv, n_guard);
+            rocke_b_region_leave(b);
+            for(int i = 0; i < n_guard; ++i)
+                acc[guard_keys[i]] = guard_loop.op->results[i];
+        }
+
         if(have_next)
         {
             if(!spec->double_buffer)
                 rocke_b_sync(b);
-            dconv_store_to_lds(ctx, ld_vec, ld_idx, nxt);
+            dconv_store_to_lds(
+                ctx, DCONV_GEN_ROW_VEC(y_local + 1), DCONV_GEN_ROW_IDX(y_local + 1), nxt);
         }
-        rocke_b_sync(b);
+        /* Tile-local index of the output row that completes at this y_local. */
+        const int so_row = y_local - (KH - 1);
+        if(spec->stage_out && so_row >= 0 && so_row < BLOCK_H)
+        {
+            /* Publish the finished row to LDS before the row barrier (rows of
+             * a tile past the image are published too; the flush guard masks
+             * their global stores). */
+            rocke_value_t* so_buf = so_bufs[y_local % 2];
+            const int so_slot = so_row % KH;
+            for(int qt = 0; qt < q_subtiles; ++qt)
+            {
+                rocke_value_t* col = rocke_b_add(b, q_in_lane, rocke_b_const_i32(b, qt * 16));
+                for(int m = 0; m < M_LOCAL; ++m)
+                {
+                    rocke_value_t* ch;
+                    {
+                        rocke_value_t* m1 = rocke_b_mul(b, wave_group_idx, c_kpg);
+                        rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
+                        rocke_value_t* m2 = rocke_b_mul(b, c4, rocke_b_const_i32(b, 4));
+                        rocke_value_t* a1 = rocke_b_add(b, c_m, m2);
+                        ch = rocke_b_add(b, m1, a1);
+                    }
+                    if(wm_base16 != NULL)
+                        ch = rocke_b_add(b, ch, wm_base16);
+                    rocke_value_t* ix[2];
+                    ix[0] = c0;
+                    {
+                        rocke_value_t* m1 = rocke_b_mul(b, col, c_so_stride);
+                        ix[1] = rocke_b_add(b, m1, ch);
+                    }
+                    rocke_value_t* a = DCONV_GEN_ACC(qt, m, so_slot);
+                    rocke_value_t* h = ctx->is_bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, a)
+                                                    : rocke_b_vec_trunc_f32_to_f16(b, a);
+                    rocke_b_smem_store_vN(b, so_buf, ix, 2, h, 4);
+                }
+            }
+        }
+        if(spec->lds_only_sync)
+            rocke_b_sync_lds_only(b);
+        else
+            rocke_b_sync(b);
 
         const int p_flush_local = y_local - (KH - 1);
         const int P_FLUSH = dconv_gen_pymod(p_flush_local, KH);
@@ -1053,143 +1590,184 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             rocke_value_t* ho_row_val
                 = rocke_b_div(b, p_flush_global, rocke_b_const_i32(b, c_stride_gen));
 
-            for(int qt = 0; qt < q_subtiles; ++qt)
+            if(spec->stage_out)
             {
-                const int qt_w_base = qt * 16;
-                rocke_value_t* out_q;
+                rocke_value_t* so_buf = so_bufs[y_local % 2];
+                rocke_value_t* row_off = rocke_b_mul(b, ho_row_val, params->p_D_stride_ho);
+                for(int pi = 0; pi < so_n; ++pi)
                 {
-                    rocke_value_t* c_b = rocke_b_const_i32(b, qt_w_base);
-                    rocke_value_t* a1 = rocke_b_add(b, q_tile_start, c_b);
-                    out_q = rocke_b_add(b, a1, q_in_lane);
+                    rocke_value_t* ok = rocke_b_land(b, so_ok[pi], in_h_range);
+                    rocke_value_t* ix[2];
+                    ix[0] = c0;
+                    ix[1] = so_lidx[pi];
+                    rocke_value_t* vec = rocke_b_smem_load_vN(b, so_buf, ix, 2, ctx->io_type, 8);
+                    rocke_value_t* off;
+                    {
+                        rocke_value_t* a1 = rocke_b_add(b, so_gel[pi], row_off);
+                        rocke_value_t* m1 = rocke_b_mul(b, a1, c_half_bytes);
+                        off = rocke_b_select(b, ok, m1, oob_sentinel);
+                    }
+                    dconv_gen_buf_store(ctx, d_rsrc, off, vec, 4);
                 }
-                rocke_value_t* out_q_ok = rocke_b_cmp_lt(b, out_q, c_W);
-
-                for(int m = 0; m < N_M_TILES; ++m)
+            }
+            else
+            {
+                for(int qt = 0; qt < q_subtiles; ++qt)
                 {
-                    if(m * 16 >= p.kpg)
-                        continue;
-                    rocke_value_t* acc_to_flush = DCONV_GEN_ACC(qt, m, P_FLUSH);
-                    rocke_value_t* k_val;
+                    const int qt_w_base = qt * 16;
+                    rocke_value_t* out_q;
                     {
-                        rocke_value_t* m1 = rocke_b_mul(b, g, c_kpg);
-                        rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
-                        rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
-                        rocke_value_t* m2 = rocke_b_mul(b, c4, c_4);
-                        rocke_value_t* a1 = rocke_b_add(b, c_m, m2);
-                        k_val = rocke_b_add(b, m1, a1);
+                        rocke_value_t* c_b = rocke_b_const_i32(b, qt_w_base);
+                        rocke_value_t* a1 = rocke_b_add(b, q_tile_start, c_b);
+                        out_q = rocke_b_add(b, a1, q_in_lane);
                     }
-                    rocke_value_t* store_ok;
-                    if(RTC)
+                    rocke_value_t* out_q_ok = rocke_b_cmp_lt(b, out_q, c_W);
+
+                    for(int m = 0; m < M_LOCAL; ++m)
                     {
-                        if(m == N_M_TILES - 1)
+                        if(m * 16 >= p.kpg)
+                            continue;
+                        rocke_value_t* acc_to_flush = DCONV_GEN_ACC(qt, m, P_FLUSH);
+                        rocke_value_t* k_val;
                         {
-                            rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
-                            rocke_value_t* rows = rocke_b_mul(b, c4, c_4);
+                            rocke_value_t* m1 = rocke_b_mul(b, g, c_kpg);
                             rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
-                            rocke_value_t* left = rocke_b_sub(b, c_kpg, c_m);
-                            rocke_value_t* c4_ok = rocke_b_cmp_lt(b, rows, left);
-                            store_ok = rocke_b_land(b, out_q_ok, c4_ok);
-                        }
-                        else
-                            store_ok = out_q_ok;
-                    }
-                    else
-                    {
-                        const int rows_in_tile = p.kpg - m * 16;
-                        if(rows_in_tile < 16)
-                        {
                             rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
-                            rocke_value_t* rows = rocke_b_mul(b, c4, c_4);
-                            rocke_value_t* c_rows = rocke_b_const_i32(b, rows_in_tile);
-                            rocke_value_t* c4_ok = rocke_b_cmp_lt(b, rows, c_rows);
-                            store_ok = rocke_b_land(b, out_q_ok, c4_ok);
+                            rocke_value_t* m2 = rocke_b_mul(b, c4, c_4);
+                            rocke_value_t* a1 = rocke_b_add(b, c_m, m2);
+                            k_val = rocke_b_add(b, m1, a1);
+                        }
+                        if(wm_base16 != NULL)
+                            k_val = rocke_b_add(b, k_val, wm_base16);
+                        rocke_value_t* store_ok;
+                        if(RTC)
+                        {
+                            if(m == N_M_TILES - 1)
+                            {
+                                rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
+                                rocke_value_t* rows = rocke_b_mul(b, c4, c_4);
+                                rocke_value_t* c_m = rocke_b_const_i32(b, m * 16);
+                                rocke_value_t* left = rocke_b_sub(b, c_kpg, c_m);
+                                rocke_value_t* c4_ok = rocke_b_cmp_lt(b, rows, left);
+                                store_ok = rocke_b_land(b, out_q_ok, c4_ok);
+                            }
+                            else
+                                store_ok = out_q_ok;
                         }
                         else
-                            store_ok = out_q_ok;
-                    }
-                    store_ok = rocke_b_land(b, store_ok, in_h_range);
-
-                    rocke_value_t* d_base = NULL;
-                    rocke_value_t* d_valid = NULL;
-                    {
-                        const char* names[4] = {"n", "h", "w", "k"};
-                        rocke_value_t* values[4];
-                        values[0] = n;
-                        values[1] = ho_row_val;
-                        values[2] = out_q;
-                        values[3] = k_val;
-                        if(!rocke_transforms_descriptor_offset(
-                               b, d_desc, names, values, 4, &d_base, &d_valid))
-                            return NULL;
-                    }
-
-                    if(WAVES_K > 1)
-                    {
-                        rocke_value_t* lane_col = rocke_b_mul(b, lane, rocke_b_const_i32(b, 4));
                         {
-                            rocke_value_t* ix[2];
-                            ix[0] = lds_row_idx;
-                            ix[1] = lane_col;
-                            rocke_b_smem_store_vN_f32(b, red_lds, ix, 2, acc_to_flush, 4);
+                            const int rows_in_tile = p.kpg - m * 16;
+                            if(rows_in_tile < 16)
+                            {
+                                rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
+                                rocke_value_t* rows = rocke_b_mul(b, c4, c_4);
+                                rocke_value_t* c_rows = rocke_b_const_i32(b, rows_in_tile);
+                                rocke_value_t* c4_ok = rocke_b_cmp_lt(b, rows, c_rows);
+                                store_ok = rocke_b_land(b, out_q_ok, c4_ok);
+                            }
+                            else
+                                store_ok = out_q_ok;
                         }
-                        rocke_b_sync(b);
-                        rocke_value_t* is_k0 = rocke_b_cmp_eq(b, wave_id_k, c0);
-                        rocke_if_t if_k0 = rocke_b_scf_if(b, is_k0);
-                        rocke_b_region_enter(b, if_k0.then_region);
+                        store_ok = rocke_b_land(b, store_ok, in_h_range);
+
+                        rocke_value_t* d_base = NULL;
+                        rocke_value_t* d_valid = NULL;
                         {
-                            rocke_value_t* row_base
-                                = rocke_b_mul(b, wave_id_q, rocke_b_const_i32(b, WAVES_K));
-                            rocke_value_t** rows_f32 = (rocke_value_t**)rocke_arena_alloc(
-                                &b->arena, (size_t)WAVES_K * sizeof(rocke_value_t*));
-                            if(rows_f32 == NULL)
+                            const char* names[4] = {"n", "h", "w", "k"};
+                            rocke_value_t* values[4];
+                            values[0] = n;
+                            values[1] = ho_row_val;
+                            values[2] = out_q;
+                            values[3] = k_val;
+                            if(!rocke_transforms_descriptor_offset(
+                                   b, d_desc, names, values, 4, &d_base, &d_valid))
                                 return NULL;
-                            for(int wk = 0; wk < WAVES_K; ++wk)
+                        }
+
+                        if(WAVES_K > 1)
+                        {
+                            rocke_value_t* lane_col = rocke_b_mul(b, lane, rocke_b_const_i32(b, 4));
                             {
                                 rocke_value_t* ix[2];
-                                ix[0] = rocke_b_add(b, row_base, rocke_b_const_i32(b, wk));
+                                ix[0] = lds_row_idx;
                                 ix[1] = lane_col;
-                                rows_f32[wk] = rocke_b_smem_load_vN_f32(b, red_lds, ix, 2, 4);
+                                rocke_b_smem_store_vN_f32(b, red_lds, ix, 2, acc_to_flush, 4);
                             }
-                            rocke_value_t* sum_slots[4];
-                            for(int slot = 0; slot < 4; ++slot)
+                            rocke_b_sync(b);
+                            rocke_value_t* is_k0 = rocke_b_cmp_eq(b, wave_id_k, c0);
+                            rocke_if_t if_k0 = rocke_b_scf_if(b, is_k0);
+                            rocke_b_region_enter(b, if_k0.then_region);
                             {
-                                rocke_value_t* sv = rocke_b_vec_extract(b, rows_f32[0], slot);
-                                for(int wk = 1; wk < WAVES_K; ++wk)
+                                rocke_value_t* row_base
+                                    = rocke_b_mul(b, wave_id_q, rocke_b_const_i32(b, WAVES_K));
+                                rocke_value_t** rows_f32 = (rocke_value_t**)rocke_arena_alloc(
+                                    &b->arena, (size_t)WAVES_K * sizeof(rocke_value_t*));
+                                if(rows_f32 == NULL)
+                                    return NULL;
+                                for(int wk = 0; wk < WAVES_K; ++wk)
                                 {
-                                    rocke_value_t* e = rocke_b_vec_extract(b, rows_f32[wk], slot);
-                                    sv = rocke_b_fadd(b, sv, e);
+                                    rocke_value_t* ix[2];
+                                    ix[0] = rocke_b_add(b, row_base, rocke_b_const_i32(b, wk));
+                                    ix[1] = lane_col;
+                                    rows_f32[wk] = rocke_b_smem_load_vN_f32(b, red_lds, ix, 2, 4);
                                 }
-                                sum_slots[slot] = sv;
+                                rocke_value_t* sum_slots[4];
+                                for(int slot = 0; slot < 4; ++slot)
+                                {
+                                    rocke_value_t* sv = rocke_b_vec_extract(b, rows_f32[0], slot);
+                                    for(int wk = 1; wk < WAVES_K; ++wk)
+                                    {
+                                        rocke_value_t* e
+                                            = rocke_b_vec_extract(b, rows_f32[wk], slot);
+                                        sv = rocke_b_fadd(b, sv, e);
+                                    }
+                                    sum_slots[slot] = sv;
+                                }
+                                rocke_value_t* partial
+                                    = rocke_b_vec_pack(b, sum_slots, 4, rocke_f32());
+                                rocke_value_t* off_bytes = rocke_b_mul(b, d_base, c_half_bytes);
+                                rocke_value_t* safe_d
+                                    = rocke_b_select(b, store_ok, off_bytes, oob_sentinel);
+                                rocke_value_t* acc_h
+                                    = ctx->is_bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, partial)
+                                                   : rocke_b_vec_trunc_f32_to_f16(b, partial);
+                                dconv_gen_buf_store(ctx, d_rsrc, safe_d, acc_h, 2);
                             }
-                            rocke_value_t* partial = rocke_b_vec_pack(b, sum_slots, 4, rocke_f32());
+                            rocke_b_region_leave(b);
+                            rocke_b_sync(b);
+                        }
+                        else
+                        {
                             rocke_value_t* off_bytes = rocke_b_mul(b, d_base, c_half_bytes);
                             rocke_value_t* safe_d
                                 = rocke_b_select(b, store_ok, off_bytes, oob_sentinel);
-                            rocke_value_t* acc_h = ctx->is_bf16
-                                                       ? rocke_b_vec_trunc_f32_to_bf16(b, partial)
-                                                       : rocke_b_vec_trunc_f32_to_f16(b, partial);
+                            rocke_value_t* acc_h
+                                = ctx->is_bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush)
+                                               : rocke_b_vec_trunc_f32_to_f16(b, acc_to_flush);
                             dconv_gen_buf_store(ctx, d_rsrc, safe_d, acc_h, 2);
                         }
-                        rocke_b_region_leave(b);
-                        rocke_b_sync(b);
-                    }
-                    else
-                    {
-                        rocke_value_t* off_bytes = rocke_b_mul(b, d_base, c_half_bytes);
-                        rocke_value_t* safe_d
-                            = rocke_b_select(b, store_ok, off_bytes, oob_sentinel);
-                        rocke_value_t* acc_h = ctx->is_bf16
-                                                   ? rocke_b_vec_trunc_f32_to_bf16(b, acc_to_flush)
-                                                   : rocke_b_vec_trunc_f32_to_f16(b, acc_to_flush);
-                        dconv_gen_buf_store(ctx, d_rsrc, safe_d, acc_h, 2);
                     }
                 }
             }
         }
 
         for(int qt = 0; qt < q_subtiles; ++qt)
-            for(int m = 0; m < N_M_TILES; ++m)
+            for(int m = 0; m < M_LOCAL; ++m)
                 DCONV_GEN_ACC(qt, m, P_FLUSH) = zero_acc;
+
+        if(spec->row_exit && KH - 1 <= y_local && y_local < n_iters - 1)
+        {
+            /* The next flush is past the image: every remaining row of the
+             * tile is dead, so the workgroup leaves. The condition is
+             * block-uniform, so no wave is left waiting at a barrier. */
+            rocke_value_t* next_flush
+                = rocke_b_add(b, h_tile_start, rocke_b_const_i32(b, y_local + 2 - KH));
+            rocke_value_t* past = rocke_b_cmp_ge(b, next_flush, p_Hi);
+            rocke_if_t if_exit = rocke_b_scf_if(b, past);
+            rocke_b_region_enter(b, if_exit.then_region);
+            rocke_b_ret(b);
+            rocke_b_region_leave(b);
+        }
     }
 
     if(PERSISTENT)
@@ -1201,6 +1779,9 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     }
 #undef DCONV_GEN_ACC
 #undef DCONV_GEN_PW
+#undef DCONV_GEN_ROW_VEC
+#undef DCONV_GEN_ROW_IDX
+#undef DCONV_GEN_ALLOC_ROW_BUFFERS
 
     if(!rocke_ir_builder_ok(b))
         return NULL;

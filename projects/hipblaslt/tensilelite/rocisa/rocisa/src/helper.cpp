@@ -23,6 +23,8 @@
 
 #include "helper.hpp"
 
+#include <cstdlib>
+
 // This file includes platform specific helpers that differ between POSIX and
 // Windows. The alternatives are switched at a whole-file level. Please do
 // not use inline/fine-grained ifdefs.

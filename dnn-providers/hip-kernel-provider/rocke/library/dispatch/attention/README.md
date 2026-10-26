@@ -297,11 +297,21 @@ Selection pins a spec the same way for dense and unified:
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
 - `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
-  normalizer). It is the `lse` request feature; only the dense candidates declare
-  it, so an unpinned LSE request is refused instead of reaching a kernel without
-  the output. It is a dense output field (`DENSE_OUTPUT_FIELDS`), so sweeps
-  never vary it. The caller passes the buffer to `bind_torch` as `tensors["lse"]`;
-  the dense runner validates its shape, dtype, device, and overlap.
+  normalizer). It is the `lse` request feature. The dense candidates, the RDNA
+  WMMA candidates, `attention_unified_3d` and the split-KV tuning candidates
+  (`*_u3d_*`) declare it; the unified 2D, d256 decode and strided decode
+  candidates do not. The split-KV support check then refuses LSE on
+  arches other than gfx942/gfx950 and with sinks. So an LSE request that cannot
+  be served is refused instead of reaching a kernel without the output. To
+  launch unified LSE through `bind_torch`, pin a split-KV tuning spec
+  (`algorithm="unified_tuning"`,
+  `spec_id="<arch>_u3d_..."`): like any unpinned unified request, the
+  `attention_unified_3d` result routes but cannot be bound. It is a dense output
+  field (`DENSE_OUTPUT_FIELDS`) and a unified semantic field (`_SEMANTIC_FIELDS`),
+  so sweeps never vary it, and with it off every spec hash and tuning id is the
+  one stored before the field existed. The caller passes the buffer to
+  `bind_torch` as `tensors["lse"]`; the runner validates its shape, dtype,
+  device, and overlap. The unified layout is `[total_q, Hq, 1]`.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.
@@ -407,8 +417,8 @@ unchanged.
 | `attention_rdna_wmma_prefill` (priority 5) | multi-wave prefill (`kernels.gfx1151.wmma_fmha_fwd_v2`) | `algorithm="wmma_fmha_fwd_v2"`, `spec_id="rdna_wmma_fmha_fwd_v2"` | every other request |
 
 The decode/prefill rule is `gfx1151.rdna_attention_use_decode`, a pure function
-of the problem, the WMMA family and the CU count; its docstring describes the
-crossover points it encodes. A decode bucket
+of the problem, the WMMA family and the CU count, which the hipDNN native
+mirrors; its docstring describes the crossover points it encodes. A decode bucket
 (64/128/256) serves Q/K widths only from its own minimum up
 (`wmma_fmha_decode_bucket`), so widths no bucket serves (Q64/V128, for
 instance) and `runtime_head_dims` requests run the prefill. Pinning either
@@ -468,11 +478,19 @@ stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog does not package these
-kernels yet: it still builds the single-wave `kernels.gfx1151.wmma_fmha_fwd`
-objects (runtime-head-dim buckets, plus exact D64/D128 transposed-QK objects
-on gfx11), which rocKE dispatch no longer selects. Moving the catalog to the
-prefill/decode pair is a separate packaging change. Kernel design and
+The shipped catalog packages the same two kernels per RDNA family (generic
+targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
+in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+`hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
+64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
+kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
+matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
+and the decode engine uses the split count of `decode_launch_plan`, with one
+difference: more than one split always merges in the `merge` launch, never in
+the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
+would need zeroed every launch), so the hipDNN workspace holds only the split
+partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`

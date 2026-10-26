@@ -44,6 +44,8 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
         observers above hand back).
     ``WarpDistributionEncoding``   the raw coordinate-transform encoding (extension substrate; rarely
         built by hand).
+    ``tensor_transforms`` -- coordinate graphs, split addresses and bound checks (import from
+        ``rocke.helpers.tiling.tensor_transforms``).
 
 MACHINERY -- internal, NOT re-exported (``RegisterMapper``, the warp-encoding calculators, the transform
 solver core): import from its own module only if you are extending the layer.

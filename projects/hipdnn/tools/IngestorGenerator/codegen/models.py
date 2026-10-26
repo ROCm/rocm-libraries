@@ -48,6 +48,16 @@ ROCKE_TARGET_NATIVE = "native"
 ROCKE_TARGET_GENERIC = "generic"
 ROCKE_TARGETS: tuple[str, ...] = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
 
+#: A launch name, and a rocKE ``role``: ``rocke.helpers.KernelModule`` roles and
+#: the packer's ``sources`` keys share this rule (RFC 0017 §15.1).
+LAUNCH_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+#: A multi-launch kernel needs at least this many launches: one launch is
+#: spelled ``kernel_source``, and two spellings of one fact drift.
+MIN_LAUNCHES = 2
+#: The UKD version a plain UKD carries, and the one ``sources`` needs.
+UKD_VERSION_BASE = "1.0"
+UKD_VERSION_SOURCES = "1.1"
+
 #: Every kind either dialect's format accepts, emittable here or not.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
@@ -225,12 +235,79 @@ class KernelSource:
     #: descriptor naming it, and its kernel symbol.
     file: str = ""
     symbol: str = ""
+    #: ``packaged`` / ``rocke``, authored-only: the name of one of the builder
+    #: module's kernels. Empty takes the builder's primary kernel. Only a launch
+    #: entry carries it; a single-launch ``kernel_source`` never does.
+    role: str = ""
+    #: ``packaged`` / ``rocke``: the launches of a multi-stage kernel, each a
+    #: FULL ``rocke`` source (this source with the launch's overrides merged
+    #: on), keyed by launch name. Non-empty makes this source a template: the
+    #: UKD carries ``sources`` in place of ``kernel_source`` and this source's
+    #: own fields are never emitted. A launch carries no launches of its own.
+    launches: dict = field(default_factory=dict)
+
+    def descriptor_fields(self) -> dict:
+        """The UKD key this source is written under: ``kernel_source``, or the
+        ``sources`` map of a multi-launch kernel. Every writer and every
+        identity comparison goes through here, so none reads one spelling and
+        ignores the other."""
+        if self.launches:
+            return {
+                "sources": {
+                    name: launch.as_document() for name, launch in self.launches.items()
+                }
+            }
+        return {"kernel_source": self.as_document()}
+
+    @property
+    def ukd_version(self) -> str:
+        """``sources`` needs UKD 1.1; every other UKD stays at 1.0."""
+        return UKD_VERSION_SOURCES if self.launches else UKD_VERSION_BASE
+
+    def authored_document(self) -> dict:
+        """The ``kernel_source`` mapping a config would state to get this source
+        back: this source's own object plus, for a multi-launch source, each
+        launch as the override it needs, i.e. only the keys that differ from this
+        source. A role-only launch is written as ``{role: ...}``, so it keeps
+        inheriting each variant's spec; writing its spec in full would make it a
+        static override that differs per kernel and cannot be factorised."""
+        document = self._own_document()
+        if self.launches:
+            document["launches"] = {
+                name: self._launch_override(name, launch)
+                for name, launch in self.launches.items()
+            }
+        return document
+
+    def _launch_override(self, name: str, launch: "KernelSource") -> dict:
+        base = self._own_document()
+        own = launch.as_document()
+        dropped = sorted(set(base) - set(own))
+        if dropped:
+            raise ValueError(
+                f"launch {name!r} drops {dropped} from its base kernel_source; an "
+                f"override can only set a key, not remove one"
+            )
+        # An override never states `kind`: a launch is a rocke source.
+        return {k: v for k, v in own.items() if k != "kind" and base.get(k) != v}
 
     def as_document(self) -> dict:
-        """The ``kernel_source`` JSON object for this kind, and nothing more.
+        """The single ``kernel_source`` JSON object for this source. A
+        multi-launch source has none: it is written as a ``sources`` map, so
+        this refuses rather than emit the template's own fields as if they were
+        a kernel (use `descriptor_fields`)."""
+        if self.launches:
+            raise ValueError(
+                f"a kernel_source with launches {sorted(self.launches)} has no "
+                f"single kernel_source object; it is written as a 'sources' map "
+                f"(KernelSource.descriptor_fields)"
+            )
+        return self._own_document()
 
-        The runtime loader hard-fails an unknown key and ``hkp_pack`` validates
-        a closed field set per kind.
+    def _own_document(self) -> dict:
+        """This source's own fields for its kind, and nothing more. The runtime
+        loader hard-fails an unknown key and ``hkp_pack`` validates a closed
+        field set per kind.
         """
         if self.kind == KERNEL_SOURCE_KIND_EMBEDDED:
             return {
@@ -254,6 +331,8 @@ class KernelSource:
             if self.target:
                 document["target"] = self.target
             document["spec"] = self.spec
+            if self.role:
+                document["role"] = self.role
             return document
         if self.kind == KERNEL_SOURCE_KIND_HSACO:
             return {"kind": self.kind, "file": self.file, "symbol": self.symbol}
@@ -391,6 +470,22 @@ class IngestorConfig:
     @property
     def is_packaged(self) -> bool:
         return self.dialect == DIALECT_PACKAGED
+
+    @property
+    def launch_names(self) -> tuple[str, ...]:
+        """The launch names the engine's dispatch handler declares, sorted; empty
+        for a single-launch engine. The loader requires every kernel to name the
+        same set (``_check_launch_names_agree``), so this is each kernel's set."""
+        return tuple(
+            sorted(
+                {
+                    name
+                    for pack in self.packs
+                    for kernel in pack.kernels
+                    for name in kernel.kernel_source.launches
+                }
+            )
+        )
 
     @property
     def is_multi_pack(self) -> bool:

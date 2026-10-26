@@ -392,8 +392,17 @@ class UnifiedSpace(WavesPerEuSpace):
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
                 if name not in recorded
             },
+            # ``emit_lse`` is an output the problem selects, not a default that
+            # knobs are a delta against: keeping it out leaves every split-KV
+            # config_key, and so every stored pin, as before the field existed.
             "reduce": (
-                None if reduce is None else dict(_declared_defaults(type(reduce)))
+                None
+                if reduce is None
+                else {
+                    name: value
+                    for name, value in _declared_defaults(type(reduce))
+                    if name != "emit_lse"
+                }
             ),
         }
 

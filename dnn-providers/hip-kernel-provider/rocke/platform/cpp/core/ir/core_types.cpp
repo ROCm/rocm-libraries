@@ -601,6 +601,50 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                              cap);
 }
 
+bool rocke_i_is_buffer_descriptor(const rocke_value_t* value)
+{
+    return value && value->op && value->op->opcode == ROCKE_OP_TILE_BUFFER_RSRC;
+}
+
+const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for iter_arg %d is a buffer descriptor, which a loop cannot carry; build the "
+             "descriptor before the loop and advance the offset, or rebuild it inside the loop "
+             "body",
+             index);
+    return buf;
+}
+
+const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    int i;
+    for(i = 3; i < op->num_operands; ++i)
+    {
+        if(rocke_i_is_buffer_descriptor(op->operands[i]))
+            return rocke_i_loop_carried_descriptor_message(i - 3, buf, cap);
+    }
+    if(op->num_regions < 1 || !op->regions[0])
+        return NULL;
+    {
+        const rocke_region_t* body = op->regions[0];
+        int k;
+        for(k = 0; k < body->num_ops; ++k)
+        {
+            const rocke_op_t* body_op = body->ops[k];
+            if(body_op->opcode != ROCKE_OP_SCF_YIELD)
+                continue;
+            for(i = 0; i < body_op->num_operands; ++i)
+            {
+                if(rocke_i_is_buffer_descriptor(body_op->operands[i]))
+                    return rocke_i_loop_carried_descriptor_message(i, buf, cap);
+            }
+        }
+    }
+    return NULL;
+}
+
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
 {
     const rocke_attr_value_t* v = rocke_attr_get(m, key);
@@ -889,7 +933,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.cvt_f32_to_u8_sat",
 
     /* arith.* range marker */
-    "arith.assume_range"};
+    "arith.assume_range",
+
+    /* arith.fdot2 */
+    "arith.fdot2"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1171,7 +1218,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.cvt_f32_to_u8_sat    */ true,
 
     /* arith.* range marker */
-    /* arith.assume_range         */ true};
+    /* arith.assume_range         */ true,
+
+    /* arith.fdot2 */
+    /* arith.fdot2                */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
