@@ -8361,9 +8361,11 @@ class DirectDepthwiseSpec:
     multiply-accumulate (``fma``) over ``KH × KW`` filter taps.
 
     Kernel structure:
-      - ``block_waves`` waves of 64 threads share one workgroup.
+      - ``block_waves`` logical waves of ``wave_size`` threads share one
+        workgroup. The kernel uses no cross-lane operation, so ``wave_size``
+        only groups threads and need not be the target's hardware wave size.
       - Lane ``l`` in wave ``w`` handles channel
-        ``by * block_ch + w * 64 + l``.
+        ``by * block_ch + w * wave_size + l``.
       - Weights (``KH × KW`` values per channel) are preloaded into registers
         before the H-streaming loop.
       - H-streaming loop (runtime loop over the ``H`` input rows, ``KH`` rows
@@ -8374,7 +8376,7 @@ class DirectDepthwiseSpec:
         rows that align to an output position produce a write.
 
     Block geometry:
-      ``threads_per_block = block_waves * 64``
+      ``threads_per_block = block_waves * wave_size``
       Grid: ``(ceil(Wo / block_w), ceil(C / block_ch), N)``
     """
 

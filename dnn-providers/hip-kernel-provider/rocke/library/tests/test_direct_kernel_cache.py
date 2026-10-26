@@ -9,6 +9,7 @@ GPU is touched.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 from dataclasses import replace
@@ -17,9 +18,11 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
-from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_WMMA,
+    DIRECT_WAVE_PARAMETRIC,
     direct_mfma_knobs_reason,
     direct_spec_for_problem,
 )
@@ -27,6 +30,8 @@ from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
+# Variants the grid builds only for wave32 targets.
+_WAVE32_ONLY = {DIRECT_DGRAD_WMMA}
 
 
 @pytest.fixture(scope="module")
@@ -137,8 +142,28 @@ def test_every_capability_row_is_built(jobs):
         for j in jobs
     }
     for variant, (_, caps_list) in dks.DIRECT_CAPABILITIES.items():
+        if variant in _WAVE32_ONLY:
+            # No tuning for this arch at all (see the gfx1250 test below).
+            assert not any(True for _ in _knob_grid(variant, _ARCH, "fp16"))
+            continue
         for c in caps_list:
             assert (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg) in built, (variant, c)
+
+
+def test_wave32_only_capability_rows_are_built_on_gfx1250():
+    jobs = dks.enumerate_direct_jobs(
+        arch="gfx1250",
+        target=ArchTarget.from_gfx("gfx1250"),
+        directions=("dgrad",),
+    )
+    built = {
+        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        for j in jobs
+        if j.identity.algorithm in _WAVE32_ONLY
+    }
+    for variant in _WAVE32_ONLY:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            assert (variant, c.KH, c.PAD) in built, (variant, c)
 
 
 def test_identities_are_unique(jobs):
@@ -146,13 +171,56 @@ def test_identities_are_unique(jobs):
     assert len(hashes) == len(set(hashes))
 
 
-@pytest.fixture
-def cache(tmp_path, jobs):
-    """A cache holding every job with a placeholder binary."""
-    c = KernelCache(tmp_path, _ARCH)
-    for job in jobs:
-        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
-    return c
+class _InMemoryEntriesCache(KernelCache):
+    """A cache whose entries are held in memory, all linked to one placeholder
+    binary on disk.
+
+    Each entry's metadata is what :meth:`KernelCache.link` would write. One
+    metadata file per job is over ten thousand small files, and writing then
+    parsing them outlasts the per-test timeout on slow filesystems (Windows
+    CI). The tests that build their own cache cover the on-disk layout.
+    """
+
+    def __init__(self, root, arch, identities):
+        super().__init__(root, arch)
+        key = hashlib.sha256(b"placeholder").hexdigest()
+        # The binary's symbol is the first identity's, as when each is put.
+        self._blob = self.put_blob(key, b"placeholder", identities[0].label())
+        self._metas = {
+            ident: {
+                "identity": ident.to_dict(),
+                "blob": key,
+                "hsaco_bytes": self._blob.stat().st_size,
+                "kernel_name": self.blob_kernel_name(key),
+            }
+            for ident in identities
+        }
+
+    def meta(self, identity):
+        return self._metas.get(identity)
+
+    def _load(self, subdir):
+        # In metadata file-name order, as the on-disk walk yields them.
+        return sorted(
+            (
+                (ident, self._blob, meta)
+                for ident, meta in self._metas.items()
+                if self._dir_for(ident).name == subdir
+            ),
+            key=lambda entry: entry[0].stable_hash(),
+        )
+
+
+@pytest.fixture(scope="module")
+def cache(tmp_path_factory, jobs):
+    """A cache holding every job with a placeholder binary.
+
+    The tests that take it only read it (the ones that add or discard entries
+    build their own), so the module shares one.
+    """
+    return _InMemoryEntriesCache(
+        tmp_path_factory.mktemp("direct_cache"), _ARCH, [j.identity for j in jobs]
+    )
 
 
 def _variants(plans):
@@ -1341,6 +1409,8 @@ def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
             or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
             or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
             or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)
+            # The preload budget the enumerator also applies: past it comgr's
+            # AGPR spilling has miscomputed dX.
             or direct_mfma_knobs_reason(problem, knobs)
         )
         assert why, f"JIT config {knobs} has no cached binary"
@@ -1416,6 +1486,17 @@ def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
             "direct_wgrad_gather",
             _problem(groups=1, cpg=24, kpg=96, stride=2, H=30, W=40),
         ),
+        (
+            "direct_wgrad_dw_mfma",
+            _problem(groups=192, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=56, W=56),
+        ),
+        # Small images: the packed-image binaries join in.
+        (
+            "direct_wgrad_dw_mfma",
+            _problem(N=128, groups=1024, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=7, W=7),
+        ),
+        ("direct_wgrad_grouped_mfma", _problem(groups=32, cpg=4, kpg=4, H=56, W=56)),
+        ("direct_wgrad_grouped_mfma", _problem(groups=32, cpg=8, kpg=8, H=56, W=56)),
     ],
 )
 def test_folded_wgrad_plans_run_the_pass_then_the_fold(cache, variant, problem):
@@ -1435,7 +1516,7 @@ def test_folded_wgrad_plans_run_the_pass_then_the_fold(cache, variant, problem):
         assert fold.buffers == ("ws", None, "dw")
         spec = dks.make_spec(variant, problem, json.loads(plan.identity.knobs))
         assert (main.grid, main.block) == spec.launch_geometry()
-        if variant == "direct_wgrad_gather":
+        if hasattr(spec, "fold_channels"):
             channels, taps = spec.fold_channels(), spec.fold_taps()
         else:
             channels, taps = problem.groups, problem.KH * problem.KW
@@ -1468,10 +1549,17 @@ def test_small_c_depthwise_wgrad_binary_bakes_its_channel_count(cache):
     )
 
 
+def _need_benchmark_direct_conv():
+    """benchmark_direct_conv imports torch at module level (its conv
+    references); the host-only CI venv that runs this file has none."""
+    pytest.importorskip("torch")
+
+
 def test_run_from_cache_variants_filter():
     """``--variants`` names cache variants (DIRECT_CAPABILITIES keys)."""
     from types import SimpleNamespace
 
+    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import _cache_variants
 
     assert _cache_variants(SimpleNamespace(variants=None)) == frozenset()
@@ -1490,6 +1578,7 @@ def test_run_from_cache_variants_filter_can_leave_nothing():
     index error or a missing cache build."""
     from types import SimpleNamespace
 
+    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import (
         _filter_variants,
         _no_plan_reason,
@@ -1520,6 +1609,7 @@ def test_compile_all_refuses_variants_before_checking_them(capsys):
     the names are valid: --variants only filters --run-from-cache."""
     from types import SimpleNamespace
 
+    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import _cache_dispatch
 
     for names in ("direct_grouped_dgrad_4c", "bogus"):
@@ -1528,3 +1618,94 @@ def test_compile_all_refuses_variants_before_checking_them(capsys):
         err = capsys.readouterr().err
         assert "--variants only filters --run-from-cache" in err
         assert "unknown direct variant" not in err
+
+
+# ---------------------------------------------------------------------------
+# A wave32 target (gfx1250): only the wave-parametric depthwise forward
+# kernels exist there, and they are built and launched at its wave size.
+# ---------------------------------------------------------------------------
+_WAVE32_ARCH = "gfx1250"
+
+
+@pytest.fixture(scope="module")
+def wave32_jobs():
+    return dks.enumerate_direct_jobs(
+        arch=_WAVE32_ARCH,
+        target=ArchTarget.from_gfx(_WAVE32_ARCH),
+        directions=("fwd",),
+    )
+
+
+def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_jobs):
+    """The MFMA variants are wave64 and drop out; the depthwise ones are built
+    at wave_size 32, which the identity records and the spec carries."""
+    assert {j.identity.algorithm for j in wave32_jobs} == DIRECT_WAVE_PARAMETRIC
+    for job in wave32_jobs:
+        assert job.identity.wave_size == 32
+        variant = job.identity.algorithm
+        caps = dks.DirectCaps(**job.caps)
+        spec = dks.make_spec(
+            variant,
+            dks.probe_problem(caps, dks.DIRECT_DTYPE, variant, job.spec_kwargs),
+            job.spec_kwargs,
+            job.identity.wave_size,
+        )
+        assert spec.wave_size == 32, job.identity.label()
+
+
+def _wave32_cache(tmp_path, jobs, spec_wave_size):
+    """The wave32 jobs with placeholder binaries. ``spec_wave_size`` is the
+    wave size the build recorded (``None``: an entry that predates the record)."""
+    c = KernelCache(tmp_path, _WAVE32_ARCH)
+    for job in jobs:
+        meta = {"kernel_name": job.identity.label()}
+        if spec_wave_size is not None:
+            meta["spec_wave_size"] = spec_wave_size
+        c.put(job.identity, b"placeholder", meta)
+    return c
+
+
+def test_wave32_build_records_its_wave_size(wave32_jobs):
+    """The build records the wave size its binary was built at, which is what
+    the run side checks before deriving a launch geometry from the identity."""
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
+
+    job = wave32_jobs[0]
+    _, meta = direct_kernel_for_job(job, _WAVE32_ARCH, dks.DIRECT_DTYPE)
+    assert meta == {"spec_wave_size": 32}
+
+
+def test_legacy_wave32_entries_are_not_launched(tmp_path, wave32_jobs):
+    """A gfx1250 entry built before the wave size was recorded holds a binary
+    built at the wave64 spec default under a wave32 identity: launching it with
+    the identity's geometry would leave half of every channel tile unwritten,
+    so it is rejected with a rebuild hint rather than offered."""
+    c = _wave32_cache(tmp_path, wave32_jobs, None)
+    problem = _problem(H=56, W=56, groups=192, cpg=1, kpg=1)
+    plans, rejected = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
+    assert plans == []
+    assert rejected and all("--compile-all" in why for _, why in rejected)
+
+
+def test_conflicting_wave_size_knob_is_rejected():
+    problem = _problem(groups=64, cpg=1, kpg=1)
+    knobs = dict(block_w=8, block_h=2, block_waves=1, unroll_rows=False)
+    with pytest.raises(ValueError, match="conflicts"):
+        dks.make_spec("direct_depthwise_tiled", problem, dict(knobs, wave_size=0), 32)
+    spec = dks.make_spec(
+        "direct_depthwise_tiled", problem, dict(knobs, wave_size=32), 32
+    )
+    assert spec.wave_size == 32
+
+
+@pytest.mark.parametrize("groups", [9, 192])
+def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
+    c = _wave32_cache(tmp_path, wave32_jobs, 32)
+    problem = _problem(H=56, W=56, groups=groups, cpg=1, kpg=1)
+    plans, _ = dks.direct_plans(c, problem, "fwd", _WAVE32_ARCH)
+    assert plans
+    assert ("direct_depthwise_spatial" in _variants(plans)) == (groups < 32)
+    for plan in plans:
+        (step,) = plan.steps
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        assert step.block == (waves * 32, 1, 1), plan.identity.label()

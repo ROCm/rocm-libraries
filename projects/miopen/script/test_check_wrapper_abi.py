@@ -73,6 +73,8 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 os.devnull,
                 "--excluded",
                 os.devnull,
+                "--wrapper-only",
+                os.devnull,
                 *extra,
             ],
             cwd=str(cwd),
@@ -100,11 +102,13 @@ class WrapperAbiCheckTest(unittest.TestCase):
             str(self.tree / "lib" / "libMIOpen_private.so.1.0"),
         )
 
-    def test_baseline_and_excluded_are_forwarded_to_the_abi_check(self):
+    def test_symbol_lists_are_forwarded_to_the_abi_check(self):
         baseline = self.tree / "baseline.txt"
         excluded = self.tree / "excluded.txt"
+        wrapper_only = self.tree / "wrapper_only.txt"
         baseline.touch()
         excluded.touch()
+        wrapper_only.touch()
         result = subprocess.run(
             [
                 sys.executable,
@@ -117,6 +121,8 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(baseline),
                 "--excluded",
                 str(excluded),
+                "--wrapper-only",
+                str(wrapper_only),
             ],
             cwd=str(self.tree),
             capture_output=True,
@@ -126,6 +132,7 @@ class WrapperAbiCheckTest(unittest.TestCase):
         argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
         self.assertEqual(argv[argv.index("--baseline") + 1], str(baseline))
         self.assertEqual(argv[argv.index("--excluded") + 1], str(excluded))
+        self.assertEqual(argv[argv.index("--wrapper-only") + 1], str(wrapper_only))
 
     def test_needed_baseline_is_not_passed_unless_asked_for(self):
         """The exact list names ROCm soversions, so it must not gate by default."""
@@ -179,13 +186,13 @@ class WrapperAbiCheckTest(unittest.TestCase):
         """Which files count is tested in test_miopen_wrapper_libs; this checks the
         script stops on what it reports, using the default lib* search.
 
-        Copied into bin/ so that search -- lib* beside its parent directory -- lands in
-        this tree. miopen_wrapper_libs.py comes with it since the script imports from
-        it and only its own directory is on sys.path.
+        Copied into bin/miopen_wrapper_tests/ so that search, two levels up, lands in
+        this tree. miopen_wrapper_libs.py comes too: the script imports it, and only
+        its own directory is on sys.path.
         """
         (self.tree / "lib" / "libMIOpen_private.so.1.0").unlink()
-        bindir = self.tree / "bin"
-        bindir.mkdir()
+        bindir = self.tree / "bin" / "miopen_wrapper_tests"
+        bindir.mkdir(parents=True)
         harness = bindir / HARNESS.name
         shutil.copy(HARNESS, harness)
         shutil.copy(HARNESS.parent / "miopen_wrapper_libs.py", bindir)
@@ -199,6 +206,8 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 "--baseline",
                 os.devnull,
                 "--excluded",
+                os.devnull,
+                "--wrapper-only",
                 os.devnull,
             ],
             cwd=str(self.tree),
