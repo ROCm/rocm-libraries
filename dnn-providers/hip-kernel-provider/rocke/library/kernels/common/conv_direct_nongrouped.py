@@ -58,6 +58,22 @@ stay build-time capabilities, like the tile geometry. Unlike the grouped
 kernels this family does not bake ``C``/``K`` either: they only set the channel
 loop's trip count and the store / staging masks.
 
+Split-C and grouped modes
+-------------------------
+``split_c > 1`` splits the channel loop over that many workgroups per output
+tile; each writes an fp32 partial sum into a packed ``[split_c, N, Ho, Wo, K]``
+workspace bound to ``D``, and :func:`build_direct_conv_split_reduce` folds
+the slabs into the output. It fills the device on small maps with deep
+channel loops (7x7..12x12, C >= 512).
+
+``grouped=True`` serves ``groups > 1`` with the same pipeline: ``p_groups``
+and the per-group channel counts are runtime, and a workgroup owns
+``group_merge`` consecutive groups, run as one dense problem whose weights
+are block-diagonal (off-diagonal fragments are staged as zeros). Merging is
+what fills an MFMA from cpg = 4 or 8. The merged group is the innermost
+coordinate of the cell axis, so the groups of one pixel tile -- which share
+every cache line of its input pixels -- run back to back.
+
 Software pipeline
 -----------------
 The global loads for chunk ``i+1`` are issued immediately after the barrier that
@@ -167,6 +183,24 @@ class DirectNongroupedConvSpec:
     # across the channel loop can push register use high enough to leave one
     # wave per SIMD, which leaves nothing to cover the barriers per chunk.
     waves_per_eu: "int | None" = None
+    # Split the input-channel reduction over ``split_c`` workgroups per output
+    # tile. Each writes its fp32 partial sum into slab ``split`` of an
+    # ``[split_c, N, Ho, Wo, K]`` workspace bound to ``D``, and
+    # :func:`build_direct_conv_split_reduce` folds the slabs into the output.
+    # This is the lever for small images with many channels (7x7..12x12 maps,
+    # C >= 512), where one workgroup per output tile leaves most CUs idle and
+    # each walks a long serial channel loop.
+    split_c: int = 1
+    # Grouped convolution (``groups >= 1``, channel counts per group runtime).
+    # A workgroup owns ``group_merge`` consecutive groups and runs them as one
+    # dense problem of ``group_merge * cpg`` input and ``group_merge * kpg``
+    # output channels whose weights are block-diagonal: the off-diagonal
+    # weight fragments are staged as zeros. Merging is what lets a small
+    # ``cpg`` (4, 8) fill an MFMA's K and M; it multiplies the MFMA work by
+    # ``group_merge`` but not the memory traffic, and these layers are
+    # memory-bound. ``grouped=False`` is the dense (``groups == 1``) kernel.
+    grouped: bool = False
+    group_merge: int = 1
 
     # ---- derived geometry -------------------------------------------------
 
@@ -192,6 +226,23 @@ class DirectNongroupedConvSpec:
     @property
     def n_col_blocks(self) -> int:
         return self.tile_w // self.atom_tile
+
+    @property
+    def merged_c(self) -> int:
+        """Input channels one workgroup reduces over (``cpg`` x merge)."""
+        return self.problem.cpg * (self.group_merge if self.grouped else 1)
+
+    @property
+    def merged_k(self) -> int:
+        """Output channels one workgroup's channel tiles span."""
+        return self.problem.kpg * (self.group_merge if self.grouped else 1)
+
+    @property
+    def w_vec(self) -> int:
+        """Channels per weight staging load. A merged block's fragment can
+        straddle two groups when ``cpg`` is 4, so it is loaded (and masked) in
+        halves of 4 channels."""
+        return 4 if self.grouped and self.group_merge > 1 else self.frag
 
     @property
     def m_tiles_total(self) -> int:
@@ -259,12 +310,22 @@ class DirectNongroupedConvSpec:
         return (
             (p.Wo + self.tile_w - 1) // self.tile_w,
             (p.Ho + self.tile_h - 1) // self.tile_h,
-            (p.kpg + self.tile_k - 1) // self.tile_k,
+            (self.merged_k + self.tile_k - 1) // self.tile_k,
         )
 
     def grid(self) -> Tuple[int, int, int]:
         n_wt, n_ht, n_kt = self.tile_counts
-        return (n_wt * n_ht * self.problem.N * n_kt, 1, 1)
+        n_mg = self.problem.groups // self.group_merge if self.grouped else 1
+        return (n_wt * n_ht * self.problem.N * n_mg * n_kt * self.split_c, 1, 1)
+
+    @property
+    def workspace_bytes(self) -> int:
+        """Bytes of the fp32 ``[split_c, N, Ho, Wo, K]`` partial-sum workspace
+        a ``split_c > 1`` kernel writes (0 when it writes the output directly)."""
+        if self.split_c == 1:
+            return 0
+        p = self.problem
+        return 4 * self.split_c * p.N * p.Ho * p.Wo * p.total_k
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -282,6 +343,8 @@ class DirectNongroupedConvSpec:
             "db" if self.double_buffer else "",
             f"iglp{self.iglp}" if self.iglp is not None else "",
             f"we{self.waves_per_eu}" if self.waves_per_eu is not None else "",
+            f"sc{self.split_c}" if self.split_c > 1 else "",
+            f"grp{self.group_merge}" if self.grouped else "",
             "bf16" if p.dtype == "bf16" else "",
         )
 
@@ -289,11 +352,20 @@ class DirectNongroupedConvSpec:
         p = self.problem
         if p.dtype not in ("fp16", "bf16"):
             raise ValueError(f"DirectNongroupedConvSpec: unsupported dtype {p.dtype!r}")
-        if p.groups != 1:
+        if not self.grouped and p.groups != 1:
             raise ValueError(
                 f"DirectNongroupedConvSpec is the groups==1 family (got groups={p.groups}); "
                 f"use conv_direct_grouped for grouped shapes"
             )
+        if self.grouped and p.groups < 1:
+            raise ValueError(f"grouped=True needs groups >= 1 (got groups={p.groups})")
+        if self.grouped and (self.group_merge < 1 or p.groups % self.group_merge != 0):
+            raise ValueError(
+                f"group_merge {self.group_merge} must be positive and divide "
+                f"groups {p.groups}"
+            )
+        if not self.grouped and self.group_merge != 1:
+            raise ValueError(f"group_merge {self.group_merge} needs grouped=True")
         if self.atom not in _ATOMS:
             raise ValueError(
                 f"unknown atom {self.atom!r}; expected one of {list(_ATOMS)}"
@@ -340,14 +412,20 @@ class DirectNongroupedConvSpec:
             raise ValueError(f"ck {self.ck} not divisible by atom K {self.atom_k}")
         if self.ck % _X_LOAD_VEC != 0:
             raise ValueError(f"ck {self.ck} not divisible by {_X_LOAD_VEC}")
-        if p.cpg % self.ck != 0:
-            raise ValueError(f"C {p.cpg} not divisible by ck {self.ck}")
-        if p.kpg % self.atom_tile != 0:
+        if self.merged_c % self.ck != 0:
+            raise ValueError(f"C {self.merged_c} not divisible by ck {self.ck}")
+        if self.merged_k % self.atom_tile != 0:
             raise ValueError(
-                f"K {p.kpg} must be a multiple of {self.atom_tile} (got {p.kpg})"
+                f"K {self.merged_k} must be a multiple of {self.atom_tile} "
+                f"(got {self.merged_k})"
             )
-        if p.cpg % _X_LOAD_VEC != 0:
-            raise ValueError(f"C {p.cpg} must be a multiple of {_X_LOAD_VEC}")
+        if self.merged_c % _X_LOAD_VEC != 0:
+            raise ValueError(f"C {self.merged_c} must be a multiple of {_X_LOAD_VEC}")
+        if self.grouped and p.cpg % self.w_vec != 0:
+            raise ValueError(
+                f"cpg {p.cpg} must be a multiple of the {self.w_vec}-channel "
+                f"weight load"
+            )
         if self.threads_per_block > 1024:
             raise ValueError(f"threads_per_block {self.threads_per_block} > 1024")
         if self.lds_pad < 0 or self.lds_pad % 8 != 0:
@@ -377,9 +455,9 @@ class DirectNongroupedConvSpec:
                 f"flattened grid of {self.grid()[0]} workgroups exceeds "
                 f"{_I32_MAX}: grow the tile or split the batch"
             )
-        a_bytes = 2 * p.N * p.H * p.W * p.cpg
-        b_bytes = 2 * p.kpg * p.KH * p.KW * p.cpg
-        d_bytes = 2 * p.N * p.Ho * p.Wo * p.kpg
+        a_bytes = 2 * p.N * p.H * p.W * p.total_c
+        b_bytes = 2 * p.total_k * p.KH * p.KW * p.cpg
+        d_bytes = 2 * p.N * p.Ho * p.Wo * p.total_k
         if max(a_bytes, b_bytes, d_bytes) > _OOB_BASE:
             # Masked staging loads and epilogue stores go to _OOB_BASE and rely
             # on it being past num_records; a larger tensor would hand the
@@ -388,11 +466,25 @@ class DirectNongroupedConvSpec:
                 f"tensors must fit below the {_OOB_BASE:#x}-byte masked-access "
                 f"offset (A {a_bytes} B, B {b_bytes} B, D {d_bytes} B)"
             )
-        if _OOB_BASE + 2 * (p.cpg + self.ck) > _I32_MAX:
+        if _OOB_BASE + 2 * (p.total_c + self.ck) > _I32_MAX:
             # The last prefetch runs one chunk (two when double-buffered) past C.
             raise ValueError(
                 f"C {p.cpg} too large: the masked-load offset plus the channel "
                 f"offset would overflow i32"
+            )
+        if self.split_c < 1:
+            raise ValueError(f"split_c must be >= 1 (got {self.split_c})")
+        if self.merged_c // self.ck < self.split_c:
+            # Every split owns at least one whole chunk: the channel loop
+            # assumes it runs at least once.
+            raise ValueError(
+                f"C {self.merged_c} has {self.merged_c // self.ck} chunks of "
+                f"ck={self.ck}, fewer than split_c={self.split_c}"
+            )
+        if self.workspace_bytes > _OOB_BASE:
+            raise ValueError(
+                f"split_c={self.split_c} workspace of {self.workspace_bytes} B "
+                f"exceeds the {_OOB_BASE:#x}-byte masked-access offset"
             )
         if self.acc_vgprs > 256:
             # A lane cannot hold more than the 256-entry accumulator file; past
@@ -562,13 +654,15 @@ def tile_w_candidates(Wo: int, atom_tile: int, max_mult: int = 6) -> "list[int]"
     """Widths worth trying for ``Wo`` with an ``atom_tile``-wide MFMA N dimension.
 
     Prefers widths that tile ``Wo`` with no wasted columns; if none do, falls
-    back to the single width with the least waste so the shape is still covered.
+    back to the widths with the least waste (all of them: at Wo=56 a 16-, a 32-
+    and a 64-wide tile all compute 64 columns) so the shape is still covered.
     """
     cands = [atom_tile * m for m in range(1, max_mult + 1)]
     exact = [w for w in cands if Wo % w == 0]
     if exact:
         return exact
-    return [min(cands, key=lambda w: -(-Wo // w) * w)]
+    least = min(-(-Wo // w) * w for w in cands)
+    return [w for w in cands if -(-Wo // w) * w == least]
 
 
 def nongrouped_knobs(
@@ -622,6 +716,114 @@ def nongrouped_knobs(
                 )
 
 
+# Split-C grid: the degrees, and the geometry they are crossed with. A split
+# pays off when the unsplit grid leaves CUs idle -- small maps (one or two
+# pixel tiles per row) with deep channel loops -- so only the narrow tiles
+# those shapes want are crossed with it. The heights let a 12-row map fit one
+# tile (or three) instead of padding it to 16 rows.
+_SPLIT_C = (2, 4, 8, 16)
+_SPLIT_TILE_H = (4, 8, 12)
+_SPLIT_TILE_K = (32, 64)
+_SPLIT_CK = (32, 64)
+_SPLIT_WIDTH_ATOMS = (1, 2)
+
+
+def nongrouped_split_knobs(
+    arch: str,
+    dtype: str,
+    *,
+    Wo: "int | None" = None,
+    waves_per_eu: "tuple[int | None, ...]" = (None, 3),
+) -> "Iterator[dict]":
+    """The ``split_c > 1`` part of the swept grid, as spec kwargs.
+
+    As :func:`nongrouped_knobs`, ``Wo`` narrows the widths to those that fit
+    one shape; without it the shape-independent AOT widths are produced.
+    """
+    import itertools
+
+    for atom in _sweep_atoms(arch, dtype):
+        at = _ATOMS[atom][0]
+        widths = [at * m for m in _SPLIT_WIDTH_ATOMS]
+        if Wo is not None:
+            widths = [w for w in widths if w in tile_w_candidates(Wo, at)]
+        for tw in widths:
+            for sc, th, tk, ck, (wm, wn), we in itertools.product(
+                _SPLIT_C,
+                _SPLIT_TILE_H,
+                _SPLIT_TILE_K,
+                _SPLIT_CK,
+                _SWEEP_WAVES,
+                waves_per_eu,
+            ):
+                yield dict(
+                    tile_h=th,
+                    tile_w=tw,
+                    tile_k=tk,
+                    ck=ck,
+                    waves_m=wm,
+                    waves_n=wn,
+                    atom=atom,
+                    swizzle_wgm=8,
+                    iglp=0,
+                    waves_per_eu=we,
+                    split_c=sc,
+                )
+
+
+# Grouped grid (``grouped=True``): memory-bound layers, so narrow channel
+# tiles and short pixel tiles, crossed with the merge degrees that fill an
+# MFMA from a small cpg (4 x 8, 8 x 4, ...).
+_GROUPED_MERGE = (1, 2, 4, 8, 16)
+_GROUPED_TILE_H = (4, 8, 16)
+_GROUPED_TILE_K = (32, 64)
+_GROUPED_CK = (16, 32, 64)
+_GROUPED_WAVES = ((1, 2), (2, 2), (1, 4), (2, 4))
+
+
+def grouped_knobs(
+    arch: str,
+    dtype: str,
+    *,
+    Wo: "int | None" = None,
+    waves_per_eu: "tuple[int | None, ...]" = (None, 3),
+) -> "Iterator[dict]":
+    """The swept ``grouped=True`` geometry, as spec kwargs (see
+    :func:`nongrouped_knobs` for ``Wo``)."""
+    import itertools
+
+    for atom in _sweep_atoms(arch, dtype):
+        at = _ATOMS[atom][0]
+        widths = [at, 2 * at]
+        if Wo is not None:
+            widths = [w for w in widths if w in tile_w_candidates(Wo, at)] or [
+                tile_w_candidates(Wo, at)[0]
+            ]
+        for tw in widths:
+            for gm, th, tk, ck, (wm, wn), we in itertools.product(
+                _GROUPED_MERGE,
+                _GROUPED_TILE_H,
+                _GROUPED_TILE_K,
+                _GROUPED_CK,
+                _GROUPED_WAVES,
+                waves_per_eu,
+            ):
+                yield dict(
+                    tile_h=th,
+                    tile_w=tw,
+                    tile_k=tk,
+                    ck=ck,
+                    waves_m=wm,
+                    waves_n=wn,
+                    atom=atom,
+                    swizzle_wgm=8,
+                    iglp=0,
+                    waves_per_eu=we,
+                    grouped=True,
+                    group_merge=gm,
+                )
+
+
 def nongrouped_specs(
     problem: DirectConvProblem,
     *,
@@ -630,20 +832,35 @@ def nongrouped_specs(
     iglp: "tuple[int | None, ...]" = (0,),
     waves_per_eu: "tuple[int | None, ...]" = (None, 3),
     swizzle_wgm: "tuple[int, ...]" = (8,),
+    split: bool = False,
 ) -> "list[DirectNongroupedConvSpec]":
     """Every valid :class:`DirectNongroupedConvSpec` worth benchmarking for ``problem``.
 
     Deduplicated by kernel name, so callers can compile the list directly.
+    ``split`` adds the ``split_c > 1`` grid: those kernels need the second pass
+    of :func:`build_direct_conv_split_reduce`, so only callers that launch it
+    ask for them.
     """
+    import itertools
+
     out: "list[DirectNongroupedConvSpec]" = []
     seen = set()
-    for knobs in nongrouped_knobs(
-        arch,
-        problem.dtype,
-        Wo=problem.Wo,
-        iglp=iglp,
-        waves_per_eu=waves_per_eu,
-        swizzle_wgm=swizzle_wgm,
+    for knobs in itertools.chain(
+        nongrouped_knobs(
+            arch,
+            problem.dtype,
+            Wo=problem.Wo,
+            iglp=iglp,
+            waves_per_eu=waves_per_eu,
+            swizzle_wgm=swizzle_wgm,
+        ),
+        (
+            nongrouped_split_knobs(
+                arch, problem.dtype, Wo=problem.Wo, waves_per_eu=waves_per_eu
+            )
+            if split
+            else ()
+        ),
     ):
         spec = DirectNongroupedConvSpec(problem=problem, name=name, **knobs)
         ok, _ = is_valid_nongrouped_spec(spec, arch=arch)
@@ -702,6 +919,7 @@ def build_direct_conv_nongrouped(
     X_PASSES = (X_VECS + THREADS - 1) // THREADS
     W_SLOTS = N_TAPS * M_TILES * KATOMS * WAVE
     W_PASSES = (W_SLOTS + THREADS - 1) // THREADS
+    W_VEC = spec.w_vec
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -723,6 +941,19 @@ def build_direct_conv_nongrouped(
     # groups == 1, so the totals are the full channel counts.
     C = params["p_total_c"]
     K = params["p_total_k"]
+    GROUPED = spec.grouped
+    GM = spec.group_merge
+    if GROUPED:
+        # Per-group channel counts, and the merged block's: C_W is the weight
+        # row length, C_M / K_M the channels a workgroup reduces / produces.
+        p_G = params["p_groups"]
+        cpg_v = b.div(C, p_G)
+        kpg_v = b.div(K, p_G)
+        C_M = b.mul(cpg_v, b.const_i32(GM)) if GM > 1 else cpg_v
+        K_M = b.mul(kpg_v, b.const_i32(GM)) if GM > 1 else kpg_v
+        C_W = cpg_v
+    else:
+        C_M, K_M, C_W = C, K, C
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
@@ -771,9 +1002,20 @@ def build_direct_conv_nongrouped(
     # contiguously; see DirectNongroupedConvSpec.
     n_wt = b.div(b.add(p_Wo, b.const_i32(TW - 1)), b.const_i32(TW))
     n_ht = b.div(b.add(p_Ho, b.const_i32(TH - 1)), b.const_i32(TH))
-    n_kt = b.div(b.add(K, b.const_i32(TK - 1)), b.const_i32(TK))
+    n_kt = b.div(b.add(K_M, b.const_i32(TK - 1)), b.const_i32(TK))
     n_hw = b.mul(n_wt, n_ht)
     n_cells = b.mul(n_hw, p_N)
+    if GROUPED:
+        # Merged group innermost on the cell axis: (n * n_hw + st) * n_mg + mg.
+        # The groups of one pixel tile share every cache line of its input
+        # pixels (a group owns only cpg * 2 bytes of each), so they run back
+        # to back and each line is fetched from DRAM once.
+        n_mg = b.div(p_G, b.const_i32(GM)) if GM > 1 else p_G
+        n_cells = b.mul(n_cells, n_mg)
+    SPLIT = spec.split_c
+    # A split kernel's cell axis is split-major: ``split * n_cells + cell``, so
+    # the swizzle treats the splits as more spatial cells of the same grid.
+    n_cols = b.mul(n_cells, b.const_i32(SPLIT)) if SPLIT > 1 else n_cells
 
     wgid = b.block_id_x()
     if spec.chiplet_swizzle:
@@ -785,7 +1027,7 @@ def build_direct_conv_nongrouped(
             b,
             wgid,
             num_pid_m=n_kt,
-            num_pid_n=n_cells,
+            num_pid_n=n_cols,
             wgm=spec.swizzle_wgm,
             num_xcds=spec.num_xcds,
             chunk_size=spec.chiplet_chunk,
@@ -794,7 +1036,16 @@ def build_direct_conv_nongrouped(
     else:
         k_tile = b.mod(wgid, n_kt)
         cell = b.div(wgid, n_kt)
+    if SPLIT > 1:
+        split = b.div(cell, n_cells)
+        cell = b.mod(cell, n_cells)
 
+    if GROUPED:
+        mg = b.mod(cell, n_mg)
+        cell = b.div(cell, n_mg)
+        # Channel offsets of the block's merged group in X (and D) and K.
+        a_ch_base = b.mul(mg, C_M)
+        k_glob_base = b.mul(mg, K_M)
     n_img = b.div(cell, n_hw)
     st = b.mod(cell, n_hw)
     w_tile = b.mod(st, n_wt)
@@ -815,6 +1066,8 @@ def build_direct_conv_nongrouped(
         """Per-pass (global byte offset base, LDS half index) for X."""
         meta = []
         img_base = b.mul(n_img, params["p_A_stride_n"])
+        if GROUPED:
+            img_base = b.add(img_base, a_ch_base)
         for j in range(X_PASSES):
             v = b.add(tid, b.const_i32(j * THREADS))
             cv = b.mod(v, b.const_i32(X_CV))
@@ -875,18 +1128,42 @@ def build_direct_conv_nongrouped(
                 b.mul(katom, b.const_i32(AK)),
                 b.mul(b.div(g_lane, b.const_i32(AT)), b.const_i32(FRAG)),
             )
-            valid = b.cmp_lt(k_out, K)
+            valid = b.cmp_lt(k_out, K_M)
             if W_SLOTS % THREADS != 0:
                 in_tile = b.cmp_lt(g, b.const_i32(W_SLOTS))
                 valid = b.land(valid, in_tile)
             else:
                 in_tile = None
+            if GROUPED and GM > 1:
+                # Block-diagonal weights: k_out's group owns merged channels
+                # [grp_k*cpg, (grp_k+1)*cpg). Each 4-channel piece of the
+                # fragment is loaded from its own offset relative to that
+                # span, and masked per chunk (see issue_stage_loads).
+                grp_k = b.div(k_out, kpg_v)
+                k_glob = b.add(k_out, k_glob_base)
+                krs = b.add(
+                    b.mul(b.add(b.mul(k_glob, b.const_i32(KH)), r), b.const_i32(KW)),
+                    s,
+                )
+                c_rel0 = b.sub(c_in_chunk, b.mul(grp_k, cpg_v))
+                pieces = []
+                for h in range(FRAG // W_VEC):
+                    c_rel = b.add(c_rel0, b.const_i32(h * W_VEC))
+                    elems = b.add(b.mul(krs, C_W), c_rel)
+                    pieces.append((elems, c_rel))
+                lds_idx = b.mul(g, b.const_i32(FRAG))
+                if in_tile is not None:
+                    lds_idx = b.select(in_tile, lds_idx, b.const_i32(w_dump))
+                meta.append((valid, pieces, lds_idx))
+                continue
+            if GROUPED:
+                k_out = b.add(k_out, k_glob_base)
             # base = ((k_out*KH + r)*KW + s)*C + c_in_chunk (KRSC)
             krs_h = b.mul(k_out, b.const_i32(KH))
             krs_hr = b.add(krs_h, r)
             krs_w = b.mul(krs_hr, b.const_i32(KW))
             krs = b.add(krs_w, s)
-            elems = b.add(b.mul(krs, C), c_in_chunk)
+            elems = b.add(b.mul(krs, C_W), c_in_chunk)
             lds_idx = b.mul(g, b.const_i32(FRAG))
             if in_tile is not None:
                 lds_idx = b.select(in_tile, lds_idx, b.const_i32(w_dump))
@@ -906,6 +1183,23 @@ def build_direct_conv_nongrouped(
             _buf_load_vN(b, dtype, a_rsrc, b.add(base, c_off), c0, x_dwords)
             for base, _ in x_meta
         ]
+        if GROUPED and GM > 1:
+            # Merged channel of the chunk's first element; a piece belongs to
+            # k_out's group iff its relative channel lands in [0, cpg).
+            c_el = b.div(c_off, c_half)
+            ws = []
+            for valid, pieces, _ in w_meta:
+                parts = []
+                for elems, c_rel in pieces:
+                    rel = b.add(c_rel, c_el)
+                    ok = b.land(valid, b.land(b.cmp_ge(rel, c0), b.cmp_lt(rel, cpg_v)))
+                    off = b.select(ok, b.mul(b.add(elems, c_el), c_half), oob_base)
+                    parts.append(_buf_load_vN(b, dtype, b_rsrc, off, c0, W_VEC // 2))
+                v = parts[0]
+                for part in parts[1:]:
+                    v = b.vec_concat(v, part)
+                ws.append(v)
+            return xs, ws
         ws = [
             _buf_load_vN(b, dtype, b_rsrc, b.add(base, c_off), c0, w_dwords)
             for base, _ in w_meta
@@ -916,7 +1210,8 @@ def build_direct_conv_nongrouped(
         for (_, lds_idx), val in zip(x_meta, xs):
             idx = lds_idx if x_buf is None else b.add(lds_idx, x_buf)
             b.smem_store_vN(X_smem, [c0, idx], val, _X_LOAD_VEC)
-        for (_, lds_idx), val in zip(w_meta, ws):
+        for meta_w, val in zip(w_meta, ws):
+            lds_idx = meta_w[-1]
             idx = lds_idx if w_buf is None else b.add(lds_idx, w_buf)
             b.smem_store_vN(W_smem, [c0, idx], val, FRAG)
 
@@ -993,12 +1288,24 @@ def build_direct_conv_nongrouped(
                                 )
 
     c_ck_bytes = b.const_i32(CK * 2)
-    xs0, ws0 = issue_stage_loads(c0)
+    if SPLIT > 1:
+        # Split ``split`` owns chunks [split*T/S, (split+1)*T/S) of the T
+        # chunks of C; validate() keeps T >= S, so every split owns one.
+        t_chunks = b.div(C_M, b.const_i32(CK))
+        c_split = b.const_i32(SPLIT)
+        chunk_lo = b.div(b.mul(split, t_chunks), c_split)
+        chunk_hi = b.div(b.mul(b.add(split, c1), t_chunks), c_split)
+        c_start = b.mul(chunk_lo, c_ck_bytes)
+        xs0, ws0 = issue_stage_loads(c_start)
+    else:
+        xs0, ws0 = issue_stage_loads(c0)
 
     if DB:
         # Prologue: publish chunk 0 into buffer 0 and have chunk 1 in flight.
         commit_stage(xs0, ws0)
-        xs0, ws0 = issue_stage_loads(c_ck_bytes)
+        xs0, ws0 = issue_stage_loads(
+            b.add(c_start, c_ck_bytes) if SPLIT > 1 else c_ck_bytes
+        )
 
     iter_args: List[Tuple[str, Value]] = [(f"acc{i}", zero_acc) for i in range(n_acc)]
     iter_args += [(f"xs{i}", v) for i, v in enumerate(xs0)]
@@ -1008,7 +1315,10 @@ def build_direct_conv_nongrouped(
     # chunks, so the clamp to one chunk never changes it. It is there for LLVM:
     # unable to prove the loop runs at all, it keeps a zero-trip guard and
     # schedules the prefetch loads late in the body.
-    n_chunks = b.smax(b.div(C, b.const_i32(CK)), c1)
+    if SPLIT > 1:
+        n_chunks = b.smax(b.sub(chunk_hi, chunk_lo), c1)
+    else:
+        n_chunks = b.smax(b.div(C_M, b.const_i32(CK)), c1)
     loop = b.scf_for_iter(
         c0,
         n_chunks,
@@ -1038,6 +1348,8 @@ def build_direct_conv_nongrouped(
             # Stage chunk i+1 into the idle buffer while chunk i still feeds MFMAs.
             commit_stage(xs, ws, nxt_x, nxt_w)
             c_off = b.mul(b.add(c_iv, b.const_i32(2)), c_ck_bytes)
+            if SPLIT > 1:
+                c_off = b.add(c_off, c_start)
             xs_n, ws_n = issue_stage_loads(c_off)
             emit_mfmas(accs, b.add(x_read_base, cur_x), b.add(w_read_base, cur_w))
         else:
@@ -1046,6 +1358,8 @@ def build_direct_conv_nongrouped(
             commit_stage(xs, ws)
             b.sync()
             c_off = b.mul(b.add(c_iv, c1), c_ck_bytes)
+            if SPLIT > 1:
+                c_off = b.add(c_off, c_start)
             xs_n, ws_n = issue_stage_loads(c_off)
             emit_mfmas(accs, x_read_base, w_read_base)
 
@@ -1062,24 +1376,47 @@ def build_direct_conv_nongrouped(
         b.add(k_base, b.mul(wave_m, b.const_i32(MT_W * AT))),
         b.mul(lane_hi, b.const_i32(4)),
     )
+    # Output channel index = local (bounded by the merged K) + the group base.
+    k_store = (lambda k: b.add(k, k_glob_base)) if GROUPED else (lambda k: k)
     row_base = b.add(out_h0, b.mul(wave_n, b.const_i32(ROWS_W)))
-    img_out_base = b.mul(n_img, params["p_D_stride_n"])
+    if SPLIT > 1:
+        # D is the fp32 workspace: slab ``split`` of a packed
+        # [split_c, N, Ho, Wo, K] array, whatever the output's strides.
+        img_out_base = b.add(b.mul(split, p_N), n_img)
+        c_f32 = b.const_i32(4)
+    else:
+        img_out_base = b.mul(n_img, params["p_D_stride_n"])
 
     for mt in range(MT_W):
         k_mt = b.add(k_lane_base, b.const_i32(mt * AT))
         for row in range(ROWS_W):
             out_h = b.add(row_base, b.const_i32(row))
             h_ok = b.cmp_lt(out_h, p_Ho)
-            row_off = b.add(img_out_base, b.mul(out_h, params["p_D_stride_ho"]))
+            if SPLIT > 1:
+                row_off = b.mul(b.add(b.mul(img_out_base, p_Ho), out_h), p_Wo)
+            else:
+                row_off = b.add(img_out_base, b.mul(out_h, params["p_D_stride_ho"]))
             for cb in range(NCB):
                 nt = row * NCB + cb
                 acc = accs_out[mt * NT_W + nt]
                 out_w = b.add(b.add(out_w0, b.const_i32(cb * AT)), lane_lo)
                 hw_ok = b.land(h_ok, b.cmp_lt(out_w, p_Wo))
-                base_off = b.add(row_off, b.mul(out_w, params["p_D_stride_wo"]))
+                if SPLIT > 1:
+                    base_off = b.mul(b.add(row_off, out_w), K)
+                else:
+                    base_off = b.add(row_off, b.mul(out_w, params["p_D_stride_wo"]))
                 for q in range(QUADS):
                     k_out = b.add(k_mt, b.const_i32(q * (AT // 4)))
-                    valid = b.land(hw_ok, b.cmp_lt(k_out, K))
+                    valid = b.land(hw_ok, b.cmp_lt(k_out, K_M))
+                    k_out = k_store(k_out)
+                    if SPLIT > 1:
+                        ws_off = b.mul(b.add(base_off, k_out), c_f32)
+                        safe = b.select(valid, ws_off, oob_base)
+                        quad = b.vec_pack(
+                            [b.vec_extract(acc, 4 * q + j) for j in range(4)], F32
+                        )
+                        b.buffer_store_vN_f32(d_rsrc, safe, c0, quad, 4)
+                        continue
                     d_off = b.mul(b.add(base_off, k_out), c_half)
                     # Same sentinel as the staging loads: validate() keeps D
                     # at or below _OOB_BASE, so the redirected store lies
@@ -1092,4 +1429,126 @@ def build_direct_conv_nongrouped(
                         b, dtype, d_rsrc, safe, c0, _trunc_f32(b, dtype, quad), 2
                     )
 
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
+# Split-C reduction
+# ---------------------------------------------------------------------------
+
+# Output elements per thread of the reduction: one dwordx4 store of 16-bit
+# outputs, read as two dwordx4 fp32 loads per slab. validate() requires K to be
+# a multiple of the atom tile (>= 16), so a vector never straddles two pixels.
+_REDUCE_VEC = 8
+
+
+@dataclass(frozen=True)
+class DirectSplitReduceSpec:
+    """The second pass of a ``split_c > 1`` :class:`DirectNongroupedConvSpec`.
+
+    Sums the ``split_c`` fp32 slabs of the packed ``[split_c, N, Ho, Wo, K]``
+    workspace (bound to ``A``) and writes the output (``D``, NHWK through the
+    ``p_D_stride_*`` kernargs) in ``dtype``. It takes the forward direct-conv
+    kernarg block, so one :class:`ConvArgs` launches both passes; ``B`` is
+    unused. ``split_c`` is baked: the fold is ``split_c`` independent loads,
+    unrolled, and MUST match the conv pass that filled the workspace.
+    """
+
+    dtype: str = "fp16"
+    split_c: int = 2
+    threads: int = 256
+    name: str = "direct_conv_split_reduce"
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        return kernel_name_join(
+            self.name,
+            f"sc{self.split_c}",
+            f"b{self.threads}",
+            "bf16" if self.dtype == "bf16" else "",
+        )
+
+    def validate(self) -> None:
+        if self.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectSplitReduceSpec: unsupported dtype {self.dtype!r}")
+        if self.split_c < 2:
+            raise ValueError(f"split_c must be >= 2 (got {self.split_c})")
+        if self.threads <= 0 or self.threads % 64 != 0 or self.threads > 1024:
+            raise ValueError(
+                f"threads must be a positive multiple of 64 up to 1024 "
+                f"(got {self.threads})"
+            )
+
+    def grid(self, problem: DirectConvProblem) -> Tuple[int, int, int]:
+        per_block = self.threads * _REDUCE_VEC
+        total = problem.N * problem.Ho * problem.Wo * problem.total_k
+        return ((total + per_block - 1) // per_block, 1, 1)
+
+
+def build_direct_conv_split_reduce(
+    spec: DirectSplitReduceSpec, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the IR of the split-C fold (see :class:`DirectSplitReduceSpec`).
+
+    ``arch`` is accepted for the builder-table signature; the kernel uses no
+    arch-specific instruction.
+    """
+    spec.validate()
+    dtype = spec.dtype
+    io_type = _io_type(dtype)
+    SPLIT = spec.split_c
+    THREADS = spec.threads
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+    params = emit_direct_params(b, io_type=io_type)
+    p_N, p_Ho, p_Wo = params["p_N"], params["p_Ho"], params["p_Wo"]
+    K = params["p_total_k"]
+
+    c0 = b.const_i32(0)
+    oob_base = b.const_i32(_OOB_BASE)
+    ws_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])
+    d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
+
+    gid = b.add(b.mul(b.block_id_x(), b.const_i32(THREADS)), b.thread_id_x())
+    elem = b.mul(gid, b.const_i32(_REDUCE_VEC))
+    hw = b.mul(p_Ho, p_Wo)
+    total = b.mul(b.mul(p_N, hw), K)
+    valid = b.cmp_lt(elem, total)
+
+    # The fp32 slabs are packed; ``elem`` indexes one of them directly.
+    slab_bytes = b.mul(total, b.const_i32(4))
+    elem_bytes = b.mul(elem, b.const_i32(4))
+    ws_off = b.select(valid, elem_bytes, oob_base)
+    ws_off_hi = b.select(valid, b.add(elem_bytes, b.const_i32(16)), oob_base)
+    # The slab offset goes in soffset, summed by the hardware after the select:
+    # added to _OOB_BASE in IR it would pass INT32_MAX once a slab nears 16 MiB.
+    # All loads first, then the adds: the slabs' loads are independent, so
+    # issuing them back to back overlaps their latencies.
+    halves = []
+    for s in range(SPLIT):
+        soff = c0 if s == 0 else b.mul(slab_bytes, b.const_i32(s))
+        lo = b.buffer_load_vN(ws_rsrc, ws_off, soff, F32, 4)
+        hi = b.buffer_load_vN(ws_rsrc, ws_off_hi, soff, F32, 4)
+        halves.append((lo, hi))
+    sum_lo, sum_hi = halves[0]
+    for lo, hi in halves[1:]:
+        sum_lo = b.fadd(sum_lo, lo)
+        sum_hi = b.fadd(sum_hi, hi)
+
+    # Packed element -> (n, ho, wo, k) -> strided output offset.
+    pix = b.div(elem, K)
+    k = b.mod(elem, K)
+    n = b.div(pix, hw)
+    rem = b.mod(pix, hw)
+    ho = b.div(rem, p_Wo)
+    wo = b.mod(rem, p_Wo)
+    d_elems = b.add(
+        b.add(b.mul(n, params["p_D_stride_n"]), b.mul(ho, params["p_D_stride_ho"])),
+        b.add(b.mul(wo, params["p_D_stride_wo"]), k),
+    )
+    d_off = b.select(valid, b.mul(d_elems, b.const_i32(2)), oob_base)
+    out = _trunc_f32(b, dtype, b.vec_concat(sum_lo, sum_hi))
+    _buf_store_vN(b, dtype, d_rsrc, d_off, c0, out, 4)
     return b.kernel

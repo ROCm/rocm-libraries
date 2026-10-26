@@ -2,7 +2,8 @@
 
 Authored descriptor sets for the hip-kernel-provider test suites. The build packs each set
 into one of two discovery roots. The unit binary reads the `unit` root. The integration
-binary reads the `integration` root. The two roots stay disjoint.
+binary reads the `integration` root. The two roots stay disjoint. The unit binary also reads
+its own copy of `archive_fixture/`, which stages beside the two roots.
 
 Every set is a top-level folder here, and every one is packed whole.
 
@@ -11,26 +12,28 @@ Every set is a top-level folder here, and every one is packed whole.
 | `shared/` | `conv_fwd/` | `hip` | `unit/shared/`, `integration/shared/` | both binaries |
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
 | `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
-| `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/` | the integration binary |
+| `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/`, `unit_archive_fixture/` | both binaries |
 
-The packer runs five times over these four sets. `shared/` feeds both binaries, and each other
-folder feeds one binary. Every descriptor in these sets applies to each packed architecture.
-Each set therefore stages one architecture folder for each packed architecture.
+The packer runs six times over these four sets. `shared/` and `archive_fixture/` feed both
+binaries, and each other folder feeds one binary. Every descriptor in these sets applies to
+each packed architecture. Each set therefore stages one architecture folder for each packed
+architecture.
 
 A staged folder carries the name of the folder it was authored in, so a shard in the build
-tree names its own origin. `shared/` is the one name that appears under both roots, which is
-what marks the set that stages twice.
+tree names its own origin. `shared/` is the one name that appears under both roots. The one
+exception to this naming rule is `unit_archive_fixture/`, the unit binary's copy of
+`archive_fixture/`.
 
 Each set is packed by its top-level folder rather than by the folder inside it, so every
 descriptor lands in a child of its shard root while the archive is written at the shard root
 itself. That climb out of a child folder is what the runtime containment guard checks, and a
 set packed from its own leaf folder never produces it. Keep one level of nesting in every set.
 
-`archive_fixture/` is authored beside the other sets rather than inside `integration/`, even
-though only the integration binary reads it. The two cannot both be source roots: one folder
-cannot contain another, because packing the parent would sweep the child's descriptors in and
-write them into the parent's archive. The fixture needs an archive that can be corrupted on
-its own -- see below -- so it needs a source root of its own.
+`archive_fixture/` is authored beside the other sets rather than inside `integration/`. The
+two cannot both be source roots: one folder cannot contain another, because packing the parent
+would sweep the child's descriptors in and write them into the parent's archive. The fixture
+needs an archive that can be corrupted on its own -- see below -- so it needs a source root of
+its own.
 
 ## `shared/conv_fwd/`
 
@@ -98,6 +101,10 @@ both engines rank for a pointwise ADD/f32 graph.
 The overlap is a requirement. The broken-archive test corrupts the archive of the fixture,
 and then asserts that the workload still runs. `hipkernel:Pointwise` serves that workload. A
 suite with only one applicable engine has no fallback and cannot make that assertion.
+
+The broken-archive test corrupts only the integration copy. The unit binary reads
+`unit_archive_fixture/`, a separate pack of the same set. That folder is not inside the `unit`
+root, so the unit engine does not discover the fixture.
 
 Two rules follow for a test author:
 

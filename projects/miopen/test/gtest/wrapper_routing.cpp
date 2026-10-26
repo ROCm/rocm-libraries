@@ -20,9 +20,13 @@
 #include "../../src/private/hipdnn_graph.hpp"
 #include "../../src/private/routing.hpp"
 
+#include <miopen/logger.hpp>
+
+#include <climits>
 #include <cstdlib>
 #include <ostream>
 #include <sstream>
+#include <streambuf>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -502,6 +506,130 @@ TEST(CPU_WrapperRoutingReport_NONE, TraceLineHandlesANullEntryPoint)
     EXPECT_NE(line.find("reason=forwarding-off"), std::string::npos) << line;
 }
 
+// stderr is unbuffered, so each write is a separate system call, and two
+// threads' lines can mix between them.
+class WriteCountingBuf : public std::streambuf
+{
+public:
+    int writes = 0;
+    std::string text;
+
+protected:
+    std::streamsize xsputn(const char* s, std::streamsize n) override
+    {
+        ++writes;
+        text.append(s, static_cast<std::size_t>(n));
+        return n;
+    }
+    int_type overflow(int_type ch) override
+    {
+        ++writes;
+        if(!traits_type::eq_int_type(ch, traits_type::eof()))
+            text.push_back(traits_type::to_char_type(ch));
+        return traits_type::not_eof(ch);
+    }
+};
+
+TEST(CPU_WrapperRoutingReport_NONE, TraceLineIsOneWrite)
+{
+    WriteCountingBuf buf;
+    std::ostream os(&buf);
+    miopen::wrapper::ReportRouteDecision("miopenConvolutionForward",
+                                         ForwardingMode::Enabled,
+                                         {Route::Hipdnn, RouteReason::HipdnnUnavailable},
+                                         os);
+    EXPECT_EQ(buf.writes, 1) << buf.text;
+    ASSERT_FALSE(buf.text.empty());
+    EXPECT_EQ(buf.text.find('\n'), buf.text.size() - 1) << buf.text;
+}
+
+TEST(CPU_WrapperRoutingReport_NONE, ForwardedCallLineIsOneWrite)
+{
+    WriteCountingBuf buf;
+    std::ostream os(&buf);
+    miopen::wrapper::ReportForwardedCall("miopenConvolutionForward", os);
+    EXPECT_EQ(buf.writes, 1) << buf.text;
+    EXPECT_EQ(buf.text, "[MIOpen] hipDNN forwarded: miopenConvolutionForward\n");
+}
+
+TEST(CPU_WrapperRoutingReport_NONE, ForwardedCallLineHandlesANullEntryPoint)
+{
+    std::ostringstream os;
+    miopen::wrapper::ReportForwardedCall(nullptr, os);
+    EXPECT_EQ(os.str(), "[MIOpen] hipDNN forwarded: <null>\n");
+}
+
+// ---------------------------------------------------------------------------
+// MIOPEN_LOG_LEVEL. Parsed the way MIOpen parses it, so the wrapper's trace and
+// error lines switch on at the same values as MIOpen's own.
+// ---------------------------------------------------------------------------
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, ParsesLikeMiopen)
+{
+    using miopen::wrapper::ParseLogLevel;
+    EXPECT_EQ(ParseLogLevel(nullptr), 0ULL);
+    EXPECT_EQ(ParseLogLevel(""), 0ULL);
+    EXPECT_EQ(ParseLogLevel("abc"), 0ULL);
+    EXPECT_EQ(ParseLogLevel("6"), 6ULL);
+    EXPECT_EQ(ParseLogLevel("7"), 7ULL);
+    // Base 0: a leading 0 means octal and 0x means hex, so "08" stops at the 8.
+    EXPECT_EQ(ParseLogLevel("06"), 6ULL);
+    EXPECT_EQ(ParseLogLevel("08"), 0ULL);
+    EXPECT_EQ(ParseLogLevel("0x6"), 6ULL);
+    EXPECT_EQ(ParseLogLevel("6abc"), 6ULL);
+    // strtoull wraps a negative value; the two checks below then narrow it to int.
+    EXPECT_EQ(ParseLogLevel("-1"), ULLONG_MAX);
+}
+
+// Thresholds use MIOpen's own enum so renumbering a level there breaks these
+// tests instead of leaving the wrapper behind.
+constexpr unsigned long long Level(miopen::LoggingLevel level)
+{
+    return static_cast<unsigned long long>(level);
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, TracesFromInfo2Up)
+{
+    using miopen::LoggingLevel;
+    using miopen::wrapper::RouteTraceEnabledFor;
+    for(unsigned long long level = 0; level < Level(LoggingLevel::Info2); ++level)
+        EXPECT_FALSE(RouteTraceEnabledFor(level)) << level;
+    EXPECT_TRUE(RouteTraceEnabledFor(Level(LoggingLevel::Info2)));
+    EXPECT_TRUE(RouteTraceEnabledFor(Level(LoggingLevel::Trace)));
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, RouteTraceNarrowsTheLevelToIntLikeMiopen)
+{
+    using miopen::wrapper::RouteTraceEnabledFor;
+    // MIOpen reads -1 as negative, which is below every level.
+    EXPECT_FALSE(RouteTraceEnabledFor(ULLONG_MAX));
+    // 0x100000006 and 0x100000002 read as 6 (Info2) and 2 (Fatal).
+    EXPECT_TRUE(RouteTraceEnabledFor(0x100000006ULL));
+    EXPECT_FALSE(RouteTraceEnabledFor(0x100000002ULL));
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, ErrorsShownOnlyAtDefaultAndFromErrorUp)
+{
+    using miopen::LoggingLevel;
+    using miopen::wrapper::ErrorLoggingEnabledFor;
+    EXPECT_FALSE(ErrorLoggingEnabledFor(Level(LoggingLevel::Quiet)));
+    EXPECT_FALSE(ErrorLoggingEnabledFor(Level(LoggingLevel::Fatal)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Default)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Error)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Info2)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Trace)));
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, ErrorsNarrowTheLevelToIntLikeMiopen)
+{
+    using miopen::wrapper::ErrorLoggingEnabledFor;
+    // MIOpen reads -1 as negative and prints nothing, errors included.
+    EXPECT_FALSE(ErrorLoggingEnabledFor(ULLONG_MAX));
+    // 0x100000002 reads as 2 (Fatal); 0x100000003 reads as 3 (Error).
+    EXPECT_FALSE(ErrorLoggingEnabledFor(0x100000002ULL));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(0x100000003ULL));
+}
+
 // ---------------------------------------------------------------------------
 // The guard that keeps a stub from dispatching under a neighbour's name.
 // ---------------------------------------------------------------------------
@@ -648,6 +776,46 @@ TEST(CPU_WrapperRoutingLastError_NONE, RecordsAnException)
     EXPECT_STREQ(prefixed, "[hipDNN-forwarded] native");
     if(miopen::wrapper::ErrorLoggingEnabled())
         EXPECT_NE(logged.find("what went wrong"), std::string::npos) << logged;
+}
+
+// The record behind miopenGetLastForwardedError.
+TEST(CPU_WrapperRoutingLastError_NONE, LastForwardedFailureFollowsRecordAndClear)
+{
+    miopenStatus_t status = miopenStatusSuccess;
+    hipdnn::ClearForwardedFailure();
+    EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
+
+    // Not InternalError: every forwarded failure the process tests can cause has
+    // that status, so only this test would catch a record that ignores its input.
+    testing::internal::CaptureStderr();
+    hipdnn::RecordFailure(miopenStatusUnsupportedOp, "hipDNN's reason");
+    static_cast<void>(testing::internal::GetCapturedStderr());
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&status));
+    EXPECT_EQ(status, miopenStatusUnsupportedOp);
+
+    status = miopenStatusSuccess;
+    EXPECT_TRUE(hipdnn::LastForwardedFailure(&status));
+    EXPECT_EQ(status, miopenStatusUnsupportedOp);
+
+    hipdnn::ClearForwardedFailure();
+    EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
+}
+
+TEST(CPU_WrapperRoutingLastError_NONE, LastForwardedFailureIsPerThread)
+{
+    hipdnn::ClearForwardedFailure();
+    bool seenOnItsThread = false;
+    testing::internal::CaptureStderr();
+    std::thread([&seenOnItsThread] {
+        hipdnn::RecordFailure(miopenStatusInternalError, "reason");
+        miopenStatus_t status = miopenStatusSuccess;
+        seenOnItsThread       = hipdnn::LastForwardedFailure(&status);
+    }).join();
+    static_cast<void>(testing::internal::GetCapturedStderr());
+
+    miopenStatus_t status = miopenStatusSuccess;
+    EXPECT_TRUE(seenOnItsThread);
+    EXPECT_FALSE(hipdnn::LastForwardedFailure(&status));
 }
 
 } // namespace

@@ -253,6 +253,13 @@ def validateMIParameters(
     Raises:
         AssertionError: If any of the validation checks fail.
     """
+    # A custom kernel is prebuilt assembly. MatrixInstruction on that
+    # solution is descriptive and does not carry the derived keys
+    # (EnableMatrixInstruction, MatrixInstM, MIWaveTile, ...) that the
+    # generator checks below.
+    if solution.get("CustomKernel"):
+        return True
+
     validMatrixInstructions = makeValidMatrixInstructions()
     validMFMA = makeValidMFMA()
     validSMFMA = makeValidSMFMA()

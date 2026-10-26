@@ -12,7 +12,7 @@ import collections
 import json
 from pathlib import Path
 
-from . import agreement, descriptor_context, provenance_sidecar
+from . import agreement, descriptor_context, provenance_sidecar, sources
 from . import generic_targets as gtmod
 from .errors import HkpPackError
 from .kpack_resolver import load_kpack
@@ -217,20 +217,25 @@ def load_variant_set(
     )
 
 
-def _payload(
-    entry: descriptor_context.Entry, arch: str, kpack_python_dir=None
-) -> bytes:
-    """The archive bytes this descriptor names, read from the archive itself.
+def _launch_sources(kernel: dict) -> dict:
+    """A kernel's kernel_source objects keyed by launch name: `{None: ks}` for a
+    single-launch kernel, `{name: ks}` for one with `sources`.
 
-    Comparing the descriptor's own ``sha256`` against a digest of that field
-    establishes nothing. Needs the archive reader only, never the producer.
+    A kernel with neither key reads as an empty kernel_source, as it always has
+    here, so a reader of a bare descriptor never trips on it. One carrying
+    `sources` is never read through the `kernel_source` key, which it lacks: that
+    read would find nothing and every per-kernel check would skip it silently.
     """
-    kernel = entry.ukd
-    source = kernel.get("kernel_source", {})
-    library = (Path(entry.origin_dir) / source.get("library", "")).resolve()
+    if "sources" in kernel:
+        return sources.kernel_sources(kernel)
+    return {None: kernel.get("kernel_source", {})}
+
+
+def _read_blob(who: str, origin_dir, source: dict, arch: str, kpack_python_dir):
+    library = (Path(origin_dir) / source.get("library", "")).resolve()
     if not library.is_file():
         raise HkpPackError(
-            f"kernel '{kernel.get('name')}' names library '{source.get('library')}', "
+            f"{who} names library '{source.get('library')}', "
             f"which is not a file at {library}"
         )
     kpack, _compression = load_kpack(kpack_python_dir)
@@ -238,15 +243,56 @@ def _payload(
         archive = kpack.PackedKernelArchive.read(library)
         blob = archive.get_kernel(source.get("toc_key"), arch)
     except Exception as exc:
-        raise HkpPackError(
-            f"kernel '{kernel.get('name')}': cannot read {library}: {exc}"
-        ) from exc
+        raise HkpPackError(f"{who}: cannot read {library}: {exc}") from exc
     if blob is None:
         raise HkpPackError(
-            f"kernel '{kernel.get('name')}': toc_key '{source.get('toc_key')}' is "
+            f"{who}: toc_key '{source.get('toc_key')}' is "
             f"absent from {library} for {arch}"
         )
     return bytes(blob)
+
+
+def _payload(entry: descriptor_context.Entry, arch: str, kpack_python_dir=None):
+    """The archive bytes this descriptor names, read from the archive itself.
+
+    Comparing the descriptor's own ``sha256`` against a digest of that field
+    establishes nothing. Needs the archive reader only, never the producer.
+
+    A kernel with `sources` yields `{launch: bytes}`, each entry read through its
+    own library and toc_key.
+    """
+    kernel = entry.ukd
+    name = kernel.get("name")
+    launches = _launch_sources(kernel)
+    if None in launches:
+        return _read_blob(
+            f"kernel '{name}'", entry.origin_dir, launches[None], arch, kpack_python_dir
+        )
+    return {
+        launch: _read_blob(
+            f"kernel '{name}' launch '{launch}'",
+            entry.origin_dir,
+            ks,
+            arch,
+            kpack_python_dir,
+        )
+        for launch, ks in launches.items()
+    }
+
+
+def _require_packed(kernel: dict) -> None:
+    """Every launch of a kernel must be a kpack kernel_source: the evidence exists
+    only once the bytes do. A `sources` kernel is held to it entry by entry."""
+    for launch, ks in _launch_sources(kernel).items():
+        kind = ks.get("kind")
+        if kind != "kpack":
+            where = "" if launch is None else f"sources '{launch}' "
+            raise HkpPackError(
+                f"--mode full needs the packed dialect, and {where}"
+                f"kernel_source.kind is {kind!r}. The producing compiler's "
+                f"evidence exists only once the bytes do; check the packed "
+                f"tree."
+            )
 
 
 def compiled_agreement(
@@ -304,13 +350,7 @@ def compiled_agreement(
         kernel = entry.ukd
         name = kernel.get("name")
         try:
-            kind = kernel.get("kernel_source", {}).get("kind")
-            if kind != "kpack":
-                raise HkpPackError(
-                    f"--mode full needs the packed dialect, and kernel_source.kind "
-                    f"is {kind!r}. The producing compiler's evidence exists only "
-                    f"once the bytes do; check the packed tree."
-                )
+            _require_packed(kernel)
             agreement.select_declaration(
                 kernel, engine, kmd, schemas, doc if entry.inline else None
             )
@@ -352,17 +392,30 @@ def compiled_agreement(
     return failures, unclaimed, verified
 
 
-def _authored_spec(kernel: dict) -> dict:
-    ks_spec = kernel.get("kernel_source", {}).get("spec")
-    if ks_spec is not None:
-        return ks_spec
-    prov_spec = kernel.get("provenance", {}).get("spec")
-    if prov_spec is not None:
-        return prov_spec
-    raise DeskCheckNoSpecFound(
-        f"kernel '{kernel.get('name')}' has no spec in kernel_source OR "
-        "provenance -- wrong tree, or a non-rocke producer?"
-    )
+def _authored_specs(kernel: dict) -> list[tuple[str | None, dict]]:
+    """`(launch, spec)` for each launch of a kernel: its `kernel_source.spec`
+    (authored) or `provenance.spec` (packed); a `sources` kernel's launch reads
+    `provenance.sources[launch].spec`. A launch with none raises, so a missing spec
+    is never read as an agreeing one."""
+    provenance = kernel.get("provenance", {})
+    found = []
+    for launch, ks in _launch_sources(kernel).items():
+        spec = ks.get("spec")
+        if spec is None:
+            packed = (
+                provenance
+                if launch is None
+                else (provenance.get("sources") or {}).get(launch) or {}
+            )
+            spec = packed.get("spec")
+        if spec is None:
+            where = "" if launch is None else f" launch '{launch}'"
+            raise DeskCheckNoSpecFound(
+                f"kernel '{kernel.get('name')}'{where} has no spec in kernel_source "
+                "OR provenance -- wrong tree, or a non-rocke producer?"
+            )
+        found.append((launch, spec))
+    return found
 
 
 def drift_comparable_fields(kernels: list[dict]) -> tuple[str, ...]:
@@ -382,13 +435,14 @@ def drift_comparable_fields(kernels: list[dict]) -> tuple[str, ...]:
     fields: list[str] = []
     for kernel in kernels:
         try:
-            spec = _authored_spec(kernel)
+            specs = _authored_specs(kernel)
         except DeskCheckNoSpecFound:
             continue
         metadata = kernel.get("metadata") or {}
-        for field in spec:
-            if field in metadata and field not in fields:
-                fields.append(field)
+        for _launch, spec in specs:
+            for field in spec:
+                if field in metadata and field not in fields:
+                    fields.append(field)
     return tuple(fields)
 
 
@@ -409,13 +463,15 @@ def metadata_spec_drift(kernels: list[dict], fields=None) -> list[tuple[str, str
         fields = drift_comparable_fields(kernels)
     bad = []
     for k in kernels:
-        spec = _authored_spec(k)
         meta = k["metadata"]
-        for f in fields:
-            if f not in spec or f not in meta:
-                continue
-            if not _values_agree(f, spec[f], meta[f]):
-                bad.append((k["name"], f))
+        # Every launch is held to the one metadata, which is the UKD's alone.
+        for launch, spec in _authored_specs(k):
+            who = k["name"] if launch is None else f"{k['name']}[{launch}]"
+            for f in fields:
+                if f not in spec or f not in meta:
+                    continue
+                if not _values_agree(f, spec[f], meta[f]):
+                    bad.append((who, f))
     return bad
 
 
@@ -467,13 +523,21 @@ def duplicate_matcher_tuples(
     return {t: c for t, c in counts.items() if c > 1}
 
 
+def _identity(kernel: dict, field: str) -> tuple:
+    """A kernel's `field` as one comparable identity: the value of its
+    kernel_source, or the distinct values across the launches of a `sources`
+    kernel (launches on one module legitimately share a toc_key)."""
+    values = {ks.get(field) for ks in _launch_sources(kernel).values()}
+    return tuple(sorted(values, key=str))
+
+
 def toc_key_uniqueness(kernels: list[dict]) -> tuple[int, int]:
     """Invariant 3: every variant individually addressable in the archive.
     Returns (distinct toc_key count, kernel count); equal means OK.
 
     Only meaningful once ``toc_key`` exists, i.e. post-pack. `_field_applicable`
     covers the pre-pack case, which the report distinguishes from a collision."""
-    toc = [k.get("kernel_source", {}).get("toc_key") for k in kernels]
+    toc = [_identity(k, "toc_key") for k in kernels]
     return len(set(toc)), len(kernels)
 
 
@@ -482,7 +546,7 @@ def symbol_distinctness(kernels: list[dict]) -> tuple[int, int]:
     guaranteed unique -- rocKE's ``kernel_name()`` may omit a field it still bakes
     in. Uniqueness comes from (toc_key, symbol). Returns (distinct symbol count,
     kernel count); fewer is legal."""
-    sym = [k.get("kernel_source", {}).get("symbol") for k in kernels]
+    sym = [_identity(k, "symbol") for k in kernels]
     return len(set(sym)), len(kernels)
 
 
@@ -490,7 +554,7 @@ def _field_applicable(kernels: list[dict], field: str) -> bool:
     """False when no kernel's ``kernel_source`` carries `field` -- the expected
     shape of an authored tree, where ``toc_key``/``symbol`` do not exist yet. True
     as soon as one kernel carries it, so a heterogeneous tree is still checked."""
-    return any(field in k.get("kernel_source", {}) for k in kernels)
+    return any(field in ks for k in kernels for ks in _launch_sources(k).values())
 
 
 #: `structural` reads the descriptors against themselves; `full` additionally binds

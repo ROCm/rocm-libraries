@@ -57,11 +57,14 @@ namespace rocsparse
             return;
         }
 
+        // ELL element index m * j + row exceeds 32 bits once m * ell_width does
+        // (a HYB matrix can have ell_nnz > INT32_MAX), so form it in 64-bit.
         for(I j = 0; j < ell_width; j++)
         {
-            const I col = ell_col_ind[m * j + row] - idx_base;
+            const int64_t index = static_cast<int64_t>(m) * j + row;
+            const I       col   = ell_col_ind[index] - idx_base;
 
-            if(ell_col_ind[m * j + row] == -1)
+            if(ell_col_ind[index] == -1)
             {
                 break;
             }
@@ -73,7 +76,7 @@ namespace rocsparse
                 return;
             }
 
-            const T val = ell_val[m * j + row];
+            const T val = ell_val[index];
             if(rocsparse::is_inf(val))
             {
                 record_data_status(data_status, rocsparse_data_status_inf);
@@ -90,7 +93,7 @@ namespace rocsparse
             {
                 if(j > 0)
                 {
-                    const I prev_col = ell_col_ind[m * (j - 1) + row] - idx_base;
+                    const I prev_col = ell_col_ind[index - m] - idx_base;
                     if(prev_col >= col)
                     {
                         record_data_status(data_status, rocsparse_data_status_invalid_sorting);

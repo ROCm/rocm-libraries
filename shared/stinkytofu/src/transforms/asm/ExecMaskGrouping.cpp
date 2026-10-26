@@ -24,6 +24,7 @@
 
 #include <cassert>
 #include <iostream>  // TODO: don't use iostream.
+#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -136,6 +137,36 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
 
         it = std::next(groupIt);
     }
+}
+
+std::unordered_set<const StinkyInstruction*> execMaskedInstructions(const BasicBlock& bb,
+                                                                    uint32_t wavefrontSize,
+                                                                    bool* unmatched) {
+    const StinkyRegister execReg = StinkyRegister::getEXECRegister(wavefrontSize);
+    std::unordered_set<const StinkyInstruction*> covered;
+    if (unmatched != nullptr) *unmatched = false;
+
+    // The same nesting rule collapseExecMaskedRegions uses: a reset closes the
+    // innermost span, any other exec write opens one. The two writes bounding a
+    // span are not themselves covered -- what they write is EXEC, which no lane
+    // mask applies to.
+    int depth = 0;
+    for (const IRBase& ir : bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (isFullMaskReset(*inst, execReg)) {
+            if (depth > 0) --depth;
+            continue;
+        }
+        if (isExecNarrowWrite(*inst, execReg)) {
+            ++depth;
+            continue;
+        }
+        if (depth > 0) covered.insert(inst);
+    }
+
+    if (depth > 0 && unmatched != nullptr) *unmatched = true;
+    return covered;
 }
 
 void expandExecMaskedGroups(BasicBlock& bb) {
