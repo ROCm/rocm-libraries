@@ -1034,6 +1034,19 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
             }
         }
 
+        if constexpr(UseTdm)
+        {
+            if(!is_gfx125_supported())
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Unsupported! arch doesn't support named barrier or TDM"
+                              << std::endl;
+                }
+                return false;
+            }
+        }
+
         // Both thread groups must be a whole number of hardware waves.
         const index_t warp_size = get_warp_size();
         if(TileMathThreadGroupSize % warp_size != 0 || TileLoadThreadGroupSize % warp_size != 0)
