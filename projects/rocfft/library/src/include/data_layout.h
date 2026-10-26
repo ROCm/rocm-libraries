@@ -560,6 +560,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
+    // rocfft-internal-test drives reorder_length_axes directly (defined in data_layout_test.cpp).
+    friend struct data_layout_test_access;
 };
 
 #endif // DATA_LAYOUT_H
