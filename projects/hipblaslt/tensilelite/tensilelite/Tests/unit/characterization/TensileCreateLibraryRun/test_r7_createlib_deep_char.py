@@ -965,12 +965,14 @@ class TestRunCLIEntryPoint:
         mapping_writes = [n for n in written if "Mapping" in n]
         assert mapping_writes, f"Expected Mapping file write; got: {written}"
 
-    def test_run_uid_mapping_written_per_arch(self, logic_dir, output_dir) -> None:
-        """Run writes per-arch UID mapping when nonzero UIDs are present.
+    @pytest.mark.parametrize("lazy_uid", [222, 111, 0])
+    def test_run_uid_mapping_written_per_arch(self, logic_dir, output_dir, lazy_uid) -> None:
+        """Run writes a unique per-arch UID mapping or rejects ambiguous identities.
 
         Args:
             logic_dir: Fixture path containing at least one logic YAML.
             output_dir: Fixture output path used by ``run()``.
+            lazy_uid: Valid, duplicate, or zero UID in the lazy library.
 
         Returns:
             None.
@@ -1008,7 +1010,7 @@ class TestRunCLIEntryPoint:
         base_args = _make_run_arguments(logic_dir, output_dir)
 
         solution_direct = SimpleNamespace(solutionUid=111, index=7)
-        solution_lazy = SimpleNamespace(solutionUid=222, index=9)
+        solution_lazy = SimpleNamespace(solutionUid=lazy_uid, index=9)
         lazy_library = SimpleNamespace(
             solutions={1: solution_lazy},
             applyNaming=lambda splitGSU: None,
@@ -1055,6 +1057,11 @@ class TestRunCLIEntryPoint:
              patch.object(M, "ParallelMap2", side_effect=_parallel_stub), \
              patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
              patch.object(M.shutil, "rmtree"):
+            if lazy_uid in (111, 0):
+                with pytest.raises(ValueError, match="SolutionUID"):
+                    M.run()
+                assert not writes
+                return
             M.run()
 
         uid_writes = [item for item in writes if "UidMapping" in item[0]]

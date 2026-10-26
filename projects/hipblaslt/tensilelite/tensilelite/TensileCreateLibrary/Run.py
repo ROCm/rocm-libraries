@@ -1510,17 +1510,18 @@ def run():
     )
     uidMappingPerArch = {}
     for archName, masterLibrary in masterLibraries.items():
-        archUidMapping = {
-            solution.solutionUid: solution.index
-            for solution in masterLibrary.solutions.values()
-        }
-        for lazyLibrary in masterLibrary.lazyLibraries.values():
-            archUidMapping.update(
-                {
-                    solution.solutionUid: solution.index
-                    for solution in lazyLibrary.solutions.values()
-                }
-            )
+        archUidMapping = {}
+        for library in (masterLibrary, *masterLibrary.lazyLibraries.values()):
+            for solution in library.solutions.values():
+                uid = solution.solutionUid
+                if uid == 0:
+                    raise ValueError(f"{archName}: zero SolutionUID at index {solution.index}")
+                if uid in archUidMapping and archUidMapping[uid] != solution.index:
+                    raise ValueError(
+                        f"{archName}: duplicate SolutionUID {uid} at indices "
+                        f"{archUidMapping[uid]} and {solution.index}"
+                    )
+                archUidMapping[uid] = solution.index
         if archUidMapping:
             uidMappingPerArch[archName] = archUidMapping
     stop_glds = timer()
