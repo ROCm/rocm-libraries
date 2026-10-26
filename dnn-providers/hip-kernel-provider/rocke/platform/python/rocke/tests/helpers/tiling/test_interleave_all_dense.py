@@ -186,8 +186,8 @@ def test_proof_population():
         else:
             cannot += 1
     assert (len(_DENSE), driven, cannot) == (
-        97,
-        96,
+        147,
+        146,
         1,
     ), f"population shifted: total={len(_DENSE)} driven={driven} cannot={cannot}"
     # Every cannot-interleave row is one we documented (and vice-versa).
