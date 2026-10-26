@@ -106,7 +106,6 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  whether or not the results need to be deterministic, and how many times the sparse-vector product will be performed.
 *
 *  <table>
-*  <caption id="v2_spmv_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>Algorithm                            <th>Deterministic  <th>Notes
 *  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>This is best suited for matrices with all rows having a similar number of non-zeros. Can outperform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
 *  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>[Deprecated] The old name for rocsparse_spmv_alg_csr_rowsplit.</td>
@@ -116,26 +115,22 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  </table>
 *
 *  <table>
-*  <caption id="v2_spmv_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms                     <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
 *  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>Generally the fastest COO algorithm.</td>
 *  </table>
 *
 *  <table>
-*  <caption id="v2_spmv_ell_algorithms">ELL Algorithms</caption>
 *  <tr><th>ELL Algorithms                <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td></td>
 *  </table>
 *
 *  <table>
-*  <caption id="v2_spmv_sell_algorithms">Sliced ELL Algorithms</caption>
 *  <tr><th>Sliced ELL Algorithms          <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_sell</td>   <td>Yes</td>        <td></td>
 *  </table>
 *
 *  <table>
-*  <caption id="v2_spmv_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Notes
 *  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td></td>
 *  </table>
@@ -147,7 +142,6 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="v2_spmv_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -157,7 +151,6 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="v2_spmv_mixed">Mixed Precisions</caption>
 *  <tr><th>A / X                     <th>Y                         <th>compute_type
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r  <td>rocsparse_datatype_i32_r
 *  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
@@ -169,7 +162,6 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  \par Mixed-regular Real Precisions
 *  <table>
-*  <caption id="v2_spmv_mixed_regular_real">Mixed-regular Real Precisions</caption>
 *  <tr><th>A                        <th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
@@ -177,7 +169,6 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *
 *  \par Mixed-regular Complex Precisions
 *  <table>
-*  <caption id="v2_spmv_mixed_regular_complex">Mixed-regular Complex Precisions</caption>
 *  <tr><th>A                        <th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c

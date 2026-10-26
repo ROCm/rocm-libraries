@@ -87,6 +87,54 @@ TEST(TestInputFillRecipes, ThreeTierPrecedence)
     EXPECT_FLOAT_EQ(fill.hi, 10.0f);
 }
 
+// ── setTypeDefault (data-type tier) ─────────────────────────────────────────
+
+// The data-type tier sits below set() and setDefault() whichever is written
+// first, so a default derived from fill(x) mid-pass sees x's final range.
+TEST(TestInputFillRecipes, TypeDefaultLosesToOpDefaultInEitherOrder)
+{
+    const auto type = FillRecipe::free(-6.0f, 6.0f);
+    const auto op = FillRecipe::free(-2.0f, 2.0f);
+
+    InputFillRecipes typeFirst;
+    typeFirst.setTypeDefault(1, type);
+    EXPECT_EQ(typeFirst.fill(1), type);
+    typeFirst.setDefault(1, op);
+    EXPECT_EQ(typeFirst.fill(1), op);
+
+    InputFillRecipes opFirst;
+    opFirst.setDefault(1, op);
+    opFirst.setTypeDefault(1, type);
+    EXPECT_EQ(opFirst.fill(1), op);
+}
+
+TEST(TestInputFillRecipes, TypeDefaultLosesToSet)
+{
+    InputFillRecipes recipes;
+    recipes.setTypeDefault(1, FillRecipe::free(-6.0f, 6.0f));
+    recipes.set(1, FillRecipe::free(-3.0f, 3.0f));
+
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(-3.0f, 3.0f));
+}
+
+// fills() and toJson() report what fill() resolves, across both tiers.
+TEST(TestInputFillRecipes, FillsAndJsonResolveAcrossTiers)
+{
+    InputFillRecipes recipes;
+    recipes.setTypeDefault(1, FillRecipe::free(-6.0f, 6.0f));
+    recipes.setTypeDefault(2, FillRecipe::free(-6.0f, 6.0f));
+    recipes.setDefault(2, FillRecipe::free(-2.0f, 2.0f));
+
+    const auto fills = recipes.fills();
+    ASSERT_EQ(fills.size(), 2u);
+    EXPECT_EQ(fills.at(1), FillRecipe::free(-6.0f, 6.0f));
+    EXPECT_EQ(fills.at(2), FillRecipe::free(-2.0f, 2.0f));
+
+    const auto json = recipes.toJson();
+    EXPECT_FLOAT_EQ(json.at("1").at("hi").get<float>(), 6.0f);
+    EXPECT_FLOAT_EQ(json.at("2").at("hi").get<float>(), 2.0f);
+}
+
 // ── get returns default-constructed FillRecipe for unknown uid ────────────────
 
 TEST(TestInputFillRecipes, GetUnknownUidReturnsDefault)

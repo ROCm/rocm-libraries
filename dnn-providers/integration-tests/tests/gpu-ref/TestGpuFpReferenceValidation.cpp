@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -14,6 +15,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -484,6 +487,58 @@ TEST(TestGpuValidatorFactory, TemplatedCreatesInt32)
 {
     const auto validator = createGpuAllCloseValidator<int32_t>();
     ASSERT_NE(validator, nullptr);
+}
+
+// ============================================================================
+// Ragged rejection tests
+// ============================================================================
+
+const std::vector<int64_t> K_RAGGED_DIMS = {2, 2, 3, 2};
+const std::vector<int64_t> K_RAGGED_STRIDES = {12, 2, 4, 1};
+
+template <typename T>
+RaggedTensor<T> makeRaggedTensor()
+{
+    const std::vector<int32_t> offsets = {0, 8, 20};
+    auto offsetTensor = std::make_shared<Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    return RaggedTensor<T>(K_RAGGED_DIMS, K_RAGGED_STRIDES, SDPA_SEQ_AXIS, offsetTensor);
+}
+
+template <typename T>
+void expectRaggedRejected(const IReferenceValidation& validator)
+{
+    auto reference = makeRaggedTensor<T>();
+    auto implementation = makeRaggedTensor<T>();
+    EXPECT_THROW(validator.allClose(reference, implementation), std::invalid_argument);
+
+    Tensor<T> dense(K_RAGGED_DIMS, K_RAGGED_STRIDES);
+    EXPECT_THROW(validator.allClose(dense, implementation), std::invalid_argument);
+}
+
+TEST(TestGpuValidationRaggedRejection, FpValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, IntValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<int32_t>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, RmsValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuRmsValidator(hipdnn_frontend::DataType::FLOAT, 1e-5f);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
 }
 
 // ============================================================================

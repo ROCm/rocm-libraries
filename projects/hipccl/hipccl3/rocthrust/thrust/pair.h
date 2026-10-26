@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -104,7 +104,7 @@ using _THRUST_STD::make_pair;
 
 THRUST_NAMESPACE_END
 
-#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
+#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
 
 THRUST_NAMESPACE_BEGIN
 
@@ -298,7 +298,7 @@ inline THRUST_HOST_DEVICE pair<T1, T2> make_pair(T1 x, T2 y);
  *  \tparam N This parameter selects the member of interest.
  *  \tparam T A \c pair type of interest.
  */
-template <_THRUST_STD::size_t N, class T>
+template <::std::size_t N, class T>
 struct tuple_element;
 
 /*! This convenience metafunction is included for compatibility with

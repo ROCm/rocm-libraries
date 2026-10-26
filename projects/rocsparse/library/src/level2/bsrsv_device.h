@@ -379,14 +379,16 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory
             if(lid < BSRDIM)
             {
                 bsr_updates[lid]
-                    = (lid < block_dim) ? y[local_col * block_dim + lid] : static_cast<T>(0);
+                    = (lid < block_dim)
+                          ? rocsparse::load_done_row_data(&y[local_col * block_dim + lid])
+                          : static_cast<T>(0);
             }
 
             __threadfence_block();
@@ -447,13 +449,13 @@ namespace rocsparse
         if(lid < block_dim)
         {
             // Store the rows results in y
-            y[row * block_dim + lid] = local_sum;
+            rocsparse::store_done_row_data(&y[row * block_dim + lid], local_sum);
         }
 
         if(lid == 0)
         {
             // Write "row is done" flag
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             // Find the minimum pivot, if applicable
             if(pivot == true)
@@ -548,14 +550,16 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory
             if(lid < BSRDIM)
             {
                 bsr_updates[lid]
-                    = (lid < block_dim) ? y[local_col * block_dim + lid] : static_cast<T>(0);
+                    = (lid < block_dim)
+                          ? rocsparse::load_done_row_data(&y[local_col * block_dim + lid])
+                          : static_cast<T>(0);
             }
 
             __threadfence_block();
@@ -616,13 +620,13 @@ namespace rocsparse
         if(lid < block_dim)
         {
             // Store the rows results in y
-            y[row * block_dim + lid] = local_sum;
+            rocsparse::store_done_row_data(&y[row * block_dim + lid], local_sum);
         }
 
         if(lid == 0)
         {
             // Write "row is done" flag
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             // Find the minimum pivot, if applicable
             if(pivot == true)

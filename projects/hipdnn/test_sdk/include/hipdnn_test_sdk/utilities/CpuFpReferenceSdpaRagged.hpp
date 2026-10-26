@@ -20,16 +20,17 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-// Ragged forward SDPA CPU reference (RFC-0014: packed [B, S, H, D] + ragged_offset), the host
+// Ragged forward SDPA CPU reference (RFC-0014: packed BSHD + ragged_offset), the host
 // mirror of GpuFpReferenceSdpaRagged. It computes in plain fp32 with no provider P-storage
 // rounding, so GPU-vs-CPU checks use gpuRefFwdTolerance.
 //
-// q/k/v/o are ragged tensors (ShallowRaggedTensor / RaggedTensor) with dims [B, S, H, D] and the
-// sequence at BSHD_SEQ_AXIS. The SDK does the packed addressing: getHostValue({b, s, h, d})
-// starts at ragged_offset[b], and per-batch lengths come from raggedIterationInfo().
+// q/k/v/o are ragged tensors (ShallowRaggedTensor / RaggedTensor) with logical dims [B, H, S, D],
+// BSHD strides and the sequence at SDPA_SEQ_AXIS. The SDK does the packed addressing:
+// getHostValue({b, h, s, d}) starts at ragged_offset[b], and per-batch lengths come from
+// raggedIterationInfo().
 //
 // Supports GQA/MQA, causal and sliding-window masks, fp8 descales, and an optional LSE that is
-// ragged or dense [B, Sq_max, H, 1]. No bias, alibi or dropout, as on the ASM v3 path.
+// ragged or dense [B, H, Sq_max, 1]. No bias, alibi or dropout, as on the ASM v3 path.
 // Descales are scalar [1] or per KV head [B, H_kv, 1, 1]. Q and K descales are both indexed by
 // the KV head of the query head, as in CpuFpReferenceSdpa and AITER.
 //
@@ -70,10 +71,10 @@ public:
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
         const auto batch = q.dims()[0];
-        const auto numHeads = q.dims()[2];
+        const auto numHeads = q.dims()[1];
         const auto headDim = q.dims()[3];
-        const auto numHeadsK = k.dims()[2];
-        const auto numHeadsV = v.dims()[2];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
         const auto headDimV = v.dims()[3];
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
@@ -88,15 +89,18 @@ public:
                                 const std::vector<int64_t>& dims,
                                 const std::vector<int64_t>& strides,
                                 const char* name) {
-            if(info.seqAxis != hipdnn_data_sdk::utilities::BSHD_SEQ_AXIS)
+            if(info.seqAxis != hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS)
             {
                 throw std::invalid_argument(who + ": " + name
-                                            + " must be ragged along BSHD_SEQ_AXIS (1), got "
+                                            + " must be ragged along SDPA_SEQ_AXIS (2), got "
                                             + std::to_string(info.seqAxis));
             }
             detail::requireTokenMajorRaggedLayout(dims, strides, who, name);
-            return detail::raggedTokenBoundaries(
-                info.rowOffsets, info.seqStride, dims[1], who, name);
+            return detail::raggedTokenBoundaries(info.rowOffsets,
+                                                 info.seqStride,
+                                                 dims[hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS],
+                                                 who,
+                                                 name);
         };
         const auto qTokens = tokens(*qInfo, q.dims(), q.strides(), "Q");
         const auto kTokens = tokens(*kInfo, k.dims(), k.strides(), "K");
@@ -152,9 +156,9 @@ public:
                         for(int64_t d = 0; d < headDim; ++d)
                         {
                             const auto qv = static_cast<ComputeDataType>(
-                                q.getHostValue(std::vector<int64_t>{b, sq, h, d}));
+                                q.getHostValue(std::vector<int64_t>{b, h, sq, d}));
                             const auto kv = static_cast<ComputeDataType>(
-                                k.getHostValue(std::vector<int64_t>{b, skv, kvHeadK, d}));
+                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                             dot += qv * kv;
                         }
                         scores[static_cast<size_t>(skv)] = dot * descaleQK * scale;
@@ -173,12 +177,12 @@ public:
                         {
                             o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(
                                                static_cast<ComputeDataType>(0)),
-                                           std::vector<int64_t>{b, sq, h, dvIdx});
+                                           std::vector<int64_t>{b, h, sq, dvIdx});
                         }
                         if(lse != nullptr)
                         {
                             lse->setHostValue(static_cast<float>(negInf),
-                                              std::vector<int64_t>{b, sq, h, 0});
+                                              std::vector<int64_t>{b, h, sq, 0});
                         }
                         continue;
                     }
@@ -205,18 +209,18 @@ public:
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
                             const auto vv = static_cast<ComputeDataType>(
-                                v.getHostValue(std::vector<int64_t>{b, skv, kvHeadV, dvIdx}));
+                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dvIdx}));
                             acc += probs[static_cast<size_t>(skv)] * vv;
                         }
                         acc *= static_cast<ComputeDataType>(descaleVVal);
                         o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
-                                       std::vector<int64_t>{b, sq, h, dvIdx});
+                                       std::vector<int64_t>{b, h, sq, dvIdx});
                     }
 
                     if(lse != nullptr)
                     {
                         lse->setHostValue(static_cast<float>(maxVal + std::log(sumExp)),
-                                          std::vector<int64_t>{b, sq, h, 0});
+                                          std::vector<int64_t>{b, h, sq, 0});
                     }
                 }
             }
@@ -291,14 +295,14 @@ private:
         return false;
     }
 
-    // LSE must be [B, Sq, H, 1] with Q's Sq. A shorter Sq would spill rows into the next batch.
+    // LSE must be [B, H, Sq, 1] with Q's Sq. A shorter Sq would spill rows into the next batch.
     static void validateLse(const std::vector<int64_t>& lseDims, const std::vector<int64_t>& qDims)
     {
         if(lseDims.size() != 4 || lseDims[0] != qDims[0] || lseDims[1] != qDims[1]
            || lseDims[2] != qDims[2] || lseDims[3] != 1)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpaRagged: lse must be rank-4 [B, Sq, H, 1] with Q's B, Sq, H");
+                "CpuFpReferenceSdpaRagged: lse must be rank-4 [B, H, Sq, 1] with Q's B, H, Sq");
         }
     }
 
@@ -310,11 +314,11 @@ private:
         if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpaRagged: q/k/v/o must all be rank-4 [B, S, H, D]");
+                "CpuFpReferenceSdpaRagged: q/k/v/o must all be rank-4 [B, H, S, D]");
         }
         const auto batch = qDims[0];
         // S_max may be 0 (every batch empty); the other dims may not.
-        if(batch <= 0 || qDims[2] <= 0 || qDims[3] <= 0 || kDims[2] <= 0 || vDims[2] <= 0
+        if(batch <= 0 || qDims[1] <= 0 || qDims[3] <= 0 || kDims[1] <= 0 || vDims[1] <= 0
            || vDims[3] <= 0)
         {
             throw std::invalid_argument(
@@ -328,21 +332,21 @@ private:
         {
             throw std::invalid_argument("CpuFpReferenceSdpaRagged: Q head_dim != K head_dim");
         }
-        if(vDims[1] != kDims[1])
+        if(vDims[2] != kDims[2])
         {
             throw std::invalid_argument(
                 "CpuFpReferenceSdpaRagged: K and V sequence extents (S_max) must match");
         }
-        const auto numHeads = qDims[2];
-        if(numHeads % kDims[2] != 0 || numHeads % vDims[2] != 0)
+        const auto numHeads = qDims[1];
+        if(numHeads % kDims[1] != 0 || numHeads % vDims[1] != 0)
         {
             throw std::invalid_argument(
                 "CpuFpReferenceSdpaRagged: numHeads must be divisible by numHeadsK and numHeadsV");
         }
-        if(oDims[1] != qDims[1] || oDims[2] != numHeads || oDims[3] != vDims[3])
+        if(oDims[1] != numHeads || oDims[2] != qDims[2] || oDims[3] != vDims[3])
         {
             throw std::invalid_argument(
-                "CpuFpReferenceSdpaRagged: output shape must be [B, Sq, H, Dv]");
+                "CpuFpReferenceSdpaRagged: output shape must be [B, H, Sq, Dv]");
         }
     }
 };

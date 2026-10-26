@@ -56,11 +56,16 @@ VariantPack buildVariantPack(
 ///
 /// Shared for the same reason buildVariantPack() is: both harnesses allocate the
 /// same buffers from the same attributes, and two copies of that would drift.
+///
+/// A ragged output shares its offset tensor from `loadedTensors`, so it has the
+/// same layout as the golden output it is compared against. Throws
+/// std::invalid_argument when that offset tensor is not loaded.
 OutputTensors allocateSentinelOutputs(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
+    const TensorMap& loadedTensors,
     bool onDevice);
 
 /// Tell each tensor which side now holds the fresh data. Without it the comparison

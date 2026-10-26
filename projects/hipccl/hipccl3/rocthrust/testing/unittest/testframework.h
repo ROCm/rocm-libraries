@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,25 +19,23 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/integer_traits.h>
-#include <thrust/limits.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/device_memory_resource.h>
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/universal_memory_resource.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(limits)
-#endif
+#include _THRUST_STD_INCLUDE(limits)
 
 #include <cstdio>
 #include <iostream>
-#include <limits>
 #include <map>
 #include <set>
 #include <string>
 #include <type_traits>
 #include <vector>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <limits>
+#endif
 
 #include "meta.h"
 #include "util.h"
@@ -235,17 +233,6 @@ struct numeric_limits<custom_numeric> : numeric_limits<int>
 {};
 _THRUST_STD_NAMESPACE_END
 #endif
-
-THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-// For random number generation
-template <>
-class integer_traits<custom_numeric> : public integer_traits_base<int, INT_MIN, INT_MAX>
-{};
-
-} // namespace detail
-THRUST_NAMESPACE_END
 
 using NumericTypes = unittest::type_list<
   char,

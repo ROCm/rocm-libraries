@@ -18,50 +18,45 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/generate.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/generic/select_system.h>
-#include <thrust/system/detail/generic/generate.h>
 #include <thrust/system/detail/adl/generate.h>
+#include <thrust/system/detail/generic/generate.h>
+#include <thrust/system/detail/generic/select_system.h>
 
 THRUST_NAMESPACE_BEGIN
 
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename ForwardIterator,
-         typename Generator>
-THRUST_HOST_DEVICE
-  void generate(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                ForwardIterator first,
-                ForwardIterator last,
-                Generator gen)
+template <typename DerivedPolicy, typename ForwardIterator, typename Generator>
+THRUST_HOST_DEVICE void
+generate(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+         ForwardIterator first,
+         ForwardIterator last,
+         Generator gen)
 {
   using thrust::system::detail::generic::generate;
   return generate(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, gen);
 } // end generate()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename OutputIterator,
-         typename Size,
-         typename Generator>
-THRUST_HOST_DEVICE
-  OutputIterator generate_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                            OutputIterator first,
-                            Size n,
-                            Generator gen)
+template <typename DerivedPolicy, typename OutputIterator, typename Size, typename Generator>
+THRUST_HOST_DEVICE OutputIterator generate_n(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec, OutputIterator first, Size n, Generator gen)
 {
   using thrust::system::detail::generic::generate_n;
   return generate_n(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, n, gen);
 } // end generate_n()
 
-
-template<typename ForwardIterator,
-         typename Generator>
-  void generate(ForwardIterator first,
-                ForwardIterator last,
-                Generator gen)
+template <typename ForwardIterator, typename Generator>
+void generate(ForwardIterator first, ForwardIterator last, Generator gen)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -72,13 +67,8 @@ template<typename ForwardIterator,
   return thrust::generate(select_system(system), first, last, gen);
 } // end generate()
 
-
-template<typename OutputIterator,
-         typename Size,
-         typename Generator>
-  OutputIterator generate_n(OutputIterator first,
-                            Size n,
-                            Generator gen)
+template <typename OutputIterator, typename Size, typename Generator>
+OutputIterator generate_n(OutputIterator first, Size n, Generator gen)
 {
   using thrust::system::detail::generic::select_system;
 

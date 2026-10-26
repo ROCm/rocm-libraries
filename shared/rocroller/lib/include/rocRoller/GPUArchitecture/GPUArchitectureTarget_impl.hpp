@@ -30,6 +30,10 @@ namespace rocRoller
             return "gfx1012";
         case GPUArchitectureGFX::GFX1030:
             return "gfx1030";
+        case GPUArchitectureGFX::GFX1170:
+            return "gfx1170";
+        case GPUArchitectureGFX::GFX1171:
+            return "gfx1171";
         case GPUArchitectureGFX::GFX1200:
             return "gfx1200";
         case GPUArchitectureGFX::GFX1201:

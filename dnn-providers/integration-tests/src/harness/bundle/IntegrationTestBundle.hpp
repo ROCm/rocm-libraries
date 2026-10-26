@@ -33,7 +33,7 @@ namespace hipdnn_integration_tests::bundle
 // Tensors keyed by tensor UID. Inputs carry their data. Outputs carry expected golden
 // values only when output blobs are present; otherwise the harness verifies outputs
 // against a reference executor.
-using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+using TensorMap = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 // Where a bundle's tensor blobs sit on disk. Nothing is read until a test asks for it.
 struct TensorBlobs
@@ -106,7 +106,10 @@ struct IntegrationTestBundle
             attrByUid[attributes->uid()] = attributes;
         }
 
+        // Ragged tensors are constructed from their offset tensor, so they load last.
+        // Offset tensors are always inputs, so an output's offset is already loaded.
         const auto loadUids = [&](const std::vector<int64_t>& uids) {
+            std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
             {
                 const auto it = attrByUid.find(uid);
@@ -114,8 +117,27 @@ struct IntegrationTestBundle
                 {
                     continue;
                 }
+                if(it->second->ragged_offset_tensor_uid().has_value())
+                {
+                    raggedUids.push_back(uid);
+                    continue;
+                }
                 tensors[uid] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(
                     blobs->pathForUid(uid), *it->second);
+            }
+            for(const int64_t uid : raggedUids)
+            {
+                const auto* attributes = attrByUid.at(uid);
+                const int64_t offsetUid = attributes->ragged_offset_tensor_uid().value();
+                const auto offsetIt = tensors.find(offsetUid);
+                if(offsetIt == tensors.end())
+                {
+                    throw std::runtime_error("ragged tensor " + std::to_string(uid)
+                                             + " references missing offset tensor "
+                                             + std::to_string(offsetUid));
+                }
+                tensors[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
+                    blobs->pathForUid(uid), *attributes, offsetIt->second);
             }
         };
 

@@ -101,6 +101,7 @@ if(TENSILELITE_ENABLE_COVERAGE)
     message(STATUS "Enabling C++ code coverage instrumentation for tensilelite-client-common")
     target_compile_options(tensilelite-client-common PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(tensilelite-client-common PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+    target_link_libraries(tensilelite-client-common PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 # f16c gives the validator hot loop hardware Half<->float conversion, which is

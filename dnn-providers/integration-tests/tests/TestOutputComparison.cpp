@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,8 @@
 #include <vector>
 
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -76,7 +79,7 @@ flatbuffers::DetachedBuffer makeGraphBuffer()
     return buffer;
 }
 
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, float value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
@@ -86,7 +89,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // A [1, 3, 1, 1] tensor with the three values written individually, so a test can build
 // the magnitude spread that separates allclose from RMS.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor3(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                  float v0,
                  float v1,
@@ -103,7 +106,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // An integer tensor, filled with one value. Integer outputs exist in this suite, and
 // the RMS validator has no implementation for them.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     intTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int32_t value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
@@ -137,6 +140,26 @@ constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
 ComparisonTolerance exactMatchingInfinities()
 {
     return ComparisonTolerance::allCloseMatchingInfinities(0.0f, 0.0f);
+}
+
+// A ragged [B, H, S, D] = [2, 3, 4, 5] tensor in the BSHD physical layout, holding 2 and 3
+// sequence rows, filled with one value.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedFloatTensor(float value)
+{
+    const std::vector<int32_t> offsets = {0, 30, 75};
+    auto offsetTensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::RaggedTensor<float>>(
+        std::vector<int64_t>{2, 3, 4, 5},
+        std::vector<int64_t>{60, 5, 15, 1},
+        hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
+        offsetTensor);
+    tensor->fillWithValue(value);
+    return tensor;
 }
 
 } // namespace
@@ -925,6 +948,33 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
     EXPECT_NE(mismatch->report.find("atol="), std::string::npos);
     EXPECT_EQ(mismatch->report.find("relative RMS"), std::string::npos)
         << "no threshold decided this failure; reporting one would name a check that did not run";
+}
+
+// The device validators index every padded position, which for a ragged tensor reads other
+// batches' rows, so a device-site ragged comparison is refused with a pointer to the host.
+TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    auto expected = raggedFloatTensor(3.5f);
+    auto actual = raggedFloatTensor(3.5f);
+
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
+            .has_value())
+        << "on the host a ragged pair compares normally";
+
+    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
+    ASSERT_NO_THROW(mismatch = compareTensor(
+                        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b"));
+
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->uid, K_UID_A);
+    EXPECT_NE(mismatch->report.find("y_out"), std::string::npos);
+    EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

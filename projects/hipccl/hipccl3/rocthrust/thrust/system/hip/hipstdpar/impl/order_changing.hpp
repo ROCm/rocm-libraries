@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/reverse.h>
 
@@ -58,7 +59,7 @@ inline void reverse(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::reverse(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::reverse(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -77,7 +78,7 @@ inline void reverse_copy(execution::parallel_unsequenced_policy, I fi, I li, O f
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::reverse_copy(::thrust::device, fi, li, fo);
+  return THRUST_NS_QUALIFIER::reverse_copy(THRUST_NS_QUALIFIER::device, fi, li, fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>

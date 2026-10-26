@@ -89,12 +89,14 @@ include(cmake/Dependencies.cmake)
 
 if(BUILD_ADDRESS_SANITIZER)
   set(DEFAULT_AMDGPU_TARGETS
+    amdgcnspirv
     gfx908:xnack+
     gfx90a:xnack+
     gfx942:xnack+
   )
 else()
   set(DEFAULT_AMDGPU_TARGETS
+    amdgcnspirv
     gfx803
     gfx900:xnack-
     gfx906:xnack-

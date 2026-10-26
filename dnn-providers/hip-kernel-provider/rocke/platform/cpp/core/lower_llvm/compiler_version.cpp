@@ -111,12 +111,12 @@ std::vector<std::string> children(const fs::path& root, const char* prefix)
 void* load_comgr(std::string& requested)
 {
     std::vector<std::string> candidates;
-    if(const char* path = std::getenv("ROCKE_COMGR_LIB"))
+    if(const char* path = std::getenv("ROCKE_COMGR_LIB"); path && *path)
         candidates.emplace_back(path);
 #ifdef _WIN32
     for(const char* name : {"HIP_PATH", "ROCM_PATH", "ROCM_HOME"})
     {
-        if(const char* root = std::getenv(name))
+        if(const char* root = std::getenv(name); root && *root)
         {
             auto paths = children(fs::path(root) / "bin", "amd_comgr");
             for(const auto& path : paths)
@@ -131,7 +131,7 @@ void* load_comgr(std::string& requested)
         candidates.push_back((dir / "libamd_comgr.so.3").string());
     };
     for(const char* name : {"ROCM_PATH", "ROCM_HOME"})
-        if(const char* root = std::getenv(name))
+        if(const char* root = std::getenv(name); root && *root)
             add_libdir(fs::path(root) / "lib");
     auto roots = children("/opt", "rocm");
     std::vector<std::string> cores;
@@ -280,7 +280,7 @@ const ckc::CompilerInfo* ckc::candidate_compiler_info()
     }
     catch(const std::exception&)
     {
-        // Candidate introspection is best-effort; unavailable keeps the offline default.
+        // Candidate introspection is best-effort; the caller decides how to handle unavailable.
         return nullptr;
     }
 }

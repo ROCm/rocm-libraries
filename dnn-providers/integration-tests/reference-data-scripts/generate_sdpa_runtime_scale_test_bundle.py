@@ -258,7 +258,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
-                    "mma_core_mode": "float",
+                    "mma_core_mode": "fp8_e4m3" if is_fp8 else "unset",
                     "implementation": "AUTO",
                 },
             }

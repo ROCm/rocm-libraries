@@ -15,13 +15,13 @@ set(VALID_BINS
 )
 
 # Set common variables
-set(TENSILE_BIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/bin")
+set(TENSILE_BIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/bin")
 string(REGEX REPLACE ";" " " tensilelite_python_command "${HIPBLASLT_PYTHON_COMMAND}")
 
 if(DEFINED DEVELOP_MODE)
     include(ProcessorCount)
     ProcessorCount(NPROC)
-    set(CMAKE_BUILD_COMMAND "cmake --build ${PROJECT_BINARY_DIR} -j ${NPROC}")
+    set(CMAKE_BUILD_COMMAND "cmake --build ${CMAKE_BINARY_DIR} -j ${NPROC}")
     foreach(BIN ${VALID_BINS})
         if(WIN32)
             set(SCRIPT_NAME ${BIN}.bat)

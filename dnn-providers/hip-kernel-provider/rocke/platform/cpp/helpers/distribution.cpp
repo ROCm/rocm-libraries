@@ -1115,7 +1115,10 @@ void rocke_block_tile_reduce_sync(rocke_ir_builder_t* b,
                     = rocke_b_add(b, warp, rocke_b_const_i32(b, i * num_reduce_warps));
                 rocke_value_t* idx[1];
                 idx[0] = slot;
-                rocke_b_smem_store_vN_f32(b, lds_buf, idx, 1, v, 1);
+                if(strcmp(v->type->name, "f64") == 0)
+                    rocke_b_smem_store_vN(b, lds_buf, idx, 1, v, 1);
+                else
+                    rocke_b_smem_store_vN_f32(b, lds_buf, idx, 1, v, 1);
             }
             rocke_b_region_leave(b);
         }
@@ -1135,7 +1138,10 @@ void rocke_block_tile_reduce_sync(rocke_ir_builder_t* b,
                 rocke_value_t* sidx[1];
                 rocke_value_t* vec;
                 sidx[0] = slot;
-                vec = rocke_b_smem_load_vN_f32(b, lds_buf, sidx, 1, 1);
+                if(strcmp(reduced->storage[i]->type->name, "f64") == 0)
+                    vec = rocke_b_smem_load_vN(b, lds_buf, sidx, 1, rocke_f64(), 1);
+                else
+                    vec = rocke_b_smem_load_vN_f32(b, lds_buf, sidx, 1, 1);
                 parts[idx_i] = rocke_b_vec_extract(b, vec, 0);
             }
             /* Pairwise power-of-two tree fold. */

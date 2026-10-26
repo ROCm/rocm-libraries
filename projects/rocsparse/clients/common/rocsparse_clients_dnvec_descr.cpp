@@ -28,6 +28,7 @@ rocsparse_clients::dnvec_descr<T>::dnvec_descr(int64_t M, int64_t batch_count, i
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
     this->m_batch_count = batch_count;
     this->m_stride      = stride;
+    stride              = std::max(stride, int64_t(1));
     this->m_host.resize(stride * batch_count);
     this->m_device.resize(stride * batch_count);
     this->m_size = M;

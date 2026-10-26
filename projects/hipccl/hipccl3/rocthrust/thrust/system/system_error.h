@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/error_code.h>
 
 #include <stdexcept>
@@ -47,7 +54,7 @@ namespace system
  *  originate from the operating system or other low-level application program interfaces.
  *
  *  Thrust uses \p system_error to report the error codes returned from device backends
- *  such as the HIP runtime.
+ *  such as the CUDA or HIP runtime.
  *
  *  The following code listing demonstrates how to catch a \p system_error to recover
  *  from an error.
@@ -58,13 +65,13 @@ namespace system
  *  #include <thrust/system.h>
  *  #include <thrust/sort.h>
  *
- *  void terminate_gracefully(void)
+ *  void terminate_gracefully()
  *  {
  *    // application-specific termination code here
  *    ...
  *  }
  *
- *  int main(void)
+ *  int main()
  *  {
  *    try
  *    {
@@ -139,19 +146,19 @@ public:
 
   /*! Destructor does not throw.
    */
-  inline virtual ~system_error(void) noexcept {};
+  inline virtual ~system_error() noexcept {};
 
   /*! Returns an object encoding the error.
    *  \return <tt>ec</tt> or <tt>error_code(ev, ecat)</tt>, from the
    *          constructor, as appropriate.
    */
-  inline const error_code& code(void) const noexcept;
+  inline const error_code& code() const noexcept;
 
   /*! Returns a human-readable string indicating the nature of the error.
    *  \return a string incorporating <tt>code().message()</tt> and the
    *          arguments supplied in the constructor.
    */
-  inline const char* what(void) const noexcept;
+  inline const char* what() const noexcept;
 
   /*! \cond
    */

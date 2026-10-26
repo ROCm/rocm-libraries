@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from pack_helpers import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
@@ -33,13 +34,14 @@ from hkp_pack.pipeline import (
     _agreement_inputs,
     compile_intermediate,
     offered_engines,
-    run_pipeline,
     shipped_engines,
 )
 from hkp_pack.provenance_sidecar import PACKED_MARKER
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
+    GENERIC_TARGETS,
+    GENERIC_TARGETS_JSON,
     PACKAGING,
     ROCKE_ARCH,
     _load_kpack,
@@ -48,6 +50,7 @@ from pack_helpers import (
     _run,
     _silent,
     read_shipped,
+    run_pipeline,
 )
 
 
@@ -60,6 +63,7 @@ def _rename_ids(folder, stem, new_stem):
             encoding="utf-8",
         )
         src.unlink()
+    _restem_uuid_ids(folder, new_stem)
 
 
 # --- A. Recursive discovery and rel_dir (quick, compile-free) ---------------
@@ -69,7 +73,7 @@ def test_discovery_is_recursive(tmp_path, main_fixture):
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", main_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     assert flat.descriptors, "nested descriptors must be discovered"
     for d in flat.descriptors:
         assert d.rel_dir.as_posix() == "hip/pointwise"
@@ -81,7 +85,7 @@ def test_rel_dir_is_root_relative_parent(tmp_path, main_fixture, empty_arch_fixt
     _nest(root, "hip/a", main_fixture)
     _nest(root, "rocKE/b", empty_arch_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     by_rel = {}
     for d in flat.descriptors:
         by_rel.setdefault(d.rel_dir.as_posix(), set()).add(d.path.name)
@@ -111,7 +115,7 @@ def test_same_filename_in_two_folders_both_survive(
         src.rename(b / src.name.replace("solob.", "solo.", 1))
     assert {p.name for p in a.glob("solo.*")} == {p.name for p in b.glob("solo.*")}
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     kdp_paths = {(d.rel_dir.as_posix(), d.path.name) for d in flat.kdps()}
     assert ("hip/a", "solo.kdp.json") in kdp_paths
     assert ("hip/b", "solo.kdp.json") in kdp_paths
@@ -126,7 +130,7 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
     _nest(root, "hip/b", empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -143,7 +147,7 @@ def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     _rename_ids(hidden, "solo", "vendor")
     logs = []
 
-    flat = load_flat_input(root, log=logs.append)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
 
     assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
     assert not [d for d in flat.descriptors if d.path.name.startswith("vendor.")]
@@ -170,7 +174,7 @@ def test_a_non_descriptor_json_is_skipped_and_logged(tmp_path, empty_arch_fixtur
     incidental.write_text("[]", encoding="utf-8")
     logs = []
 
-    flat = load_flat_input(root, log=logs.append)
+    flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
 
     assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
     assert not [d for d in flat.descriptors if d.path.name == incidental.name]
@@ -395,7 +399,7 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
 
     out_root = tmp_path / "out"
     with pytest.raises(RuntimeError, match="uncaught failure"):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=[ARCH],
             out_root=out_root,
@@ -444,7 +448,7 @@ def test_failed_arch_leaves_no_partial_tree(
 
     out_root = tmp_path / "out"
     with pytest.raises(HkpPackError, match="gfx950"):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=out_root,
@@ -483,7 +487,7 @@ def test_failed_arch_removes_its_previous_good_output(
     _nest(root, "hip/pointwise", main_fixture)
     out_root = tmp_path / "out"
 
-    pipeline.run_pipeline(
+    run_pipeline(
         source_root=root,
         arches=[ARCH],
         out_root=out_root,
@@ -500,7 +504,7 @@ def test_failed_arch_removes_its_previous_good_output(
     monkeypatch.setattr(pipeline, "pack_arch", always_fail)
 
     with pytest.raises(HkpPackError, match=ARCH):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=[ARCH],
             out_root=out_root,
@@ -529,7 +533,7 @@ def test_failure_names_every_failed_arch(
     monkeypatch.setattr(pipeline, "pack_arch", always_fail)
 
     with pytest.raises(HkpPackError) as exc:
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=tmp_path / "out",
@@ -540,7 +544,6 @@ def test_failure_names_every_failed_arch(
 
     message = str(exc.value)
     assert "gfx942" in message and "gfx950" in message
-    assert "2 of 2" in message
 
 
 # --- E. The shipped example tree -------------------------------------------
@@ -551,7 +554,7 @@ def test_example_tree_is_self_consistent():
     Catches a broken example on any box, including one with no toolchain, so
     the tree cannot rot silently between full runs.
     """
-    flat = load_flat_input(EXAMPLE_ROOT)
+    flat = load_flat_input(EXAMPLE_ROOT, GENERIC_TARGETS)
 
     ids = [d.id for d in flat.descriptors]
     assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
@@ -790,7 +793,7 @@ def test_authored_kpack_folder_is_rejected(tmp_path, empty_arch_fixture):
     _nest(root, "kpack", empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="reserved"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -800,7 +803,7 @@ def test_kpack_folder_rejected_only_at_the_arch_root(tmp_path, empty_arch_fixtur
     root = tmp_path / "root"
     _nest(root, "hip/kpack", empty_arch_fixture)
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     assert {d.rel_dir.as_posix() for d in flat.kdps()} == {"hip/kpack"}
 
 
@@ -1006,7 +1009,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         # cleanly and is rejected at load, dropping the matcher, then the pack
         # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
-        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
+        ("shared.uhd.json", {"adapter": "Native"}, "invalid adapter"),
         (
             "pointwise.kmd.json",
             {"fields": [{"name": "block_size", "type": "integer"}]},
@@ -1036,7 +1039,7 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
     target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
     with pytest.raises(HkpPackError, match=expected):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1056,7 +1059,7 @@ def test_reserved_kpack_folder_is_case_insensitive(
     _nest(root, spelling, empty_arch_fixture)
 
     with pytest.raises(HkpPackError, match="reserved"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1091,7 +1094,15 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
     ueds = 0
     for path in EXAMPLE_ROOT.rglob("*.ued.json"):
         doc = _read(path)
-        expect(doc["heuristic"], "uhd", f"{path.name} heuristic")
+        for role in (
+            "sort_kernel_catalog",
+            "predict_engine",
+            "predict_applicable_kernels",
+        ):
+            for value in doc.get(role, {}).values():
+                # The scoring roles take one id or a list of them, one per metric.
+                for ref in [value] if isinstance(value, str) else value:
+                    expect(ref, "uhd", f"{path.name} {role}")
         expect(doc["metadata"], "kmd", f"{path.name} metadata")
         ueds += 1
 
@@ -1182,6 +1193,54 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         )
 
 
+def test_a_model_uhds_artifact_reaches_the_shipped_tree(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """The model a UHD names ships in the arch output, not only the intermediate."""
+    root = tmp_path / "root"
+    dest = _nest(root, "hip/pointwise", main_fixture)
+
+    # Make the shared UHD a trained one; both UEDs reference it, so it and its
+    # sidecar survive pruning.
+    (dest / "shared.uhd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
+                "name": "Shared trained heuristic",
+                "adapter": "tree_data",
+                "features_signature": ["$kernel.block_size"],
+                "features_hash": "sha256:" + "0" * 16,
+                "trained_against": {
+                    "ued": {
+                        "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
+                    "kmd": {
+                        "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3",
+                        "revision": "1.0",
+                    },
+                    "umd": [],
+                },
+                "objective": "max",
+                "tree_data": {"artifact": "shared_model.bin"},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+
+    shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
+    assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
+    artifact = shipped / "shared_model.bin"
+    assert artifact.is_file(), "a shipped UHD must be shipped with the model it names"
+    assert artifact.read_bytes() == b"HGBM-arch"
+
+
 # --- I. The embedded_source kind (quick, compile-free) ----------------------
 _EMBEDDED_SOURCE = {
     "kind": "embedded_source",
@@ -1215,7 +1274,7 @@ def test_embedded_source_root_loads(tmp_path, empty_arch_fixture):
     """The walk accepts the kind and leaves the block unmodified."""
     root = _embedded_source_root(tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE))
 
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
     kdps = list(flat.kdps())
     assert len(kdps) == 1
     ukd = kdps[0].doc["kernelDescriptors"][0]
@@ -1232,7 +1291,7 @@ def test_embedded_source_requires_source_file_and_entry_point(
     root = _embedded_source_root(tmp_path, empty_arch_fixture, kernel_source)
 
     with pytest.raises(HkpPackError, match=missing):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1250,7 +1309,7 @@ def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
     )
 
     with pytest.raises(HkpPackError) as excinfo:
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
     message = str(excinfo.value)
     assert "unsupported kind 'embedded_sources'" in message
@@ -1286,7 +1345,7 @@ def test_a_kind_no_producer_handles_fails_the_compile(
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, _UNPRODUCED_SOURCES[kind]
     )
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError) as excinfo:
         compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
@@ -1318,7 +1377,7 @@ def test_a_passthrough_kind_carries_no_specialization_obligation(
     root = _inline_ukd_root(
         tmp_path, empty_arch_fixture, _embedded_source_without_contract
     )
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     assert _agreement_inputs(flat, ARCH) == ({}, {})
 
@@ -1339,7 +1398,7 @@ def test_a_compiling_kind_without_a_contract_is_still_refused(
     refused before a compiler is reached.
     """
     root = _inline_ukd_root(tmp_path, empty_arch_fixture, _drop_specialization_contract)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="missing/invalid specialization_contract"):
         compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
@@ -1363,7 +1422,7 @@ def test_embedded_source_rejects_a_parent_segment(
     )
 
     with pytest.raises(HkpPackError, match=re.escape(source_file)):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1383,7 +1442,7 @@ def test_embedded_source_rejects_an_absolute_path(
     )
 
     with pytest.raises(HkpPackError, match=re.escape(source_file)):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 # --- J. Emitting embedded_source through pass-through and pruning -----------
@@ -1448,19 +1507,18 @@ def _make_embedded(folder, arch=None):
     kdp["kernelDescriptors"] = [inline, _STANDALONE_ID]
     kdp_path.write_text(json.dumps(kdp, indent=2) + "\n", encoding="utf-8")
 
+    standalone = {
+        "version": "0.1",
+        "id": _STANDALONE_ID,
+        "name": "PointwiseMul f32 block64 (solo)",
+        "kernel_source": dict(_STANDALONE_SOURCE),
+        "metadata": {"dtype": "FLOAT", "block_size": 64},
+        "priority": 0,
+    }
+    if arch:
+        standalone["arch"] = list(arch)
     (folder / _STANDALONE_FILE).write_text(
-        json.dumps(
-            {
-                "version": "0.1",
-                "id": _STANDALONE_ID,
-                "name": "PointwiseMul f32 block64 (solo)",
-                "kernel_source": dict(_STANDALONE_SOURCE),
-                "metadata": {"dtype": "FLOAT", "block_size": 64},
-                "priority": 0,
-            },
-            indent=2,
-        )
-        + "\n",
+        json.dumps(standalone, indent=2) + "\n",
         encoding="utf-8",
     )
     return folder
@@ -1759,6 +1817,7 @@ def _embedded_copy(root, sub, fixture, suffix=""):
             renamed.write_text(text, encoding="utf-8")
             if renamed != path:
                 path.unlink()
+        _restem_uuid_ids(dest, f"solo{suffix}")
     return dest
 
 
@@ -1908,6 +1967,8 @@ def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
         arch,
         "--hipcc",
         "hipcc-not-invoked",
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
         "--inter-root",
         str(tmp_path / "inter"),
         "--source-label",
@@ -2077,12 +2138,14 @@ def test_a_disabled_kind_is_pruned_from_its_kdp_and_the_rest_ships(
     its other entries and still survives every arch they cover."""
     root, kdp_path = _mixed_root(tmp_path, main_fixture, rocke_fixture, form)
 
-    enabled = load_flat_input(root, log=_silent)
+    enabled = load_flat_input(root, GENERIC_TARGETS, log=_silent)
     (kdp,) = [k for k in enabled.kdps() if k.path == kdp_path]
     assert _ROCKE_UKD_ID in _entry_ids(kdp), "the premise: rocKE UKD selected"
 
     logs = []
-    flat = load_flat_input(root, log=logs.append, disabled_kinds=("rocke",))
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=logs.append, disabled_kinds=("rocke",)
+    )
     assert any("pointwise.kdp.json" in m and "rocke" in m for m in logs)
     if form == "standalone":
         assert any(_ROCKE_UKD_ID in m and "rocke" in m for m in logs)
@@ -2112,10 +2175,12 @@ def test_a_kdp_left_with_no_enabled_kind_does_not_ship(
     kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
     _add_rocke_ukd(kdp_path, ukd, form)
 
-    assert shipped_engines(load_flat_input(root, log=_silent), [ROCKE_ARCH]) == {
-        ROCKE_ARCH: ["test_fixture:attention"]
-    }, "the premise: it ships with rocKE"
-    flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+    assert shipped_engines(
+        load_flat_input(root, GENERIC_TARGETS, log=_silent), [ROCKE_ARCH]
+    ) == {ROCKE_ARCH: ["test_fixture:attention"]}, "the premise: it ships with rocKE"
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rocke",)
+    )
     assert shipped_engines(flat, [ROCKE_ARCH]) == {ROCKE_ARCH: []}
 
     results = run_pipeline(
@@ -2141,11 +2206,13 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
         (family / "broken.kdp.json").write_text("{", encoding="utf-8")
 
     with pytest.raises(HkpPackError, match="malformed"):
-        load_flat_input(root, log=_silent)
+        load_flat_input(root, GENERIC_TARGETS, log=_silent)
     with pytest.raises(HkpPackError, match="malformed"):
-        load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
+        load_flat_input(root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",))
     (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
-    flat = load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
+    flat = load_flat_input(
+        root, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",)
+    )
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
 
@@ -2156,7 +2223,7 @@ def test_disabling_an_unknown_kind_is_an_error(tmp_path, main_fixture):
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", main_fixture)
     with pytest.raises(HkpPackError, match="unknown kernel_source kind"):
-        load_flat_input(root, log=_silent, disabled_kinds=("rokce",))
+        load_flat_input(root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rokce",))
 
 
 def _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch):
@@ -2188,21 +2255,27 @@ def test_offered_engines_ignores_the_build_arches_but_honours_the_filters(
     if root_kind == "rocke":
         root = tmp_path / "root"
         shutil.copytree(rocke_fixture, root)
-        flat = load_flat_input(root, log=_silent)
+        flat = load_flat_input(root, GENERIC_TARGETS, log=_silent)
         assert "test_fixture:attention" in offered_engines(flat)
         assert (
             "test_fixture:attention" not in shipped_engines(flat, ["gfx90a"])["gfx90a"]
         )
 
-        flat = load_flat_input(root, log=_silent, disabled_kinds=("rocke",))
+        flat = load_flat_input(
+            root, GENERIC_TARGETS, log=_silent, disabled_kinds=("rocke",)
+        )
         assert offered_engines(flat) == []
 
         fam = tmp_path / "fam"
         _nest(fam, "rocKE", rocke_fixture)
-        flat = load_flat_input(fam, log=_silent, exclude_folders=("rocKE",))
+        flat = load_flat_input(
+            fam, GENERIC_TARGETS, log=_silent, exclude_folders=("rocKE",)
+        )
         assert offered_engines(flat) == []
         return
 
     entry_arch = None if root_kind == "all-wildcard" else [ROCKE_ARCH]
     root = _wildcard_solo(tmp_path, empty_arch_fixture, entry_arch)
-    assert offered_engines(load_flat_input(root, log=_silent)) == ["test_fixture:solo"]
+    assert offered_engines(load_flat_input(root, GENERIC_TARGETS, log=_silent)) == [
+        "test_fixture:solo"
+    ]

@@ -134,6 +134,12 @@ int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const c
     return rocke_arch_max_vector_load_dwords(t, dtype);
 }
 
+int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t)
+{
+    /* ArchTarget.async_lds_max_dwords property. */
+    return rocke_arch_async_lds_max_dwords(t);
+}
+
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t)
 {
     /* ArchTarget.max_threads_per_block property. */

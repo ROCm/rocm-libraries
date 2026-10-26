@@ -1,7 +1,11 @@
 #include "explicit_gemm/hipblaslt_matmul.hpp"
 
+#include "hip_util.h"
+#include "unreachable.h"
+
 #include <hipblaslt/hipblaslt.h>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -108,17 +112,117 @@ MatmulDescGuard make_matmul_desc(hipblasComputeType_t compute_type,
 
 using PreferenceGuard = Guard<hipblasLtMatmulPreference_t, &hipblasLtMatmulPreferenceDestroy>;
 
-// Resolve the GEMM algorithm via hipBLASLt's heuristic. This is the recommended
-// usage (vs. passing a null algo): kernel selection is explicit and robust
-// across hipBLASLt versions. We restrict to workspace-free algos because the
-// GEMM is launched with a null workspace. `out_algo` is valid only if true is
-// returned; otherwise the caller falls back to the null-algo default path.
-bool resolve_algo(hipblasLtMatmulDesc_t desc,
-                  hipblasLtMatrixLayout_t a,
-                  hipblasLtMatrixLayout_t b,
-                  hipblasLtMatrixLayout_t c,
-                  hipblasLtMatrixLayout_t d,
-                  hipblasLtMatmulAlgo_t& out_algo)
+// The column-major GEMM a layer runs, in hipBLASLt's terms. A is the weights for fprop and
+// dgrad and the input for wgrad; B is the other operand; D is the output.
+struct GemmProblem
+{
+    hipblasOperation_t trans_a;
+    hipblasOperation_t trans_b;
+    int64_t m;
+    int64_t n;
+    int64_t k;
+    hipDataType abc_type;
+    hipDataType d_type;
+    hipblasComputeType_t compute_type;
+    int64_t lda;
+    int64_t ldb;
+    int64_t ldd;
+    bool a_is_weights;
+};
+
+GemmProblem gemm_problem(const ConvParams& par)
+{
+    const int64_t m_spatial = static_cast<int64_t>(par.n) * par.h * par.w;
+    const int64_t c         = par.c;
+    const int64_t k         = par.k;
+    const auto abc_type     = to_hip_data_type(par.input_type);
+    const auto compute_type = to_compute_type(par.input_type);
+
+    switch(par.direction)
+    {
+    case Direction::Fprop:
+        // Y[M,K] = X[M,C] * W^T[C,K]  (W KRSC row [K,C])
+        // Col: Y^T[K,M] = W^T[K,C] * X^T[C,M] = op(W)[K,C] * op(X)[C,M]
+        return {HIPBLAS_OP_T,
+                HIPBLAS_OP_N,
+                k,
+                m_spatial,
+                c,
+                abc_type,
+                abc_type,
+                compute_type,
+                c,
+                c,
+                k,
+                true};
+    case Direction::Dgrad:
+        // dX[M,C] = dY[M,K] * W[K,C]
+        // Col: dX^T[C,M] = W^T[C,K] * dY^T[K,M]
+        return {HIPBLAS_OP_N,
+                HIPBLAS_OP_N,
+                c,
+                m_spatial,
+                k,
+                abc_type,
+                abc_type,
+                compute_type,
+                c,
+                k,
+                c,
+                true};
+    case Direction::Wgrad:
+        // dW[K,C] = dY^T[K,M] * X[M,C]
+        // Row dW aliases col [C,K] ld=C; dW^T[C,K] = X^T[C,M] * dY[M,K]
+        return {HIPBLAS_OP_N,
+                HIPBLAS_OP_T,
+                c,
+                k,
+                m_spatial,
+                abc_type,
+                HIP_R_32F,
+                compute_type,
+                c,
+                k,
+                c,
+                false};
+    }
+    HIPCONV_UNREACHABLE();
+}
+
+struct GemmDescs
+{
+    LayoutGuard a;
+    LayoutGuard b;
+    LayoutGuard c;
+    LayoutGuard d;
+    MatmulDescGuard matmul;
+};
+
+GemmDescs make_descs(const GemmProblem& g)
+{
+    const bool a_n = g.trans_a == HIPBLAS_OP_N;
+    const bool b_n = g.trans_b == HIPBLAS_OP_N;
+    return {make_col_layout(g.abc_type, a_n ? g.m : g.k, a_n ? g.k : g.m, g.lda),
+            make_col_layout(g.abc_type, b_n ? g.k : g.n, b_n ? g.n : g.k, g.ldb),
+            make_col_layout(g.d_type, g.m, g.n, g.ldd),
+            make_col_layout(g.d_type, g.m, g.n, g.ldd),
+            make_matmul_desc(g.compute_type, g.trans_a, g.trans_b)};
+}
+
+// A failed query means hipBLASLt could not answer; a successful one with no results means
+// the heuristic found no algorithm for the GEMM.
+struct HeuristicOutcome
+{
+    hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
+    int returned           = 0;
+
+    bool found() const { return status == HIPBLAS_STATUS_SUCCESS && returned > 0; }
+    bool none() const { return status == HIPBLAS_STATUS_SUCCESS && returned == 0; }
+};
+
+// The heuristic's top workspace-free algorithm, since the GEMM is launched without a
+// workspace. `out_algo` is valid only if the outcome is found().
+HeuristicOutcome resolve_algo(const GemmDescs& descs, hipblasLtMatmulAlgo_t& out_algo)
 {
     PreferenceGuard pref_guard = [] {
         hipblasLtMatmulPreference_t pref{};
@@ -134,66 +238,37 @@ bool resolve_algo(hipblasLtMatmulDesc_t desc,
     }();
 
     hipblasLtMatmulHeuristicResult_t result{};
-    int returned      = 0;
-    const auto status = hipblasLtMatmulAlgoGetHeuristic(
-        handle(), desc, a, b, c, d, pref_guard.handle, 1, &result, &returned);
-    if(status != HIPBLAS_STATUS_SUCCESS || returned <= 0)
-        return false;
-
-    out_algo = result.algo;
-    return true;
-}
-
-void run_matmul(hipblasOperation_t trans_a,
-                hipblasOperation_t trans_b,
-                int64_t m,
-                int64_t n,
-                int64_t k,
-                hipDataType abc_type,
-                hipDataType d_type,
-                hipblasComputeType_t compute_type,
-                const void* a,
-                int64_t lda,
-                const void* b,
-                int64_t ldb,
-                void* d,
-                int64_t ldd,
-                float alpha,
-                float beta,
-                hipStream_t stream)
-{
-    auto a_desc = make_col_layout(
-        abc_type, trans_a == HIPBLAS_OP_N ? m : k, trans_a == HIPBLAS_OP_N ? k : m, lda);
-    auto b_desc = make_col_layout(
-        abc_type, trans_b == HIPBLAS_OP_N ? k : n, trans_b == HIPBLAS_OP_N ? n : k, ldb);
-    auto c_desc  = make_col_layout(d_type, m, n, ldd);
-    auto d_desc  = make_col_layout(d_type, m, n, ldd);
-    auto mm_desc = make_matmul_desc(compute_type, trans_a, trans_b);
-
-    hipblasLtMatmulAlgo_t algo{};
-    const bool have_algo = resolve_algo(
-        mm_desc.handle, a_desc.handle, b_desc.handle, c_desc.handle, d_desc.handle, algo);
-
-    check_status(hipblasLtMatmul(handle(),
-                                 mm_desc.handle,
-                                 &alpha,
-                                 a,
-                                 a_desc.handle,
-                                 b,
-                                 b_desc.handle,
-                                 &beta,
-                                 d,
-                                 c_desc.handle,
-                                 d,
-                                 d_desc.handle,
-                                 have_algo ? &algo : nullptr,
-                                 nullptr,
-                                 0,
-                                 stream),
-                 "hipblasLtMatmul");
+    HeuristicOutcome outcome{};
+    outcome.status = hipblasLtMatmulAlgoGetHeuristic(handle(),
+                                                     descs.matmul.handle,
+                                                     descs.a.handle,
+                                                     descs.b.handle,
+                                                     descs.c.handle,
+                                                     descs.d.handle,
+                                                     pref_guard.handle,
+                                                     1,
+                                                     &result,
+                                                     &outcome.returned);
+    if(outcome.found())
+        out_algo = result.algo;
+    return outcome;
 }
 
 } // namespace
+
+bool has_algorithm(const ConvParams& par)
+{
+    // Only an empty answer rules the layer out; a failed query is left for the launch to report.
+    try
+    {
+        hipblasLtMatmulAlgo_t algo{};
+        return !resolve_algo(make_descs(gemm_problem(par)), algo).none();
+    }
+    catch(const HipblasltError&)
+    {
+        return true;
+    }
+}
 
 void launch_gemm(const ConvParams& par,
                  const void* in,
@@ -201,80 +276,36 @@ void launch_gemm(const ConvParams& par,
                  void* out,
                  hipStream_t stream)
 {
-    const int64_t m_spatial = static_cast<int64_t>(par.n) * par.h * par.w;
-    const int64_t c         = par.c;
-    const int64_t k         = par.k;
-    const auto abc_type     = to_hip_data_type(par.input_type);
-    const auto compute_type = to_compute_type(par.input_type);
+    const GemmProblem g   = gemm_problem(par);
+    const GemmDescs descs = make_descs(g);
 
-    switch(par.direction)
-    {
-    case Direction::Fprop:
-        // Y[M,K] = X[M,C] * W^T[C,K]  (W KRSC row [K,C])
-        // Col: Y^T[K,M] = W^T[K,C] * X^T[C,M] = op(W)[K,C] * op(X)[C,M]
-        run_matmul(HIPBLAS_OP_T,
-                   HIPBLAS_OP_N,
-                   k,
-                   m_spatial,
-                   c,
-                   abc_type,
-                   abc_type,
-                   compute_type,
-                   wei,
-                   c,
-                   in,
-                   c,
-                   out,
-                   k,
-                   1.0f,
-                   0.0f,
-                   stream);
-        break;
+    hipblasLtMatmulAlgo_t algo{};
+    const HeuristicOutcome heuristic = resolve_algo(descs, algo);
+    // launch() reports this as hipErrorNotSupported; a null algo would only re-ask the same
+    // heuristic and fail with HIPBLAS_STATUS_INTERNAL_ERROR.
+    if(heuristic.none())
+        throw HipError(hipErrorNotSupported, "hipBLASLt has no algorithm for this GEMM");
+    check_status(heuristic.status, "hipblasLtMatmulAlgoGetHeuristic");
 
-    case Direction::Dgrad:
-        // dX[M,C] = dY[M,K] * W[K,C]
-        // Col: dX^T[C,M] = W^T[C,K] * dY^T[K,M]
-        run_matmul(HIPBLAS_OP_N,
-                   HIPBLAS_OP_N,
-                   c,
-                   m_spatial,
-                   k,
-                   abc_type,
-                   abc_type,
-                   compute_type,
-                   wei,
-                   c,
-                   in,
-                   k,
-                   out,
-                   c,
-                   1.0f,
-                   0.0f,
-                   stream);
-        break;
-
-    case Direction::Wgrad:
-        // dW[K,C] = dY^T[K,M] * X[M,C]
-        // Row dW aliases col [C,K] ld=C; dW^T[C,K] = X^T[C,M] * dY[M,K]
-        run_matmul(HIPBLAS_OP_N,
-                   HIPBLAS_OP_T,
-                   c,
-                   k,
-                   m_spatial,
-                   abc_type,
-                   HIP_R_32F,
-                   compute_type,
-                   in,
-                   c,
-                   wei,
-                   k,
-                   out,
-                   c,
-                   1.0f,
-                   0.0f,
-                   stream);
-        break;
-    }
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    check_status(hipblasLtMatmul(handle(),
+                                 descs.matmul.handle,
+                                 &alpha,
+                                 g.a_is_weights ? wei : in,
+                                 descs.a.handle,
+                                 g.a_is_weights ? in : wei,
+                                 descs.b.handle,
+                                 &beta,
+                                 out,
+                                 descs.c.handle,
+                                 out,
+                                 descs.d.handle,
+                                 &algo,
+                                 nullptr,
+                                 0,
+                                 stream),
+                 "hipblasLtMatmul");
 }
 
 } // namespace hipconv::explicit_gemm

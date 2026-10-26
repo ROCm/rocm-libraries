@@ -99,7 +99,7 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size)
+ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
 void generate_sobol_kernel(T*                       data,
                            const size_t             n,
                            const Constant*          direction_vectors,
@@ -114,7 +114,7 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size)
+ROCRAND_INTERNAL_KERNEL __launch_bounds__(block_size)
 void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned long long, Distribution)
 {}
@@ -494,31 +494,32 @@ private:
     std::enable_if_t<IsDevice && !IsScrambled> deallocate()
     {
         hipError_t error = hipFree(m_direction_vectors);
+        // hipErrorInvalidValue is returned when hipFree tries to call an already
+        // deallocated section of memory. This may occur when 'hipDeviceReset()' is
+        // used before the current class' destructor is called.
         if(error != hipErrorInvalidValue)
         {
-            // hipErrorInvalidValue is thrown when hipFree tries to call an already
-            // deallocated section of memory. This may occur when 'hipDeviceReset()' is
-            // used before the current class' deconstructor is called.
-            return;
+            ROCRAND_HIP_FATAL_ASSERT(error);
         }
-        ROCRAND_HIP_FATAL_ASSERT(error);
     }
 
     // Device, scrambled
     template<bool IsDevice = system_type::is_device(), bool IsScrambled = Scrambled>
     std::enable_if_t<IsDevice && IsScrambled> deallocate()
     {
-        hipError_t m_dir_error   = hipFree(m_direction_vectors);
-        hipError_t m_scram_error = hipFree(m_scramble_constants);
-        if((m_dir_error != hipErrorInvalidValue) && (m_scram_error != hipErrorInvalidValue))
+        hipError_t dir_error   = hipFree(m_direction_vectors);
+        hipError_t scram_error = hipFree(m_scramble_constants);
+        // hipErrorInvalidValue is returned when hipFree is given a pointer that was
+        // already deallocated. This may occur when 'hipDeviceReset()' is used before
+        // the current class' destructor is called.
+        if(dir_error != hipErrorInvalidValue)
         {
-            // hipErrorInvalidValue is thrown when hipFree tries to call an already
-            // deallocated section of memory. This may occur when 'hipDeviceReset()' is
-            // used before the current class' deconstructor is called.
-            return;
+            ROCRAND_HIP_FATAL_ASSERT(dir_error);
         }
-        ROCRAND_HIP_FATAL_ASSERT(m_dir_error);
-        ROCRAND_HIP_FATAL_ASSERT(m_scram_error);
+        if(scram_error != hipErrorInvalidValue)
+        {
+            ROCRAND_HIP_FATAL_ASSERT(scram_error);
+        }
     }
 };
 
@@ -549,7 +550,7 @@ public:
         {
             throw status;
         }
-        status = get_constants().get_direction_vectors(&m_scramble_constants);
+        status = get_constants().get_scramble_constants(&m_scramble_constants);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;

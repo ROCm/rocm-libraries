@@ -47,7 +47,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="gather_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y
 *  <tr><td>HIP_R_8I
 *  <tr><td>HIP_R_16F

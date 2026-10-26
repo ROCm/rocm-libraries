@@ -404,7 +404,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--tune` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--arch ARCH` | _none_ | Target gfx architecture. Can also come from `ARCH:` inside a `--list` YAML. Choices: `gfx950`, `gfx950_128cu`, `gfx942`, `gfx942_80cu`, `gfx942_38cu`, `gfx942_20cu`, `gfx942_228cu`. |
+| `--arch ARCH` | _none_ | Target gfx architecture. Can also come from `ARCH:` inside a `--list` YAML. Choices: `gfx950`, `gfx950_128cu`, `gfx942`, `gfx942_80cu`, `gfx942_38cu`, `gfx942_20cu`, `gfx942_228cu`, `gfx1250`, `gfx1250_96cu`, `gfx1250_192cu`, `gfx1250-strict`, `gfx1250-strict_96cu`, `gfx1250-strict_192cu` (A0). The retired `gfx1250v0*` names are still accepted, with a deprecation warning. A0 runs set `HSA_DISABLE_GFX12_STRICT=0`. |
 | `--backend {ductile,tensile}` | `ductile` | Tuning backend used in the configure step. Only used with `--tune`. |
 | `-n, --n_slots INT` | `4` | Max concurrent optimization jobs per device during the optimize step. |
 | `--up_thr FLOAT` | `1.03` | Performance uplift threshold (e.g. `1.03` keeps kernels with ≥3% uplift). |
@@ -587,7 +587,7 @@ my_optimization/
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
 LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
 
-${HIPBLASLT_PATH}/tensilelite/Tensile/bin/TensileMergeLibrary \
+${HIPBLASLT_PATH}/tensilelite/tensilelite/bin/TensileMergeLibrary \
   --no_eff --force_merge True \
   "${LIBRARY_DIR}" my_optimization/final_libs "${LIBRARY_DIR}"
 
@@ -964,7 +964,7 @@ from geko.schemas import GemmType, GemmConfig
 gemm_type = GemmType.from_hipblaslt(
     "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
 )
-# Or from Tensile YAML codes only:
+# Or from tensilelite YAML codes only:
 # gemm_type = GemmType.from_tensile("N", "T", "H", "H", "S")
 
 gemm_config = GemmConfig(
@@ -1226,7 +1226,7 @@ If the benchmark fails, check for:
 
 **Invalid GEMM Types:**
 Check the supported data types in hipBLASLt:
-- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/Tensile/Common/DataType.py)
+- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Common/DataType.py)
 - Verify your log file contains valid `a_type`, `b_type`, `c_type`, and `compute_type` combinations
 - Example valid types: `f16_r`, `bf16_r`, `f32_r`, `f8_r`, `bf8_r`
 
@@ -1344,5 +1344,3 @@ If you want to submit an issue, you can do so on
 ## License
 
 MIT License. Copyright (C) Advanced Micro Devices, Inc.
-
-

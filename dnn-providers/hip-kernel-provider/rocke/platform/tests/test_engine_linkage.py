@@ -4,7 +4,9 @@
 """Archive consumers carry the loader and thread dependencies of the lowerer."""
 
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,20 +27,31 @@ def load_driver(name, path):
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
-@pytest.mark.parametrize("consumer", ["online", "differential", "micro_parity"])
+@pytest.mark.parametrize("consumer", ["differential", "micro_parity"])
 def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer):
-    run = Mock(return_value=SimpleNamespace(returncode=0, stdout=b"", stderr=""))
+    def complete_compile(command, **_kwargs):
+        if "-o" in command:
+            Path(command[command.index("-o") + 1]).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
-    if consumer == "online":
-        online.build_lib(str(tmp_path / "librocke.so"))
-    elif consumer == "differential":
+    if consumer == "differential":
         driver = load_driver(
             "link_test_run_diff",
             PLATFORM / "tests/instances/differential/run_diff.py",
         )
         monkeypatch.setattr(driver, "TMP", tmp_path)
-        assert driver.compile_c("fixture", tmp_path / "librocke_core.a")[0]
+        # Fingerprint invalidation has dedicated differential-runner coverage;
+        # this test isolates link-command construction and cache publication.
+        monkeypatch.setattr(
+            driver, "_native_emitter_fingerprint", lambda *_args, **_kwargs: "fixture"
+        )
+        archive = tmp_path / "librocke_core.a"
+        archive.touch()
+        (tmp_path / "fixture_emit.c").write_text("int main() { return 0; }\n")
+        assert driver.compile_c("fixture", archive, src_dir=tmp_path)[0]
     else:
         driver = load_driver(
             "link_test_run_parity", PLATFORM / "tests/instances/parity/run_parity.py"
@@ -64,6 +77,115 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             assert command.index(flag) > archive_index
         else:
             assert flag not in command
+
+
+@pytest.mark.parametrize(
+    ("platform", "library_name"),
+    [("linux", "librocke.so"), ("darwin", "librocke.dylib"), ("win32", "rocke.dll")],
+)
+def test_online_build_uses_the_cmake_shared_target(
+    monkeypatch, tmp_path, platform, library_name
+):
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if "--build" in command:
+            stage = tmp_path / f".stage-{os.getpid()}"
+            (stage / library_name).touch()
+        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+
+    monkeypatch.setattr(online.subprocess, "run", run)
+    monkeypatch.setattr(online.sys, "platform", platform)
+    destination = tmp_path / library_name
+
+    assert online.build_lib(str(destination)) == str(destination)
+    assert destination.is_file()
+    build = next(command for command in calls if "--build" in command)
+    assert build[build.index("--target") + 1] == "rocke_shared"
+    configure = next(command for command in calls if "-S" in command)
+    assert "-DROCKE_BUILD_SHARED_ENGINE=ON" in configure
+    assert "-DBUILD_TESTING=ON" in configure
+
+
+@pytest.mark.skipif(
+    shutil.which("cmake") is None or shutil.which("ctest") is None,
+    reason="CMake and CTest required",
+)
+def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path):
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(PLATFORM),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ctest_dir = tmp_path / "installed-ctest"
+    ctest_dir.mkdir()
+    shutil.copy2(
+        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    )
+    executable_suffix = ".exe" if os.name == "nt" else ""
+    expected_artifacts = {
+        "ROCKE_REPLAY_CLI": (
+            f"../tests/portable_ir/rocke_portable_ir_replay_cli{executable_suffix}"
+        ),
+        "ROCKE_PROVENANCE_MANIFEST": (
+            "../tests/portable_ir/rocke_portable_ir_provenance.txt"
+        ),
+        "ROCKE_STORAGE_TEST": f"../rocke_storage{executable_suffix}",
+        "ROCKE_IR_TYPES_TEST": f"../rocke_ir_types{executable_suffix}",
+        "ROCKE_NONTEMPORAL_HIP_TEST": f"../rocke_nontemporal_hip{executable_suffix}",
+        "ROCKE_UNSIGNED_INT_OPS_CLI": f"../rocke_unsigned_int_ops{executable_suffix}",
+        "ROCKE_ARCH_TARGET_TEST_EXE": (
+            f"../rocke_arch_target_identity{executable_suffix}"
+        ),
+        "ROCKE_BUFFER_RSRC_HIP_TEST": (f"../rocke_buffer_rsrc_hip{executable_suffix}"),
+    }
+
+    for rocm_path in (None, tmp_path / "synthetic-rocm"):
+        ctest_env = dict(os.environ)
+        if rocm_path is None:
+            ctest_env.pop("ROCM_PATH", None)
+        else:
+            ctest_env["ROCM_PATH"] = str(rocm_path)
+        listed = subprocess.run(
+            ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=ctest_env,
+        )
+        tests = json.loads(listed.stdout)["tests"]
+        rocke_pytest = next(test for test in tests if test["name"] == "rocke_pytest")
+        properties = {
+            prop["name"]: prop["value"] for prop in rocke_pytest["properties"]
+        }
+        entries = properties["ENVIRONMENT"]
+        pairs = [item.split("=", 1) for item in entries]
+        names = [name for name, _ in pairs]
+        assert len(names) == len(set(names))
+        environment = dict(pairs)
+
+        assert environment.pop("PYTHONPATH") == "."
+        if sys.platform == "linux" and rocm_path is not None:
+            compiler_path = environment.pop("PATH").split(os.pathsep)
+            assert compiler_path[:2] == [
+                str(rocm_path / "bin"),
+                str(rocm_path / "lib/llvm/bin"),
+            ]
+            assert environment.pop("HIP_DEVICE_LIB_PATH") == str(
+                rocm_path / "lib/llvm/amdgcn/bitcode"
+            )
+        assert environment == expected_artifacts
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

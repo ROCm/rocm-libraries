@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// GPU-vs-CPU tests for the ragged SDPA forward GPU reference (RFC-0014: packed [B,S,H,D] plus
+// GPU-vs-CPU tests for the ragged SDPA forward GPU reference (RFC-0014: packed BSHD plus
 // ragged_offset).
 //
 // The GPU reference takes device tensors and explicit ragged_offset aux. The CPU mirror reads the
@@ -87,7 +87,7 @@ Tensor<int32_t> makeRaggedOffset(const std::vector<int64_t>& cum, int64_t seqStr
     return off;
 }
 
-// View a borrowed packed host buffer as an RFC-0014 ragged tensor ([B, S, H, D], BSHD_SEQ_AXIS).
+// View a borrowed packed host buffer as an RFC-0014 ragged tensor ([B, H, S, D], SDPA_SEQ_AXIS).
 template <typename T>
 ShallowRaggedTensor<T> wrapRagged(T* buf,
                                   const std::vector<int64_t>& dims,
@@ -95,7 +95,7 @@ ShallowRaggedTensor<T> wrapRagged(T* buf,
                                   const std::vector<int64_t>& cum)
 {
     return ShallowRaggedTensor<T>(
-        buf, dims, raggedStrides(dims), BSHD_SEQ_AXIS, makeRaggedOffsetAux(cum, seqStride));
+        buf, dims, raggedStrides(dims), SDPA_SEQ_AXIS, makeRaggedOffsetAux(cum, seqStride));
 }
 
 // Randomize only the packed prefix (first `count` elements) of a padded buffer.
@@ -320,17 +320,17 @@ TEST(TestGpuSdpaRaggedFwdBfp16, RaggedHeadDim192xV128GqaCausal)
 }
 
 // The layout of the hd192 ragged golden bundles (quick/SdpaFwd/bshd/bf16/hd192_*_ragged): literal
-// [B, S, H, D] dims with contiguous strides, D = 192 / Dv = 128, bottom-right causal. S_max is
+// [B, H, S, D] dims with BSHD strides, D = 192 / Dv = 128, bottom-right causal. S_max is
 // 64 rather than 256 to keep the CPU mirror fast, and the lengths differ per batch.
 TEST(TestGpuSdpaRaggedFwdBfp16, RfcLayoutHd192BundleShape)
 {
     SKIP_IF_NO_DEVICES();
 
     const std::vector<int64_t> seqLens = {64, 40, 17};
-    const std::vector<int64_t> qkDims = {3, 64, 2, 192};
-    const std::vector<int64_t> qkStrides = {24576, 384, 192, 1};
-    const std::vector<int64_t> voDims = {3, 64, 2, 128};
-    const std::vector<int64_t> voStrides = {16384, 256, 128, 1};
+    const std::vector<int64_t> qkDims = {3, 2, 64, 192};
+    const std::vector<int64_t> qkStrides = {24576, 192, 384, 1};
+    const std::vector<int64_t> voDims = {3, 2, 64, 128};
+    const std::vector<int64_t> voStrides = {16384, 128, 256, 1};
     const auto cum = cumTokens(seqLens);
     const auto total = cum.back();
 
@@ -349,7 +349,7 @@ TEST(TestGpuSdpaRaggedFwdBfp16, RfcLayoutHd192BundleShape)
                               const std::vector<int64_t>& strides,
                               int64_t tokenWidth) {
             return ShallowRaggedTensor<bfloat16>(
-                buf, dims, strides, /*seqAxis=*/1, makeRaggedOffsetAux(cum, tokenWidth));
+                buf, dims, strides, SDPA_SEQ_AXIS, makeRaggedOffsetAux(cum, tokenWidth));
         };
         auto qR = wrap(q.memory().hostData(), qkDims, qkStrides, 384);
         auto kR = wrap(k.memory().hostData(), qkDims, qkStrides, 384);
@@ -409,7 +409,7 @@ TEST(TestGpuSdpaRaggedFwdFp32, RaggedLseOutput)
 
     auto offQ = makeRaggedOffset(cumQ, numHeads * headDim);
     auto offKv = makeRaggedOffset(cumKv, numHeads * headDim);
-    // Ragged LSE is [B,S,H,1] packed by token with seq stride H, so its offsets are cum * H.
+    // Ragged LSE is [B,H,S,1] packed by token with seq stride H, so its offsets are cum * H.
     auto offLse = makeRaggedOffset(cumQ, numHeads);
     GpuFpReferenceSdpaRagged::fpropRagged<float, float, float, float, float>(
         q, k, v, oGpu, offQ, offKv, offKv, offQ, std::nullopt, -1, -1, true, &lseGpu, &offLse);
@@ -429,7 +429,7 @@ namespace
 
 constexpr float LSE_SENTINEL = -99.0f;
 
-// Dense LSE, the frontend's default stats layout: contiguous [B, Sq_max, H, 1], so batch b
+// Dense LSE, the frontend's default stats layout: contiguous [B, H, Sq_max, 1], so batch b
 // starts at b * Sq_max * H whatever the Q packing. Both LSE buffers start at a sentinel, so
 // padding rows must stay untouched and a misaddressed write shows up as a mismatch.
 // With zeroQk every score is 0, so a valid row's LSE is log(seqKv[b]).
@@ -948,13 +948,13 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnLseShorterThanQ)
     EXPECT_FALSE(throwsOnQTokens({0, 2, 3}, /*lseSq=*/2));
 }
 
-// A pre-RFC [B, H, S, D] tensor with BSHD strides is rejected. H == S, and the offsets are in
-// units of strides[1], so the offset and S_max checks alone would accept it.
-TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnHeadsBeforeSequenceLayout)
+// A [B, S, H, D] tensor with contiguous strides is rejected. H == S, and the offsets are in
+// units of strides[2], so the offset and S_max checks alone would accept it.
+TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnSequenceBeforeHeadsLayout)
 {
     SKIP_IF_NO_DEVICES();
-    const std::vector<int64_t> dims = {1, 4, 4, 16}; // [B, H, S, D]
-    const std::vector<int64_t> strides = {256, 16, 64, 1};
+    const std::vector<int64_t> dims = {1, 4, 4, 16}; // [B, S, H, D]
+    const std::vector<int64_t> strides = {256, 64, 16, 1};
     Tensor<float> q(dims, strides);
     Tensor<float> k(dims, strides);
     Tensor<float> v(dims, strides);
@@ -971,7 +971,7 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnHeadsBeforeSequenceLayout)
 namespace
 {
 
-// Runs fp32 fpropRagged on views with the given dims (contiguous strides) and all-zero offset
+// Runs fp32 fpropRagged on views with the given dims (token-major strides) and all-zero offset
 // tables. Every batch is empty, so no tensor element is read and valid shapes launch nothing.
 // The views are ShallowGpuTensors, as on the plan path: unlike Tensor they accept a zero dim,
 // so the reference's own checks are what reject it. offsetRows overrides the tables' B + 1.
@@ -983,20 +983,15 @@ std::string shapeError(const std::vector<int64_t>& qDims,
                        int64_t offsetRows = -1,
                        bool lseOffsetWithoutLse = false)
 {
-    const auto contiguous = [](const std::vector<int64_t>& dims) {
-        std::vector<int64_t> strides(dims.size(), 1);
-        for(size_t i = dims.size() - 1; i > 0; --i)
-        {
-            strides[i - 1] = strides[i] * dims[i];
-        }
-        return strides;
+    const auto stridesOf = [](const std::vector<int64_t>& dims) {
+        return dims.size() == 4 ? raggedStrides(dims) : generateStrides(dims);
     };
     Tensor<float> backing({1});
     void* mem = backing.memory().deviceData();
-    hipdnn_gpu_ref::ShallowGpuTensor<float> q(mem, qDims, contiguous(qDims));
-    hipdnn_gpu_ref::ShallowGpuTensor<float> k(mem, kDims, contiguous(kDims));
-    hipdnn_gpu_ref::ShallowGpuTensor<float> v(mem, vDims, contiguous(vDims));
-    hipdnn_gpu_ref::ShallowGpuTensor<float> o(mem, oDims, contiguous(oDims));
+    hipdnn_gpu_ref::ShallowGpuTensor<float> q(mem, qDims, stridesOf(qDims));
+    hipdnn_gpu_ref::ShallowGpuTensor<float> k(mem, kDims, stridesOf(kDims));
+    hipdnn_gpu_ref::ShallowGpuTensor<float> v(mem, vDims, stridesOf(vDims));
+    hipdnn_gpu_ref::ShallowGpuTensor<float> o(mem, oDims, stridesOf(oDims));
     Tensor<int32_t> off({offsetRows >= 0 ? offsetRows : qDims[0] + 1, 1, 1, 1});
     off.fillWithValue(0);
     try
@@ -1037,7 +1032,7 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnBadShapes)
     };
 
     EXPECT_EQ(shapeError(d, d, d, d), "");
-    expectError(shapeError({2, 4, 64}, d, d, d), "rank-4 [B, S, H, D]");
+    expectError(shapeError({2, 4, 64}, d, d, d), "rank-4 [B, H, S, D]");
     expectError(shapeError(d, d, d, d, /*offsetRows=*/2), "[B+1, 1, 1, 1]");
     expectError(shapeError(raggedDims(2, 4, 4, 0), raggedDims(2, 4, 4, 0), d, d),
                 "all dimensions must be positive");
@@ -1104,7 +1099,7 @@ void checkTokenOffsets(const std::vector<int64_t>& seqQ,
                              const std::shared_ptr<ITensor>& table,
                              int64_t multiplier) {
             return ShallowRaggedTensor<float>(
-                buf, dims, raggedStrides(dims), BSHD_SEQ_AXIS, table, std::nullopt, multiplier);
+                buf, dims, raggedStrides(dims), SDPA_SEQ_AXIS, table, std::nullopt, multiplier);
         };
         auto qR = wrap(q.memory().hostData(), qDims, qoTable, mult.q);
         auto kR = wrap(k.memory().hostData(), kDims, kvTable, mult.k);
@@ -1242,27 +1237,28 @@ TEST(TestGpuSdpaRaggedFwdFp32, DistinctKAndVHeadCounts)
 namespace
 {
 
-// Token-major layouts other than contiguous [B, S, H, D]. Both pass the RFC-0014 layout check.
+// Token-major layouts other than BSHD-strided [B, H, S, D]. Both pass the RFC-0014 layout check.
 enum class TokenLayout
 {
-    PADDED_TOKEN_STRIDE, // strides[1] = H * D + 8: gaps between tokens
-    DIM_MAJOR_TOKEN, // inside a token, D is the outer axis: strides {.., H * D, 1, H}
+    PADDED_TOKEN_STRIDE, // strides[2] = H * D + 8: gaps between tokens
+    DIM_MAJOR_TOKEN, // inside a token, D is the outer axis: strides {.., 1, H * D, H}
 };
 
 std::vector<int64_t> tokenLayoutStrides(const std::vector<int64_t>& dims, TokenLayout layout)
 {
-    const auto heads = dims[2];
+    const auto heads = dims[1];
+    const auto seq = dims[2];
     const auto dim = dims[3];
     if(layout == TokenLayout::PADDED_TOKEN_STRIDE)
     {
         const auto tokenStride = heads * dim + 8;
-        return {dims[1] * tokenStride, tokenStride, dim, 1};
+        return {seq * tokenStride, dim, tokenStride, 1};
     }
-    return {dims[1] * heads * dim, heads * dim, 1, heads};
+    return {seq * heads * dim, 1, heads * dim, heads};
 }
 
 // fp32 self-shaped attention (Hk = Hv = H, Dv = D) on non-contiguous token-major tensors.
-// Offsets are cum * strides[1]. Only valid tokens are compared, through the strides.
+// Offsets are cum * strides[2]. Only valid tokens are compared, through the strides.
 void checkRaggedTokenLayout(const std::vector<int64_t>& seqQ,
                             const std::vector<int64_t>& seqKv,
                             int64_t numHeads,
@@ -1285,14 +1281,17 @@ void checkRaggedTokenLayout(const std::vector<int64_t>& seqQ,
     k.fillWithRandomValues(-1.0f, 1.0f, SEED_K);
     v.fillWithRandomValues(-1.0f, 1.0f, SEED_V);
 
-    std::vector<float> oCpuBack(static_cast<size_t>(cumQ.back() * qStrides[1]), 0.0f);
+    std::vector<float> oCpuBack(static_cast<size_t>(cumQ.back() * raggedSeqStride(qStrides)), 0.0f);
     {
         const auto wrap = [](float* buf,
                              const std::vector<int64_t>& dims,
                              const std::vector<int64_t>& strides,
                              const std::vector<int64_t>& cum) {
-            return ShallowRaggedTensor<float>(
-                buf, dims, strides, BSHD_SEQ_AXIS, makeRaggedOffsetAux(cum, strides[1]));
+            return ShallowRaggedTensor<float>(buf,
+                                              dims,
+                                              strides,
+                                              SDPA_SEQ_AXIS,
+                                              makeRaggedOffsetAux(cum, raggedSeqStride(strides)));
         };
         auto qR = wrap(q.memory().hostData(), qDims, qStrides, cumQ);
         auto kR = wrap(k.memory().hostData(), kvDims, kvStrides, cumKv);
@@ -1301,8 +1300,8 @@ void checkRaggedTokenLayout(const std::vector<int64_t>& seqQ,
         CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(qR, kR, vR, oR);
     }
 
-    auto offQ = makeRaggedOffset(cumQ, qStrides[1]);
-    auto offKv = makeRaggedOffset(cumKv, kvStrides[1]);
+    auto offQ = makeRaggedOffset(cumQ, raggedSeqStride(qStrides));
+    auto offKv = makeRaggedOffset(cumKv, raggedSeqStride(kvStrides));
     GpuFpReferenceSdpaRagged::fpropRagged<float, float, float, float, float>(
         q, k, v, oGpu, offQ, offKv, offKv, offQ);
 
@@ -1314,8 +1313,8 @@ void checkRaggedTokenLayout(const std::vector<int64_t>& seqQ,
         {
             for(int64_t d = 0; d < headDim; ++d)
             {
-                const auto i
-                    = static_cast<size_t>(token * qStrides[1] + h * qStrides[2] + d * qStrides[3]);
+                const auto i = static_cast<size_t>(token * raggedSeqStride(qStrides)
+                                                   + h * qStrides[1] + d * qStrides[3]);
                 EXPECT_NEAR(g[i], oCpuBack[i], tolerance)
                     << "output mismatch at token " << token << " head " << h << " dim " << d;
             }

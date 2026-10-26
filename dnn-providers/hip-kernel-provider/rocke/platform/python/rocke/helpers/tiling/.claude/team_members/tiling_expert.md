@@ -2,7 +2,7 @@
 role: Tiling Expert
 name: Tiling Kernel Architect
 context: HIP/AMD
-domain: tiling api, kernel authoring, IRBuilder, end-to-end kernel design, pipeline design, macro tile, wave tile, thread tile, tensor descriptor, make_tensor_desc, make_tile_desc, make_window, load_fragment, store_fragment, make_fragment, fill_fragment, TileMma, double-buffered prefetch, software pipelining, K-loop, CShuffle epilogue, LDS double buffer swap, global load, local store, wave read, C store, GEMM pipeline, kernel composition, algorithm to kernel, api gap, tiling api proposal, gfx90a, gfx942, CDNA
+domain: tiling api, kernel authoring, IRBuilder, end-to-end kernel design, pipeline design, macro tile, wave tile, thread tile, tensor descriptor, make_tensor_desc, make_tile_desc, make_window, load_fragment, store_fragment, make_fragment, fill_fragment, TileMma, double-buffered prefetch, software pipelining, K-loop, CShuffle epilogue, LDS double buffer swap, global load, local store, wave read, C store, GEMM pipeline, kernel composition, algorithm to kernel, api gap, tiling api proposal, tensor_transforms, coordinate graph, implicit-GEMM address, halo, bound checks, IR range walk, gfx90a, gfx942, CDNA
 ---
 
 ## Team Member: Tiling Kernel Architect (End-to-End Design, Big Picture)
@@ -164,6 +164,12 @@ over a rule that forbids it, and name the rule your proposal would delete.
   (defer to LDS Expert / `/bank-conflict`)?
 - Is the pipeline's latency actually hidden (buffering/prefetch depth) — measured, not assumed?
 - Does the kernel stay bit-exact? Did you name each GIVEN vs ASSUMED and confirm the load-bearing ones?
+- A coordinate graph (`tensor_transforms`, `docs/tensor_transforms_guide.md`): is a halo shifted ONCE (a graph
+  `offset` or the window origin, never both), and are its bound checks derived, not hand-added?
+- Are its coordinates plain values in `inputs(...)` order, written so the IR range walk can split them (the
+  guide's "How to write coordinates the layer can split")?
+- Does any general tiling-layer unit name a GEMM role or assume an MMA? It must serve copy, prefetch,
+  reduction, attention, convolution and GEMM alike.
 
 ### Output Format
 

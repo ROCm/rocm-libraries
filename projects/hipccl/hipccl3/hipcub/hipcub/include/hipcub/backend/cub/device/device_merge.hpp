@@ -1,6 +1,6 @@
 /******************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Copyright (c) 2025-2026, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,6 +33,9 @@
 
 #include <cub/device/device_merge.cuh> // IWYU pragma: export
 
+#include <cuda/std/cstdint> // IWYU pragma: export
+using ::cuda::std::int64_t;
+
 BEGIN_HIPCUB_NAMESPACE
 
 struct DeviceMerge
@@ -44,11 +47,11 @@ struct DeviceMerge
              typename CompareOp = ::cuda::std::less<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t MergeKeys(void*          d_temp_storage,
-                                std::size_t&   temp_storage_bytes,
+                                size_t&        temp_storage_bytes,
                                 KeyIteratorIn1 keys_in1,
-                                int            num_keys1,
+                                int64_t        num_keys1,
                                 KeyIteratorIn2 keys_in2,
-                                int            num_keys2,
+                                int64_t        num_keys2,
                                 KeyIteratorOut keys_out,
                                 CompareOp      compare_op = {},
                                 hipStream_t    stream     = 0)
@@ -74,13 +77,13 @@ struct DeviceMerge
              typename CompareOp = ::cuda::std::less<>>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t MergePairs(void*            d_temp_storage,
-                                 std::size_t&     temp_storage_bytes,
+                                 size_t&          temp_storage_bytes,
                                  KeyIteratorIn1   keys_in1,
                                  ValueIteratorIn1 values_in1,
-                                 int              num_keys1,
+                                 int64_t          num_keys1,
                                  KeyIteratorIn2   keys_in2,
                                  ValueIteratorIn2 values_in2,
-                                 int              num_keys2,
+                                 int64_t          num_keys2,
                                  KeyIteratorOut   keys_out,
                                  ValueIteratorOut values_out,
                                  CompareOp        compare_op = {},

@@ -35,6 +35,11 @@ public:
         return explicit_gemm::is_patch_embedding(par);
     }
 
+    bool runs_on_current_device(const hipconv::ConvParams& par) const override
+    {
+        return explicit_gemm::patch_embed_has_algorithm(par);
+    }
+
     size_t get_workspace_size(const hipconv::ConvParams& par) const override
     {
         return explicit_gemm::patch_embed_workspace_bytes(par);

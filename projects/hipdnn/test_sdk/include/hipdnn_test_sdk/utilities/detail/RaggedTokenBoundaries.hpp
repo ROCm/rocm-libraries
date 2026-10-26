@@ -8,29 +8,32 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+
 namespace hipdnn_test_sdk::detail
 {
 
-// RFC-0014 packs a ragged tensor token by token: rank-4 [B, S, H, D] with the sequence the
-// outermost axis after batch. The seq stride (strides[1]) must therefore cover one token's whole
-// H x D block, so tokens never overlap. A [B, H, S, D] tensor with BSHD strides fails this,
-// because its axis-1 stride is D.
+// RFC-0014 packs a ragged tensor token by token: logical rank-4 [B, H, S, D] ragged along
+// SDPA_SEQ_AXIS, physically BSHD so the sequence is the outermost axis after batch. The seq
+// stride (strides[2]) must therefore cover one token's whole H x D block, so tokens never
+// overlap. A contiguous BHSD tensor fails this, because its seq stride is D.
 inline bool isTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
                                      const std::vector<int64_t>& strides)
 {
+    constexpr auto SEQ_AXIS = static_cast<size_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
     if(dims.size() != 4 || strides.size() != 4)
     {
         return false;
     }
     int64_t tokenSpan = 1; // elements from a token's first to last element, inclusive
-    for(size_t i = 2; i < dims.size(); ++i)
+    for(size_t i = 1; i < dims.size(); ++i)
     {
-        if(dims[i] > 0)
+        if(i != SEQ_AXIS && dims[i] > 0)
         {
             tokenSpan += (dims[i] - 1) * strides[i];
         }
     }
-    return strides[1] >= tokenSpan;
+    return strides[SEQ_AXIS] >= tokenSpan;
 }
 
 inline void requireTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
@@ -41,8 +44,8 @@ inline void requireTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
     if(!isTokenMajorRaggedLayout(dims, strides))
     {
         throw std::invalid_argument(who + ": " + name
-                                    + " must be [B, S, H, D] packed token by token (RFC-0014): "
-                                      "strides[1] must cover one token's H x D block");
+                                    + " must be [B, H, S, D] packed token by token (RFC-0014): "
+                                      "strides[2] must cover one token's H x D block");
     }
 }
 
@@ -50,7 +53,7 @@ inline void requireTokenMajorRaggedLayout(const std::vector<int64_t>& dims,
 // offset[b] / seqStride. Tensors with different token widths share a packing but not element
 // offsets, so cross-tensor checks compare tokens.
 // Throws std::invalid_argument unless seqStride > 0, offset[0] == 0, each offset is a whole
-// number of tokens, offsets never decrease, and no batch is longer than sMax (dims()[1]).
+// number of tokens, offsets never decrease, and no batch is longer than sMax (dims()[2]).
 inline std::vector<int64_t> raggedTokenBoundaries(const std::vector<int64_t>& elementOffsets,
                                                   int64_t seqStride,
                                                   int64_t sMax,

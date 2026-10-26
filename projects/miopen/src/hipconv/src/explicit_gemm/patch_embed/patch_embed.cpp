@@ -189,6 +189,11 @@ bool is_patch_embedding(const ConvParams& par)
     return par.groups == 1;
 }
 
+bool patch_embed_has_algorithm(const ConvParams& par)
+{
+    return has_algorithm(gemm_params(par));
+}
+
 std::size_t patch_embed_workspace_bytes(const ConvParams& par)
 {
     const std::size_t rows  = static_cast<std::size_t>(par.n) * par.p * par.q;

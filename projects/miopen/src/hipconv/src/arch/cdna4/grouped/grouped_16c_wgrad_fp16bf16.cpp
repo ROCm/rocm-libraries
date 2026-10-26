@@ -1,4 +1,6 @@
 #include "conv_kernel_table.h"
+#include "kv_descriptor.h"
+#include "direction_field.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -532,6 +534,18 @@ public:
         launch.grid       = dim3(blocks_c, blocks_q, par.n);
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", cfg_.group_size);
+        d.int_field("waves_per_wg", cfg_.waves_per_wg);
+        d.int_field("wave_q32", cfg_.wave_q32, /*default=*/1);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        direction_field(d, cfg_.direction, Direction::Wgrad);
+        return d;
     }
 
 protected:

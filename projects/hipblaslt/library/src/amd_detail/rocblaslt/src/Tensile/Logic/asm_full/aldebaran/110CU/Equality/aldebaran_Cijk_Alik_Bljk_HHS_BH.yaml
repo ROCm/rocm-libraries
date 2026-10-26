@@ -231,6 +231,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqGZ9OKMd
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT128x192x16_MI32x32x8x1_SN_MIWT2_3_SU0_SUS0_WSGRA1_WSGRB1_WGM4
   1LDSBuffer: 1
   ActivationFuncCall: false
@@ -349,6 +350,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 1
+  SolutionUID: 0uTnqGZ92JL5
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT256x128x16_MI32x32x8x1_SN_MIWT4_2_SU0_SUS0_WSGRA1_WSGRB1_WGM8
   ActivationFuncCall: false
   AssignedDerivedParameters: true
@@ -464,6 +466,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 2
+  SolutionUID: 0uTnqGZ8wWPt
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT96x128x16_MI32x32x8x1_SN_MIWT3_1_SU0_SUS0_WSGRA1_WSGRB0_WGM32
   1LDSBuffer: 1
   ActivationFuncCall: false
@@ -580,6 +583,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 3
+  SolutionUID: 0uTnqGZ96Bz3
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT96x128x16_MI32x32x8x1_SN_MIWT3_1_SU0_SUS0_WSGRA0_WSGRB1_WGM1
   1LDSBuffer: 1
   ActivationFuncCall: false
@@ -696,6 +700,7 @@ Solutions:
   _staggerStrideShift: 0
   allowLRVWforTLUandMI: false
 - SolutionIndex: 4
+  SolutionUID: 0uTnqGZ8eDmP
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_MT32x64x32_MI16x16x16x1_SN_MIWT1_2_SU0_SUS0_WSGRA1_WSGRB0_WGM1
   ActivationFuncCall: false
   AssignedDerivedParameters: true

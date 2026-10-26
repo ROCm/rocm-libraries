@@ -603,17 +603,7 @@ public:
 
     std::string_view name() const override { return "direct_wgrad"; }
 
-    std::string describe_config() const override { return ConfigMatcher(cfg_).describe(); }
-
-    bool matches_descriptor(std::string_view spec, std::string* error) const override
-    {
-        ConfigMatcher matcher(cfg_);
-        if(matcher.match(spec))
-            return true;
-        if(error)
-            *error = matcher.error();
-        return false;
-    }
+    KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     // Does not chain to DirectConvKernel::is_applicable.
     // That base serves the fprop/dgrad families and rejects Wgrad outright.

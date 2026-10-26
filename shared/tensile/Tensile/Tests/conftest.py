@@ -144,14 +144,12 @@ def useGlobalParameters(tensile_args):
                 cCompiler,
                 assembler,
                 offloadBundler,
-                hipconfig,
                 deviceEnumerator
             ) = validateToolchain(
                 args.CxxCompiler,
                 args.CCompiler,
                 args.Assembler,
                 args.OffloadBundler,
-                ToolchainDefaults.HIP_CONFIG,
                 ToolchainDefaults.DEVICE_ENUMERATOR
             )
             params = {
@@ -159,7 +157,6 @@ def useGlobalParameters(tensile_args):
                 "CCompiler": cCompiler,
                 "Assembler": assembler,
                 "OffloadBundler": offloadBundler,
-                "HipConfig": hipconfig,
                 "ROCmAgentEnumeratorPath": deviceEnumerator,
             }
             Common.assignGlobalParameters(params)

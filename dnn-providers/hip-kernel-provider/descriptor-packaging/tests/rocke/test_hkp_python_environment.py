@@ -15,7 +15,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from cmake_harness import SuppliedPython, consumer_preamble, write_module
 
 pytestmark = pytest.mark.quick

@@ -1425,6 +1425,34 @@ template<class T>
 struct is_compound : std::integral_constant<bool, ::rocprim::traits::get<T>().is_compound()>
 {};
 
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+
+template<class T>
+constexpr bool is_floating_point_v = is_floating_point<T>::value;
+
+template<class T>
+constexpr bool is_integral_v = is_integral<T>::value;
+
+template<class T>
+constexpr bool is_arithmetic_v = is_arithmetic<T>::value;
+
+template<class T>
+constexpr bool is_fundamental_v = is_fundamental<T>::value;
+
+template<class T>
+constexpr bool is_unsigned_v = is_unsigned<T>::value;
+
+template<class T>
+constexpr bool is_signed_v = is_unsigned<T>::value;
+
+template<class T>
+constexpr bool is_scalar_v = is_scalar<T>::value;
+
+template<class T>
+constexpr bool is_compound_v = is_compound<T>::value;
+
+#endif
+
 static_assert(::rocprim::traits::radix_key_codec::radix_key_fundamental<int>::value,
               "'int' should be fundamental");
 static_assert(!::rocprim::traits::radix_key_codec::radix_key_fundamental<int*>::value,
@@ -1435,6 +1463,13 @@ static_assert(::rocprim::traits::radix_key_codec::radix_key_fundamental<rocprim:
               "'rocprim::uint128_t' should be fundamental");
 static_assert(!::rocprim::traits::radix_key_codec::radix_key_fundamental<rocprim::int128_t*>::value,
               "'rocprim::int128_t*' should not be fundamental");
+
+static_assert(::rocprim::is_floating_point_v<__half>, "__half should be a floating point type");
+static_assert(::rocprim::is_floating_point_v<bfloat16>, "bfloat16 should be a floating point type");
+static_assert(::rocprim::is_integral_v<::rocprim::int128_t>,
+              "::rocprim::int128_t should be a integral type");
+static_assert(::rocprim::is_integral_v<::rocprim::uint128_t>,
+              "::rocprim::uint128_t should be a integral type");
 
 END_ROCPRIM_NAMESPACE
 

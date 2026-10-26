@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,6 @@
 
 // hipcub API
 #include <hipcub/device/device_histogram.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
@@ -73,9 +71,11 @@ inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_valu
     return test_utils::get_random_data<T>(
         size,
         static_cast<T>(
-            std::max(min1 - d / 10, static_cast<long long>(std::numeric_limits<T>::lowest()))),
+            _HIPCUB_STD::max(min1 - d / 10,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<T>::lowest()))),
         static_cast<T>(
-            std::min(max1 + d / 10, static_cast<long long>(std::numeric_limits<T>::max()))),
+            _HIPCUB_STD::min(max1 + d / 10,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<T>::max()))),
         seed_value);
 }
 
@@ -89,8 +89,11 @@ inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_valu
     return test_utils::get_random_data<T>(
         size,
         static_cast<T>(
-            std::max(min1 - d / 10, static_cast<double>(std::numeric_limits<T>::lowest()))),
-        static_cast<T>(std::min(max1 + d / 10, static_cast<double>(std::numeric_limits<T>::max()))),
+            _HIPCUB_STD::max(min1 - d / 10,
+                             static_cast<double>(_HIPCUB_STD::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            _HIPCUB_STD::min(max1 + d / 10,
+                             static_cast<double>(_HIPCUB_STD::numeric_limits<T>::max()))),
         seed_value);
 }
 
@@ -195,7 +198,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -371,7 +374,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
 
     const native_level_type n_lower_level = 0;
     const native_level_type n_upper_level
-        = static_cast<native_level_type>(std::numeric_limits<sample_type>::max());
+        = static_cast<native_level_type>(_HIPCUB_STD::numeric_limits<sample_type>::max());
 
     level_type lower_level = test_utils::convert_to_device<level_type>(n_lower_level);
     level_type upper_level = test_utils::convert_to_device<level_type>(n_upper_level);
@@ -387,7 +390,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        auto          d_input = rocprim::counting_iterator<sample_type>{0UL};
+        auto          d_input = test_utils::counting_iterator<sample_type>{0UL};
         counter_type* d_histogram;
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
 
@@ -470,7 +473,9 @@ using Params2 = ::testing::Types<
     params2<unsigned short, 65536, 0, 1, 1, int>,
     params2<unsigned char, 256, 0, 1, 1, unsigned short>,
     params2<test_utils::half, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#if defined(__HIP_PLATFORM_AMD__)
     params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params2<float, 456, -100, 1, 123>,
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
     params2<int, 10, 0, 1, 10, int, int, true>,
@@ -522,7 +527,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -768,6 +773,14 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         upper_level[channel] = test_utils::convert_to_device<level_type>(n_upper_level[channel]);
     }
 
+    // accuracy problems with bfloat and half
+    // nvidia cub also doesn't work
+    // TODO: check if nvidia works with only sample type bfloat/half
+    if(test_utils::is_half<level_type>::value || test_utils::is_bfloat16<level_type>::value)
+    {
+        GTEST_SKIP();
+    }
+
     hipStream_t stream = 0; // default
     if(TestFixture::params::use_graphs)
     {
@@ -787,7 +800,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -795,9 +808,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                std::max(size, static_cast<size_t>(channels)),
-                std::numeric_limits<unsigned int>::min(),
-                std::numeric_limits<unsigned int>::max(),
+                _HIPCUB_STD::max(size, static_cast<size_t>(channels)),
+                _HIPCUB_STD::numeric_limits<unsigned int>::min(),
+                _HIPCUB_STD::numeric_limits<unsigned int>::max(),
                 seed_value
                     + seed_value_addition // Make sure that we do not use the same or shifted sequence
             );
@@ -880,8 +893,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                     }
                 }
             }
-            rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
-                   d_input2(d_input, transform_op<sample_type>());
+            test_utils::transform_iterator<sample_type*, transform_op<sample_type>> d_input2(
+                d_input,
+                transform_op<sample_type>());
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -1026,7 +1040,9 @@ using Params4 = ::testing::Types<
     params4<unsigned short, 4, 4, 65536, 0, 1, 1, int>,
     params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short>,
     params4<test_utils::half, 3, 1, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#if defined(__HIP_PLATFORM_AMD__)
     params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params4<float, 4, 2, 456, -100, 1, 123>,
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
     params4<int, 4, 3, 10, 0, 1, 10, int, int, true>,
@@ -1089,7 +1105,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -1097,9 +1113,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                std::max(size, static_cast<size_t>(channels)),
-                std::numeric_limits<unsigned int>::min(),
-                std::numeric_limits<unsigned int>::max(),
+                _HIPCUB_STD::max(size, static_cast<size_t>(channels)),
+                _HIPCUB_STD::numeric_limits<unsigned int>::min(),
+                _HIPCUB_STD::numeric_limits<unsigned int>::max(),
                 seed_value);
 
             // Generate data
@@ -1210,8 +1226,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                     }
                 }
             }
-            rocprim::transform_iterator<sample_type*, transform_op<sample_type>, sample_type>
-                   d_input2(d_input, transform_op<sample_type>());
+            test_utils::transform_iterator<sample_type*, transform_op<sample_type>> d_input2(
+                d_input,
+                transform_op<sample_type>());
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {

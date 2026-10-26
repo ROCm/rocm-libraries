@@ -289,9 +289,10 @@ namespace rocsparse
             // ever goes from 0 to 1 here, so the returned value carries no
             // information beyond the wait itself and is discarded.
             rocsparse::spin_loop<SLEEP>(&done_array[col], __MEMORY_SCOPE_DEVICE);
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
-            local_sum = rocsparse::fma(-local_val, y[col * y_inc], local_sum);
+            local_sum = rocsparse::fma(
+                -local_val, rocsparse::load_done_row_data(&y[col * y_inc]), local_sum);
         }
 
         local_sum = rocsparse::wfreduce_sum<WF_SIZE>(local_sum);
@@ -304,9 +305,9 @@ namespace rocsparse
 
         if(lid == WF_SIZE - 1)
         {
-            rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
+            rocsparse::store_done_row_result(&y[row * y_inc], local_sum);
 
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
         }
     }
 }
