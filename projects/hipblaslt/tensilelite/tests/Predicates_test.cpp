@@ -73,6 +73,30 @@ TEST(Predicates, ArithmeticIntensity)
 // docs/solution-selection-unit-test-pattern.md.
 // ----------------------------------------------------------------------------
 
+TEST(Predicates, WorkgroupMappingXCCCheck_DeviceQueryIsEvaluationOnly)
+{
+    using namespace TensileLite;
+    // Deserialization and a library write only construct the predicate.
+    // Construction must not query a device, including on a machine with none.
+    Predicates::Contraction::WorkgroupMappingXCCCheck skipped(std::array<int, 2>{-1, -1});
+    Predicates::Contraction::WorkgroupMappingXCCCheck checked(std::array<int, 2>{4, -1});
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+
+    // value[0] == -1 skips the check, so evaluation does not need a device either.
+    EXPECT_TRUE(skipped(problem));
+
+    int        deviceCount = 0;
+    hipError_t deviceErr   = hipGetDeviceCount(&deviceCount);
+    if(deviceErr != hipSuccess || deviceCount == 0)
+    {
+        EXPECT_THROW(checked(problem), std::runtime_error);
+        return;
+    }
+    EXPECT_NO_THROW(checked(problem));
+}
+
 TEST(Predicates, WorkgroupMappingXCCCheck_38CU_XCC4_Fails)
 {
     using namespace TensileLite;
