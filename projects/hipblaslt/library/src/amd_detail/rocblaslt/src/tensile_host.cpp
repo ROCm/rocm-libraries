@@ -7368,7 +7368,12 @@ static rocblaslt_status
             break;
         if(tile.m <= 0 || tile.n <= 0 || tile.k <= 0)
             continue;
-        if(prob.m % tile.m != 0 || prob.n % tile.n != 0 || prob.k % tile.k != 0)
+        // M against the macro tile and K against the depth unroll are what a
+        // ranked kernel actually requires. N is not: the kernel edges the free
+        // dimension, and N of 160, 192 and 320 against a 128-wide tile all
+        // verify. Requiring it here only refused tiles that would have worked,
+        // which left the problem with no rocRoller kernel at all.
+        if(prob.m % tile.m != 0 || prob.k % tile.k != 0)
             continue;
 
         std::shared_ptr<TensileLite::ContractionSolution> found;

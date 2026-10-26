@@ -75,6 +75,33 @@ Tests:
   norm_check: 0
   gpu_arch: '950'
 
+# A ranked rocRoller tile has to divide M (macro tile) and K (depth unroll). It does
+# not have to divide N: the kernel edges the free dimension. The off path required
+# all three, which refused tiles that would have worked and could leave a problem
+# with no rocRoller kernel at all.
+#
+# Every other shape in this suite divides its tile in N by luck, so nothing here
+# exercised the N term. These N values do not: 160, 192 and 320 against the 128- and
+# 256-wide tiles the ranker offers for these types.
+- name: rocroller_non_power_of_two_n
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [512]
+  N: [160, 192, 320]
+  K: [4096]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  batch_count: [1]
+  initialization: uniform_low_precision
+  unit_check: 0
+  norm_check: 0
+  gpu_arch: '950'
+
 # Selection on the object (hipblaslt_ext) API sees only a Tensile problem, which does
 # not record the block-scale format, so block-scaled GEMMs used to bypass rocRoller
 # routing there and silently fall through to the Tensile heuristic. No other use_ext
