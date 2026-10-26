@@ -286,9 +286,20 @@ TEST(GPU_CkImplLoader_BFP16, NchwForwardFullOverwriteAndAliasFallback)
     const auto kernels =
         loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
     std::vector<std::string> selected_kernels;
-    for(const auto& id : kernels)
-        if(loader.IsArgsSupported(CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false))
-            selected_kernels.push_back(id);
+    // Exercise staged fallback implementations, not native-output invokers that
+    // deliberately reject aliasing. One supported row per implementation suffices.
+    for(const char* family : {"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<",
+                              "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<",
+                              "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<"})
+    {
+        const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
+            return id.rfind(family, 0) == 0 &&
+                   loader.IsArgsSupported(
+                       CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
+        });
+        if(selected != kernels.end())
+            selected_kernels.push_back(*selected);
+    }
     ASSERT_FALSE(selected_kernels.empty())
         << "No supported full-overwrite forward candidate for " << device_name;
 
