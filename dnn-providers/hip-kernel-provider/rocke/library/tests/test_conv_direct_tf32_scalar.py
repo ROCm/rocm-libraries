@@ -15,7 +15,9 @@ CPU part: build + lower on gfx950 and gfx942, names, rejections, fp32 == tf32
 IR for the scalar kernels, and an ISA instruction-count check of the wgrad
 MFMAs (comgr cross-compile). GPU part (gfx950/gfx942 attached): correctness
 against an IEEE fp32 torch reference computed on the CPU, relative to the
-output peak -- 1e-5 for exact fp32 math, 1e-4 for the TF32 wgrad.
+output peak -- 1e-5 for exact fp32 math; for the TF32 wgrad, 1e-4 on gfx950
+and, on gfx942, 1e-3 against a reference whose inputs are masked to what the
+native XF32 MFMA consumes (``_tf32_reference_inputs``).
 
 pytest forks per test on some setups, which leaves HIP without a device; run
 the GPU part as ``python3 library/tests/test_conv_direct_tf32_scalar.py``.
@@ -402,6 +404,24 @@ def _ref_dgrad(dY, W, p):
     return dx.permute(0, 2, 3, 1).contiguous()
 
 
+def _tf32_wgrad_tol(arch: str) -> float:
+    """TF32 wgrad bound: gfx950's BF16x3 emulation tracks the full fp32 payload;
+    gfx942's native XF32 is checked against masked inputs, as in
+    test_conv_fwd_correctness."""
+    return 1e-3 if arch == "gfx942" else 1e-4
+
+
+def _tf32_reference_inputs(t, arch: str):
+    """``t`` as the TF32 MMA on ``arch`` consumes it.
+
+    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); gfx950's BF16x3 emulation uses the full payload.
+    """
+    if arch != "gfx942":
+        return t
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+
+
 def _ref_wgrad(X, dY, p):
     import torch.nn.functional as F
 
@@ -455,7 +475,7 @@ class TestGpuCorrectness(unittest.TestCase):
 
     def test_wgrad(self):
         for dtype in _F32_DTYPES:
-            tol = 1e-5 if dtype == "fp32" else 1e-4
+            tol = 1e-5 if dtype == "fp32" else _tf32_wgrad_tol(_GPU)
             for label, pkw, skw in _WGRAD_CASES:
                 with self.subTest(dtype=dtype, case=label):
                     spec = _wgrad_spec(label, pkw, skw, dtype)
@@ -466,7 +486,15 @@ class TestGpuCorrectness(unittest.TestCase):
                     out = _launch(
                         spec, cdg.build_direct_conv_wgrad, _GPU, "wgrad", dY, X, dW
                     )
-                    err = _rel_err(out, _ref_wgrad(X, dY, p))
+                    if dtype == "tf32":
+                        ref = _ref_wgrad(
+                            _tf32_reference_inputs(X, _GPU),
+                            _tf32_reference_inputs(dY, _GPU),
+                            p,
+                        )
+                    else:
+                        ref = _ref_wgrad(X, dY, p)
+                    err = _rel_err(out, ref)
                     print(
                         f"  {dtype:5s} wgrad {label:14s} rel_err={err:.2e}", flush=True
                     )

@@ -19,8 +19,10 @@ The CPU part (no GPU) builds and lowers every variant for both dtypes on gfx950
 and gfx942, checks the MFMA intrinsics and their counts, the rejections, and
 that fp16 / bf16 kernel names are unchanged; one comgr compile per arch checks
 the ISA, including that the BF16x3 split of the loop-invariant weights is
-hoisted out of the row loop. The GPU part runs every variant on a gfx950 for
-both dtypes against a float64 CPU reference (no TF32 anywhere in it).
+hoisted out of the row loop. The GPU part runs every variant on the device
+(gfx942 or gfx950) for both dtypes against a float64 CPU reference (no TF32
+anywhere in it). On gfx942 the TF32 reference reads the inputs masked to what
+the native XF32 MFMA consumes (``_tf32_reference_inputs``).
 
 Run the GPU part as ``python3 test_conv_direct_tf32_mfma.py`` if pytest's
 forked workers report "No HIP GPUs are available".
@@ -561,25 +563,57 @@ class TestDirectTf32Isa(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# GPU correctness (gfx950)
+# GPU correctness (gfx942 / gfx950)
 # ---------------------------------------------------------------------------
+
+
+def _gpu_arch() -> str:
+    if not _HAS_TORCH:
+        return ""
+    from rocke.runtime.hip_module import get_device_arch
+
+    return get_device_arch(0) or ""
+
+
+_GPU_ARCH = _gpu_arch()
 
 
 def _gpu_skip_reason() -> str:
     if not _HAS_TORCH:
         return "torch not importable"
-    from rocke.runtime.hip_module import get_device_arch
-
-    arch = get_device_arch(0)
-    if arch != "gfx950":
-        return f"needs a gfx950 GPU (got {arch!r})"
+    if _GPU_ARCH not in _ARCHES:
+        return f"needs a gfx942 or gfx950 GPU (got {_GPU_ARCH!r})"
     return ""
 
 
 _GPU_SKIP = _gpu_skip_reason()
-# Relative to the output's peak. fp32 is exact fp32 MFMA arithmetic; gfx950
-# TF32 is the BF16x3 emulation, about fp32 accurate.
-_TOL = {"fp32": 2e-5, "tf32": 1e-4}
+
+
+def _tolerance(dtype: str, arch: str) -> float:
+    """Max error relative to the output's peak.
+
+    fp32 is exact fp32 MFMA arithmetic. gfx950 TF32 is the BF16x3 emulation,
+    about fp32 accurate, and 1e-4 fails a single bf16 pass. gfx942 TF32 is
+    the native XF32 MFMA, checked against masked inputs
+    (``_tf32_reference_inputs``) at 1e-3, as in test_conv_fwd_correctness.
+    """
+    if dtype == "tf32":
+        return 1e-3 if arch == "gfx942" else 1e-4
+    return 2e-5
+
+
+def _tf32_reference_inputs(t, dtype: str, arch: str):
+    """``t`` as the MFMA on ``arch`` consumes it for a ``dtype`` problem.
+
+    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); gfx950's BF16x3 emulation and the fp32 atoms use the
+    full payload.
+    """
+    if dtype != "tf32" or arch != "gfx942":
+        return t
+    import torch
+
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
 
 
 def _u8(t):
@@ -621,7 +655,7 @@ def _rel_err(out, ref) -> float:
     return float((out.double() - ref).abs().max() / ref.abs().max().clamp(min=1.0))
 
 
-def _run_fwd(spec, build) -> float:
+def _run_fwd(spec, build, arch: str) -> float:
     import torch
 
     from kernels.common.conv_abi import conv_direct_args_signature
@@ -631,12 +665,16 @@ def _run_fwd(spec, build) -> float:
     from rocke.runtime.hip_module import Runtime
 
     p = spec.problem
-    art = compile_kernel(build(spec, arch="gfx950"), arch="gfx950")
+    art = compile_kernel(build(spec, arch=arch), arch=arch)
     torch.manual_seed(0)
     A = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1.0, 1.0)
     B = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0)
     D = torch.empty(p.N, p.Ho, p.Wo, p.total_k)
-    ref = _fwd_reference(A, B, p)
+    ref = _fwd_reference(
+        _tf32_reference_inputs(A, p.dtype, arch),
+        _tf32_reference_inputs(B, p.dtype, arch),
+        p,
+    )
 
     rt = Runtime()
     bufs = [rt.alloc(t.nbytes) for t in (A, B, D)]
@@ -655,7 +693,7 @@ def _run_fwd(spec, build) -> float:
     return _rel_err(D, ref)
 
 
-def _run_dgrad(problem, fprop) -> float:
+def _run_dgrad(problem, fprop, arch: str) -> float:
     """transpose [-> reorganize] -> fprop on fp32 storage, vs conv_transpose2d."""
     import torch
 
@@ -686,9 +724,9 @@ def _run_dgrad(problem, fprop) -> float:
     r_spec = DirectReorganizeWeightsSpec(
         problem=p, fold_k32=fprop.fold_k32, runtime_channels=rtc
     )
-    t_art = compile_kernel(build_direct_transpose_weights_dgrad(t_spec), arch="gfx950")
-    r_art = compile_kernel(build_direct_reorganize_weights(r_spec), arch="gfx950")
-    f_art = compile_kernel(build_direct_conv(fprop, arch="gfx950"), arch="gfx950")
+    t_art = compile_kernel(build_direct_transpose_weights_dgrad(t_spec), arch=arch)
+    r_art = compile_kernel(build_direct_reorganize_weights(r_spec), arch=arch)
+    f_art = compile_kernel(build_direct_conv(fprop, arch=arch), arch=arch)
 
     torch.manual_seed(7)
     dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1.0, 1.0)
@@ -696,8 +734,8 @@ def _run_dgrad(problem, fprop) -> float:
     dX = torch.empty(p.N, p.H, p.W, p.total_c)
     ref = (
         torch.nn.functional.conv_transpose2d(
-            dY.double().permute(0, 3, 1, 2),
-            W.double().permute(0, 3, 1, 2),
+            _tf32_reference_inputs(dY, p.dtype, arch).double().permute(0, 3, 1, 2),
+            _tf32_reference_inputs(W, p.dtype, arch).double().permute(0, 3, 1, 2),
             padding=p.PAD,
             groups=p.groups,
         )
@@ -813,7 +851,7 @@ _DGRAD_CASES = (
 
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP or "gpu")
 class TestDirectTf32Gpu(unittest.TestCase):
-    """Every variant, fp32 and tf32, on a gfx950 against a float64 reference."""
+    """Every variant, fp32 and tf32, on gfx942 / gfx950 against a float64 reference."""
 
     def test_forward(self):
         for name, (build, _valid, make, _m) in _FWD.items():
@@ -821,9 +859,9 @@ class TestDirectTf32Gpu(unittest.TestCase):
                 continue
             for dt in _F32_DTYPES:
                 with self.subTest(variant=name, dtype=dt):
-                    err = _run_fwd(make(dt), build)
+                    err = _run_fwd(make(dt), build, _GPU_ARCH)
                     print(f"  {name:12s} {dt}  rel_err={err:.2e}", flush=True)
-                    self.assertLess(err, _TOL[dt])
+                    self.assertLess(err, _tolerance(dt, _GPU_ARCH))
 
     def test_mfma_dgrad(self):
         for label, kw, knobs, fold, rtc in _DGRAD_CASES:
@@ -836,11 +874,11 @@ class TestDirectTf32Gpu(unittest.TestCase):
                     )
                     if rtc:
                         fprop = _rtc(fprop)
-                    ok, why = is_valid_spec(fprop, arch="gfx950")
+                    ok, why = is_valid_spec(fprop, arch=_GPU_ARCH)
                     self.assertTrue(ok, why)
-                    err = _run_dgrad(p, fprop)
+                    err = _run_dgrad(p, fprop, _GPU_ARCH)
                     print(f"  dgrad {label:16s} {dt}  rel_err={err:.2e}", flush=True)
-                    self.assertLess(err, _TOL[dt])
+                    self.assertLess(err, _tolerance(dt, _GPU_ARCH))
 
 
 if __name__ == "__main__":
