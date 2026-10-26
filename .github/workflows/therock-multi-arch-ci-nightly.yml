@@ -45,41 +45,25 @@ jobs:
     outputs:
       test_projects: ${{ steps.scope.outputs.test_projects }}
     steps:
-      - name: Checkout repository config
+      - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: |
-            .github/repos-config.json
-          sparse-checkout-cone-mode: false
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
 
       - name: Collect rocm-libraries subtrees
         id: scope
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-
-          with open(".github/repos-config.json", encoding="utf-8") as f:
-              config = json.load(f)
-          subtrees = sorted(
-              f"{entry['category']}/{entry['name']}"
-              for entry in config["repositories"]
-          )
-          print("test_projects=" + ",".join(subtrees))
-          PY
-
-      - name: Surface test scope
-        env:
-          TEST_PROJECTS: ${{ steps.scope.outputs.test_projects }}
-        run: |
-          {
-            echo "### Nightly test scope"
-            echo ""
-            echo "Testing rocm-libraries subtrees and their direct consumers only:"
-            echo ""
-            echo '```'
-            echo "${TEST_PROJECTS}" | tr ',' '\n'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python .github/scripts/therock_nightly_test_scope.py
 
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@47434387de730d51788b705e5600602dd6064997 # 2026-10-16
