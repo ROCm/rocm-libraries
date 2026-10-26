@@ -273,7 +273,7 @@ TEST(TestCaseOutcome, UnexercisedRecordNamesItsStageAndReason)
 // JSON
 // ---------------------------------------------------------------------------
 
-TEST(TestCaseOutcome, StartedRecordNamesTheTestAndBundleOnly)
+TEST(TestCaseOutcome, StartedRecordNamesTheCaseAndBundleOnly)
 {
     const auto line = startedRecordJson(makeIdentity());
     EXPECT_EQ(line.find('\n'), std::string::npos);
