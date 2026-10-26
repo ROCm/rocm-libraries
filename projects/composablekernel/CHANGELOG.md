@@ -8,6 +8,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 * Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
 * Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
+* Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
