@@ -166,7 +166,7 @@ namespace TensileLite
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
         X_MACRO(StrideMetadata2) \
-        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps
+        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps \
            them distinct from another generator's WorkgroupMapping. */ \
         X_MACRO(RR_WorkgroupMapping) \
         X_MACRO(RR_MagicMultipleWgm) \
@@ -180,7 +180,8 @@ namespace TensileLite
         X_MACRO(RR_MagicMultipleWgmMainBlock) \
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
-        X_MACRO(ScaleBlockSizeA)
+        X_MACRO(ScaleBlockSizeA) \
+        X_MACRO(ESMRuntimeSupported)
 
     enum class CustomArgSemantic
     {

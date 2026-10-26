@@ -750,8 +750,12 @@ class TestConfigEnumeration(unittest.TestCase):
         indices = [c.args[1] for c in py.call_args_list if c.args[2] == "ll"]
         return rows, ir_artifact_diff.family_status(rows)[0], indices
 
+    def test_supported_catalog_census(self):
+        # This is a coverage contract, not a traversal requirement: a deliberate
+        # catalog change updates the census separately from the driver behavior.
+        self.assertEqual(self.config_count, 111)
+
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
-        self.assertEqual(self.config_count, 113)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with self.subTest(driver=driver):
                 rows, actual_status, indices = self.drive_family(driver)
@@ -761,7 +765,7 @@ class TestConfigEnumeration(unittest.TestCase):
 
     def test_new_feature_probes_follow_the_existing_scale_configs(self):
         self.assertEqual(
-            [build.__name__ for build, arch in self.emitter.CONFIGS[108:]],
+            [build.__name__ for build, arch in self.emitter.CONFIGS[-5:]],
             [
                 "build_data_prefetch",
                 "build_cluster",
@@ -770,9 +774,7 @@ class TestConfigEnumeration(unittest.TestCase):
                 "build_tdm",
             ],
         )
-        self.assertTrue(
-            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[108:])
-        )
+        self.assertTrue(all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-5:]))
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG

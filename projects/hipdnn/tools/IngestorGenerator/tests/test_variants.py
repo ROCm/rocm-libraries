@@ -243,7 +243,7 @@ class TestArchAndTarget:
         )
 
     def test_shipped_wmma_catalog_compiles_only_generic_objects(
-        self, gfx1151_wmma_attention_config
+        self, gfx1151_wmma_attention_config, gfx1151_wmma_attention_decode_config
     ):
         """Gfx1151WmmaAttentionNative's scoreKernel ranks the 32-key single-wave
         transposed geometry above 64-key two-wave unconditionally. That holds for
@@ -251,9 +251,13 @@ class TestArchAndTarget:
         processor-specific gfx1151 objects at long sequences, and the matcher
         cannot see an object's compile target. A native kernel here needs that
         score keyed on the target first."""
-        kernels = [k for p in gfx1151_wmma_attention_config.packs for k in p.kernels]
-        assert kernels
-        assert {k.kernel_source.target for k in kernels} == {"generic"}
+        for config in (
+            gfx1151_wmma_attention_config,
+            gfx1151_wmma_attention_decode_config,
+        ):
+            kernels = [k for p in config.packs for k in p.kernels]
+            assert kernels
+            assert {k.kernel_source.target for k in kernels} == {"generic"}
 
     def test_a_kernel_without_target_emits_none(self, tmp_path):
         kernels = _kernels(tmp_path)
