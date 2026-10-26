@@ -75,6 +75,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from benchmarks.common import case_results
+from benchmarks.common.batched_timing import DEFAULT_TIMING, TIMINGS
 
 _SCRIPT_DIR = Path(__file__).parent
 
@@ -225,6 +226,24 @@ def previous_rows(log_dir: Path) -> List[dict]:
     for path in sorted(log_dir.glob("shard-*.jsonl")) + [log_dir / "measured.jsonl"]:
         out.extend(case_results.read_rows(path))
     return out
+
+
+def forwarded_timing(forwarded: Sequence[str]) -> str:
+    """The finalist timing the forwarded arguments ask the sweeps for.
+
+    The runner forwards the benchmark's flags verbatim, but it merges the rows
+    and carries a previous run's into ``--resume``, and rows of two timings are
+    not comparable (:mod:`benchmarks.common.case_results`). So it reads this
+    one flag back: the last ``--timing`` given, as argparse would take it, else
+    the sweeps' default.
+    """
+    timing = DEFAULT_TIMING
+    for i, arg in enumerate(forwarded):
+        if arg == "--timing" and i + 1 < len(forwarded):
+            timing = forwarded[i + 1]
+        elif arg.startswith("--timing="):
+            timing = arg.split("=", 1)[1]
+    return timing
 
 
 def shard_paths(log_dir: Path, index: int, width: int) -> Dict[str, Path]:
@@ -421,11 +440,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         return 2
 
+    timing = forwarded_timing(forwarded)
+    if timing not in TIMINGS:
+        print(
+            f"error: --timing {timing!r}: expected one of {TIMINGS}",
+            file=sys.stderr,
+        )
+        return 2
+
     devices = resolve_devices(args.devices)
     shards = (
-        args.shards
-        if args.shards is not None
-        else SHARDS_PER_DEVICE * len(devices)
+        args.shards if args.shards is not None else SHARDS_PER_DEVICE * len(devices)
     )
     cases = read_cases(args.miopen_file)
     if not cases:
@@ -452,6 +477,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # does no matching of its own.
     carried: List[dict] = []
     if args.resume:
+        # Every row is carried, whatever its timing, so a resume measured the
+        # other way loses nothing; the sweeps skip only the cases their own
+        # timing has (case_results.measured_keys), and the merge takes only
+        # those rows.
         carried = previous_rows(log_dir)
         if not carried:
             print(f"[info] --resume: no rows in {log_dir}; running everything")
@@ -492,7 +521,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # The shards' own row files, re-read on each progress tick. A shard reports
     # nothing until it exits, so its rows are the only live view into it.
     row_files = [paths["rows"] for _index, paths in plan]
-    baseline = {row["key"] for row in carried}
+    baseline = {row["key"] for row in carried if case_results.row_timing(row) == timing}
 
     def _progress(shards_done: int, busy: int) -> None:
         print(
@@ -536,6 +565,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # The shards' rows are keyed by geometry; the case file is what puts
         # each row's MIOpenDriver line back on it.
         case_results.miopen_cmds_by_key(miopen_file=args.miopen_file),
+        timing=timing,
     )
     if rows:
         out = Path(args.results or (log_dir / "results.jsonl"))

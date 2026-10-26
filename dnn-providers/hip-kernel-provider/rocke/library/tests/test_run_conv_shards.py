@@ -200,7 +200,7 @@ def test_a_jit_run_is_refused_before_any_process_starts(tmp_path, capsys):
 
 
 # --------------------------------------------------------------------------- merge
-def _row(engine, key, ms, kernel, tflops=100.0, runners_up=None):
+def _row(engine, key, ms, kernel, tflops=100.0, runners_up=None, timing=None):
     row = {
         "key": key,
         "engine": engine,
@@ -216,6 +216,8 @@ def _row(engine, key, ms, kernel, tflops=100.0, runners_up=None):
     }
     if runners_up:
         row["runners_up"] = list(runners_up)
+    if timing is not None:
+        row["timing"] = timing
     return row
 
 
@@ -246,9 +248,12 @@ def test_the_same_case_measured_twice_keeps_the_faster():
         [_row("direct", "k", 0.9, "slow"), _row("direct", "k", 0.4, "fast")]
     )
     assert rows[0]["direct_kernel"] == "fast"
-    assert case_results.merge(
-        [_row("direct", "k", 0.4, "fast"), _row("direct", "k", 0.9, "slow")]
-    ) == rows
+    assert (
+        case_results.merge(
+            [_row("direct", "k", 0.4, "fast"), _row("direct", "k", 0.9, "slow")]
+        )
+        == rows
+    )
 
 
 def test_the_runner_up_kernels_get_a_column_each():
@@ -284,9 +289,7 @@ def test_the_faster_row_brings_its_whole_ranking():
 
 
 def test_merge_is_ordered_by_key():
-    rows = case_results.merge(
-        [_row("direct", k, 1.0, "x") for k in ("c", "a", "b")]
-    )
+    rows = case_results.merge([_row("direct", k, 1.0, "x") for k in ("c", "a", "b")])
     assert [r["key"] for r in rows] == ["a", "b", "c"]
 
 
@@ -421,7 +424,7 @@ def test_a_writer_without_a_path_writes_nothing(tmp_path):
 
 
 # --------------------------------------------------------------------------- end to end
-_STUB = '''\
+_STUB = """\
 import argparse, json, sys
 ap = argparse.ArgumentParser()
 ap.add_argument("--miopen-file")
@@ -439,10 +442,10 @@ with open(args.results, "w") as out:
                 "key": f"fwd/bf16/case{n}", "engine": engine, "case": n,
                 "shape": f"s{n}", "dtype": "bf16", "direction": "fwd",
                 "tflops": 100.0, "ms": ms, "gbps": 1.0,
-                "kernel": f"{engine}-kernel-{n}", "candidates": 3,
+                "kernel": f"{engine}-kernel-{n}", "candidates": 3, "timing": "staged",
             }) + "\\n")
 print("stub done")
-'''
+"""
 
 
 def test_a_whole_run_splits_schedules_and_merges(tmp_path, monkeypatch, capsys):
@@ -460,11 +463,17 @@ def test_a_whole_run_splits_schedules_and_merges(tmp_path, monkeypatch, capsys):
 
     rc = run_conv_shards.main(
         [
-            "--miopen-file", str(cases),
-            "--devices", "2",
-            "--shards", "4",
-            "--log-dir", str(logs),
-            "--", "--run-from-cache", "/nonexistent",
+            "--miopen-file",
+            str(cases),
+            "--devices",
+            "2",
+            "--shards",
+            "4",
+            "--log-dir",
+            str(logs),
+            "--",
+            "--run-from-cache",
+            "/nonexistent",
         ]
     )
     assert rc == 0, capsys.readouterr()
@@ -495,8 +504,17 @@ def test_a_run_whose_shards_measured_nothing_is_a_failure(tmp_path, monkeypatch)
     cases = tmp_path / "cases.txt"
     cases.write_text("convbfp16 -n 1\n")
     rc = run_conv_shards.main(
-        ["--miopen-file", str(cases), "--devices", "1",
-         "--log-dir", str(tmp_path / "logs"), "--", "--run-from-cache", "/c"]
+        [
+            "--miopen-file",
+            str(cases),
+            "--devices",
+            "1",
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--",
+            "--run-from-cache",
+            "/c",
+        ]
     )
     assert rc != 0
 
@@ -522,8 +540,16 @@ def test_resume_after_the_separator_is_caught_here(tmp_path, capsys):
     f = tmp_path / "cases.txt"
     f.write_text("convbfp16 -n 1\n")
     rc = run_conv_shards.main(
-        ["--miopen-file", str(f), "--devices", "1", "--",
-         "--run-from-cache", "/c", "--resume"]
+        [
+            "--miopen-file",
+            str(f),
+            "--devices",
+            "1",
+            "--",
+            "--run-from-cache",
+            "/c",
+            "--resume",
+        ]
     )
     assert rc == 2
     assert "goes before --" in capsys.readouterr().err
@@ -543,8 +569,14 @@ def test_resume_carries_the_earlier_rows_and_skips_their_cases(
     cases.write_text("".join(f"convbfp16 -n {i}\n" for i in range(6)))
     logs = tmp_path / "logs"
     runner = [
-        "--miopen-file", str(cases), "--devices", "1", "--shards", "2",
-        "--log-dir", str(logs),
+        "--miopen-file",
+        str(cases),
+        "--devices",
+        "1",
+        "--shards",
+        "2",
+        "--log-dir",
+        str(logs),
     ]
     forwarded = ["--", "--run-from-cache", "/c"]
     argv = runner + forwarded
@@ -573,7 +605,7 @@ def test_resume_carries_the_earlier_rows_and_skips_their_cases(
     assert not (set(ran) & first), f"re-measured {set(ran) & first}"
 
 
-_RESUME_STUB = '''\
+_RESUME_STUB = """\
 import argparse, json, os, pathlib, sys
 ap = argparse.ArgumentParser()
 ap.add_argument("--miopen-file")
@@ -604,12 +636,12 @@ with open(args.results, "w") as out:
                 "key": key, "engine": engine, "case": n, "shape": f"s{n}",
                 "dtype": "bf16", "direction": "fwd", "tflops": 1.0,
                 "ms": 1.0 if engine == "direct" else 2.0, "gbps": 1.0,
-                "kernel": f"{engine}-{n}", "candidates": 1,
+                "kernel": f"{engine}-{n}", "candidates": 1, "timing": "staged",
             }) + "\\n")
 log = pathlib.Path(args.results).parent / "ran.json"
 prev = json.loads(log.read_text()) if log.is_file() else []
 log.write_text(json.dumps(prev + ran))
-'''
+"""
 
 
 # --------------------------------------------------------------------------- progress
@@ -824,3 +856,78 @@ def test_a_different_shape_keys_differently():
     assert case_key(a, "bf16", "fwd") != case_key(b, "bf16", "fwd")
     assert case_key(a, "bf16", "fwd") != case_key(a, "fp16", "fwd")
     assert case_key(a, "bf16", "fwd") != case_key(a, "bf16", "dgrad")
+
+
+# --------------------------------------------------------------------------- timing
+def test_a_row_without_timing_is_a_block_row():
+    """Rows written before the field existed were all timed back to back."""
+    assert case_results.row_timing(_row("direct", "k", 1.0, "d")) == "block"
+    assert case_results.row_timing(_row("direct", "k", 1.0, "d", timing="staged")) == (
+        "staged"
+    )
+
+
+def test_the_writer_records_how_the_row_was_timed(tmp_path):
+    f = tmp_path / "rows.jsonl"
+    with case_results.ResultsWriter(str(f), "implicit", "staged") as writer:
+        writer.row(
+            key="k",
+            case=1,
+            shape="s",
+            dtype="bf16",
+            direction="fwd",
+            tflops=1.0,
+            ms=1.0,
+            gbps=1.0,
+            kernel="x",
+            candidates=1,
+        )
+    assert [r["timing"] for r in case_results.read_rows(f)] == ["staged"]
+    with pytest.raises(ValueError, match="timing"):
+        case_results.ResultsWriter(None, "direct", "events")
+
+
+def test_resume_skips_only_cases_timed_the_same_way(tmp_path):
+    """A case measured back to back is not measured for a staged run."""
+    f = tmp_path / "rows.jsonl"
+    rows = [
+        _row("direct", "old", 1.0, "d"),
+        _row("direct", "new", 1.0, "d", timing="staged"),
+    ]
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert case_results.measured_keys(f, "direct") == {"old"}
+    assert case_results.measured_keys(f, "direct", "staged") == {"new"}
+
+
+def test_a_merge_takes_one_timing():
+    """The faster-row rule must not pick the cheaper protocol over the faster
+    kernel: a staged row of a case is never replaced by its block row."""
+    rows = [
+        _row("direct", "k", 1.0, "block-kernel"),
+        _row("direct", "k", 1.2, "staged-kernel", timing="staged"),
+    ]
+    merged = case_results.merge(rows, timing="staged")
+    assert merged[0]["direct_kernel"] == "staged-kernel"
+    assert merged[0]["timing"] == "staged"
+    with pytest.raises(ValueError, match="different timings"):
+        case_results.merge(rows)
+
+
+def test_a_merge_of_one_timing_needs_no_argument():
+    merged = case_results.merge([_row("direct", "k", 1.0, "d", timing="staged")])
+    assert merged[0]["timing"] == "staged"
+    assert case_results.merge([_row("direct", "k", 1.0, "d")])[0]["timing"] == "block"
+
+
+@pytest.mark.parametrize(
+    "forwarded, timing",
+    [
+        ([], "staged"),
+        (["--fast-rank"], "staged"),
+        (["--timing", "block"], "block"),
+        (["--fast-rank", "--timing=block"], "block"),
+        (["--timing", "block", "--timing", "staged"], "staged"),
+    ],
+)
+def test_the_runner_reads_the_timing_it_forwards(forwarded, timing):
+    assert run_conv_shards.forwarded_timing(forwarded) == timing

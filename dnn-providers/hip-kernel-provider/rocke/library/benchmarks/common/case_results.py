@@ -31,6 +31,13 @@ the run was given a shape rather than a command.
 
 Rows are appended and flushed per case: a shard that is killed after four hours
 keeps the four hours.
+
+Every row says how its time was measured (``timing``, one of
+:data:`benchmarks.common.batched_timing.TIMINGS`; a row without the field is
+from before it existed, when every sweep timed block). The protocols differ by a fixed
+per-call cost, so rows of two protocols are never compared with each other:
+resuming skips only cases measured the same way, and a merge takes one
+protocol's rows.
 """
 
 from __future__ import annotations
@@ -39,6 +46,8 @@ import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from benchmarks.common.batched_timing import BLOCK_TIMING, TIMINGS
 
 #: The two sweeps, by the name their rows carry.
 ENGINES = ("direct", "implicit")
@@ -76,6 +85,7 @@ MERGED_FIELDS = (
     "winner_ms",
     "winner_kernel",
     "speedup",
+    "timing",
 )
 
 #: Columns of the ``.csv`` beside it, in order.
@@ -98,6 +108,7 @@ CSV_FIELDS = (
     "implicit_ms",
     "winner_ms",
     "winner_kernel",
+    "timing",
 )
 
 
@@ -148,16 +159,27 @@ def add_skip_measured_arg(parser) -> None:
     )
 
 
-def measured_keys(path, engine: str) -> set:
-    """Case keys ``engine`` already has a row for in ``path``.
+def row_timing(row: dict) -> str:
+    """How ``row``'s time was measured; rows older than the field are block."""
+    return row.get("timing") or BLOCK_TIMING
+
+
+def measured_keys(path, engine: str, timing: str = BLOCK_TIMING) -> set:
+    """Case keys ``engine`` already has a row for in ``path``, timed by ``timing``.
 
     One engine's rows only: a run killed between the direct sweep and the
     implicit one has the case measured on one side and not the other, and
-    resuming has to finish the second rather than skip it.
+    resuming has to finish the second rather than skip it. One protocol's rows
+    only, for the same reason: a case measured the other way is not measured
+    for this run.
     """
     if not path:
         return set()
-    return {row["key"] for row in read_rows(path) if row.get("engine") == engine}
+    return {
+        row["key"]
+        for row in read_rows(path)
+        if row.get("engine") == engine and row_timing(row) == timing
+    }
 
 
 class ResultsWriter:
@@ -169,10 +191,15 @@ class ResultsWriter:
     no row -- its absence is the finding, and the log says why.
     """
 
-    def __init__(self, path: Optional[str], engine: str) -> None:
+    def __init__(
+        self, path: Optional[str], engine: str, timing: str = BLOCK_TIMING
+    ) -> None:
         if engine not in ENGINES:
             raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
+        if timing not in TIMINGS:
+            raise ValueError(f"timing must be one of {TIMINGS}, got {timing!r}")
         self._engine = engine
+        self._timing = timing
         self._path = Path(path) if path else None
         self._fh = None
         self._n = 0
@@ -220,6 +247,7 @@ class ResultsWriter:
             "gbps": round(float(gbps), 3),
             "kernel": kernel,
             "candidates": int(candidates),
+            "timing": self._timing,
         }
         if passed is not None:
             record["passed"] = bool(passed)
@@ -378,7 +406,9 @@ def miopen_cmds_by_key(
 
 
 def merge(
-    rows: Iterable[dict], miopen_cmds: Optional[Dict[str, str]] = None
+    rows: Iterable[dict],
+    miopen_cmds: Optional[Dict[str, str]] = None,
+    timing: Optional[str] = None,
 ) -> List[dict]:
     """Join per-engine rows into one row per case.
 
@@ -398,13 +428,27 @@ def merge(
     case can order the same near-tied kernels differently, and a mix of the
     two would be a ranking that never happened.
 
+    ``timing`` keeps only the rows measured that way (:func:`row_timing`).
+    Without it the rows must all have been measured one way, and a mix raises
+    ``ValueError``: the faster-row rule would otherwise pick whichever protocol
+    is cheaper rather than whichever kernel is faster.
+
     Sorted by key, so two runs of the same case list produce comparable files.
     """
+    rows = list(rows)
+    if timing is None:
+        seen = {row_timing(row) for row in rows if row.get("engine") in ENGINES}
+        if len(seen) > 1:
+            raise ValueError(
+                f"rows measured with different timings {sorted(seen)}; "
+                f"merge one protocol at a time"
+            )
+        timing = seen.pop() if seen else BLOCK_TIMING
     by_key: Dict[str, dict] = {}
     for row in rows:
         key = row.get("key")
         engine = row.get("engine")
-        if not key or engine not in ENGINES:
+        if not key or engine not in ENGINES or row_timing(row) != timing:
             continue
         merged = by_key.setdefault(
             key,
@@ -413,6 +457,7 @@ def merge(
                 "shape": row.get("shape"),
                 "dtype": row.get("dtype"),
                 "direction": row.get("direction"),
+                "timing": timing,
             },
         )
         ms = row.get("ms")
@@ -498,8 +543,9 @@ def summary(rows: Sequence[dict]) -> str:
         1 for r in rows if r["direct_ms"] is None and r["implicit_ms"] is not None
     )
     wins = sum(1 for r in rows if r["winner"] == "direct")
+    timing = f" ({rows[0].get('timing')} timing)" if rows else ""
     return (
-        f"{len(rows)} case(s): {both} measured by both "
+        f"{len(rows)} case(s){timing}: {both} measured by both "
         f"(direct faster on {wins}), {direct_only} direct-only, "
         f"{implicit_only} implicit-only"
     )

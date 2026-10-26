@@ -32,7 +32,19 @@ class _FakeDevice:
 
     def install(self, monkeypatch) -> None:
         monkeypatch.setattr(batched_timing, "time_batch", self._time_batch)
+        monkeypatch.setattr(batched_timing, "time_batch_staged", self._time_staged)
         monkeypatch.setattr(batched_timing, "prime_device", self._prime)
+
+    def _time_staged(self, runs, *, warmup, iters, stream=0):
+        # The finalists' round, in the default (staged) protocol.
+        self.batches += 1
+        out = []
+        for run in runs:
+            ms = self.times[run()]
+            if ms is not None:
+                self.measured += 1
+            out.append(ms)
+        return out
 
     def _prime(self, run, **_kwargs) -> None:
         self.primed += 1
@@ -175,9 +187,7 @@ def test_scratch_is_released_for_everything_that_cannot_rank(monkeypatch):
     device.install(monkeypatch)
     dropped = []
 
-    ranked = _rank(
-        device, len(times), finalists=2, chunk=3, on_drop=dropped.append
-    )
+    ranked = _rank(device, len(times), finalists=2, chunk=3, on_drop=dropped.append)
 
     # Everything but the two finalists: the slow ones and the one that failed.
     assert sorted(dropped) == [0, 2, 3, 5]
@@ -238,9 +248,7 @@ def test_without_a_budget_the_count_alone_chunks(monkeypatch):
 
     monkeypatch.setattr(batched_timing, "time_batch", counting)
 
-    batched_timing.rank(
-        5, device.make_run, warmup=3, iters=10, finalists=5, chunk=2
-    )
+    batched_timing.rank(5, device.make_run, warmup=3, iters=10, finalists=5, chunk=2)
 
     assert batches == [2, 2, 1]
 
@@ -262,3 +270,47 @@ def test_probe_results_are_reported_as_they_land(monkeypatch):
     assert [i for i, _, _ in seen] == [0, 1, 2, 3, 4]
     assert all(probe is not None for _, probe, _ in seen)
     assert all(ms is None for _, _, ms in seen)
+
+
+def test_staged_timing_changes_only_how_the_finalists_are_timed(monkeypatch):
+    """--timing staged (the default): the probe is the same batched block round,
+    and only the finalists go through the stalled single-call protocol."""
+    times = [4.0, 1.0, 3.0, 2.0]
+    device = _FakeDevice(times)
+    device.install(monkeypatch)
+    staged = []
+    assert batched_timing.DEFAULT_TIMING == "staged"
+
+    def _staged(runs, *, warmup, iters, stream=0):
+        staged.append((len(runs), warmup, iters))
+        # A stalled sample pays the event pair the block loop amortises away.
+        return [times[run()] + 0.5 for run in runs]
+
+    monkeypatch.setattr(batched_timing, "time_batch_staged", _staged)
+
+    ranked = _rank(device, len(times), finalists=2)
+
+    assert device.probed == len(times)
+    assert device.measured == 0
+    assert staged == [(2, 3, 10)]
+    assert {r.index: r.ms for r in ranked if r.is_finalist} == {1: 1.5, 3: 2.5}
+
+
+def test_block_timing_never_touches_the_stall_gate(monkeypatch):
+    device = _FakeDevice([1.0, 2.0])
+    device.install(monkeypatch)
+
+    def _staged(*_args, **_kwargs):
+        raise AssertionError("block timing went through the staged path")
+
+    monkeypatch.setattr(batched_timing, "time_batch_staged", _staged)
+    ranked = _rank(device, 2, finalists=2, timing="block")
+    assert device.measured == 2
+    assert all(r.is_finalist for r in ranked)
+
+
+def test_an_unknown_timing_is_refused(monkeypatch):
+    device = _FakeDevice([1.0])
+    device.install(monkeypatch)
+    with pytest.raises(ValueError, match="timing"):
+        _rank(device, 1, timing="events")

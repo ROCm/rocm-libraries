@@ -55,6 +55,14 @@ record file is still written -- it is the comparison's own record of the best
 direct-conv time -- and passing ``--early-stop``/``--early-stop-after``
 alongside ``--fast-rank`` has no effect.
 
+Both scripts report times measured the way hipDNN's ``dnn-benchmark`` times a
+call (``--timing staged``, the default: one stalled event pair per launch, the
+median; see :mod:`benchmarks.common.batched_timing`), so the numbers compare
+with hipDNN and MIOpen. ``--timing block`` restores the back-to-back average.
+Early stopping and the ``--fast-rank`` probe rank with block launches either
+way. ``--timing`` is forwarded to both scripts, and the merged results record
+which protocol measured them.
+
 Notes
 -----
 - Without a cache, direct conv requires ``cpg == kpg`` (C/groups == K/groups)
@@ -72,7 +80,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from benchmarks.common import case_results
+from benchmarks.common import batched_timing, case_results
 
 _SCRIPT_DIR = Path(__file__).parent
 
@@ -223,6 +231,7 @@ def _build_mode_args(args) -> list[str]:
         a += ["--early-stop", str(args.early_stop)]
     if args.early_stop_after is not None:
         a += ["--early-stop-after", str(args.early_stop_after)]
+    a += ["--timing", args.timing]
     # Both scripts take the fast-ranking flags with the same names and the
     # same defaults (they share benchmarks.common.batched_timing), so a knob
     # is forwarded only when it was given and the scripts' own default stands
@@ -310,6 +319,7 @@ def _write_results(
     *,
     miopen_file: str | None = None,
     miopen_cmd: str | None = None,
+    timing: str | None = None,
 ) -> None:
     """Join the two sweeps' per-case rows into ``path`` (and a ``.csv``).
 
@@ -320,10 +330,13 @@ def _write_results(
 
     The children key their rows by geometry, not by the line they read, so the
     MIOpenDriver command goes back on here, from the input this run was given.
+    ``timing`` is how both children timed their kernels; the merge takes only
+    rows measured that way (``None``: the rows must agree among themselves).
     """
     rows = case_results.merge(
         case_results.read_rows(rows_direct) + case_results.read_rows(rows_implicit),
         case_results.miopen_cmds_by_key(miopen_file=miopen_file, miopen_cmd=miopen_cmd),
+        timing=timing,
     )
     if not rows:
         print(f"\n[info] no per-case results to write to {path}", file=sys.stderr)
@@ -416,6 +429,7 @@ def main() -> int:
         metavar="N",
         help="forwarded to both scripts (default: theirs)",
     )
+    batched_timing.add_timing_arg(parser)
     parser.add_argument(
         "--no-seed-from-direct",
         action="store_true",
@@ -743,6 +757,7 @@ def main() -> int:
                 rows_implicit,
                 miopen_file=args.miopen_file,
                 miopen_cmd=args.miopen_cmd,
+                timing=args.timing,
             )
 
     _print_summary(direct_result, implicit_result, implicit_note)

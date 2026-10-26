@@ -171,6 +171,20 @@ _hipMemsetAsync = _b(
     ctypes.c_size_t,
     ctypes.c_void_p,
 )
+_hipExtMallocWithFlags = _b(
+    "hipExtMallocWithFlags",
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_size_t,
+    ctypes.c_uint,
+)
+_hipStreamWaitValue32 = _b(
+    "hipStreamWaitValue32",
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.c_uint,
+    ctypes.c_uint32,
+)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))

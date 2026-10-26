@@ -45,6 +45,29 @@ too short for them to fall back.
 What is left is sampling noise on a one- or two-launch measurement, which is
 why the cut is deliberately loose: the probe only has to get a candidate into
 the top ``finalists``, not to rank it there.
+
+Timing the finalists like hipDNN
+--------------------------------
+
+Round 2 has two protocols, chosen by ``timing``. ``block`` is
+:func:`rocke.runtime.time_launches`: ``iters`` launches back to back between
+one event pair, averaged. ``staged`` (the default) is what hipDNN's
+``dnn-benchmark`` does by default, and what a number compared against hipDNN
+or MIOpen has to be:
+every call is its own sample, a start/stop event pair around one call queued
+behind a host-released stall (:func:`rocke.runtime.time_launches_staged`), and
+the reported time is the median. The span holds no host submission, but it
+does hold the fixed device cost of one event pair around a single call: a
+back-to-back loop amortises it away, while hipDNN's timing (and MIOpen's,
+where it records events around a launch) pays it on every call. On small
+kernels that fixed cost is a large share of the time, so the two protocols
+must not be compared with each other.
+
+Only round 2 changes. The probe stays a batched block measurement either way:
+it only orders the candidates, and the event cost is the same constant on all
+of them, so it does not change which reach the finalists. Staged samples drain
+the device after every call, so the clocks the priming brought up are allowed
+to settle between samples -- deliberately, as dnn-benchmark does.
 """
 
 from __future__ import annotations
@@ -70,6 +93,30 @@ DEFAULT_FINALISTS = 64
 # two timed launches cost little more and halve the sampling noise.
 DEFAULT_PROBE_WARMUP = 1
 DEFAULT_PROBE_ITERS = 2
+
+#: How a reported time is measured; see "Timing the finalists like hipDNN"
+#: above. The sweeps' ``--timing`` flag picks one for every reported number,
+#: ranked or not (:meth:`benchmarks.common.early_stop.EarlyStop.measure`).
+TIMINGS = ("block", "staged")
+DEFAULT_TIMING = "staged"
+#: The protocol of :func:`rocke.runtime.time_launches`, and of every result
+#: recorded before the choice existed.
+BLOCK_TIMING = "block"
+
+
+def add_timing_arg(parser) -> None:
+    """Add ``--timing`` to a sweep's parser."""
+    parser.add_argument(
+        "--timing",
+        choices=TIMINGS,
+        default=DEFAULT_TIMING,
+        help="how every reported time is measured. staged: each launch its "
+        "own stalled event pair, median of --iters -- what hipDNN's "
+        "dnn-benchmark measures, so the numbers compare with hipDNN and "
+        "MIOpen. block: --iters launches back to back between one event "
+        "pair, averaged. Early stopping and the --fast-rank probe still rank "
+        f"with block launches (default: {DEFAULT_TIMING})",
+    )
 
 
 @dataclass
@@ -231,6 +278,48 @@ def time_batch(
     return out
 
 
+def time_batch_staged(
+    runs: Sequence[Callable[[], None]],
+    *,
+    warmup: int,
+    iters: int,
+    stream: int = 0,
+) -> List[Optional[float]]:
+    """Per-candidate median of ``iters`` stalled single-call samples.
+
+    Every sample is :func:`rocke.runtime.time_launches_staged`'s: a start/stop
+    event pair around one call, queued behind a stall the host releases once
+    the call is enqueued. ``warmup`` samples of each candidate are discarded.
+    The process's shared gate serves every candidate.
+
+    ``None`` for a candidate whose launch raised, and for one whose call
+    blocked the host on the stalled stream (the watchdog had to release it, so
+    the sample holds host time); the second is reported, as it means the bound
+    launch synchronizes when it should not.
+    """
+    from statistics import median
+
+    from rocke.runtime.hip_module import HipError
+    from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
+
+    out: List[Optional[float]] = []
+    for i, run in enumerate(runs):
+        try:
+            samples = time_launches_staged(
+                run, warmup=warmup, iters=iters, stream=stream
+            )
+        except StallTimeout as e:
+            print(f"  [staged] finalist {i}: {e}; not ranked", flush=True)
+            out.append(None)
+            continue
+        except (HipError, RuntimeError):
+            # time_launches_staged drained before raising.
+            out.append(None)
+            continue
+        out.append(median(samples) if samples else None)
+    return out
+
+
 def rank(
     n: int,
     make_run: Callable[[int], Optional[Callable[[], None]]],
@@ -248,6 +337,7 @@ def rank(
     on_drop: Optional[Callable[[int], None]] = None,
     held_bytes: Optional[Callable[[], int]] = None,
     chunk_bytes: int = 0,
+    timing: str = DEFAULT_TIMING,
 ) -> List[Ranked]:
     """Probe all ``n`` candidates, then time the best ``finalists`` in full.
 
@@ -278,8 +368,15 @@ def rank(
     The finalists' scratch is still held when this returns -- they were timed
     with it -- so the caller frees that along with the rest of the case.
 
+    ``timing`` picks round 2's protocol (:data:`TIMINGS`): ``block`` times the
+    finalists with :func:`time_batch`, ``staged`` with
+    :func:`time_batch_staged`, so ``ms`` is then a median of single-call
+    samples. The probe is the same either way.
+
     Returns one :class:`Ranked` per candidate, in candidate order.
     """
+    if timing not in TIMINGS:
+        raise ValueError(f"timing must be one of {TIMINGS}, got {timing!r}")
     results = [Ranked(index=i) for i in range(n)]
     # The finalists' bound launches, kept alive from the probe. A launch holds
     # its packed kernargs and its kernel handle, so keeping it is what makes
@@ -346,22 +443,24 @@ def rank(
             if results[i].failed:
                 drop(i)
 
-    # Round 2. The finalists are verified first and then timed as one batch:
-    # a candidate's timed launches start right after the previous one's, so
-    # the clocks that the priming brought up never fall back between them.
+    # Round 2. The finalists are verified first and then timed as one batch.
+    # In block timing a candidate's timed launches start right after the
+    # previous one's, so the clocks that the priming brought up never fall
+    # back between them; staged timing drains after every sample, as hipDNN's
+    # does (see the module docstring).
     order = sorted(kept, key=lambda i: results[i].probe_ms)
     if on_finalist is not None:
         for i in order:
             # A kernel that fails here is still timed, so its row carries a
             # number; the caller reads ``passed`` and keeps it from ranking.
             results[i].passed = on_finalist(i, kept[i])
-    times = time_batch(
-        [kept[i] for i in order],
-        warmup=warmup,
-        iters=iters,
-        stream=stream,
-        chunk=chunk,
-    )
+    finals = [kept[i] for i in order]
+    if timing == "staged":
+        times = time_batch_staged(finals, warmup=warmup, iters=iters, stream=stream)
+    else:
+        times = time_batch(
+            finals, warmup=warmup, iters=iters, stream=stream, chunk=chunk
+        )
     for i, ms in zip(order, times):
         if ms is None:
             results[i].failed = True

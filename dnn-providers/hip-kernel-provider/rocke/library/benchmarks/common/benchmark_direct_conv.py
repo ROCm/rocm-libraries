@@ -1159,7 +1159,7 @@ def _run_nongrouped_sweep(
     )
 
     results: List[NonGroupedResult] = []
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop(args.early_stop, args.early_stop_after, timing=args.timing)
     n_run = 0
     for spec, kernel in pending:
         artifact = artifact_map.get(kernel.name)
@@ -2259,8 +2259,7 @@ def _measure_plans(
         rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
         ref_f32 = ref_out.float().cpu()
         rel_err = float(
-            (out_cpu.float() - ref_f32).abs().max()
-            / ref_f32.abs().max().clamp(min=1.0)
+            (out_cpu.float() - ref_f32).abs().max() / ref_f32.abs().max().clamp(min=1.0)
         )
         passed = rel_err < 5e-2
         if not passed:
@@ -2365,13 +2364,15 @@ def _fast_rank_plans(*, args, plans, bind, verify, stop, row, width) -> None:
         finalists=args.fast_rank_finalists,
         chunk=args.fast_rank_chunk,
         primer=args.fast_rank_primer,
+        timing=args.timing,
         on_probe=_on_probe,
         on_finalist=_on_finalist,
     )
     n_probed = sum(1 for r in ranked if r.probe_ms is not None)
     n_final = sum(1 for r in ranked if r.is_finalist)
     print(
-        f"  probe: {n_probed}/{n} timed, {n_final} finalist(s) measured in full",
+        f"  probe: {n_probed}/{n} timed, {n_final} finalist(s) measured in full "
+        f"({args.timing} timing)",
         flush=True,
     )
     for r in ranked:
@@ -2469,9 +2470,10 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     modules = ModuleCache(args.module_cache_bytes)
     # One row per case, for the comparison driver and the shard runner to
     # merge. Does nothing without --results.
-    results_out = ResultsWriter(args.results, "direct")
-    # --skip-measured: cases a previous run of this sweep already recorded.
-    done = measured_keys(args.skip_measured, "direct")
+    results_out = ResultsWriter(args.results, "direct", args.timing)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them.
+    done = measured_keys(args.skip_measured, "direct", args.timing)
     n_skipped = 0
 
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
@@ -2675,6 +2677,7 @@ def main() -> int:
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
     add_early_stop_arg(parser)
+    batched_timing.add_timing_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -2910,8 +2913,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.skip_measured and not args.run_from_cache:
         print(
-            "error: --skip-measured resumes an AOT sweep; pass "
-            "--run-from-cache DIR",
+            "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
             file=sys.stderr,
         )
         return 2
