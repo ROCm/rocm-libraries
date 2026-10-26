@@ -510,26 +510,45 @@ namespace rocsparse
             if(block_dim <= 8)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 8, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    bsrsv_solve_block_size,
+                                    64,
+                                    8,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else if(block_dim <= 16)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 16, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    bsrsv_solve_block_size,
+                                    64,
+                                    16,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else if(block_dim <= 32)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 32, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    bsrsv_solve_block_size,
+                                    64,
+                                    32,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else
             {
                 // Launch general algorithm for large BSR block dimensions (> 32x32)
-                LAUNCH_BSRSV_GENERAL(
-                    fill_mode, handle->pointer_mode, 128, 64, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_GENERAL(fill_mode,
+                                     handle->pointer_mode,
+                                     bsrsv_solve_block_size,
+                                     64,
+                                     gcn_arch_name,
+                                     asicRev);
             }
         }
         else
@@ -540,7 +559,12 @@ namespace rocsparse
             // LCOV_EXCL_START;
 
             // Launch general algorithm
-            LAUNCH_BSRSV_GENERAL(fill_mode, handle->pointer_mode, 128, 32, gcn_arch_name, asicRev);
+            LAUNCH_BSRSV_GENERAL(fill_mode,
+                                 handle->pointer_mode,
+                                 bsrsv_solve_block_size,
+                                 32,
+                                 gcn_arch_name,
+                                 asicRev);
 
             // LCOV_EXCL_STOP;
         }

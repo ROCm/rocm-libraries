@@ -28,6 +28,9 @@
 
 namespace rocsparse
 {
+    // Threads per block of every bsrsv solve launch.
+    static constexpr uint32_t bsrsv_solve_block_size = 128;
+
     template <typename T>
     rocsparse_status bsrsv_analysis_template(rocsparse_handle          handle,
                                              rocsparse_direction       dir,
