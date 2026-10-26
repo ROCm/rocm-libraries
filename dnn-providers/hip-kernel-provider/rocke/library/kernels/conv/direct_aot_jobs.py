@@ -526,7 +526,15 @@ DGRAD_RTC_VGPR_FILL = 0.875
 # Wave32 WMMA forward of tiny channel counts (direct_fwd_smallc_wmma /
 # direct_fwd_smallk_wmma): (filter, pad, stride, C) of the stems and
 # (filter, pad, stride, K) of the few-output-channel layers the cache serves.
-FWD_SMALLC_STEMS = ((3, 1, 1, 3), (3, 1, 1, 4), (3, 1, 2, 3), (7, 3, 2, 3))
+FWD_SMALLC_STEMS = (
+    (3, 1, 1, 3),
+    (3, 1, 1, 4),
+    (3, 1, 2, 3),
+    (7, 3, 2, 3),
+    (4, 0, 4, 3),
+    (14, 0, 14, 3),
+    (16, 0, 16, 3),
+)
 FWD_SMALLK_LAYERS = ((3, 1, 1, 4),)
 # fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
 # tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
