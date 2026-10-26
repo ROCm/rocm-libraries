@@ -84,9 +84,10 @@ namespace TensileLite::Client::hostnumerics
 
         struct CopyBack
         {
-            std::span<std::byte>               destination;
-            roc::hostnumerics::Tensor          source;
-            roc::hostnumerics::IndexSelection selection = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
+            std::span<std::byte>              destination;
+            roc::hostnumerics::Tensor         source;
+            roc::hostnumerics::IndexSelection selection
+                = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
         };
 
         struct BiasReduction
@@ -135,10 +136,11 @@ namespace TensileLite::Client::hostnumerics
         std::optional<roc::hostnumerics::Tensor> scaleAlpha;
         std::optional<roc::hostnumerics::Tensor> scaleA;
         std::optional<roc::hostnumerics::Tensor> scaleB;
-        roc::hostnumerics::IndexSelection       outputSelection = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
-        std::optional<BoundEpilogue>             epilogue;
-        std::optional<BiasReduction>             biasReduction;
-        std::vector<CopyBack>                    copyBacks;
+        roc::hostnumerics::IndexSelection        outputSelection
+            = roc::hostnumerics::IndexSelection::allLastDimensionFastest();
+        std::optional<BoundEpilogue> epilogue;
+        std::optional<BiasReduction> biasReduction;
+        std::vector<CopyBack>        copyBacks;
 
         friend class GemmInvocationAdapter;
     };
@@ -185,16 +187,16 @@ namespace TensileLite::Client::hostnumerics
         explicit GemmInvocationAdapter(std::unique_ptr<const State> state);
 
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
-            translateGemmInvocation(ContractionProblemGemm const&      problem,
-                                    ContractionInputs const&           inputs,
+            translateGemmInvocation(ContractionProblemGemm const&     problem,
+                                    ContractionInputs const&          inputs,
                                     roc::hostnumerics::IndexSelection outputSelection);
 
         std::unique_ptr<const State> m_state;
     };
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const&      problem,
-                                ContractionInputs const&           inputs,
+        translateGemmInvocation(ContractionProblemGemm const&     problem,
+                                ContractionInputs const&          inputs,
                                 roc::hostnumerics::IndexSelection outputSelection);
 
     std::variant<GemmInvocationAdapter, TranslationFailure>

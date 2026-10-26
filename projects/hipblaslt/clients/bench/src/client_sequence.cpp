@@ -192,7 +192,8 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
         scalar,
         layout,
         roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-            roc::hostnumerics::GenerationRecipe::cosine(), hipblaslt::hostnumerics::defaultInitializationSeed));
+            roc::hostnumerics::GenerationRecipe::cosine(),
+            hipblaslt::hostnumerics::defaultInitializationSeed));
     const auto storage = generated.rawEncodedBackingStorage();
     if(!storage.empty())
         std::memcpy(data, storage.data(), storage.size());

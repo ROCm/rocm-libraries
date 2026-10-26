@@ -1702,7 +1702,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                       return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
                           roc::hostnumerics::GenerationRecipe::uniformInteger(
                               {.lower = 1, .upper = 10})
-                              .withAffineValueMapping({.scale = 0.1}), seed);
+                              .withAffineValueMapping({.scale = 0.1}),
+                          seed);
                   }
                   return hipblaslt::hostnumerics::initializationRecipe(
                       scalar,
@@ -2261,11 +2262,12 @@ void testing_matmul_with_bias(const Arguments&                                  
             }
 
             if(arg.amaxD)
-                initializeHostTensor(hAmaxD_gold[i],
-                                     Talpha,
-                                     roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
-                                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-                                         roc::hostnumerics::GenerationRecipe::zero(), 0));
+                initializeHostTensor(
+                    hAmaxD_gold[i],
+                    Talpha,
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                        roc::hostnumerics::GenerationRecipe::zero(), 0));
 
             if(arg.scaleE)
                 initializeHostTensor(
@@ -3694,11 +3696,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                                             && referenceD.type() != ScalarType::Int8;
                 if(productIsFinal)
                 {
-                    matmulIntoWithBlasBackend(referenceA,
-                                              referenceB,
-                                              referenceD,
-                                              matmulOptions,
-                                              roc::hostnumerics::IndexSelection::allLastDimensionFastest());
+                    matmulIntoWithBlasBackend(
+                        referenceA,
+                        referenceB,
+                        referenceD,
+                        matmulOptions,
+                        roc::hostnumerics::IndexSelection::allLastDimensionFastest());
                 }
                 else
                 {
@@ -3714,11 +3717,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                     EpilogueOptions conversion(accumulatorType);
                     if(hasProduct)
                     {
-                        matmulIntoWithBlasBackend(referenceA,
-                                                  referenceB,
-                                                  referenceAccumulator,
-                                                  matmulOptions,
-                                                  roc::hostnumerics::IndexSelection::allLastDimensionFastest());
+                        matmulIntoWithBlasBackend(
+                            referenceA,
+                            referenceB,
+                            referenceAccumulator,
+                            matmulOptions,
+                            roc::hostnumerics::IndexSelection::allLastDimensionFastest());
                         conversion.inputScale = alpha;
                     }
                     if(betaValue != std::complex<double>(0.0, 0.0))

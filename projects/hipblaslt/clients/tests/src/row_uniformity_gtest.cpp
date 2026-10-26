@@ -314,7 +314,8 @@ namespace
         const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
             GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
                                                      .upperUnbiasedExponent = 12,
-                                                     .sourceType            = ScalarType::Float32}), seed);
+                                                     .sourceType            = ScalarType::Float32}),
+            seed);
         return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
     }
 

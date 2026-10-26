@@ -100,18 +100,18 @@ namespace TensileLite
             {
             }
 
-            bool validate(ContractionProblemGemm const&             problem,
-                          ContractionInputs const&                  reference,
-                          ContractionInputs const&                  result,
+            bool validate(ContractionProblemGemm const&            problem,
+                          ContractionInputs const&                 reference,
+                          ContractionInputs const&                 result,
                           const roc::hostnumerics::IndexSelection& outputSelection);
 
-            bool checkResults(TensorDescriptor const&                   tensor,
-                              void const*                               refPtr,
-                              void const*                               resPtr,
-                              size_t                                    maxElements,
-                              bool                                      isgpu,
+            bool checkResults(TensorDescriptor const&                  tensor,
+                              void const*                              refPtr,
+                              void const*                              resPtr,
+                              size_t                                   maxElements,
+                              bool                                     isgpu,
                               const roc::hostnumerics::IndexSelection& outputSelection,
-                              double                                    threshold);
+                              double                                   threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,
@@ -136,8 +136,8 @@ namespace TensileLite
                                       bool               hasNullPointer,
                                       bool               hasZeroElements) const;
 
-            std::shared_ptr<DataInitialization>             m_dataInit;
-            std::shared_ptr<ProblemInputs>                  m_referenceInputs;
+            std::shared_ptr<DataInitialization>            m_dataInit;
+            std::shared_ptr<ProblemInputs>                 m_referenceInputs;
             std::vector<roc::hostnumerics::IndexSelection> m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;

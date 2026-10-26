@@ -556,7 +556,7 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
         0);
 
     StructuredSparsityPattern pattern;
-    pattern.indexOrder = {0, 1, 2};
+    pattern.indexOrder           = {0, 1, 2};
     pattern.axis                 = sparseAxis;
     pattern.fixedPositions       = {0, 1};
     Tensor componentPrunedTensor = Tensor::copyEncodedBackingStorage(

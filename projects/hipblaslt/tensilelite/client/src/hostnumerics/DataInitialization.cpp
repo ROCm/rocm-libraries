@@ -62,11 +62,13 @@ namespace TensileLite::Client
                                           std::optional<double> freeValue = std::nullopt)
         {
             const uint64_t recipeSeed = seed + sequence;
-            auto realOnly = [recipeSeed](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), recipeSeed);
+            auto           realOnly   = [recipeSeed](GenerationRecipe::Component component) {
+                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component),
+                                                                      recipeSeed);
             };
             auto replicated = [recipeSeed](GenerationRecipe::Component component) {
-                return GenerationRecipe::replicatedLastDimensionFastest(std::move(component), recipeSeed);
+                return GenerationRecipe::replicatedLastDimensionFastest(std::move(component),
+                                                                        recipeSeed);
             };
             auto cartesian = [recipeSeed](GenerationRecipe::Component component) {
                 GenerationRecipe::Component imaginary = component;
@@ -291,7 +293,8 @@ namespace TensileLite::Client
             return Layout(Shape(std::move(logicalDimensions)), std::move(logicalStrides), 0);
         }
 
-        StructuredSparsityPattern sparsePatternLastDimensionFastest(PruneSparseMode mode, size_t sparseAxis, size_t rank)
+        StructuredSparsityPattern
+            sparsePatternLastDimensionFastest(PruneSparseMode mode, size_t sparseAxis, size_t rank)
         {
             StructuredSparsityPattern pattern;
             pattern.indexOrder.resize(rank);
@@ -453,8 +456,10 @@ namespace TensileLite::Client
         if(lower > upper)
             throw std::runtime_error("TensileLite uniform lower bound exceeds upper bound.");
 
-        const auto uniformRealRecipe = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-            roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}), key.seed + key.semanticStream);
+        const auto uniformRealRecipe
+            = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
+                key.seed + key.semanticStream);
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::hostnumerics::generate(generated, uniformRealRecipe);

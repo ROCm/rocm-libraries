@@ -137,7 +137,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
                     bTensor.rawEncodedBackingStorage().data(),
                     bTensor.rawEncodedBackingStorage().size());
         std::vector<float> A_dirty = A_clean;
-        const auto         nan     = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+        const auto         nan = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
             roc::hostnumerics::GenerationRecipe::typeNaN(), 0);
         roc::hostnumerics::Tensor dirtyTensor = cleanTensor.deepCopy();
         roc::hostnumerics::generateAt(dirtyTensor, 0, nan);

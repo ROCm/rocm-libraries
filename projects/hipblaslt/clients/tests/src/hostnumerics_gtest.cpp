@@ -418,11 +418,12 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
         if(sequence == initialization::OperandSequence::MatrixB)
             component
                 = component.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
-        const Tensor generated = generate(
-            ScalarType::Float32,
-            Shape{size},
-            GenerationRecipe::realOnlyLastDimensionFastest(
-                std::move(component), initialization::seedForSequence(defaultInitializationSeed, sequence)));
+        const Tensor generated
+            = generate(ScalarType::Float32,
+                       Shape{size},
+                       GenerationRecipe::realOnlyLastDimensionFastest(
+                           std::move(component),
+                           initialization::seedForSequence(defaultInitializationSeed, sequence)));
         generated.copyLogicalElementsToEncodedStorage(std::as_writable_bytes(std::span(values)));
         return values;
     };
@@ -712,9 +713,10 @@ TEST(HostNumericsDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encodi
     for(const hipDataType type : fp8Types)
     {
         using namespace roc::hostnumerics;
-        const Tensor value = generate(hipblaslt::hostnumerics::scalarType(type),
-                                      Shape{1},
-                                      GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
+        const Tensor value
+            = generate(hipblaslt::hostnumerics::scalarType(type),
+                       Shape{1},
+                       GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
         EXPECT_EQ(value.rawEncodedBackingStorage().front(), std::byte{0})
             << "hipDataType=" << static_cast<int>(type);
     }
@@ -2175,10 +2177,10 @@ TEST(HostNumericsDataInitializationBridge, MatmulValidationAcceptsScalarVectorAn
     using namespace hipblaslt::hostnumerics;
     for(const Shape& shape : {Shape{}, Shape{3}, Shape{2, 3}, Shape{2, 3, 2}})
     {
-        const Tensor expected
-            = generate(ScalarType::Float32,
-                       shape,
-                       GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::constant({.value = 1.0}), 0));
+        const Tensor         expected = generate(ScalarType::Float32,
+                                         shape,
+                                         GenerationRecipe::realOnlyLastDimensionFastest(
+                                             GenerationRecipe::constant({.value = 1.0}), 0));
         MatmulValidationCase testCase;
         testCase.outputs.emplace_back(expected, expected.deepCopy());
         MatmulValidationOptions options;
