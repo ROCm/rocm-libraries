@@ -812,16 +812,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return singleStageLoop() && waitAlu_ && isGlobalPrefetch(*node->inst) &&
                waitAlu_->untilFree(*node->inst, WaitAluHideOp::Wmma, formWmma_) > 0;
     }
-    // A queued WMMA with no source-data wait: only such a WMMA can hide a held memory op.
-    bool wmmaIssuableNow() const {
-        for (DAGNode* w : wmmaQueue)
-            if (getMaxSrcDataWait(w) <= 0) return true;
+    // Some memory op the scoreboard still holds (unplacedMemWaitsOut) is waiting in a queue.
+    bool heldMemOpPending() const {
+        for (const ReadySetByDAGid* q : {&otherQueue, &valuQueue, &prefetchQueue})
+            for (DAGNode* n : *q)
+                if (unplacedMemWaitsOut(n)) return true;
         return false;
     }
     // A prefetch or VMEM load no level placed (no prefetch lead) whose va_vdst the WMMAs still
     // ready to issue would hide: it waits for them, as far as the scoreboard needs and no further.
     bool unplacedMemWaitsOut(const DAGNode* node) const {
-        if (!waitAlu_ || !wmmaIssuableNow()) return false;
+        if (!waitAlu_) return false;
         const StinkyInstruction& inst = *node->inst;
         if (!isGlobalPrefetch(inst) && !isBufferMemLoad(inst) && !isGlobalMemLoad(inst))
             return false;
@@ -2475,9 +2476,29 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
     }
 
+    // Phase G — final safety net: force-pick the least-blocked ready node to guarantee progress.
+    auto pickFallback = [&]() -> DAGNode* {
+        DAGNode* fallback = nullptr;
+        int fallbackKind = -1;
+        int fallbackWait = 0;
+        if (!findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait))
+            return nullptr;
+        // RAW/hazard and global credit-drain waits are real elapsed time.
+        int realWait = fallbackWait;
+        if (fallbackKind == kGlobalRead && globalReadQueueFull())
+            realWait = std::max(realWait, globalReadInflight_.minResidual());
+        if (realWait > 0) advanceTime(realWait, TimeKind::Elapsed);
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
+                             << " kind=" << fallbackKind << " wait=" << realWait << "\n");
+        return rememberPick(popNonWmma(fallback, fallbackKind));
+    };
+
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
     if (promotedPhase_ == PromotePhase::None && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+        // No WMMA can issue yet: a memory op held for the scoreboard goes first (Phase G).
+        if (bestLatency > 0 && heldMemOpPending())
+            if (DAGNode* n = pickFallback()) return n;
         // The queued WMMA can only start once its sources arrive: that stall elapses.
         if (wmmaQueueCover() > 0 && bestLatency > 0) advanceTime(bestLatency, TimeKind::Elapsed);
         DAGNode* node = pickOneFromWMMA(bestWMMA);
@@ -2519,21 +2540,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
     }
 
-    // Phase G — final safety net: force-pick the least-blocked ready node to
-    // guarantee progress.
-    DAGNode* fallback = nullptr;
-    int fallbackKind = -1;
-    int fallbackWait = 0;
-    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
-        // RAW/hazard and global credit-drain waits are real elapsed time.
-        int realWait = fallbackWait;
-        if (fallbackKind == kGlobalRead && globalReadQueueFull())
-            realWait = std::max(realWait, globalReadInflight_.minResidual());
-        if (realWait > 0) advanceTime(realWait, TimeKind::Elapsed);
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
-                             << " kind=" << fallbackKind << " wait=" << realWait << "\n");
-        return rememberPick(popNonWmma(fallback, fallbackKind));
-    }
+    if (DAGNode* n = pickFallback()) return n;
 
     // Only barriers are left and an SCC chain is still holding them back.
     // applyClusterBarrierSccRule only locks chains whose readers can all issue
