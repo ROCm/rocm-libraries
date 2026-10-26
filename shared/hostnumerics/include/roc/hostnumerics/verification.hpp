@@ -6,7 +6,7 @@
 #include <string>
 
 namespace roc::hostnumerics {
-enum class VerificationStatus { Passed, Mismatch, Unsupported, Incomplete, Count };
+enum class VerificationStatus { Passed, Mismatch, Unsupported, Incomplete };
 
 // Unsupported denotes numerical semantics outside a verifier's contract.
 // Incomplete denotes an exhausted work/storage budget or incomplete observation.

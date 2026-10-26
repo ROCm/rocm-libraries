@@ -151,8 +151,6 @@ Accumulator applyActivation(Activation activation, Accumulator value, Accumulato
             }
             case Activation::Clamp:
                 return std::max(parameter0, std::min(value, parameter1));
-            case Activation::Count:
-                break;
         }
     }
 

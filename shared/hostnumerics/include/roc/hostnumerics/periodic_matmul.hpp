@@ -18,7 +18,7 @@ struct PeriodicMatmulSegment {
     PeriodicInitialization b;  // Logical [segment K, N], repeats only along N.
 };
 
-enum class PeriodicMatmulMode { ExactInteger, FloatingPoint, Count };
+enum class PeriodicMatmulMode { ExactInteger, FloatingPoint };
 
 struct PeriodicMatmulLimits {
     size_t maxReferenceMultiplyAdds = 1'000'000'000;

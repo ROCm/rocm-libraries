@@ -65,7 +65,6 @@ namespace hipblaslt_sample_detail
         C          = 2,
         Bias       = 3,
         ScaleAlpha = 4,
-        Count,
     };
 
     enum class LayerNormInitializationSequence : std::uint64_t
@@ -73,13 +72,11 @@ namespace hipblaslt_sample_detail
         Input = 0,
         Gamma = 1,
         Beta  = 2,
-        Count,
     };
 
     enum class AMaxInitializationSequence : std::uint64_t
     {
         Input = 0,
-        Count,
     };
 
     constexpr std::uint64_t groupedInitializationSequence(std::uint64_t              group,

@@ -12,7 +12,6 @@ namespace roc::hostnumerics {
 enum class ReductionOperation {
     Sum,              // Adds all values in each reduction slice.
     MaximumAbsolute,  // Ignores NaN magnitudes and returns the largest remaining magnitude.
-    Count,
 };
 
 // Allocates a contiguous output whose shape is input.shape() with axes removed.

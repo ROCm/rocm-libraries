@@ -18,7 +18,7 @@
 namespace roc::hostnumerics {
 inline constexpr uint64_t freivaldsModulus = (uint64_t{1} << 61) - 1;
 
-enum class FreivaldsProbeAlgorithm { SplitMix64Rejection, SplitMix64Legacy, Count };
+enum class FreivaldsProbeAlgorithm { SplitMix64Rejection, SplitMix64Legacy };
 struct FreivaldsProbeOptions {
     uint64_t seed = 0;
     FreivaldsProbeAlgorithm algorithm = FreivaldsProbeAlgorithm::SplitMix64Rejection;

@@ -35,7 +35,6 @@ namespace TensileLite::Client::hostnumerics
         InvalidScaleConfiguration,
         InvalidDescriptor,
         InvalidBatchIndex,
-        Count,
     };
 
     struct TranslationFailure

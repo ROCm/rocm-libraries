@@ -12,7 +12,6 @@ namespace roc::hostnumerics {
 enum class ActivationApplication {
     Forward,   // Writes activation(value).
     Gradient,  // Multiplies input by activation'(auxiliaryInput).
-    Count,
 };
 
 // Numerical policy and optional inputs for the standalone rank-two epilogue.
