@@ -999,6 +999,7 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
 
     const char* required_arch = rocke_attr_get_str(&op->attrs, "required_arch");
     const char* required_flavor = rocke_attr_get_str(&op->attrs, "required_llvm_flavor");
+    const char* minimum_flavor = rocke_attr_get_str(&op->attrs, "minimum_llvm_flavor");
     if(required_arch
        && (!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, required_arch) != 0))
     {
@@ -1015,6 +1016,18 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
                       "tile.inline_asm requires LLVM flavor %s, got %s",
                       required_flavor,
                       rocke_llvm_flavor_name(L->flavor));
+    }
+    if(minimum_flavor)
+    {
+        rocke_llvm_flavor_t minimum = rocke_llvm_flavor_from_name(minimum_flavor);
+        if(minimum == ROCKE_LLVM_FLAVOR_AUTO || !rocke_ll_flavor_at_least(L->flavor, minimum))
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.inline_asm requires LLVM flavor %s, got %s",
+                          minimum_flavor,
+                          rocke_llvm_flavor_name(L->flavor));
+        }
     }
     raw_template = rocke_attr_get_str(&op->attrs, "template");
     if(raw_template == NULL)

@@ -12,7 +12,11 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
-from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import (
+    GOLDEN_ALIASES,
+    GOLDEN_FLAVORS,
+    GOLDEN_PROFILE_FLAVORS,
+)
 from rocke.core.ir_golden import check_golden as _check_golden
 
 
@@ -5211,7 +5215,8 @@ def build_golden() -> dict:
     """Run every case under each golden flavor and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
-        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 
@@ -5229,8 +5234,8 @@ def main():
     ap.add_argument(
         "--write",
         type=Path,
-        help="(re-)bless the flavor-keyed golden: run every case under each of "
-        f"{GOLDEN_FLAVORS} and write the result. Run only from a verified-good "
+        help="(re-)bless the profile-keyed golden: run every case under each of "
+        f"{GOLDEN_PROFILE_FLAVORS} and write lane aliases. Run only from a verified-good "
         "tree; re-blessing should accompany a reviewed, expected output change.",
     )
     ap.add_argument(

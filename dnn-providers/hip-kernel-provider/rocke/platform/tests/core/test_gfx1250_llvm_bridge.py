@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Focused validation for the standalone gfx1250 LLVM 23 bridge."""
+"""Focused validation for the gfx1250 LLVM23-generation emission profile."""
 
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ def _lower(kernel, *, arch="gfx1250", flavor="llvm23"):
 class TestGfx1250LlvmBridge(unittest.TestCase):
     def test_exact_control_intrinsics_and_inline_asm(self):
         llvm = _lower(_build_all())
+        self.assertEqual(llvm, _lower(_build_all(), flavor="llvm24"))
         expected = (
             "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)",
             "call void @llvm.amdgcn.s.barrier.signal(i32 1)",
