@@ -525,7 +525,6 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
               input_right_pads_{input_right_pads}
         {
             stride_overflow = stride_overflow_in;
-            static ActiveWorkgroupsPerCU active_workgroups_per_cu;
 
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
@@ -545,29 +544,38 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
 
             if(split_k < 0)
             {
-                ck::index_t gemmM, gemmN, gemmK;
-                std::tie(gemmM, gemmN, gemmK) =
-                    get_bwd_weight_gemm_sizes<NDimSpatial>(a_g_n_k_wos_lengths, e_g_k_c_xs_lengths);
-
-                const auto grid_size =
-                    calculate_mn_grid_size<MPerBlock, NPerBlock>(gemmM, gemmN) * Conv_G_;
-                k_batch_ = get_best_occupancy_k_batch_value(active_workgroups_per_cu.max_occupancy_,
-                                                            grid_size);
-
-                // Ensure that k_batch_ does not exceed the maximum value
-                // for the GEMM pipeline.
-                const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
-                k_batch_               = std::min(k_batch_, k_batch_max);
-
-                // Cap k_batch_ to 128 to avoid accuracy issues
-                k_batch_ = std::min(k_batch_, 128);
-
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                if constexpr(sizeof(WeiDataType) == 2 &&
+                             CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
                 {
-                    std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
-                              << std::endl;
-                    std::cout << "[SPLIT-K AUTODEDUCE] Final k_batch value: " << k_batch_
-                              << std::endl;
+                    k_batch_ = 1;
+                }
+                else
+                {
+                    static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+                    ck::index_t gemmM, gemmN, gemmK;
+                    std::tie(gemmM, gemmN, gemmK) = get_bwd_weight_gemm_sizes<NDimSpatial>(
+                        a_g_n_k_wos_lengths, e_g_k_c_xs_lengths);
+
+                    const auto grid_size =
+                        calculate_mn_grid_size<MPerBlock, NPerBlock>(gemmM, gemmN) * Conv_G_;
+                    k_batch_ = get_best_occupancy_k_batch_value(
+                        active_workgroups_per_cu.max_occupancy_, grid_size);
+
+                    // Ensure that k_batch_ does not exceed the maximum value
+                    // for the GEMM pipeline.
+                    const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
+                    k_batch_               = std::min(k_batch_, k_batch_max);
+
+                    // Cap k_batch_ to 128 to avoid accuracy issues.
+                    k_batch_ = std::min(k_batch_, 128);
+
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
+                                  << std::endl;
+                        std::cout << "[SPLIT-K AUTODEDUCE] Final k_batch value: " << k_batch_
+                                  << std::endl;
+                    }
                 }
             }
             else
@@ -758,9 +766,9 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
         std::array<ck::index_t, NDimSpatial> input_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
         std::array<ck::index_t, NDimSpatial> output_spatial_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
+        const std::array<ck::index_t, NDimSpatial> input_left_pads_;
+        const std::array<ck::index_t, NDimSpatial> input_right_pads_;
         long_index_t c_space_size_bytes;
         bool stride_overflow;
     };
@@ -1181,7 +1189,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
         if constexpr(sizeof(WeiDataType) == 2 &&
                      CShuffleBlockTransferScalarPerVector_NPerBlock == 1)
         {
-            if(gemm_arg.KBatch > 1)
+            if(!ck::is_gfx125_supported() || gemm_arg.KBatch > 1)
                 return false;
         }
 

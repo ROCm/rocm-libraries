@@ -271,9 +271,9 @@ struct DeviceGroupedConvBwdWeight_Explicit
 
         GemmArgument explicit_gemm_args;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        const std::array<ck::index_t, NDimSpatial> conv_filter_strides_;
+        const std::array<ck::index_t, NDimSpatial> input_left_pads_;
+        const std::array<ck::index_t, NDimSpatial> input_right_pads_;
         WeiDataType* p_wei_grid_;
         bool is_filter_data_packed;
         CElementwiseGridDesc elementwise_desc_;

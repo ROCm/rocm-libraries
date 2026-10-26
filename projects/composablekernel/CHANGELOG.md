@@ -6,13 +6,19 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
-* Added a gfx1250 BF16 unmerged two-stage backward-weight candidate with scalar output-gradient loads and vectorized input-channel loads for skinny-channel long reductions.
-* Added gfx1250 BF16 RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
+* Added gfx1250 FP16/BF16 scalar WMMA backward-weight instances for odd per-group channels, supporting explicit split-one and automatic split-one selection.
+* Added gfx1250 BF16 skinny-output and RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
 
-### Fixed
+### Optimized
 
-* Restored device-wide occupancy planning for automatic split-K in gfx1250 two-stage WMMA grouped backward-weight, removing the squared per-CU cap that underfilled small output grids with long reductions.
-* Corrected BF16/FP32 large backward-weight factory declarations to respect their own datatype build guards.
+* Removed redundant output clears for proven packed split-one WMMA backward-weight mappings.
+* Restored device-wide automatic split-K occupancy planning for two-stage WMMA backward-weight, without the squared per-CU cap that underfilled small output grids with long reductions.
+
+### Resolved Issues
+
+* Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
+* Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
+* Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
@@ -20,18 +26,11 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 * Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
-* Added gfx1250 split-one scalar WMMA backward-weight instances for odd per-group channels.
 
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
-* Avoided redundant grouped-convolution output clears only for proven packed split-one WMMA mappings.
 
-### Resolved Issues
-
-* Preserved preprocessing when kernel timing is compiled out, and made TwoStage backward-weight arguments own long-index-converted support metadata.
-* Extended WMMA backward-weight interface coverage to gfx12 with valid K tiles.
-* Kept gfx1250 BF16 convolution compiler options consistent across architecture-selection paths.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 

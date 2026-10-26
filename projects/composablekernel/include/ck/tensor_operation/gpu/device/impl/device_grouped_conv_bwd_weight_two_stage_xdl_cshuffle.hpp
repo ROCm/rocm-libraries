@@ -992,9 +992,9 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         const IndexType Conv_N_;
         const IndexType Conv_K_;
         const IndexType Conv_C_;
-        const std::array<IndexType, NDimSpatial>& conv_filter_strides_;
-        const std::array<IndexType, NDimSpatial>& input_left_pads_;
-        const std::array<IndexType, NDimSpatial>& input_right_pads_;
+        const std::array<IndexType, NDimSpatial> conv_filter_strides_;
+        const std::array<IndexType, NDimSpatial> input_left_pads_;
+        const std::array<IndexType, NDimSpatial> input_right_pads_;
         std::array<IndexType, NDimSpatial + 3> b_g_n_c_wis_lengths_; // input lengths
         std::array<IndexType, NDimSpatial + 3> b_g_n_c_wis_strides_; // input strides
         std::array<IndexType, NDimSpatial + 3> e_g_k_c_xs_lengths_;  // weight lengths
