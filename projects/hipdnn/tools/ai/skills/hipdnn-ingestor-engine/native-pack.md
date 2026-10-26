@@ -108,10 +108,11 @@ Prepared state must remain immutable across concurrent launches.
 
 A kernel whose UKD carries a `sources` map launches several kernels in order. The sketch
 is a pack whose kernels carry `decode` and `merge` launches; the decode launch writes
-partial results to a workspace slice and the merge launch reads them. `intermediateBytes`,
-`decodeSignature`, `mergeSignature`, `bindOperands`, `configureDecode` and
-`configureMerge` stand for pack-local helpers (matching, signatures and geometry follow
-`ConvNative.cpp`).
+partial results to a workspace slice and the merge launch reads them. `Binding`,
+`intermediateBytes`, `decodeSignature`, `mergeSignature`, `bindOperands`,
+`configureDecode` and `configureMerge` stand for pack-local types and helpers
+(matching, signatures and geometry follow `ConvNative.cpp`).
+`Gfx1151WmmaAttentionNative.cpp` is a shipped decode and merge handler.
 
 ```cpp
 class PreparedDecodeMerge : public PreparedDispatch
@@ -203,18 +204,12 @@ private:
 };
 ```
 
-What the sketch relies on:
+What the sketch relies on beyond the contract above and `LaunchKernelDefinition.hpp`:
 
-- One launch-name set per pack. The generator refuses a config whose launch names
-  disagree and the state manager drops a mismatching kernel, so alternatives with
+- The generator refuses a config whose launch names disagree, so alternatives with
   another set (for example a single-launch variant) belong to a separate engine.
-- Launch order and the hand-off are the handler's. The descriptor lists the launches
-  only.
 - The hipDNN workspace is not zeroed. A launch that accumulates into the slice must
   initialise it, or an earlier launch must write all of it.
-- `launchKernelDefinition(kernel, name)` throws `INVALID_VALUE` for an unknown name or a
-  single-launch kernel. Two launch names may name one kernel, so both codes may resolve
-  out of one module.
 - `launchNames()` is provisional until the `launches[]` dispatch program exists
   ([RFC 0017 §15.1](../../../../docs/rfcs/0017_UniversalKernelDescriptor.md)).
 
