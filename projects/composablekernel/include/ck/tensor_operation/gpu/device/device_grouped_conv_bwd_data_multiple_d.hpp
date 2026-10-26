@@ -39,6 +39,10 @@ struct DeviceGroupedConvBwdDataMultipleD : public BaseOperator
 
     static_assert(NumDTensor == DsLayout::Size(), "wrong! Inconsistent NumDTensor");
 
+    // Includes any internal initialization and final conversion. Unknown families
+    // make no promise about independence from prior logical output contents.
+    virtual bool IsOutputFullyDefined(const BaseArgument*) const { return false; }
+
     virtual std::unique_ptr<BaseArgument> MakeArgumentPointer(
         const void* p_a,                                                 // output image
         const void* p_b,                                                 // weight

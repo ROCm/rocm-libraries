@@ -1072,6 +1072,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     // alignment, alias and workspace proof at invocation, even when only one
     // of these tagged transposes can be borrowed.
     const bool borrowable_shape =
+        ctx.GetStream().GetDeviceName() == "gfx1250" &&
         (problem.Is2d() || problem.Is3d()) && problem.IsLayoutDefault() &&
         problem.GetConv().mode == miopenConvolution &&
         problem.GetConv().trans_output_pads.size() == problem.GetSpatialDims() &&
@@ -1086,14 +1087,11 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         !problem.HasNonPackedTensors() && problem.GetAlphaBetaCase() == DEFAULT &&
         problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f;
 
-    // The 3D output-copy optimization is restricted to gfx1250; other devices
-    // retain staging even when the selected CK invoker defines E.
-    const bool selected_output_complete =
-        (!problem.IsDirectionForward() || PlainFwdSetOutput) &&
-        (problem.GetDirection() != miopen::conv::Direction::BackwardWeights ||
-         ctx.GetStream().GetDeviceName() == "gfx1250") &&
-        (!problem.Is3d() || ctx.GetStream().GetDeviceName() == "gfx1250") &&
-        SelectedNCHWCKOutputIsFullyDefined(problem, id_string, split_k);
+    // Fusion retains staging because it has no scalar/workspace proof here.
+    const bool can_skip_output_init =
+        (std::is_same_v<CastType, miopen::conv::DataInvokeParams> ||
+         std::is_same_v<CastType, miopen::conv::WrWInvokeParams>) &&
+        (!problem.IsDirectionForward() || PlainFwdSetOutput);
 
     result.invoker_factory = [kernel_id_                = kernel_id,
                               split_k_                  = split_k,
@@ -1104,7 +1102,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_tr_inst_           = std::move(_output_tr_inst),
                               output_init_tr_inst_      = std::move(_output_init_tr_inst),
                               borrowable_shape_         = borrowable_shape,
-                              selected_output_complete_ = selected_output_complete,
+                              can_skip_output_init_     = can_skip_output_init,
                               x_desc_ =
                                   problem.IsDirectionForward() ? problem.GetIn() : problem.GetOut(),
                               w_desc_ = problem.GetWeights(),
@@ -1123,7 +1121,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 output_tr_inst2           = std::move(output_tr_inst_),
                 output_init_tr_inst2      = std::move(output_init_tr_inst_),
                 borrowable_shape2         = borrowable_shape_,
-                selected_output_complete2 = selected_output_complete_,
+                can_skip_output_init2     = can_skip_output_init_,
                 x_desc2                   = std::move(x_desc_),
                 w_desc2                   = std::move(w_desc_),
                 y_desc2                   = std::move(y_desc_),
@@ -1156,7 +1154,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                          std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
             {
                 safe_to_borrow =
-                    borrowable_shape2 && data_ctx.alpha.GetAsFloat() == 1.0f &&
+                    borrowable_shape2 && handle.GetDeviceName() == "gfx1250" &&
+                    data_ctx.alpha.GetAsFloat() == 1.0f &&
                     data_ctx.beta.GetAsFloat() == 0.0f &&
                     data_ctx.workSpaceSize >= workspace_size2 &&
                     internal::CanBorrowNCHWOperands(
@@ -1169,11 +1168,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 static_cast<void>(borrowable_shape2);
                 static_cast<void>(workspace_size2);
             }
-
-            // The selected invoker, not beta=0 or a successful GEMM launch,
-            // must define all of E. This removes only the old-output copy;
-            // CK's own clears and the staged output conversion remain intact.
-            const bool skip_output_init = selected_output_complete2 && safe_to_borrow;
 
             std::array<internal::TransposeInstanceTagged*, 3> tr_ptrs = {
                 &input1_tr_inst2, &input2_tr_inst2, &output_tr_inst2};
@@ -1202,6 +1196,28 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                          output_init_tr_inst2.IsSkippable();
             if(!borrowed_output)
                 output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
+                MakeNCHWCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
+                                 std::decay_t<decltype(*sh_conv_ptr2)>,
+                                 CKArgsType,
+                                 CastType>(
+                    ck_args2, sh_conv_ptr2, operand_ptrs, data_ctx, split_k2);
+
+            shared<Data_t> buf_handle{};
+            if(ck_buff_des2.has_value() && ck_buff_des2->ck_size && workspace_ptr)
+            {
+                buf_handle = handle.CreateSubBuffer(
+                    workspace_ptr, ck_buff_des2->ck_offset, ck_buff_des2->ck_size);
+                assert(buf_handle.get());
+                sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), buf_handle.get());
+            }
+            // Ask the concrete operation about this actual, workspace-bound
+            // argument. Its complete invocation must define every logical output.
+            const bool output_complete =
+                sh_conv_ptr2->IsOutputFullyDefined(argument_ptr.get());
+            const bool skip_output_init =
+                can_skip_output_init2 && safe_to_borrow && output_complete;
+
 
             // ConvertFrom automatically keeps kernel time and accumulates.
             if(!borrowed_input1)
@@ -1225,21 +1241,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                     elapsed += handle.GetKernelTime();
             }
 
-            std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
-                MakeNCHWCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
-                                 std::decay_t<decltype(*sh_conv_ptr2)>,
-                                 CKArgsType,
-                                 CastType>(
-                    ck_args2, sh_conv_ptr2, operand_ptrs, data_ctx, split_k2);
-
-            shared<Data_t> buf_handle{};
-            if(ck_buff_des2.has_value() && ck_buff_des2->ck_size && workspace_ptr)
-            {
-                buf_handle = handle.CreateSubBuffer(
-                    workspace_ptr, ck_buff_des2->ck_offset, ck_buff_des2->ck_size);
-                assert(buf_handle.get());
-                sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), buf_handle.get());
-            }
 
             auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
             {

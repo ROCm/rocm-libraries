@@ -25,9 +25,7 @@ using namespace ck::tensor_layout::convolution;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
 template <ck::index_t NDimSpatial, typename DataType>
-void CheckDirtyOutput(const ck::utils::conv::ConvParam& param,
-                      bool has_spatial_holes,
-                      bool filter_only = false)
+void CheckDirtyOutput(const ck::utils::conv::ConvParam& param, bool has_spatial_holes)
 {
     using OutLayout = std::conditional_t<NDimSpatial == 2, NHWGK, NDHWGK>;
     using WeiLayout = std::conditional_t<NDimSpatial == 2, GKYXC, GKZYXC>;
@@ -119,24 +117,9 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param,
 
     const auto instances = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
         DeviceOp>::GetInstances();
-    // Exercise both the specialized and default v3 paths on a full overwrite. The
-    // stride-2 control must use Default; the specialized op rejects that geometry.
-    const std::vector<std::string> specializations =
-        has_spatial_holes ? std::vector<std::string>{"Default"}
-        : filter_only     ? std::vector<std::string>{"Filter1x1Stride1Pad0"}
-                          : std::vector<std::string>{"Filter1x1Stride1Pad0", "Default"};
-    for(const auto& specialization : specializations)
+    bool executed = false;
+    for(const auto& op : instances)
     {
-        bool executed = false;
-        for(const auto& op : instances)
-        {
-            const std::string name = op->GetTypeString();
-            if(name.find("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<") != 0 ||
-               name.find(", " + specialization + ", ") == std::string::npos)
-            {
-                continue;
-            }
-
             auto arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
                                                wei_device.GetDeviceBuffer(),
                                                {},
@@ -161,6 +144,36 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param,
             {
                 continue;
             }
+
+            if(!op->IsOutputFullyDefined(arg.get()))
+                continue;
+            const std::string name = op->GetTypeString(); // Diagnostics only.
+
+            // A non-packed group stride must never receive a capability promise,
+            // even if the implementation accepts this descriptor for invocation.
+            auto nonpacked_strides = in_strides;
+            ++nonpacked_strides[0];
+            auto nonpacked_arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
+                                                        wei_device.GetDeviceBuffer(),
+                                                        {},
+                                                        in_device.GetDeviceBuffer(),
+                                                        out_lengths,
+                                                        out_strides,
+                                                        wei_lengths,
+                                                        wei_strides,
+                                                        {},
+                                                        {},
+                                                        in_lengths,
+                                                        nonpacked_strides,
+                                                        filter_strides,
+                                                        filter_dilations,
+                                                        left_pads,
+                                                        right_pads,
+                                                        PassThrough{},
+                                                        PassThrough{},
+                                                        PassThrough{},
+                                                        1);
+            EXPECT_FALSE(op->IsOutputFullyDefined(nonpacked_arg.get()));
 
             ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));
             op->SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());
@@ -205,12 +218,10 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param,
                     EXPECT_GT(holes, 0u);
                 }
             }
-            break;
-        }
-        EXPECT_TRUE(executed) << "No supported WMMA-v3 " << specialization
-                              << " instance executed for " << NDimSpatial << "D"
-                              << (has_spatial_holes ? ", stride-2" : ", 1x1");
     }
+    EXPECT_TRUE(executed) << "No supported output-qualified instance executed for "
+                          << NDimSpatial << "D"
+                          << (has_spatial_holes ? ", stride-2" : ", 1x1");
 }
 
 template <typename DataType>
@@ -221,7 +232,7 @@ void Run2d()
     // Group and channel tails require scalar loads/stores; every logical element
     // must still be written despite padded GEMM M/N tiles.
     CheckDirtyOutput<2, DataType>(
-        {2, 4, 2, 5, 3, {1, 1}, {3, 5}, {1, 1}, {1, 1}, {0, 0}, {0, 0}}, false, true);
+        {2, 4, 2, 5, 3, {1, 1}, {3, 5}, {1, 1}, {1, 1}, {0, 0}, {0, 0}}, false);
     CheckDirtyOutput<2, DataType>({2, 2, 2, 16, 16, {1, 1}, {4, 6}, {2, 2}, {1, 1}, {0, 0}, {0, 0}},
                                   true);
 }

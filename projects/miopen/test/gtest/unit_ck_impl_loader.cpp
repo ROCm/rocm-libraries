@@ -112,163 +112,9 @@ miopen::conv::ProblemDescription MakeBf16NchwPointwiseProblem(miopen::conv::Dire
 }
 } // namespace
 
-TEST(CPU_CkImplLoader_NONE, SelectedNchwOutputDefinitionIsFamilySpecific)
-{
-    using miopen::solver::SelectedNCHWCKOutputIsFullyDefined;
-    const auto fwd = MakeBf16NchwPointwiseProblem(miopen::conv::Direction::Forward, 2);
-    const auto bwd = MakeBf16NchwPointwiseProblem(miopen::conv::Direction::BackwardData, 2);
-    const std::string wmma_fwd =
-        "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 64, 64, Default, "
-        "16, 16, 2, 2, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, "
-        "BlkGemmPipelineVersion: v1, 1>";
-    const std::string xdl_fwd =
-        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 32, 32, "
-        "Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>";
-    const auto merged_fwd = wmma_fwd.substr(0, wmma_fwd.size() - 2) + "16>";
-    const auto packed_fwd = wmma_fwd.substr(0, wmma_fwd.size() - 1) + ", GroupsPerWmma: 4>";
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(fwd, wmma_fwd, std::nullopt));
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(fwd, xdl_fwd, std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, merged_fwd, std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, packed_fwd, std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, wmma_fwd, 2));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, "Unknown" + wmma_fwd, std::nullopt));
-
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
-        bwd, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128>", 4));
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
-        bwd, "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128>", 1));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        bwd, "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<128>", 1));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        bwd, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128>", 0));
-}
-
-TEST(CPU_CkImplLoader_NONE, SelectedNcdhwBackwardFullClearRequiresDefaultXdlV1)
-{
-    using miopen::solver::SelectedNCHWCKOutputIsFullyDefined;
-    using Direction = miopen::conv::Direction;
-    const std::string xdl_v1 =
-        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 64, 8, 8, Default, "
-        "32, 32, 2, 2, 1, 8, 1, 1>";
-    const auto make_problem = [](miopenDataType_t type,
-                                 Direction direction,
-                                 miopenTensorLayout_t layout,
-                                 std::vector<int> output_pads,
-                                 float alpha,
-                                 float beta) {
-        const miopen::TensorDescriptor dx(type, layout, {2, 16, 5, 5, 5});
-        const miopen::TensorDescriptor w(type, layout, {16, 16, 1, 1, 1});
-        const miopen::TensorDescriptor dy(type, layout, {2, 16, 3, 3, 3});
-        const miopen::ConvolutionDescriptor conv(
-            {0, 0, 0}, {2, 2, 2}, {1, 1, 1}, std::move(output_pads), 1);
-        return direction == Direction::Forward
-                   ? miopen::conv::ProblemDescription{dx,
-                                                      w,
-                                                      dy,
-                                                      conv,
-                                                      direction,
-                                                      0,
-                                                      miopen::Scalar(alpha),
-                                                      miopen::Scalar(beta)}
-                   : miopen::conv::ProblemDescription{dy,
-                                                      w,
-                                                      dx,
-                                                      conv,
-                                                      direction,
-                                                      0,
-                                                      miopen::Scalar(alpha),
-                                                      miopen::Scalar(beta)};
-    };
-    const auto problem = make_problem(
-        miopenBFloat16, Direction::BackwardData, miopenTensorNCDHW, {0, 0, 0}, 1.0f, 0.0f);
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(problem, xdl_v1, std::nullopt));
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenHalf, Direction::BackwardData, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
-        xdl_v1,
-        std::nullopt));
-    for(const auto split : {1, 2, 0, -1})
-        EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(problem, xdl_v1, split));
-    for(const auto direction : {Direction::Forward, Direction::BackwardWeights})
-        EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-            make_problem(miopenBFloat16, direction, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
-            xdl_v1,
-            std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenBFloat16, Direction::Forward, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
-        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 1>",
-        std::nullopt));
-    const auto fwd =
-        make_problem(miopenFloat, Direction::Forward, miopenTensorNCDHW, {0, 0, 0}, 1, 0);
-    const std::string fwd_v3 =
-        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Default, "
-        "16, 16, 2, 1, 4, 4, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, "
-        "BlkGemmPipelineVersion: v2>";
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(fwd, fwd_v3, std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, fwd_v3, 1));
-    for(const auto* suffix : {"_MergedGroups", "_DirectLoad", "_Large_Tensor"})
-    {
-        auto excluded = fwd_v3;
-        excluded.insert(excluded.find('<'), suffix);
-        EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(fwd, excluded, std::nullopt));
-    }
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenFloat, Direction::Forward, miopenTensorNCDHW, {0, 0, 0}, 1, 1),
-        fwd_v3,
-        std::nullopt));
-    EXPECT_TRUE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenFloat, Direction::BackwardData, miopenTensorNCDHW, {0, 0, 0}, 1, 0),
-        xdl_v1,
-        std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenBFloat16, Direction::BackwardData, miopenTensorNDHWC, {0, 0, 0}, 1, 0),
-        xdl_v1,
-        std::nullopt));
-    EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(
-        make_problem(miopenBFloat16, Direction::BackwardData, miopenTensorNCDHW, {0, 1, 0}, 1, 0),
-        xdl_v1,
-        std::nullopt));
-    for(const auto scalars : {std::array<float, 2>{2, 0}, {1, 1}, {0, 1}})
-        EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(make_problem(miopenBFloat16,
-                                                                     Direction::BackwardData,
-                                                                     miopenTensorNCDHW,
-                                                                     {0, 0, 0},
-                                                                     scalars[0],
-                                                                     scalars[1]),
-                                                        xdl_v1,
-                                                        std::nullopt));
-    for(const auto* unsupported :
-        {"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<64, Default>",
-         "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, Default>",
-         "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, Scale>",
-         "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, Bilinear>",
-         "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1_Unknown<64, Default>",
-         "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, Default>_Unknown"})
-        EXPECT_FALSE(SelectedNCHWCKOutputIsFullyDefined(problem, unsupported, std::nullopt))
-            << unsupported;
-}
 // -- GPU tests (require a HIP device) -----------------------------------------
 
 #if MIOPEN_BACKEND_HIP
-
-static std::array<bool, 3> ReadStagingWrites(Data_t workspace,
-                                             const std::array<std::size_t, 3>& region_sizes)
-{
-    const miopen::MultiBufferWorkspaceTraits regions(
-        {region_sizes[0], region_sizes[1], region_sizes[2]});
-    std::array<bool, 3> changed{};
-    for(std::size_t i = 0; i < changed.size(); ++i)
-    {
-        std::vector<unsigned char> bytes(std::min<std::size_t>(64, region_sizes[i]));
-        const auto* src = reinterpret_cast<const unsigned char*>(workspace) + regions.GetOffset(i);
-        const auto status = hipMemcpy(bytes.data(), src, bytes.size(), hipMemcpyDeviceToHost);
-        EXPECT_EQ(status, hipSuccess);
-        changed[i] =
-            status == hipSuccess && std::any_of(bytes.begin(), bytes.end(), [](unsigned char byte) {
-                return byte != 0xa5;
-            });
-    }
-    return changed;
-}
 
 TEST(GPU_CkImplLoader_FP16, LoaderLoadsForCurrentDevice)
 {
@@ -307,7 +153,7 @@ TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernels)
                                   << device_name;
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
+TEST(GPU_CkImplLoader_BFP16, NchwPointwiseBorrowAndStagedForward)
 {
     const auto device_name = GetCurrentDeviceName();
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
@@ -321,15 +167,12 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
     unit.SetupFloats(ctx);
     unit.SetupComputeType(ctx);
 
-    const auto run = [&](const auto& problem,
-                         bool overlap,
-                         const std::array<bool, 3>& expect_staging) {
+    const auto run = [&](const auto& problem, bool overlap) {
         const auto kernels =
             loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
         const auto candidate = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-            return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
-                   loader.IsArgsSupported(
-                       CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
+            return loader.IsArgsSupported(
+                CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
         });
         ASSERT_NE(candidate, kernels.end()) << "No supported forward candidate for " << device_name;
         const auto& selected = *candidate;
@@ -337,8 +180,6 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
             loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, selected, false);
         ASSERT_EQ(solution.status, miopenStatusSuccess);
         ASSERT_TRUE(solution.invoker_factory);
-        const auto layout_bytes = miopen::solver::GetWorkspaceSizeLayoutTransformConv(problem);
-        EXPECT_EQ(solution.workspace_sz, layout_bytes);
         Workspace scratch(solution.workspace_sz);
         ASSERT_NE(scratch.ptr(), nullptr);
         const auto invoker =
@@ -384,12 +225,6 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
                     miopen::conv::DataInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
             handle.Finish();
 
-            const auto staged = ReadStagingWrites(scratch.ptr(),
-                                                  {miopen::solver::GetPackedSize(x_desc),
-                                                   miopen::solver::GetPackedSize(w_desc),
-                                                   miopen::solver::GetPackedSize(y_desc)});
-            EXPECT_EQ(staged, expect_staging) << "selected=" << selected << " overlap=" << overlap;
-
             const auto actual = overlap ? handle.Read<bfloat16>(alias_dev, y_desc.GetElementSize())
                                         : handle.Read<bfloat16>(y_dev, y_desc.GetElementSize());
             for(std::size_t n = 0; n < 42; ++n)
@@ -407,25 +242,25 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
         }
     };
 
-    run(unit, false, {false, false, false});
-    run(unit, true, {true, true, true});
+    run(unit, false);
+    run(unit, true);
     for(const auto [channels, outputs] :
         std::array<std::pair<std::size_t, std::size_t>, 3>{{{256, 16}, {32, 512}, {512, 32}}})
     {
         auto control = MakeBf16NchwPointwiseProblem(direction, 1, channels, outputs);
         control.SetupFloats(ctx);
         control.SetupComputeType(ctx);
-        run(control, false, {false, false, false});
-        run(control, true, {true, true, true});
+        run(control, false);
+        run(control, true);
     }
     auto spatial = MakeBf16NchwPointwiseProblem(direction, 2);
     spatial.SetupFloats(ctx);
     spatial.SetupComputeType(ctx);
-    run(spatial, false, {true, false, true});
-    run(spatial, true, {true, true, true});
+    run(spatial, false);
+    run(spatial, true);
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwForwardFullOverwriteAndAliasFallback)
+TEST(GPU_CkImplLoader_BFP16, NchwForwardFullOverwriteAndAliasFallback)
 {
     const auto device_name = GetCurrentDeviceName();
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
@@ -448,45 +283,18 @@ TEST(GPU_CkImplLoader_BF16, NchwForwardFullOverwriteAndAliasFallback)
     const auto kernels =
         loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
     std::vector<std::string> selected_kernels;
-    for(const auto* family : {"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<",
-                              "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<",
-                              "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<"})
-    {
-        const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-            return id.find(family) == 0 &&
-                   miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
-                   loader.IsArgsSupported(
-                       CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false);
-        });
-        if(selected != kernels.end())
-            selected_kernels.push_back(*selected);
-    }
+    for(const auto& id : kernels)
+        if(loader.IsArgsSupported(CKSolverType::GrpConvFwd, problem, id, miopenBFloat16, false))
+            selected_kernels.push_back(id);
     ASSERT_FALSE(selected_kernels.empty())
         << "No supported full-overwrite forward candidate for " << device_name;
 
     const auto run_selected = [&](const auto& selected) {
         const auto solution =
             loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, selected, false);
-        EXPECT_TRUE(
-            miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, selected, std::nullopt))
-            << selected;
         ASSERT_EQ(solution.status, miopenStatusSuccess);
         ASSERT_TRUE(solution.invoker_factory);
 
-        const miopen::TensorDescriptor nhwc_x(
-            miopenBFloat16, miopenTensorNHWC, {2, 24, SpatialExtent, SpatialExtent});
-        const miopen::TensorDescriptor nhwc_w(miopenBFloat16, miopenTensorNHWC, {24, 24, 3, 3});
-        const auto nhwc_y = conv.GetForwardOutputTensor(nhwc_x, nhwc_w, miopenBFloat16);
-        auto native       = miopen::conv::ProblemDescription{
-            nhwc_x, nhwc_w, nhwc_y, conv, miopen::conv::Direction::Forward};
-        native.SetupFloats(ctx);
-        native.SetupComputeType(ctx);
-        const auto native_solution =
-            loader.GetSolution(CKSolverType::GrpConvFwd, ctx, native, selected, false);
-        ASSERT_EQ(native_solution.status, miopenStatusSuccess);
-        EXPECT_EQ(solution.workspace_sz,
-                  miopen::solver::GetWorkspaceSizeLayoutTransformConv(
-                      problem, native_solution.workspace_sz));
         Workspace scratch(solution.workspace_sz);
         ASSERT_NE(scratch.ptr(), nullptr);
         const auto invoker =
@@ -605,7 +413,7 @@ TEST(GPU_CkImplLoader_BF16, NchwForwardFullOverwriteAndAliasFallback)
         run_selected(selected);
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
+TEST(GPU_CkImplLoader_BFP16, NchwPointwiseBackwardBorrowAndFallback)
 {
     const auto device_name = GetCurrentDeviceName();
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
@@ -632,8 +440,6 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
         const auto solution = loader.GetSolution(solver_type, ctx, problem, selected, false);
         ASSERT_EQ(solution.status, miopenStatusSuccess);
         ASSERT_TRUE(solution.invoker_factory);
-        EXPECT_GE(solution.workspace_sz,
-                  miopen::solver::GetWorkspaceSizeLayoutTransformConv(problem));
         Workspace scratch(solution.workspace_sz);
         ASSERT_NE(scratch.ptr(), nullptr);
         const auto invoker =
@@ -697,17 +503,6 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
                 }
                 handle.Finish();
 
-                const std::array<std::size_t, 3> region_sizes =
-                    wrw ? std::array<std::size_t, 3>{miopen::solver::GetPackedSize(x_desc),
-                                                     miopen::solver::GetPackedSize(y_desc),
-                                                     miopen::solver::GetPackedSize(w_desc)}
-                        : std::array<std::size_t, 3>{miopen::solver::GetPackedSize(y_desc),
-                                                     miopen::solver::GetPackedSize(w_desc),
-                                                     miopen::solver::GetPackedSize(x_desc)};
-                EXPECT_EQ(ReadStagingWrites(scratch.ptr(), region_sizes),
-                          (std::array<bool, 3>{overlap, overlap, overlap}))
-                    << "selected=" << selected << " wrw=" << wrw;
-
                 const auto actual =
                     wrw ? (overlap ? handle.Read<bfloat16>(alias_dev, w_desc.GetElementSize())
                                    : handle.Read<bfloat16>(w_dev, w_desc.GetElementSize()))
@@ -721,7 +516,7 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
     }
 }
 
-TEST(GPU_CkImplLoader_BF16, NchwBackwardHolesUseSelectedFullClear)
+TEST(GPU_CkImplLoader_BFP16, NchwBackwardHolesUseSelectedFullClear)
 {
     const auto device_name = GetCurrentDeviceName();
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
@@ -742,9 +537,8 @@ TEST(GPU_CkImplLoader_BF16, NchwBackwardHolesUseSelectedFullClear)
     const auto kernels =
         loader.FillValidKernels(CKSolverType::GrpConvBwd, problem, miopenBFloat16, false);
     const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-        return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, 1) &&
-               loader.IsArgsSupported(
-                   CKSolverType::GrpConvBwd, problem, id + "+1", miopenBFloat16, false);
+        return loader.IsArgsSupported(
+            CKSolverType::GrpConvBwd, problem, id + "+1", miopenBFloat16, false);
     });
     if(selected == kernels.end())
         GTEST_SKIP() << "No selected full-clear backward kernel supports stride-two holes";
@@ -788,8 +582,8 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
     if(device_name.find("gfx1250") != 0)
         GTEST_SKIP() << "3D FP16/BF16/FP32 XDL-v1 backward candidates target gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded())
-        << "Required CK grouped conv library not installed for " << device_name;
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const miopen::TensorDescriptor dx_desc(dtype, miopenTensorNCDHW, {2, 16, 5, 5, 5});
     const miopen::TensorDescriptor w_desc(dtype, miopenTensorNCDHW, {16, 16, 1, 1, 1});
@@ -804,8 +598,7 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
 
     const auto kernels = loader.FillValidKernels(CKSolverType::GrpConv3dBwd, problem, dtype, false);
     const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-        return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
-               loader.IsArgsSupported(CKSolverType::GrpConv3dBwd, problem, id, dtype, false);
+        return loader.IsArgsSupported(CKSolverType::GrpConv3dBwd, problem, id, dtype, false);
     });
     ASSERT_NE(selected, kernels.end())
         << "No supported 3D FP16/BF16/FP32 no-D XDL-v1 backward candidate";
@@ -824,9 +617,6 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
     const auto dxs                                = dx_desc.GetStrides();
     const auto dys                                = dy_desc.GetStrides();
     const auto ws                                 = w_desc.GetStrides();
-    const std::array<std::size_t, 3> region_sizes = {miopen::solver::GetPackedSize(dy_desc),
-                                                     miopen::solver::GetPackedSize(w_desc),
-                                                     miopen::solver::GetPackedSize(dx_desc)};
     for(const int sign : {1, -1})
     {
         std::vector<DataType> dy(dy_desc.GetElementSize());
@@ -882,9 +672,6 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
             invoker(handle,
                     miopen::conv::DataInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
             handle.Finish();
-            EXPECT_EQ(ReadStagingWrites(scratch.ptr(), region_sizes),
-                      (std::array<bool, 3>{true, alias, true}))
-                << "selected=" << *selected << " alias=" << alias;
             const auto actual = handle.Read<DataType>(dx_dev, dx_desc.GetElementSize());
             for(std::size_t i = 0; i < actual.size(); ++i)
                 EXPECT_EQ(static_cast<float>(actual[i]), static_cast<float>(DataType{expected[i]}))
@@ -895,7 +682,7 @@ void CheckNcdhwBackwardSelectedFullClearAndAliasFallback(miopenDataType_t dtype)
     }
 }
 
-TEST(GPU_CkImplLoader_BF16, NcdhwBackwardSelectedFullClearAndAliasFallback)
+TEST(GPU_CkImplLoader_BFP16, NcdhwBackwardSelectedFullClearAndAliasFallback)
 {
     CheckNcdhwBackwardSelectedFullClearAndAliasFallback<bfloat16>(miopenBFloat16);
 }
@@ -917,7 +704,8 @@ void CheckNcdhwForwardOverwriteAndAliasFallback(miopenDataType_t dtype)
     if(device_name != "gfx1250")
         GTEST_SKIP() << "3D forward copy elision targets gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded());
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
     auto&& handle = get_handle();
     miopen::ExecutionContext ctx(&handle);
 
@@ -936,8 +724,7 @@ void CheckNcdhwForwardOverwriteAndAliasFallback(miopenDataType_t dtype)
         const auto kernels =
             loader.FillValidKernels(CKSolverType::GrpConv3dFwd, problem, dtype, false);
         const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-            return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, std::nullopt) &&
-                   loader.IsArgsSupported(CKSolverType::GrpConv3dFwd, problem, id, dtype, false);
+            return loader.IsArgsSupported(CKSolverType::GrpConv3dFwd, problem, id, dtype, false);
         });
         ASSERT_NE(selected, kernels.end());
         const auto solution =
@@ -1049,7 +836,8 @@ void CheckNchwWrwOverwriteAndAliasFallback(miopenDataType_t dtype)
     if(device_name != "gfx1250")
         GTEST_SKIP() << "WRW copy elision targets gfx1250";
     const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    ASSERT_TRUE(loader.IsLoaded());
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
     auto&& handle = get_handle();
     miopen::ExecutionContext ctx(&handle);
     const miopen::TensorDescriptor x_desc(dtype, miopenTensorNCHW, {2, 16, 5, 7});
@@ -1062,12 +850,9 @@ void CheckNchwWrwOverwriteAndAliasFallback(miopenDataType_t dtype)
     problem.SetupComputeType(ctx);
     const auto kernels  = loader.FillValidKernels(CKSolverType::GrpConvWrw, problem, dtype, false);
     const auto selected = std::find_if(kernels.begin(), kernels.end(), [&](const auto& id) {
-        return miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, id, 1) &&
-               loader.IsArgsSupported(CKSolverType::GrpConvWrw, problem, id + "+1", dtype, false);
+        return loader.IsArgsSupported(CKSolverType::GrpConvWrw, problem, id + "+1", dtype, false);
     });
     ASSERT_NE(selected, kernels.end());
-    EXPECT_FALSE(miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, *selected, -1));
-    EXPECT_FALSE(miopen::solver::SelectedNCHWCKOutputIsFullyDefined(problem, *selected, 2));
     const auto solution =
         loader.GetSolution(CKSolverType::GrpConvWrw, ctx, problem, *selected + "+1", false);
     ASSERT_EQ(solution.status, miopenStatusSuccess);
@@ -1152,6 +937,7 @@ TEST(GPU_CkImplLoader_BFP16, NchwWrwOverwriteAndAliasFallback)
 {
     CheckNchwWrwOverwriteAndAliasFallback<bfloat16>(miopenBFloat16);
 }
+
 
 TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)
 {

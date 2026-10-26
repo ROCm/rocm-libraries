@@ -10,6 +10,111 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "profiler/profile_grouped_conv_fwd_impl.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+
+namespace {
+template <ck::index_t D, typename T>
+void CheckQualifiedForwardDirtyOutput()
+{
+    using Pass = ck::tensor_operation::element_wise::PassThrough;
+    using namespace ck::tensor_layout::convolution;
+    using ALayout = std::conditional_t<D == 2, NHWGC, NDHWGC>;
+    using BLayout = std::conditional_t<D == 2, GKYXC, GKZYXC>;
+    using ELayout = std::conditional_t<D == 2, NHWGK, NDHWGK>;
+    using Op = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
+        D, ALayout, BLayout, ck::Tuple<>, ELayout, T, T, ck::Tuple<>, T, Pass, Pass, Pass>;
+    constexpr ck::index_t G = 3, N = 2, C = 16, K = 16;
+    std::array<ck::index_t, D + 3> a{}, as{}, b{}, bs{}, e{}, es{};
+    std::array<ck::index_t, D> stride{}, dilation{}, pads{};
+    a[0] = b[0] = e[0] = G;
+    a[1] = e[1] = N;
+    b[1] = e[2] = K;
+    a[2] = b[2] = C;
+    ck::index_t spatial = 1;
+    for(ck::index_t d = D; d > 0; --d)
+    {
+        a[d + 2] = e[d + 2] = d == D ? 5 : 3;
+        b[d + 2] = 1;
+        as[d + 2] = spatial * G * C;
+        es[d + 2] = spatial * G * K;
+        bs[d + 2] = C;
+        spatial *= a[d + 2];
+        stride[d - 1] = dilation[d - 1] = 1;
+    }
+    as[0] = C;
+    as[1] = spatial * G * C;
+    as[2] = bs[2] = es[2] = 1;
+    bs[0] = K * C;
+    bs[1] = C;
+    es[0] = K;
+    es[1] = spatial * G * K;
+    std::vector<T> input(N * spatial * G * C), weight(G * K * C);
+    std::vector<T> actual(N * spatial * G * K);
+    for(std::size_t i = 0; i < input.size(); ++i)
+        input[i] = ck::type_convert<T>((static_cast<int>(i % 7) - 3) * 0.25f);
+    for(std::size_t i = 0; i < weight.size(); ++i)
+        weight[i] = ck::type_convert<T>((static_cast<int>(i % 5) - 2) * 0.5f);
+    ck::DeviceMem input_device(input.size() * sizeof(T));
+    ck::DeviceMem weight_device(weight.size() * sizeof(T));
+    ck::DeviceMem output_device(actual.size() * sizeof(T));
+    input_device.ToDevice(input.data());
+    weight_device.ToDevice(weight.data());
+    const auto instances =
+        ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<Op>::GetInstances();
+    bool executed = false;
+    for(const auto& op : instances)
+    {
+        auto arg = op->MakeArgumentPointer(input_device.GetDeviceBuffer(),
+                                          weight_device.GetDeviceBuffer(), {},
+                                          output_device.GetDeviceBuffer(), a, as, b, bs, {}, {},
+                                          e, es, stride, dilation, pads, pads, Pass{}, Pass{}, Pass{});
+        if(!op->IsOutputFullyDefined(arg.get()))
+            continue;
+        ASSERT_TRUE(op->IsSupportedArgument(arg.get()));
+        ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));
+        op->SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());
+        for(float poison : {113.f, std::numeric_limits<float>::quiet_NaN()})
+        {
+            std::fill(actual.begin(), actual.end(), ck::type_convert<T>(poison));
+            output_device.ToDevice(actual.data());
+            op->MakeInvokerPointer()->Run(arg.get(), StreamConfig{nullptr, false});
+            output_device.FromDevice(actual.data());
+            // Independent 1x1 convolution reference, checking every group, batch,
+            // channel and spatial cell, including the non-tile-aligned spatial tail.
+            for(ck::index_t n = 0; n < N; ++n)
+                for(ck::index_t s = 0; s < spatial; ++s)
+                    for(ck::index_t g = 0; g < G; ++g)
+                        for(ck::index_t k = 0; k < K; ++k)
+                        {
+                            float want = 0;
+                            for(ck::index_t c = 0; c < C; ++c)
+                                want += ck::type_convert<float>(input[((n * spatial + s) * G + g) * C + c]) *
+                                        ck::type_convert<float>(weight[(g * K + k) * C + c]);
+                            const float got = ck::type_convert<float>(
+                                actual[((n * spatial + s) * G + g) * K + k]);
+                            EXPECT_TRUE(std::isfinite(got)) << op->GetTypeString();
+                            EXPECT_EQ(got, want) << op->GetTypeString() << " group=" << g;
+                        }
+        }
+        executed = true;
+    }
+    EXPECT_TRUE(executed) << "No qualified forward invocation executed";
+}
+
+TEST(TestGroupedConvndFwdOutputContract, PackedDirtyOutput)
+{
+#ifdef CK_ENABLE_FP16
+    CheckQualifiedForwardDirtyOutput<2, ck::half_t>();
+    CheckQualifiedForwardDirtyOutput<3, ck::half_t>();
+#else
+    GTEST_SKIP() << "FP16 instances disabled";
+#endif
+}
+} // namespace
+
 
 static ck::index_t param_mask     = 0xffff;
 static ck::index_t instance_index = -1;

@@ -26,6 +26,10 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeB = ComputeTypeA>
 struct DeviceGroupedConvBwdWeight : public BaseOperator
 {
+    // Includes any internal initialization and final conversion. Unknown families
+    // make no promise about independence from prior logical output contents.
+    virtual bool IsOutputFullyDefined(const BaseArgument*) const { return false; }
+
     virtual std::unique_ptr<BaseArgument>
     MakeArgumentPointer(const void* p_in,
                         void* p_wei,

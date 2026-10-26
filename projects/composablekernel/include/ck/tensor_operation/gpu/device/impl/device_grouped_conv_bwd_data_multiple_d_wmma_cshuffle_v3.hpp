@@ -720,6 +720,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
               k_batch_{split_k}
         {
             stride_overflow          = stride_overflow_in;
+            is_packed_output_ = is_packed_grouped_conv_output<NDimSpatial, ELayout>(
+                e_g_n_c_wis_lengths, e_g_n_c_wis_strides);
             bool if_d_is_output_mem  = false;
             const void* out_mem_void = static_cast<const void*>(p_e);
             static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -762,32 +764,9 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                         input_left_pads[d] == 0 && input_right_pads[d] == 0;
                 }
 
-                if(completely_overwrites_e)
-                {
-                    // The 1x1 transform freezes the filter coordinates and merges
-                    // (N, output spatial) into M, with every C in GEMM N. Require
-                    // packed E strides so group/batch offsets cover distinct elements.
-                    completely_overwrites_e    = e_g_n_c_wis_strides[2] == 1;
-                    long_index_t packed_stride = e_g_n_c_wis_lengths[2];
-                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
-                                 is_same_v<ELayout, tensor_layout::convolution::NDHWGC>)
-                    {
-                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
-                        packed_stride *= e_g_n_c_wis_lengths[0];
-                    }
-                    for(index_t d = NDimSpatial; d > 0; --d)
-                    {
-                        completely_overwrites_e &= e_g_n_c_wis_strides[d + 2] == packed_stride;
-                        packed_stride *= e_g_n_c_wis_lengths[d + 2];
-                    }
-                    completely_overwrites_e &= e_g_n_c_wis_strides[1] == packed_stride;
-                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
-                                 is_same_v<ELayout, tensor_layout::convolution::GNDHWC>)
-                    {
-                        packed_stride *= e_g_n_c_wis_lengths[1];
-                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
-                    }
-                }
+                // The 1x1 transform covers (N, spatial) x C; packed addressing
+                // makes those stores and the group offsets distinct.
+                completely_overwrites_e &= is_packed_output_;
             }
 
             // An aliased D must not be zeroed before its value is read by the epilogue.
@@ -1215,6 +1194,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
         std::vector<std::array<GemmArgs, MaxGroupedGemmGroupsNum>> gemm_kernel_args_;
 
         bool bwd_needs_zero_out;
+        bool is_packed_output_;
         long_index_t e_space_size_bytes;
         bool stride_overflow;
     };
@@ -1971,6 +1951,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
     bool IsSupportedArgument(const BaseArgument* p_arg) override
     {
         return IsSupportedArgument(*dynamic_cast<const Argument*>(p_arg));
+    }
+
+    bool IsOutputFullyDefined(const BaseArgument* p_arg) const override
+    {
+        if constexpr(NumDTensor != 0 || !is_same_v<CDEElementwiseOp, element_wise::PassThrough>)
+            return false;
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        // Spatial holes and split reductions are defined by the invocation's
+        // internal clear. Only the proved 1x1 split-one case may omit that clear.
+        return arg != nullptr && arg->gemms_count_ > 0 && arg->is_packed_output_ &&
+               arg->a_g_n_k_wos_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->b_g_k_c_xs_lengths_[0] == arg->e_g_n_c_wis_lengths_[0] &&
+               arg->a_g_n_k_wos_lengths_[1] == arg->e_g_n_c_wis_lengths_[1] &&
+               arg->a_g_n_k_wos_lengths_[2] == arg->b_g_k_c_xs_lengths_[1] &&
+               arg->b_g_k_c_xs_lengths_[2] == arg->e_g_n_c_wis_lengths_[2] &&
+               IsSupportedArgument(*arg);
     }
 
     static auto

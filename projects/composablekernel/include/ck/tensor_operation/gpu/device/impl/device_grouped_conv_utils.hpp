@@ -10,6 +10,48 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
+// Packed channel-last image addressing in logical [G, N, C/K, spatial...] order.
+// Deliberately excludes transposed and merged layouts: a contiguous clear and the
+// per-group GEMM stores must refer to the same distinct logical elements.
+template <index_t NDimSpatial, typename Layout, typename Lengths, typename Strides>
+bool is_packed_grouped_conv_output(const Lengths& lengths, const Strides& strides)
+{
+    using namespace tensor_layout::convolution;
+    constexpr bool group_interleaved =
+        (NDimSpatial == 1 && (is_same_v<Layout, NWGC> || is_same_v<Layout, NWGK>)) ||
+        (NDimSpatial == 2 && (is_same_v<Layout, NHWGC> || is_same_v<Layout, NHWGK>)) ||
+        (NDimSpatial == 3 && (is_same_v<Layout, NDHWGC> || is_same_v<Layout, NDHWGK>));
+    constexpr bool group_major =
+        (NDimSpatial == 1 && (is_same_v<Layout, GNWC> || is_same_v<Layout, GNWK>)) ||
+        (NDimSpatial == 2 && (is_same_v<Layout, GNHWC> || is_same_v<Layout, GNHWK>)) ||
+        (NDimSpatial == 3 && (is_same_v<Layout, GNDHWC> || is_same_v<Layout, GNDHWK>));
+    if constexpr(!group_interleaved && !group_major)
+        return false;
+
+    long_index_t packed_stride = 1;
+    const auto consume = [&](index_t i) {
+        if(lengths[i] <= 0 || strides[i] != packed_stride ||
+           lengths[i] > 0x7fffffffffffffffLL / packed_stride)
+            return false;
+        packed_stride *= lengths[i];
+        return true;
+    };
+    if(!consume(2))
+        return false;
+    if constexpr(group_interleaved)
+        if(!consume(0))
+            return false;
+    for(index_t d = NDimSpatial; d > 0; --d)
+        if(!consume(d + 2))
+            return false;
+    if(!consume(1))
+        return false;
+    if constexpr(group_major)
+        if(!consume(0))
+            return false;
+    return true;
+}
+
 // 1d
 template <typename InLayout, typename WeiLayout, typename OutLayout>
 constexpr bool is_NWGC_GKXC_NWGK()
