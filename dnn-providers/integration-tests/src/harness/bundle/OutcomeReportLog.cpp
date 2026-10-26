@@ -3,7 +3,6 @@
 
 #include "harness/bundle/OutcomeReportLog.hpp"
 
-#include <exception>
 #include <ios>
 #include <iostream>
 
@@ -12,8 +11,8 @@ namespace hipdnn_integration_tests::bundle
 
 OutcomeReportLog& OutcomeReportLog::get()
 {
-    static OutcomeReportLog instance;
-    return instance;
+    static OutcomeReportLog s_instance;
+    return s_instance;
 }
 
 bool OutcomeReportLog::open(const std::filesystem::path& path)
@@ -48,28 +47,23 @@ bool OutcomeReportLog::isOpen() const
 
 void OutcomeReportLog::append(std::string_view line) noexcept
 {
-    try
+    // Nothing below throws: the stream was not asked to (no exceptions mask), so a failed
+    // write sets a flag, reported once, instead of an exception that would fail a test.
+    const std::lock_guard<std::mutex> lock(_mutex);
+    if(!_file.is_open())
     {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        if(!_file.is_open())
-        {
-            return;
-        }
-
-        _file.write(line.data(), static_cast<std::streamsize>(line.size()));
-        _file.put('\n');
-        _file.flush();
-
-        if(!_file.good() && !_writeFailureReported)
-        {
-            _writeFailureReported = true;
-            std::cerr << "WARNING: writing the outcome report failed; later records may be "
-                         "missing.\n";
-        }
+        return;
     }
-    catch(const std::exception&)
+
+    _file.write(line.data(), static_cast<std::streamsize>(line.size()));
+    _file.put('\n');
+    _file.flush();
+
+    if(!_file.good() && !_writeFailureReported)
     {
-        // Deliberately silent: see the header.
+        _writeFailureReported = true;
+        std::cerr << "WARNING: writing the outcome report failed; later records may be "
+                     "missing.\n";
     }
 }
 
