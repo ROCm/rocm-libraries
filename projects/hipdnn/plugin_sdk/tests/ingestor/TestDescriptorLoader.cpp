@@ -531,6 +531,26 @@ nlohmann::json pointwisePatternNodes()
                                    {"results", {{"out_0", "$output"}}}}});
 }
 
+/// The `.umd.json` body in @p documents whose scope is @p scope.
+nlohmann::json& matcherOfScope(Documents& documents, std::string_view scope)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == ".umd.json" && document.body.at("scope").get<std::string>() == scope)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no matcher of scope " + std::string(scope));
+}
+
+/// Replaces @p matcher's native symbol with declarative @p criteria.
+void declareCriteria(nlohmann::json& matcher, nlohmann::json criteria)
+{
+    matcher.erase("match_symbol");
+    matcher["criteria"] = std::move(criteria);
+}
+
 } // namespace
 
 TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
@@ -2138,6 +2158,43 @@ INSTANTIATE_TEST_SUITE_P(
                           spellAsMultiLaunch(documents).at("sources").at("merge").erase(
                               "signature");
                       }},
+        ViolationCase{"umd_declares_both_arms",
+                      [](Documents& documents) {
+                          matcherOfScope(documents, "graph")["criteria"]
+                              = nlohmann::json::parse(R"({"==": ["$graph.node_count", 1]})");
+                      }},
+        ViolationCase{
+            "umd_declares_neither_arm",
+            [](Documents& documents) { matcherOfScope(documents, "graph").erase("match_symbol"); }},
+        ViolationCase{"umd_criteria_is_a_literal",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "graph"), true);
+                      }},
+        ViolationCase{"umd_criteria_do_not_compile",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "graph"),
+                                          nlohmann::json::parse(R"({"var": "graph.node_count"})"));
+                      }},
+        ViolationCase{"graph_scoped_criteria_read_kernel_metadata",
+                      [](Documents& documents) {
+                          declareCriteria(
+                              matcherOfScope(documents, "graph"),
+                              nlohmann::json::parse(R"({"==": ["$kernel.dtype", "FLOAT"]})"));
+                      }},
+        // The pack is dropped at pairing, which leaves the engine with none.
+        ViolationCase{"criteria_read_what_the_pattern_does_not_publish",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"]
+                              = {{"nodes", pointwisePatternNodes()}};
+                          declareCriteria(
+                              matcherOfScope(documents, "graph"),
+                              nlohmann::json::parse(R"({"==": ["$weights.dtype", "FLOAT"]})"));
+                      }},
+        ViolationCase{"criteria_read_a_field_the_kmd_does_not_declare",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "kernel"),
+                                          nlohmann::json::parse(R"({"==": ["$kernel.tile", 1]})"));
+                      }},
         ViolationCase{"arch_has_duplicate_entries",
                       [](Documents& documents) {
                           documentOfType(documents, ".kdp.json")["arch"]
@@ -2179,6 +2236,55 @@ TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
     const auto* native = std::get_if<NativeGraphMatch>(&sets.front().engine.graphMatch);
     ASSERT_NE(native, nullptr);
     EXPECT_EQ(native->symbol, "descriptorloader.native");
+}
+
+/// Both UMDs carry criteria over a declarative pattern's binding: they compile while the
+/// files are read, pair with the engine, and need no registered match symbol.
+TEST(TestDescriptorLoader, LoadsDeclarativeCriteriaPairedWithADeclarativePattern)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria"));
+    auto documents = makeSetDocuments('1', "test:criteria");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"),
+                    nlohmann::json::parse(R"({"==": ["$pointwise.operation", "ADD"]})"));
+    declareCriteria(matcherOfScope(documents, "kernel"),
+                    nlohmann::json::parse(R"({"==": ["$input_a.dtype", "$kernel.dtype"]})"));
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& matchers = sets.front().set.matchers;
+    ASSERT_EQ(matchers.size(), 2u);
+    for(const auto& matcher : matchers)
+    {
+        ASSERT_NE(matcher.criteria, nullptr) << matcher.name;
+        EXPECT_TRUE(matcher.matchSymbol.empty()) << matcher.name;
+    }
+}
+
+/// A pack pairing criteria with an engine that does not publish what they read is dropped,
+/// and the diagnostic names the reference, the matcher, the engine, and the pack, since
+/// the UMD alone cannot say which pairing to correct.
+TEST(TestDescriptorLoader, NamesEveryPartyToAnUnresolvedCriteriaReference)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unresolved_criteria"));
+    auto documents = makeSetDocuments('1', "test:unresolved_criteria");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"),
+                    nlohmann::json::parse(R"({"==": ["$weights.dtype", "FLOAT"]})"));
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    for(const char* part : {"$weights.dtype", "graph shape", "test:unresolved_criteria", "'pack'"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, part))
+            << part << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 /// nlohmann silently keeps the last of two equal keys, so without this check the operand map

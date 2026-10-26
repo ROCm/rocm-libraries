@@ -291,14 +291,21 @@ enum class MatchScope
     KERNEL, ///< Reads `$kernel.*` too; disqualifies only the one kernel.
 };
 
-/// UMD: one applicability check, shared by id across packs.
+class CompiledCriteria;
+
+/// UMD: one applicability check, shared by id across packs. Exactly one arm is set:
+/// @ref matchSymbol names a native criterion, or @ref criteria holds a declarative one.
 struct MatchDescriptor
 {
     DescriptorId id;
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
-    std::string matchSymbol; ///< Resolved through NativeRegistry.
+    std::string matchSymbol; ///< Resolved through NativeRegistry; empty with @ref criteria.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
+    /// The declarative `criteria` arm, compiled when the UMD is read (see
+    /// CompiledCriteria.hpp). Null for a native criterion. Immutable and shared by every
+    /// copy of the descriptor.
+    std::shared_ptr<const CompiledCriteria> criteria = nullptr;
 };
 
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.

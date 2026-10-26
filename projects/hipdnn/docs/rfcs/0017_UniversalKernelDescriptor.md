@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
-- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). The declarative `criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UDD and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. A UMD either names a native symbol or carries declarative `criteria`, compiled with the SDK expression library (`CompiledCriteria.hpp`). The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
+- **Last verified**: 2026-10-26 against `users/dahawkin/kernel-ingestor-ued-criteria` (0b6c859e7ef)
 
 ## Table of Contents
 
@@ -113,11 +113,11 @@ stays a full provider, one per dependency. This complements build-time codegen.
 
 ### 1.1 What Ships Now Versus Later
 
-The single-kernel path ships. In the shipped loader, every UMD, UDD, and UHD names a native C++
-symbol: a UMD `matchSymbol`, a UDD `dispatchSymbol`, and a `NATIVE` UHD `payload`
-(`Descriptors.hpp`). The declarative criteria of RFC 0018 and the UDD formulas are not yet built.
-The `jsonexpr` interpreter (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr/`) exists but
-the loader does not use it. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no
+The single-kernel path ships. In the shipped loader, every UDD and UHD names a native C++ symbol:
+a UDD `dispatchSymbol` and a `NATIVE` UHD `payload` (`Descriptors.hpp`). A UMD either names a native
+`matchSymbol` or carries the declarative criteria of RFC 0018, which the loader compiles with the
+`jsonexpr` interpreter (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp`). The
+UDD formulas are not yet built. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no
 adapter yet.
 
 | Capability | This RFC (day-one) | Deferred to a follow-up |
@@ -2085,12 +2085,12 @@ Four areas are new here:
 
 ### 14.2 Follow-up RFCs
 
-The state of each row is: KDP + AOT packaging is built (kpack). For UED, UMD, and UHD, only the
-native arms are built (`graph_match.native`, `matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
-metadata schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
-`MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter exists but
-the loader does not use it. Shape matching, runtime drop-in, adapters, composition, and JIT are
-not yet built.
+The state of each row is: KDP + AOT packaging is built (kpack). The UED has both arms
+(`graph_match.nodes` and `graph_match.native`). The UMD has both arms (`criteria` and
+`matchSymbol`). For the UHD, only the `NATIVE` arm is built. UDD + dispatch and KMD + metadata
+schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
+`MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter compiles UMD
+`criteria`. Shape matching, runtime drop-in, adapters, composition, and JIT are not yet built.
 
 The pieces this document frames but does not design land in focused follow-up RFCs, each bundling
 a descriptor format with the subsystem it drives. Together they form the planned series below.

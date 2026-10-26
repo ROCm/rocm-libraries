@@ -40,6 +40,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -91,7 +92,8 @@
  *  - Every file-backed descriptor must carry `version`, the UMD included (RFC 0018 A.1
  *    makes it optional), since an unversioned type cannot be gated. An inline kernel
  *    gates against its pack's UKD row.
- *  - A UMD's `kernel_fields` (RFC 0018 A.1) fails as an unknown key, dropping its packs.
+ *  - A UMD's `kernel_fields` and `allow_override_shape` (RFC 0018 A.1) fail as unknown
+ *    keys, dropping its packs.
  *  - Packs and standalone kernels are keyed by (id, arch), not id alone (RFC 0020
  *    §13.2.1): a per-arch shard ships one id per arch.
  *  - A standalone UKD may carry `arch`, and an inline kernel may narrow its pack's list.
@@ -122,8 +124,15 @@
  * RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format error, and no
  * engine is registered.
  *
- * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as
- * `criteria` beside `nodes` and `features_signature`, which arrive with follow-up RFCs.
+ * A UMD carries exactly one of `match_symbol` and `criteria`. `match_symbol` is resolved
+ * through the native registries when the set is validated. `criteria` is compiled with
+ * the JSON Expression Language while the file is read (CompiledCriteria.hpp), and each
+ * pack listing the UMD checks its references against the pack's engine; a reference that
+ * engine does not publish drops the pack.
+ *
+ * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as an
+ * engine-scoped `criteria` beside `graph_match.nodes` and `features_signature`, which
+ * arrive with follow-up RFCs.
  * This loader mirrors the structs exactly, so a new field is a change in both places and
  * nowhere else.
  *
@@ -1033,15 +1042,31 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // `kernel_fields` (RFC 0018 A.1) and the declarative `criteria` arm are deliberately
+    // `kernel_fields` and `allow_override_shape` (RFC 0018 A.1) are deliberately
     // unsupported and fail as unknown keys; see the file header.
-    requireKnownKeys(root, {"version", "revision", "id", "name", "scope", "match_symbol"}, where);
+    requireKnownKeys(
+        root, {"version", "revision", "id", "name", "scope", "match_symbol", "criteria"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
     matcher.name = requireString(root, "name", where);
     matcher.scope = matchScopeFromString(requireString(root, "scope", where), where);
-    matcher.matchSymbol = requireString(root, "match_symbol", where);
+    // One that declares neither states no check; one that declares both hides a
+    // conjunction a pack states by listing two matchers (RFC 0018 A.1).
+    const bool native = root.contains("match_symbol");
+    if(native == root.contains("criteria"))
+    {
+        fail(where + " must declare exactly one of 'match_symbol' and 'criteria'");
+    }
+    if(native)
+    {
+        matcher.matchSymbol = requireString(root, "match_symbol", where);
+    }
+    else
+    {
+        matcher.criteria
+            = compileCriteria(root.at("criteria"), matcher.scope, "key 'criteria' in " + where);
+    }
     matcher.revision = declaredRevisionOf(root, where);
     return matcher;
 }
@@ -2754,6 +2779,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         // step.
         std::map<DescriptorId, MatchDescriptor> matchers;
         std::map<DescriptorId, DispatchDescriptor> dispatches;
+        // RFC 0018 A.5 checks 5 and 6, per (matcher, engine): a matcher several of this
+        // engine's packs list is checked once. "" means its references all resolve.
+        std::map<DescriptorId, std::string> criteriaErrors;
 
         for(auto* packEntry : packEntries)
         {
@@ -2789,6 +2817,22 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                     reason
                         = "names matcher " + toString(matcherId) + ", which no descriptor defines";
                     break;
+                }
+                if(matcher->criteria != nullptr)
+                {
+                    auto [checked, inserted] = criteriaErrors.try_emplace(matcherId);
+                    if(inserted)
+                    {
+                        checked->second = criteriaReferenceError(
+                            *matcher->criteria, engine.graphMatch, set.schema);
+                    }
+                    if(!checked->second.empty())
+                    {
+                        reason = "pairs " + describeDescriptor("matcher", matcher->name, matcherId)
+                                 + " with engine '" + engine.name + "', but its criteria "
+                                 + checked->second;
+                        break;
+                    }
                 }
                 packMatchers.push_back(matcher);
             }
@@ -3335,6 +3379,10 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
         bool resolvable = true;
         for(const auto& matcher : set.matchers)
         {
+            if(matcher.criteria != nullptr)
+            {
+                continue;
+            }
             const bool registered = matcher.scope == MatchScope::GRAPH
                                         ? GraphCriterionRegistry::isRegistered(matcher.matchSymbol)
                                         : KernelMatcherRegistry::isRegistered(matcher.matchSymbol);

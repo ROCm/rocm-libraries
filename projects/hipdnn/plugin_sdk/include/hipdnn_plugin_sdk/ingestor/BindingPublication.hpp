@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -33,6 +35,71 @@ inline std::string tensorField(std::string_view root, std::string_view field)
 inline std::string tensorElement(std::string_view root, std::string_view field, size_t index)
 {
     return tensorField(root, field) + "[" + std::to_string(index) + "]";
+}
+
+/// The fields publishTensor() publishes under a root, besides the root itself and the
+/// indexed fields below. Kept beside publishTensor() so the two change together; the
+/// load-time reference check (CompiledCriteria.hpp) reads these, not the publisher.
+inline constexpr std::array<std::string_view, 8> PUBLISHED_TENSOR_FIELDS
+    = {"uid",
+       "rank",
+       "dtype",
+       "stride_order",
+       "packed",
+       "virtual",
+       "is_runtime_pass_by_value",
+       "value_f32"};
+
+/// The per-axis fields publishTensor() publishes as `<field>[i]`, one token per axis.
+inline constexpr std::array<std::string_view, 2> PUBLISHED_INDEXED_TENSOR_FIELDS
+    = {"dims", "strides"};
+
+/// The fields publishGraph() publishes under the reserved `graph` root.
+inline constexpr std::array<std::string_view, 2> PUBLISHED_GRAPH_FIELDS
+    = {"node_count", "is_override_shape_enabled"};
+
+/// Splits `name[i]` into its name and index. The index must be written the way
+/// tensorElement() writes one: decimal digits, no sign, and no leading zero, so a token
+/// that can never be published is refused rather than read as null forever.
+inline std::optional<std::pair<std::string_view, size_t>> splitIndexedField(std::string_view field)
+{
+    const auto open = field.find('[');
+    if(open == std::string_view::npos || open == 0 || field.back() != ']')
+    {
+        return std::nullopt;
+    }
+    const auto digits = field.substr(open + 1, field.size() - open - 2);
+    // 18 digits always fit size_t on a 64-bit host and no tensor has that many axes.
+    if(digits.empty() || digits.size() > 18 || (digits.size() > 1 && digits.front() == '0'))
+    {
+        return std::nullopt;
+    }
+    size_t index = 0;
+    for(const char digit : digits)
+    {
+        if(digit < '0' || digit > '9')
+        {
+            return std::nullopt;
+        }
+        index = (index * 10) + static_cast<size_t>(digit - '0');
+    }
+    return std::pair{field.substr(0, open), index};
+}
+
+/// True when publishTensor() can publish @p field under a root: one of
+/// PUBLISHED_TENSOR_FIELDS, or `dims[i]` / `strides[i]`. Whether axis `i` exists depends
+/// on the graph's rank, so any index is accepted here and an absent one reads as null.
+inline bool isPublishedTensorField(std::string_view field)
+{
+    const auto contains = [](const auto& names, std::string_view name) {
+        return std::find(names.begin(), names.end(), name) != names.end();
+    };
+    if(contains(PUBLISHED_TENSOR_FIELDS, field))
+    {
+        return true;
+    }
+    const auto indexed = splitIndexedField(field);
+    return indexed.has_value() && contains(PUBLISHED_INDEXED_TENSOR_FIELDS, indexed->first);
 }
 
 /// Validates @p tensor and publishes its fields under @p root. Publish each root
@@ -136,8 +203,8 @@ inline bool publishTensor(BoundTokens& bound,
     return true;
 }
 
-/// Publishes facts for the whole graph, not just the matched nodes: `graph.node_count`
-/// and `graph.is_override_shape_enabled`.
+/// Publishes facts for the whole graph, not just the matched nodes: the
+/// PUBLISHED_GRAPH_FIELDS under the `graph` root.
 inline void publishGraph(BoundTokens& bound,
                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {

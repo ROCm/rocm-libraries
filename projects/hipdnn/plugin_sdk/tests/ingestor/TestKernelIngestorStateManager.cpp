@@ -16,8 +16,10 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -760,6 +762,59 @@ TEST(TestKernelIngestorStateManager, ACompiledPatternBindsTheCatalogOrDeclinesIt
     EXPECT_TRUE(declined.entries.empty());
     EXPECT_TRUE(declined.bound.empty());
     EXPECT_EQ(counters().kernelCalls, kernelCallsBefore);
+}
+
+TEST(TestKernelIngestorStateManager, DeclarativeCriteriaNarrowTheCatalogOverThePatternsBinding)
+{
+    // Both UMDs are expressions over what the compiled pattern published: the graph-scoped
+    // one reads a node attribute, the kernel-scoped one relates a bound tensor's dtype to
+    // each candidate's metadata. No native criterion is registered.
+    const ScopedBlockSizeScore score;
+    const DescriptorId addMatcherId = testId(0xC1);
+    const DescriptorId kernelMatcherId = testId(0xC2);
+    const auto criteria = [](const char* text, MatchScope scope) {
+        return compileCriteria(nlohmann::json::parse(text), scope, "criteria");
+    };
+
+    const StateManager manager(
+        makeSchema(),
+        {{addMatcherId,
+          "operation is add",
+          MatchScope::GRAPH,
+          "",
+          {},
+          criteria(R"({"==": ["$pointwise.operation", "ADD"]})", MatchScope::GRAPH)},
+         {kernelMatcherId,
+          "kernel serves the dtype",
+          MatchScope::KERNEL,
+          "",
+          {},
+          criteria(R"({"and": [{"==": ["$input_a.dtype", "$kernel.dtype"]},
+                               {">=": ["$kernel.block_size", 128]}]})",
+                   MatchScope::KERNEL)}},
+        makeTestDispatches(),
+        {makePack({addMatcherId, kernelMatcherId})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{compilePatternText(BINARY_POINTWISE_PATTERN)});
+    const auto properties = testDeviceProperties();
+
+    PatternGraphBuilder add;
+    add.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const auto addGraph = add.build();
+    const auto matched
+        = manager.unsortedCatalog(MatchContext{addGraph.context().graph, 0, properties});
+
+    // Of FLOAT/64, FLOAT/256 and HALF/64, only FLOAT/256 serves a FLOAT graph at >= 128.
+    ASSERT_EQ(matched.entries.size(), 1U);
+    EXPECT_EQ(matched.entries.front()->kernelId, testId(0x65));
+
+    PatternGraphBuilder mul;
+    mul.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::MUL, 1, 2, 3));
+    const auto mulGraph = mul.build();
+    const auto declined
+        = manager.unsortedCatalog(MatchContext{mulGraph.context().graph, 0, properties});
+
+    EXPECT_TRUE(declined.entries.empty());
 }
 
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)

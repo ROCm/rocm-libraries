@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
@@ -193,9 +194,13 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
             selector["rankers"][metric][arch] = "unavailable";
         }
     }
+    // A native matcher is its symbol; a declarative one is its expression, so editing
+    // criteria changes the selector revision as swapping a symbol does.
     for(const auto& matcher : set.matchers)
     {
-        selector["matchers"][toString(matcher.id)] = matcher.matchSymbol;
+        selector["matchers"][toString(matcher.id)] = matcher.criteria != nullptr
+                                                         ? matcher.criteria->source()
+                                                         : nlohmann::json(matcher.matchSymbol);
     }
     for(const auto& dispatch : set.dispatches)
     {

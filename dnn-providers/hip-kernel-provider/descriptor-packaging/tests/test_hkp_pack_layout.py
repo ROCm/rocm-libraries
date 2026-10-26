@@ -907,15 +907,15 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
 def _named_native_symbols(path, doc):
     """Return the native symbols a descriptor names, read from the naming fields.
 
-    A UED names one only in the `native` arm of `graph_match`. A `nodes` pattern
-    names no native symbol.
+    A UED names one only in the `native` arm of `graph_match`, and a UMD only in
+    `match_symbol`. A `nodes` pattern or a `criteria` expression names none.
     """
     kind = path.name.split(".")[-2]
     if kind == "ued":
         native = (doc.get("graph_match") or {}).get("native")
         return {native} if native else set()
     if kind == "umd":
-        return {doc["match_symbol"]}
+        return {doc["match_symbol"]} if "match_symbol" in doc else set()
     if kind == "udd":
         return {doc["dispatch_symbol"]}
     if kind == "uhd" and doc.get("kind") == "native":
@@ -1064,7 +1064,15 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         ),
         # Required keys the loader demands.
         ("pointwise.udd.json", {"dispatch_symbol": None}, "dispatch_symbol"),
-        ("pointwise.umd.json", {"match_symbol": None}, "match_symbol"),
+        ("pointwise.umd.json", {"match_symbol": None}, "exactly one of"),
+        (
+            "pointwise.umd.json",
+            {"criteria": {"==": ["$kernel.block_size", 128]}},
+            "exactly one of",
+        ),
+        # A literal root is constant, so it states no check.
+        ("pointwise.umd.json", {"match_symbol": None, "criteria": True}, "literal"),
+        ("pointwise.umd.json", {"match_symbol": None, "criteria": "$$x"}, "literal"),
     ],
 )
 def test_generic_descriptors_are_validated_against_the_loader_schema(
@@ -1087,6 +1095,24 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 
     with pytest.raises(HkpPackError, match=expected):
         load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "criteria", [{"==": ["$kernel.block_size", 128]}, "$kernel.is_supported"]
+)
+def test_umd_criteria_arm_replaces_match_symbol(tmp_path, main_fixture, criteria):
+    """A UMD may state its check as an expression object or a `$`-reference
+    instead of a native match_symbol."""
+    root = tmp_path / "root"
+    _nest(root, "hip", main_fixture)
+    target = root / "hip" / "pointwise.umd.json"
+    doc = _read(target)
+    del doc["match_symbol"]
+    doc["criteria"] = criteria
+    target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick

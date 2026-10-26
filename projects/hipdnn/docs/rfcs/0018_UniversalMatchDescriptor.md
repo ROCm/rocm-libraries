@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison
 - **Status**: In progress
-- **Status notes**: The UMD ships in its native-only form: `version`, `id`, `name`, `scope`, and `match_symbol`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). The declarative `criteria`, `kernel_fields`, and `allow_override_shape` fields are not built. The expression language ships as a standalone SDK library (`JsonExpression.hpp`, #11632), and the UMD loader does not use it yet.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: The UMD ships both arms, the native `match_symbol` and the declarative `criteria`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). `criteria` compiles with the SDK expression library (`JsonExpression.hpp`, #11632) in `CompiledCriteria.hpp`, and each pack checks its references against its engine. `kernel_fields`, `allow_override_shape`, and `$kernel.*` memoization are not built.
+- **Last verified**: 2026-10-26 against `users/dahawkin/kernel-ingestor-ued-criteria` (0b6c859e7ef)
 
 > Follow-up to [RFC 0017 (Universal Kernel Descriptors)](0017_UniversalKernelDescriptor.md),
 > covering the "UMD + applicability" row of its follow-up series
@@ -256,8 +256,9 @@ The expression language is a header-only SDK library:
 `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/JsonExpression.hpp` and `jsonexpr/`, documented in
 [`docs/JsonExpression.md`](../JsonExpression.md). It implements the operators this RFC uses,
 including `in`, `divisible`, `present`, `not_present`, three-valued `and`/`or`, and the layout
-aliases of [A.4](#a4-stride_order-values-and-layout-aliases). Not yet built: the descriptor loader
-does not compile any UMD, UDD, or UHD field with it.
+aliases of [A.4](#a4-stride_order-values-and-layout-aliases). The descriptor loader compiles a UMD's
+`criteria` with it (`CompiledCriteria.hpp`), and the UHD runtime compiles `features_signature` with
+it (`heuristics/uhd/Expressions.hpp`). Not yet built: UDD formulas.
 
 A UMD's `criteria` field is a single `Bool`-rooted expression in the **descriptor expression
 language**. The language has no RFC number of its own
@@ -373,9 +374,9 @@ then N, which is NHWC.
 
 ## 6. The Native-Matcher Escape Hatch
 
-The native criterion is the only UMD form that is built. The loader resolves `match_symbol` by
-`scope` (`DescriptorLoader.hpp`, `KernelIngestorStateManager.hpp`). A `graph` UMD names a
-`GraphCriterionFn` in `GraphCriterionRegistry`. A `kernel` UMD names a `KernelMatcherFn` in
+The native criterion is built beside the declarative `criteria` arm. The loader resolves
+`match_symbol` by `scope` (`DescriptorLoader.hpp`, `KernelIngestorStateManager.hpp`). A `graph` UMD
+names a `GraphCriterionFn` in `GraphCriterionRegistry`. A `kernel` UMD names a `KernelMatcherFn` in
 `KernelMatcherRegistry`, with signature
 `(const MatchContext&, const BoundTokens&, const KernelDefinition&)`. Both types are in
 `NativeRegistry.hpp`. An example is `hipkernel.gfx950_attention_dense.kernel_match`, named by
@@ -488,8 +489,12 @@ follow-up, as in RFC 0017 §5.
 
 ## 8. The Matcher: Compilation, Indexing, and Caching
 
-Not yet built. No criteria compiler, root-opcode index, or `$kernel.*` memoization exists. Each
-engine's `KernelIngestorStateManager` caches its catalog on `CatalogKey` (`MatchContext.hpp`): the
+The criteria compiler and the pair check are built (`CompiledCriteria.hpp`). `compileCriteria()`
+runs when a UMD is read. `criteriaReferenceError()` runs once per `(matcher, engine)` when the
+loader resolves the engine's packs (`DescriptorLoader.hpp`). A graph-scoped verdict is memoized
+across the packs of one catalog build. Not yet built: the root-opcode index and `$kernel.*`
+memoization, so a kernel-scoped criterion is evaluated once per candidate. Each engine's
+`KernelIngestorStateManager` caches its catalog on `CatalogKey` (`MatchContext.hpp`): the
 graph id and the device id. The key has no descriptor-inventory generation. The gfx942
 `attention_dense` figures in this section (2,710 kernels and the figures derived from them) are
 design estimates; no gfx942 `attention_dense` descriptors ship. The shipped attention catalogs are
@@ -499,8 +504,8 @@ Both halves are authored as text and compiled once into in-memory structures. Th
 compilation, and the root-opcode index that prunes engines before any pattern runs, belong to the
 UED ([RFC 0020 § 7](0020_UniversalEngineDescriptor.md#7-pattern-matching-stage-one)). Compiling a
 UMD's criteria expands layout aliases and parses the expression into an abstract syntax tree (AST).
-Compilation is on demand: nothing is parsed until a graph needs it, and the parsed result is cached
-and reused ([RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works)). Neither compiled form
+Compilation runs once, when the UMD is read, so a malformed criterion is a load error rather than a
+first-graph surprise, as a malformed pattern is. Neither compiled form
 is complete on its own. A UMD is validated against the engine of each pack that lists it. That check
 confirms every `$`-reference resolves in the engine's published symbols, and every `$kernel.*`
 exists in its KMD ([Appendix A.5](#a5-compile-time-validation-normative)). A failure names both
@@ -1183,10 +1188,11 @@ its criteria are evaluated over.
 
 ### A.1 The UMD descriptor object
 
-Not yet built: `allow_override_shape`, `criteria`, and `kernel_fields`. `parseMatchDescriptor()` in
-`DescriptorLoader.hpp` accepts only `version`, `id`, `name`, `scope`, and `match_symbol`, all
-required, and refuses the other keys as unknown. It accepts UMD version `1.0`. A key that starts
-with `x-` or `_`, or the key `provenance`, is warned about and ignored.
+Not yet built: `allow_override_shape` and `kernel_fields`. `parseMatchDescriptor()` in
+`DescriptorLoader.hpp` refuses both as unknown keys. It requires `version`, `id`, `name`, `scope`,
+and exactly one of `match_symbol` and `criteria`, and accepts an optional `revision`. It accepts UMD
+version `1.0`. A key that starts with `x-` or `_`, or the key `provenance`, is warned about and
+ignored.
 
 | Field | Type | Required | Default | Rule |
 |---|---|---|---|---|
@@ -1308,9 +1314,16 @@ per-axis stride reads of §5 instead of any alias.
 
 ### A.5 Compile-time validation (normative)
 
-Not yet built: checks 3, 3n, 5, and 6, which need `criteria` or `kernel_fields`. Checks 1, 2 (for
-`scope`), and 4 run. An unregistered `match_symbol` drops the whole descriptor set of that engine,
-not only the UMD (`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`).
+Not yet built: check 3n and the `kernel_fields` half of check 6, and the same pair checks for UDD
+formulas and the UHD `features_signature`. Checks 1, 2, 4, 5, and 6 run, and check 3 runs in part.
+`compileCriteria()` in `CompiledCriteria.hpp` refuses an unknown operator, a wrong argument count,
+an unknown or rank-mismatched layout alias, and a `scope` that disagrees with the `$kernel.*` reads.
+It has no static type check. It refuses a literal root, and a criterion whose result is not boolean
+`true` declines at match time. `criteriaReferenceError()` runs checks 5 and 6, and also refuses
+`present` or `not_present` on a pattern variable or attribute the pattern binds as required. Under a
+native `graph_match` it checks only `$kernel.*` references. A failing pair drops that pack. An
+unregistered `match_symbol` drops the whole descriptor set of that engine, not only the UMD
+(`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`).
 
 A UMD MUST pass every check below to compile. A failure refuses the descriptor with a diagnostic,
 and on the drop-in path quarantines it ([§8](#8-the-matcher-compilation-indexing-and-caching),

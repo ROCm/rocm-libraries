@@ -752,15 +752,41 @@ def _require_enum(doc, key, allowed, where):
 
 
 def _validate_umd(desc):
-    """UMD: scope is a closed enum and match_symbol is required.
+    """UMD: scope is a closed enum and exactly one of match_symbol and criteria.
 
     Mirrors parseMatchDescriptor. A bad scope drops the matcher at load, which
     cascades: a KDP naming a matcher no descriptor defines loses its pack, and
     an engine with no loadable pack is dropped entirely.
+
+    `criteria` is checked for shape only: an expression object or a `$`-reference.
+    The loader compiles the expression and resolves its references against each
+    engine the UMD is paired with.
     """
     where = f"UMD {desc.path.name}"
-    _require(desc.doc, ["name", "scope", "match_symbol"], where)
+    _require(desc.doc, ["name", "scope"], where)
     _require_enum(desc.doc, "scope", _MATCH_SCOPES, where)
+    native = "match_symbol" in desc.doc
+    if native == ("criteria" in desc.doc):
+        raise HkpPackError(
+            f"{where} must declare exactly one of 'match_symbol' and 'criteria'"
+        )
+    if native:
+        return
+    criteria = desc.doc["criteria"]
+    if isinstance(criteria, dict):
+        return
+    # `$$...` escapes a literal string starting with `$`; it is not a reference.
+    if (
+        isinstance(criteria, str)
+        and len(criteria) > 1
+        and criteria[0] == "$"
+        and criteria[1] != "$"
+    ):
+        return
+    raise HkpPackError(
+        f"{where} criteria {criteria!r} is a literal, which states no check; "
+        "use an expression object or a '$' reference"
+    )
 
 
 def _validate_udd(desc):

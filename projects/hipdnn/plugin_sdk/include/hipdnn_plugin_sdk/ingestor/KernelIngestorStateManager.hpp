@@ -27,6 +27,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -52,7 +53,8 @@ struct KernelDispatcher
     const IKernelDispatchHandler<THandle>* handler = nullptr;
 };
 
-/// A UMD plus the native function its matchSymbol resolved to at construction.
+/// A UMD plus the native function its matchSymbol resolved to at construction. Both
+/// functions stay null for a declarative UMD, whose compiled criteria the descriptor holds.
 struct ResolvedMatcher
 {
     MatchDescriptor descriptor;
@@ -140,7 +142,8 @@ struct MetadataTupleValuesHash
 /// thread, concurrently with other engines' `finishCatalog` calls and with the caller
 /// thread. A matcher or graph criterion is a plain function of its const arguments and
 /// must stay callable from any thread at once: any state it reaches beyond those
-/// arguments needs its own synchronization.
+/// arguments needs its own synchronization. Compiled criteria are immutable and meet
+/// that by construction.
 ///
 /// Everything between a lookup and a store is thread-local: `catalogFor` returns a
 /// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
@@ -165,12 +168,13 @@ public:
 
     /// @throws std::invalid_argument bad pack reference, two kernels sharing a metadata tuple
     ///         that compete at the same arch tier on a device, or a null compiled graph pattern.
-    /// @throws std::runtime_error a UMD or the engine's native graph_match names a symbol
-    ///         this build does not ship.
+    /// @throws std::runtime_error a native UMD or the engine's native graph_match names a
+    ///         symbol this build does not ship.
     ///
     /// Matcher, dispatch, and native graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable(). A declarative graph_match arrives already compiled.
+    /// isApplicable(). A declarative graph_match and declarative criteria arrive already
+    /// compiled.
     /// @param describedBy Names the engine when a native graph_match symbol fails to
     ///        resolve. That symbol lives on the UED, so unlike matcher and dispatch symbols
     ///        it has no descriptor of its own to name.
@@ -207,7 +211,11 @@ public:
             const auto id = matcher.id;
             const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
             ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
-            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            if(resolved.descriptor.criteria != nullptr)
+            {
+                _readsCriteria = true;
+            }
+            else if(resolved.descriptor.scope == MatchScope::GRAPH)
             {
                 resolved.graphFn
                     = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
@@ -1173,6 +1181,14 @@ private:
             catalog.bound = std::move(*stage.bound);
         }
         GraphMatcherMemo graphVerdicts;
+        // The `$device.*` values criteria read, resolved once per catalog build and only
+        // for an engine that has criteria to read them.
+        std::optional<CriteriaDevice> criteriaDevice;
+        if(_readsCriteria)
+        {
+            criteriaDevice.emplace(context.deviceProperties);
+        }
+        const MatcherInputs inputs{context, catalog.bound, criteriaDevice};
 
         for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
         {
@@ -1184,7 +1200,7 @@ private:
                 continue;
             }
 
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
+            if(!graphLevelMatchersPass(pack, inputs, graphVerdicts))
             {
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
@@ -1210,7 +1226,7 @@ private:
 
                 // Referenced, not rebuilt or copied: every field was settled at
                 // construction, and `_definitions` never changes after it.
-                if(kernelLevelMatchersPass(pack, context, catalog.bound, precomputed))
+                if(kernelLevelMatchersPass(pack, inputs, precomputed))
                 {
                     catalog.entries.push_back(&precomputed);
                     ++admitted;
@@ -1319,10 +1335,31 @@ private:
         entries.resize(kept);
     }
 
+    /// What every matcher of one catalog build reads besides the candidate kernel.
+    struct MatcherInputs
+    {
+        const MatchContext& context;
+        const BoundTokens& bound;
+        /// Set whenever the engine has a declarative UMD.
+        const std::optional<CriteriaDevice>& criteriaDevice;
+    };
+
+    /// @p kernel is null for a graph-scoped matcher.
+    static bool matcherPasses(const ResolvedMatcher& matcher,
+                              const MatcherInputs& inputs,
+                              const KernelDefinition* kernel)
+    {
+        if(const auto& criteria = matcher.descriptor.criteria)
+        {
+            return criteria->passes(CriteriaSymbols(inputs.bound, *inputs.criteriaDevice, kernel));
+        }
+        return kernel == nullptr ? matcher.graphFn(inputs.context, inputs.bound)
+                                 : matcher.kernelFn(inputs.context, inputs.bound, *kernel);
+    }
+
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
-                                const MatchContext& context,
-                                GraphMatcherMemo& graphVerdicts,
-                                const BoundTokens& bound) const
+                                const MatcherInputs& inputs,
+                                GraphMatcherMemo& graphVerdicts) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -1336,7 +1373,7 @@ private:
             if(memo == graphVerdicts.end())
             {
                 GraphMatcherVerdict verdict;
-                verdict.passed = matcher.graphFn(context, bound);
+                verdict.passed = matcherPasses(matcher, inputs, nullptr);
                 memo = graphVerdicts.emplace(matcherId, std::move(verdict)).first;
             }
 
@@ -1349,8 +1386,7 @@ private:
     }
 
     bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
-                                 const MatchContext& context,
-                                 const BoundTokens& bound,
+                                 const MatcherInputs& inputs,
                                  const KernelDefinition& kernel) const
     {
         for(const auto& matcherId : pack.matcherIds)
@@ -1360,7 +1396,7 @@ private:
             {
                 continue;
             }
-            if(!matcher.kernelFn(context, bound, kernel))
+            if(!matcherPasses(matcher, inputs, &kernel))
             {
                 return false;
             }
@@ -1609,6 +1645,8 @@ private:
 
     MetadataSchema _schema;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
+    /// True when any UMD is declarative, so a catalog build resolves `$device.*` for it.
+    bool _readsCriteria = false;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     /// One entry per pack, parallel to _packs: its kernels' context-independent

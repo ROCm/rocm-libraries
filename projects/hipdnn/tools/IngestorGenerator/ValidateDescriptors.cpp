@@ -301,6 +301,11 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         }
         for(const auto& matcher : set.matchers)
         {
+            // A declarative matcher names no symbol for a stub to stand in for.
+            if(matcher.criteria != nullptr)
+            {
+                continue;
+            }
             if(matcher.scope == MatchScope::GRAPH)
             {
                 harvested.graphCriterion.insert(matcher.matchSymbol);

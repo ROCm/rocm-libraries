@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -33,11 +34,13 @@
 /**
  * @file TestPointwiseDeclarativeMatch.cpp
  * @brief Tests the pointwise engine with a declarative `graph_match.nodes` pattern in
- *        place of its native graph match.
+ *        place of its native graph match, and with declarative `criteria` in place of its
+ *        native UMDs.
  *
  * The engine test copies the shipped unit pointwise set from disk and replaces only its
- * UED's `graph_match`, so the two engines differ only in which arm binds the graph.
- * Matching needs no device, so the engine runs against a fixed device identity.
+ * UED's `graph_match`, and optionally the ADD pack's UMDs, so the engines differ only in
+ * which arm binds the graph and which arm decides applicability. Matching needs no device,
+ * so the engine runs against a fixed device identity.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -134,11 +137,55 @@ flatbuffers::FlatBufferBuilder buildFullyAttributedPointwiseGraph()
     });
 }
 
-} // namespace
+/// `{name: [args...]}`.
+nlohmann::json op(const char* name, std::vector<nlohmann::json> args)
+{
+    return nlohmann::json::object({{name, nlohmann::json(std::move(args))}});
+}
 
-/// The pattern compiles at load, the set validates, and the engine answers applicability
-/// through the compiled pattern.
-TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
+/// The native pointwise criteria restated as expressions over the pattern's binding: one
+/// node, three single-element rank-4 or rank-5 operands of one dtype in a supported layout,
+/// none virtual, passed by value, or constant. Dims are positive, so a product of 1 means
+/// every axis is 1; a rank-4 tensor has no `dims[4]`, which the default fills.
+std::vector<nlohmann::json> servableBindingCriteria()
+{
+    std::vector<nlohmann::json> all{op("==", {"$graph.node_count", 1})};
+    for(const std::string root : {"$input_a", "$input_b", "$output"})
+    {
+        all.push_back(op("in", {root + ".rank", nlohmann::json::array({4, 5})}));
+        all.push_back(op("==",
+                         {op("*",
+                             {root + ".dims[0]",
+                              root + ".dims[1]",
+                              root + ".dims[2]",
+                              root + ".dims[3]",
+                              op("value_or_default", {root + ".dims[4]", 1})}),
+                          1}));
+        all.push_back(op(
+            "in",
+            {root + ".stride_order", nlohmann::json::array({"nchw", "nhwc", "ncdhw", "ndhwc"})}));
+        all.push_back(op("!", {root + ".virtual"}));
+        all.push_back(op("!", {root + ".is_runtime_pass_by_value"}));
+        all.push_back(op("not_present", {root + ".value_f32"}));
+    }
+    all.push_back(op("==", {"$input_b.dtype", "$input_a.dtype"}));
+    all.push_back(op("==", {"$output.dtype", "$input_a.dtype"}));
+    return all;
+}
+
+/// Replaces the native symbol of the UMD in @p path with @p criteria.
+void declareCriteria(const std::filesystem::path& path, nlohmann::json criteria)
+{
+    auto umd = nlohmann::json::parse(std::ifstream(path));
+    umd.erase("match_symbol");
+    umd["criteria"] = std::move(criteria);
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << umd.dump();
+}
+
+/// Loads one staged shard of the shipped pointwise set with its UED's `graph_match`
+/// replaced by the declarative pattern and, when @p declarativeCriteria, the ADD pack's
+/// UMDs replaced by servableBindingCriteria(), then asks the engine about @p graph.
+void expectApplicability(const ApplicabilityCase& graph, bool declarativeCriteria)
 {
     // One staged shard of the shipped set: every descriptor of it sits beside its packs.
     const auto& shipped = loadedSet(POINTWISE_ADD.engineName);
@@ -155,11 +202,29 @@ TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
     ued["graph_match"] = {{"nodes", pointwisePattern()}};
     std::ofstream(uedPath, std::ios::binary | std::ios::trunc) << ued.dump();
 
+    if(declarativeCriteria)
+    {
+        auto operation = servableBindingCriteria();
+        operation.push_back(op("==", {"$pointwise.operation", "ADD"}));
+        declareCriteria(scratch.path() / "operation_is_add.umd.json", op("and", operation));
+        auto dtype = servableBindingCriteria();
+        dtype.push_back(op("==", {"$input_a.dtype", "$kernel.dtype"}));
+        declareCriteria(scratch.path() / "kernel_dtype_matches_graph.umd.json", op("and", dtype));
+    }
+
     registerNativeIngestorSymbols();
     auto sets = loadValidatedDescriptorSets<Handle>(scratch.path());
     ASSERT_EQ(sets.size(), 1U);
     ASSERT_TRUE(std::holds_alternative<std::shared_ptr<const CompiledGraphPattern>>(
         sets.front().set.engine.graphMatch));
+    if(declarativeCriteria)
+    {
+        const auto& matchers = sets.front().set.matchers;
+        ASSERT_EQ(std::count_if(matchers.begin(),
+                                matchers.end(),
+                                [](const MatchDescriptor& m) { return m.criteria != nullptr; }),
+                  2);
+    }
 
     // The staged packs name the architecture they were packed for.
     auto properties = testDeviceProperties();
@@ -169,10 +234,26 @@ TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
     }
     const FixedDeviceResolver resolver(std::move(properties));
     const auto engine = makeEngine<Handle, Settings, Context>(sets.front().set, resolver);
-    const GraphFixture fixture(GetParam().build());
+    const GraphFixture fixture(graph.build());
     Handle handle;
 
-    EXPECT_EQ(engine->isApplicable(handle, fixture.context().graph), GetParam().applicable);
+    EXPECT_EQ(engine->isApplicable(handle, fixture.context().graph), graph.applicable);
+}
+
+} // namespace
+
+/// The pattern compiles at load, the set validates, and the engine answers applicability
+/// through the compiled pattern.
+TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
+{
+    expectApplicability(GetParam(), false);
+}
+
+/// With the ADD pack's native criteria restated as `criteria` expressions over the
+/// pattern's binding, the engine answers every graph as the native criteria do.
+TEST_P(TestPointwiseDeclarativeMatch, DeclarativeCriteriaAnswerAsTheNativeOnesDo)
+{
+    expectApplicability(GetParam(), true);
 }
 
 INSTANTIATE_TEST_SUITE_P(

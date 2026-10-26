@@ -14,6 +14,14 @@ jsonlogic.com, as the contract.
 files, and anyone who implements a data source for them. This document assumes
 C++ and JSON. It does not assume you know JsonLogic.
 
+**UMD criteria.** A Universal Match Descriptor (UMD) may carry a `criteria`
+rule, which the descriptor loader compiles with this language
+([`CompiledCriteria.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp)).
+Its data source, `CriteriaSymbols`, resolves the tokens the engine's
+`graph_match` bound, the candidate kernel's metadata as `$kernel.*`, and the
+device's properties as `$device.*`. A criterion passes only when it evaluates to
+boolean `true`. See [RFC 0018](rfcs/0018_UniversalMatchDescriptor.md).
+
 ## Quickstart
 
 The pipeline has two halves. Compilation happens once per rule; evaluation
