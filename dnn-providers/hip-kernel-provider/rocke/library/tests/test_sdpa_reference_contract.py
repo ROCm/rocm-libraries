@@ -160,7 +160,10 @@ def test_gfx942_source_adapter_reports_a_renamed_current_api(monkeypatch):
 @pytest.mark.parametrize("causal", [False, True], ids=["full", "causal"])
 def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     import kernels
-    from kernels.gfx950.attention_dense import attention_dense_signature
+    from kernels.gfx950.attention_dense import (
+        attention_dense_runtime_args,
+        attention_dense_signature,
+    )
 
     target = get_architecture("gfx950")
     library_root = Path(kernels.__file__).resolve().parent.parent
@@ -185,13 +188,18 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
         "kernels bake the shape. Use a sequence length the aligned (non-ragged) "
         "grid kernel accepts, or extend the dense replay ABI first."
     )
-    # Replay supplies shape scalars only for the runtime-shape members of this cohort.
+    # Replay supplies shape and head scalars only for the runtime-shape members of
+    # this cohort: the grid body reads both head counts from kernargs there.
     signature = attention_dense_signature(spec)
     names = [arg["name"] for arg in signature]
     expected = ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"]
+    scalars = []
     if not case.persistent:
-        expected += ["batch", "seqlen_q", "seqlen_kv"]
-    assert names == expected
+        scalars = ["batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads"]
+    assert names == expected + scalars
+    # The export binds exactly these scalars (dense-v2 replay), from the same
+    # single source the launcher uses, so a replayed kernel gets every kernarg.
+    assert list(attention_dense_runtime_args(spec)) == scalars
 
 
 @pytest.mark.parametrize("causal", [False, True])
@@ -923,11 +931,16 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
         if architecture == "gfx942":
             scalars = module.attention_dense_runtime_args(spec)
         else:
+            # Spelled out from the case, not via attention_dense_runtime_args, so a
+            # wrong binding there cannot satisfy this check: the runtime-shape grid
+            # body reads the shape and both head counts from kernargs.
             scalars = (
                 dict(
                     batch=case.batch,
                     seqlen_q=case.sequence_length,
                     seqlen_kv=case.sequence_length,
+                    num_query_heads=case.query_heads,
+                    num_kv_heads=case.kv_heads,
                 )
                 if spec.runtime_shape
                 else {}
