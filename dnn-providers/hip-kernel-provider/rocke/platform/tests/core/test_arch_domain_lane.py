@@ -3,7 +3,7 @@
 
 """Gate the arch-domain *lane* -- what the lowerers do with the artifact.
 
-``test_arch_domain_artifact.py`` gates the committed data. This file gates what
+``tests/tools/test_arch_domain_artifact.py`` gates the committed data. This file gates what
 the lowerers do with it: every intrinsic demand goes through one chokepoint,
 that chokepoint consults the table, it speaks only for a measured, definite
 negative, and in ``error`` mode it refuses one unless a waiver covers it -- the
