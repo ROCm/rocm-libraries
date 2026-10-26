@@ -132,6 +132,8 @@ def _gemm_utils_accepts(
         layout=layout,
         dtype=dtype,
         warp_tile_k=t["warp_tile_k"],
+        warp_tile_m=t["warp_tile_m"],
+        warp_tile_n=t["warp_tile_n"],
     )
 
 
@@ -269,11 +271,35 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
 
     def test_8bit_32x32x128_compared(self):
         """The fp8/bf8 32x32x128 warp tile passes the shared rules on both
-        sides, so the sweeps above compare it; other dtypes reject it."""
+        sides, so the sweeps above compare it; other dtypes reject it. Both
+        sides reject comp_async with it (does not compile) and accept the TDM
+        pipelines."""
         t = TRAIT_TILES[-2]
         pads = (True, True, True)
         for dtype in ("fp8", "bf8"):
             self.assertTrue(self._baseline_ok("rcr", dtype, t, pads), dtype)
+            for pipe, (epi, sched, legal_pads) in LEGAL_TRAITS.items():
+                want = pipe != "comp_async"
+                self.assertEqual(
+                    _te_accepts(pipe, epi, sched, False, "rcr", legal_pads, dtype, t),
+                    want,
+                    (dtype, pipe),
+                )
+                self.assertEqual(
+                    _arch_filter_accepts(
+                        self.filt, pipe, epi, sched, "rcr", legal_pads, dtype, t
+                    ),
+                    want,
+                    (dtype, pipe),
+                )
+                if gemm_utils is not None:
+                    self.assertEqual(
+                        _gemm_utils_accepts(
+                            pipe, epi, sched, False, "rcr", legal_pads, dtype, t
+                        ),
+                        want,
+                        (dtype, pipe),
+                    )
         for dtype in ("fp16", "bf16"):
             self.assertFalse(
                 _arch_filter_accepts(
@@ -285,7 +311,7 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
     def test_tile_space(self):
         """Every tile x wave x warp_tile_k x dtype for the legal trait of each
         gated pipeline (LDS incl. TDM row padding, TDM C tile, 4-wave v2 and
-        8-bit warp_tile_k rules)."""
+        8-bit warp_tile_k and warp_tile_m/n rules)."""
         mismatches = []
         compared = accepted = rejected = 0
         for t in _tile_space():
