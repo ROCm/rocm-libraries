@@ -136,6 +136,38 @@ TEST(ScalarConversionTutorial, ComplexAndEnumValues) {
               -3);
 }
 
+template <typename T>
+class CharacterConversion : public ::testing::Test {};
+using Characters = ::testing::Types<char, wchar_t, char8_t, char16_t, char32_t>;
+TYPED_TEST_SUITE(CharacterConversion, Characters);
+
+TYPED_TEST(CharacterConversion, ConvertsNumericValuesUnderEveryPolicy) {
+    using T = TypeParam;
+    const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
+    for (const auto overflow :
+         {IntegerOverflow::Identity, IntegerOverflow::Saturate, IntegerOverflow::ModuloWrap}) {
+        const ScalarConversionOptions options{IntegerRounding::TowardZero, overflow};
+        EXPECT_EQ(convertScalar<int64_t>(T{42}, options), 42);
+        EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::max(), options),
+                  static_cast<uint64_t>(std::numeric_limits<T>::max()));
+    }
+    EXPECT_EQ(convertScalar<int64_t>(std::numeric_limits<T>::min(), saturate),
+              static_cast<int64_t>(std::numeric_limits<T>::min()));
+    EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::min(), saturate), 0);
+}
+
+TEST(ScalarConversion, NarrowsCharacterAndCharacterBackedEnumValues) {
+    const ScalarConversionOptions identity{IntegerRounding::TowardZero, IntegerOverflow::Identity};
+    const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
+    const ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
+    enum class Sample : char16_t { High = 256 };
+    EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, saturate), 255);
+    EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, wrap), 0);
+    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, saturate), 255);
+    EXPECT_EQ(convertScalar<uint8_t>(Sample::High, wrap), 0);
+    EXPECT_EQ(convertScalar<int64_t>(Sample::High, identity), 256);
+}
+
 template <typename Source>
 concept ConvertsWithoutPolicies = requires(Source source) { convertScalar<int32_t>(source); };
 
