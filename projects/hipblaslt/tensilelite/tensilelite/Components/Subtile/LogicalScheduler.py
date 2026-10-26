@@ -3276,11 +3276,9 @@ class LogicalScheduler:
 
         build_nll keeps that barrier to separate the body's final LDS read from
         the next macro tile's global reads. When the body is followed by the
-        fused store, GlobalWriteBatch.emit puts its own barrier at the end of
-        the arm -- the "sync waves before subtile paired stores" drain -- and
-        every path out of the arm crosses it, so it separates the same two
-        things a whole store later. Keeping both costs a barrier the profile
-        shows at 118 cycles per wave, 0.53% of the kernel's stall.
+        fused store, GlobalWriteBatch.emit's own barrier at the end of the arm
+        separates the same two things a whole store later, and every path out
+        crosses it, so keeping both is a redundant drain.
 
         The conditions below are the ones GlobalWriteBatch.emit tests, minus
         the bias disjunct: it keys on states.useBias, which is not derivable
@@ -5653,15 +5651,12 @@ class LogicalScheduler:
         # barrier, and _tailEntryInflightBound derives it.
         from rocisa.instruction import SWaitCnt, SBarrier
         self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
-        # Split entry: give the in-flight half its own wait and barrier at
-        # the first read that touches it, so the entry wait only has to
-        # cover the resident half. That turns the entry vmcnt(0) the
-        # profile charges 354 cycles per wave into a vmcnt(18) charged 28,
-        # and the second wait it pays for costs 73 -- tail vmcnt stall
-        # falls from 91.7k cycles to 42.4k. Throughput is unchanged
-        # (1.001x geomean over 11 shapes): the arm is MFMA-bound, so the
-        # recovered cycles land back on the critical path. A bounded wait
-        # is the correct shape for a half the barrier already covers.
+        # Split entry: give the in-flight half its own wait and barrier at the
+        # first read that touches it, so the entry wait only has to cover the
+        # resident half. That replaces the entry vmcnt(0) with a bounded wait,
+        # the correct shape for a half the barrier already covers. The arm is
+        # MFMA-bound, so the cycles this recovers land back on the critical
+        # path rather than shortening the kernel.
         splitWait = self._tail_uid_sync_slot is not None
         entryVmcnt = (self._tailEntryResidentBound() if splitWait
                       else self._tailEntryInflightBound())
