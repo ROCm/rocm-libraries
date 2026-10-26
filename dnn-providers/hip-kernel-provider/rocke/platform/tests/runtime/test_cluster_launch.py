@@ -364,3 +364,39 @@ def test_manifest_timing_passes_the_cluster_without_torch():
     assert rt.launch.call_count == 5
     for call in rt.launch.call_args_list:
         assert call.kwargs == {"cluster": (2, 1, 1)}
+
+
+def test_prepared_cluster_launch_sets_up_once(hip):
+    # Validation, the device query and the ctypes launch config are built when
+    # the launch is prepared; each call only enqueues the same config.
+    with mock.patch.object(
+        hip_module, "check_launch_cluster", wraps=hip_module.check_launch_cluster
+    ) as check, mock.patch.object(
+        hip_module, "device_supports_cluster_launch", return_value=True
+    ) as supports:
+        enqueue = Runtime().prepare_launch(
+            object(),
+            (8, 1, 1),
+            (64, 1, 1),
+            b"\0" * 8,
+            stream=_STREAM,
+            cluster=(4, 1, 1),
+        )
+        for _ in range(3):
+            enqueue()
+    assert check.call_count == 1
+    assert supports.call_count == 1
+    assert len(hip.ex) == 3
+    assert all(c["cfg"] is hip.ex[0]["cfg"] for c in hip.ex)
+    assert [c["cluster"] for c in hip.ex] == [(4, 1, 1)] * 3
+
+
+def test_prepared_cluster_launch_refuses_an_unsupported_device_up_front(hip):
+    with mock.patch.object(
+        hip_module, "device_supports_cluster_launch", return_value=False
+    ):
+        with pytest.raises(HipError, match="does not support cluster launch"):
+            Runtime().prepare_launch(
+                object(), (2, 1, 1), (64, 1, 1), b"", stream=_STREAM, cluster=(2, 1, 1)
+            )
+    assert not hip.ex

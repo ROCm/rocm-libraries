@@ -687,6 +687,31 @@ class Runtime:
             )
             return ()
 
+        cfg, attr = Runtime._cluster_launch_config(
+            grid, block, shared_bytes, stream, cluster, where
+        )
+        _check(
+            _hipDrvLaunchKernelEx(ctypes.byref(cfg), fn, params, extra),
+            f"hipDrvLaunchKernelEx({where})",
+        )
+        return (cfg, attr)
+
+    @staticmethod
+    def _cluster_launch_config(
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        shared_bytes: int,
+        stream: int,
+        cluster: Tuple[int, int, int],
+        where: str,
+    ) -> Tuple[Any, Any]:
+        """Validate ``cluster`` and build the ``hipDrvLaunchKernelEx`` config.
+
+        Returns ``(cfg, attr)``: the launch config and the cluster-dimension
+        attribute it points at, which must stay alive together. Raises before
+        HIP sees anything for a bad shape (see :func:`check_launch_cluster`)
+        or a device that reports no cluster launch support.
+        """
         shape = check_launch_cluster(grid, cluster)
         device = current_device()
         if device_supports_cluster_launch(device) is False:
@@ -709,11 +734,7 @@ class Runtime:
             attrs=ctypes.pointer(attr),
             numAttrs=1,
         )
-        _check(
-            _hipDrvLaunchKernelEx(ctypes.byref(cfg), fn, params, extra),
-            f"hipDrvLaunchKernelEx({where})",
-        )
-        return (cfg, attr)
+        return cfg, attr
 
     def launch(
         self,
@@ -850,19 +871,17 @@ class Runtime:
         keep = (args_buf, size_buf, extra)
 
         if cluster is not None:
-            cluster = check_launch_cluster(grid, cluster)
+            # Validated, device-checked and built once, like the plain path's
+            # ctypes arguments: the callable only enqueues.
+            cfg, attr = self._cluster_launch_config(
+                grid, block, shared_bytes, int(stream), cluster, "prepare_launch"
+            )
+            cfg_ref = ctypes.byref(cfg)
 
-            def enqueue_cluster(_keep=keep) -> None:
-                self._enqueue(
-                    fn,
-                    grid,
-                    block,
-                    shared_bytes,
-                    int(stream),
-                    None,
-                    extra,
-                    cluster,
-                    "prepare_launch",
+            def enqueue_cluster(_keep=keep + (cfg, attr)) -> None:
+                _check(
+                    _hipDrvLaunchKernelEx(cfg_ref, fn, None, extra),
+                    "hipDrvLaunchKernelEx(prepare_launch)",
                 )
 
             return enqueue_cluster

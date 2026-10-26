@@ -917,11 +917,12 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # would build an unmerged kernel under a merged spec's name and grid.
         group_merge=getattr(spec, "group_merge", 1),
         # The split-K forward binary (its own ABI and epilogue) and its cluster
-        # form; dropped, the engine would build the plain kernel.
-        split_k=getattr(spec, "split_k", 1),
-        split_k_cluster=getattr(spec, "split_k_cluster", 0),
+        # form; dropped, the engine would build the plain kernel. Read
+        # directly: a spec without them is malformed, not unsplit.
+        split_k=spec.split_k,
+        split_k_cluster=spec.split_k_cluster,
         # The wavelet load-wave count changes the launch block and the loaders.
-        num_load_waves=getattr(spec, "num_load_waves", 4),
+        num_load_waves=spec.num_load_waves,
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the

@@ -366,6 +366,38 @@ class TestSplitKAotScope(unittest.TestCase):
                 self.assertEqual(split, 0)
 
 
+class TestSplitKSpecDict(unittest.TestCase):
+    """The Python-to-C++ spec dict carries the split-K fields as they are."""
+
+    def test_fields_are_forwarded(self):
+        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+
+        d = conv_implicit_gemm_spec_to_dict(
+            _spec(split_k=2, split_k_cluster=4, pipeline="mem", num_load_waves=3)
+        )
+        self.assertEqual(
+            (d["split_k"], d["split_k_cluster"], d["num_load_waves"]), (2, 4, 3)
+        )
+
+    def test_a_spec_without_them_is_rejected(self):
+        # A spec object missing a field is malformed: it must not be read as
+        # an unsplit, cluster-free kernel with four load waves.
+        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+
+        spec = _spec(split_k=2)
+        for missing in ("split_k", "split_k_cluster", "num_load_waves"):
+
+            class _Without:
+                def __getattr__(self, name, _missing=missing):
+                    if name == _missing:
+                        raise AttributeError(name)
+                    return getattr(spec, name)
+
+            with self.subTest(missing=missing):
+                with self.assertRaises(AttributeError):
+                    conv_implicit_gemm_spec_to_dict(_Without())
+
+
 class TestSplitKReduceEngine(unittest.TestCase):
     """The C++ Stage 2 builder fails cleanly on a name it cannot hold."""
 
