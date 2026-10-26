@@ -307,6 +307,150 @@ class TestStemEngines(unittest.TestCase):
             self.assertEqual(name, _with_dtype(spec, "fp16").kernel_name(), fam)
 
 
+# Real problems served through the AOT cache, per family: (variant, dtype,
+# problem, uncovered border). The 16x16 patch embedding covers 224 of 230 rows
+# and 231 columns, so its plans add the border-zeroing workgroups.
+_STEM_ARCH = "gfx1250"
+_CACHED_CASES = (
+    (
+        "direct_dgrad_patch_wmma",
+        "bf16",
+        dict(N=2, H=230, W=231, K=64, KH=16, S=16),
+        True,
+    ),
+    ("direct_dgrad_patch_wmma", "fp16", dict(N=2, H=64, W=72, K=96), False),
+    (
+        "direct_dgrad_smallc_wmma",
+        "bf16",
+        dict(N=2, H=50, W=70, K=24, KH=3, S=2, PAD=1),
+        False,
+    ),
+    (
+        "direct_dgrad_smallc_wmma",
+        "fp16",
+        dict(N=1, H=37, W=29, C=4, K=32, KH=3, S=1, PAD=1),
+        False,
+    ),
+)
+
+
+def _cached_jobs(variant: str, problem) -> list:
+    """The AOT jobs of ``variant`` whose capability serves ``problem``."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from benchmarks.common.kernel_cache import KernelCache
+
+    jobs = []
+    for caps in dks.DIRECT_CAPABILITIES[variant][1]:
+        for _, job in dks._caps_jobs(
+            _STEM_ARCH, 32, variant, "dgrad", caps, problem.dtype
+        )[1]:
+            if KernelCache.supports_problem(job.identity, problem)[0]:
+                jobs.append(job)
+    return jobs
+
+
+def _cached_plans(cache, variant: str, problem):
+    """``variant``'s launch plans for ``problem`` from ``direct_plans``."""
+    from benchmarks.common import direct_kernel_sweep as dks
+
+    plans, rejected = dks.direct_plans(cache, problem, "dgrad", _STEM_ARCH)
+    return [p for p in plans if p.identity.algorithm == variant], rejected
+
+
+class TestStemCachedPlans(unittest.TestCase):
+    """The shipped path: a real problem reaches each family through the AOT
+    cache's capability match and per-shape re-validation (``direct_plans``),
+    and each plan binds the kernel's own kernarg order, the grid (patch
+    border workgroups included) and the block of its knobs. The cache holds
+    placeholder binaries; ``TestStemGpu.test_cached_plans`` runs real ones."""
+
+    def test_cached_plans(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from benchmarks.common import direct_kernel_sweep as dks
+        from benchmarks.common.kernel_cache import KernelCache
+        from kernels.common.conv_abi import conv_direct_args_signature
+        from kernels.common.conv_args import ConvArgs
+
+        builders = {
+            "direct_dgrad_patch_wmma": build_dgrad_patch_wmma,
+            "direct_dgrad_smallc_wmma": build_dgrad_smallc_wmma,
+        }
+        for variant, dtype, pkw, border in _CACHED_CASES:
+            p = _problem(dtype=dtype, **pkw)
+            with self.subTest(
+                variant=variant, problem=pkw
+            ), tempfile.TemporaryDirectory() as tmp:
+                cache = KernelCache(Path(tmp), _STEM_ARCH)
+                jobs = _cached_jobs(variant, p)
+                self.assertTrue(jobs)
+                for job in jobs:
+                    cache.put(
+                        job.identity,
+                        b"placeholder",
+                        {"kernel_name": job.identity.label()},
+                    )
+                plans, rejected = _cached_plans(cache, variant, p)
+                self.assertTrue(plans, rejected)
+                ptrs = {"dy": 1 << 32, "w": 2 << 32, "dx": 3 << 32}
+                sizes = {
+                    "dy": 2 * p.N * p.Ho * p.Wo * p.total_k,
+                    "w": 2 * p.total_k * p.KH * p.KW * p.cpg,
+                    "dx": 2 * p.N * p.H * p.W * p.total_c,
+                }
+                for plan in plans:
+                    knobs = json.loads(plan.identity.knobs)
+                    (step,) = plan.steps
+                    self.assertEqual(step.buffers, ("dy", "w", "dx"))
+                    self.assertEqual(
+                        step.signature,
+                        conv_direct_args_signature(dtype, direction="dgrad"),
+                    )
+                    self.assertEqual(
+                        step.conv_args, ConvArgs.from_problem(p, direction="dgrad")
+                    )
+                    # The signature is the kernel's own kernarg order.
+                    spec = dks.make_spec(variant, p, knobs, 32)
+                    kernel = builders[variant](spec, _STEM_ARCH)
+                    names = [e["name"] for e in step.signature]
+                    self.assertEqual([a.name for a in kernel.params], names)
+                    vals = dks.launch_values(step, ptrs, sizes)
+                    self.assertEqual(set(vals), set(names))
+                    self.assertEqual(
+                        [vals[n] for n in names[:3]],
+                        [ptrs["dy"], ptrs["w"], ptrs["dx"]],
+                    )
+                    # Grid and block from the knobs alone.
+                    wc, wp = knobs["waves_c"], knobs["waves_p"]
+                    self.assertEqual(step.block, (wc * wp * 32, 1, 1))
+                    if variant == "direct_dgrad_patch_wmma":
+                        P, tw = p.KH, knobs["tile_w"]
+                        th = wp * knobs["tiles_p"] * 16 // tw
+                        main = (
+                            p.N
+                            * -(-p.Ho // th)
+                            * -(-p.Wo // tw)
+                            * (P // knobs["r_blk"])
+                        )
+                        self.assertEqual(p.Ho * P < p.H or p.Wo * P < p.W, border, pkw)
+                        self.assertEqual(
+                            step.grid, (main + (p.N if border else 0), 1, 1)
+                        )
+                    else:
+                        self.assertEqual(
+                            step.grid,
+                            (
+                                p.N
+                                * -(-p.H // knobs["out_h"])
+                                * -(-p.W // knobs["out_w"]),
+                                1,
+                                1,
+                            ),
+                        )
+
+
 def _with_dtype(spec, dtype):
     return dataclasses.replace(
         spec, problem=dataclasses.replace(spec.problem, dtype=dtype)
@@ -375,15 +519,11 @@ _SMALLC_CASES = (
 
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestStemGpu(unittest.TestCase):
-    def _check(self, spec, build):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
-        from rocke import compile_kernel
+    def _run(self, p, launch, label):
+        """Fill dY / W, poison dX, ``launch(ptrs, sizes)`` and check dX
+        against torch's dgrad."""
         from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-        p = spec.problem
-        art = compile_kernel(build(spec, GPU_ARCH), arch=GPU_ARCH)
         td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
         torch.manual_seed(0)
         dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1, 1).to(td)
@@ -394,13 +534,39 @@ class TestStemGpu(unittest.TestCase):
         def u8(t):
             return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-        bufs = [rt.alloc(t.nbytes) for t in (dY, w, dX)]
+        sizes = {"dy": dY.nbytes, "w": w.nbytes, "dx": dX.nbytes}
+        ptrs = {name: rt.alloc(nb) for name, nb in sizes.items()}
         try:
-            rt.memcpy_h2d(bufs[0], u8(dY), dY.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, dX.nbytes)  # poison: every element is written
+            rt.memcpy_h2d(ptrs["dy"], u8(dY), dY.nbytes)
+            rt.memcpy_h2d(ptrs["w"], u8(w), w.nbytes)
+            rt.memset(ptrs["dx"], 0x7F, dX.nbytes)  # poison: every element is written
+            launch({k: int(v) for k, v in ptrs.items()}, sizes)
+            rt.memcpy_d2h(u8(dX), ptrs["dx"], dX.nbytes)
+        finally:
+            for x in ptrs.values():
+                rt.free(x)
+        ref = torch.nn.grad.conv2d_input(
+            (p.N, p.total_c, p.H, p.W),
+            w.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            stride=p.stride,
+            padding=p.PAD,
+        ).permute(0, 2, 3, 1)
+        err = float((dX.float() - ref).abs().max() / ref.abs().max())
+        self.assertLess(err, 1e-2, f"{label}: rel err {err:.3g}")
+
+    def _check(self, spec, build):
+        from kernels.common.conv_abi import conv_direct_args_signature
+        from kernels.common.conv_args import ConvArgs
+        from rocke import compile_kernel
+        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+        p = spec.problem
+        art = compile_kernel(build(spec, GPU_ARCH), arch=GPU_ARCH)
+
+        def launch(ptrs, sizes):
             vals = ConvArgs.from_problem(p, direction="dgrad").to_launch_values(
-                *(int(x) for x in bufs), dY.nbytes, w.nbytes, dX.nbytes
+                ptrs["dy"], ptrs["w"], ptrs["dx"], sizes["dy"], sizes["w"], sizes["dx"]
             )
             KernelLauncher(
                 hsaco=art.hsaco,
@@ -412,19 +578,54 @@ class TestStemGpu(unittest.TestCase):
                     grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
                 ),
             )
-            rt.memcpy_d2h(u8(dX), bufs[2], dX.nbytes)
-        finally:
-            for x in bufs:
-                rt.free(x)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.total_c, p.H, p.W),
-            w.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=p.PAD,
-        ).permute(0, 2, 3, 1)
-        err = float((dX.float() - ref).abs().max() / ref.abs().max())
-        self.assertLess(err, 1e-2, f"{spec}: rel err {err:.3g}")
+
+        self._run(p, launch, str(spec))
+
+    def test_cached_plans(self):
+        """The shipped path on the GPU: each case's AOT cell is compiled into
+        a cache as --compile-all does, and every plan ``direct_plans`` offers
+        runs with its own kernargs, grid and block."""
+        import tempfile
+        from pathlib import Path
+
+        from benchmarks.common import direct_kernel_sweep as dks
+        from benchmarks.common.kernel_cache import KernelCache
+        from benchmarks.common.kernel_sweep import compile_jobs
+        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+        for variant, dtype, pkw, _ in _CACHED_CASES:
+            p = _problem(dtype=dtype, **pkw)
+            with tempfile.TemporaryDirectory() as tmp:
+                cache = KernelCache(Path(tmp), GPU_ARCH)
+                compile_jobs(
+                    cache=cache,
+                    all_jobs=_cached_jobs(variant, p),
+                    build=dks.direct_kernel_for_job,
+                    arch=GPU_ARCH,
+                    dtype=dtype,
+                    directions=["direct_dgrad"],
+                    jobs=8,
+                    log=lambda *_: None,
+                )
+                plans, rejected = _cached_plans(cache, variant, p)
+                self.assertTrue(plans, (variant, pkw, rejected[:2]))
+                for plan in plans:
+                    (step,) = plan.steps
+
+                    def launch(ptrs, sizes, step=step):
+                        KernelLauncher(
+                            hsaco=step.hsaco_path.read_bytes(),
+                            kernel_name=step.kernel_name,
+                            signature=step.signature,
+                        )(
+                            dks.launch_values(step, ptrs, sizes),
+                            config=LaunchConfig(
+                                grid=step.grid, block=step.block, fence=True
+                            ),
+                        )
+
+                    with self.subTest(variant=variant, kernel=plan.label):
+                        self._run(p, launch, plan.label)
 
     def test_patch(self):
         for pkw, knobs in _PATCH_CASES:
