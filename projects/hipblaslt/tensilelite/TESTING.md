@@ -83,7 +83,7 @@ and it still owes a real test.
 > <details>
 > <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
 >
-> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel is turned into
 > assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
 > Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
 > 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
@@ -722,7 +722,7 @@ and Windows are not tracked separately. The exclusions in
 rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
 they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
-including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
+including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
 **No C++ coverage target exists** for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own

@@ -4,6 +4,7 @@
 from ._hostnumerics import (
     IndexSelection,
     IndexSelectionKind,
+    Layout,
     ScalarCategory,
     ScalarType,
     ScalarTypeInfo,
@@ -21,4 +22,5 @@ __all__ = [
     "Shape",
     "IndexSelection",
     "IndexSelectionKind",
+    "Layout",
 ]

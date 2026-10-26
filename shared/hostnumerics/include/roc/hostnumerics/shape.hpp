@@ -23,7 +23,7 @@ class Shape {
     Shape() = default;
 
     explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {
-        const auto count = tryElementCount(m_dimensions);
+        const auto count = getElementCount(m_dimensions);
         if (!count) throw std::runtime_error("Tensor shape element count exceeds size_t.");
         m_elementCount = *count;
     }
@@ -200,7 +200,7 @@ class Shape {
         }
     }
 
-    static std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
+    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
         if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
             return 0;
         size_t count = 1;
