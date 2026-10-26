@@ -109,8 +109,8 @@ class TestGeneratedFromHelper:
 
 
 class TestGenerateCliStampsTheKdp:
-    def test_manifest_and_commits_reach_the_emitted_kdp(self, tmp_path):
-        out = tmp_path / "out"
+    @staticmethod
+    def _generate(out: Path, *extra: str) -> dict:
         subprocess.run(
             [
                 sys.executable,
@@ -121,13 +121,23 @@ class TestGenerateCliStampsTheKdp:
                 str(_ROOT / "configs" / "scale_add.yaml"),
                 "--output-dir",
                 str(out),
+                *extra,
             ],
             check=True,
             capture_output=True,
             cwd=_ROOT,
         )
         (kdp_path,) = out.rglob("*.kdp.json")
-        stamp = json.loads(kdp_path.read_text())["provenance"]["generated_from"]
+        return json.loads(kdp_path.read_text())
+
+    def test_a_run_without_the_flag_stamps_nothing(self, tmp_path):
+        """Unstamped by default, so regenerating an unchanged bundle is byte-identical."""
+        kdp = self._generate(tmp_path / "out")
+        assert "generated_from" not in kdp["provenance"]
+
+    def test_manifest_and_commits_reach_the_emitted_kdp(self, tmp_path):
+        kdp = self._generate(tmp_path / "out", "--stamp-provenance")
+        stamp = kdp["provenance"]["generated_from"]
         assert stamp["manifest"].endswith("configs/scale_add.yaml")
         assert stamp["config"].endswith("configs/scale_add.yaml")
         assert "generator_commit" in stamp and "rocke_commit" in stamp
