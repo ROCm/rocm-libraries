@@ -59,9 +59,10 @@ public:
      *
      * Typically this is implemented by checking all the engine's plan builders.
      *
-     * Return false to decline a graph; that is the supported way to opt out. An exception thrown
-     * from here is tolerated rather than fatal: the host logs a warning and skips this engine for
-     * the graph. Accepting a graph means the engine can build a plan for it; an engine that learns
+     * Return false to decline a graph; that is the supported way to opt out. A std::exception
+     * thrown from here is skipped with a warning for this engine; any other exception type is not
+     * caught by the SDK, ends this plugin's applicability query, and the host then skips the
+     * plugin. Accepting a graph means the engine can build a plan for it; an engine that learns
      * only while building that it has no solver throws NOT_APPLICABLE from
      * initializeExecutionContext instead.
      *
@@ -175,9 +176,9 @@ public:
      * @param executionContext The execution context to initialize with a plan.
      * @throws HipdnnPluginException with status NOT_APPLICABLE if the engine accepted the graph at
      *         applicability but has no solver for it (the host reports it as not supported and the
-     *         frontend's default plan build moves to the next ranked engine). Any other status is a
-     *         failure that is returned to the caller: no applicable plan builder is found, or plan
-     *         creation fails.
+     *         frontend's default plan build falls back to another ranked engine, scanning from the
+     *         top of the list). Any other status is a failure that is returned to the caller: no
+     *         applicable plan builder is found, or plan creation fails.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(

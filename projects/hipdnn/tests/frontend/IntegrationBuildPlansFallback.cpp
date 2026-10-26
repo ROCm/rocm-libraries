@@ -41,8 +41,8 @@ protected:
                 hipdnn_tests::plugin_constants::testGoodPluginPath()};
     }
 
-    // The engine pinned to the front of the ranked list through the soft
-    // preferred-engine setter, so the tests do not depend on heuristic order.
+    // The engine made the active plan through the soft preferred-engine setter, so the
+    // tests do not depend on heuristic order.
     virtual int64_t preferredEngineId() const
     {
         return noSolverEngineId();

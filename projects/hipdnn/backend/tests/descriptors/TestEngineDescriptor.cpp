@@ -517,8 +517,7 @@ TEST_F(TestEngineDescriptor, FinalizeQueriesOnlyThePinnedEngineApplicability)
     EXPECT_TRUE(getEngineDescriptor()->isFinalized());
 }
 
-/// The owning plugin's real failure reaches the caller instead of being rewritten into a
-/// misleading out-of-range engine ID.
+/// The owning plugin's applicability failure reaches the caller unchanged.
 TEST_F(TestEngineDescriptor, FinalizePropagatesOwningPluginApplicabilityError)
 {
     auto engine = getEngineDescriptor();

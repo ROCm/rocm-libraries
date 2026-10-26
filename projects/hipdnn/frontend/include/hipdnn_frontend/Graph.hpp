@@ -3467,9 +3467,9 @@ public:
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine selection
      * @param policy Build plan policy: HEURISTICS_CHOICE compiles the active plan
-     *        (the preferred engine's plan when one is set, otherwise the top-ranked
-     *        plan) and moves to another ranked plan only if that plan's engine
-     *        accepted the graph but has no solver for it; any other failure is
+     *        (the preferred engine's plan when it is among the ranked candidates,
+     *        otherwise the top-ranked plan) and tries another ranked plan only if
+     *        that plan's engine accepted the graph but has no solver for it; any other failure is
      *        returned. See build_plans() for the details. ALL compiles every
      *        engine config
      * @param do_multithreaded_builds Reserved for future use
@@ -6729,7 +6729,7 @@ public:
      *
      * The preference is soft. If the preferred engine's plan fails because the
      * engine accepted the graph but has no solver for it, build_plans() falls back
-     * to the next ranked engine, scanning from the top of the list; read the engine
+     * to another ranked engine, scanning from the top of the list; read the engine
      * that serves the graph with @c get_execution_plan_engine_id() or
      * @c get_plan_name(). Any other failure of the preferred engine's plan (out of
      * memory, device or execution-context failure, workspace query failure,

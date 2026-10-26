@@ -2003,9 +2003,8 @@ TEST(TestEnginePluginResourceManager, ConstructorContinuesAfterBadPluginWithGood
     }
 }
 
-// A plugin that loads fine but throws when asked which engines apply to a graph
-// (e.g. an engine's applicability check finds no solver) must not take the other
-// plugins' engines down with it. ROCm/rocm-libraries#14266.
+// A plugin that loads fine but throws when asked which engines apply to a graph must not
+// take the other plugins' engines down with it. ROCm/rocm-libraries#14266.
 TEST(TestEnginePluginResourceManager, GetApplicableEngineIdsSkipsPluginThatThrows)
 {
     const std::shared_ptr<MockEnginePlugin> badPlugin = std::make_shared<MockEnginePlugin>();

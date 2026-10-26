@@ -127,7 +127,7 @@ Frontend API control flow
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
         c. If finalize returns HIPDNN_STATUS_NOT_SUPPORTED (the engine's
            CreateExecutionContext reported HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE:
-           no solver), repeat a-b for the next ranked plan.
+           no solver), repeat a-b for another ranked plan (the list is scanned from the top).
            Any other failure is returned to the caller.
 
 
@@ -186,7 +186,7 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
@@ -253,7 +253,7 @@ normal selector, ranking its kernels by the same metric, with
            -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
            -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
            -> Backend: hipdnnBackendFinalize(engine)
-              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
         2. Backend: hipdnnBackendCreateDescriptor(ENGINECFG)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, ENGINE, engineDesc)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, RANKING_METRIC_EXT, metric)

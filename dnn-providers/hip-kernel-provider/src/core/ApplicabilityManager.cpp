@@ -240,9 +240,10 @@ std::vector<int64_t> ApplicabilityManager::getApplicableEngineIdsStaged(Handle& 
         }
     }
 
-    // In registration order, so the ids and the first non-std exception match the sequential
-    // loop. An engine whose begin or finish threw a std::exception is inapplicable and its
-    // siblings are still reported; anything else propagates from the rethrow.
+    // In the base class's iteration order (`_entries`), so the ids and the first non-std
+    // exception match the sequential loop. An engine whose begin or finish threw a
+    // std::exception is inapplicable and its siblings are still reported; anything else
+    // propagates from the rethrow.
     std::vector<int64_t> applicable;
     for(const auto& slot : slots)
     {

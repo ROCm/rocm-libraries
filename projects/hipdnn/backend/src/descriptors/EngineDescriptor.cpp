@@ -47,8 +47,9 @@ void EngineDescriptor::finalize()
                                                                             _graph.get()))
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "EngineDescriptor::finalize() failed: Engine id is not in a valid "
-                              "range of engine IDs");
+                              "EngineDescriptor::finalize() failed: Engine id is not applicable "
+                              "to this graph (no engine plugin offered it; see the log for "
+                              "plugin warnings)");
     }
 
     // Engine details load lazily: providers build the knob list by ranking the catalog, which

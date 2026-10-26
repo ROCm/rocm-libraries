@@ -10675,6 +10675,52 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsCandidateOverWorkspaceL
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
 }
 
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackAcceptsCandidateAtWorkspaceLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_workspace_greater_than(100);
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_NOT_SUPPORTED, Exactly(1), "no solver for engine 10");
+    // The limit bars only workspaces strictly greater than it, so equal is accepted.
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/100);
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsAlreadyBarredCandidate)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/true);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_NOT_SUPPORTED, Exactly(1), "no solver for engine 10");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
 TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineNoSolverFallsBackFromTopOfList)
 {
     ::testing::FLAGS_gmock_verbose = "error";

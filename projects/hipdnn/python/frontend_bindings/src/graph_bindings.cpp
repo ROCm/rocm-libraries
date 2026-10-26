@@ -250,7 +250,8 @@ void graphBindings(nb::module_& m)
              &graph::Graph::build_plans,
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
              "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan (the "
-             "preferred engine's plan when one is set, otherwise the top-ranked plan). Only "
+             "preferred engine's plan when it is among the ranked candidates, otherwise the "
+             "top-ranked plan). Only "
              "if that plan fails because its engine accepted the graph but has no solver for "
              "it are the other ranked plans tried, from the top of the list; the first that "
              "compiles becomes active. Candidates barred by deselect_engines() or over the "
@@ -753,7 +754,8 @@ void graphBindings(nb::module_& m)
              nb::rv_policy::reference_internal,
              "Prefer an engine ID for plan selection (None clears it). The preference is soft: "
              "if the preferred engine's plan fails because the engine accepted the graph but "
-             "has no solver for it, build_plans() falls back to the next ranked engine; any "
+             "has no solver for it, build_plans() falls back to another ranked engine (the "
+             "list is scanned from the top); any "
              "other failure of the preferred engine is returned. Read the serving engine with "
              "get_execution_plan_engine_id() or get_plan_name().")
         .def("set_preferred_engine_id_ext",
@@ -761,7 +763,8 @@ void graphBindings(nb::module_& m)
              nb::rv_policy::reference_internal,
              "Prefer an engine by name (an empty string clears it). The preference is soft: "
              "if the preferred engine's plan fails because the engine accepted the graph but "
-             "has no solver for it, build_plans() falls back to the next ranked engine; any "
+             "has no solver for it, build_plans() falls back to another ranked engine (the "
+             "list is scanned from the top); any "
              "other failure of the preferred engine is returned. Read the serving engine with "
              "get_execution_plan_engine_id() or get_plan_name().")
         .def("set_ranking_metric",
