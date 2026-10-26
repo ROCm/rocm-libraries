@@ -21,7 +21,6 @@ enum class MxScaleStorageLayout {
     // GFX1250 block-scale ABI: tile the padded fast dimension in groups of 128 / blockSize,
     // ordered as [fast tile, slow coordinate, coordinate within the tile].
     Gfx1250,
-    Count,
 };
 
 // Complete storage contract for converting one natural rank-two MX scale

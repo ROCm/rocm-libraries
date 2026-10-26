@@ -21,7 +21,6 @@ enum class UlpComparisonMode {
     /// absolute difference before the result is represented as double, and types without an
     /// encoded-distance implementation use `RelativeSpacing`.
     EncodedDistance,
-    Count,
 };
 
 enum class ComplexComparisonMode {
@@ -31,7 +30,6 @@ enum class ComplexComparisonMode {
     /// Compare the complex-difference magnitude against a tolerance scaled by the expected
     /// complex-value magnitude.
     Magnitude,
-    Count,
 };
 
 /// Configures three independent comparison criteria plus optional evidence and reporting.
@@ -200,7 +198,6 @@ enum class SentinelRegion {
     Inside,
     /// Guard storage following a logical allocation.
     After,
-    Count,
 };
 
 /// One overwritten sentinel. `index` is always an element offset from the start of the storage

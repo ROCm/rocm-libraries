@@ -25,7 +25,6 @@ enum class IntegerOverflow : uint8_t {
 enum class BFloat16Rounding : uint8_t {
     NearestEven,
     Truncate,
-    Count,
 };
 
 struct ScalarConversionOptions {

@@ -588,7 +588,6 @@ namespace TensileLite
                     location = "after";
                     break;
                 case roc::hostnumerics::SentinelRegion::Unspecified:
-                case roc::hostnumerics::SentinelRegion::Count:
                     break;
                 }
                 std::cout << "Value written " << location << " output buffer at index "

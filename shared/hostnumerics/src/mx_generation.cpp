@@ -177,8 +177,6 @@ std::optional<uint8_t> explicitScaleRaw(const MxGenerationInvocation& problem) {
             return maximumScaleRaw(problem.scaleType);
         case MxScaleGenerationMode::NaN:
             return scaleRawForValue(problem.scaleType, std::numeric_limits<double>::quiet_NaN());
-        case MxScaleGenerationMode::Count:
-            break;
     }
     throw std::runtime_error("Invalid MX scale generation mode.");
 }

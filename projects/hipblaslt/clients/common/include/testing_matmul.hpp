@@ -1672,8 +1672,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                     return hipblaslt::hostnumerics::initialization::OperandSequence::MatrixB;
                 case hipblaslt::hostnumerics::MatrixRole::C:
                     return hipblaslt::hostnumerics::initialization::OperandSequence::MatrixC;
-                case hipblaslt::hostnumerics::MatrixRole::Count:
-                    break;
                 }
                 throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
             }();

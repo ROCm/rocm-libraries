@@ -154,7 +154,6 @@ class GenerationRecipe {
             Absolute,
             Sine,
             Cosine,
-            Count,
         };
 
         struct ZeroPattern {};

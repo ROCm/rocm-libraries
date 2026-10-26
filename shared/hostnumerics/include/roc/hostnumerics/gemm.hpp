@@ -17,7 +17,6 @@ enum class GemmBackend {
     Automatic,  // Selects between available BLAS and built-in Blocked execution.
     Blocked,    // Uses built-in density-aware blocked or selected-output execution.
     Blas,       // Uses the optional BLAS component's transforming implementation.
-    Count,
 };
 
 // Selects when low-precision accumulator types are rounded.
@@ -25,7 +24,6 @@ enum class AccumulationRounding {
     TypeDefault,         // Stepwise rounding for F16/BF16 accumulators; full precision otherwise.
     FullPrecision,       // Keeps the host register type through the complete dot product.
     AfterProductAndSum,  // Quantizes every product and accumulated sum.
-    Count,
 };
 
 // Numerical and execution policy intrinsic to one matrix multiplication.

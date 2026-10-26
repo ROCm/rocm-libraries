@@ -28,7 +28,6 @@ enum class Activation {
     Silu,
     Swish,
     Clamp,
-    Count,
 };
 
 struct IdentityActivation {};
@@ -78,14 +77,12 @@ using ActivationFunction =
 enum class MathMode {
     Default,
     XFloat32,  // Truncate Float32 operands to the xfloat32 representation.
-    Count,
 };
 
 // Selects the final conversion performed before writing an output tensor.
 enum class OutputConversion {
     Default,
     SaturatingInt8,  // Round and clamp to [-128, 127].
-    Count,
 };
 
 }  // namespace roc::hostnumerics
