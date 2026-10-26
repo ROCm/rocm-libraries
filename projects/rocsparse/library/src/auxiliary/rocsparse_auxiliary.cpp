@@ -1533,9 +1533,9 @@ try
         (coo_nnz > 0 && (coo_row_ind == nullptr || coo_col_ind == nullptr || coo_val == nullptr)),
         rocsparse_status_invalid_pointer);
 
-    hyb->m           = m;
-    hyb->n           = n;
-    hyb->partition   = partition;
+    hyb->m              = m;
+    hyb->n              = n;
+    hyb->partition      = partition;
     hyb->ell_nnz        = ell_nnz;
     hyb->ell_nnz_legacy = static_cast<rocsparse_int>(
         std::min<int64_t>(ell_nnz, std::numeric_limits<rocsparse_int>::max()));
