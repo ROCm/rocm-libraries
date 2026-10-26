@@ -16,7 +16,7 @@ import re
 import pytest
 from types import SimpleNamespace
 
-from Tensile.Components.Subtile.SubtileLREmit import (
+from tensilelite.Components.Subtile.SubtileLREmit import (
     emitSubtileDsRead, localReadDoSubtile,
 )
 

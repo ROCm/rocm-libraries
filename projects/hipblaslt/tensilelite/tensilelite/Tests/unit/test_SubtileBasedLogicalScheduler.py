@@ -2425,7 +2425,7 @@ class TestHoistSetupBeforeLastMFMA:
         return body
 
     def test_setup_lands_before_the_last_mfma(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_mfma("mfma0"), _text("filler"), _mfma("mfma1"))
         out = _hoistSetupBeforeLastMFMA(body, [_text("sub"), _text("cmp")])
         assert _labels(out) == ["mfma0", "filler", "sub", "cmp", "mfma1"]
@@ -2433,13 +2433,13 @@ class TestHoistSetupBeforeLastMFMA:
     def test_body_without_mfma_appends_setup(self):
         """A skip branch has no compute to hide the branch behind, so the
         setup just follows the body."""
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_text("a"), _text("b"))
         out = _hoistSetupBeforeLastMFMA(body, [_text("sub")])
         assert _labels(out) == ["a", "b", "sub"]
 
     def test_input_module_is_not_mutated(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_mfma("mfma0"))
         before = _labels(body)
         _hoistSetupBeforeLastMFMA(body, [_text("sub")])
@@ -2457,14 +2457,14 @@ class TestEmitBodySetupBranch:
         return body, [_text("sub"), _text("cmp")], _text("branch")
 
     def test_without_hoist_setup_follows_the_body(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
         module = Module("loop")
         body, setup, branch = self._parts()
         _emitBodySetupBranch(module, body, setup, branch, hoist=False)
         assert _labels(module) == ["mfma0", "tail", "sub", "cmp", "branch"]
 
     def test_with_hoist_setup_moves_above_the_last_mfma(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
         module = Module("loop")
         body, setup, branch = self._parts()
         _emitBodySetupBranch(module, body, setup, branch, hoist=True)
@@ -2579,7 +2579,7 @@ class TestPlacementPrinters:
     def test_preops_printer_lists_all_three_sections(self):
         import io
         buf = io.StringIO()
-        from Tensile.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
         p = self._lr()
         p.preOps = [WaitLROp()]
         p.deps = [Dep(ref=self._lr('B', slot=0), mt_offset=0)]
@@ -2788,7 +2788,7 @@ class TestEmitWaitGrPlacementCounts:
     @staticmethod
     def _emitter(loadRatioA=1.0, loadRatioB=1.0, loadRatioSA=1.0, loadRatioSB=1.0,
                  withScale=True):
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         cfg = make_cfg_256x256_fp4()
         mk = lambda r: MagicMock(subtileShape=[1, 1], loadRatioGR=r)
         return InstructionEmitter(
