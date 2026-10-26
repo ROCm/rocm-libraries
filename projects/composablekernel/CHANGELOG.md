@@ -6,19 +6,22 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
-* Added gfx1250 FP16/BF16 scalar WMMA backward-weight instances for odd per-group channels, supporting explicit split-one and automatic split-one selection.
-* Added gfx1250 BF16 skinny-output and RGB nonoverlap-patch backward-weight candidates with stride-aware zero-copy patch views and FP32 partial accumulation.
+* Added gfx1250 scalar FP16/BF16 weight-gradient candidates for odd per-group channels; automatic reduction splitting selects the supported single-split path.
+* Added gfx1250 BF16 skinny-channel and nonoverlapping RGB-patch weight-gradient candidates.
+* Added bounded gfx1250 native NCHW FP32 pointwise backward-data and FP16 pointwise forward candidates.
+* Added gfx1250 forward candidates with native NCHW/NCDHW output stores.
+* Added an optional argument-specific convolution output-coverage contract without changing existing operator base vtables.
 
 ### Optimized
 
-* Removed redundant output clears for proven packed split-one WMMA backward-weight mappings.
-* Restored device-wide automatic split-K occupancy planning for two-stage WMMA backward-weight, without the squared per-CU cap that underfilled small output grids with long reductions.
+* Avoided redundant clears for proven packed split-one WMMA weight-gradient and pointwise backward-data invocations.
 
 ### Resolved Issues
 
 * Fixed incorrect results when kernel timing is disabled by preserving required kernel preprocessing.
 * Fixed grouped-convolution weight-gradient support checks using expired stride and padding metadata.
 * Applied the gfx1250 BF16 3D convolution compiler workaround to mixed-target and gfx1250-strict builds.
+* Restored device-wide occupancy planning for gfx1250 automatic weight-gradient reduction splitting.
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 

@@ -65,6 +65,10 @@ function(miopen_apply_ck_compile_definitions target)
         target_compile_definitions(${target} PRIVATE CK_USE_GFX1250)
     endif()
 
+    if("${_ck_arch}" MATCHES "gfx1250")
+        target_compile_definitions(${target} PRIVATE CK_USE_GFX1250)
+    endif()
+
     _miopen_arch_matches("${_ck_arch}" MIOPEN_CK_USE_OCP_FP8_TARGETS _ck_use_ocp_fp8)
     if(_ck_use_ocp_fp8)
         target_compile_definitions(${target} PRIVATE CK_USE_OCP_FP8)

@@ -292,7 +292,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                                                AComputeType,
                                                BComputeType>
 #ifndef CK_CODE_GEN_RTC
-    , public GroupedConvOutputDefinition
+    ,
+      public GroupedConvOutputDefinition
 #endif
 {
     // TODO: Extend support for more spatial dimensions.
@@ -722,7 +723,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
-            stride_overflow          = stride_overflow_in;
+            stride_overflow   = stride_overflow_in;
             is_packed_output_ = is_packed_grouped_conv_output<NDimSpatial, ELayout>(
                 e_g_n_c_wis_lengths, e_g_n_c_wis_strides);
             bool if_d_is_output_mem  = false;
@@ -734,7 +735,23 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                 }
             });
 
-            bwd_needs_zero_out = k_batch_ > 1 || !image_covered_dilation || !image_covered_strides;
+            bool completely_overwrites_e = false;
+            if constexpr(NumDTensor == 0 && is_same_v<ADataType, BDataType> &&
+                         is_same_v<ADataType, EDataType> &&
+                         (is_same_v<ADataType, half_t> || is_same_v<ADataType, bhalf_t>) &&
+                         ConvBackwardDataSpecialization ==
+                             ConvolutionBackwardDataSpecialization::Filter1x1Stride1Pad0 &&
+                         (is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::GNDHWC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::NDHWGC>))
+            {
+                completely_overwrites_e = k_batch_ == 1 &&
+                                          a_g_n_k_wos_lengths[0] == b_g_k_c_xs_lengths[0] &&
+                                          a_g_n_k_wos_lengths[0] == e_g_n_c_wis_lengths[0] &&
+                                          a_g_n_k_wos_lengths[1] == e_g_n_c_wis_lengths[1] &&
+                                          a_g_n_k_wos_lengths[2] == b_g_k_c_xs_lengths[1] &&
+                                          b_g_k_c_xs_lengths[2] == e_g_n_c_wis_lengths[2];
 
                 for(index_t i = 0; i < NDimSpatial + 3; ++i)
                 {

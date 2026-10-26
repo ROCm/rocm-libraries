@@ -7,15 +7,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Added
 
-* [Conv] Added gfx1250 CK pointwise kernels that can process supported NCHW FP32 input gradients and
-  FP16 forward convolutions without layout conversion.
+* [Conv] Added gfx1250 CK pointwise kernels that process supported NCHW FP32 input gradients and FP16 forward convolutions without layout conversion.
+* [Conv] Added gfx1250 CK forward candidates that write NCHW/NCDHW outputs directly.
 
 ### Optimized
 
-* [Conv] Reduced redundant layout copies and output initialization for qualified gfx1250 CK
-  convolutions. Other devices and unsupported layouts or scalars retain existing staging.
-* [Conv] Output initialization is omitted only when the selected CK operation advertises full output
-  coverage for the actual invocation argument.
+* [Conv] Reduced redundant layout copies and output initialization for qualified gfx1250 CK convolutions. Other devices and unsupported layouts or scalars retain existing staging.
+* [Conv] Output initialization is omitted only when the selected CK operation advertises full output coverage for the actual invocation argument.
 
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
