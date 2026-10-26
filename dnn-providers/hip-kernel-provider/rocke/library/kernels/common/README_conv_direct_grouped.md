@@ -449,6 +449,216 @@ if ok:
 
 ---
 
+## fp32 storage and TF32 — MFMA forward and MFMA dgrad
+
+`DirectConvProblem.dtype` takes two fp32-storage values besides `fp16` / `bf16`:
+
+| `dtype` | Tensors | MFMA | gfx942 | gfx950 |
+|---------|---------|------|--------|--------|
+| `"fp32"` | fp32 | exact fp32 atoms | `16x16x4` / `32x32x2` f32 | same |
+| `"tf32"` | fp32 | catalog TF32 atoms | native `16x16x8` / `32x32x4` xf32 | emulated `16x16x32` / `32x32x16` xf32 (3 bf16 MFMAs each) |
+
+This covers `DirectConv16cSpec` (with and without `fold_k32`), `DirectConv8cSpec`,
+`DirectConv32cSpec`, the generic `DirectConvSpec`, and the MFMA dgrad pipeline
+(`make_dgrad_fprop_spec`, plus the transpose / reorganize / coalesced
+weight-copy kernels).
+
+- **Generic modes.** Every mode builds: plain loops, `fold_k32`,
+  `runtime_k_loop`, `waves_k`, `waves_q`, single buffering, `persistent_grid`
+  and `runtime_channels`. All of them except `persistent_grid` are checked on
+  the GPU.
+- **Coalesced weight copy.** `build_direct_coalesced_weights_dgrad` builds but
+  has no caller and no GPU check, for any dtype.
+
+**`DirectConv4cSpec` rejects both.** No 4x4 TF32 or fp32 atom exists on any
+arch. Use the generic `DirectConvSpec` for `cpg = 4`: it runs the group as a
+partial 16x16 K-atom.
+
+### How it works
+
+Nothing in the addressing changes. Every kernel builds the same K-contiguous
+per-lane fragments as its fp16 path: 4 or 8 elements, read at element offsets.
+Only the widths change:
+
+- Global loads become `buffer_load_dwordx4`, one per 4 elements.
+- LDS rows hold 4-byte elements, so the LDS footprint doubles.
+- LDS reads are `ds_read_b128`, at most 4 elements and 16 bytes each.
+- The epilogue stores fp32 without truncating.
+
+Each logical `m x m` MFMA goes through `_mma_f32_logical`. This is exact
+because every 16x16 / 32x32 layout groups lanes the same way: `lane // m` is the
+K group, and the slot indexes within it. The helper does one of two things:
+
+- **Split** the fragment into consecutive atom-wide slices on one accumulator.
+- **Zero-pad** the fragment, and pad A and B alike, up to a wider atom.
+
+For `"tf32"`, each operand is then bitcast to `vec<tf32 x N>`. There is no
+rounding step: gfx942 hardware truncates, and gfx950 splits the full fp32
+payload into BF16x3.
+
+Some kernels chain several 4-wide atoms on one accumulator: the 16c kernel
+without `fold_k32`, the 8c kernel, and the 32c kernel. For these,
+`_mma_f32_chain` concatenates consecutive pairs into one 8-wide gfx950 TF32
+atom instead of padding each one.
+
+Physical MFMAs per filter row (3x3):
+
+| Variant | gfx950 tf32 (bf16 MFMAs) | gfx942 tf32 (xf32) | fp32 |
+|---------|--------------------------|--------------------|------|
+| 16c `fold_k32` | 6 | 8 | 16 |
+| 16c non-fold | 6 | 6 | 12 |
+| 8c | 3 | 4 | 8 |
+| 32c | 18 | 24 | 48 |
+
+What this means for each configuration:
+
+- **16c without `fold_k32`** is never worse than with it. The fold
+  zero-pads the s=2 residual.
+- **Generic `DirectConvSpec`**: its K-atoms are a runtime loop, so nothing
+  can be paired.
+  - On gfx950 TF32, prefer `fold_k32` (`cpg % 32 == 0`). Without it, each
+    4-wide fragment is padded to the 8-wide emulated atom.
+  - On gfx942 TF32, prefer the non-fold path: two native atoms per K-atom.
+
+The fixed kernels preload the weights before the row loop. In ISA, LLVM hoists
+the BF16x3 split (`v_cvt_pk_bf16_f32`) of those loop-invariant weights out of
+the loop. The input fragment's split is common-subexpression-eliminated across
+the KH taps that share it.
+
+### Names, validation and LDS
+
+- **Kernel names.** fp32 kernels end in `_f32` and TF32 kernels in `_tf32`;
+  fp16 / bf16 names are unchanged.
+  - The dgrad weight-copy kernels move elements without arithmetic, so fp32 and
+    tf32 share one binary, tagged `_f32`.
+  - `direct_dgrad_workspace_bytes` and `direct_dgrad_coalesced_workspace_bytes`
+    size the workspace at 4 bytes per element.
+- **Validation.** The validators replace the f16 atom checks with the TF32 /
+  fp32 plan. They also check the doubled LDS row ring:
+  - `is_valid_spec_{8c,16c,32c}` reject a fp32 ring over the arch's LDS (e.g.
+    a large 32c tile on gfx942).
+  - `is_valid_spec`'s LDS budget counts 4-byte elements.
+- **ABI.** fp32 and tf32 kernels take `ptr<f32, global>` operands:
+  `conv_direct_args_signature("fp32")`.
+
+### Tests
+
+`library/tests/test_conv_direct_tf32_mfma.py` has two parts.
+
+- **CPU.** For every variant, on gfx950 and gfx942, for both dtypes:
+  - the variant builds and lowers;
+  - the MFMA intrinsics and their counts are right;
+  - the rejections fire;
+  - fp16 / bf16 names are unchanged;
+  - one comgr ISA check per arch, including the hoisting above.
+- **gfx950 GPU.** Every variant against a float64 reference, with the error
+  taken relative to the peak.
+
+---
+
+## fp32 storage and TF32 — scalar-FMA kernels and direct wgrad
+
+### Scalar-FMA kernels: one fp32 binary for both dtypes
+
+These kernels accept `"fp32"` and `"tf32"`:
+
+- `DirectConvDgradSpec`;
+- the depthwise family: `DirectDepthwiseSpec`, `DirectDepthwiseSpatialSpec`,
+  `DirectDepthwiseTiledSpec`, `DirectDepthwiseColSpec` (its own `dtype`
+  field), `DirectDepthwiseDgradSpec` and `DirectDepthwiseDgradStreamSpec`.
+
+All of them widen each element to f32 on load, reduce with scalar `fma`, and
+narrow once on store. fp32 storage only changes three things:
+
+- the load becomes a one-dword `buffer_load_vN`;
+- the store becomes `buffer_store_f32`, with no truncation;
+- the byte strides, which are now `_elem_bytes(dtype)`.
+
+**`"tf32"` runs the same exact fp32 math.** TF32 permits reduced precision; it
+does not require it. These kernels have no channel reduction for an MMA to
+take: each output reduces over its own KH x KW taps, or over `kpg` for the
+scalar dgrad. So fp32 and tf32 problems build the same IR under the same name,
+tagged `_f32` (the column kernel spells its tag `f32`). One binary serves both.
+
+For anyone reading `--dtype tf32` results: on these kernels a tf32 problem is
+an fp32 problem. It gets neither TF32 rounding nor a TF32 speedup, and its
+timing equals the fp32 one. Tell them apart by kernel name: MMA kernels serving
+tf32 end in `_tf32`, these end in `_f32`. `benchmark_direct_conv.py` prints a
+note when a tf32 depthwise case runs.
+
+The cache identity still records the problem's dtype, so an AOT cache stores
+two entries with identical code. The sweep could map `tf32` to `fp32` for these
+variants to keep one.
+
+The shared helpers are `_scalar_load`, `_scalar_store`, `_scalar_name_flags`
+and `_scalar_dtype_reason`. A dtype outside `fp16` / `bf16` / `fp32` / `tf32` is
+rejected with a reason that names it.
+
+### Direct wgrad (`DirectConvWgradSpec`)
+
+The MFMA K axis is spatial (`wo`). The 16-bit kernel reads both operands with
+`ds_read_b64_tr_b16`, and there is no 32-bit transpose read. The fp32 path
+keeps the same spatial-major LDS tiles and the same software pipeline, and
+changes three things:
+
+- **Gather reads.** Each lane reads its fragment
+  `tile[(lane/16)*VEC_CH + j][lane%16]`, `j < VEC_CH`, with `VEC_CH`
+  `ds_read_b32`. LLVM pairs these into `ds_read2_b32`. The KW strip fragments
+  are row shifts of one another, so their overlapping rows are loaded once.
+- **Padded row stride.** The four lane groups of one read start
+  `VEC_CH * row` dwords apart. That offset is 16 or 48 mod 64 (and 16 mod 32),
+  so by address analysis the reads are bank-conflict free with 64 or 32 banks.
+  This needs a row of 18 floats at `mfma_k=32` and 20 floats at `mfma_k=16`.
+  An 18-float row is only 8-byte aligned, so the commit writes it as
+  `ds_write_b64` pieces. LLVM pairs these into `ds_write2_b64`.
+- **The MMA.** Each logical 16x16 MMA goes through `_mma_f32_logical`. The
+  gathered fragment is K-contiguous like the 16-bit one.
+  - **`"fp32"`:** `16x16x4` f32 atoms, 8 per logical atom at `mfma_k=32`.
+  - **`"tf32"` on gfx950:** one emulated `16x16x32` xf32, which is 3
+    `v_mfma_f32_16x16x32_bf16`. At `mfma_k=16` the fragment is zero-padded to
+    8 elements, so prefer `mfma_k=32` there.
+  - **`"tf32"` on gfx942:** native `v_mfma_f32_16x16x8_xf32`, 4 per logical
+    atom at `mfma_k=32` and 2 at `mfma_k=16`.
+
+Because the fp32 path needs no `ds_read_tr`, fp32 / tf32 wgrad is also valid
+on **gfx942**. The 16-bit wgrad stays gfx950-only. dW stays the fp32 atomic
+accumulator.
+
+**Names.** `_f32` for fp32 and `_tf32` for tf32 (the code differs). The fp16 /
+bf16 names and IR are unchanged.
+
+ISA at 3x3, `ho_per_block=4`, `mfma_k=32`: 36 logical MMAs per kernel.
+
+| | gfx950 tf32 | gfx942 tf32 | fp32 (both) | gfx950 fp16 |
+|---|---|---|---|---|
+| MFMAs | 108 `16x16x32_bf16` | 144 `16x16x8_xf32` | 288 `16x16x4_f32` | 36 `16x16x32_f16` |
+| LDS reads | 44 `ds_read2_b32` | 44 `ds_read2_b32` | 44 `ds_read2_b32` | 36 `ds_read_b64_tr_b16` |
+| LDS writes | 28 `ds_write2_b64` | 28 `ds_write2_b64` | 28 `ds_write2_b64` | 14 `ds_write_b128` |
+| LDS bytes | 6912 | 6912 | 6912 | 3072 |
+| VGPR + AGPR | 164 + 60 | 124 + 36 | 124 + 36 | 88 + 36 |
+
+None of these spill. On gfx950 tf32, the BF16x3 split costs 148
+`v_cvt_pk_bf16_f32`.
+
+The implicit-GEMM wgrad, which also supports TF32, remains the choice for
+strided problems: direct wgrad is stride-1 only, in every dtype.
+
+### Tests
+
+`library/tests/test_conv_direct_tf32_scalar.py` has two parts.
+
+- **CPU.** Every scalar variant builds and lowers on gfx950 and gfx942, and
+  fp32 and tf32 give the same name and the same IR. The test also checks that
+  fp16 / bf16 names are unchanged and that bad dtypes are rejected. For wgrad,
+  it builds every variant for fp32 and tf32 on both arches and checks the
+  names and rejections. A comgr ISA check counts the MFMAs above.
+- **GPU (gfx950).** The test compares against an IEEE fp32 CPU torch
+  reference, with the error taken relative to the peak. The tolerance is 1e-5
+  for the scalar kernels and fp32 wgrad, and 1e-4 for tf32 wgrad. Run it as
+  `python3 library/tests/test_conv_direct_tf32_scalar.py`.
+
+---
+
 ## Launch Grid
 
 Every direct kernel is AOT: the batch, the spatial extents, the group count and

@@ -364,9 +364,9 @@ def main() -> int:
     parser.add_argument(
         "--dtype",
         default=None,
-        choices=["fp16", "bf16"],
+        choices=["fp16", "bf16", "fp32", "tf32"],
         help="operand dtype forwarded to both scripts (default: fp16, or the "
-        "MIOpenDriver command's)",
+        "MIOpenDriver command's).",
     )
     parser.add_argument(
         "--direction",

@@ -27,11 +27,36 @@ the redundancy.
 
 | Role | Tensor | Layout | Notes |
 |------|--------|--------|-------|
-| A | input activations | NHWC `[N, H, W, C]` | `C % 8 == 0` (dwordx4 staging loads) |
+| A | input activations | NHWC `[N, H, W, C]` | `C` a multiple of one dwordx4 (8 halves / 4 floats) |
 | B | weights | KRSC `[K, KH, KW, C]` | |
 | D | output | NHWK `[N, Ho, Wo, K]` | `K % atom_tile == 0` |
 
-fp16 and bf16 I/O, f32 accumulation. `stride ∈ {1, 2}`, any `KH`/`KW`/`PAD`.
+fp16, bf16 and fp32 I/O, f32 accumulation. `stride ∈ {1, 2}`, any `KH`/`KW`/`PAD`.
+
+`DirectConvProblem.dtype` picks storage and MMA:
+
+| `dtype` | Tensors | MMA per logical atom (gfx950) | MMA per logical atom (gfx942) |
+|---------|---------|-------------------------------|-------------------------------|
+| `fp16` / `bf16` | 16-bit | the atom itself | the atom itself (`32x32x8` / `16x16x16` only) |
+| `tf32` | fp32 | one emulated `32x32x16` / `16x16x32` xf32 atom = 3 bf16 MFMAs (a 4-element fragment is zero-padded to it) | native `32x32x4` / `16x16x8` xf32, 2 elements each (4 per 8-element fragment) |
+| `fp32` | fp32 | exact `32x32x2` / `16x16x4` f32, 1 element each | same |
+
+fp32 storage keeps the 16-bit kernel's fragment addressing in *elements*; only
+bytes change. Each logical atom goes through
+`conv_direct_grouped._mma_f32_logical`, which splits the per-lane K fragment
+into the physical atom's slices (or zero-pads both operands up to it) and, for
+`tf32`, bitcasts the fp32 payload to `vec<tf32>` (no rounding op: gfx942 drops
+the low mantissa bits in hardware, gfx950's BF16x3 split uses the full
+payload). TF32 is a precision *floor*, not a target: gfx950's emulation is
+close to fp32. Kernel names gain a trailing `fp32` / `tf32` flag (16-bit names
+are unchanged), plus `p<pad>` when an fp32-storage spec uses a non-default
+`lds_pad`. The C++ engine twin is 16-bit only; fp32 / tf32 specs lower through
+the Python engine.
+
+fp32 / tf32 storage runs the plain kernel only: `split_c > 1` and
+`grouped=True` stage and reduce 16-bit data, so `validate()` rejects them for
+fp32 storage and `nongrouped_split_knobs` / `grouped_knobs` yield nothing for
+it.
 
 ## AOT kernel arguments
 
@@ -59,8 +84,8 @@ ones (`kernels.conv.direct_aot_jobs._NONGROUPED_DILATED`).
 Unlike the grouped kernels, the channel counts are runtime too: they only set
 the channel loop's trip count and the staging / store masks. `p_groups` is
 ignored (the family is `groups == 1`). One binary therefore serves every shape
-whose `C` is a multiple of `ck` (and of 8) and whose `K` is a multiple of the
-atom tile; `spec.problem` only has to pass the validator, and the emitted IR
+whose `C` is a multiple of `ck` (and of one dwordx4: 8 halves, 4 floats) and
+whose `K` is a multiple of the atom tile; `spec.problem` only has to pass the validator, and the emitted IR
 does not depend on it (`library/tests/test_conv_abi.py` asserts this).
 
 Launch with the shared helpers:
@@ -121,16 +146,42 @@ Waves split the block `waves_m x waves_n`: `waves_m` along output channels,
 
 3. **Weights pre-swizzled into MFMA fragment order.** Weight slot
    `((tap*M_TILES + m_tile)*KATOMS + k_atom)*64 + lane` holds exactly the
-   `FRAG` halves that `lane` feeds to the MFMA. Both the staging store and the
+   `FRAG` elements that `lane` feeds to the MFMA. Both the staging store and the
    consuming read are linear in `lane`, so neither side can bank-conflict and no
    padding is needed. The staging thread's global read is `FRAG` contiguous
-   channels of one `k_out` row — contiguous in KRSC.
+   channels of one `k_out` row — contiguous in KRSC. With fp32 storage an
+   8-element fragment is 32 bytes, and two `ds_read_b128` per lane at a 32-byte
+   lane stride are 2-way conflicted; the array is therefore stored as
+   `FRAG / 4` planes (plane `h` holds floats `4h..4h+3` of every slot), so each
+   16-byte read and write is again linear in `lane` at a 16-byte stride
+   (`spec.w_planes`; one plane, the layout above, for 16-bit).
 
 4. **Conflict-free activation reads via `lds_pad`.** The activation tile is
    stored `[pos][c]` with channel stride `ck + lds_pad`. The default pad of 8
    halves spreads a `ds_read_b128` wave across all banks on gfx950 (64 banks, see
    [`arch/gfx950.md`](../../../platform/dsl_docs/optimization/arch/gfx950.md)).
    Neighbouring pads (4, 16) conflict; treat the value as tuned, not arbitrary.
+
+   The rule is in bytes: the pixel stride must be an odd number of 16-byte
+   quads. For fp32 storage that is a pad of **4 floats** (`default_lds_pad`);
+   8 floats is an even quad count and 2-way conflicts. Re-derived with
+   `rocke.analysis.lds.predict_lds_conflicts` (gfx950: `ds_read_b128` serves 16
+   lanes per phase against a 256-byte window) on the activation-fragment read,
+   both 16-byte halves of an 8-float fragment:
+
+   | fp32 `lds_pad` | 32-wide atom, stride 1 | 32-wide atom, stride 2 | 16-wide atom |
+   |---|---|---|---|
+   | 0 | 4-way (ck 16), 8-way (ck 32) | 8 / 16-way | 2..8-way |
+   | **4** | **conflict-free** | 2-way | 2-way |
+   | 8 | 2-way | 4-way | 2-way |
+   | 12 | conflict-free | 2-way | 2-way |
+
+   Stride 2 is 2-way at every pad (an even multiplier of the pixel stride), as it
+   is for 16-bit; the 16-wide atoms are 2-way at every pad with fp32, because
+   their `lane_hi` lanes read 32 bytes over and share a phase with the
+   `lane_hi = 0` lanes. gfx942 predicts the same multiplicities. The spec
+   default stays 8 (the 16-bit value); `nongrouped_knobs` sweeps 4 for fp32
+   storage.
 
 5. **Hoisted staging predication**.
    The validity masks of the staging loads (image border, `K` tail, pass tail)
@@ -225,19 +276,24 @@ class DirectNongroupedConvSpec:
 
 Constraints (`validate()` then `is_valid_nongrouped_spec(spec, arch)`):
 
-* `groups == 1`, dtype fp16/bf16, atom known and present on the target
-  (`32x32x16` and `16x16x32` need gfx950; `32x32x8` / `16x16x16` also gfx942);
+* `groups == 1`, dtype fp16/bf16/fp32/tf32, atom known and present on the
+  target (16-bit: `32x32x16` and `16x16x32` need gfx950, `32x32x8` / `16x16x16`
+  also gfx942; fp32 / tf32: every atom on both arches, issued through the
+  arch's fp32 / TF32 atoms);
 * tile, wave, `ck`, stride, `C` and `K` values positive (checked before any
   derived geometry, so a bad spec gets a reason, not a `ZeroDivisionError`);
 * `tile_w`, `tile_k`, `K` multiples of the atom tile; `tile_h % waves_n == 0`;
   `(tile_k / atom_tile) % waves_m == 0`;
-* `ck % atom_k == 0`, `ck % 8 == 0`, `C % ck == 0`, `C % 8 == 0`;
-* `lds_pad` a non-negative multiple of 8 (a negative pad overlaps neighbouring
-  pixels in LDS; the vec8 LDS access is emitted `align 16`, so the pixel stride
-  `ck + lds_pad` must stay a multiple of 8 halves); `swizzle_wgm >= 1`; `iglp` None or ≥ 0; `waves_per_eu` None or ≥ 1
+* `ck % atom_k == 0`, `C % ck == 0`, and `ck`, `C` multiples of one dwordx4
+  (8 halves, 4 floats);
+* `lds_pad` a non-negative multiple of 16 bytes (8 halves, 4 floats): a
+  negative pad overlaps neighbouring pixels in LDS, and the 16-byte LDS access
+  is emitted `align 16`, so the pixel stride `ck + lds_pad` must stay a
+  multiple of 16 bytes; `swizzle_wgm >= 1`; `iglp` None or ≥ 0; `waves_per_eu` None or ≥ 1
   (the C++ port encodes None as -1 / 0, so those values are reserved in both
   engines); flattened grid ≤ 2³¹ − 1 workgroups; A, B and D each ≤
-  `0x7F000000` bytes; accumulators ≤ 256 registers per lane;
+  `0x7F000000` bytes (counted with the element size: an fp32 tensor reaches it
+  at half the elements); accumulators ≤ 256 registers per lane;
 * `stride ∈ {1, 2}`; threads, wave size and `lds_bytes` within the arch limits.
 
 Usage:
@@ -274,7 +330,12 @@ needs.
 spec over `tile_h ∈ {8, 16}`, `tile_k ∈ {32, 64, 128, 256}`,
 `ck ∈ {16, 32, 64}`, five wave layouts, and per MFMA tile size the widest-K
 atom the target supports (`32x32x16` / `16x16x32` on gfx950, `32x32x8` /
-`16x16x16` on gfx942) with the `tile_w_candidates` of each atom.
+`16x16x16` on gfx942) with the `tile_w_candidates` of each atom. fp32 / tf32
+sweep `ck ∈ {16, 32}` (fp32 doubles the staged bytes; ck 64 mostly does not
+fit), `lds_pad = 4`, and the 8-element-fragment atoms `32x32x16` / `16x16x32`
+on both arches: those issue without zero-padding everywhere (gfx950 TF32: one
+emulated atom; gfx942 TF32: four native xf32 atoms; fp32: eight fp32 atoms),
+while a 4-element fragment on gfx950 TF32 pads half of every emulated atom.
 `benchmarks/common/benchmark_direct_conv.py` routes `groups == 1` shapes to
 this sweep:
 
@@ -298,7 +359,11 @@ The AOT grid also drops tiles that would spill registers
 (`nongrouped_register_reason`): accumulators that fill the 256-entry
 accumulator file, or an estimated live set (`nongrouped_live_regs`:
 accumulators, carried prefetch, one step's operand fragments) above 80% of the
-registers a wave gets once the block's waves share the SIMDs. On the gfx950
+registers a wave gets once the block's waves share the SIMDs. The estimate
+counts bytes: fp32 fragments cost twice the registers of 16-bit ones (the
+dwordx4 activation prefetch costs the same), and on gfx950 TF32 the BF16x3
+split of every live operand fragment adds as many registers again
+(`nongrouped_live_regs(spec, arch)`). On the gfx950
 grid this cuts 924 kernels to 658 and, with `waves_per_eu` unset, leaves no
 spilling binary; the spilling ones were also the slowest to compile. It is a
 heuristic, not a validity rule: the per-shape
@@ -312,6 +377,7 @@ heuristic, not a validity rule: the per-shape
 | Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 42+ (dilated: 63+) | `tests/parity/conv_direct_grouped_emit.{py,c}` |
 | IR golden | Python lowering is byte-stable (7 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16; includes one binary launched on four unrelated shapes | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
+| fp32 / tf32 | validation and rejections, names, LDS sizing, knobs, register estimate; build + lower on gfx950 / gfx942 across atoms, dilation, padding, stride, DB; MFMA counts per logical atom in IR and ISA (gfx950 tf32 3x `v_mfma_*_bf16` + `v_cvt_pk_bf16_f32`, gfx942 tf32 `v_mfma_*_xf32`, fp32 `v_mfma_*_f32`), no scratch; 16-bit Python vs C++ byte-identity; on silicon the 16-bit suite's shapes, a sweep sample and one AOT binary on three shapes vs IEEE fp32 `conv2d` (rel. to peak: fp32 1e-5, tf32 1e-4 on gfx950) | `python tests/test_conv_direct_nongrouped_tf32.py` |
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |
 | AOT cache | runtime channels, width filtering, `groups == 1` only, plans pack against the signature | `pytest tests/test_direct_kernel_cache.py` |
 

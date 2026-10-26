@@ -451,7 +451,8 @@ def _conv_signature(
     The name list is the ABI; this only attaches manifest types to it, so the
     signature can never drift from what the kernel builders declare.
     """
-    _ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}
+    # ``tf32`` is a compute mode over fp32 tensors, so its pointers are f32.
+    _ir = {"fp16": "f16", "bf16": "bf16", "fp32": "f32", "tf32": "f32"}
 
     def _ptr(dt: str) -> str:
         return f"ptr<{_ir.get(dt, dt)}, global>"

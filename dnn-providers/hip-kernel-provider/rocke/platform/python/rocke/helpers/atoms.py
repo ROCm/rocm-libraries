@@ -346,6 +346,86 @@ class MfmaAtom:
             name="mfma_f32_32x32x2_f32",
         )
 
+    # ---- TF32 atoms (logical XF32; operands vec<tf32xN>, see core/tf32.py) ----
+    #
+    # gfx942 issues the two native xf32 instructions. gfx950 has none, so its
+    # catalog answers the same (tf32, tf32, fp32) query with two emulated rows
+    # that lower to three BF16 MFMAs each (architecture/xf32_bf16x3_emulation.md);
+    # they inherit the BF16 atom's fragment lengths. The four keys never collide,
+    # and the arch catalog decides which pair a target may use.
+
+    @classmethod
+    def tf32_16x16x8(cls) -> "MfmaAtom":
+        """Native gfx942 XF32 MFMA, 16x16 output, K=8 per atom.
+
+        A/B: ``vec<tf32x2>`` per lane, K-contiguous; C: <4 x float>.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=8,
+            a_per_lane=2,
+            b_per_lane=2,
+            c_per_lane=4,
+            dtype_in="tf32",
+            dtype_out="f32",
+            name="mfma_f32_16x16x8_xf32",
+        )
+
+    @classmethod
+    def tf32_32x32x4(cls) -> "MfmaAtom":
+        """Native gfx942 XF32 MFMA, 32x32 output, K=4 per atom.
+
+        A/B: ``vec<tf32x2>`` per lane, K-contiguous; C: <16 x float>.
+        """
+        return cls(
+            m=32,
+            n=32,
+            k=4,
+            a_per_lane=2,
+            b_per_lane=2,
+            c_per_lane=16,
+            dtype_in="tf32",
+            dtype_out="f32",
+            name="mfma_f32_32x32x4_xf32",
+        )
+
+    @classmethod
+    def tf32_16x16x32(cls) -> "MfmaAtom":
+        """Emulated gfx950 TF32 MMA (BF16x3 over 16x16x32 BF16), K=32 per atom.
+
+        A/B: ``vec<tf32x8>`` per lane, K-contiguous; C: <4 x float>.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=32,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=4,
+            dtype_in="tf32",
+            dtype_out="f32",
+            name="mfma_f32_16x16x32_xf32",
+        )
+
+    @classmethod
+    def tf32_32x32x16(cls) -> "MfmaAtom":
+        """Emulated gfx950 TF32 MMA (BF16x3 over 32x32x16 BF16), K=16 per atom.
+
+        A/B: ``vec<tf32x8>`` per lane, K-contiguous; C: <16 x float>.
+        """
+        return cls(
+            m=32,
+            n=32,
+            k=16,
+            a_per_lane=8,
+            b_per_lane=8,
+            c_per_lane=16,
+            dtype_in="tf32",
+            dtype_out="f32",
+            name="mfma_f32_32x32x16_xf32",
+        )
+
     @classmethod
     def bf16_16x16x16(cls) -> "MfmaAtom":
         """BF16 sibling of :meth:`f16_16x16x16` (legacy CDNA atom)."""
@@ -923,13 +1003,26 @@ MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp6_16x16x96(),
 )
 
+# Logical TF32: native gfx942 pair, then the gfx950 BF16x3 pair.
+MFMA_TF32_ATOMS: Tuple[MfmaAtom, ...] = (
+    MfmaAtom.tf32_16x16x8(),
+    MfmaAtom.tf32_32x32x4(),
+    MfmaAtom.tf32_16x16x32(),
+    MfmaAtom.tf32_32x32x16(),
+)
+
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS
+    + MFMA_F32_ATOMS
+    + MFMA_BF16_ATOMS
+    + MFMA_FP8_ATOMS
+    + MFMA_MX_ATOMS
+    + MFMA_TF32_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
@@ -947,6 +1040,8 @@ _DTYPE_ALIAS = {
     "float": "fp32",
     "bf16": "bf16",
     "bfloat16": "bf16",
+    "tf32": "tf32",
+    "xf32": "tf32",
 }
 
 _BY_SHAPE: Dict[Tuple[str, int, int, int], MfmaAtom] = {

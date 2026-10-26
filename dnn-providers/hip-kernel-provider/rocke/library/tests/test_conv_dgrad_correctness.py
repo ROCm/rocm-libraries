@@ -919,7 +919,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
     artifact = compile_kernel(
         build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
     )
-    td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    td = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
     p = spec.problem if problem is None else problem
     torch.manual_seed(seed)
     dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
@@ -1921,6 +1921,245 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
                 split_k = self._resolve(dtype, override=2 * ATOMIC_16BIT_MAX_SPLIT_K)
                 self.assertEqual(split_k, ATOMIC_16BIT_MAX_SPLIT_K)
                 self._assert_accurate(dtype, split_k)
+
+
+# TF32 on gfx950 is the BF16x3 emulation: it consumes the whole fp32 payload,
+# so its error sits about 1.5 orders of magnitude below the 1e-4 bound, while a
+# dropped cross term or a single bf16 pass lands well above it. gfx942's native
+# XF32 ignores the low 13 mantissa bits of each operand, so its reference is
+# computed from inputs masked the same way (``_tf32_reference_inputs``) and
+# held to 1e-3, as in test_conv_fwd_correctness / test_conv_wgrad_correctness.
+_TF32_TOL = {"gfx950": 1e-4, "gfx942": 1e-3}
+
+# Per arch, the two TF32 atoms as (warp_tile_m, warp_tile_n, warp_tile_k),
+# 16x16 first.
+_TF32_WARP_TILES = {
+    "gfx950": ((16, 16, 32), (32, 32, 16)),
+    "gfx942": ((16, 16, 8), (32, 32, 4)),
+}
+
+
+def _tf32_reference_inputs(t, arch: str):
+    """``t`` as the TF32 MMA on ``arch`` consumes it.
+
+    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
+    (``& 0xFFFFE000``); gfx950's BF16x3 emulation uses the full payload.
+    """
+    if arch != "gfx942":
+        return t
+    import torch
+
+    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+
+
+@unittest.skipUnless(
+    ARCH in _TF32_TOL and _HAS_TORCH,
+    "TF32 dgrad correctness needs gfx942 or gfx950 + torch",
+)
+class TestConvDgradTf32(unittest.TestCase):
+    """fp32 storage, TF32 MMA (``mma_dtype="tf32"``) against an IEEE fp32 reference.
+
+    Built and launched in-process (``_dgrad_run_inprocess``), not through the
+    benchmark driver, so every case pins exactly one spec.
+    """
+
+    def _check(
+        self, *, warp_tile, tile_k, epilogue, split_k, stride, groups=1, Hi=14, K=64
+    ):
+        import torch
+
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        C = 64 * groups
+        K = K * groups
+        problem = ConvProblem(
+            N=2,
+            Hi=Hi,
+            Wi=Hi + 3,
+            C=C,
+            K=K,
+            Y=3,
+            X=3,
+            sH=stride,
+            sW=stride,
+            pH=1,
+            pW=1,
+            groups=groups,
+        )
+        wm, wn, wk = warp_tile
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_tf32",
+            data=ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32"),
+            tile_m=64,
+            tile_n=64,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=wm,
+            warp_tile_n=wn,
+            warp_tile_k=wk,
+            wave_size=64,
+            pipeline="mem",
+            epilogue=epilogue,
+            split_k=split_k,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, reason)
+        spec.validate()
+        got = _dgrad_run_inprocess(spec, "fp32")
+
+        # The same inputs _dgrad_run_inprocess drew, in its order.
+        p = spec.problem
+        torch.manual_seed(0)
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
+        dY = _tf32_reference_inputs(dY, ARCH)
+        W = _tf32_reference_inputs(W, ARCH)
+        # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
+        # TF32 where the backend has it.
+        prev = (
+            torch.backends.cudnn.allow_tf32,
+            torch.backends.cudnn.conv.fp32_precision,
+            torch.backends.fp32_precision,
+        )
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        torch.backends.fp32_precision = "ieee"
+        try:
+            ref = torch.nn.grad.conv2d_input(
+                (p.N, p.C, p.Hi, p.Wi),
+                W.permute(0, 3, 1, 2),
+                dY.permute(0, 3, 1, 2),
+                stride=stride,
+                padding=1,
+                groups=groups,
+            ).permute(0, 2, 3, 1)
+        finally:
+            (
+                torch.backends.cudnn.allow_tf32,
+                torch.backends.cudnn.conv.fp32_precision,
+                torch.backends.fp32_precision,
+            ) = prev
+        self.assertEqual(tuple(got.shape), tuple(ref.shape))
+        self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
+        rel = (got - ref).abs().max().item() / ref.abs().max().item()
+        self.assertLess(rel, _TF32_TOL[ARCH], f"relative-to-peak error {rel:.3e}")
+
+    def test_cases(self):
+        for warp_tile, tile_k in zip(_TF32_WARP_TILES[ARCH], (64, 32)):
+            for epilogue in ("default", "cshuffle"):
+                for split_k in (1, 2):
+                    for stride in (1, 2):
+                        with self.subTest(
+                            warp_tile=warp_tile,
+                            epilogue=epilogue,
+                            split_k=split_k,
+                            stride=stride,
+                        ):
+                            self._check(
+                                warp_tile=warp_tile,
+                                tile_k=tile_k,
+                                epilogue=epilogue,
+                                split_k=split_k,
+                                stride=stride,
+                            )
+
+    def test_grouped(self):
+        for split_k in (1, 2):
+            with self.subTest(split_k=split_k):
+                self._check(
+                    warp_tile=_TF32_WARP_TILES[ARCH][1],
+                    tile_k=32,
+                    epilogue="cshuffle",
+                    split_k=split_k,
+                    stride=2,
+                    groups=2,
+                )
+
+    def test_k_not_tile_aligned(self):
+        # gemm_k = 9 * 48 is not a multiple of tile_k = 64: the last tile reads
+        # past real K and relies on the buffer OOB clamp returning zero.
+        self._check(
+            warp_tile=_TF32_WARP_TILES[ARCH][0],
+            tile_k=64,
+            epilogue="default",
+            split_k=1,
+            stride=1,
+            Hi=13,
+            K=48,
+        )
+
+    def test_stride1_and_patch_k_loops(self):
+        # The tap-outer K loop, its dY halo forms and the patch (one-GEMM)
+        # decomposition read their fragments through the same TF32 path as
+        # the tilde K loop; pin that each still feeds the TF32 atom.
+        import torch
+
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        data = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+        same = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        patch = ConvProblem(N=2, Hi=28, Wi=28, C=64, K=64, Y=2, X=2, sH=2, sW=2)
+        cases = [
+            ("tap_outer_k", dict(tap_outer_k=True), same),
+            ("dy_halo=1", dict(tap_outer_k=True, dy_halo=1, halo_max_wo=14), same),
+            ("dy_halo=2", dict(tap_outer_k=True, dy_halo=2, halo_max_wo=14), same),
+            ("patch", dict(patch=True), patch),
+        ]
+        for warp_tile in _TF32_WARP_TILES[ARCH]:
+            for label, knobs, p in cases:
+                with self.subTest(warp_tile=warp_tile, knobs=label):
+                    spec = DgradConvSpec(
+                        problem=p,
+                        data=data,
+                        tile_m=64,
+                        tile_n=64,
+                        tile_k=64,
+                        warp_m=2,
+                        warp_n=2,
+                        warp_tile_m=warp_tile[0],
+                        warp_tile_n=warp_tile[1],
+                        warp_tile_k=warp_tile[2],
+                        epilogue="cshuffle",
+                        **knobs,
+                    )
+                    ok, reason = is_valid_dgrad_spec(spec, ARCH)
+                    self.assertTrue(ok, reason)
+                    got = _dgrad_run_inprocess(spec, "fp32", seed=0)
+                    # _dgrad_run_inprocess's inputs, in its draw order.
+                    torch.manual_seed(0)
+                    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+                    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
+                    dY = _tf32_reference_inputs(dY, ARCH)
+                    W = _tf32_reference_inputs(W, ARCH)
+                    ref = torch.nn.grad.conv2d_input(
+                        (p.N, p.C, p.Hi, p.Wi),
+                        W.permute(0, 3, 1, 2).double(),
+                        dY.permute(0, 3, 1, 2).double(),
+                        stride=(p.sH, p.sW),
+                        padding=(p.pH, p.pW),
+                    ).permute(0, 2, 3, 1)
+                    rel = (
+                        (got.double().cpu() - ref).abs().max() / ref.abs().max()
+                    ).item()
+                    self.assertLess(
+                        rel, _TF32_TOL[ARCH], f"relative-to-peak error {rel:.3e}"
+                    )
 
 
 if __name__ == "__main__":
