@@ -1,19 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * conv_winograd_fwd.cpp -- C++ port of the Winograd F(m x m, 3 x 3) forward
+ * conv_winograd_fwd.cpp -- C++ port of the Winograd F(mh x mw, 3 x 3) forward
  * transform kernels (library/kernels/common/conv_winograd_fwd.py): K1 filter
  * transform, K2a per-pixel max, K2 input transform (register and LDS-region
- * paths, fused or split prescale) and K4 output transform. See the header and
- * the Python module.
+ * paths, fused or split prescale), K4 output transform, and the merged launch
+ * of independent stages. See the header and the Python module.
  *
  * Every emitter runs in PYTHON EVALUATION ORDER (arguments left to right,
  * innermost call first): nested builder calls are hoisted into ordered
  * locals, since C++ leaves the evaluation order of call arguments
- * unspecified.
+ * unspecified. The merged kernel re-emits the stage bodies through a context
+ * that substitutes the stage's block / thread ids and shares parameters of
+ * the same name (the Python _SubBuilder).
  */
 #include "rocke/instance_conv_winograd_fwd.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -87,7 +90,7 @@ int mh(const Spec* s)
 }
 int mw(const Spec* s)
 {
-    return s->m;
+    return s->m_w ? s->m_w : s->m;
 }
 int nh(const Spec* s)
 {
@@ -124,7 +127,7 @@ int vec_k(const Spec* s)
 }
 int vec_cg(const Spec* s)
 {
-    return rocke_wino::pow2_vec(cpg(s), s->vec);
+    return rocke_wino::pow2_vec(cpg(s), s->filter_vec ? s->filter_vec : s->vec);
 }
 bool input_lds(const Spec* s)
 {
@@ -136,9 +139,13 @@ bool prescale_split(const Spec* s)
         return true;
     return rocke_wino::pow2_ceil(s->problem.C / vec_c(s)) > 1024;
 }
+double beta_of(int m)
+{
+    return m == 2 ? 4.0 : (m == 4 ? 100.0 : 225.0);
+}
 double prescale_beta(const Spec* s)
 {
-    return s->m == 2 ? 4.0 : 100.0;
+    return sqrt(beta_of(mh(s)) * beta_of(mw(s)));
 }
 int prescale_limit_log2(const Spec* s)
 {
@@ -184,7 +191,10 @@ std::string spec_short(const Spec* s)
     std::vector<std::string> tags;
     char buf[64];
     tags.push_back(problem_short(s->problem));
-    snprintf(buf, sizeof buf, "f%d", s->m);
+    if(mw(s) == mh(s))
+        snprintf(buf, sizeof buf, "f%d", s->m);
+    else
+        snprintf(buf, sizeof buf, "f%dx%d", mh(s), mw(s));
     tags.push_back(buf);
     tags.push_back(io_dt(s));
     if(strcmp(op_dt(s), io_dt(s)) != 0)
@@ -204,6 +214,10 @@ std::string spec_short(const Spec* s)
         tags.push_back("ll" + std::to_string(s->lds_lanes));
     if(s->prescale)
         tags.push_back(prescale_split(s) ? "pss" : "ps");
+    if(s->filter_rows != 1)
+        tags.push_back("fr" + std::to_string(s->filter_rows));
+    if(s->filter_vec)
+        tags.push_back("fv" + std::to_string(s->filter_vec));
     std::string out;
     for(size_t i = 0; i < tags.size(); ++i)
         out += (i ? "_" : "") + tags[i];
@@ -354,7 +368,7 @@ bool stage_launch(
     {
         long long items = (long long)p.K * (cpg(s) / vec_cg(s));
         grid[0] = (int)cdiv(items, kFilterBlock);
-        grid[1] = nh(s);
+        grid[1] = nh(s) / s->filter_rows;
         grid[2] = 1;
         *block = kFilterBlock;
         return true;
@@ -413,6 +427,9 @@ struct E
 {
     rocke_ir_builder_t* b;
     const Spec* s;
+    bool sub; /* inside a merged kernel */
+    V bid[3];
+    V tid;
 };
 
 V ci(E& e, int64_t v)
@@ -425,21 +442,30 @@ V cf(E& e, double v)
 }
 V thread_x(E& e)
 {
-    return rocke_b_thread_id_x(e.b);
+    return e.sub ? e.tid : rocke_b_thread_id_x(e.b);
 }
 V block_x(E& e)
 {
-    return rocke_b_block_id_x(e.b);
+    return e.sub ? e.bid[0] : rocke_b_block_id_x(e.b);
 }
 V block_y(E& e)
 {
-    return rocke_b_block_id_y(e.b);
+    return e.sub ? e.bid[1] : rocke_b_block_id_y(e.b);
 }
 
-/* b.param(name, t, noalias=..., readonly=..., writeonly=...). */
+/* b.param(name, t, noalias=..., readonly=..., writeonly=...); a merged kernel
+ * shares a parameter of the same name. */
 V param(E& e, const char* name, const rocke_type_t* t, int flags)
 {
     rocke_ir_builder_t* b = e.b;
+    if(e.sub)
+    {
+        for(int i = 0; i < b->num_param_lookup; i++)
+        {
+            if(b->param_names[i] && strcmp(b->param_names[i], name) == 0)
+                return b->param_values[i];
+        }
+    }
     if(flags == 0)
         return rocke_b_param(b, name, t, NULL);
     rocke_param_opts_t o;
@@ -957,10 +983,11 @@ void emit_filter(E& e)
     int cg = cpg(s);
     int cgv = cg / vec;
     long long items = (long long)p.K * cgv;
-    int n = nh(s);
-    std::vector<int64_t> gint;
+    int n = nh(s), nwv = nw(s);
+    std::vector<int64_t> gint, gint_w;
     int64_t den = filter_matrix_int(mh(s), gint);
-    double scale = 1.0 / (double)(den * den); /* power of two for F2 */
+    int64_t den_w = filter_matrix_int(mw(s), gint_w);
+    double scale = 1.0 / (double)(den * den_w);
 
     set_mwgs(e, kFilterBlock);
     V w = param(e, "w", gptr(e, rocke_wino::ir_dtype(io_dt(s))), NOALIAS | RO);
@@ -978,7 +1005,7 @@ void emit_filter(E& e)
         V tx = thread_x(e);
         gid = rocke_b_add(b, mu, tx);
     }
-    V row_i = block_y(e);
+    V row_y = block_y(e);
     V ok;
     {
         V k = ci(e, items);
@@ -1013,59 +1040,74 @@ void emit_filter(E& e)
             taps[ky].push_back(rocke_wino::raw_to_f32(b, raw, vec));
         }
     }
-    /* G[i][ky] for the runtime row i (uniform): a select chain over the n rows. */
-    VV coef;
-    for(int ky = 0; ky < 3; ++ky)
-    {
-        V cval = cf(e, (double)gint[0 * 3 + ky]);
-        for(int i = 1; i < n; ++i)
-        {
-            V k = ci(e, i);
-            V eq = rocke_b_cmp_eq(b, row_i, k);
-            V cv2 = cf(e, (double)gint[i * 3 + ky]);
-            cval = rocke_b_select(b, eq, cv2, cval);
-        }
-        coef.push_back(cval);
-    }
-    /* tmp[kx][ch] = sum_ky G[i][ky] * g[ky][kx][ch] */
-    std::vector<VV> tmp(3);
-    for(int kx = 0; kx < 3; ++kx)
-    {
-        for(int ch = 0; ch < vec; ++ch)
-        {
-            V f0 = rocke_b_fmul(b, coef[0], taps[0][kx][ch]);
-            V f1 = rocke_b_fma(b, coef[1], taps[1][kx][ch], f0);
-            tmp[kx].push_back(rocke_b_fma(b, coef[2], taps[2][kx][ch], f1));
-        }
-    }
     V sc = cf(e, scale);
-    /* U[i * n + j][k][c] */
-    V ubase;
+    int nr = s->filter_rows;
+    for(int rr = 0; rr < nr; ++rr)
     {
-        V k1 = ci(e, (int64_t)n * p.K);
-        V m1 = rocke_b_mul(b, row_i, k1);
-        V a1 = rocke_b_add(b, m1, kk);
-        V k2 = ci(e, cg);
-        V m2 = rocke_b_mul(b, a1, k2);
-        V a2 = rocke_b_add(b, m2, c);
-        V k3 = ci(e, 2);
-        V m3 = rocke_b_mul(b, a2, k3);
-        ubase = oob_sel(e, ok, m3);
-    }
-    for(int j = 0; j < n; ++j)
-    {
-        VV vals;
-        for(int ch = 0; ch < vec; ++ch)
+        V row_i;
+        VV coef;
+        if(nr == n)
         {
-            std::vector<std::pair<int64_t, V>> terms;
-            for(int kx = 0; kx < 3; ++kx)
-                terms.push_back({gint[j * 3 + kx], tmp[kx][ch]});
-            V lc = rocke_wino::lincomb(b, terms);
-            vals.push_back(rocke_b_fmul(b, lc, sc));
+            row_i = ci(e, rr);
+            for(int ky = 0; ky < 3; ++ky)
+                coef.push_back(cf(e, (double)gint[rr * 3 + ky]));
         }
-        V k = ci(e, (int64_t)j * p.K * cg * 2);
-        V off = rocke_b_add(b, ubase, k);
-        rocke_wino::store_vec_f32(b, u_rsrc, off, vals, op_dt(s));
+        else
+        {
+            V k1 = ci(e, nr);
+            V mu = rocke_b_mul(b, row_y, k1);
+            V k2 = ci(e, rr);
+            row_i = rocke_b_add(b, mu, k2);
+            for(int ky = 0; ky < 3; ++ky)
+            {
+                V cval = cf(e, (double)gint[0 * 3 + ky]);
+                for(int i = 1; i < n; ++i)
+                {
+                    V k = ci(e, i);
+                    V eq = rocke_b_cmp_eq(b, row_i, k);
+                    V cv2 = cf(e, (double)gint[i * 3 + ky]);
+                    cval = rocke_b_select(b, eq, cv2, cval);
+                }
+                coef.push_back(cval);
+            }
+        }
+        std::vector<VV> tmp(3);
+        for(int kx = 0; kx < 3; ++kx)
+        {
+            for(int ch = 0; ch < vec; ++ch)
+            {
+                V f0 = rocke_b_fmul(b, coef[0], taps[0][kx][ch]);
+                V f1 = rocke_b_fma(b, coef[1], taps[1][kx][ch], f0);
+                tmp[kx].push_back(rocke_b_fma(b, coef[2], taps[2][kx][ch], f1));
+            }
+        }
+        V ubase;
+        {
+            V k1 = ci(e, (int64_t)nwv * p.K);
+            V m1 = rocke_b_mul(b, row_i, k1);
+            V a1 = rocke_b_add(b, m1, kk);
+            V k2 = ci(e, cg);
+            V m2 = rocke_b_mul(b, a1, k2);
+            V a2 = rocke_b_add(b, m2, c);
+            V k3 = ci(e, 2);
+            V m3 = rocke_b_mul(b, a2, k3);
+            ubase = oob_sel(e, ok, m3);
+        }
+        for(int j = 0; j < nwv; ++j)
+        {
+            VV vals;
+            for(int ch = 0; ch < vec; ++ch)
+            {
+                std::vector<std::pair<int64_t, V>> terms;
+                for(int kx = 0; kx < 3; ++kx)
+                    terms.push_back({gint_w[j * 3 + kx], tmp[kx][ch]});
+                V lc = rocke_wino::lincomb(b, terms);
+                vals.push_back(rocke_b_fmul(b, lc, sc));
+            }
+            V k = ci(e, (int64_t)j * p.K * cg * 2);
+            V off = rocke_b_add(b, ubase, k);
+            rocke_wino::store_vec_f32(b, u_rsrc, off, vals, op_dt(s));
+        }
     }
 }
 
@@ -1970,6 +2012,246 @@ const char* stage_tag(rocke_winograd_fwd_stage_t st)
     return "";
 }
 
+/* ------------------------------------------------------------ merged */
+
+struct Part
+{
+    rocke_winograd_fwd_stage_t st;
+    int grid[3];
+    int block;
+    int start, nflat, pack;
+};
+
+bool merge_layout(const Spec* s,
+                  const rocke_winograd_fwd_stage_t* names,
+                  int n_names,
+                  std::vector<Part>* parts,
+                  int* block_out,
+                  std::string* err)
+{
+    /* transform_stages(spec): every present stage's launch is computed. */
+    const rocke_winograd_fwd_stage_t order[4] = {ROCKE_WINOGRAD_FWD_K1,
+                                                 ROCKE_WINOGRAD_FWD_K2A,
+                                                 ROCKE_WINOGRAD_FWD_K2,
+                                                 ROCKE_WINOGRAD_FWD_K4};
+    int grids[4][3] = {};
+    int blocks[4] = {};
+    bool present[4] = {};
+    for(int i = 0; i < 4; ++i)
+    {
+        present[i] = rocke_winograd_fwd_stage_present(s, order[i]);
+        if(present[i] && !stage_launch(s, order[i], grids[i], &blocks[i], err))
+            return false;
+    }
+    std::string missing;
+    for(int i = 0; i < n_names; ++i)
+    {
+        if(names[i] < 0 || names[i] > 3 || !present[names[i]])
+            missing += std::string(missing.empty() ? "" : ", ") + "'"
+                       + rocke_winograd_fwd_stage_name(names[i]) + "'";
+    }
+    if(!missing.empty())
+    {
+        *err = "no stage(s) [" + missing + "] in this pipeline";
+        return false;
+    }
+    std::vector<int> fixed;
+    for(int i = 0; i < n_names; ++i)
+        if(names[i] != ROCKE_WINOGRAD_FWD_K1
+           && std::find(fixed.begin(), fixed.end(), blocks[names[i]]) == fixed.end())
+            fixed.push_back(blocks[names[i]]);
+    if(fixed.size() > 1)
+    {
+        *err = "stages with barriers need one block size";
+        return false;
+    }
+    int block = 0;
+    if(!fixed.empty())
+        block = fixed[0];
+    else
+        for(int i = 0; i < n_names; ++i)
+            block = std::max(block, blocks[names[i]]);
+    int start = 0;
+    parts->clear();
+    for(int i = 0; i < n_names; ++i)
+    {
+        Part pt;
+        pt.st = names[i];
+        memcpy(pt.grid, grids[names[i]], sizeof pt.grid);
+        pt.block = blocks[names[i]];
+        long long sub = (long long)pt.grid[0] * pt.grid[1] * pt.grid[2];
+        int pack;
+        long long nflat;
+        if(pt.block == block)
+        {
+            pack = 1;
+            nflat = sub;
+        }
+        else if(pt.st != ROCKE_WINOGRAD_FWD_K1)
+        {
+            *err = "block mismatch in a merged stage";
+            return false;
+        }
+        else if(pt.block < block)
+        {
+            if(block % pt.block)
+            {
+                *err = "block does not divide the merged block";
+                return false;
+            }
+            pack = block / pt.block;
+            nflat = cdiv(sub, pack);
+        }
+        else
+        {
+            if(pt.block % block)
+            {
+                *err = "merged block does not divide the stage block";
+                return false;
+            }
+            pack = -(pt.block / block);
+            nflat = sub * -pack;
+        }
+        pt.start = start;
+        pt.nflat = (int)nflat;
+        pt.pack = pack;
+        start += (int)nflat;
+        parts->push_back(pt);
+    }
+    *block_out = block;
+    return true;
+}
+
+struct Merged
+{
+    rocke_ir_builder_t* b;
+    const Spec* s;
+    std::vector<Part> parts;
+    int block;
+    V flat, tid;
+    std::string err;
+    bool ok = true;
+};
+
+void merged_emit(Merged& M, int i)
+{
+    rocke_ir_builder_t* b = M.b;
+    const Part& st = M.parts[i];
+    E e{b, M.s, false, {nullptr, nullptr, nullptr}, nullptr};
+    V local;
+    {
+        V k = rocke_b_const_i32(b, st.start);
+        local = rocke_b_sub(b, M.flat, k);
+    }
+    V sub, stid;
+    if(st.pack > 1)
+    {
+        V k = rocke_b_const_i32(b, st.pack);
+        V mu = rocke_b_mul(b, local, k);
+        V k2 = rocke_b_const_i32(b, st.block);
+        V dv = rocke_b_div(b, M.tid, k2);
+        sub = rocke_b_add(b, mu, dv);
+        V k3 = rocke_b_const_i32(b, st.block);
+        stid = rocke_b_mod(b, M.tid, k3);
+    }
+    else if(st.pack < 0)
+    {
+        V k = rocke_b_const_i32(b, -st.pack);
+        sub = rocke_b_div(b, local, k);
+        V k2 = rocke_b_const_i32(b, -st.pack);
+        V md = rocke_b_mod(b, local, k2);
+        V k3 = rocke_b_const_i32(b, M.block);
+        V mu = rocke_b_mul(b, md, k3);
+        stid = rocke_b_add(b, mu, M.tid);
+    }
+    else
+    {
+        sub = local;
+        stid = M.tid;
+    }
+    int gx = st.grid[0], gy = st.grid[1], gz = st.grid[2];
+    V bx, r, by, bz;
+    if(gx > 1)
+    {
+        V k = rocke_b_const_i32(b, gx);
+        bx = rocke_b_mod(b, sub, k);
+    }
+    else
+        bx = rocke_b_const_i32(b, 0);
+    if(gx > 1)
+    {
+        V k = rocke_b_const_i32(b, gx);
+        r = rocke_b_div(b, sub, k);
+    }
+    else
+        r = sub;
+    if(gy > 1)
+    {
+        V k = rocke_b_const_i32(b, gy);
+        by = rocke_b_mod(b, r, k);
+    }
+    else
+        by = rocke_b_const_i32(b, 0);
+    if(gy > 1)
+    {
+        V k = rocke_b_const_i32(b, gy);
+        bz = rocke_b_div(b, r, k);
+    }
+    else
+        bz = r;
+    e.sub = true;
+    e.bid[0] = bx;
+    e.bid[1] = by;
+    e.bid[2] = bz;
+    e.tid = stid;
+    long long total = (long long)gx * gy * gz;
+    if(st.pack > 1 && (long long)st.nflat * st.pack != total)
+    {
+        V k = rocke_b_const_i32(b, total);
+        V lt = rocke_b_cmp_lt(b, sub, k);
+        rocke_if_t g = rocke_b_scf_if(b, lt);
+        rocke_b_region_enter(b, g.then_region);
+        if(!emit_stage(e, st.st, &M.err))
+            M.ok = false;
+        rocke_b_region_leave(b);
+    }
+    else if(!emit_stage(e, st.st, &M.err))
+        M.ok = false;
+}
+
+void merged_chain(Merged& M, int i)
+{
+    rocke_ir_builder_t* b = M.b;
+    if(i == (int)M.parts.size() - 1)
+    {
+        merged_emit(M, i);
+        return;
+    }
+    const Part& st = M.parts[i];
+    V k = rocke_b_const_i32(b, st.start + st.nflat);
+    V lt = rocke_b_cmp_lt(b, M.flat, k);
+    rocke_if_else_t ie = rocke_b_scf_if_else(b, lt);
+    rocke_b_region_enter(b, ie.then_region);
+    merged_emit(M, i);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, ie.else_region);
+    merged_chain(M, i + 1);
+    rocke_b_region_leave(b);
+}
+
+std::string merged_tag(const rocke_winograd_fwd_stage_t* names, int n_names)
+{
+    std::string tag = "merged_";
+    for(int i = 0; i < n_names; ++i)
+    {
+        std::string nm = rocke_winograd_fwd_stage_name(names[i]);
+        for(auto& ch : nm)
+            ch = (char)tolower((unsigned char)ch);
+        tag += (i ? "_" : "") + nm;
+    }
+    return tag;
+}
+
 } // namespace
 
 /* ===================================================================== *
@@ -1996,6 +2278,9 @@ rocke_winograd_fwd_spec_t rocke_winograd_fwd_spec_default(void)
     s.wg_tile_rows = 1;
     s.nt_stores = true;
     s.lds_lanes = 32;
+    s.filter_rows = 1;
+    s.filter_vec = 0;
+    s.m_w = 0;
     s.name = "conv_winograd_fwd";
     return s;
 }
@@ -2049,10 +2334,16 @@ bool rocke_winograd_fwd_is_valid_spec(const rocke_winograd_fwd_spec_t* s,
         set_reason(reason, reason_cap, "C and K must be divisible by groups");
         return false;
     }
-    if(s->m != 2 && s->m != 4)
+    auto tile_ok = [](int m) { return m == 2 || m == 4 || m == 6; };
+    if(!tile_ok(s->m))
     {
-        snprintf(msg, sizeof msg, "m must be one of (2, 4) (got %d)", s->m);
+        snprintf(msg, sizeof msg, "m must be one of (2, 4, 6) (got %d)", s->m);
         set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    if(s->m_w && !tile_ok(s->m_w))
+    {
+        set_reason(reason, reason_cap, "m_w must be 0 or one of (2, 4, 6)");
         return false;
     }
     if(p.is_3d)
@@ -2082,7 +2373,8 @@ bool rocke_winograd_fwd_is_valid_spec(const rocke_winograd_fwd_spec_t* s,
         set_reason(reason, reason_cap, "operand_dtype must be one of ('fp16', 'bf16')");
         return false;
     }
-    if(!strcmp(s->operand_dtype, "bf16") && (s->m != 2 || strcmp(s->io_dtype, "bf16") != 0))
+    if(!strcmp(s->operand_dtype, "bf16")
+       && (mh(s) != 2 || mw(s) != 2 || strcmp(s->io_dtype, "bf16") != 0))
     {
         set_reason(
             reason, reason_cap, "bf16 operands are only accurate enough for F(2,3) with bf16 I/O");
@@ -2107,6 +2399,19 @@ bool rocke_winograd_fwd_is_valid_spec(const rocke_winograd_fwd_spec_t* s,
     if(Ho(s) <= 0 || Wo(s) <= 0)
     {
         set_reason(reason, reason_cap, "empty output");
+        return false;
+    }
+    if(!(s->filter_vec == 0 || s->filter_vec == 1 || s->filter_vec == 2 || s->filter_vec == 4
+         || s->filter_vec == 8))
+    {
+        snprintf(msg, sizeof msg, "filter_vec must be 0/1/2/4/8 (got %d)", s->filter_vec);
+        set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    if(s->filter_rows < 1 || nh(s) % s->filter_rows)
+    {
+        snprintf(msg, sizeof msg, "filter_rows must divide n = %d", nh(s));
+        set_reason(reason, reason_cap, msg);
         return false;
     }
     if(s->tiles_per_thread < 1)
@@ -2196,7 +2501,7 @@ rocke_kernel_def_t* rocke_build_winograd_fwd_stage(rocke_ir_builder_t* b,
             rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
             return NULL;
         }
-        E e{b, spec};
+        E e{b, spec, false, {nullptr, nullptr, nullptr}, nullptr};
         if(!emit_stage(e, stage, &err))
         {
             rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, err.c_str());
@@ -2235,8 +2540,81 @@ rocke_kernel_def_t* rocke_build_winograd_fwd_stage_new(rocke_ir_builder_t* b,
     });
 }
 
+rocke_kernel_def_t* rocke_build_winograd_merged(rocke_ir_builder_t* b,
+                                                const rocke_winograd_fwd_spec_t* spec,
+                                                const rocke_winograd_fwd_stage_t* names,
+                                                int n_names,
+                                                const char* arch)
+{
+    (void)arch;
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char reason[512];
+        if(!rocke_winograd_fwd_is_valid_spec(spec, reason, sizeof reason))
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+            return NULL;
+        }
+        if(names == NULL || n_names < 1)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_winograd_merged: no stages");
+            return NULL;
+        }
+        Merged M;
+        M.b = b;
+        M.s = spec;
+        if(!merge_layout(spec, names, n_names, &M.parts, &M.block, &M.err))
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, M.err.c_str());
+            return NULL;
+        }
+        M.flat = rocke_b_block_id_x(b);
+        M.tid = rocke_b_thread_id_x(b);
+        merged_chain(M, 0);
+        if(!M.ok)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, M.err.c_str());
+            return NULL;
+        }
+        rocke_attr_set_int(b, &rocke_ir_builder_kernel(b)->attrs, "max_workgroup_size", M.block);
+        if(!rocke_ir_builder_ok(b))
+            return NULL;
+        return rocke_ir_builder_kernel(b);
+    });
+}
+
+rocke_kernel_def_t* rocke_build_winograd_merged_new(rocke_ir_builder_t* b,
+                                                    const rocke_winograd_fwd_spec_t* spec,
+                                                    const rocke_winograd_fwd_stage_t* names,
+                                                    int n_names,
+                                                    const char* arch)
+{
+    if(b != NULL)
+        memset(b, 0, sizeof(*b));
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char name[1024];
+        if(b == NULL)
+            return NULL;
+        if(spec == NULL || names == NULL || n_names < 1)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_winograd_merged: null spec / names");
+            return NULL;
+        }
+        std::string tag = merged_tag(names, n_names);
+        if(rocke_winograd_fwd_kernel_name(spec, tag.c_str(), name, sizeof name) != ROCKE_OK)
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_winograd_merged: kernel name too long");
+            return NULL;
+        }
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+            return NULL;
+        return rocke_build_winograd_merged(b, spec, names, n_names, arch);
+    });
+}
+
 rocke_status_t rocke_winograd_fwd_lower_to_llvm(const rocke_winograd_fwd_spec_t* spec,
                                                 rocke_winograd_fwd_stage_t stage,
+                                                const rocke_winograd_fwd_stage_t* names,
+                                                int n_names,
                                                 const char* arch,
                                                 rocke_llvm_flavor_t flavor,
                                                 char** out_ll,
@@ -2255,7 +2633,8 @@ rocke_status_t rocke_winograd_fwd_lower_to_llvm(const rocke_winograd_fwd_spec_t*
     }
     if(arch == NULL)
         arch = "gfx1250";
-    kernel = rocke_build_winograd_fwd_stage_new(&b, spec, stage, arch);
+    kernel = n_names > 0 ? rocke_build_winograd_merged_new(&b, spec, names, n_names, arch)
+                         : rocke_build_winograd_fwd_stage_new(&b, spec, stage, arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);

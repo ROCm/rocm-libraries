@@ -357,6 +357,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd_fwd.WinogradFwdSpec": ("problem",),
     "kernels.common.conv_winograd_gemm_wmma.WinogradGemmReduceSpec": (),
     "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
+    # Winograd forward: merged transform launch
+    "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
 }
 
 

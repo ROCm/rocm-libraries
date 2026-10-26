@@ -5,8 +5,8 @@
  * transform family (conv_winograd_fwd; see winograd_glue.hpp). Registered via
  * register_winograd_fwd(), adding:
  *   conv_winograd_fwd_lower_llvm(spec, arch) / _serialize_ir / _verify
- * The spec dict mirrors WinogradFwdSpec (problem nested) plus `stage`
- * ("K1" | "K2a" | "K2" | "K4").
+ * The spec dict mirrors WinogradFwdSpec (problem nested) plus either
+ * `stage` ("K1" | "K2a" | "K2" | "K4") or `merged` (a list of stage names).
  */
 #include "winograd_glue.hpp"
 
@@ -25,6 +25,7 @@ struct WfwdSel
 {
     rocke_winograd_fwd_spec_t spec;
     rocke_winograd_fwd_stage_t stage = ROCKE_WINOGRAD_FWD_K1;
+    std::vector<rocke_winograd_fwd_stage_t> merged;
 };
 
 rocke_winograd_fwd_stage_t wfwd_stage(const std::string& name)
@@ -45,6 +46,7 @@ WfwdSel wfwd_build(const py::dict& d, std::deque<std::string>& store)
     s.problem = conv_problem_from_dict(d["problem"].cast<py::dict>(), "WinogradFwdSpec");
     std::string v;
     s.m = dict_int(d, "m", s.m);
+    s.m_w = dict_int(d, "m_w", s.m_w);
     if(dict_str(d, "io_dtype", v))
         s.io_dtype = keep(store, v);
     if(dict_str(d, "operand_dtype", v))
@@ -66,16 +68,29 @@ WfwdSel wfwd_build(const py::dict& d, std::deque<std::string>& store)
     s.wg_tile_rows = dict_int(d, "wg_tile_rows", s.wg_tile_rows);
     s.nt_stores = dict_bool(d, "nt_stores", s.nt_stores);
     s.lds_lanes = dict_int(d, "lds_lanes", s.lds_lanes);
+    s.filter_rows = dict_int(d, "filter_rows", s.filter_rows);
+    s.filter_vec = dict_int(d, "filter_vec", s.filter_vec);
     if(dict_str(d, "name", v))
         s.name = keep(store, v);
-    if(!dict_str(d, "stage", v))
-        throw py::value_error("conv_winograd_fwd: the dict needs `stage`");
-    out.stage = wfwd_stage(v);
+    if(d.contains("merged") && !d["merged"].is_none())
+    {
+        for(const auto& nm : d["merged"].cast<std::vector<std::string>>())
+            out.merged.push_back(wfwd_stage(nm));
+        if(out.merged.empty())
+            throw py::value_error("conv_winograd_fwd: empty merged stage list");
+    }
+    else if(dict_str(d, "stage", v))
+        out.stage = wfwd_stage(v);
+    else
+        throw py::value_error("conv_winograd_fwd: the dict needs `stage` or `merged`");
     return out;
 }
 
 rocke_kernel_def_t* wfwd_kernel(rocke_ir_builder_t* b, const WfwdSel& sel, const std::string& arch)
 {
+    if(!sel.merged.empty())
+        return rocke_build_winograd_merged_new(
+            b, &sel.spec, sel.merged.data(), (int)sel.merged.size(), arch.c_str());
     return rocke_build_winograd_fwd_stage_new(b, &sel.spec, sel.stage, arch.c_str());
 }
 

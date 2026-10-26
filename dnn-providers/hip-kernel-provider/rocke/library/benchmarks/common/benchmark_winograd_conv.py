@@ -42,6 +42,7 @@ import argparse
 import ctypes
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -87,20 +88,33 @@ def _pow2_vec(n: int, cap: int = 8) -> int:
     return v
 
 
+def _m_pair(m) -> Tuple[int, int]:
+    """``4`` / ``"4"`` / ``"6x4"`` / ``(6, 4)`` -> ``(mh, mw)``."""
+    if isinstance(m, (tuple, list)):
+        return int(m[0]), int(m[1])
+    t = str(m).lower().split("x")
+    return (int(t[0]), int(t[-1]))
+
+
+def m_label(m) -> str:
+    mh, mw = _m_pair(m)
+    return str(mh) if mh == mw else f"{mh}x{mw}"
+
+
 def resolve_prescale(mode: str, m: int, io_dtype: str) -> bool:
     """``auto``: on for bf16 I/O with F(4,3), off otherwise."""
     if mode == "on":
         return True
     if mode == "off":
         return False
-    return io_dtype == "bf16" and m == 4
+    return io_dtype == "bf16" and max(_m_pair(m)) >= 4
 
 
 def resolve_operand(mode: str, m: int, io_dtype: str) -> str:
     """``auto``: fp16 for F(4,3) and fp16 I/O; bf16 for F(2,3) with bf16 I/O."""
     if mode != "auto":
         return mode
-    return "bf16" if (m == 2 and io_dtype == "bf16") else "fp16"
+    return "bf16" if (_m_pair(m) == (2, 2) and io_dtype == "bf16") else "fp16"
 
 
 # ---------------------------------------------------------------------------
@@ -222,24 +236,44 @@ def k3_label(cfg: tuple) -> str:
 
 @dataclass
 class WinogradPipeline:
-    """Device buffers + launchers of one Winograd pipeline instance."""
+    """Device buffers + launchers of one Winograd pipeline instance.
 
-    spec: object  # WinogradFwdSpec
+    ``spec.problem`` is one *batch chunk*: the conv is run as ``chunks``
+    pipelines over consecutive N-ranges of x / y, sharing U (K1 runs once)
+    and the V / M / e workspaces (the chunks run in stream order). That keeps
+    every buffer below the 2 GiB the 32-bit buffer offsets address (batch
+    split, ``--batch-split``). x and y are one buffer per chunk.
+
+    ``merge`` names transform stages launched as one kernel
+    (:func:`conv_winograd_fwd.build_winograd_merged`), e.g. ``("K2", "K1")``:
+    the first chunk's input transform and the filter transform share a grid.
+    """
+
+    spec: object  # WinogradFwdSpec (of one chunk)
     arch: str = "gfx1250"
     rt: object = None
+    chunks: int = 1
+    merge: Tuple[str, ...] = ()
     bufs: Dict[str, int] = field(default_factory=dict)
     sizes: Dict[str, int] = field(default_factory=dict)
+    xs: List[int] = field(default_factory=list)
+    ys: List[int] = field(default_factory=list)
+    # name -> (launcher, values of chunk 0, grid, block)
     stages: Dict[str, Tuple[object, dict, tuple, tuple]] = field(default_factory=dict)
+    # name -> per-chunk values (stages that read x or write y)
+    chunk_vals: Dict[str, List[dict]] = field(default_factory=dict)
     k3: Optional[Tuple[object, dict, tuple, tuple]] = None
     k3_cfg: Optional[tuple] = None
     # Pre-bound K3 of the WMMA batched GEMM (set_k3_run); replaces ``k3``.
     k3_run: Optional[object] = None
+    # (plan, problem) of the WMMA K3, to re-bind it on another stream.
+    k3_plan: Optional[tuple] = None
 
     @property
     def gemm_problem(self):
         from kernels.common.conv_winograd_fwd import winograd_gemm_problem
 
-        return winograd_gemm_problem(self.spec.problem, self.spec.m)
+        return winograd_gemm_problem(self.spec.problem, self.spec.tile_mn)
 
     # -- setup --
 
@@ -253,6 +287,13 @@ class WinogradPipeline:
         for st in W.transform_stages(s):
             art = compile_kernel(st.build(s, arch=self.arch), arch=self.arch)
             out[st.name] = (art, st.grid, st.signature, st.block)
+        if self.merge:
+            lay = W.merged_stage(s, self.merge)
+            k = W.build_winograd_merged(
+                W.WinogradMergedSpec(s, tuple(self.merge)), arch=self.arch
+            )
+            art = compile_kernel(k, arch=self.arch)
+            out["MERGED"] = (art, lay.grid, lay.signature, lay.block)
         return out
 
     def alloc(self):
@@ -264,29 +305,50 @@ class WinogradPipeline:
             sz["e"] = 4  # never read; keep a valid pointer
         for k, nb in sz.items():
             self.sizes[k] = nb
-            self.bufs[k] = int(self.rt.alloc(max(nb, 4)))
+            if k in ("x", "y"):
+                lst = [int(self.rt.alloc(max(nb, 4))) for _ in range(self.chunks)]
+                (self.xs if k == "x" else self.ys)[:] = lst
+                self.bufs[k] = lst[0]
+            else:
+                self.bufs[k] = int(self.rt.alloc(max(nb, 4)))
 
     def free(self):
         from rocke.runtime import synchronize_and_release
 
         synchronize_and_release(0)
         for k, ptr in list(self.bufs.items()):
+            if k not in ("x", "y"):
+                self.rt.free(ptr)
+        for ptr in self.xs[1:] + self.ys[1:]:
+            self.rt.free(ptr)
+        for ptr in self.xs[:1] + self.ys[:1]:
             self.rt.free(ptr)
         self.bufs.clear()
+        self.xs.clear()
+        self.ys.clear()
+
+    def _nc(self) -> int:
+        return self.spec.problem.N
 
     def upload(self, x_t, w_t):
         # Pinned host staging, device drained around each copy: a pageable copy
         # registers host memory through KFD's SVM path, and that page-table
         # update while one of our kernels is in flight hangs gfx1250.
         self.rt.sync()
-        for key, t in (("x", x_t), ("w", w_t)):
+        nc = self._nc()
+        items = [(self.xs[i], x_t[i * nc : (i + 1) * nc]) for i in range(self.chunks)]
+        items.append((self.bufs["w"], w_t))
+        for ptr, t in items:
             h = t.contiguous().pin_memory()
-            self.rt.memcpy_h2d(self.bufs[key], _u8(h), h.nbytes)
+            self.rt.memcpy_h2d(ptr, _u8(h), h.nbytes)
             self.rt.sync()
+            del h
 
     def poison(self, byte: int = 0x7F):
-        for k in ("U", "V", "M", "e", "y"):
+        for k in ("U", "V", "M", "e"):
             self.rt.memset(self.bufs[k], byte, self.sizes[k])
+        for ptr in self.ys:
+            self.rt.memset(ptr, byte, self.sizes["y"])
 
     def make_launchers(self, transforms):
         from rocke.runtime.launcher import KernelLauncher
@@ -299,16 +361,28 @@ class WinogradPipeline:
             if min(grid) <= 0:
                 raise ValueError(f"{name}: empty grid {grid}")
             vals = {}
+            per_chunk = False
             for a in sig:
                 nm = a["name"]
                 if nm.endswith("_bytes"):
                     vals[nm] = S[buf_of[nm[: -len("_bytes")]]]
                 else:
                     vals[nm] = B[buf_of[nm]]
+                    per_chunk |= buf_of[nm] in ("x", "y")
             lau = KernelLauncher(
                 hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
             )
             self.stages[name] = (lau, vals, grid, (block, 1, 1))
+            if per_chunk:
+                cv = []
+                for i in range(self.chunks):
+                    d = dict(vals)
+                    if "x" in d:
+                        d["x"] = self.xs[i]
+                    if "y" in d:
+                        d["y"] = self.ys[i]
+                    cv.append(d)
+                self.chunk_vals[name] = cv
 
     def set_k3(self, cfg, spec, art):
         from kernels.common.conv_abi import conv_args_signature
@@ -335,44 +409,74 @@ class WinogradPipeline:
         self.k3 = (lau, values, grid, (spec.launch_block_size, 1, 1))
         self.k3_cfg = cfg
         self.k3_run = None
+        self.k3_plan = None
 
-    def set_k3_run(self, run):
-        """Use the pre-bound launch(es) ``run`` (a WMMA K3 plan) as K3."""
+    def set_k3_run(self, run, plan=None):
+        """Use the pre-bound launch(es) ``run`` (a WMMA K3 plan) as K3;
+        ``plan = (K3Plan, WinogradGemmProblem)`` allows re-binding it."""
         self.k3_run = run
+        self.k3_plan = plan
+
+    # -- launch sequences --
 
     def _pre_k3(self):
         """Transform stages before K3: K1, the split-prescale K2a, K2."""
         return [k for k in ("K1", "K2a", "K2") if k in self.stages]
 
-    def _all(self):
-        pre = [self.stages[k] for k in self._pre_k3()]
-        return pre + [self.k3, self.stages["K4"]]
+    def sequence(self, *, infer: bool = False, merged: bool = True) -> list:
+        """The launch order as ``(stage name, chunk)`` items; ``"K3"`` is the
+        GEMM. ``infer``: U is pre-transformed (no K1). ``merged``: use the
+        merged kernel (if built) for the stages in ``self.merge`` of the
+        first chunk."""
+        pre = [k for k in self._pre_k3() if k != "K1"]
+        use_merge = merged and not infer and "MERGED" in self.stages
+        seq = []
+        if not infer and not use_merge:
+            seq.append(("K1", 0))
+        for i in range(self.chunks):
+            for k in pre:
+                if use_merge and i == 0 and k in self.merge:
+                    if ("MERGED", 0) not in seq:
+                        seq.append(("MERGED", 0))
+                    continue
+                seq.append((k, i))
+            seq += [("K3", i), ("K4", i)]
+        return seq
 
-    # -- run --
+    def _stage_vals(self, name: str, chunk: int):
+        lau, vals, grid, block = self.stages[name]
+        if name in self.chunk_vals:
+            vals = self.chunk_vals[name][chunk]
+        return lau, vals, grid, block
 
     def run_once(self):
         from rocke.runtime.launcher import LaunchConfig
 
-        if self.k3_run is not None:
-            for k in self._pre_k3():
-                lau, vals, grid, block = self.stages[k]
-                lau(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            self.k3_run()
-            self.rt.sync()
-            lau, vals, grid, block = self.stages["K4"]
-            lau(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            return
-        for lau, vals, grid, block in self._all():
+        for name, i in self.sequence():
+            if name == "K3":
+                if self.k3_run is not None:
+                    self.k3_run()
+                    self.rt.sync()
+                else:
+                    lau, vals, grid, block = self.k3
+                    lau(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
+                continue
+            lau, vals, grid, block = self._stage_vals(name, i)
             lau(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    def bound(self, which: str):
+    def bound(self, which: str, chunk: int = 0, stream: int = 0):
         from rocke.runtime.launcher import LaunchConfig
 
         if which == "K3" and self.k3_run is not None:
-            return self.k3_run
+            if stream == 0:
+                return self.k3_run
+            plan, prob = self.k3_plan
+            B = self.bufs
+            return plan.bind(prob, B["V"], B["U"], B["M"], stream=stream)
         if which == "K2" and "K2a" in self.stages:
             # The split prescale's max pass belongs to K2's time.
-            fa, fb = self.bound("K2a"), self.bound("K2b")
+            fa = self.bound("K2a", chunk, stream)
+            fb = self.bound("K2b", chunk, stream)
 
             def k2(_a=fa, _b=fb):
                 _a()
@@ -381,15 +485,60 @@ class WinogradPipeline:
             return k2
         if which == "K2b":
             which = "K2"
-        st = self.k3 if which == "K3" else self.stages[which]
-        lau, vals, grid, block = st
-        return lau.bind(vals, config=LaunchConfig(grid=grid, block=block, stream=0))
+        if which == "K3":
+            lau, vals, grid, block = self.k3
+        else:
+            lau, vals, grid, block = self._stage_vals(which, chunk)
+        return lau.bind(
+            vals, config=LaunchConfig(grid=grid, block=block, stream=stream)
+        )
 
-    def bound_total(self):
-        fns = [self.bound(k) for k in ("K1", "K2", "K3", "K4")]
+    def bound_seq(self, seq, stream: int = 0):
+        fns = [self.bound(k, i, stream) for k, i in seq]
 
-        def run(_f=fns):
+        def run(_f=tuple(fns)):
             for f in _f:
+                f()
+
+        return run
+
+    def bound_total(self, stream: int = 0, merged: bool = True):
+        return self.bound_seq(self.sequence(merged=merged), stream)
+
+    def bound_infer(self, stream: int = 0):
+        """K2..K4 only: the weights-pretransformed (inference) mode."""
+        return self.bound_seq(self.sequence(infer=True), stream)
+
+    def bound_two_streams(self, stream: int = 0):
+        """K1 on a second stream, overlapping K2 of the first chunk; K3 waits
+        for it. Each call starts K1 only after the previous call's work on
+        the main stream (a fork / join per call), so calls do not overlap.
+        ``stream``: main stream handle (0: torch's current stream); usable
+        inside a HIP graph capture on that stream."""
+        import torch
+
+        if stream:
+            s1 = torch.cuda.ExternalStream(stream)
+        else:
+            s1 = torch.cuda.current_stream()
+        s2 = torch.cuda.Stream()
+        k1 = self.bound("K1", 0, s2.cuda_stream)
+        rest = []
+        for name, i in self.sequence(infer=True):
+            rest.append((name, self.bound(name, i, stream)))
+        ev_fork = torch.cuda.Event()
+        ev_u = torch.cuda.Event()
+
+        def run():
+            ev_fork.record(s1)
+            s2.wait_event(ev_fork)
+            k1()
+            ev_u.record(s2)
+            joined = False
+            for name, f in rest:
+                if name == "K3" and not joined:
+                    s1.wait_event(ev_u)
+                    joined = True
                 f()
 
         return run
@@ -398,10 +547,47 @@ class WinogradPipeline:
         import torch
 
         self.rt.sync()
-        out = torch.empty_like(like, device="cpu").pin_memory()
-        self.rt.memcpy_d2h(_u8(out), self.bufs["y"], out.nbytes)
-        self.rt.sync()
+        nc = self._nc()
+        out = torch.empty_like(like, device="cpu")
+        for i in range(self.chunks):
+            h = torch.empty_like(like[i * nc : (i + 1) * nc], device="cpu")
+            h = h.pin_memory()
+            self.rt.memcpy_d2h(_u8(h), self.ys[i], h.nbytes)
+            self.rt.sync()
+            out[i * nc : (i + 1) * nc] = h
         return out
+
+
+def time_graph(fn, *, warmup: int, iters: int) -> float:
+    """Microseconds per call of ``fn(stream)`` captured into one HIP graph
+    (torch.cuda.CUDAGraph) and replayed: the GPU-side time without the host
+    launch cost. ``fn`` builds the launches bound to ``stream``."""
+    import torch
+
+    s = torch.cuda.Stream()
+    torch.cuda.synchronize()
+    run = fn(s.cuda_stream)
+    with torch.cuda.stream(s):
+        run()  # warm (module loads) outside the capture
+    torch.cuda.synchronize()
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g, stream=s):
+        run()
+    torch.cuda.synchronize()
+    with torch.cuda.stream(s):
+        for _ in range(warmup):
+            g.replay()
+        e0 = torch.cuda.Event(enable_timing=True)
+        e1 = torch.cuda.Event(enable_timing=True)
+        e0.record(s)
+        for _ in range(iters):
+            g.replay()
+        e1.record(s)
+    e1.synchronize()
+    us = e0.elapsed_time(e1) * 1e3 / iters
+    torch.cuda.synchronize()
+    del g
+    return us
 
 
 def verify_error(out, ref) -> Tuple[float, float]:
@@ -493,7 +679,7 @@ def _k3_sweep_wmma(pipe, cands, args, ref, y_t):
     from benchmarks.common import winograd_k3_wmma as K3W
     from kernels.common.conv_winograd_gemm_wmma import WinogradGemmProblem
 
-    prob = WinogradGemmProblem.from_conv(pipe.spec.problem, pipe.spec.m)
+    prob = WinogradGemmProblem.from_conv(pipe.spec.problem, pipe.spec.tile_mn)
     B = pipe.bufs
     plans = K3W.candidate_plans(
         prob, cands, K3W.device_cus(), tails=args.k3_tails == "on"
@@ -518,19 +704,56 @@ def _k3_sweep_wmma(pipe, cands, args, ref, y_t):
         return None
     plan, us, _ = best
     run = plan.bind(prob, B["V"], B["U"], B["M"])
-    return us, "wmma:" + plan.label(), lambda: pipe.set_k3_run(run)
+    return us, "wmma:" + plan.label(), lambda: pipe.set_k3_run(run, (plan, prob))
 
 
-def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
+def batch_chunks(problem, m: int, mode: str, **spec_kw) -> int:
+    """Number of N-chunks of the batch split: ``mode`` is ``auto`` (the
+    fewest chunks, a divisor of N, whose chunk pipeline keeps every buffer
+    and GEMM operand within the 32-bit offsets) or an explicit count."""
+    import dataclasses
+
+    from kernels.common.conv_winograd_fwd import WinogradFwdSpec
+    from kernels.common.conv_winograd_gemm_wmma import (
+        WinogradGemmProblem,
+        WinogradGemmWmmaSpec,
+        winograd_gemm_problem_reason,
+    )
+
+    N = problem.N
+    if mode != "auto":
+        c = int(mode)
+        if c < 1 or N % c:
+            raise ValueError(f"--batch-split {c} must divide N={N}")
+        return c
+    for c in range(1, N + 1):
+        if N % c:
+            continue
+        sub = dataclasses.replace(problem, N=N // c)
+        try:
+            WinogradFwdSpec(problem=sub, m=m[0], m_w=m[1], **spec_kw)
+        except ValueError:
+            continue
+        prob = WinogradGemmProblem.from_conv(sub, m)
+        if winograd_gemm_problem_reason(WinogradGemmWmmaSpec(), prob) is None:
+            return c
+    raise ValueError(f"no batch split of N={N} fits the 32-bit offsets")
+
+
+def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
+    """One pipeline; ``m`` is the tile ``(mh, mw)`` (or an int, square)."""
+    import dataclasses
+
     from rocke.runtime import time_launches
     from kernels.common.conv_winograd_fwd import (
         WinogradFwdSpec,
         tuned_transform_options,
     )
 
+    m = _m_pair(m)
     prescale = resolve_prescale(args.prescale, m, io_dtype)
     operand = resolve_operand(args.operand, m, io_dtype)
-    xf = tuned_transform_options(m, prescale)
+    xf = tuned_transform_options(m, prescale, problem)
     if args.vec:
         xf["vec"] = args.vec
     if args.k2_lds:
@@ -540,10 +763,12 @@ def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
         xf["tiles_per_thread"] = args.k2_tiles
     if args.k2_lanes:
         xf["lds_lanes"] = args.k2_lanes
+    if args.k1_vec:
+        xf["filter_vec"] = args.k1_vec
+    if args.k1_rows:
+        xf["filter_rows"] = (m[0] + 2) if args.k1_rows == "all" else int(args.k1_rows)
     vec = xf["vec"]
-    spec = WinogradFwdSpec(
-        problem=problem,
-        m=m,
+    spec_kw = dict(
         io_dtype=io_dtype,
         operand_dtype=operand,
         block_size=args.block,
@@ -552,9 +777,13 @@ def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
         nt_stores=args.nt_stores == "on",
         **xf,
     )
+    chunks = batch_chunks(problem, m, args.batch_split, **spec_kw)
+    sub = dataclasses.replace(problem, N=problem.N // chunks)
+    spec = WinogradFwdSpec(problem=sub, m=m[0], m_w=m[1], **spec_kw)
     tag = (
-        f"F({m},3) io={io_dtype} op={operand} prescale={'on' if prescale else 'off'} "
-        f"vec={vec} T={spec.num_tiles}"
+        f"F({m_label(m)},3) io={io_dtype} op={operand} prescale={'on' if prescale else 'off'} "
+        f"vec={vec} T={spec.num_tiles * chunks}"
+        + (f" chunks={chunks}x(N={sub.N}, T={spec.num_tiles})" if chunks > 1 else "")
     )
     print(f"\n== {problem.short()} {tag}", flush=True)
     ws = spec.workspace_bytes()
@@ -563,7 +792,17 @@ def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
         flush=True,
     )
 
-    pipe = WinogradPipeline(spec=spec, arch=arch)
+    merge: Tuple[str, ...] = ()
+    merge_arg = args.merge
+    if merge_arg == "auto":
+        from kernels.common.conv_winograd_fwd import merge_worthwhile
+
+        merge_arg = "K2,K1" if merge_worthwhile(spec) else "off"
+    if merge_arg != "off":
+        names = [s.strip() for s in merge_arg.split(",")]
+        first = "K2a" if (prescale and spec.prescale_split) else "K2"
+        merge = tuple(first if s == "K2" else s for s in names)
+    pipe = WinogradPipeline(spec=spec, arch=arch, chunks=chunks, merge=merge)
     transforms = pipe.compile_transforms()
     impls = ("wmma", "implicit") if args.k3 == "both" else (args.k3,)
     built = {}
@@ -630,27 +869,52 @@ def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
             pipe.run_once()
             err, l2 = verify_error(pipe.read_y(y_t), ref)
 
+        def timed(fn):
+            return time_launches(fn, warmup=args.warmup, iters=args.iters) * 1e3
+
         results = []
         for rep in range(args.repeats):
+            if args.cooldown > 0:
+                # Long timing loops throttle the GPU (power / sclk); let it
+                # cool before each repeat.
+                time.sleep(args.cooldown)
+            # The total first (it is the number that counts), then the
+            # variants, then the per-stage times (one chunk's launch, times
+            # the chunk count).
+            total = timed(pipe.bound_total())
+            extra = {}
+            if merge:
+                extra["total_unmerged_us"] = timed(pipe.bound_total(merged=False))
+                extra["merged_us"] = timed(pipe.bound("MERGED"))
+            extra["infer_us"] = timed(pipe.bound_infer())
+            if args.two_streams == "on":
+                extra["total_2s_us"] = timed(pipe.bound_two_streams())
+            if args.graph == "on":
+                gkw = dict(warmup=args.warmup, iters=args.iters)
+                extra["total_graph_us"] = time_graph(
+                    lambda s: pipe.bound_total(stream=s), **gkw
+                )
+                extra["infer_graph_us"] = time_graph(
+                    lambda s: pipe.bound_infer(stream=s), **gkw
+                )
+                if args.two_streams == "on":
+                    extra["total_2s_graph_us"] = time_graph(
+                        lambda s: pipe.bound_two_streams(stream=s), **gkw
+                    )
             times = {
-                k: time_launches(pipe.bound(k), warmup=args.warmup, iters=args.iters)
-                * 1e3
+                k: timed(pipe.bound(k)) * (1 if k == "K1" else chunks)
                 for k in ("K1", "K2", "K3", "K4")
             }
-            total = (
-                time_launches(pipe.bound_total(), warmup=args.warmup, iters=args.iters)
-                * 1e3
-            )
             sz = pipe.sizes
-            k2_bytes = sz["x"] + sz["V"] + (sz["e"] if prescale else 0)
-            k4_bytes = sz["M"] + sz["y"] + (sz["e"] if prescale else 0)
+            k2_bytes = (sz["x"] + sz["V"] + (sz["e"] if prescale else 0)) * chunks
+            k4_bytes = (sz["M"] + sz["y"] + (sz["e"] if prescale else 0)) * chunks
             tflops = problem.flops / (total * 1e-6) * 1e-12
             status = "NA" if err is None else ("PASS" if err < 5e-2 else "FAIL")
             line = "\t".join(
                 [
                     "WINO_RESULT",
                     f"shape={problem.short()}",
-                    f"m={m}",
+                    f"m={m_label(m)}",
                     f"io={io_dtype}",
                     f"op={operand}",
                     f"prescale={int(prescale)}",
@@ -668,7 +932,10 @@ def run_case(problem, io_dtype: str, m: int, args, arch: str, ref_cache: dict):
                     f"verify={status}",
                     f"err={err if err is not None else float('nan'):.3e}",
                     f"relL2={l2 if l2 is not None else float('nan'):.3e}",
+                    f"chunks={chunks}",
+                    f"merge={'+'.join(merge) or 'off'}",
                 ]
+                + [f"{k}={v:.2f}" for k, v in extra.items()]
             )
             print(line, flush=True)
             results.append(line)
@@ -681,7 +948,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--miopen-cmd", help="one MIOpenDriver command line")
     ap.add_argument("--miopen-file", help="file with one MIOpenDriver command per line")
-    ap.add_argument("--m", default="4", choices=("2", "4", "both"))
+    ap.add_argument(
+        "--m",
+        default="4",
+        help="tile sizes, comma-separated: 2, 4, 6 or mixed HxW (e.g. 6x4, 4x6); "
+        "'both' = 2,4; 'auto' / 'autoN' = the N (default 2) tiles the cost "
+        "model ranks best (each is measured, the fastest verified one counts)",
+    )
     ap.add_argument("--prescale", default="auto", choices=("on", "off", "auto"))
     ap.add_argument(
         "--operand",
@@ -696,6 +969,12 @@ def main(argv=None) -> int:
         help="K2 LDS region in tiles, e.g. 4x8; 0x0 = register path; '' = tuned",
     )
     ap.add_argument("--k2-tiles", type=int, default=0, help="K2 tiles per thread")
+    ap.add_argument("--k1-vec", type=int, default=0, help="K1 vector width (0 = vec)")
+    ap.add_argument(
+        "--k1-rows",
+        default="",
+        help="K1 rows of G g per thread: 1, a divisor of n, or 'all' ('' = tuned)",
+    )
     ap.add_argument("--k2-lanes", type=int, default=0, help="K2 LDS lanes per tile")
     ap.add_argument("--prescale-mode", default="fused", choices=("fused", "split"))
     ap.add_argument(
@@ -719,6 +998,37 @@ def main(argv=None) -> int:
         choices=("on", "off"),
         help="also try WMMA plans that run the last partial round of blocks "
         "with a second tile config",
+    )
+    ap.add_argument(
+        "--batch-split",
+        default="auto",
+        help="N-chunks run as separate pipelines (U shared): 'auto' = the "
+        "fewest that keep every buffer < 2 GiB, or a divisor of N",
+    )
+    ap.add_argument(
+        "--merge",
+        default="off",
+        help="transform stages launched as one kernel, in block order, e.g. "
+        "'K2,K1' (K2 = the first stage of the input transform); 'off'; 'auto' "
+        "= K2,K1 unless K2's LDS would starve K1's blocks of occupancy",
+    )
+    ap.add_argument(
+        "--graph",
+        default="off",
+        choices=("on", "off"),
+        help="also time the chain (and the inference chain) replayed as a HIP graph",
+    )
+    ap.add_argument(
+        "--two-streams",
+        default="off",
+        choices=("on", "off"),
+        help="also time K1 on a second stream, overlapping K2",
+    )
+    ap.add_argument(
+        "--cooldown",
+        type=float,
+        default=0.0,
+        help="seconds to sleep before each timing repeat (GPU throttling)",
     )
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--warmup", type=int, default=5)
@@ -744,7 +1054,7 @@ def main(argv=None) -> int:
     if not cmds:
         ap.error("give --miopen-cmd or --miopen-file")
 
-    ms = (2, 4) if args.m == "both" else (int(args.m),)
+    ms_arg = "2,4" if args.m == "both" else args.m
     rc = 0
     ref_cache: dict = {}
     for cmd in cmds:
@@ -755,11 +1065,26 @@ def main(argv=None) -> int:
         if dtype not in ("fp16", "bf16"):
             print(f"[skip] dtype {dtype} unsupported: {cmd}", flush=True)
             continue
+        ms = []
+        for tok in (t.strip() for t in ms_arg.split(",")):
+            if not tok:
+                continue
+            if tok.startswith("auto"):
+                from benchmarks.common.winograd_k3_wmma import device_cus
+                from kernels.common.conv_winograd_fwd import auto_tiles
+
+                got = auto_tiles(
+                    problem, dtype, count=int(tok[4:] or 2), num_cus=device_cus()
+                )
+                print(f"auto tiles: {[m_label(m) for m in got]}", flush=True)
+            else:
+                got = [_m_pair(tok)]
+            ms += [m for m in got if m not in ms]
         for m in ms:
             try:
                 res = run_case(problem, dtype, m, args, arch, ref_cache)
             except ValueError as e:
-                print(f"[skip] {problem.short()} F({m},3): {e}", flush=True)
+                print(f"[skip] {problem.short()} F({m_label(m)},3): {e}", flush=True)
                 continue
             if not res or any("verify=FAIL" in r for r in res):
                 rc = 1
