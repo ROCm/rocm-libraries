@@ -8,8 +8,11 @@
 #include <limits>
 #include <roc/hostnumerics/detail/prime.hpp>
 #include <stdexcept>
+#include <vector>
 
 namespace roc::hostnumerics {
+// Flat indices first + ordinal * stride, with at most maxElements entries.
+// Consumers supply an exclusive end bound; entries at or beyond it are omitted.
 struct IndexRange {
     size_t first;
     size_t stride;
@@ -17,7 +20,22 @@ struct IndexRange {
 
     IndexRange(size_t first, size_t stride, size_t maxElements)
         : first(first), stride(stride), maxElements(maxElements) {
-        if (stride == 0) throw std::runtime_error("Index selection stride must be nonzero.");
+        if (stride == 0) throw std::runtime_error("Index range stride must be nonzero.");
+    }
+
+    // A start at or beyond end yields no entries. Validate stride even for empty work.
+    size_t count(size_t end) const {
+        if (stride == 0) throw std::runtime_error("Index range stride must be nonzero.");
+        if (first >= end) return 0;
+        return std::min(1 + (end - 1 - first) / stride, maxElements);
+    }
+
+    // Allocate an explicit list only when requested; traversal can retain the range.
+    std::vector<size_t> indices(size_t end) const {
+        std::vector<size_t> result(count(end));
+        for (size_t ordinal = 0; ordinal < result.size(); ++ordinal)
+            result[ordinal] = first + ordinal * stride;
+        return result;
     }
 
     static IndexRange all() {
