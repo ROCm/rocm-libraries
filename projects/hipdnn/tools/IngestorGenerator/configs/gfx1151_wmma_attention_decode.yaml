@@ -1,0 +1,146 @@
+# Source of truth for the shipped hipkernel:Gfx1151WmmaAttentionDecode catalog:
+# the rocKE RDNA split-KV SDPA decode for gfx11 (RDNA3/3.5) and gfx12 (RDNA4).
+# Its prefill sibling is configs/gfx1151_wmma_attention.yaml.
+#
+# Decode (kernels/gfx1151/wmma_fmha_decode.py): the split-KV, GQA-packed decode
+# for small query lengths, one object per dtype x bucket (64/128/256) x bias
+# kind. Each kernel is a two-launch kernel (RFC 0017 section 15.1 "sources"):
+# "decode", the object's primary kernel, and "merge", the companion kernel that
+# combines the splits, both in the same code object. The native handler
+# (Gfx1151WmmaAttentionNative.cpp) declares those two launch names, launches
+# decode and then merge, and owns the workspace of split partials. Masks are
+# all runtime. The D256 objects split the O columns over dv_split workgroups
+# (2 on gfx11, 4 on gfx12). Batch, sequence lengths, Q/K/V head counts, the
+# head widths, the diagonal alignment and window bounds, LSE selection, the
+# bias broadcast strides and every dense tensor stride are launch arguments.
+#
+# The native matcher serves exactly the problems the rocKE dispatcher's rule
+# (rdna_attention_use_decode) sends to decode, in the bucket
+# wmma_fmha_decode_bucket picks; the prefill engine declines those. Every kernel
+# compiles for its shard's LLVM generic processor (target: generic).
+
+dialect: packaged
+authored_subpath: rocKE/gfx1151_wmma_attention_decode
+engine:
+  name: hipkernel:Gfx1151WmmaAttentionDecode
+  # 1.2.0: graphs with a runtime pass-by-value scale tensor require it. The
+  # native matcher declines override-shape graphs (1.1.0).
+  sdk_version: 1.2.0
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: dtype
+  type: string
+- name: kind
+  type: string
+- name: head_size
+  type: int
+- name: head_size_v
+  type: int
+- name: mask_mode
+  type: string
+- name: bias
+  type: string
+- name: block_size
+  type: int
+- name: block_m
+  type: int
+- name: dv_split
+  type: int
+
+specialization:
+  metadata_fields:
+  - dtype
+  - kind
+  - head_size
+  - head_size_v
+  - mask_mode
+  - bias
+  - block_size
+  - block_m
+  - dv_split
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}
+  bindings:
+    dtype: {field: dtype}
+    kind: {method: catalog_kind}
+    head_size: {method: catalog_head_size}
+    head_size_v: {method: catalog_head_size_v}
+    mask_mode: {method: catalog_mask}
+    bias: {method: catalog_bias}
+    block_size: {method: catalog_block_size}
+    block_m: {method: catalog_block_m}
+    dv_split: {method: catalog_dv_split}
+
+kernel_source_kind: rocke
+# Split-KV decode partials: derived from the problem and the device's CU count.
+workspace_policy: derived
+packs:
+- name: gfx1151_wmma_attention_decode
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx1151/wmma_fmha_decode.py
+    builder: build_wmma_fmha_decode_module
+    target: generic
+    # Two launches of one code object: the split-KV kernel and the kernel merging
+    # its splits (the builder returns a KernelModule; "merge" is its companion).
+    launches:
+      decode: {}
+      merge: {role: merge}
+  variants:
+  # Decode, D64/D128 on both families (one O slice per workgroup).
+  - name: wmma_decode.{dtype}_d{head_size}_dvs{dv_split}_{tag}
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, bias, dv_split]
+    spec_defaults:
+      dv_split: 1
+    shape_axes:
+      dtype: [fp16, bf16]
+    knob_sets:
+      bias:
+      - {tag: nobias, metadata: {bias: none}}
+      - {bias: f32, tag: bias_f32}
+      - {bias: q, tag: bias_q}
+    shapes:
+    - {head_size: 64, knobs: bias, resolved: {kind: decode, head_size_v: 64, mask_mode: runtime, block_size: 128, block_m: 16}}
+    - {head_size: 128, knobs: bias, resolved: {kind: decode, head_size_v: 128, mask_mode: runtime, block_size: 128, block_m: 16}}
+  # Decode, D256 on gfx11: O columns split over 2 workgroups.
+  - name: wmma_decode.{dtype}_d{head_size}_dvs{dv_split}_{tag}
+    arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, bias, dv_split]
+    spec_defaults:
+      dv_split: 2
+    shape_axes:
+      dtype: [fp16, bf16]
+    knob_sets:
+      bias:
+      - {tag: nobias, metadata: {bias: none}}
+      - {bias: f32, tag: bias_f32}
+      - {bias: q, tag: bias_q}
+    shapes:
+    - {head_size: 256, knobs: bias, resolved: {kind: decode, head_size_v: 256, mask_mode: runtime, block_size: 128, block_m: 16}}
+  # Decode, D256 on gfx12: O columns split over 4 workgroups.
+  - name: wmma_decode.{dtype}_d{head_size}_dvs{dv_split}_{tag}
+    arch: [gfx1200, gfx1201]
+    metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, bias, dv_split]
+    spec_defaults:
+      dv_split: 4
+    shape_axes:
+      dtype: [fp16, bf16]
+    knob_sets:
+      bias:
+      - {tag: nobias, metadata: {bias: none}}
+      - {bias: f32, tag: bias_f32}
+      - {bias: q, tag: bias_q}
+    shapes:
+    - {head_size: 256, knobs: bias, resolved: {kind: decode, head_size_v: 256, mask_mode: runtime, block_size: 128, block_m: 16}}

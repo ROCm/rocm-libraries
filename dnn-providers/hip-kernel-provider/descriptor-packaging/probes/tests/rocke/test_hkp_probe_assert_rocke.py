@@ -35,6 +35,7 @@ class _Tree:
             "kdp": KDP_IN_ARCH_DIR,
             "name": self.ukd_name if name is None else name,
             "kind": kind,
+            "arch": ARCH,
         }
 
     def write_expect(self, entries):

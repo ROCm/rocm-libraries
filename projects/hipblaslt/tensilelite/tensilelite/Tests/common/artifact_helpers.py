@@ -171,7 +171,7 @@ def extract_artifact(artifact_path, dest_dir):
         warnings.warn(
             f"Extracted artifact '{artifact_path}' contains no code object "
             f"files ({', '.join(code_object_exts)}). The _is_use_cache_file "
-            f"whitelist may be out of sync with the Tensile output layout.",
+            f"whitelist may be out of sync with the TensileLite output layout.",
             stacklevel=2,
         )
 

@@ -15,6 +15,7 @@
  * reached through rocke/lower_llvm_internal.h.
  */
 
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stddef.h>
@@ -64,6 +65,7 @@ static void _op_arith_zext(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_arith_sext(rocke_lower_t* L, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, "arith.zext");
     const rocke_value_t* v = op->operands[0];
     rocke_ll_emitf(L,
                    "  %s = sext %s %s to %s",
@@ -133,6 +135,21 @@ static void _op_arith_cast_f32_to(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_llvm_type(L, op->results[0]->type));
 }
 
+static void _op_arith_cvt_f32_to_f64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    rocke_ll_emitf(
+        L, "  %s = fpext float %s to double", rocke_ll_result_name(op), rocke_ll_operand(L, v));
+}
+
+/* LLVM's fptrunc rounds to nearest even under the default FP environment. */
+static void _op_arith_cvt_f64_to_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    rocke_ll_emitf(
+        L, "  %s = fptrunc double %s to float", rocke_ll_result_name(op), rocke_ll_operand(L, v));
+}
+
 static void _op_arith_sitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
@@ -146,6 +163,17 @@ static void _op_arith_sitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_emitf(
         L, "  %s = sitofp i32 %s to float", rocke_ll_result_name(op), rocke_ll_operand(L, v));
+}
+
+static void _op_arith_uitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_i_refuse_non_u8_source(op);
+    const rocke_value_t* v = op->operands[0];
+    rocke_ll_emitf(L,
+                   "  %s = uitofp %s %s to float",
+                   rocke_ll_result_name(op),
+                   rocke_ll_llvm_type(L, v->type),
+                   rocke_ll_operand(L, v));
 }
 
 static void _op_arith_rint_f32(rocke_lower_t* L, const rocke_op_t* op)
@@ -232,8 +260,32 @@ static void _op_arith_cvt_pk_f32_bf8x4(rocke_lower_t* L, const rocke_op_t* op)
  * fused scale + dequant: <4 x fp8/bf8> + f32 scale -> <4 x f32>
  * ------------------------------------------------------------------------- */
 
+/* Python _Lowerer._require_fp8_scale_conversion. LLVM does not always refuse
+ * the intrinsic on a target without the instruction: it can select it and write
+ * an encoding the GPU does not have. So the check is made here, from the
+ * backend's capability, before anything is emitted. */
+static void ll_require_fp8_scale_conversion(rocke_lower_t* L,
+                                            const rocke_op_t* op,
+                                            const char* instruction,
+                                            const char* fallback)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)";
+    if(!L->backend || !L->backend->has_fp8_scale_conversion)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s needs %s, which %s does not have (gfx950 does); convert with %s and "
+                      "multiply by the scale instead",
+                      rocke_opcode_name(op->opcode),
+                      instruction,
+                      gfx,
+                      fallback);
+    }
+}
+
 static void _op_arith_cvt_scalef32_pk_f32_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    ll_require_fp8_scale_conversion(L, op, "v_cvt_scalef32_pk_f32_fp8", "cvt_pk_f32_fp8x4");
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* scale = op->operands[1];
     const char* res = rocke_ll_result_name(op);
@@ -267,6 +319,7 @@ static void _op_arith_cvt_scalef32_pk_f32_fp8(rocke_lower_t* L, const rocke_op_t
 
 static void _op_arith_cvt_scalef32_pk_f32_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    ll_require_fp8_scale_conversion(L, op, "v_cvt_scalef32_pk_f32_bf8", "cvt_pk_f32_bf8x4");
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* scale = op->operands[1];
     const char* res = rocke_ll_result_name(op);
@@ -427,6 +480,27 @@ static void _op_arith_cvt_f32_to_i8_sat(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = trunc i32 %s to i8", res, smin_v);
 }
 
+/* Python _op_arith_cvt_f32_to_u8_sat: clamping in f32 keeps fptoui in range,
+ * and maxnum turns a NaN into 0. */
+static void _op_arith_cvt_f32_to_u8_sat(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const char* res = rocke_ll_result_name(op);
+    const char* rounded = rocke_ll_derived(L, op, "r");
+    const char* low = rocke_ll_derived(L, op, "lo");
+    const char* high = rocke_ll_derived(L, op, "hi");
+    rocke_ll_need(L, "rint.f32");
+    rocke_ll_need(L, "maxnum.f32");
+    rocke_ll_need(L, "minnum.f32");
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.rint.f32(float %s)", rounded, rocke_ll_operand(L, v));
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.maxnum.f32(float %s, float 0.000000e+00)", low, rounded);
+    rocke_ll_emitf(
+        L, "  %s = call float @llvm.minnum.f32(float %s, float 2.550000e+02)", high, low);
+    rocke_ll_emitf(L, "  %s = fptoui float %s to i8", res, high);
+}
+
 static void _op_arith_cvt_pk_i8_f32x4(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
@@ -506,7 +580,10 @@ void rocke_ll_register_convert(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_TRUNC_F32_TO_BF16, _op_arith_trunc_f32_to_bf16);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CAST_TO_F32, _op_arith_cast_to_f32);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CAST_F32_TO, _op_arith_cast_f32_to);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_F32_TO_F64, _op_arith_cvt_f32_to_f64);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_F64_TO_F32, _op_arith_cvt_f64_to_f32);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SITOFP_F32, _op_arith_sitofp_f32);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_UITOFP_F32, _op_arith_uitofp_f32);
     rocke_ll_set_handler(ROCKE_OP_ARITH_RINT_F32, _op_arith_rint_f32);
 
     rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_FP8_TO_F32, _op_arith_cvt_fp8_to_f32);
@@ -523,6 +600,7 @@ void rocke_ll_register_convert(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_PK_BF8_F32X4, _op_arith_cvt_pk_bf8_f32x4);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_PK_I8_F32X4, _op_arith_cvt_pk_i8_f32x4);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_F32_TO_I8_SAT, _op_arith_cvt_f32_to_i8_sat);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT, _op_arith_cvt_f32_to_u8_sat);
 }
 
 } /* namespace ckc */

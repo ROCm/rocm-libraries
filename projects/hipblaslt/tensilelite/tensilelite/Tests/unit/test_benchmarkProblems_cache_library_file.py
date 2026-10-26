@@ -11,7 +11,7 @@ gfx1201 SIGSEGV regression; persisting it eliminates the bug class.
 
 import inspect
 
-import Tensile.BenchmarkProblems as bp
+import tensilelite.BenchmarkProblems as bp
 
 
 def test_cache_yaml_write_path_persists_LibraryFile():
@@ -32,8 +32,12 @@ def test_cache_yaml_write_path_persists_LibraryFile():
 
 def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path):
     """_readCacheIfValid must return both fields, not just CodeObjectFiles."""
-    from Tensile import LibraryIO
-    from Tensile.BenchmarkProblems import _readCacheIfValid, _CACHE_FIELDS
+    from tensilelite import LibraryIO
+    from tensilelite.BenchmarkProblems import (
+        _CACHE_FIELDS,
+        _KERNEL_NAMING_VERSION,
+        _readCacheIfValid,
+    )
 
     cachePath = str(tmp_path / "cache.yaml")
     # Build a cache yaml with all required fields. The fixture values must
@@ -47,6 +51,7 @@ def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path)
         customKernelWildcard = False
 
     cacheData = {f: getattr(StubBenchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    cacheData["KernelNamingVersion"] = _KERNEL_NAMING_VERSION
     cacheData["CodeObjectFiles"] = ["library/gfx1201/TensileLibrary_gfx1201.co"]
     cacheData["LibraryFile"] = "library/gfx1201/TensileLibrary.yaml"
     LibraryIO.writeYAML(cachePath, cacheData)
@@ -59,8 +64,8 @@ def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path)
 
 def test_cache_yaml_without_LibraryFile_is_invalid(tmp_path):
     """Legacy cache.yaml lacking LibraryFile must be treated as invalid → recompile."""
-    from Tensile import LibraryIO
-    from Tensile.BenchmarkProblems import _readCacheIfValid, _CACHE_FIELDS
+    from tensilelite import LibraryIO
+    from tensilelite.BenchmarkProblems import _readCacheIfValid, _CACHE_FIELDS
 
     cachePath = str(tmp_path / "cache.yaml")
     class StubBenchmarkStep:

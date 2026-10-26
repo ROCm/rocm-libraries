@@ -128,20 +128,69 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  *
- * @note The `engine_details` structure is provided by the user, while the function fills in its fields, including
- *       allocating the buffer for the serialized `EngineDetails`. After use, this memory must be freed using
- *       hipdnnEnginePluginDestroyEngineDetails().
+ * @note The caller provides the `engine_details` structure, and this function fills in its `ptr`
+ *       and `size` with memory it allocates for the serialized `EngineDetails`. The plugin owns
+ *       that memory. On success, `engine_details` must hold a non-null `ptr` and a non-zero `size`,
+ *       or hipDNN reports a plugin error. When `ptr` and `size` are valid, hipDNN calls
+ *       hipdnnEnginePluginDestroyEngineDetails() once to free the memory allocated by this
+ *       function, passing the same `handle` and the `engine_details` this call filled in. The
+ *       memory must remain valid until then. If `ptr` is non-null but `size` is zero, hipDNN does
+ *       not call hipdnnEnginePluginDestroyEngineDetails() for that structure.
  *
  * @note The optional `name` field of `EngineDetails` records the engine's name but never confers
  *       one: `EngineDetails` exists only once a graph does, so a name carried there cannot be
  *       validated when the plugin loads. Report the name through hipdnnEnginePluginGetEngineName
  *       instead; filling in this field alone is reported as a plugin defect and ignored.
+ *
+ * @note When this function returns an error status, the plugin must ensure that no memory it
+ *       allocated for `engine_details` remains allocated. hipDNN does not call
+ *       hipdnnEnginePluginDestroyEngineDetails() after a failed call.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
                                        int64_t engine_id,
                                        const hipdnnPluginConstData_t* op_graph,
                                        hipdnnPluginConstData_t* engine_details);
+
+/**
+ * @brief Optional matched-catalog enumeration (engine plugin API 1.5.0).
+ *
+ * Explicit knob settings in engine_config restrict the catalog. offset is zero-based and
+ * must not exceed total_count; limit must be in [1, 10000]. Candidate order is stable and
+ * independent of ranking; candidate ids are non-empty and unique. An absent export or
+ * NOT_APPLICABLE means unsupported, not empty.
+ * Free a successful response with DestroyEngineDetails.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginEnumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                          const hipdnnPluginConstData_t* engine_config,
+                                          const hipdnnPluginConstData_t* op_graph,
+                                          uint64_t offset,
+                                          uint64_t limit,
+                                          hipdnnPluginConstData_t* engine_details);
+
+/**
+ * @brief Describes or evaluates an engine UHD prediction (engine API 1.5.0).
+ *
+ * ENGINE predicts execution with tuning off; CONFIGURATION returns complete knob settings
+ * for one configuration. Neither may benchmark, tune, or run GPU work, and a missing
+ * prediction never changes applicability. The output `metric` is always
+ * engine_config.ranking_metric (empty = "tflops"; RFC 0019 §11.4); an engine with no
+ * model for it reports UNAVAILABLE. An unregistered metric is BAD_PARAM.
+ *
+ * @param[in] evaluate Zero for description only, one to evaluate the prediction.
+ * @param[out] prediction Serialized EnginePrediction, freed with
+ * hipdnnEnginePluginDestroyEngineDetails; left empty on failure.
+ * @return SUCCESS with an AVAILABLE, UNAVAILABLE, or INVALID prediction, or an error.
+ * An absent export or NOT_APPLICABLE means unsupported.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetPrediction(hipdnnEnginePluginHandle_t handle,
+                                    const hipdnnPluginConstData_t* engine_config,
+                                    const hipdnnPluginConstData_t* op_graph,
+                                    hipdnnEnginePredictionKind_t kind,
+                                    int32_t evaluate,
+                                    hipdnnPluginConstData_t* prediction);
 
 /**
  * @brief Destroys the `engine_details` object and releases the associated resources.
@@ -152,7 +201,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @return A value of type `hipdnnPluginStatus_t` indicating the status of the operation.
  *
- * @note This function takes a structure as input, deallocates the buffer, and sets all fields to 0.
+ * @note hipDNN calls this function once for each successful hipdnnEnginePluginGetEngineDetails()
+ *       call that returned a non-null `ptr` and a non-zero `size`, passing the structure that call
+ *       filled in. This function must free that memory, and hipDNN does not use it afterwards.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHandle_t handle,
@@ -177,6 +228,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 
 /**
  * @brief Creates an execution context for a specific engine configuration and an operation graph.
+ *
+ * An engine that chooses its own kernel here ranks its catalog by
+ * engine_config.ranking_metric (empty = "tflops"), within any explicit knob settings.
  *
  * @param[in] handle The engine plugin handle.
  * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from
@@ -225,8 +279,17 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @note This function is optional. Plugins that do not export it do not support compiled execution plan
  *       serialization.
  * @note The serialized bytes are plugin-specific and are treated as opaque by hipDNN.
- * @note The plugin owns the returned buffer. hipDNN must release it by calling
- *       hipdnnEnginePluginDestroySerializedExecutionContext().
+ * @note The caller provides the `serialized_context` structure, and this function fills in its
+ *       `ptr` and `size` with memory it allocates for the serialized execution context. The plugin
+ *       owns that memory. On success, `serialized_context` must hold a non-null `ptr` and a
+ *       non-zero `size`, or hipDNN reports a plugin error. When `ptr` and `size` are valid, hipDNN
+ *       copies the bytes. In either case hipDNN calls
+ *       hipdnnEnginePluginDestroySerializedExecutionContext() once to free the memory allocated by
+ *       this function, passing the same `handle` and the `serialized_context` this call filled in.
+ *       The memory must remain valid until then.
+ * @note When this function returns an error status, the plugin must ensure that no memory it
+ *       allocated for `serialized_context` remains allocated. hipDNN does not call
+ *       hipdnnEnginePluginDestroySerializedExecutionContext() after a failed call.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSerializeExecutionContext(
@@ -245,6 +308,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * @note This function is optional. Plugins that export hipdnnEnginePluginSerializeExecutionContext must also
  *       export this function.
+ * @note hipDNN calls this function once after each successful
+ *       hipdnnEnginePluginSerializeExecutionContext() call, passing the structure exactly as that
+ *       call filled it in (including a null `ptr` or a zero `size`). This function must free any
+ *       memory allocated for this structure, and hipDNN does not use it afterwards.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginDestroySerializedExecutionContext(

@@ -45,7 +45,7 @@ from benchmarks.common.kernel_cache import (
     current_emitter_digest,
     current_llvm_flavor,
 )
-from benchmarks.common.kernel_label import strip_launch_suffix
+from kernels.conv.kernel_label import strip_launch_suffix
 
 # Longest artifact stem written to --out-dir: a file name is capped at 255
 # bytes (NAME_MAX) and a lossless label can exceed it, so a longer name is cut
@@ -69,15 +69,15 @@ def job_and_builder(identity: KernelIdentity):
     """``(job, build)``: the job ``--compile-all`` builds ``identity`` from
     and the family's ``build(job, arch, dtype)``."""
     if identity.is_direct:
-        from benchmarks.common.direct_kernel_sweep import (
-            build_direct_job,
+        from kernels.conv.direct_aot_jobs import (
             direct_job_for_identity,
+            direct_kernel_for_job,
         )
 
-        return direct_job_for_identity(identity), build_direct_job
-    from benchmarks.common.kernel_sweep import build_kernel, job_for_identity
+        return direct_job_for_identity(identity), direct_kernel_for_job
+    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
 
-    return job_for_identity(identity), build_kernel
+    return job_for_identity(identity), kernel_for_job
 
 
 def reproduce(
@@ -135,6 +135,7 @@ def reproduce(
                 comgr_input.llvm_text,
                 isa=comgr_input.isa,
                 options=list(comgr_input.options),
+                fresh_process=comgr_input.fresh_process,
             )
         except Exception as e:  # noqa: BLE001 - reported per kernel
             log(f"  [error] compile failed: {type(e).__name__}: {e}")

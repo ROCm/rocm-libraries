@@ -12,12 +12,13 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 
-from hkp_pack import provenance_sidecar
-from hkp_pack.pipeline import run_pipeline
+from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
 
@@ -27,6 +28,17 @@ ARCH = "gfx942"
 ROCKE_ARCH = "gfx950"
 
 EXAMPLE_ROOT = PACKAGING / "examples" / "descriptors"
+
+
+#: The shipped generic target table, as the path the packer and its tools take and as
+#: the loaded table the library entry points take.
+GENERIC_TARGETS_JSON = DEFAULT_TABLE_PATH
+GENERIC_TARGETS = GenericTargets.load(GENERIC_TARGETS_JSON)
+
+
+def run_pipeline(**kwargs):
+    """`pipeline.run_pipeline` with the shipped generic target table."""
+    return pipeline.run_pipeline(generic_targets_json=GENERIC_TARGETS_JSON, **kwargs)
 
 
 def _read(path):
@@ -164,7 +176,15 @@ def _run_cli(*args, mode="structural"):
     """The CLI as an agent runs it. The mode is always explicit, because the tool
     requires it."""
     return subprocess.run(
-        [sys.executable, str(_TOOL), "--mode", mode, *args],
+        [
+            sys.executable,
+            str(_TOOL),
+            "--mode",
+            mode,
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            *args,
+        ],
         capture_output=True,
         text=True,
     )
@@ -206,3 +226,26 @@ def _conftest_only_paths(candidates):
         for p in candidates
         if p and str(p) in sys.path and os.path.abspath(p) not in env_paths
     ]
+
+
+def _restem_uuid_ids(folder, token):
+    """Give every UUID id under `folder` a distinct, deterministic value.
+
+    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
+    uuid5 keeps repeat packs byte-identical.
+    """
+    ids = set()
+    for path in sorted(folder.rglob("*.json")):
+        did = json.loads(path.read_text(encoding="utf-8")).get("id")
+        try:
+            uuid.UUID(str(did))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        ids.add(did)
+    for path in sorted(folder.rglob("*.json")):
+        text = path.read_text(encoding="utf-8")
+        for did in sorted(ids):
+            text = text.replace(
+                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
+            )
+        path.write_text(text, encoding="utf-8")

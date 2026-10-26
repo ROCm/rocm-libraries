@@ -119,7 +119,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
             std::vector<unsigned int>          output_grid(p.length.size() + 1, 1);
             int                                start_global_dev_id_input  = 0;
             int                                start_global_dev_id_output = 0;
-            std::uniform_int_distribution<int> dev_rng(0, total_num_devices);
+            std::uniform_int_distribution<int> dev_rng(0, total_num_devices - 1);
 
             auto p_dist = p;
             switch(type)

@@ -353,13 +353,24 @@ TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
 }
 
 // ---------------------------------------------------------------------------
-// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16
+// gfx12's SWMMAC (16x16x32, and 16x16x64 iu4) executes as an illegal
+// instruction on gfx1250, so neither stepping may define it.
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SWMMA_NonXDL_F32_16x16x32_BF16) {
-    auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x32_bf16");
-    ASSERT_NE(desc, nullptr);
-    EXPECT_TRUE(desc->has(IF_SWMMA));
-    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+TEST_F(HwInstDescTest, SWMMA_Gfx12Only_NotDefined) {
+    for (const char* name : {"gfx1250", "gfx1250v0"}) {
+        const auto* info = ArchHelper::getInstance().getArchInfo(name);
+        ASSERT_NE(info, nullptr) << name;
+        const auto& map = info->getMnemonicToIsaOpcodeMap();
+        for (const char* mnemonic :
+             {"v_swmmac_bf16_16x16x32_bf16", "v_swmmac_f16_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf16", "v_swmmac_f32_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf8_bf8", "v_swmmac_f32_16x16x32_bf8_fp8",
+              "v_swmmac_f32_16x16x32_fp8_bf8", "v_swmmac_f32_16x16x32_fp8_fp8",
+              "v_swmmac_i32_16x16x32_iu4", "v_swmmac_i32_16x16x32_iu8",
+              "v_swmmac_i32_16x16x64_iu4"}) {
+            EXPECT_EQ(map.count(mnemonic), 0u) << name << " " << mnemonic;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

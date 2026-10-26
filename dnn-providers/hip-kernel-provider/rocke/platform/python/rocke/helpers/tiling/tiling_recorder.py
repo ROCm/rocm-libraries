@@ -64,6 +64,21 @@ class PipelineTransaction:
         return self.tile_desc.layout
 
     @property
+    def tensor(self) -> Any:
+        """The memory ``TensorDesc`` this load / store addressed, rebuilt from the recorded lengths,
+        strides and dtype (the addressing facts). The address replays use it for LDS transactions,
+        whose lengths are ints."""
+        from rocke.core.ir import Type
+
+        from .descriptors import make_tensor_desc
+
+        if self.kind == "fill":
+            raise ValueError(
+                "a fill transaction moves no memory -- it has no tensor descriptor"
+            )
+        return make_tensor_desc(self.lengths, self.strides, Type(self.dtype_name))
+
+    @property
     def op_fanout(self) -> int:
         """Hardware mem-ops this verb emits: one wide op per ``vw`` registers."""
         if self.kind == "fill":
@@ -187,7 +202,7 @@ class _Recorder:
         if kind == "store" and space == "global":
             vw = 1
         else:
-            vw = _access_vw(tile_desc, tensor.strides, tensor.dtype.name, swizzle)
+            vw = _access_vw(tile_desc, tensor, swizzle)
         node = PipelineTransaction(
             kind=kind,
             seq=self._next(),
@@ -308,11 +323,11 @@ class _Recorder:
             )
 
 
-def _access_vw(tile_desc: Any, strides: Any, dtype_name: str, swizzle: Any) -> int:
+def _access_vw(tile_desc: Any, tensor: Any, swizzle: Any) -> int:
     """The vw the emit would choose for this access (reuse the validated bank-conflict helper)."""
     from .lds_conflict import access_width
 
-    return access_width(tile_desc, tuple(strides), dtype_name, swizzle)
+    return access_width(tile_desc, tensor, swizzle)
 
 
 def _namespaces(build_fn: Callable) -> list[dict]:
@@ -561,10 +576,9 @@ def _elem_addresses(t: PipelineTransaction, n_lanes: int) -> dict[tuple[int, int
     origin = tuple(int(o) for o in t.origin)  # Milestone 0: constant LDS origins
     accesses, vw = addr_map(
         t.tile_desc,
-        tuple(t.strides),
+        t.tensor,
         origin=origin,
         n_lanes=n_lanes,
-        dtype_name=t.dtype_name,
         lds_swizzle=t.swizzle,
     )
     out: dict[tuple[int, int], int] = {}

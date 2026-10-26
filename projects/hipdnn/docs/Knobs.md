@@ -83,7 +83,6 @@ Knobs follow a hierarchical naming scheme to avoid conflicts and improve organiz
 ```
 global.benchmarking
 global.workspace_size_limit
-global.deterministic
 ```
 
 **Plugin-specific namespace**:
@@ -247,7 +246,8 @@ The following global knobs are available in hipDNN:
 
 | Knob Name | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `global.benchmarking` | int64 | 0 (disabled) | Enable benchmarking mode for kernel selection. When enabled, engines may run multiple kernel variants and select the fastest. First run may be slower due to benchmarking overhead. |
+| `global.benchmarking` | int64 | 0 (disabled) | Enable benchmarking mode for kernel selection. When enabled, engines may run multiple kernel variants and select the fastest. First run may be slower due to benchmarking overhead. The `HIPDNN_FORCE_BENCHMARKING` environment variable overrides this knob (see [Environment Configuration](./Environment.md#hipdnn_force_benchmarking)). |
+| `global.workspace_size_limit` | int64 | Engine-dependent (the maximum the engine reports) | Maximum workspace memory in bytes. Only engines that support it expose it. Today the MIOpen provider exposes it for convolution operations. See the [MIOpen provider knobs](../../../dnn-providers/miopen-provider/docs/Knobs.md). |
 
 > [!NOTE]
 > Additional global knobs may be available depending on the engine. Use `get_knobs_for_engine()` to discover all available knobs for a specific engine.
