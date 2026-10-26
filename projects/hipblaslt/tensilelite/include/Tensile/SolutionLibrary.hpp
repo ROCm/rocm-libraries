@@ -65,7 +65,8 @@ namespace TensileLite
            && solutions.problemType.computeType == problem.computeType()
            && solutions.problemType.groupedGemm == problem.groupedGemm()
            && solutions.problemType.mxBlockA == problem.mxBlockA()
-           && solutions.problemType.mxBlockB == problem.mxBlockB())
+           && solutions.problemType.mxBlockB == problem.mxBlockB()
+           && solutions.problemType.fusedA2A == problem.fusedA2A())
             return true;
         return false;
     }
