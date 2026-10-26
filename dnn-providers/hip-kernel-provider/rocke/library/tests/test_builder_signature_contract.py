@@ -363,6 +363,9 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
     # Winograd forward: merged transform launch
     "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
+    # Generalized Winograd forward
+    "kernels.common.conv_winograd_gen.WinoAxis": ("m", "r"),
+    "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
 }
 
 

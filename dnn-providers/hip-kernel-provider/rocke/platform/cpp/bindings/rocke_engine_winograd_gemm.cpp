@@ -46,6 +46,7 @@ rocke_winograd_gemm_wmma_spec_t wgw_build_spec(const py::dict& d, std::deque<std
     if(d.contains("sched"))
         s.sched = d["sched"].is_none() ? nullptr : keep(store, d["sched"].cast<std::string>());
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.taps = dict_int(d, "taps", s.taps);
     return s;
 }
 

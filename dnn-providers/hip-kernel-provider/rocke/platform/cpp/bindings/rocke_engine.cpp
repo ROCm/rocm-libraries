@@ -141,10 +141,11 @@ void register_fused_moe_e2e(py::module_& m);
  * transforms rocke_tensor_descriptor tag clash note above). */
 void register_moe_gemm_fused(py::module_& m);
 
-/* Defined in rocke_engine_winograd_{fwd,gemm}.cpp: the Winograd
+/* Defined in rocke_engine_winograd_{fwd,gemm,gen}.cpp: the Winograd
  * forward families, one translation unit each (see winograd_glue.hpp). */
 void register_winograd_fwd(py::module_& m);
 void register_winograd_gemm(py::module_& m);
+void register_winograd_gen(py::module_& m);
 
 namespace
 {
@@ -4867,6 +4868,7 @@ PYBIND11_MODULE(rocke_engine, m)
     register_img2col(m); /* separate TU; see note at top of file */
     register_winograd_fwd(m); /* separate TUs; see winograd_glue.hpp */
     register_winograd_gemm(m);
+    register_winograd_gen(m);
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,
          &deep_fused_conv_pool_serialize_ir,

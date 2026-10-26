@@ -2,12 +2,15 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_conv_winograd_internal.h -- pieces the C++ ports of the
- * Winograd forward kernels share (library/kernels/common/conv_winograd_fwd.py):
+ * Winograd forward families share (library/kernels/common/conv_winograd_fwd.py,
+ * conv_winograd_gen.py, conv_winograd_fused_1d_wmma.py):
  *
- *   * the exact Toom-Cook matrices (A^T, G, B^T) of the F(m, 3) point sets of
- *     conv_winograd_fwd._POINTS, as rationals;
+ *   * the exact Toom-Cook matrices (A^T, G, B^T) of every default point set
+ *     (conv_winograd_gen.POINTS, which includes the F(m, 3) sets of
+ *     conv_winograd_fwd._POINTS), as rationals;
  *   * the small IR helpers of conv_winograd_fwd (_load_raw, _raw_to_f32,
- *     _pack_vec_f32, _store_packed, _store_vec_f32, _oob_sel, _lincomb).
+ *     _pack_vec_f32, _store_packed, _store_vec_f32, _oob_sel, _lincomb) and
+ *     conv_winograd_gen._lincomb_f.
  *
  * C++ only (not part of the C ABI).
  */
@@ -70,7 +73,7 @@ struct ToomCook
     }
 };
 
-/* toom_cook(m) of conv_winograd_fwd (r = 3); NULL when there is none. */
+/* toom_cook_gen(m, r) with the default points; NULL when there is none. */
 const ToomCook* toom_cook(int m, int r);
 
 /* _pow2_vec: the largest power of two <= cap that divides n. */
@@ -106,6 +109,9 @@ rocke_value_t* oob_sel(rocke_ir_builder_t* b, rocke_value_t* ok, rocke_value_t* 
 /* conv_winograd_fwd._lincomb: sum(c * v) over the non-zero integer c, fp32. */
 rocke_value_t* lincomb(rocke_ir_builder_t* b,
                        const std::vector<std::pair<int64_t, rocke_value_t*>>& terms);
+/* conv_winograd_gen._lincomb_f: sum(c * v) with float coefficients. */
+rocke_value_t* lincomb_f(rocke_ir_builder_t* b,
+                         const std::vector<std::pair<double, rocke_value_t*>>& terms);
 
 } // namespace rocke_wino
 
