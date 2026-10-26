@@ -12,7 +12,6 @@
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
 
-#include <vector>
 #include <thread>
 
 #if MIOPEN_BACKEND_HIP
