@@ -389,9 +389,10 @@ still validates a packed `sources`, so a shipped tree can be checked.
   `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
   field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
   No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
-  agreement evidence: a declaration with `metadata_fields` over a `hip` or `hsaco` `sources`
-  UKD is refused, exactly as for a single launch, and the desk check reports the kernel as
-  unclaimed. Claims, consumer agreement and evidence publish and verify are `rocke` only.
+  agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
+  `sources` UKD is refused, exactly as for a single launch; one without them leaves the
+  kernel reported as unclaimed by the desk check. Claims, consumer agreement and evidence
+  publish and verify are `rocke` only.
 
 The packer lists the entries and nothing more: launch order, workspace and the hand-off
 between stages belong to the native dispatch handler of the pack. That handler declares the
