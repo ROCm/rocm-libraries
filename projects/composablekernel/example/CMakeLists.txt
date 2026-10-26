@@ -182,9 +182,9 @@ function(add_example_executable EXAMPLE_NAME FILE_NAME)
             message(DEBUG "removing bf8 example ${source} ")
             list(REMOVE_ITEM FILE_NAME "${source}")
         endif()
-        # Build fp8 gemm_multiply_multiply and moe only on gfx94/95 and gfx12
+        # Build fp8 or bf8 examples only on architectures where they are supported: gfx94/95 and gfx12
         if(NOT EX_TARGETS MATCHES "gfx94" AND NOT EX_TARGETS MATCHES "gfx95" AND NOT EX_TARGETS MATCHES "gfx12")
-            if(source_name MATCHES "fp8" AND source_name MATCHES "(gemm_multiply_multiply|moe)")
+            if(source_name MATCHES "fp8|bf8")
                 message(DEBUG "Skipping ${source} example for current target")
                 list(REMOVE_ITEM FILE_NAME "${source}")
             endif()
