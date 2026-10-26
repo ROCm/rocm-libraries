@@ -89,6 +89,52 @@ struct constant_generator
 struct DeviceTransform
 {
     template<typename... RandomAccessIteratorsIn,
+             typename... RandomAccessIteratorsOut,
+             typename NumItemsT,
+             typename TransformOp,
+             typename Env = _HIPCUB_STD::execution::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Transform(_HIPCUB_STD::tuple<RandomAccessIteratorsIn...>  inputs,
+                                _HIPCUB_STD::tuple<RandomAccessIteratorsOut...> outputs,
+                                NumItemsT                                       num_items,
+                                TransformOp                                     transform_op,
+                                Env                                             env = {})
+    {
+        return detail::legacy_invoke(env,
+                                     [&](auto stream)
+                                     {
+                                         return ::rocprim::transform(
+                                             inputs,
+                                             outputs,
+                                             num_items,
+                                             transform_op,
+                                             stream,
+                                             HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+                                     });
+    }
+
+    template<typename... RandomAccessIteratorsIn,
+             typename... RandomAccessIteratorsOut,
+             typename NumItemsT,
+             typename TransformOp>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Transform([[maybe_unused]] void*                          d_temp_storage,
+                                [[maybe_unused]] size_t&                        temp_storage_bytes,
+                                _HIPCUB_STD::tuple<RandomAccessIteratorsIn...>  inputs,
+                                _HIPCUB_STD::tuple<RandomAccessIteratorsOut...> outputs,
+                                NumItemsT                                       num_items,
+                                TransformOp                                     transform_op,
+                                hipStream_t                                     stream = nullptr)
+    {
+        return ::rocprim::transform(inputs,
+                                    outputs,
+                                    num_items,
+                                    transform_op,
+                                    stream,
+                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename NumItemsT,
              typename TransformOp,

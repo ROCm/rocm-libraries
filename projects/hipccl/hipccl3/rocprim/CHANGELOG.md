@@ -16,6 +16,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for predicated `rocprim::device_transform`.
 * Added support for nullary transform `rocprim::device_generate`.
 * Added new `rocprim::device_find_if`.
+* Added `rocprim::device_transform` variant accepting n-ary transform operations API with $n$ input and $m$ output iterators.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 

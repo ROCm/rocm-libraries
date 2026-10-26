@@ -34,6 +34,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::MaxPotentialDynamicSmemBytes`.
 * Added env-based API for `hipcub::DeviceSegmentedReduce::Sum`.
 * Added new `hipcub::DeviceFind::FindIf`.
+* Added new `hipcub::DeviceTransform::Transform` N->M API.
 * Feature parity with CCCL/CUB 3.3.0.
 
 ### Changed

@@ -23,6 +23,7 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/device/device_transform.hpp"
+#include "hipcub/tuple.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -760,6 +761,136 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
     }
 }
 
+template<class Functor, class OutputIterator, class... Inputs>
+OutputIterator transform_nary(Functor f, size_t size, OutputIterator out, Inputs... inputs)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        *out++ = f(*inputs++...);
+    }
+
+    return out;
+}
+
+template<typename T, typename U>
+struct binary_to_ternary_transform
+{
+    HIPCUB_HOST_DEVICE
+    auto operator()(T a, T b) const
+    {
+        return hipcub::tuple<U, U, U>{a + b, a * b, -a};
+    }
+};
+
+template<typename T, typename U>
+struct binary_to_ternary_host_transform
+{
+    HIPCUB_HOST
+    auto operator()(T a, T b) const
+    {
+        return std::tuple<U, U, U>{a + b, a * b, -a};
+    }
+};
+
+TYPED_TEST(HipcubDeviceTransformTests, BinaryToTernaryTransform)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type       = typename TestFixture::input_type;
+    using output_type      = typename TestFixture::output_type;
+    using HostOutputTupleT = std::tuple<output_type, output_type, output_type>;
+
+    hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<input_type> input1
+                = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+            std::vector<input_type> input2
+                = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+
+            // Device pointers
+            input_type*  d_input1;
+            input_type*  d_input2;
+            output_type* d_output1;
+            output_type* d_output2;
+            output_type* d_output3;
+
+            // Allocate memory
+            size_t num_input_bytes  = size * sizeof(input_type);
+            size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input1, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input2, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output1, num_output_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output2, num_output_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output3, num_output_bytes));
+
+            // Prepare input
+            HIP_CHECK(hipMemcpy(d_input1, input1.data(), num_input_bytes, hipMemcpyHostToDevice));
+            HIP_CHECK(hipMemcpy(d_input2, input2.data(), num_input_bytes, hipMemcpyHostToDevice));
+
+            // Calculate expected results on host
+            std::vector<HostOutputTupleT> expected(size, HostOutputTupleT{0, 0, 0});
+
+            transform_nary(binary_to_ternary_host_transform<input_type, output_type>(),
+                           size,
+                           expected.begin(),
+                           input1.begin(),
+                           input2.begin());
+
+            // Run
+            HIP_CHECK(hipcub::DeviceTransform::Transform(
+                test_utils::make_tuple(d_input1, d_input2),
+                test_utils::make_tuple(d_output1, d_output2, d_output3),
+                size,
+                binary_to_ternary_transform<input_type, output_type>{},
+                stream));
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Fetch output
+            std::vector<output_type> output1(size);
+            std::vector<output_type> output2(size);
+            std::vector<output_type> output3(size);
+            HIP_CHECK(hipMemcpy(output1.data(), d_output1, num_output_bytes, hipMemcpyDeviceToHost))
+            HIP_CHECK(hipMemcpy(output2.data(), d_output2, num_output_bytes, hipMemcpyDeviceToHost))
+            HIP_CHECK(hipMemcpy(output3.data(), d_output3, num_output_bytes, hipMemcpyDeviceToHost))
+
+            // Check if output values are as expected
+            for(decltype(size) i = 0; i < size; ++i)
+            {
+                auto e = expected[i];
+
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output1[i],
+                                            std::get<0>(e),
+                                            test_utils::precision<output_type>::value));
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output2[i],
+                                            std::get<1>(e),
+                                            test_utils::precision<output_type>::value));
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output3[i],
+                                            std::get<2>(e),
+                                            test_utils::precision<output_type>::value));
+            }
+        }
+    }
+}
+
 template<class T>
 struct flag_expected_op_t
 {
@@ -841,7 +972,7 @@ void test_large_indices()
     }
 }
 
-TEST(RocprimDeviceTransformTests, LargeIndices)
+TEST(HipcubDeviceTransformTests, LargeIndices)
 {
 #if HAS_VALGRIND_H
     //Disable large tests to reduce valgrind run time
