@@ -419,7 +419,54 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             constexpr auto b_warp_y_0 = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
             constexpr auto c_warp_y_0 = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-            auto stage_gemm_split_a = [&](auto s) {
+#ifndef CK_TDM_V3_EARLY_REFILL
+#define CK_TDM_V3_EARLY_REFILL 1
+#endif
+            // The fill issuers of stage s; with alternating issuers they own only that stage.
+            auto stage_issuer = [&](auto s) {
+                if constexpr(s.value == 0)
+                    return is_a_issuer0 || is_b_issuer0;
+                else
+                    return is_a_issuer1 || is_b_issuer1;
+            };
+            // Refill stage s with the tile two ahead (the same moves as the loop's own refill).
+            auto refill_stage = [&](auto s) {
+                if constexpr(s.value == 0)
+                {
+                    if(is_a_issuer0)
+                    {
+                        move_tile_window(a_copy_dram_window, a_dram_tile_window_step_stride);
+                        Base::GlobalPrefetchTDM(
+                            tdm_config_a[0], a_copy_lds_windows[number<0>{}], a_copy_dram_window);
+                    }
+                    if(is_b_issuer0)
+                    {
+                        move_tile_window(b_copy_dram_window, b_dram_tile_window_step_stride);
+                        Base::GlobalPrefetchTDM(
+                            tdm_config_b[0], b_copy_lds_windows[number<0>{}], b_copy_dram_window);
+                    }
+                }
+                else
+                {
+                    if(is_a_issuer1)
+                    {
+                        move_tile_window(a_dram_window1, a_dram_tile_window_step_stride);
+                        Base::GlobalPrefetchTDM(
+                            tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
+                    }
+                    if(is_b_issuer1)
+                    {
+                        move_tile_window(b_dram_window1, b_dram_tile_window_step_stride);
+                        Base::GlobalPrefetchTDM(
+                            tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
+                    }
+                }
+            };
+
+            // early (bool_constant): right after the signal, the issuers of stage s consume the
+            // barrier phase themselves and refill stage s, ahead of the overlapped WMMAs; every
+            // other wave waits for the phase after them (stage_wait in the loop).
+            auto stage_gemm_split_a = [&](auto s, auto early) {
                 static_for<0, sub_tile_num, 1>{}([&](auto i) {
                     auto b_win = make_tile_window(b_lds_block_views[s],
                                                   make_tuple(number<NPerBlock>{}, number<kKSub>{}),
@@ -446,6 +493,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             }
                             __builtin_amdgcn_s_barrier_signal(-1);
                             __builtin_amdgcn_sched_barrier(0);
+                            if constexpr(early.value)
+                            {
+                                if(stage_issuer(s))
+                                {
+                                    __builtin_amdgcn_s_barrier_wait(-1);
+                                    refill_stage(s);
+                                }
+                                __builtin_amdgcn_sched_barrier(0);
+                            }
                         }
                         typename WG::AWarpTensor a_warp;
                         a_warp.get_thread_buffer() = a_slice.get_y_sliced_thread_data(
@@ -571,18 +627,26 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             }
                         }
 #if CK_TDM_V3_SPLIT_BARRIER
-#if CK_TDM_V3_SPLIT_A
-                        stage_gemm_split_a(I0{});
+#if CK_TDM_V3_SPLIT_A && CK_TDM_V3_EARLY_REFILL
+                        stage_gemm_split_a(I0{}, bool_constant<true>{});
+                        if(!stage_issuer(I0{}))
+                        {
+                            stage_wait();
+                        }
+#elif CK_TDM_V3_SPLIT_A
+                        stage_gemm_split_a(I0{}, bool_constant<false>{});
+                        stage_wait();
 #else
                         stage_gemm_arrive(I0{});
-#endif
                         stage_wait();
+#endif
 #else
                         stage_gemm(I0{});
 
                         block_sync_lds();
 #endif
 
+#if !(CK_TDM_V3_SPLIT_BARRIER && CK_TDM_V3_SPLIT_A && CK_TDM_V3_EARLY_REFILL)
                         if(is_a_issuer0)
                         {
                             move_tile_window(a_copy_dram_window, a_dram_tile_window_step_stride);
@@ -597,6 +661,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                                     b_copy_lds_windows[number<0>{}],
                                                     b_copy_dram_window);
                         }
+#endif
 #if !CK_TDM_V3_SPLIT_BARRIER
                         if(is_a_issuer1 || is_b_issuer1)
                         {
@@ -642,18 +707,26 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     // pong
                     {
 #if CK_TDM_V3_SPLIT_BARRIER
-#if CK_TDM_V3_SPLIT_A
-                        stage_gemm_split_a(I1{});
+#if CK_TDM_V3_SPLIT_A && CK_TDM_V3_EARLY_REFILL
+                        stage_gemm_split_a(I1{}, bool_constant<true>{});
+                        if(!stage_issuer(I1{}))
+                        {
+                            stage_wait();
+                        }
+#elif CK_TDM_V3_SPLIT_A
+                        stage_gemm_split_a(I1{}, bool_constant<false>{});
+                        stage_wait();
 #else
                         stage_gemm_arrive(I1{});
-#endif
                         stage_wait();
+#endif
 #else
                         stage_gemm(I1{});
 
                         block_sync_lds();
 #endif
 
+#if !(CK_TDM_V3_SPLIT_BARRIER && CK_TDM_V3_SPLIT_A && CK_TDM_V3_EARLY_REFILL)
                         if(is_a_issuer1)
                         {
                             move_tile_window(a_dram_window1, a_dram_tile_window_step_stride);
@@ -666,6 +739,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             Base::GlobalPrefetchTDM(
                                 tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
                         }
+#endif
 #if !CK_TDM_V3_SPLIT_BARRIER
                         if(is_a_issuer0 || is_b_issuer0)
                         {
@@ -685,7 +759,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             {
 #if CK_TDM_V3_SPLIT_BARRIER
 #if CK_TDM_V3_SPLIT_A
-                stage_gemm_split_a(I0{});
+                stage_gemm_split_a(I0{}, bool_constant<false>{});
 #else
                 stage_gemm_arrive(I0{});
 #endif
