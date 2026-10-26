@@ -710,4 +710,3 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16SkinnyOutputSignedSplitTails)
 }
 
 } // namespace
-
