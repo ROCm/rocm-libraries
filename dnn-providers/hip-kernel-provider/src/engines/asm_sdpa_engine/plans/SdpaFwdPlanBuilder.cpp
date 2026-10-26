@@ -8,10 +8,14 @@
 #include "plans/SdpaFwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <string>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -252,6 +256,150 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
+// Formats dims or strides for a decline reason.
+static std::string vectorToString(const flatbuffers::Vector<int64_t>* values)
+{
+    return hipdnn_data_sdk::utilities::vecToString(
+        hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(values));
+}
+
+// Q/K/V/O strides the kernels cannot address. Logs the first one found and
+// returns false; returns true when every layout is addressable. Called by
+// isApplicable after it has checked that Q, K, V and O have rank-4 dims.
+//
+// The forward argument block carries only batch, head and sequence byte strides
+// for Q, K, V and O, and each row is read or written as D contiguous elements. On
+// gfx942 each kind of layout declined here gave a wrong O in the cases run,
+// except where noted:
+// - Head-dim (innermost) stride other than 1: it is treated as 1 (a stride-2 Q, K
+//   or V read the gaps between elements, so O changed between runs; a stride-2 O
+//   left half of O unwritten).
+// - Sequence stride below the tensor's own head dim, also 0 and also on a
+//   length-1 sequence axis: each buffer ends S * seq stride bytes after the start
+//   of its (batch, head) slice, so the end of the last row reads as 0 and writes
+//   there are dropped. (With S_kv = 1 a short K row still gave the right O, since
+//   the one key takes all the softmax weight; by the address formula its score,
+//   and so the stats, are wrong.) This relies on K having Q's head dim and O
+//   being [B, H_q, S_q, D_v], which isApplicable does not check yet: the kernels
+//   size K rows by Q's head dim and O's buffer by S_q.
+// - O batch or head stride 0 on an axis longer than 1. Each (batch, head) slice
+//   of O is written by its own workgroups (grid z is the batch, and x or y the
+//   head), so such slices share memory and overwrite each other: an O batch or
+//   head stride of 0 left half or two thirds of O wrong, and O changed between
+//   some runs with identical inputs.
+//   Only a zero stride is checked, as in the backward: it is how a broadcast is
+//   written, so O gets one when it is given a broadcast input's strides. Nonzero
+//   strides that make O overlap itself, such as equal batch and head strides,
+//   have to be built by hand; they are not checked, although on gfx942 they also
+//   gave a wrong O. Stats do get an overlap check (below), because their address
+//   formula leaves a single comparison to make; for O it would take a footprint
+//   check over three axes in any order, which would fit better in hipDNN's graph
+//   validation, where every engine gets it. The batch-axis part assumes batch
+//   mode, the only mode with forward kernels: in group mode the kernels locate
+//   each batch by its sequence offsets, not by O's batch stride.
+// A zero batch or head stride on Q, K or V (a broadcast) just re-reads one slice
+// and stays accepted. So do odd strides, which the backward declines on some
+// axes: with bf16 (hd128 and hd192) they were addressed correctly on every axis
+// of Q, K, V and O, on gfx942 and on gfx950, whose kernels load rows as 16-byte
+// vectors. The fp8 kernels, with their 1-byte elements, were not run with them.
+static bool
+    areFwdIoLayoutsAddressable(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    struct IoTensor
+    {
+        const char* name;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor;
+        // Written by the kernels (O).
+        bool isOutput;
+    };
+    const std::array<IoTensor, 4> ioTensors{
+        {{"q", &q, false}, {"k", &k, false}, {"v", &v, false}, {"o", &o, true}}};
+    for(const auto& io : ioTensors)
+    {
+        const auto* dims = io.tensor->dims();
+        const auto* strides = io.tensor->strides();
+        const auto describe = [&]() {
+            return std::string(io.name) + " tensor (Actual dims: " + vectorToString(dims)
+                   + ", strides: " + vectorToString(strides) + ")";
+        };
+        HIP_KERNEL_RETURN_FALSE_IF(strides->size() != 4,
+                                   "rank-4 strides required for " + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(3) != 1,
+                                   "head-dim (innermost) stride must be 1 for " + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(2) < dims->Get(3),
+                                   "sequence stride must be at least the head dim for "
+                                       + describe());
+        const bool zeroOutputStride = io.isOutput
+                                      && ((dims->Get(0) > 1 && strides->Get(0) == 0)
+                                          || (dims->Get(1) > 1 && strides->Get(1) == 0));
+        HIP_KERNEL_RETURN_FALSE_IF(zeroOutputStride,
+                                   "zero batch or head stride aliases output " + describe());
+    }
+    return true;
+}
+
+// Stats (LSE) layouts the kernels cannot write. Logs the first problem found and
+// returns false; returns true when the layout is addressable. Called by
+// isApplicable after it has checked that stats are [B, H_q, S_q] or
+// [B, H_q, S_q, 1] matching Q.
+//
+// Every forward kernel writes the LSE of (b, h, s) at
+// ((b * H_q + h) * lse_Hs + s) * 4 bytes, with lse_Hs the stats head stride
+// (buildPlan); it takes no stats batch or sequence stride (from the .co
+// disassembly of every forward kernel). On gfx942 a padded stats batch stride, a
+// seq stride of 2, and [B, S_q, H] or [H, B, S_q] storage each gave wrong or NaN
+// stats; by the address formula [H, B, S_q] also writes past the end of the stats
+// buffer. So the seq stride must be 1 and the batch stride H_q times the head
+// stride. A head stride below S_q makes (batch, head) slices overlap, so it
+// declines too. Unlike in the backward, whose kernels ignore the stats strides, a
+// padded head stride with a matching batch stride fits this formula, was correct
+// on gfx942, and stays accepted. The stride of a size-1 batch or sequence axis is
+// not checked. A size-1 head axis is, on purpose: buildPlan passes the head
+// stride as lse_Hs, so with H_q = 1 and B > 1 the kernel steps between batches by
+// the head stride, which must then equal the batch stride and be at least S_q.
+// Passing the batch stride as lse_Hs when H_q = 1 would also accept packed
+// [B, 1, S_q] stats with any head stride; such stats are rare and decline.
+static bool
+    isFwdStatsLayoutAddressable(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t batchSize = q.dims()->Get(0);
+    const int64_t numHeadsQ = q.dims()->Get(1);
+    const int64_t seqLenQ = q.dims()->Get(2);
+    const auto* statsStrides = stats.strides();
+    const auto describe = [&]() {
+        return " (Actual stats dims: " + vectorToString(stats.dims()) + ", strides: "
+               + vectorToString(statsStrides) + ", q dims: " + vectorToString(q.dims()) + ")";
+    };
+    HIP_KERNEL_RETURN_FALSE_IF(statsStrides->size() != stats.dims()->size(),
+                               "stats tensor must have one stride per dim" + describe());
+    HIP_KERNEL_RETURN_FALSE_IF(seqLenQ > 1 && statsStrides->Get(2) != 1,
+                               "stats tensor seq stride must be 1 when S_q > 1" + describe());
+    // The kernel's step between batches; no match if it overflows int64.
+    int64_t kernelBatchStride = 0;
+    const bool batchStrideMatches
+        = !__builtin_mul_overflow(numHeadsQ, statsStrides->Get(1), &kernelBatchStride)
+          && statsStrides->Get(0) == kernelBatchStride;
+    HIP_KERNEL_RETURN_FALSE_IF(batchSize > 1 && !batchStrideMatches,
+                               "stats tensor batch stride must be H_q times its head stride when "
+                               "B > 1"
+                                   + describe());
+    HIP_KERNEL_RETURN_FALSE_IF((batchSize > 1 || numHeadsQ > 1) && statsStrides->Get(1) < seqLenQ,
+                               "stats tensor head stride must be at least S_q when B * H_q > 1 "
+                               "(slices would overlap)"
+                                   + describe());
+    return true;
+}
+
 static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
@@ -373,6 +521,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
         !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
+    if(!areFwdIoLayoutsAddressable(*qTensor, *kTensor, *vTensor, *oTensor))
+    {
+        return false;
+    }
+
     // Validate optional stats (LSE) output tensor.
     // Gate purely on generate_stats; the UID is required when the flag is set.
     const bool hasStats = hasStatsOutput(attrs);
@@ -415,6 +568,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                        || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
                                        || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
                                    "stats tensor shape [B,H,Sq] must match Q tensor");
+
+        if(!isFwdStatsLayoutAddressable(*statsTensor, *qTensor))
+        {
+            return false;
+        }
     }
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
