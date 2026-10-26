@@ -2918,11 +2918,14 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[5];
+    const char* parts[6];
     char f_buf[32];
+    char pad_buf[32];
     char bw_buf[24];
     char bh_buf[24];
     char bwv_buf[24];
+    int n_parts = 0;
+    int pad_w;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -2932,19 +2935,27 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"f{KH}x{KW}", f"bw{block_w}",
-     *                  f"bh{block_h}", f"bw{block_waves}wv",
+    /* kernel_name_join(name, p.short(), f"f{KH}x{KW}",
+     *                  f"p{PAD}x{PAD_W}" if PAD_W != PAD else "",
+     *                  f"bw{block_w}", f"bh{block_h}", f"bw{block_waves}wv",
      *                  flags={"ur": unroll_rows, "dg": dgrad,
      *                         "bf16": dtype=="bf16"}) */
     snprintf(f_buf, sizeof(f_buf), "f%dx%d", spec->problem.KH, spec->problem.KW);
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
-    parts[0] = prob_short;
-    parts[1] = f_buf;
-    parts[2] = bw_buf;
-    parts[3] = bh_buf;
-    parts[4] = bwv_buf;
+    parts[n_parts++] = prob_short;
+    parts[n_parts++] = f_buf;
+    /* Only a per-axis padding is named: an equal one keeps its historical name. */
+    pad_w = rocke_direct_conv_problem_pad_w(&spec->problem);
+    if(pad_w != spec->problem.PAD)
+    {
+        snprintf(pad_buf, sizeof(pad_buf), "p%dx%d", spec->problem.PAD, pad_w);
+        parts[n_parts++] = pad_buf;
+    }
+    parts[n_parts++] = bw_buf;
+    parts[n_parts++] = bh_buf;
+    parts[n_parts++] = bwv_buf;
     {
         const char* flag_names[3] = {"ur", "dg", "bf16"};
         int flag_on[3];
@@ -2953,7 +2964,7 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
         flag_on[1] = spec->dgrad ? 1 : 0;
         flag_on[2] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 

@@ -111,6 +111,50 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
         )
         self.assertIsNotNone(spec, why)
 
+    def test_tiled_dgrad_name_carries_per_axis_padding(self):
+        kn = dict(block_w=8, block_h=2)
+        n0 = _tiled(_problem(KH=5, PAD=2, pad_w=0), **kn).kernel_name()
+        n1 = _tiled(_problem(KH=5, PAD=2, pad_w=1), **kn).kernel_name()
+        self.assertNotEqual(n0, n1)
+        self.assertIn("_f5x5_p2x0_", n0)
+        # An equal padding keeps its historical name, however it is spelled.
+        sym = _tiled(_problem(KH=5, PAD=2, pad_w=2), **kn).kernel_name()
+        self.assertEqual(sym, _tiled(_problem(KH=5, PAD=2), **kn).kernel_name())
+        self.assertNotIn("_p2x", sym)
+
+    def test_pad_w_below_minus_one_refused(self):
+        kn = dict(block_w=8, block_h=2)
+        for p in (_problem(KH=5, PAD=1, pad_w=-2), _problem(pad_w=-3)):
+            ok, why = dc.is_valid_depthwise_tiled_spec(_tiled(p, **kn), "gfx1250")
+            self.assertFalse(ok)
+            self.assertIn("pad_w", why)
+            fwd = dc.DirectDepthwiseTiledSpec(problem=p, wave_size=32, **kn)
+            self.assertFalse(dc.is_valid_depthwise_tiled_spec(fwd, "gfx1250")[0])
+            ok, why = dc.is_valid_depthwise_dgrad_stream_spec(_stream(p), "gfx1250")
+            self.assertFalse(ok)
+            self.assertIn("pad_w", why)
+            with self.assertRaisesRegex(ValueError, "pad_w"):
+                _stream(p).validate()
+            spec, why = direct_spec_for_problem(
+                "direct_depthwise", p, {"block_w": 8, "block_waves": 1}, "gfx1250"
+            )
+            self.assertIsNone(spec)
+            self.assertIn("pad_w", why)
+
+    def test_stream_refuses_per_axis_padding(self):
+        # The row-streaming kernel offsets columns by PAD.
+        p = _problem(KH=5, PAD=2, pad_w=1)
+        ok, why = dc.is_valid_depthwise_dgrad_stream_spec(_stream(p), "gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("one padding", why)
+        with self.assertRaisesRegex(ValueError, "one padding"):
+            dc.build_direct_depthwise_dgrad_streaming(_stream(p), arch="gfx1250")
+        # pad_w equal to PAD is the same problem as pad_w=-1.
+        p = _problem(KH=5, PAD=2, pad_w=2)
+        self.assertTrue(
+            dc.is_valid_depthwise_dgrad_stream_spec(_stream(p), "gfx1250")[0]
+        )
+
     def test_aot_grid(self):
         from rocke.core.arch import ArchTarget
 

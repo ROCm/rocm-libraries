@@ -63,6 +63,47 @@ void dgs_set_err(rocke_ir_builder_t* b)
         b->status = ROCKE_ERR_VALUE;
 }
 
+/* pad_w_reason(p): only -1 (PAD) or a value of at least 0 is a column
+ * padding. Returns true (and fills reason) when pad_w is neither. */
+bool dgs_pad_w_reason(const rocke_direct_conv_problem_t* p,
+                      const char* prefix,
+                      char* reason,
+                      size_t reason_cap)
+{
+    if(p->pad_w >= -1)
+        return false;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "%spad_w must be -1 (PAD) or a column padding of at least 0 (got %d)",
+                 prefix,
+                 p->pad_w);
+    return true;
+}
+
+/* _dw_dgrad_stream_padding_reason(p): the row-streaming dgrad kernel offsets
+ * columns by PAD, so it computes no per-axis padding. */
+bool dgs_stream_padding_reason(const rocke_direct_conv_problem_t* p,
+                               const char* prefix,
+                               char* reason,
+                               size_t reason_cap)
+{
+    if(dgs_pad_w_reason(p, prefix, reason, reason_cap))
+        return true;
+    if(rocke_direct_conv_problem_pad_w(p) != p->PAD)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "%sone padding for both axes (got PAD=%dx%d)",
+                     prefix,
+                     p->PAD,
+                     rocke_direct_conv_problem_pad_w(p));
+        return true;
+    }
+    return false;
+}
+
 bool dgs_is_bf16(const rocke_direct_conv_problem_t* p)
 {
     return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
@@ -801,6 +842,8 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_validate(
                      p->kpg);
         return ROCKE_ERR_VALUE;
     }
+    if(dgs_stream_padding_reason(p, "DirectDepthwiseDgradStreamSpec: ", reason, reason_cap))
+        return ROCKE_ERR_VALUE;
     return ROCKE_OK;
 }
 
@@ -836,6 +879,8 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
                      p->dil_w);
         return false;
     }
+    if(dgs_stream_padding_reason(p, "", reason, reason_cap))
+        return false;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
@@ -938,7 +983,9 @@ rocke_status_t rocke_direct_depthwise_dgrad_stream_lower_to_llvm(
     char* err,
     size_t err_cap)
 {
-    rocke_ir_builder_t b;
+    /* Zeroed so the failure path below may read and free it even when the
+     * builder never reached rocke_ir_builder_init (e.g. the name overflowed). */
+    rocke_ir_builder_t b = {};
     rocke_kernel_def_t* kernel;
     rocke_status_t st;
 
@@ -1003,6 +1050,8 @@ bool rocke_dconv_dw_tiled_padding_reason(const rocke_direct_depthwise_tiled_spec
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const int pad_w = rocke_direct_conv_problem_pad_w(p);
+    if(dgs_pad_w_reason(p, "DirectDepthwiseTiledSpec: ", reason, reason_cap))
+        return true;
     if(spec->dgrad && (p->stride != 1 || p->PAD > p->KH - 1 || pad_w > p->KW - 1))
     {
         if(reason && reason_cap > 0)

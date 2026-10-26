@@ -851,12 +851,14 @@ forward correlation of dY with the filter rotated by 180 degrees, at padding
 dgrad kernarg block, reads dY (`Ho x Wo`) and writes dX (`H x W`): the extents
 and the A-side strides swap roles, the weight-row loads read row `KH-1-r`
 reversed, and the epilogue addresses dX through its kernarg strides. The grid
-tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag. Only one
+tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag (and a
+`p{PAD}x{PAD_W}` part when the two paddings differ). Only one
 filter row is register-resident, so the mode takes filters up to
 `_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
 51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
 (`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
-padding and `Wo` uses it). It requires stride 1 and `PAD <= KH-1`,
+padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1
+and `PAD <= KH-1`,
 `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
 `direct_spec_for_problem` refuses such a problem for every other variant. AOT
 variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
@@ -864,8 +866,8 @@ variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
 `DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the
 direct-conv AOT cache; there is no dispatcher route. Both engines build it
 (C++ `rocke_build_direct_depthwise_tiled` with `dgrad = true`); parity configs
-178-182, and 183-185 are specs both engines reject (per-axis padding on the
-forward mode, stride 2, a 65-row filter).
+178-182 and 189, and 183-185 and 190 are specs both engines reject (per-axis
+padding on the forward mode, stride 2, a 65-row filter, `pad_w = -2`).
 
 ### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
 
@@ -1021,8 +1023,10 @@ Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` with
 
 Parity gate: configs 171-177 in
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (scalar and `cpl` 2 / 4
-/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 186-188 are specs
-both engines reject (`groups % cpl != 0`, `cpl = 3`, the accumulator bound).
+/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 186-188 and
+191-192 are specs both engines reject (`groups % cpl != 0`, `cpl = 3`, the
+accumulator bound, a per-axis padding, `pad_w = -3`). The kernel offsets
+columns by `PAD`, so it refuses a problem whose `PAD_W != PAD`.
 
 ## Direct Non-grouped Convolution
 

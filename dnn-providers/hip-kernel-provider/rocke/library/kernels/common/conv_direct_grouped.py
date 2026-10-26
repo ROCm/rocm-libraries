@@ -329,7 +329,8 @@ class DirectConvProblem:
     dil_w: int = 1
     # Column padding when it differs from the row padding (-1: PAD). Only the
     # rotated-filter depthwise dgrad kernel takes such a problem; every other
-    # variant is refused one in direct_spec_for_problem.
+    # variant is refused one in direct_spec_for_problem. Values below -1 are
+    # no padding (pad_w_reason).
     pad_w: int = -1
 
     @property
@@ -453,6 +454,17 @@ def dilation_reason(p: "DirectConvProblem") -> Optional[str]:
         return (
             f"this direct conv kernel has no dilation (got {p.dil_h}x{p.dil_w}); "
             f"only the non-grouped forward kernel computes a dilated convolution"
+        )
+    return None
+
+
+def pad_w_reason(p: "DirectConvProblem") -> Optional[str]:
+    """Why ``p.pad_w`` is not a column padding: only ``-1`` (PAD) or a value
+    of at least 0 is one."""
+    if p.pad_w < -1:
+        return (
+            f"pad_w must be -1 (PAD) or a column padding of at least 0 "
+            f"(got {p.pad_w})"
         )
     return None
 
@@ -7095,6 +7107,18 @@ class DirectDepthwiseDgradStreamSpec:
             raise ValueError(
                 f"DirectDepthwiseDgradStreamSpec requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
             )
+        why = _dw_dgrad_stream_padding_reason(p)
+        if why is not None:
+            raise ValueError(f"DirectDepthwiseDgradStreamSpec: {why}")
+
+
+def _dw_dgrad_stream_padding_reason(p: "DirectConvProblem") -> Optional[str]:
+    """The row-streaming dgrad kernel offsets columns by ``PAD``: it computes
+    no per-axis padding."""
+    why = pad_w_reason(p)
+    if why is None and p.PAD_W != p.PAD:
+        why = f"one padding for both axes (got PAD={p.PAD}x{p.PAD_W})"
+    return why
 
 
 def is_valid_depthwise_dgrad_stream_spec(
@@ -7108,7 +7132,7 @@ def is_valid_depthwise_dgrad_stream_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
-    why = dilation_reason(p)
+    why = dilation_reason(p) or _dw_dgrad_stream_padding_reason(p)
     if why is not None:
         return False, why
     if p.dtype not in ("fp16", "bf16"):
@@ -9164,6 +9188,9 @@ class DirectDepthwiseTiledSpec:
             self.name,
             p.short(),
             f"f{p.KH}x{p.KW}",
+            # Only a per-axis padding is named, so a padding equal on both
+            # axes keeps its historical name.
+            f"p{p.PAD}x{p.PAD_W}" if p.PAD_W != p.PAD else "",
             f"bw{self.block_w}",
             f"bh{self.block_h}",
             f"bw{self.block_waves}wv",
@@ -9176,6 +9203,9 @@ class DirectDepthwiseTiledSpec:
 
     def validate(self) -> None:
         p = self.problem
+        why = pad_w_reason(p)
+        if why is not None:
+            raise ValueError(f"DirectDepthwiseTiledSpec: {why}")
         if self.dgrad and (p.stride != 1 or p.PAD > p.KH - 1 or p.PAD_W > p.KW - 1):
             raise ValueError(
                 "DirectDepthwiseTiledSpec(dgrad=True) needs stride 1 and "

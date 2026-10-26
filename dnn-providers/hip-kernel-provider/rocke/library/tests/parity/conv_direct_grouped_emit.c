@@ -98,7 +98,7 @@ enum
 #define FOURC_BF16_CFG_BASE 163
 /* Depthwise forward on a wave32 target (gfx1250), configs 166..170, follows
  * the bf16 4c ones: see _wave32_spec in the Python emitter. The depthwise
- * dgrad configs 171..188 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
+ * dgrad configs 171..192 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
 #define WAVE32_CFG_BASE 166
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
@@ -861,7 +861,7 @@ static void set_dw_tiled(rocke_direct_depthwise_tiled_spec_t* s,
     s->dgrad = dgrad;
 }
 
-/* Depthwise dgrad configs 171..188 (idx 0..17), mirrors Python _dw_dgrad_spec. */
+/* Depthwise dgrad configs 171..192 (idx 0..21), mirrors Python _dw_dgrad_spec. */
 static int make_dw_dgrad_cfg(int idx,
                              int* kind,
                              rocke_direct_depthwise_dgrad_stream_spec_t* sdgs,
@@ -957,6 +957,27 @@ static int make_dw_dgrad_cfg(int idx,
     case 17:
         set_dw_dgrad_stream(
             sdgs, mk_dw_dg_problem(2, 14, 14, 256, 3, 3, 1, -1, 1, "fp16"), 16, 1, 8, 32);
+        return 0;
+    /* A 5x5 filter whose column padding (0) differs from its row padding (2):
+     * the kernel name carries the per-axis padding. */
+    case 18:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 2, 0, 1, "fp16"), 8, 2, true, 32);
+        break;
+    /* Both engines reject: pad_w below -1 is no column padding. */
+    case 19:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 1, -2, 1, "fp16"), 8, 2, true, 32);
+        break;
+    /* Both engines reject: the row-streaming kernel takes one padding. */
+    case 20:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 2, 1, 1, "fp16"), 8, 1, 1, 32);
+        return 0;
+    /* Both engines reject: pad_w below -1 on the row-streaming kernel. */
+    case 21:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 64, 3, 3, 1, -3, 1, "bf16"), 8, 1, 1, 32);
         return 0;
     default:
         return -1;

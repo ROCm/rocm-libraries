@@ -490,7 +490,7 @@ def _wgrad_direct_spec(idx: int):
 # Depthwise forward on a wave32 target (gfx1250), indices 166..170: the
 # preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
 # the preloading kernel at wave_size 64: a logical wave of 64 threads, which
-# the wave32 target runs as two hardware waves. Indices 171..188 are the
+# the wave32 target runs as two hardware waves. Indices 171..192 are the
 # depthwise dgrad kernels (see _dw_dgrad_spec).
 # ---------------------------------------------------------------------------
 _WAVE32_CFG_BASE = 166
@@ -559,7 +559,7 @@ def _wave32_spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
             "gfx1250",
         )
-    if 5 <= idx <= 22:
+    if 5 <= idx <= 26:
         return _dw_dgrad_spec(idx - 5)
     return None
 
@@ -582,7 +582,7 @@ def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):
 
 
 def _dw_dgrad_spec(idx: int):
-    """Depthwise dgrad configs 171..188 (``idx`` 0..17): the row-streaming
+    """Depthwise dgrad configs 171..192 (``idx`` 0..21): the row-streaming
     DirectDepthwiseDgradStreamSpec (scalar, then channel-packed cpl 2 / 4 / 8),
     the rotated-filter DirectDepthwiseTiledSpec(dgrad=True) on large, non-square
     and per-axis-padded filters, and specs both engines reject."""
@@ -669,6 +669,15 @@ def _dw_dgrad_spec(idx: int):
         17: lambda: stream(
             _dwp_dg(2, 14, 14, 256, 3, 3, 1, -1, 1, "fp16"), 16, 1, cpl=8
         ),
+        # A 5x5 filter whose column padding (0) differs from its row padding
+        # (2): the kernel name carries the per-axis padding.
+        18: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 0, 1, "fp16"), 8, 2),
+        # Both engines reject: pad_w below -1 is no column padding.
+        19: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 1, -2, 1, "fp16"), 8, 2),
+        # Both engines reject: the row-streaming kernel takes one padding.
+        20: lambda: stream(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 1, 1, "fp16"), 8, 1),
+        # Both engines reject: pad_w below -1 on the row-streaming kernel.
+        21: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -3, 1, "bf16"), 8, 1),
     }
     sel = table.get(idx)
     return None if sel is None else sel()

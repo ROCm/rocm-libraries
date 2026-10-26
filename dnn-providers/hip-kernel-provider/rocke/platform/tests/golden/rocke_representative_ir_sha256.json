@@ -1255,7 +1255,7 @@
           "bytes": 43483,
           "family": "conv_direct_depthwise_tiled",
           "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_bw8_bh2_bw1wv_dg",
-          "sha256": "37c1fe66af77e9d6a2df8df6abc69f8592f0d73cdef1bed6b236abfd67a62bbf",
+          "sha256": "3319c044995e4149f829ce4ad464038b04a11e70fabe17ad8c03af5c6db06a93",
           "status": "ok"
         },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {
@@ -3587,7 +3587,7 @@
           "bytes": 43616,
           "family": "conv_direct_depthwise_tiled",
           "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_bw8_bh2_bw1wv_dg",
-          "sha256": "0e01c68fd8bb1f7d33bf6a30b1fd829a95efe2ecd467e927e34203cd560495f2",
+          "sha256": "a8a4787efc79eac4d05d8f94bac746561586b21c4c3a0ada52dbd820d83c4437",
           "status": "ok"
         },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {
@@ -5919,7 +5919,7 @@
           "bytes": 43680,
           "family": "conv_direct_depthwise_tiled",
           "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_bw8_bh2_bw1wv_dg",
-          "sha256": "3f54564b4f9dfdcbca688a0da666a9a81af13ed03e05bfed366b1e2b82034acd",
+          "sha256": "6486d1fa935b6fc1762c08ab289f14174c0ae0b2dae2aa5ba270264112ebed6f",
           "status": "ok"
         },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {

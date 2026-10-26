@@ -114,7 +114,8 @@ typedef struct rocke_direct_conv_problem
     int pad_w; /* default -1 (= PAD); column padding where it differs from
                 * PAD. Only the rotated-filter depthwise dgrad
                 * (rocke_direct_depthwise_tiled_spec_t.dgrad) takes such a
-                * problem; the forward tiled spec rejects one. */
+                * problem; the forward tiled spec rejects one. Values below
+                * -1 are no padding: the depthwise dgrad specs reject them. */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
@@ -538,6 +539,10 @@ int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tile
 void rocke_direct_depthwise_tiled_out_hw(const rocke_direct_depthwise_tiled_spec_t* spec,
                                          int* out_h,
                                          int* out_w);
+/* kernel_name_join(name, p.short(), f"f{KH}x{KW}",
+ *                  f"p{PAD}x{PAD_W}" if PAD_W != PAD else "", f"bw{block_w}",
+ *                  f"bh{block_h}", f"bw{block_waves}wv",
+ *                  flags={"ur", "dg", "bf16"}) */
 rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap);
 rocke_status_t rocke_direct_depthwise_tiled_validate(

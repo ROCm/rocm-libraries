@@ -586,6 +586,8 @@ def direct_spec_for_problem(
         return None, (
             f"binary bakes C={knobs['channels']}, problem has C={problem.groups}"
         )
+    if getattr(problem, "pad_w", -1) < -1:
+        return None, f"pad_w must be -1 (PAD) or at least 0 (got {problem.pad_w})"
     if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
         variant != DIRECT_DEPTHWISE_TILED_DGRAD
     ):
