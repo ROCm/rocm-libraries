@@ -381,7 +381,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | `clang-format` and static analysis not enforced in CI | Low | Low | Manual enforcement in code review |
 | No sanitizer (ASAN/TSAN) gate in CI | Low | High if hit | None; ASAN can be built manually |
 | Elementwise binary op accepts BF16 but the binary test harness has no BF16 support | Medium | Medium | BF16 scalar reads covered by `util_test`; no end-to-end binary BF16 test |
-| Permute `bench` configs exceed device memory on smaller GPUs (e.g. gfx908, gfx1100): the binary aborts with a HIP out-of-memory error partway through | Low | Medium | Bench results on those targets are incomplete; run bench on MI300-class GPUs |
+| Permute `bench` configs exceed device memory on smaller GPUs: the binary aborts with a HIP out-of-memory error partway through (gfx908 and gfx1100 already in the FP32 entries; gfx90a in the FP64 entries at ranks 2 and 4, which are listed last so the other types complete) | Low | Medium | Bench results on those targets are incomplete; run bench on MI300-class GPUs |
 | `test/02_elementwise/configs/code_coverage/` is unused (elementwise coverage reads `emulation/quick`) | Low | Low | Documented in the Coverage section |
 
 ---

@@ -10,6 +10,9 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added fp64 support to hiptensorPermute for ranks 2-6.
 * Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 
+### Resolved issues
+* Fixed `hiptensorElementwiseBinaryExecute` treating the alpha and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+
 ## hipTensor 2.5.0 for ROCm 10.2
 
 ### Added
@@ -23,7 +26,6 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Resolved issues
 * Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.
 * Fixed elementwise operations reading the wrong elements when two input tensors ordered the same modes differently. Every tensor's strides are now permuted into the output tensor's mode order before reaching the kernel.
-* Fixed `hiptensorElementwiseBinaryExecute` treating the alpha and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
 
 ## hipTensor 2.4.0 for ROCm 10.1
 
