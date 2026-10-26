@@ -13,11 +13,16 @@ bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
     if(prob.bias != nullptr || prob.batch_count != 1)
         return false;
 
-    const auto scaleType = hipDataType_to_rocRoller_type(prob.scale_type);
-    if(scaleType != rocRoller::DataType::None && scaleType != rocRoller::DataType::Float)
+    // Asked in the types hipBLASLt already uses, not a generator's: this target
+    // builds without rocRoller's headers so that a checkout without
+    // shared/rocroller still compiles it. normalizeOperandType answers
+    // HIPBLASLT_DATATYPE_INVALID for a format no ranked kernel handles, which
+    // is the "unset" case and not a refusal.
+    const auto scaleType = normalizeOperandType(prob.scale_type);
+    if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
         return false;
 
-    return genKernelType(prob).typeAcc == rocRoller::DataType::Float;
+    return genKernelType(prob).typeAcc == HIP_R_32F;
 }
 
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
