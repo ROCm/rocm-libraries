@@ -146,8 +146,8 @@ The caller must zero-initialise `dX`. Supported dtypes:
 - `bf16` — packed `global_atomic_fadd_v2bf16` (`<2 x bfloat>`)
 - `fp16` — packed `global_atomic_fadd_v2f16` (`<2 x half>`)
 
-A TF32 kernel keeps any `dX` dtype: an fp32 `dX` uses the scalar f32 atomics,
-a 16-bit `dX` the packed ones above.
+A TF32 kernel has an fp32 `dX` (TF32 is an fp32-convolution mode), so it uses
+the scalar f32 atomics.
 
 ## Vector Loads
 

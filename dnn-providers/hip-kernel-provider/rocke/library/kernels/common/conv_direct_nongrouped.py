@@ -136,10 +136,10 @@ from kernels.common.conv_direct_grouped import (
     _elem_bytes,
     _f32_mma_plan,
     _io_type,
+    _is_f32_storage,
     _load_elems,
     _mfma,
     _mma_f32_logical,
-    _storage_dtype,
     _store_from_f32,
     _trunc_f32,
     emit_direct_params,
@@ -151,10 +151,6 @@ _X_LOAD_VEC = 8
 # LDS alignment unit, whatever the element width.
 _VEC_BYTES = 16
 _NONGROUPED_DTYPES = ("fp16", "bf16", "fp32", "tf32")
-
-
-def _is_f32_storage(dtype: str) -> bool:
-    return _storage_dtype(dtype) == "fp32"
 
 
 def _x_load_vec(dtype: str) -> int:
