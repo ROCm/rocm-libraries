@@ -290,6 +290,21 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
 
+#### HIPDNN_INGESTOR_CANDIDATE_LIMIT
+
+A process-wide cap on how many of an ingestor engine's best-ranked candidates a plan build considers. An engine with thousands of applicable kernels otherwise constructs, and with benchmarking on times, every one of them on a cold plan build.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset or empty) | No limit: every knob-filtered candidate is considered |
+| `<n>`      | A positive decimal integer: only the `n` best-ranked candidates are considered |
+
+Any other value (zero, a sign, trailing text, a value past the range of `size_t`) is ignored as unset and logs a warning naming the variable and the value.
+
+**Notes:**
+- The limit is applied after the knob filter and before the benchmarked-record lookup, with benchmarking on or off. A record benchmarked under a limit covers exactly the candidates a later build under the same limit walks, so it serves that build; without the limit it no longer covers the candidate set and the engine benchmarks again.
+- It does not change which kernels apply to a graph or the knobs an engine advertises.
+
 ### Engine Applicability Threading
 
 The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, every check still runs on the calling thread. Internally, a provider with two or more ingestor engines reaches that point through a begin-all, finish-all sequence in which the engines share one device lookup and one catalog key, rather than the one-engine-at-a-time loop. This is an implementation detail of the hip-kernel-provider, not a stable interface; it can change without notice, and nothing here depends on it.

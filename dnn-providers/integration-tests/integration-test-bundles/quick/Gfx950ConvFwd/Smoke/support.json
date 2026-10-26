@@ -1,0 +1,20 @@
+{
+  "claims": {
+    "hipkernel:Gfx950ConvFwd": [
+      {
+        "cases": [
+          "depthwise_c32_3x3_bfloat16",
+          "depthwise_c32_3x3_half",
+          "smoke_bfloat16",
+          "smoke_half"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
