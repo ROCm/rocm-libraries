@@ -62,6 +62,19 @@ class UniversalGemmProfiler
             ck_tile::FillConstant<ADataType>{static_cast<ADataType>(1)}(a_m_k);
             ck_tile::FillConstant<BDataType>{static_cast<BDataType>(1)}(b_k_n);
         }
+        else if(setting_.init_method == 3)
+        {
+            // normal(mean 0, sigma 0.1); the second field is the variance
+            ck_tile::FillNormalDistribution<ADataType>{0.f, 0.01f, 11939}(a_m_k);
+            ck_tile::FillNormalDistribution<BDataType>{0.f, 0.01f, 11940}(b_k_n);
+        }
+        else if(setting_.init_method == 4)
+        {
+            // integers in [-5, 5]: exact in every input type, and the fp32 accumulation stays
+            // exact while 25 * K < 2^24, so the output can be checked bit for bit
+            ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5.f, 5.f, 11939}(a_m_k);
+            ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5.f, 5.f, 11940}(b_k_n);
+        }
         else
         {
             a_m_k.SetZero();
