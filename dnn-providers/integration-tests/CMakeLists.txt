@@ -196,11 +196,20 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
 
+    # The gauntlet fuzz driver's own tests: space evaluator, sampler, and the driver
+    # against a stub binary. No GPU and no built binary are involved.
+    add_test(
+        NAME hipdnn_gauntlet_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/gauntlet/test_gauntlet.py
+    )
+    set(HIPDNN_IT_GAUNTLET_TEST hipdnn_gauntlet_python_tests)
+
     # None of these suites uses a third-party plugin; don't let a broken one
     # installed in the developer's environment fail them.
     set_tests_properties(
         hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
-        hipdnn_support_features_python_tests
+        hipdnn_support_features_python_tests hipdnn_gauntlet_python_tests
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
 
@@ -373,6 +382,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GAUNTLET_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GAUNTLET_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

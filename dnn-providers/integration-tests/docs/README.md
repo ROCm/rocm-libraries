@@ -8,8 +8,8 @@ developer who must run the suite, read its output, or add to it.
 | Document | Read it to… |
 |---|---|
 | [File Formats](file-formats.md) | Understand every file in the bundle tree and the provider configs: graphs, template sweeps, metadata, golden data and DVC pointers, support-claim sidecars, per-engine TOML, tier YAML. Also learn how test names are derived. |
-| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
-| [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, or add a C++ test when a bundle cannot express it. |
+| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. Also the per-case [outcome report](running-tests.md#outcome-report) and [gauntlet fuzz runs](running-tests.md#gauntlet-fuzz-runs). |
+| [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, add a C++ test when a bundle cannot express it, or [freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding) as a regression case. |
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
 | [Support Matrix and Feature Coverage](support-matrix.md) | Render the human-readable matrix of which engine supports which graph on which GPU and OS, validate the sidecars it is built from, see the pre-commit and CI checks around it, and measure per-op feature coverage. |
 
@@ -36,6 +36,11 @@ C++-to-bundle pipeline, `find_case.py`) and
 | **Cell** | One (engine, arch, platform[, sweep case]) combination. It is the unit that a claim covers. |
 | **Arch token** | The GPU architecture as a claim records it: the part of `gcnArchName` before the first `:` (`gfx942`). |
 | **Enforcement level** | The point a run must reach for a claim to count as confirmed: `applicability` (accepted), `buildable` (plans compile) or `full` (outputs verified). Each bundle sets it in its metadata. |
+| **Outcome** | The one result a case gets on one engine in the [outcome report](running-tests.md#outcome-report): `PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` or `UNEXERCISED`. |
+| **Purpose** | An optional tag on a case (`claim`, `probe` or `regression`) that says why it exists. It changes no verdict. |
+| **Space** | A `*.space.json` under `gauntlet/spaces/`: the axes, legality rules and case template that a [fuzz run](running-tests.md#gauntlet-fuzz-runs) samples graphs from. It names an existing sweep template and never holds a graph. |
+| **Fuzz run** | A run of `gauntlet/run_gauntlet_fuzz.py`: random legal samples from the spaces, run through the unchanged binary on one engine, one outcome per sample. Run on demand, never in CI. |
+| **Shape seed, data seed** | The seed that picks a fuzz sample's graph (its case id is `s<shape seed>`), and the seed that fills its inputs (`metadata.seed`). |
 
 ## Signals a run prints, and what they ask of you
 

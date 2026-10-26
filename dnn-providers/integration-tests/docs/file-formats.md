@@ -237,6 +237,7 @@ parses it.
 |---|---|---|
 | `format_version` | int | **Required, must be `1`.** Otherwise the whole metadata object is rejected. |
 | `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. |
+| `purpose` | string | `claim`, `probe` or `regression`; absent when not set. Why the case exists: a graph an engine claims, a legal graph whose expected outcome is "decline with a reason, or accept and be correct", or a frozen fuzz finding. A tag only: it changes no verdict, and the [outcome report](running-tests.md#outcome-report) copies it into each record. Any other value rejects the metadata. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |

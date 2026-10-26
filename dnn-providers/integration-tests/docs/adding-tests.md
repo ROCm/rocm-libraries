@@ -190,6 +190,30 @@ one of these:
 - **quarantine the bundle** until one of the above lands: exclude it in the
   provider's `test_categories_integration.yaml` with a comment that says why.
 
+### Freeze a fuzz finding
+
+A [fuzz run](running-tests.md#gauntlet-fuzz-runs) writes `failures/<case>/` for each
+`WRONG` and `CRASH`. The folder is outside the bundle root, so later batches never
+reload it. It holds a graph whose tensor UIDs are already in canonical (by-name) order,
+so an import does not renumber tensors and so does not change their per-tensor input
+seeds. Import it with `import_graph.py`, which finds the sweep with the same skeleton
+and appends the case, or reports a duplicate:
+
+```bash
+FAIL=<work-dir>/failures/<case>
+python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
+    --graph $FAIL/<case>.json \
+    --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+    --tier quick     # or the tier that fits the cost
+```
+
+`<case>.meta.json` next to the graph carries the data seed and `purpose: regression`,
+so the case replays with the same inputs. Check `$FAIL/replay.txt` for the fill path:
+a failure seen with device-filled inputs reproduces bit for bit only on the same path
+(`HIPDNN_TEST_HOST_INPUT_FILL=1` forces the host fill). Then run the new case with
+`--gtest_filter`, record the engine's decline or fix in the usual way, and keep the
+fuzz finding's `repro.json` in the issue that reports the defect.
+
 ### Finding existing cases
 
 ```bash

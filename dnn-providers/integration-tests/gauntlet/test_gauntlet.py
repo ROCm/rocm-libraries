@@ -1,0 +1,1507 @@
+#!/usr/bin/env python3
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Tests for the gauntlet fuzz tool (RFC 0023): spaces, sampler, driver, fault artifacts.
+
+No GPU and no C++ binary: the driver runs against ``stub_binary.py``, a script that honors
+the same command line and writes the same outcome-report JSON Lines. Run with::
+
+    python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import random
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+import run_gauntlet_fuzz as fuzz
+import sampler
+import space as space_lib
+
+HERE = Path(__file__).resolve().parent
+TESTS_ROOT = HERE.parent
+MIGRATION_DIR = TESTS_ROOT / "migration-scripts"
+STUB = HERE / "stub_binary.py"
+BUNDLES = TESTS_ROOT / "integration-test-bundles"
+SPACES = space_lib.load_spaces()
+SPACE_IDS = [s.space_id for s in SPACES]
+bu = fuzz.load_bundle_utils()
+
+
+def _load_by_path(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+bundle_discovery = _load_by_path(
+    "gauntlet_test_bundle_discovery", TESTS_ROOT / "scripts" / "bundle_discovery.py"
+)
+
+
+def space_by_id(space_id):
+    return next(s for s in SPACES if s.space_id == space_id)
+
+
+# --------------------------------------------------------------------------
+# Toy spaces
+# --------------------------------------------------------------------------
+
+
+def write_space(tmp_path, file_name="Toy.space.json", **overrides):
+    """A small valid space (and its template) in ``tmp_path``; ``overrides`` replace keys."""
+    (tmp_path / "toy.template.json").write_text('{"nodes": [], "tensors": []}')
+    decl = {
+        "version": 1,
+        "operation": file_name.split(".")[0],
+        "template": "toy.template.json",
+        "axes": {
+            "a": {"values": [1, 2, 3]},
+            "n": {"range": [1, 100], "boundaries": [1, 100]},
+        },
+        "derive": {"twice": "a * 2"},
+        "constraints": [{"rule": "n >= a", "reason": "n must reach a"}],
+        "case": {
+            "values": {"a": "${a}", "n": "${n}"},
+            "metadata": {"purpose": "probe"},
+        },
+    }
+    decl.update(overrides)
+    path = tmp_path / file_name
+    path.write_text(json.dumps(decl))
+    return path
+
+
+def derived(tmp_path, expression, a=2, n=7):
+    sp = space_lib.load_space(write_space(tmp_path, derive={"r": expression}))
+    return sp.derive_env({"a": a, "n": n})["r"]
+
+
+# --------------------------------------------------------------------------
+# R5: expression evaluator
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "expression, expected",
+    [
+        ("a + 1", 3),
+        ("a * n // 2", 7),
+        ("n % 4", 3),
+        ("2 ** a", 4),
+        ("n / 2", 3.5),
+        ("-a", -2),
+        ("a == 2 and n > 5", True),
+        ("a == 3 or n == 7", True),
+        ("not a == 2", False),
+        ("[a, n][1]", 7),
+        ("[1, [2, 3]][1][0]", 2),
+        ("min(a, n)", 2),
+        ("max([a, n])", 7),
+        ("len([1, 2, 3])", 3),
+        ("abs(-n)", 7),
+        ("'x' if a == 2 else 'y'", "x"),
+        ("None", None),
+        ("True", True),
+        ("1 < a < 3", True),
+        ("a in [1, 2]", True),
+        ("1.5e-3 * 2", 0.003),
+    ],
+)
+def test_evaluator_accepts_the_safe_subset(tmp_path, expression, expected):
+    assert derived(tmp_path, expression) == expected
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "foo(1)",
+        "sum([1, 2])",
+        "open('x')",
+        "__import__('os')",
+        "a.real",
+        "'x'.upper()",
+        "[x for x in [1, 2]]",
+        "{x for x in [1]}",
+        "(x for x in [1])",
+        "{x: x for x in [1]}",
+        "(lambda: 1)()",
+        "lambda: 1",
+        "a[1:2]",
+        "f'{a}'",
+        "{1: 2}",
+        "(1, 2)",
+        "(b := 3)",
+        "min(key=abs)",
+        "min(*[1, 2])",
+        "unknown_name + 1",
+        "a +",
+        "",
+        "2 ** 100000",
+        "a @ a",
+        "a is None",
+        "b'bytes'",
+        "1j",
+    ],
+)
+def test_evaluator_rejects_everything_else_as_a_load_error_naming_the_space(
+    tmp_path, expression
+):
+    path = write_space(tmp_path, derive={"r": expression})
+    if expression == "2 ** 100000":
+        sp = space_lib.load_space(path)  # loadable; the guard fires on evaluation
+        with pytest.raises(space_lib.SpaceError, match="Toy/Default"):
+            sp.derive_env({"a": 1, "n": 1})
+        return
+    with pytest.raises(space_lib.SpaceError, match="Toy/Default"):
+        space_lib.load_space(path)
+
+
+@pytest.mark.parametrize("section", ["derive", "constraints", "case"])
+def test_every_expression_site_is_checked(tmp_path, section):
+    bad = "[x for x in [1]]"
+    if section == "derive":
+        path = write_space(tmp_path, derive={"r": bad})
+    elif section == "constraints":
+        path = write_space(tmp_path, constraints=[{"rule": bad, "reason": "r"}])
+    else:
+        path = write_space(tmp_path, case={"values": {"v": "${" + bad + "}"}})
+    with pytest.raises(space_lib.SpaceError, match="Toy/Default.*comprehension"):
+        space_lib.load_space(path)
+
+
+def test_derived_values_see_only_earlier_ones(tmp_path):
+    ok = write_space(tmp_path, derive={"p": "a + 1", "q": "p * 2"})
+    sp = space_lib.load_space(ok)
+    assert sp.derive_env({"a": 2, "n": 5})["q"] == 6
+    forward = write_space(tmp_path, derive={"q": "p * 2", "p": "a + 1"})
+    with pytest.raises(space_lib.SpaceError, match="unknown name 'p'"):
+        space_lib.load_space(forward)
+
+
+def test_division_by_zero_is_an_evaluation_error_naming_the_space(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path, derive={"r": "a // (n - n)"}))
+    with pytest.raises(space_lib.SpaceError, match="Toy/Default.*ZeroDivisionError"):
+        sp.derive_env({"a": 1, "n": 1})
+
+
+def test_missing_template_is_a_load_error_naming_the_space(tmp_path):
+    path = write_space(tmp_path, template="no/such/graph.template.json")
+    with pytest.raises(space_lib.SpaceError, match=r"Toy/Default.*not found"):
+        space_lib.load_space(path)
+
+
+def test_template_is_resolved_relative_to_the_space_file(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "graph.template.json").write_text('{"nodes": []}')
+    path = write_space(tmp_path, template="sub/graph.template.json")
+    assert (
+        space_lib.load_space(path).template_path
+        == (tmp_path / "sub" / "graph.template.json").resolve()
+    )
+
+
+@pytest.mark.parametrize(
+    "axes, message",
+    [
+        ({"a": {"values": []}}, "non-empty list"),
+        ({"a": {"range": [5, 1]}}, "lo <= hi"),
+        ({"a": {"range": [1.5, 2]}}, "integers"),
+        ({"a": {"range": [1, 10], "boundaries": [11]}}, "inside the range"),
+        ({"a": {"values": [1], "range": [1, 2]}}, "exactly one"),
+        ({"a": {"values": [1], "boundaries": [1]}}, "needs a 'range'"),
+        ({"a": {"values": [1], "extra": 1}}, "unknown keys"),
+        ({"min": {"values": [1]}}, "reserved"),
+        ({"1a": {"values": [1]}}, "not a valid name"),
+        ({}, "non-empty object"),
+    ],
+)
+def test_axis_declarations_are_validated(tmp_path, axes, message):
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*{message}"):
+        space_lib.load_space(
+            write_space(
+                tmp_path, axes=axes, derive={}, constraints=[], case={"values": {}}
+            )
+        )
+
+
+def test_space_file_shape_is_validated(tmp_path):
+    with pytest.raises(space_lib.SpaceError, match="'version' must be 1"):
+        space_lib.load_space(write_space(tmp_path, version=2))
+    with pytest.raises(space_lib.SpaceError, match="'operation'"):
+        space_lib.load_space(write_space(tmp_path, operation="Other"))
+    with pytest.raises(space_lib.SpaceError, match="driver-owned"):
+        space_lib.load_space(
+            write_space(tmp_path, case={"values": {}, "metadata": {"seed": 1}})
+        )
+    with pytest.raises(space_lib.SpaceError, match="reason"):
+        space_lib.load_space(write_space(tmp_path, constraints=[{"rule": "a > 0"}]))
+    with pytest.raises(space_lib.SpaceError, match="unknown top-level"):
+        space_lib.load_space(write_space(tmp_path, bogus=1))
+
+
+def test_space_file_name_gives_operation_and_space_name(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path, file_name="Toy.Odd.space.json"))
+    assert (sp.operation, sp.name, sp.space_id, sp.suite_name) == (
+        "Toy", "Odd", "Toy/Odd", "gauntlet_Toy_Odd",
+    )  # fmt: skip
+    sp = space_lib.load_space(write_space(tmp_path))
+    assert (sp.space_id, sp.suite_name) == ("Toy/Default", "gauntlet_Toy_Default")
+
+
+# --------------------------------------------------------------------------
+# R5: typed substitution
+# --------------------------------------------------------------------------
+
+
+def test_substitution_keeps_json_types_and_copies_other_strings(tmp_path):
+    case = {
+        "values": {
+            "int": "${a}",
+            "float": "${n / 4}",
+            "bool": "${a > 1}",
+            "none": "${None}",
+            "list": "${[a, 2.5, 'x']}",
+            "str": "${'p' + 'q' if a == 2 else 'z'}",
+            "nested": {"deep": ["${a * 10}", "literal"]},
+            "plain": "no substitution",
+            "open": "${a",
+            "prefix": "x ${a}",
+            "close": "a}",
+            "number": 7,
+        },
+        "metadata": {"purpose": "probe"},
+    }
+    sp = space_lib.load_space(write_space(tmp_path, case=case))
+    rendered = sp.render(sp.derive_env({"a": 2, "n": 10}))["values"]
+    assert rendered == {
+        "int": 2,
+        "float": 2.5,
+        "bool": True,
+        "none": None,
+        "list": [2, 2.5, "x"],
+        "str": "pq",
+        "nested": {"deep": [20, "literal"]},
+        "plain": "no substitution",
+        "open": "${a",
+        "prefix": "x ${a}",
+        "close": "a}",
+        "number": 7,
+    }
+    assert type(rendered["int"]) is int and type(rendered["bool"]) is bool
+    assert json.loads(json.dumps(rendered)) == rendered
+
+
+def test_rendered_lists_are_not_shared_between_samples(tmp_path):
+    sp = space_lib.load_space(
+        write_space(tmp_path, derive={"v": "[a]"}, case={"values": {"v": "${v}"}})
+    )
+    first = sp.render(sp.derive_env({"a": 1, "n": 1}))
+    first["values"]["v"].append(99)
+    assert sp.render(sp.derive_env({"a": 1, "n": 1}))["values"]["v"] == [1]
+
+
+# --------------------------------------------------------------------------
+# R5: sampler
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_sample_is_determined_by_its_shape_seed(space_id):
+    sp = space_by_id(space_id)
+    first = [sampler.sample(sp, s) for s in (7, 8, 9)]
+    again = [sampler.sample(sp, s) for s in (9, 8, 7)][
+        ::-1
+    ]  # call order does not matter
+    for a, b in zip(first, again):
+        assert json.dumps(a.row) == json.dumps(b.row)
+        assert a.axis_values == b.axis_values
+    assert len({json.dumps(s.row["values"]) for s in first}) == 3
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_constraints_hold_over_1000_samples(space_id):
+    sp = space_by_id(space_id)
+    assert sp.constraints
+    for seed in range(1000):
+        s = sampler.sample(sp, seed)
+        env = sp.derive_env(s.axis_values)
+        for c in sp.constraints:
+            assert c.expr.evaluate(env), f"seed {seed}: {c.rule} ({c.reason})"
+
+
+def test_constraints_hold_for_a_toy_space_and_redraws_happen(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path))
+    attempts = []
+    for seed in range(1000):
+        s = sampler.sample(sp, seed)
+        assert s.axis_values["n"] >= s.axis_values["a"]
+        attempts.append(s.attempts)
+    assert max(attempts) >= 1
+
+
+def test_boundary_values_are_drawn_about_half_the_time(tmp_path):
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path,
+            axes={"n": {"range": [1, 100000], "boundaries": [1, 2]}},
+            derive={},
+            constraints=[],
+            case={"values": {}},
+        )
+    )
+    rng = random.Random(0)
+    draws = [sp.axes["n"].draw(rng) for _ in range(4000)]
+    share = sum(d in (1, 2) for d in draws) / len(draws)
+    assert 0.45 < share < 0.56
+    assert all(1 <= d <= 100000 for d in draws)
+    assert sum(d not in (1, 2) for d in draws) > 1500  # and the rest is uniform
+
+
+def test_infeasible_space_is_an_explicit_error_with_the_reasons(tmp_path):
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path, constraints=[{"rule": "n > 1000", "reason": "n is capped at 100"}]
+        )
+    )
+    with pytest.raises(sampler.InfeasibleSpaceError) as info:
+        sampler.sample(sp, 1, max_attempts=50)
+    text = str(info.value)
+    assert "Toy/Default" in text and "infeasible" in text
+    assert "n > 1000" in text and "n is capped at 100" in text and "50" in text
+
+
+def test_data_seed_is_derived_and_always_in_range():
+    seen = set()
+    for seed in range(5000):
+        d = sampler.derive_data_seed(seed)
+        assert 0 <= d < 2**32
+        assert d == sampler.derive_data_seed(seed)
+        seen.add(d)
+    assert len(seen) > 4990
+    assert 0 <= sampler.derive_data_seed(2**62) < 2**32
+
+
+def test_data_seed_can_be_fixed_and_is_validated():
+    sp = space_by_id("SdpaFwd/Default")
+    assert sampler.sample(sp, 5, data_seed=4021).row["metadata"]["seed"] == 4021
+    assert sampler.sample(sp, 5, data_seed=2**32 - 1).data_seed == 2**32 - 1
+    assert sampler.sample(sp, 5, data_seed=0).data_seed == 0
+    for bad in (-1, 2**32, 1.5, True, "7"):
+        with pytest.raises(ValueError):
+            sampler.sample(sp, 5, data_seed=bad)
+    for bad in (-1, 2**63, 1.5):
+        with pytest.raises(ValueError):
+            sampler.sample(sp, bad)
+    # a new data seed changes the data, never the geometry
+    a, b = sampler.sample(sp, 5, data_seed=1), sampler.sample(sp, 5, data_seed=2)
+    assert (
+        a.row["values"] == b.row["values"]
+        and a.row["metadata"]["seed"] != b.row["metadata"]["seed"]
+    )
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_row_has_sweep_json_format(space_id):
+    s = sampler.sample(space_by_id(space_id), 913377)
+    row = s.row
+    assert list(row) == ["id", "values", "metadata"]
+    assert row["id"] == "s913377"
+    meta = row["metadata"]
+    assert meta["format_version"] == 1 and isinstance(meta["format_version"], int)
+    assert meta["generator"] == "gauntlet-fuzz"
+    assert meta["purpose"] == "probe"
+    assert (
+        meta["seed"] == sampler.derive_data_seed(913377) and 0 <= meta["seed"] < 2**32
+    )
+    assert space_id in meta["notes"] and "913377" in meta["notes"]
+    assert json.loads(json.dumps(row)) == row
+
+
+# --------------------------------------------------------------------------
+# R7: shipped spaces
+# --------------------------------------------------------------------------
+
+
+def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
+    assert space_lib.DEFAULT_SPACES_DIR == HERE / "spaces"
+    assert SPACE_IDS == ["RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense"]
+    for sp in SPACES:
+        assert BUNDLES not in sp.path.parents
+        assert sp.template_path.name == "graph.template.json"
+        assert BUNDLES in sp.template_path.parents
+        assert (
+            sp.path.parent / "graph.template.json"
+        ).exists() is False  # never a copy
+        decl = json.loads(sp.path.read_text())
+        assert decl["template"].startswith("../../integration-test-bundles/quick/")
+        assert decl["case"]["metadata"]["purpose"] == "probe"
+
+
+def test_shipped_spaces_declare_cost_ceilings():
+    rules = {
+        s.space_id: [c.rule.replace(" ", "") for c in s.constraints] for s in SPACES
+    }
+    assert any("2**31" in r for r in rules["SdpaFwd/Default"])
+    assert any("2**31" in r for r in rules["SdpaFwd/Gfx950Dense"])
+    assert any("2**30" in r for r in rules["RMSNorm/Default"])
+    assert any("sq==skv" in r for r in rules["SdpaFwd/Gfx950Dense"])
+
+
+def _packed(dims, strides):
+    """True when ``strides`` address ``dims`` densely (some permutation of a contiguous layout)."""
+    if len(dims) != len(strides) or any(d < 1 for d in dims):
+        return False
+    count = 1
+    for d in dims:
+        count *= d
+    return sum((d - 1) * s for d, s in zip(dims, strides)) + 1 == count
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, space_id):
+    sp = space_by_id(space_id)
+    topology = tmp_path / "quick" / sp.operation / sp.template_path.parent.name
+    topology.mkdir(parents=True)
+    for name in ("graph.template.json", "sweep.json", "support.json"):
+        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    sweep = json.loads((topology / "sweep.json").read_text())
+    existing = len(sweep["cases"])
+    samples = [sampler.sample(sp, seed) for seed in range(200, 240)]
+    sweep["cases"] += [s.row for s in samples]
+    (topology / "sweep.json").write_text(json.dumps(sweep, indent=2))
+
+    cases, error = bundle_discovery.read_sweep_cases(topology / "sweep.json")
+    assert error is None and len(cases) == existing + len(samples)
+    template = json.loads((topology / "graph.template.json").read_text())
+    for s in samples:
+        graph = bu.expand(template, s.row["values"])
+        assert "${" not in json.dumps(graph), "an unresolved placeholder is left"
+        assert bu.canonical_uid_map_by_name(graph) == {
+            t["uid"]: t["uid"] for t in graph["tensors"]
+        }
+        for tensor in graph["tensors"]:
+            if tensor.get("value") is None:
+                assert _packed(tensor["dims"], tensor["strides"]), (s.case_id, tensor)
+    expanded = {
+        json.dumps(bu.expand(template, s.row["values"]), sort_keys=True)
+        for s in samples
+    }
+    assert len(expanded) > 30  # the samples are different graphs
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_shipped_space_samples_cover_its_axes(space_id):
+    sp = space_by_id(space_id)
+    drawn = [sampler.sample(sp, seed).axis_values for seed in range(400)]
+    for name, axis in sp.axes.items():
+        seen = {json.dumps(d[name]) for d in drawn}
+        if not axis.is_range:
+            assert seen == {json.dumps(v) for v in axis.values}
+        else:
+            assert {json.dumps(b) for b in axis.boundaries} <= seen
+            assert len(seen) > len(axis.boundaries)
+
+
+def test_gfx950_dense_space_obeys_the_rocke_rules():
+    sp = space_by_id("SdpaFwd/Gfx950Dense")
+    for seed in range(500):
+        env = sp.derive_env(sampler.sample(sp, seed).axis_values)
+        assert env["d"] in (64, 128) and env["dtype"] in ("bfloat16", "half")
+        assert env["sq"] % 128 == 0 and env["skv"] % 32 == 0
+        assert env["hq"] % env["hkv"] == 0
+        assert not env["causal"] or env["sq"] == env["skv"]
+        assert 2**-64 <= env["scale"] <= 16
+        assert env["stride_q"] == [
+            env["sq"] * env["hq"] * env["d"],
+            env["d"],
+            env["hq"] * env["d"],
+            1,
+        ]  # BSHD
+
+
+# --------------------------------------------------------------------------
+# Driver fixtures
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def clean_environment(monkeypatch):
+    for name in list(os.environ):
+        if name.startswith("HIPDNN_FUZZ_") or name in (
+            "HIPDNN_STUB_CONTROL",
+            fuzz.HOST_FILL_ENV,
+        ):
+            monkeypatch.delenv(name)
+
+
+class Run:
+    """One driver run against the stub, with helpers to read what it left behind."""
+
+    def __init__(self, tmp_path, monkeypatch):
+        self.tmp = tmp_path
+        self.monkeypatch = monkeypatch
+        self.work = tmp_path / "work"
+        self.log = tmp_path / "stub-invocations.jsonl"
+        self.control_path = tmp_path / "control.json"
+        self.control()
+
+    def control(self, **control):
+        control.setdefault("log", str(self.log))
+        self.control_path.write_text(json.dumps(control))
+        self.monkeypatch.setenv("HIPDNN_STUB_CONTROL", str(self.control_path))
+
+    def args(self, *extra, space="SdpaFwd/Default", seed=1000):
+        args = [
+            "--binary", str(STUB),
+            "--work-dir", str(self.work),
+            "--case-timeout", "30s",
+            "--seed", str(seed),
+        ]  # fmt: skip
+        if space:
+            args += ["--filter", space if space.startswith("^") else f"^{space}$"]
+        return args + list(extra)
+
+    def run(self, *extra, **kwargs):
+        return fuzz.main(self.args(*extra, **kwargs))
+
+    @property
+    def summary(self):
+        return json.loads((self.work / "summary.json").read_text())
+
+    @property
+    def outcome_list(self):
+        return [
+            json.loads(line)
+            for line in (self.work / "outcomes.jsonl").read_text().splitlines()
+        ]
+
+    @property
+    def invocations(self):
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def failure_dir(self, case, space="SdpaFwd_Default"):
+        return self.work / "failures" / f"{space}_{case}"
+
+
+@pytest.fixture
+def run(tmp_path, monkeypatch):
+    return Run(tmp_path, monkeypatch)
+
+
+# --------------------------------------------------------------------------
+# R6: control surface
+# --------------------------------------------------------------------------
+
+
+def test_environment_variables_set_the_defaults_and_flags_override_them(monkeypatch):
+    env = {
+        "HIPDNN_FUZZ_SAMPLES": "7",
+        "HIPDNN_FUZZ_SEED": "55",
+        "HIPDNN_FUZZ_DATA_SEED": "66",
+        "HIPDNN_FUZZ_FILTER": "^RMSNorm/",
+        "HIPDNN_FUZZ_TIME_BUDGET": "2h",
+        "HIPDNN_FUZZ_CASE_TIMEOUT": "90s",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    a = fuzz.parse_args(["--binary", "bin"])
+    assert (a.samples, a.seed, a.data_seed, a.filter) == (7, 55, 66, "^RMSNorm/")
+    assert (a.time_budget, a.case_timeout) == (7200.0, 90.0)
+    a = fuzz.parse_args(
+        ["--binary", "bin", "--samples", "3", "--seed", "1", "--data-seed", "2", "--filter", "x",
+         "--time-budget", "10m", "--case-timeout", "5s"]
+    )  # fmt: skip
+    assert (a.samples, a.seed, a.data_seed, a.filter) == (3, 1, 2, "x")
+    assert (a.time_budget, a.case_timeout) == (600.0, 5.0)
+
+
+def test_defaults(monkeypatch):
+    a = fuzz.parse_args(["--binary", "bin"])
+    assert (
+        a.samples == 32
+        and a.data_seed is None
+        and a.filter is None
+        and a.time_budget is None
+    )
+    assert a.case_timeout == 600.0
+    assert 0 <= a.seed < 2**31
+    # a time budget without --samples means unlimited samples
+    assert fuzz.parse_args(["--binary", "bin", "--time-budget", "30m"]).samples == 0
+    assert (
+        fuzz.parse_args(
+            ["--binary", "bin", "--time-budget", "30m", "--samples", "5"]
+        ).samples
+        == 5
+    )
+    assert fuzz.parse_args(["--binary", "bin", "--samples", "0"]).samples == 0
+
+
+@pytest.mark.parametrize(
+    "text, seconds",
+    [
+        ("90", 90.0),
+        ("30m", 1800.0),
+        ("4h", 14400.0),
+        ("1h30m", 5400.0),
+        ("0.5s", 0.5),
+        ("2d", 172800.0),
+        ("0", None),
+        ("none", None),
+    ],
+)
+def test_durations(text, seconds):
+    assert fuzz.parse_duration(text) == seconds
+
+
+@pytest.mark.parametrize("bad", ["soon", "5x", "m"])
+def test_bad_duration_is_an_error(bad):
+    with pytest.raises(ValueError):
+        fuzz.parse_duration(bad)
+
+
+@pytest.mark.parametrize(
+    "env, value",
+    [
+        ("HIPDNN_FUZZ_SAMPLES", "many"),
+        ("HIPDNN_FUZZ_SEED", "-3"),
+        ("HIPDNN_FUZZ_DATA_SEED", str(2**32)),
+        ("HIPDNN_FUZZ_TIME_BUDGET", "soon"),
+    ],
+)
+def test_bad_environment_values_are_usage_errors(monkeypatch, env, value):
+    monkeypatch.setenv(env, value)
+    with pytest.raises(SystemExit) as info:
+        fuzz.parse_args(["--binary", "bin"])
+    assert info.value.code == 2
+
+
+def test_seed_is_printed_and_replayable(run, capsys):
+    assert (
+        fuzz.main(
+            [
+                "--binary",
+                str(STUB),
+                "--work-dir",
+                str(run.work),
+                "--samples",
+                "1",
+                "--filter",
+                "^SdpaFwd/Default$",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    seed = run.summary["seed"]
+    assert f"seed {seed}" in out
+    assert run.outcome_list[0]["case"] == f"s{seed}"
+
+
+def test_default_run_covers_every_space_and_filter_narrows(run):
+    assert run.run("--samples", "2", space=None) == 0
+    assert run.summary["spaces"] == SPACE_IDS
+    assert run.summary["samples_by_space"] == {s: 2 for s in SPACE_IDS}
+    assert run.run("--samples", "2", space="RMSNorm/Default") == 0
+    assert run.summary["spaces"] == ["RMSNorm/Default"]
+    assert run.run("--samples", "2", space="SdpaFwd/.*") == 0
+    assert run.summary["spaces"] == ["SdpaFwd/Default", "SdpaFwd/Gfx950Dense"]
+
+
+def test_filter_matching_nothing_and_broken_spaces_are_usage_errors(
+    run, tmp_path, capsys
+):
+    assert run.run("--samples", "1", space="NoSuchOp/Default") == 2
+    assert "no space" in capsys.readouterr().err
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(spaces, template="missing.template.json")
+    assert run.run("--samples", "1", "--spaces-dir", str(spaces), space=None) == 2
+    assert "Toy/Default" in capsys.readouterr().err
+
+
+def test_infeasible_space_ends_the_run_with_an_error(run, tmp_path, capsys):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(
+        spaces, constraints=[{"rule": "n > 1000", "reason": "n is capped at 100"}]
+    )
+    assert run.run("--samples", "1", "--spaces-dir", str(spaces), space=None) == 2
+    err = capsys.readouterr().err
+    assert "infeasible" in err and "n is capped at 100" in err
+
+
+# --------------------------------------------------------------------------
+# R6: batches and what the binary is given
+# --------------------------------------------------------------------------
+
+
+def test_batch_is_written_as_a_concrete_sweep_under_the_bundle_root(run):
+    assert (
+        run.run(
+            "--samples",
+            "3",
+            "--test-article",
+            "ART",
+            "--test-engine",
+            "ENG",
+            "--test-config",
+            "CFG",
+            "--binary-arg=--extra",
+        )
+        == 0
+    )
+    sp = space_by_id("SdpaFwd/Default")
+    directory = run.work / "bundles" / "gauntlet" / "SdpaFwd" / "Default"
+    assert (
+        directory / "graph.template.json"
+    ).read_bytes() == sp.template_path.read_bytes()
+    sweep = json.loads((directory / "sweep.json").read_text())
+    assert sweep["version"] == 1
+    rows = sweep["cases"]
+    assert [r["id"] for r in rows] == ["s1000", "s1001", "s1002"]
+    for row, seed in zip(rows, (1000, 1001, 1002)):
+        assert json.dumps(row) == json.dumps(sampler.sample(sp, seed).row)
+        assert set(row["metadata"]) >= {
+            "format_version",
+            "generator",
+            "seed",
+            "purpose",
+            "notes",
+        }
+        assert row["metadata"]["purpose"] == "probe"
+    # discoverable the way the harness walks a golden-data-dir
+    assert bundle_discovery.find_sweep_roots(run.work / "bundles") == [directory]
+    # the binary is called with the documented command line
+    modes = {i["mode"]: i["argv"] for i in run.invocations}
+    for mode in ("list", "run"):
+        argv = modes[mode]
+        assert argv[argv.index("--golden-data-dir") + 1] == str(run.work / "bundles")
+        assert (
+            "--gtest_filter=gauntlet_SdpaFwd_Default.s1000:gauntlet_SdpaFwd_Default.s1001:gauntlet_SdpaFwd_Default.s1002"
+            in argv
+        )
+        assert argv[argv.index("--test-article") + 1] == "ART"
+        assert argv[argv.index("--test-engine") + 1] == "ENG"
+        assert argv[argv.index("--test-config") + 1] == "CFG"
+        assert "--extra" in argv
+    assert (
+        "--gtest_list_tests" in modes["list"]
+        and "--outcome-report" not in modes["list"]
+    )
+    assert (
+        "--gtest_list_tests" not in modes["run"] and "--outcome-report" in modes["run"]
+    )
+    assert {o["test"] for o in run.outcome_list} == {
+        f"gauntlet_SdpaFwd_Default.s{s}" for s in (1000, 1001, 1002)
+    }
+
+
+def test_each_space_gets_its_own_batch_and_gtest_names(run):
+    run.run("--samples", "1", space=None)
+    names = {o["test"] for o in run.outcome_list}
+    assert names == {
+        "gauntlet_RMSNorm_Default.s1000",
+        "gauntlet_SdpaFwd_Default.s1000",
+        "gauntlet_SdpaFwd_Gfx950Dense.s1000",
+    }
+
+
+def test_samples_are_split_into_batches_with_consecutive_seeds(run):
+    assert run.run("--samples", "7", "--batch-size", "3") == 0
+    runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
+    assert [len(r) for r in runs] == [3, 3, 1]
+    assert [o["case"] for o in run.outcome_list] == [f"s{1000 + i}" for i in range(7)]
+
+
+def test_fixed_data_seed_applies_to_every_sample(run):
+    run.run("--samples", "3", "--data-seed", "4021")
+    rows = json.loads(
+        (run.work / "bundles/gauntlet/SdpaFwd/Default/sweep.json").read_text()
+    )["cases"]
+    assert {r["metadata"]["seed"] for r in rows} == {4021}
+    assert [r["id"] for r in rows] == ["s1000", "s1001", "s1002"]
+
+
+# --------------------------------------------------------------------------
+# R6: outcomes, exit code, summary
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "behaviour, outcome, exit_code",
+    [
+        ("pass", "PASS", 0),
+        ("unclaimed_pass", "UNCLAIMED_PASS", 0),
+        ("declined", "DECLINED", 0),
+        ("unexercised", "UNEXERCISED", 0),
+        ("wrong", "WRONG", 1),
+        ("crash_engine", "CRASH", 1),
+        ("crash", "CRASH", 1),
+    ],
+)
+def test_exit_status_is_nonzero_only_for_wrong_and_crash(
+    run, behaviour, outcome, exit_code
+):
+    run.control(default=behaviour)
+    assert run.run("--samples", "2") == exit_code
+    assert [o["outcome"] for o in run.outcome_list] == [outcome, outcome]
+    assert run.summary["exit_code"] == exit_code
+    assert run.summary["outcomes"][outcome] == 2
+
+
+def test_summary_counts_every_sample_per_engine_and_space_with_reasons(run):
+    run.control(
+        seed_mod={
+            "m": 6,
+            "map": {
+                "1": "declined",
+                "2": "wrong",
+                "3": "unexercised",
+                "4": "load_skip",
+                "5": "unclaimed_pass",
+            },
+        },
+        engine="STUB_ENGINE",
+    )
+    assert run.run("--samples", "12", "--batch-size", "5", space=None) == 1
+    summary = run.summary
+    assert summary["samples"] == 36 and summary["reconciled"] is True
+    assert sum(summary["outcomes"].values()) == 36
+    assert summary["outcomes"] == {
+        "PASS": 6,
+        "DECLINED": 6,
+        "WRONG": 6,
+        "CRASH": 0,
+        "UNCLAIMED_PASS": 6,
+        "UNEXERCISED": 12,
+    }
+    engine = summary["engines"]["STUB_ENGINE"]
+    assert engine["samples"] == 36 and set(engine["spaces"]) == set(SPACE_IDS)
+    for space_id in SPACE_IDS:
+        sp = engine["spaces"][space_id]
+        assert sp["samples"] == 12 and sum(sp["outcomes"].values()) == 12
+        assert sp["outcomes"]["PASS"] == 2 and sp["outcomes"]["WRONG"] == 2
+        assert list(sp["declined_reasons"].values()) == [2]
+        assert "does not support this graph" in next(iter(sp["declined_reasons"]))
+        assert sorted(sp["unexercised_reasons"].values()) == [2, 2]
+        assert any(r.startswith("load:") for r in sp["unexercised_reasons"])
+        assert any(r == "no oracle available" for r in sp["unexercised_reasons"])
+        assert len(sp["wrong"]) == 2
+    assert len(summary["findings"]) == 6
+    assert len(run.outcome_list) == 36
+    assert (run.work / "samples.jsonl").read_text().count("\n") == 36
+
+
+def test_summary_path_flag_and_outcome_records(run):
+    target = run.tmp / "elsewhere" / "s.json"
+    target.parent.mkdir()
+    run.run("--samples", "2", "--summary", str(target))
+    assert json.loads(target.read_text())["samples"] == 2
+    assert not (run.work / "summary.json").exists()
+    record = run.outcome_list[0]
+    assert record["test"] == "gauntlet_SdpaFwd_Default.s1000"
+    assert record["engine"] == "STUB_ENGINE" and record["arch"] == "gfx950"
+    assert (
+        record["purpose"] == "probe"
+        and record["outcome"] == "PASS"
+        and record["source"] == "binary"
+    )
+
+
+def test_unrecognized_outcome_is_unexercised_not_a_pass(run, monkeypatch):
+    # a binary that reports an outcome this driver does not know must not count green
+    class Odd(fuzz.Fuzz):
+        def _finish_record(self, sp, sample, record, attempt):
+            super()._finish_record(sp, sample, dict(record, outcome="MAYBE"), attempt)
+
+    args = fuzz.parse_args(run.args("--samples", "1"))
+    assert Odd(args, fuzz.select_spaces(args)).run() == 0
+    assert run.outcome_list[0]["outcome"] == "UNEXERCISED"
+    assert "unrecognized outcome 'MAYBE'" in run.outcome_list[0]["reason"]
+
+
+# --------------------------------------------------------------------------
+# R6: crash, hang, load and registration recovery
+# --------------------------------------------------------------------------
+
+
+def test_crash_is_one_case_and_the_remainder_runs_again(run):
+    run.control(cases={"s1002": "crash"})
+    assert run.run("--samples", "6", "--batch-size", "6") == 1
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert {c: o["outcome"] for c, o in outcomes.items()} == {
+        "s1000": "PASS", "s1001": "PASS", "s1002": "CRASH", "s1003": "PASS", "s1004": "PASS", "s1005": "PASS",
+    }  # fmt: skip
+    assert (
+        outcomes["s1002"]["source"] == "driver"
+        and outcomes["s1002"]["crash_kind"] == "death"
+    )
+    assert (
+        "died" in outcomes["s1002"]["reason"] and "139" in outcomes["s1002"]["reason"]
+    )
+    runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
+    assert len(runs) == 2 and len(runs[0]) == 6
+    assert runs[1] == [f"gauntlet_SdpaFwd_Default.s{s}" for s in (1003, 1004, 1005)]
+
+
+def test_several_crashes_in_one_batch_each_cost_one_case(run):
+    run.control(cases={"s1000": "crash", "s1002": "crash", "s1004": "crash"})
+    assert run.run("--samples", "5", "--batch-size", "5") == 1
+    assert [o["outcome"] for o in run.outcome_list] == [
+        "CRASH",
+        "PASS",
+        "CRASH",
+        "PASS",
+        "CRASH",
+    ]
+
+
+def test_hang_is_killed_after_the_case_timeout_and_counts_as_crash(run):
+    run.control(cases={"s1001": "hang"}, hang_seconds=120)
+    started = time.monotonic()
+    assert run.run("--samples", "3", "--batch-size", "3", "--case-timeout", "1s") == 1
+    assert time.monotonic() - started < 60
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert (
+        outcomes["s1001"]["outcome"] == "CRASH"
+        and outcomes["s1001"]["crash_kind"] == "hang"
+    )
+    assert "hang" in outcomes["s1001"]["reason"]
+    assert (
+        outcomes["s1000"]["outcome"] == "PASS"
+        and outcomes["s1002"]["outcome"] == "PASS"
+    )
+    assert run.summary["engines"]["STUB_ENGINE"]["spaces"]["SdpaFwd/Default"][
+        "crash"
+    ] == ["s1001"]
+
+
+def test_case_skipped_at_load_is_unexercised_with_the_load_message(run):
+    run.control(cases={"s1001": "load_skip"})
+    assert run.run("--samples", "3") == 0
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert outcomes["s1001"]["outcome"] == "UNEXERCISED"
+    assert (
+        outcomes["s1001"]["reason"].startswith("load:")
+        and "stub load failure" in outcomes["s1001"]["reason"]
+    )
+    assert outcomes["s1001"]["source"] == "driver"
+    runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
+    assert all("gauntlet_SdpaFwd_Default.s1001" not in names for names in runs)
+    assert outcomes["s1000"]["outcome"] == outcomes["s1002"]["outcome"] == "PASS"
+
+
+def test_registration_crash_is_bisected_to_the_case_that_causes_it(run):
+    run.control(cases={"s1005": "reg_crash"})
+    assert run.run("--samples", "8", "--batch-size", "8") == 0
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert outcomes["s1005"]["outcome"] == "UNEXERCISED"
+    assert outcomes["s1005"]["reason"].startswith("load-crash")
+    assert "134" in outcomes["s1005"]["reason"]
+    assert {c: o["outcome"] for c, o in outcomes.items() if c != "s1005"} == {
+        f"s{1000 + i}": "PASS" for i in range(8) if i != 5
+    }
+    assert (
+        len([i for i in run.invocations if i["mode"] == "list"]) <= 8
+    )  # log2 splits, not one per case
+
+
+def test_two_registration_crashes_are_both_isolated(run):
+    run.control(cases={"s1001": "reg_crash", "s1006": "reg_crash"})
+    assert run.run("--samples", "8", "--batch-size", "8") == 0
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert sorted(c for c, o in outcomes.items() if o["outcome"] == "UNEXERCISED") == [
+        "s1001",
+        "s1006",
+    ]
+    assert sum(o["outcome"] == "PASS" for o in outcomes.values()) == 6
+
+
+def test_a_run_that_dies_before_any_case_starts_is_bisected_too(run):
+    run.control(cases={"s1003": "run_start_crash"})
+    assert run.run("--samples", "5", "--batch-size", "5") == 0
+    outcomes = {o["case"]: o for o in run.outcome_list}
+    assert outcomes["s1003"]["outcome"] == "UNEXERCISED" and outcomes["s1003"][
+        "reason"
+    ].startswith("load-crash")
+    assert sorted(c for c, o in outcomes.items() if o["outcome"] == "PASS") == [
+        "s1000",
+        "s1001",
+        "s1002",
+        "s1004",
+    ]
+
+
+def test_every_sample_has_exactly_one_outcome_under_mixed_failures(run):
+    run.control(
+        seed_mod={
+            "m": 9,
+            "map": {
+                "1": "crash",
+                "2": "load_skip",
+                "3": "wrong",
+                "4": "declined",
+                "5": "reg_crash",
+                "6": "hang",
+            },
+        },
+        hang_seconds=60,
+    )
+    assert run.run("--samples", "9", "--batch-size", "9", "--case-timeout", "1s") == 1
+    cases = [o["case"] for o in run.outcome_list]
+    assert (
+        sorted(cases) == sorted({f"s{1000 + i}" for i in range(9)}) and len(cases) == 9
+    )
+    assert run.summary["reconciled"] is True and run.summary["samples"] == 9
+    assert run.summary["outcomes"]["CRASH"] == 2  # one death, one hang
+
+
+def test_binary_that_cannot_run_is_a_usage_error(run, capsys):
+    assert (
+        fuzz.main(
+            [
+                "--binary",
+                "definitely-not-a-binary-xyz",
+                "--work-dir",
+                str(run.work),
+                "--samples",
+                "1",
+            ]
+        )
+        == 2
+    )
+    assert "not an executable" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# R6: SIGINT
+# --------------------------------------------------------------------------
+
+
+def _fuzz(run, *extra, **kwargs):
+    args = fuzz.parse_args(run.args(*extra, **kwargs))
+    return fuzz.Fuzz(args, fuzz.select_spaces(args))
+
+
+def test_stop_request_finishes_the_batch_and_writes_the_report(run):
+    run.control(delay=0.3)
+    f = _fuzz(run, "--samples", "0", "--time-budget", "5m", "--batch-size", "3")
+    timer = threading.Timer(0.5, f.request_stop)
+    timer.start()
+    assert f.run() == 0
+    timer.join()
+    summary = run.summary
+    assert summary["stopped_because"] == "interrupted"
+    assert summary["samples"] >= 3 and summary["samples"] % 3 == 0  # whole batches only
+    assert (
+        summary["reconciled"] is True
+        and summary["outcomes"]["PASS"] == summary["samples"]
+    )
+    assert summary["elapsed_seconds"] < 60
+
+
+def test_second_interrupt_kills_the_binary_without_inventing_crashes(run):
+    run.control(delay=30)
+    f = _fuzz(run, "--samples", "4", "--batch-size", "4")
+    timer = threading.Timer(1.0, lambda: (f.request_stop(), f.request_stop(abort=True)))
+    timer.start()
+    started = time.monotonic()
+    assert f.run() == 0
+    timer.join()
+    assert time.monotonic() - started < 25
+    assert {o["outcome"] for o in run.outcome_list} == {"UNEXERCISED"}
+    assert all(
+        o["reason"] == "interrupted before the case ran" for o in run.outcome_list
+    )
+    assert run.summary["reconciled"] is True and run.summary["outcomes"]["CRASH"] == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs POSIX SIGINT delivery")
+def test_real_sigint_stops_the_driver_gracefully(run):
+    run.control(delay=0.2)
+    cmd = [sys.executable, str(fuzz.DRIVER_PATH)] + run.args(
+        "--samples", "0", "--time-budget", "5m", "--batch-size", "2"
+    )
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    deadline = time.monotonic() + 30
+    seen = ""
+    while "batch " not in seen and time.monotonic() < deadline:
+        seen += proc.stdout.readline()
+    proc.send_signal(signal.SIGINT)
+    out, _ = proc.communicate(timeout=60)
+    assert proc.returncode == 0, out
+    assert "finishing the current batch" in out
+    assert (
+        run.summary["stopped_because"] == "interrupted"
+        and run.summary["outcomes"]["CRASH"] == 0
+    )
+
+
+# --------------------------------------------------------------------------
+# R6b: continuous mode
+# --------------------------------------------------------------------------
+
+
+def test_continuous_mode_keeps_drawing_fresh_samples_until_the_time_budget(run):
+    run.control(delay=0.02)
+    started = time.monotonic()
+    two = "^(RMSNorm/Default|SdpaFwd/Default)$"
+    assert run.run("--time-budget", "2s", "--batch-size", "2", space=two) == 0
+    elapsed = time.monotonic() - started
+    assert 2 <= elapsed < 40
+    summary = run.summary
+    assert summary["continuous"] is True and summary["stopped_because"] == "time-budget"
+    assert summary["samples_per_space"] is None
+    samples = [
+        json.loads(line)
+        for line in (run.work / "samples.jsonl").read_text().splitlines()
+    ]
+    assert len(samples) >= 6  # several batches
+    per_space = {}
+    for s in samples:
+        per_space.setdefault(s["space"], []).append(s["shape_seed"])
+    assert set(per_space) == {"RMSNorm/Default", "SdpaFwd/Default"}
+    for seeds in per_space.values():
+        assert len(seeds) >= 2 and len(set(seeds)) == len(
+            seeds
+        )  # distinct ids across batches
+        assert seeds == list(range(1000, 1000 + len(seeds)))  # fresh seeds every batch
+    # round robin: batches alternate between the spaces
+    batch_spaces = [samples[i]["space"] for i in range(0, len(samples), 2)]
+    assert all(a != b for a, b in zip(batch_spaces, batch_spaces[1:]))
+    # every sample has one outcome
+    assert summary["reconciled"] is True and summary["samples"] == len(samples) == len(
+        run.outcome_list
+    )
+    assert len({(o["space"], o["case"]) for o in run.outcome_list}) == len(samples)
+
+
+def test_continuous_mode_logs_crashes_and_goes_on(run):
+    run.control(seed_mod={"m": 3, "map": {"1": "crash"}}, delay=0.01)
+    assert run.run("--samples", "0", "--time-budget", "2s", "--batch-size", "3") == 1
+    summary = run.summary
+    assert summary["outcomes"]["CRASH"] >= 2 and summary["outcomes"]["PASS"] >= 4
+    assert summary["reconciled"] is True and summary["samples"] > 3
+    assert len(list((run.work / "failures").iterdir())) == summary["outcomes"]["CRASH"]
+
+
+def test_sample_cap_stops_a_budgeted_run_too(run):
+    assert run.run("--samples", "4", "--time-budget", "5m", "--batch-size", "2") == 0
+    assert (
+        run.summary["stopped_because"] == "sample-cap" and run.summary["samples"] == 4
+    )
+    assert run.summary["continuous"] is False
+
+
+# --------------------------------------------------------------------------
+# R6c: fault artifacts
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def findings(tmp_path_factory):
+    """One run with a WRONG, a crash and a hang, then a probe that checks the folders exist."""
+    tmp = tmp_path_factory.mktemp("findings")
+    mp = pytest.MonkeyPatch()
+    for name in list(os.environ):
+        if name.startswith("HIPDNN_FUZZ_") or name in (
+            "HIPDNN_STUB_CONTROL",
+            fuzz.HOST_FILL_ENV,
+        ):
+            mp.delenv(name)
+    mp.setenv(fuzz.HOST_FILL_ENV, "1")
+    mp.setenv("HIPDNN_FINDINGS_MARKER", "present")
+    r = Run(tmp, mp)
+    r.control(
+        cases={
+            "s2000": "wrong",
+            "s2001": "crash",
+            "s2002": "hang",
+            "s2003": "probe_file",
+        },
+        hang_seconds=120,
+        probe_path=str(r.failure_dir("s2002") / "repro.json"),
+    )
+    code = r.run(
+        "--samples", "5", "--batch-size", "5", "--case-timeout", "1s", "--seed", "2000",
+        "--test-article", "ART", "--test-config", "CFG",
+    )  # fmt: skip
+    assert code == 1
+    yield r
+    mp.undo()
+
+
+def test_wrong_crash_and_hang_each_leave_a_complete_folder(findings):
+    r = findings
+    assert sorted(p.name for p in (r.work / "failures").iterdir()) == [
+        "SdpaFwd_Default_s2000", "SdpaFwd_Default_s2001", "SdpaFwd_Default_s2002",
+    ]  # fmt: skip
+    for case, outcome in (("s2000", "WRONG"), ("s2001", "CRASH"), ("s2002", "CRASH")):
+        folder = r.failure_dir(case)
+        name = f"SdpaFwd_Default_{case}"
+        files = {p.name for p in folder.iterdir()}
+        assert files >= {
+            f"{name}.json", f"{name}.meta.json", "repro.json", "outcome.json", "log_tail.txt",
+            "replay.sh", "replay.txt",
+        }  # fmt: skip
+        assert (
+            json.loads((folder / "outcome.json").read_text())["result"]["outcome"]
+            == outcome
+        )
+        assert json.loads((folder / "repro.json").read_text())["outcome"] == outcome
+
+
+def test_folders_are_written_before_the_run_continues(findings):
+    r = findings
+    probe = next(o for o in r.outcome_list if o["case"] == "s2003")
+    assert probe["outcome"] == "PASS" and probe["reason"] == "probe:True"
+    assert r.summary["reconciled"] is True and r.summary["outcomes"] == {
+        "PASS": 2, "DECLINED": 0, "WRONG": 1, "CRASH": 2, "UNCLAIMED_PASS": 0, "UNEXERCISED": 0,
+    }  # fmt: skip
+
+
+def test_fault_graph_is_the_expanded_concrete_graph_with_canonical_uids(findings):
+    sp = space_by_id("SdpaFwd/Default")
+    template = json.loads(sp.template_path.read_text())
+    for case, seed in (("s2000", 2000), ("s2001", 2001)):
+        graph = json.loads(
+            (findings.failure_dir(case) / f"SdpaFwd_Default_{case}.json").read_text()
+        )
+        expected = bu.expand(template, sampler.sample(sp, seed).row["values"])
+        assert bu.canon(graph) == bu.canon(
+            bu.remap_graph(expected, bu.canonical_uid_map_by_name(expected))
+        )
+        assert [t["name"] for t in graph["tensors"]] == ["K", "Q", "SdpaFwd_0::O", "V"]
+        assert [t["uid"] for t in graph["tensors"]] == [0, 1, 2, 3]
+        assert "${" not in json.dumps(graph)
+
+
+def test_meta_sidecar_records_seed_purpose_and_source(findings):
+    sp = space_by_id("SdpaFwd/Default")
+    meta = json.loads(
+        (findings.failure_dir("s2000") / "SdpaFwd_Default_s2000.meta.json").read_text()
+    )
+    s = sampler.sample(sp, 2000)
+    assert meta["format_version"] == 1 and meta["purpose"] == "regression"
+    assert meta["seed"] == s.data_seed
+    assert (
+        "SdpaFwd/Default" in meta["reference_source"]
+        and "2000" in meta["reference_source"]
+    )
+    assert "operation" not in meta  # a failure folder is not a capture suite
+
+
+def test_repro_json_carries_everything_needed_to_replay(findings):
+    sp = space_by_id("SdpaFwd/Default")
+    repro = json.loads((findings.failure_dir("s2001") / "repro.json").read_text())
+    s = sampler.sample(sp, 2001)
+    assert repro["space"] == "SdpaFwd/Default"
+    assert repro["space_sha256"] == hashlib.sha256(sp.path.read_bytes()).hexdigest()
+    assert (
+        repro["template_sha256"]
+        == hashlib.sha256(sp.template_path.read_bytes()).hexdigest()
+    )
+    assert repro["shape_seed"] == 2001 and repro["data_seed"] == s.data_seed
+    assert repro["axis_values"] == s.axis_values and repro["sweep_row"] == s.row
+    assert (
+        repro["input_fill"]["path"] == "host"
+        and repro["input_fill"][fuzz.HOST_FILL_ENV] == "1"
+    )
+    assert repro["input_fill"]["data_seed"] == s.data_seed
+    assert repro["engine"] == "STUB_ENGINE" and repro["arch"] == "gfx950"
+    assert repro["test_article"] == "ART" and repro["test_config"] == "CFG"
+    assert (
+        "rocm_version" in repro and "git_sha" in repro
+    )  # best effort: present, maybe null
+    assert (
+        repro["driver_flags"]["case_timeout"] == 1.0
+        and repro["driver_flags"]["seed"] == 2000
+    )
+    assert (
+        repro["hipdnn_env"][fuzz.HOST_FILL_ENV] == "1"
+        and repro["hipdnn_env"]["HIPDNN_FINDINGS_MARKER"] == "present"
+    )
+    assert "HIPDNN_STUB_CONTROL" in repro["hipdnn_env"]
+    assert repro["uids_canonical"] is True
+
+
+def test_log_tail_keeps_the_binarys_last_words(findings):
+    assert (
+        "segmentation fault"
+        in (findings.failure_dir("s2001") / "log_tail.txt").read_text()
+    )
+    assert (
+        "[ RUN      ] gauntlet_SdpaFwd_Default.s2002"
+        in (findings.failure_dir("s2002") / "log_tail.txt").read_text()
+    )
+
+
+def test_replay_files_name_one_command_and_the_fill_path(findings):
+    folder = findings.failure_dir("s2000")
+    repro = json.loads((folder / "repro.json").read_text())
+    script = (folder / "replay.sh").read_text()
+    assert script.startswith("#!/bin/sh\n")
+    command = [line for line in script.splitlines() if line.startswith("exec ")]
+    assert len(command) == 1
+    text = command[0]
+    assert (
+        "--filter '^SdpaFwd/Default$' --seed 2000 --samples 1 --data-seed "
+        + str(repro["data_seed"])
+        in text
+    )
+    assert f"{fuzz.HOST_FILL_ENV}=1" in text and "HIPDNN_STUB_CONTROL=" in text
+    assert (
+        '--work-dir "$D/replay-work"' in text
+        and "--test-article ART" in text
+        and "--test-config CFG" in text
+    )
+    assert "host" in script and fuzz.HOST_FILL_ENV in script
+    replay_txt = (folder / "replay.txt").read_text()
+    assert replay_txt.splitlines()[0] == repro["replay"]["command"]
+    assert "input fill path: host" in replay_txt and "import_graph.py" in replay_txt
+
+
+def _replay(folder, work_name="replayed"):
+    repro = json.loads((folder / "repro.json").read_text())
+    argv = list(repro["replay"]["argv"])
+    work = folder.parent.parent / work_name
+    argv[argv.index("--work-dir") + 1] = str(work)
+    env = {k: v for k, v in os.environ.items() if k not in repro["replay"]["env_unset"]}
+    env.update(repro["replay"]["env_set"])
+    done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120)
+    return repro, work, done
+
+
+@pytest.mark.parametrize(
+    "case, outcome", [("s2000", "WRONG"), ("s2001", "CRASH"), ("s2002", "CRASH")]
+)
+def test_replay_regenerates_the_identical_sweep_row_graph_and_seed(
+    findings, case, outcome
+):
+    folder = findings.failure_dir(case)
+    repro, work, done = _replay(folder, f"replayed_{case}")
+    assert done.returncode == 1, done.stdout + done.stderr
+    sweep = json.loads(
+        (work / "bundles/gauntlet/SdpaFwd/Default/sweep.json").read_text()
+    )
+    assert len(sweep["cases"]) == 1
+    assert json.dumps(sweep["cases"][0]) == json.dumps(
+        repro["sweep_row"]
+    )  # byte-identical row
+    assert sweep["cases"][0]["metadata"]["seed"] == repro["data_seed"]
+    replayed_folder = work / "failures" / f"SdpaFwd_Default_{case}"
+    name = f"SdpaFwd_Default_{case}.json"
+    assert (replayed_folder / name).read_bytes() == (folder / name).read_bytes()
+    result = json.loads((replayed_folder / "outcome.json").read_text())["result"]
+    assert result["outcome"] == outcome
+    assert json.loads((work / "summary.json").read_text())["seed"] == int(case[1:])
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX shell")
+def test_replay_script_runs(findings):
+    folder = findings.failure_dir("s2000")
+    done = subprocess.run(
+        ["sh", str(folder / "replay.sh")], capture_output=True, text=True, timeout=120
+    )
+    assert done.returncode == 1
+    assert (folder / "replay-work" / "failures" / "SdpaFwd_Default_s2000").is_dir()
+
+
+# --------------------------------------------------------------------------
+# R6c: freeze
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_fault_folder_imports_for_real_and_expands_back_identically(
+    run, tmp_path, space_id
+):
+    sp = space_by_id(space_id)
+    run.control(default="wrong")
+    assert run.run("--samples", "1", "--seed", "4242", space=space_id) == 1
+    folder = run.failure_dir("s4242", f"{sp.operation}_{sp.name}")
+    case = folder.name
+    failing_graph = json.loads((folder / f"{case}.json").read_text())
+    repro = json.loads((folder / "repro.json").read_text())
+
+    tree = tmp_path / "tree"
+    topology = tree / "quick" / sp.operation / sp.template_path.parent.name
+    topology.mkdir(parents=True)
+    for name in ("graph.template.json", "sweep.json", "support.json"):
+        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    before = json.loads((topology / "sweep.json").read_text())["cases"]
+
+    def import_it():
+        return subprocess.run(
+            [sys.executable, str(MIGRATION_DIR / "import_graph.py"), "--graph", str(folder / f"{case}.json"),
+             "--bundle-dir", str(tree), "--tier", "quick"],
+            capture_output=True, text=True, cwd=MIGRATION_DIR, timeout=120,
+        )  # fmt: skip
+
+    done = import_it()
+    assert done.returncode == 0, done.stderr
+    assert "appended case" in done.stderr
+    template = json.loads((topology / "graph.template.json").read_text())
+    cases = json.loads((topology / "sweep.json").read_text())["cases"]
+    assert len(cases) == len(before) + 1
+    new = cases[-1]
+    expanded = bu.expand(template, new["values"])
+    assert bu.canon(expanded) == bu.canon(failing_graph)  # the same graph back
+    # UIDs unchanged: the import did not renumber a tensor (that would change its input seed)
+    sampled = bu.expand(template, repro["sweep_row"]["values"])
+    assert [(t["name"], t["uid"]) for t in failing_graph["tensors"]] == [
+        (t["name"], t["uid"]) for t in sampled["tensors"]
+    ]
+    assert [t["uid"] for t in new["values"]["tensors"]] == [
+        t["uid"] for t in repro["sweep_row"]["values"]["tensors"]
+    ]
+    assert new["metadata"]["seed"] == repro["data_seed"]  # the same seed
+    assert new["metadata"]["purpose"] == "regression"
+    assert (
+        space_id in new["metadata"]["reference_source"]
+        and "4242" in new["metadata"]["reference_source"]
+    )
+    # importing again is a no-op (duplicate detection)
+    again = import_it()
+    assert again.returncode == 0 and "DUPLICATE" in again.stderr
+    assert (
+        len(json.loads((topology / "sweep.json").read_text())["cases"])
+        == len(before) + 1
+    )
+
+
+def test_fault_folder_survives_a_later_crash(run):
+    run.control(cases={"s1000": "wrong", "s1003": "crash", "s1005": "crash"})
+    assert run.run("--samples", "8", "--batch-size", "4") == 1
+    names = sorted(p.name for p in (run.work / "failures").iterdir())
+    assert names == [
+        "SdpaFwd_Default_s1000",
+        "SdpaFwd_Default_s1003",
+        "SdpaFwd_Default_s1005",
+    ]
+    for name in names:
+        assert (run.work / "failures" / name / "repro.json").exists()
+        assert (run.work / "failures" / name / "replay.sh").exists()
+    # the later batches did not touch the first finding
+    first = json.loads(
+        (run.work / "failures/SdpaFwd_Default_s1000/outcome.json").read_text()
+    )
+    assert first["result"]["outcome"] == "WRONG"

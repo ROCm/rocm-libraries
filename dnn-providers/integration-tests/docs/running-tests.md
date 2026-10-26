@@ -148,6 +148,7 @@ Otherwise, you test the old tree.
 | `--validator` | `HIPDNN_TEST_VALIDATOR` | `auto` | Where the comparison runs: `auto` (follow the reference), `cpu`, `gpu`. |
 | `--reference-executor` | `HIPDNN_TEST_REFERENCE_EXECUTOR` | `cpu` | Reference for C++ graph tests only. |
 | `--golden-data-dir`, `--gd` | `HIPDNN_TEST_GOLDEN_DATA_DIR` | `<exe>/../lib/integration-test-bundles/` | Bundle root. The path in the flag must exist. The binary does not check the path in the env var up front. |
+| `--outcome-report <file>` | `HIPDNN_TEST_OUTCOME_REPORT` | none | Append one JSON object per line: a `started` record before each bundle test and a `finished` record when it ends. See [Outcome report](#outcome-report). The flag wins over the env var. The binary exits 1 if the file cannot be opened. |
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
@@ -209,6 +210,118 @@ ops responsible, at registration. With both lanes selected (the default), a
 bundle with golden data that neither lane registered a test for fails as
 `<bundle>_Unvalidated`. A tree whose `.bin` files were never pulled registers
 nothing and says so. It is registered once, not per provider.
+
+## Outcome report
+
+`--outcome-report <file>` (or `HIPDNN_TEST_OUTCOME_REPORT`) gives every bundle
+test one outcome per engine, which the pass/fail tally cannot say. A skip can be a
+clean decline or a test that never ran; the report tells them apart. The file is
+JSON Lines, appended to, and flushed after every record, so a crash keeps every
+earlier line. Each registered bundle test writes a `started` record before it runs
+and exactly one `finished` record when it ends: a `SetUp` skip, a bundle that failed
+to load (the synthetic failing test) and a test that threw each get one. A `started`
+with no `finished` is the test the process died in.
+
+```json
+{"event":"started","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377"}
+{"event":"finished","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377",
+ "engine":"ASM_SDPA_ENGINE","arch":"gfx950","platform":"linux","purpose":"probe",
+ "outcome":"DECLINED","stage":"query","depth":"not-reached","origin":"none","verifier":"none",
+ "reason":"Engine ASM_SDPA_ENGINE does not support this graph (1 output tensor(s), 0 ranked engine(s))"}
+```
+
+`purpose` is the case's [`purpose`](file-formats.md#metadata-sidecar--namemetajson)
+metadata and is absent when the case sets none. `stage` is where the test stopped:
+`graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle` or `setup`
+(`none` for a pass).
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | The engine accepted the graph and its output matched an oracle. |
+| `DECLINED` | The support query resolved and the engine is absent from the ranked list, or the engine declined later (`EngineNotApplicableError` while building or running). For a claimed graph the run also fails as `CLAIM_BROKEN`. |
+| `WRONG` | Accepted, ran, and the output did not match the oracle. |
+| `CRASH` | In the ranked list, then failed to build or execute, **including a late `NOT_SUPPORTED`** (accepting a graph is a promise). Also: a hang or a dead process, which only the driver can see. |
+| `UNCLAIMED_PASS` | `PASS` on a graph whose sidecar does not claim this engine, arch and platform. The claim is too narrow. |
+| `UNEXERCISED` | Nothing verified it: a skip rule or guard, the frontend rejected the graph, the support query did not resolve (unknown is never `DECLINED`), no oracle, an oracle or harness error, or a pass that still left a failure on the test record. Never green. |
+
+The report adds no pass or fail rule: it records what the harness already decided.
+A run with no `--outcome-report` writes nothing.
+
+## Gauntlet fuzz runs
+
+A fuzz run draws random legal graphs from a **space** declaration, runs them through
+the unchanged `hipdnn_integration_tests` on one engine, and reports one outcome per
+sample. It is for finding defects an integration test did not think of; it is **not**
+a CTest lane and never runs in CI (RFC 0023). The driver is
+`dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py` (Python 3, standard
+library only).
+
+```bash
+# The lane's own arguments: `ctest -N -V -R '<lane>_quick_suite'` prints them.
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests \
+    --test-article <path to the provider plugin> \
+    --test-engine  HIP_MLOPS_ENGINE \
+    --test-config  dnn-providers/hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml \
+    --filter '^RMSNorm/' --samples 64 --work-dir gauntlet-runs/hip_mlops
+```
+
+The driver prints the seed it used. Run it again with `--seed` to get the same
+samples. Spaces live in `gauntlet/spaces/` (`<Op>[.<Name>].space.json`); with no
+`--filter` every space runs, and a space whose graphs the engine does not accept
+reports `DECLINED`, not a failure.
+
+| Variable | Flag | Meaning | Default |
+|---|---|---|---|
+| `HIPDNN_FUZZ_SAMPLES` | `--samples` | Samples per space. `0` is unlimited. | 32 |
+| `HIPDNN_FUZZ_SEED` | `--seed` | Shape seed of the first sample. Sample *i* uses `seed + i`. | random, printed |
+| `HIPDNN_FUZZ_DATA_SEED` | `--data-seed` | Input-data seed (the case's `metadata.seed`) for every sample. | derived from each shape seed |
+| `HIPDNN_FUZZ_FILTER` | `--filter` | Regex on `<Op>/<Space>`. | every space |
+| `HIPDNN_FUZZ_TIME_BUDGET` | `--time-budget` | Wall-clock limit, e.g. `30m`, `4h`. | none |
+| `HIPDNN_FUZZ_CASE_TIMEOUT` | `--case-timeout` | Longest one case may run before it counts as a hang (the driver kills the binary: `CRASH`). | `10m` |
+
+The binary, `--test-article`, `--test-engine` and `--test-config` are flags of the
+driver and are passed through; `--binary-arg` adds any other binary flag. Other flags:
+`--work-dir`, `--batch-size` (samples per binary invocation), `--spaces-dir` and
+`--summary`.
+
+**Continuous mode.** With `--time-budget` and no `--samples`, or with `--samples 0`,
+nothing is pre-built: each batch draws fresh random samples (new seeds, round-robin
+over the spaces) until the budget ends, a `--samples` cap is hit, or you press Ctrl-C.
+The current batch finishes and the report is still written. A crash is logged and the
+run continues.
+
+**Every sample gets one outcome.**
+
+| What happened | Outcome |
+|---|---|
+| A `finished` record | Its outcome. |
+| The binary died with a case `started` and not `finished` | `CRASH`; the rest of the batch runs again. |
+| A case ran past `--case-timeout` | `CRASH` (hang); the rest runs again. |
+| A case written but absent from `--gtest_list_tests` | `UNEXERCISED` (load), with the load message. |
+| The binary died before any case started | The batch is halved and rerun until the registration-killing case is isolated: `UNEXERCISED` (load crash). |
+
+**Outputs** under `--work-dir`: `bundles/` (what the binary was given), `outcomes.jsonl`,
+`samples.jsonl`, `summary.json` (counts per outcome for each engine and space, decline
+and unexercised reasons, findings), `reports/` and `logs/` (one per binary invocation),
+and `failures/<case>/` for each `WRONG` and `CRASH`. The exit status is non-zero if any
+sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reasons and
+never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
+tested the engine.
+
+**Failure artifacts.** `failures/<case>/` is written before the run continues and holds
+the expanded graph (`<case>.json`, tensor UIDs in canonical order), its metadata
+(`<case>.meta.json`, `purpose: regression`), `repro.json` (space, hashes of the space
+and template, shape seed and axis values, data seed, host or device fill, engine, arch,
+ROCm and git versions, flags and `HIPDNN_*` environment), the outcome record, the
+binary's log tail, and `replay.sh`: one command that regenerates the same graph and the
+same input tensors. Device-filled inputs differ from the host fill's, so a replay uses
+the fill path of the original run. To turn a finding into a checked-in case, see
+[Freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding).
+
+Run the driver's own tests with
+`python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`
+(CTest: `hipdnn_gauntlet_python_tests`). They use a stub binary and need no GPU.
 
 ## Test tiers
 

@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "SDPA forward in the ASM_SDPA_ENGINE region: bfloat16, head size 128 or 192 for Q and K with V and O at 128 (fmha_v3_fwd gfx942/gfx950 kernel tables), BSHD or BHSD, grouped-query heads, any sequence length, dense or bottom-right causal. gfx950 ships no causal kernel, so its causal samples decline; they stay as probes.",
+  "engine": "ASM_SDPA_ENGINE",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["bfloat16"]},
+    "layout": {"values": ["bshd", "bhsd"]},
+    "b":      {"values": [1, 2, 3, 4]},
+    "hkv":    {"values": [1, 2, 4, 8]},
+    "group":  {"values": [1, 2, 4, 8]},
+    "sq":     {"range": [1, 2048], "boundaries": [1, 63, 64, 65, 127, 128, 129, 256, 512]},
+    "skv":    {"range": [1, 2048], "boundaries": [1, 64, 128, 256, 512, 1024]},
+    "dqk":    {"values": [128, 192]},
+    "causal": {"values": [false, true]},
+    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]}
+  },
+  "derive": {
+    "hq":       "hkv * group",
+    "dv":       "128",
+    "dims_q":   "[b, hq, sq, dqk]",
+    "dims_k":   "[b, hkv, skv, dqk]",
+    "dims_v":   "[b, hkv, skv, dv]",
+    "dims_o":   "[b, hq, sq, dv]",
+    "stride_q": "[sq*hq*dqk, dqk, hq*dqk, 1] if layout == 'bshd' else [hq*sq*dqk, sq*dqk, dqk, 1]",
+    "stride_k": "[skv*hkv*dqk, dqk, hkv*dqk, 1] if layout == 'bshd' else [hkv*skv*dqk, skv*dqk, dqk, 1]",
+    "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
+    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]"
+  },
+  "constraints": [
+    {"rule": "not causal or sq <= skv", "reason": "bottom-right causal mask needs sq <= skv"},
+    {"rule": "b*hq*sq*skv*dqk <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": "${scale}",
+        "attributes__diagonal_alignment": "${'BOTTOM_RIGHT' if causal else 'TOP_LEFT'}",
+        "attributes__right_bound": "${0 if causal else None}"
+      }
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}

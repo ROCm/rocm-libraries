@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp: BSHD only, head size 64 or 128, bfloat16 or half, (query heads, kv heads) pairs taken from the quick SdpaFwd claims for this engine, seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. The pair list is the verified starting set; the shipped KDP holds more.",
+  "engine": "hipkernel:Gfx950AttentionDense",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype":    {"values": ["bfloat16", "half"]},
+    "b":        {"values": [1, 2, 3, 4]},
+    "heads":    {"values": [[16, 2], [32, 32], [32, 8], [64, 4], [64, 8], [8, 1]]},
+    "d":        {"values": [64, 128]},
+    "sq_m":     {"range": [1, 16], "boundaries": [1, 2, 4, 16]},
+    "skv_mode": {"values": ["same", "independent"]},
+    "skv_n":    {"range": [1, 64], "boundaries": [1, 2, 4, 8, 16, 64]},
+    "causal":   {"values": [false, true]},
+    "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]}
+  },
+  "derive": {
+    "hq":        "heads[0]",
+    "hkv":       "heads[1]",
+    "sq":        "sq_m * 128",
+    "skv":       "sq if skv_mode == 'same' else skv_n * 32",
+    "dims_q":    "[b, hq, sq, d]",
+    "dims_kv":   "[b, hkv, skv, d]",
+    "stride_q":  "[sq*hq*d, d, hq*d, 1]",
+    "stride_kv": "[skv*hkv*d, d, hkv*d, 1]"
+  },
+  "constraints": [
+    {"rule": "hq % hkv == 0", "reason": "GQA: query heads must be a multiple of kv heads"},
+    {"rule": "not causal or sq == skv", "reason": "the kernel's causal mask is top-left; bottom-right coincides only when sq == skv"},
+    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}",  "strides": "${stride_q}",  "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_q}",  "strides": "${stride_q}",  "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": "${scale}",
+        "attributes__diagonal_alignment": "${'BOTTOM_RIGHT' if causal else 'TOP_LEFT'}",
+        "attributes__right_bound": "${0 if causal else None}"
+      }
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}

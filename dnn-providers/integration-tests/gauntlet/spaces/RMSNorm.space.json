@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "operation": "RMSNorm",
+  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/RMSNorm/Variant4/graph.template.json",
+  "axes": {
+    "dtype":   {"values": ["float", "half", "bfloat16"]},
+    "x_dtype": {"values": ["float", "half", "bfloat16"]},
+    "layout":  {"values": ["nchw", "nhwc"]},
+    "ndim":    {"values": [4, 5]},
+    "n":       {"range": [1, 8], "boundaries": [1, 2, 8]},
+    "c":       {"range": [1, 256], "boundaries": [1, 2, 3, 64, 128, 256]},
+    "d3":      {"range": [1, 8], "boundaries": [1, 2, 4]},
+    "h":       {"range": [1, 128], "boundaries": [1, 2, 3, 64, 128]},
+    "w":       {"range": [1, 512], "boundaries": [1, 2, 31, 32, 33, 64, 127, 128, 129, 256, 512]},
+    "k":       {"values": [1, 2, 3, 4]}
+  },
+  "derive": {
+    "d":       "d3 if ndim == 5 else 1",
+    "kh":      "2 if ndim == 4 else 3",
+    "pc":      "c if k <= 1 else 1",
+    "pd":      "d if k <= 2 else 1",
+    "ph":      "h if k <= kh else 1",
+    "pw":      "w",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, pc, ph, pw] if ndim == 4 else [1, pc, pd, ph, pw]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "ps_w":    "1 if layout == 'nchw' else pc",
+    "ps_h":    "pw if layout == 'nchw' else pw * pc",
+    "ps_d":    "ph * pw if layout == 'nchw' else ph * pw * pc",
+    "ps_c":    "pd * ph * pw if layout == 'nchw' else 1",
+    "ps_n":    "pc * pd * ph * pw",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]"
+  },
+  "constraints": [
+    {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes"},
+    {"rule": "x_dtype == dtype or dtype == 'float'", "reason": "mixed precision keeps float y, scale and bias around a low-precision x, as in the quick sweeps"},
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": [1], "strides": [1], "data_type": "float"},
+        {"uid": 3, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dtype}"},
+        {"uid": 4, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${x_dtype}"}
+      ]
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}
