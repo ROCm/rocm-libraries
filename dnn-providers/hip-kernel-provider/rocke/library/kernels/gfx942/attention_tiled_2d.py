@@ -5838,7 +5838,6 @@ def _build_gfx942_4warp_gqa_lean(
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     BN = 64  # 4-warp: 64-key tiles
-    BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
     NKEYT = BN // 32
@@ -5916,28 +5915,21 @@ def _build_gfx942_4warp_gqa_lean(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
-    # D192 bounds every K/V key by the last valid key and every Q row by the last
+    # Every K/V key is bounded by the last valid key and every Q row by the last
     # token of its sequence: the 64-key tiles and 128-row Q block otherwise read
     # block-table entries, K/V rows and Q rows past the sequence when its length
-    # is not a tile multiple. Clamped keys are masked to -inf (P = 0) and
-    # clamped rows are never stored, so only the addresses change.
-    CLAMP = HD == 192
-    k_last = b.sub(klen, b.const_i32(1)) if CLAMP else None
-    q_last = b.sub(cu_q_stop, b.const_i32(1)) if CLAMP else None
+    # is not a tile multiple (an unbounded block-table read returns an arbitrary
+    # page id, so the K/V load faults). Clamped keys are masked to -inf (P = 0)
+    # and clamped rows are never stored, so only the addresses change.
+    k_last = b.sub(klen, b.const_i32(1))
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
 
     def phys_key(kv, keytile):
-        if CLAMP:
-            key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
-            key = b.select(b.cmp_lt(key, k_last), key, k_last)
-            lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
-            pb = b.global_load_i32(BT, lblk)
-            return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
+        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
-        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -5984,8 +5976,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            if CLAMP:
-                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
+            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
