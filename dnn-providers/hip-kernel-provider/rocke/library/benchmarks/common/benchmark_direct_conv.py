@@ -41,7 +41,14 @@ from typing import List
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 from benchmarks.common import batched_timing
-from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg
+from benchmarks.common.case_results import (
+    RUNNERS_UP,
+    ResultsWriter,
+    add_results_arg,
+    add_skip_measured_arg,
+    measured_keys,
+)
+from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
@@ -2452,6 +2459,12 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     # The binaries are shape-generic, so their modules outlive a case.
     modules = ModuleCache(args.module_cache_bytes)
+    # One row per case, for the comparison driver and the shard runner to
+    # merge. Does nothing without --results.
+    results_out = ResultsWriter(args.results, "direct")
+    # --skip-measured: cases a previous run of this sweep already recorded.
+    done = measured_keys(args.skip_measured, "direct")
+    n_skipped = 0
 
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
@@ -2466,6 +2479,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
+            if case_key(p, dtype, direction) in done:
+                # Counted, not printed: resuming a few thousand cases would
+                # otherwise open with a few thousand lines of nothing.
+                n_skipped += 1
+                continue
             plans, rejected = _filter_variants(
                 *direct_plans(cache, p, direction, arch), variants
             )
@@ -2575,10 +2593,33 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     f"  {rank:>4}  {tflops:>7.1f}  {ms:>8.3f}  {gbps:>7.1f}  {verdict:>6}  {label}"
                 )
             # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
-            tflops, _, ms, _, label = results[0]
+            tflops, gbps, ms, passed, label = results[0]
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
+            results_out.row(
+                key=case_key(p, dtype, direction),
+                case=case_idx,
+                shape=p.short(),
+                dtype=dtype,
+                direction=direction,
+                tflops=tflops,
+                ms=ms,
+                gbps=gbps,
+                kernel=label,
+                candidates=len(plans),
+                passed=passed,
+                # The tail of the ranking just printed, names only.
+                runners_up=[r[-1] for r in results[1 : 1 + RUNNERS_UP]],
+            )
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
     if len(cases) > 1:
         print(f"\n{modules.summary()}", flush=True)
+        if results_out.n_rows:
+            print(f"{results_out.n_rows} row(s) written to {args.results}", flush=True)
     return overall_rc
 
 
@@ -2725,6 +2766,17 @@ def main() -> int:
         f"measured at idle clocks (default: {batched_timing.DEFAULT_PRIMER})",
     )
 
+    add_results_arg(
+        parser.add_argument_group(
+            "Per-case results (AOT --run-from-cache only)",
+            "A machine-readable row per case, which benchmark_conv_compare.py "
+            "merges with the implicit-GEMM sweep's and run_conv_shards.py "
+            "concatenates across cards.",
+        ),
+        merged=False,
+    )
+    add_skip_measured_arg(parser)
+
     add_module_cache_arg(
         parser.add_argument_group(
             "Loaded binaries (AOT --run-from-cache only)",
@@ -2848,6 +2900,22 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    if args.skip_measured and not args.run_from_cache:
+        print(
+            "error: --skip-measured resumes an AOT sweep; pass "
+            "--run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.results and not args.run_from_cache:
+        # The JIT sweep has no cached kernels to name, and its per-case best is
+        # a kernel it just built -- a different artifact. Saying so beats
+        # accepting the flag and writing an empty file.
+        print(
+            "error: --results records an AOT sweep; pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
     if args.fast_rank and not args.run_from_cache:
         # The JIT sweep builds and loads its kernels one at a time, so
         # batching their launches would save nothing; saying so beats

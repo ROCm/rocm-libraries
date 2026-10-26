@@ -72,6 +72,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from benchmarks.common import case_results
+
 _SCRIPT_DIR = Path(__file__).parent
 
 # Regex patterns that match the "Best:" summary printed by both benchmarks.
@@ -301,6 +303,25 @@ def _build_miopen_args(args) -> list[str]:
 _ALL_STOPPED_RE = re.compile(r"all \d+ early-stopped: .*")
 
 
+def _write_results(path: str, rows_direct: str, rows_implicit: str) -> None:
+    """Join the two sweeps' per-case rows into ``path`` (and a ``.csv``).
+
+    The two files are what the children wrote under ``--results``; a sweep that
+    was skipped (``--skip-direct`` / ``--skip-implicit``) or that reached no
+    case leaves none, and :func:`case_results.read_rows` reads that as no rows,
+    so the merged table is simply one-sided.
+    """
+    rows = case_results.merge(
+        case_results.read_rows(rows_direct) + case_results.read_rows(rows_implicit)
+    )
+    if not rows:
+        print(f"\n[info] no per-case results to write to {path}", file=sys.stderr)
+        return
+    csv_path = case_results.write(rows, path)
+    print(f"\n{case_results.summary(rows)}")
+    print(f"results: {path} (and {csv_path})", flush=True)
+
+
 def _print_summary(
     direct: tuple[float | None, str],
     implicit: tuple[float | None, str],
@@ -493,6 +514,9 @@ def main() -> int:
         "the device's clocks up",
     )
 
+    case_results.add_results_arg(parser, merged=True)
+    case_results.add_skip_measured_arg(parser)
+
     parser.add_argument(
         "--module-cache-bytes",
         type=int,
@@ -665,6 +689,21 @@ def main() -> int:
         if seed:
             direct_args += ["--early-stop-record", seed_file]
 
+        # Each sweep writes its own per-case rows; they are joined below on
+        # the case key both of them record. The files are the children's, not
+        # the user's: --results names the merged table.
+        rows_direct = str(Path(tmp) / "direct_rows.jsonl")
+        rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
+        if args.results:
+            direct_args += ["--results", rows_direct]
+            implicit_args += ["--results", rows_implicit]
+        if args.skip_measured:
+            # Each sweep skips what *it* already recorded: a run killed
+            # between the two has the case on one side only, and resuming has
+            # to finish the other rather than skip it.
+            direct_args += ["--skip-measured", args.skip_measured]
+            implicit_args += ["--skip-measured", args.skip_measured]
+
         if not args.skip_direct:
             tflops, name, _ = _run_script(
                 _SCRIPT_DIR / "benchmark_direct_conv.py",
@@ -685,6 +724,9 @@ def main() -> int:
             m = _ALL_STOPPED_RE.search(output)
             if tflops is None and m:
                 implicit_note = m.group(0)
+
+        if args.results:
+            _write_results(args.results, rows_direct, rows_implicit)
 
     _print_summary(direct_result, implicit_result, implicit_note)
     return 0

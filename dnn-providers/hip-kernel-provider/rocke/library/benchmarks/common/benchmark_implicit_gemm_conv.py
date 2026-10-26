@@ -77,9 +77,17 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # ---------------------------------------------------------------------------
 
 from benchmarks.common import batched_timing  # noqa: E402
+from benchmarks.common.case_results import (  # noqa: E402
+    RUNNERS_UP,
+    ResultsWriter,
+    add_results_arg,
+    add_skip_measured_arg,
+    measured_keys,
+)
 from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
+    case_key,
 )
 from benchmarks.common.module_cache import add_module_cache_arg  # noqa: E402
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
@@ -1300,6 +1308,17 @@ def main() -> int:
         f"measured at idle clocks (default: {batched_timing.DEFAULT_PRIMER})",
     )
 
+    add_results_arg(
+        parser.add_argument_group(
+            "Per-case results (AOT --run-from-cache only)",
+            "A machine-readable row per case, which benchmark_conv_compare.py "
+            "merges with the direct-conv sweep's and run_conv_shards.py "
+            "concatenates across cards.",
+        ),
+        merged=False,
+    )
+    add_skip_measured_arg(parser)
+
     add_module_cache_arg(
         parser.add_argument_group(
             "Loaded binaries (AOT --run-from-cache only)",
@@ -1622,6 +1641,23 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    if args.skip_measured and not args.run_from_cache:
+        print(
+            "error: --skip-measured resumes an AOT sweep; pass "
+            "--run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.results and not args.run_from_cache:
+        # The JIT sweep has no cached kernels to name, and its per-case best is
+        # a kernel it just built -- a different artifact, and --csv already
+        # covers it. Saying so beats accepting the flag and writing nothing.
+        print(
+            "error: --results records an AOT sweep; pass --run-from-cache DIR "
+            "(the JIT sweep writes --csv instead)",
+            file=sys.stderr,
+        )
+        return 2
     if args.fast_rank and not args.run_from_cache:
         # The JIT sweep builds and loads its kernels one at a time, so
         # batching their launches would save nothing; saying so beats
@@ -4639,6 +4675,12 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     # A cached binary is shape-generic: its module is loaded on the first case
     # that offers it and reused by every later one.
     modules = ModuleCache(args.module_cache_bytes)
+    # One row per case, for the comparison driver and the shard runner to
+    # merge. Does nothing without --results.
+    results_out = ResultsWriter(args.results, "implicit")
+    # --skip-measured: cases a previous run of this sweep already recorded.
+    done = measured_keys(args.skip_measured, "implicit")
+    n_skipped = 0
 
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
@@ -4652,6 +4694,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         case_direction = case[2] if len(case) > 2 else args.direction
 
         for direction in directions or (case_direction,):
+            if case_key(problem, case_dtype, direction) in done:
+                # Counted, not printed: resuming a few thousand cases would
+                # otherwise open with a few thousand lines of nothing.
+                n_skipped += 1
+                continue
             # The problem the kernels launch on (dgrad runs width-folded, as
             # the dispatcher launches it); the tensors, the reference and the
             # FLOP count stay the case's own -- the fold keeps every byte.
@@ -5094,11 +5141,33 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     flush=True,
                 )
             # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
-            tflops, _, ms, label = results[0]
+            tflops, gbps, ms, label = results[0]
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
+            results_out.row(
+                key=case_key(problem, case_dtype, direction),
+                case=case_idx,
+                shape=problem.short(),
+                dtype=case_dtype,
+                direction=direction,
+                tflops=tflops,
+                ms=ms,
+                gbps=gbps,
+                kernel=label,
+                candidates=n_compatible,
+                # The tail of the Top-N just printed, names only.
+                runners_up=[r[-1] for r in results[1 : 1 + RUNNERS_UP]],
+            )
 
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
     if len(cases) > 1:
         print(f"\n{modules.summary()}", flush=True)
+        if results_out.n_rows:
+            print(f"{results_out.n_rows} row(s) written to {args.results}", flush=True)
     return overall_rc
 
 
