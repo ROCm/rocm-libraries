@@ -31,7 +31,12 @@ namespace TensileLite
         uint32_t magicShiftAndSignNumTilesN;
         uint32_t magicShiftAndSignWgmTail;
         uint32_t magicShiftAndSignWgmMainBlock;
-        int32_t  quotientTilesMByWgm;
+        int32_t quotientTilesMByWgm;
+        // ceil(M / tileM) and ceil(N / tileN). A power-of-two macrotile
+        // recomputes these inline; any other macrotile hoists them as int64
+        // kernargs. Computed either way.
+        int64_t numTilesM = 0;
+        int64_t numTilesN = 0;
     };
 
     inline int32_t rocRollerS32(uint32_t value)
@@ -249,13 +254,20 @@ namespace TensileLite
         return rocRollerSubS32(shifted ^ sign, sign);
     }
 
+    // Ceil-div of a non-negative size by a positive macrotile. A power-of-two
+    // macrotile lowers to a shift and this agrees with that shift. Any other
+    // macrotile (gfx950 ships 192-wide MXFP4 tiles) is the same ceil-div,
+    // hoisted as int64. Tile 0 is not a macrotile.
+    inline int64_t rocRollerNumTilesS64(int64_t size, uint32_t tile)
+    {
+        if(tile == 0u)
+            throw std::runtime_error("rocRoller WGM macrotile must be positive");
+        return (size + static_cast<int64_t>(tile) - 1) / static_cast<int64_t>(tile);
+    }
+
     inline int32_t rocRollerNumTiles(int64_t size, uint32_t tile)
     {
-        if(tile == 0u || (tile & (tile - 1u)) != 0u)
-            throw std::runtime_error("rocRoller WGM macrotile must be a positive power of two");
-        uint32_t log     = 31u - rocRollerClz32(tile);
-        int64_t  shifted = (size + static_cast<int64_t>(tile) - 1) >> log;
-        return static_cast<int32_t>(shifted);
+        return static_cast<int32_t>(rocRollerNumTilesS64(size, tile));
     }
 
     inline RocRollerWgmKernargs evaluateRocRollerWgmKernargs(int64_t  m,
@@ -264,8 +276,10 @@ namespace TensileLite
                                                              uint32_t tileN,
                                                              int32_t  wgm = RocRollerDefaultWgm)
     {
-        int32_t ntM   = rocRollerNumTiles(m, tileM);
-        int32_t ntN   = rocRollerNumTiles(n, tileN);
+        int64_t ntM64 = rocRollerNumTilesS64(m, tileM);
+        int64_t ntN64 = rocRollerNumTilesS64(n, tileN);
+        int32_t ntM   = static_cast<int32_t>(ntM64);
+        int32_t ntN   = static_cast<int32_t>(ntN64);
         int32_t w     = wgm;
         int32_t total = rocRollerMulS32(ntM, ntN);
         int32_t block = rocRollerMulS32(w, ntN);
@@ -285,6 +299,8 @@ namespace TensileLite
         out.magicShiftAndSignWgmTail      = rocRollerMagicShiftAndSignS32(tail);
         out.magicShiftAndSignWgmMainBlock = rocRollerMagicShiftAndSignS32(main);
         out.quotientTilesMByWgm           = qM;
+        out.numTilesM                     = ntM64;
+        out.numTilesN                     = ntN64;
         return out;
     }
 }

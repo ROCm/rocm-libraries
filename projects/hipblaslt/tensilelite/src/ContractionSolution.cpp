@@ -3978,6 +3978,14 @@ namespace TensileLite
                 case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
                     rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
                     break;
+                // ceil(size / tile) as int64. Every other RR_* kernarg is 32-bit;
+                // appendCustomType would follow a 32-bit declaration and truncate.
+                case CustomArgSemantic::RR_NumTilesM:
+                    rv.args.template append<int64_t>("RR_NumTilesM", wgmKernarg().numTilesM);
+                    break;
+                case CustomArgSemantic::RR_NumTilesN:
+                    rv.args.template append<int64_t>("RR_NumTilesN", wgmKernarg().numTilesN);
+                    break;
 
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));
