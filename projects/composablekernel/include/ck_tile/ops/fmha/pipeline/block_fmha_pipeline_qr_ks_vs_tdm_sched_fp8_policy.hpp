@@ -530,13 +530,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         });
     }
 
+    // Log2 softmax scale of row band Half: one per workgroup, or one per lane row band.
+    template <index_t Half, typename LogScale>
+    CK_TILE_DEVICE static float BandScale(const LogScale& log2e_scale)
+    {
+        if constexpr(std::is_same_v<LogScale, float>)
+            return log2e_scale;
+        else
+            return log2e_scale[number<Half>{}];
+    }
+
     template <typename Problem,
               typename ScoreTensor,
               typename RowTensor,
+              typename LogScale,
               typename ColScale = NoColumnScale>
     CK_TILE_DEVICE static void RunSplitSoftmaxPart01(ScoreTensor& score,
                                                      RowTensor& row_max,
-                                                     float log2e_scale,
+                                                     LogScale log2e_scale,
                                                      float& delta_m0,
                                                      float& delta_m1,
                                                      const ColScale& col_scale = {})
@@ -585,8 +596,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 else
                     return TreeMax(values);
             }();
+            const float scale = BandScale<decltype(half)::value>(log2e_scale);
             return Softmax::template RunPart1<kValidateMax>(
-                lane_max, Softmax::PermuteLaneX16(lane_max), old_max * log2e_scale, log2e_scale);
+                lane_max, Softmax::PermuteLaneX16(lane_max), old_max * scale, scale);
         };
         const auto p1_m0 = row_part(number<0>{}, old_max_m0);
         const auto p1_m1 = row_part(number<1>{}, old_max_m1);
@@ -715,14 +727,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     };
 
     // Fused output rescale: each slot issues exp, fma, exp, in-place mul, add, so no exp pairs up.
-    template <typename ScoreTensor, typename Fragments, typename ColScale = NoColumnScale>
+    template <typename ScoreTensor,
+              typename Fragments,
+              typename LogScale,
+              typename ColScale = NoColumnScale>
     CK_TILE_DEVICE static auto RunInterleavedLocalSums(ScoreTensor& score,
                                                        Fragments& output,
                                                        float exponent_max_m0,
                                                        float exponent_max_m1,
                                                        float delta_m0,
                                                        float delta_m1,
-                                                       float log2e_scale,
+                                                       LogScale log2e_scale,
                                                        float& output_scale_m0,
                                                        float& output_scale_m1,
                                                        const ColScale& col_scale = {})
@@ -756,15 +771,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
             constexpr index_t msb  = decltype(q)::value / Plan::kPairsPerMsb;
             constexpr index_t pair = decltype(q)::value % Plan::kPairsPerMsb;
             const float row_max    = msb < 2 ? exponent_max_m0 : exponent_max_m1;
+            const float scale      = BandScale<(msb < 2 ? 0 : 1)>(log2e_scale);
             const float col        = [&]() {
                 if constexpr(std::is_same_v<ColScale, NoColumnScale>)
-                    return log2e_scale;
+                    return scale;
                 else
-                    return log2e_scale * col_scale[number<pair / Mapping::kPairsPerFragment>{}];
+                    return scale * col_scale[number<pair / Mapping::kPairsPerFragment>{}];
             }();
             leaf(q) = __builtin_elementwise_fma(Mapping::template LoadPair<msb, pair>(score),
                                                 Softmax::Broadcast(col),
-                                                -Softmax::Broadcast(row_max * log2e_scale));
+                                                -Softmax::Broadcast(row_max * scale));
         };
         auto exp_element = [&](auto q, auto e) {
             leaf(q)[decltype(e)::value] = Softmax::Exp2(leaf[q][decltype(e)::value]);
@@ -838,11 +854,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
               typename ScoreTensor,
               typename RowTensor,
               typename Fragments,
+              typename LogScale,
               typename ColScale = NoColumnScale>
     CK_TILE_DEVICE static void RunSplitSoftmaxPart2AndGetScale(ScoreTensor& score,
                                                                const RowTensor& row_max,
                                                                RowTensor& row_sum,
-                                                               float log2e_scale,
+                                                               LogScale log2e_scale,
                                                                float delta_m0,
                                                                float delta_m1,
                                                                float& output_scale_m0,

@@ -3,6 +3,7 @@
 
 """FMHA codegen and real rendered-dispatch regression tests (CPU only)."""
 
+import itertools
 import json
 import os
 import re
@@ -1322,7 +1323,9 @@ class TestGfx125V128Codegen(unittest.TestCase):
         self.assertEqual({k.F_mode for k in kernels}, {"batch", "group"})
         for k in kernels:
             with self.subTest(kernel=k.name):
-                self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
+                self.assertIn(
+                    k.F_pipeline.tag, ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa")
+                )
                 self.assertEqual(k.F_pipeline.F_vlayout, "row")
                 self.assertEqual(k.F_pipeline.F_qscale, "mx")
                 self.assertEqual(k.F_tile.F_occupancy, 2)
@@ -1332,6 +1335,38 @@ class TestGfx125V128Codegen(unittest.TestCase):
         # No seqlen_q condition gates qr_tdm_fp8_sched.
         for k in kernels:
             self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
+
+    def test_fp8_sched_mgqa_decode_instances(self):
+        # Merged-GQA decode instances: batch only, no bias, dispatched ahead of plain sched.
+        cases = (
+            ("fp8bf16", {"no", "pertensor", "perhead", "blockscale"}),
+            ("mxfp8bf16", {"mx"}),
+        )
+        for (dtype, qscales), hdim in itertools.product(cases, (64, 128, 256)):
+            with self.subTest(dtype=dtype, hdim=hdim):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
+                )
+                mgqa = [
+                    k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa"
+                ]
+                self.assertEqual(len(mgqa), len(qscales) * 8)
+                for k in mgqa:
+                    self.assertEqual(k.F_mode, "batch")
+                    self.assertEqual(k.F_pipeline.F_bias, "no")
+                    self.assertIn(k.F_pipeline.F_qscale, qscales)
+                    self.assertIn(
+                        "fmha_fwd_can_merge_head_groups", str(k.F_pipeline.F_constraint)
+                    )
+                    self.assertIn(
+                        "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
+                        k.render(),
+                    )
+                api = pool.render("test")
+                self.assertLess(
+                    api.index("QRKSVS_TDM_SCHED_FP8_MGQA"),
+                    api.index("QRKSVS_TDM_SCHED_FP8,"),
+                )
 
     def test_mxfp8bf16_mirrors_mxfp8(self):
         key = lambda k: (
@@ -1526,7 +1561,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         api = pool.render("test")
                         # FP8FP32 and MXFP8 have no other D64 pipeline.
                         if dtype in ("fp8fp32", "mxfp8", "mxfp8bf16"):
-                            self.assertEqual(len(sched), len(kernels))
+                            self.assertEqual(
+                                len(sched),
+                                sum(
+                                    k.F_pipeline.tag != "qr_tdm_fp8_sched_mgqa"
+                                    for k in kernels
+                                ),
+                            )
                         else:
                             self.assertLess(
                                 api.rindex("QRKSVS_TDM_SCHED_FP8"),
@@ -1594,7 +1635,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         == (1 if k.F_pipeline.F_bias == "bias" else 2)
                     )
                     if hdim == 256:
-                        self.assertEqual(len(sched), len(kernels))
+                        self.assertEqual(
+                            len(sched),
+                            sum(
+                                k.F_pipeline.tag != "qr_tdm_fp8_sched_mgqa"
+                                for k in kernels
+                            ),
+                        )
                         for k in sched:
                             t = k.F_tile
                             self.assertEqual(

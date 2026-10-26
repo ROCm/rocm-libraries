@@ -75,6 +75,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kHasSink           = Problem::kHasSink;
     static constexpr bool kEnableVirtualSink = EnableVirtualSink_;
     static constexpr auto QScaleEnum         = Problem::QScaleEnum;
+    // Query rows fold the heads of one KV head: row = g * seqlen_q + s.
+    static constexpr bool kMergeHeads = Problem::kMergeNumHeadGroupsSeqLenQ;
 
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm_fp8_sched: every softmax site calls exp2, so log2(e) must be folded "
@@ -90,9 +92,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::MX,
                   "qr_tdm_fp8_sched: unsupported quantization granularity");
+    static_assert(!kMergeHeads || (!kIsGroupMode && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
+                  "merged GQA rows need batch mode and no bias");
     static constexpr bool kQuantized  = QScaleEnum != BlockAttentionQuantScaleEnum::NO_SCALE;
     static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
     static constexpr bool kMx         = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+    // Merged PERHEAD/BLOCKSCALE rows fold their own head's q descale into the softmax scale.
+    static constexpr bool kRowScale =
+        kMergeHeads && (QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD || kBlockScale);
     // Quantized modes cast P to fp8 against this fixed scale and undo it in the epilogue.
     static constexpr float kPScale = 256.0f;
 
@@ -293,6 +300,94 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // V scale rows each thread copies: two at D256.
     static constexpr index_t kMxVRowsPerThread = max(Geometry::kDv / kBlockSize, index_t{1});
 
+    // Merged GQA rows: query position row % seqlen_q, head row / seqlen_q of num_groups.
+    struct MergedHeads
+    {
+        index_t seqlen_q      = 1;
+        index_t num_groups    = 1;
+        const float* sink_ptr = nullptr;
+        // Per-head q descales of the group, folded as (scale_s * q_descale) * k_descale.
+        const float* q_descale_ptr    = nullptr;
+        index_t q_descale_head_stride = 0;
+        float scale_s                 = 1.0f;
+        float k_descale               = 1.0f;
+    };
+
+    // Tile row that this lane holds at distributed index idx of a row tensor.
+    template <typename Tensor, typename Idx>
+    CK_TILE_DEVICE static index_t LaneRowOf(Idx idx)
+    {
+        constexpr auto dstr  = typename Tensor::StaticTileDistribution{};
+        using PartitionIndex = remove_cvref_t<decltype(get_partition_index(dstr))>;
+        const auto lane_x    = make_tensor_adaptor_coordinate(
+                                dstr.get_ps_ys_to_xs_adaptor(),
+                                container_concat(get_partition_index(dstr),
+                                                 array<index_t, dstr.get_num_of_dimension_y()>{}))
+                                .get_bottom_index();
+        return (lane_x + get_x_indices_from_distributed_indices(dstr, idx, PartitionIndex{}))
+            .at(number<0>{});
+    }
+
+    // Query position of each lane row (row tensor layout); merged rows of one head share one.
+    template <typename RowTensor>
+    CK_TILE_DEVICE static auto MergedRowPositions(const MergedHeads& merged, index_t row0)
+    {
+        auto pos =
+            make_static_distributed_tensor<index_t>(typename RowTensor::StaticTileDistribution{});
+        sweep_tile_span(decltype(pos)::get_distributed_spans()[number<0>{}], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            const index_t row    = row0 + LaneRowOf<RowTensor>(i_idx);
+            pos(i_idx)           = merged.seqlen_q == 1 ? 0 : row % merged.seqlen_q;
+        });
+        return pos;
+    }
+
+    // Sets tensor elements where pred(row position, col0 + column) holds; positions per lane row.
+    template <typename Tensor, typename RowPositions, typename DataType, typename Predicate>
+    CK_TILE_DEVICE static void SetTileIfRowPos(
+        Tensor& tensor, DataType value, const RowPositions& pos, index_t col0, Predicate pred)
+    {
+        constexpr auto dstr  = typename Tensor::StaticTileDistribution{};
+        constexpr auto spans = Tensor::get_distributed_spans();
+        using PartitionIndex = remove_cvref_t<decltype(get_partition_index(dstr))>;
+        const auto lane_x    = make_tensor_adaptor_coordinate(
+                                dstr.get_ps_ys_to_xs_adaptor(),
+                                container_concat(get_partition_index(dstr),
+                                                 array<index_t, dstr.get_num_of_dimension_y()>{}))
+                                .get_bottom_index();
+        sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+            const index_t row = pos[make_tuple(idx0)];
+            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                constexpr auto idx = make_tuple(idx0, idx1);
+                const index_t col =
+                    col0 + lane_x.at(number<1>{}) +
+                    get_x_indices_from_distributed_indices(dstr, idx, PartitionIndex{})
+                        .at(number<1>{});
+                if(pred(row, col))
+                    tensor(idx) = value;
+            });
+        });
+    }
+
+    // Softmax scale of a merged row's head, folded as the kernel folds it for one head.
+    CK_TILE_DEVICE static float MergedRowScale(const MergedHeads& merged, index_t row)
+    {
+        const index_t g       = min(row / merged.seqlen_q, merged.num_groups - 1);
+        const float q_descale = merged.q_descale_ptr[g * merged.q_descale_head_stride];
+        if constexpr(kBlockScale)
+            return merged.scale_s * q_descale;
+        else
+            return merged.scale_s * q_descale * merged.k_descale;
+    }
+
+    // Sink logit of a merged row's head, in the units of the unmerged per-head sink_v * scale_s.
+    CK_TILE_DEVICE static float
+    MergedSinkLogit(const MergedHeads& merged, index_t row, float scale_s)
+    {
+        const index_t g = min(row / merged.seqlen_q, merged.num_groups - 1);
+        return (merged.sink_ptr[g] / scale_s) * scale_s;
+    }
+
     // Compiler-only memory fence: keeps LDS reads below a barrier that publishes async writes.
     CK_TILE_DEVICE static void CompilerMemoryFence() { asm volatile("" ::: "memory"); }
 
@@ -472,9 +567,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr index_t kMxKDwords       = Geometry::kN * kMxQkScaleDwords;
     static constexpr index_t kMxLdsTileDwords = kMxKDwords + kBlockSize * kMxVRowsPerThread;
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-    // Static LDS of one workgroup (arena, O staging, MX scales) must fit kBlockPerCu per CU.
+    // Static LDS of one workgroup (arena, O staging, MX or row scales) must fit kBlockPerCu per CU.
     static_assert((Policy::GetLdsArenaSize() + kOLdsBytes +
-                   (kMx ? 2 * kMxLdsTileDwords * static_cast<index_t>(sizeof(int32_t)) : 0)) *
+                   (kMx ? 2 * kMxLdsTileDwords * static_cast<index_t>(sizeof(int32_t)) : 0) +
+                   (kRowScale ? 2 * kBlockSize * static_cast<index_t>(sizeof(float)) : 0)) *
                       kBlockPerCu <=
                   get_lds_size());
 #endif
@@ -482,6 +578,21 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     {
         __shared__ int32_t buf[2 * kMxLdsTileDwords];
         return buf + (tile & 1) * kMxLdsTileDwords;
+    }
+
+    // Merged row softmax scales live in LDS, one pair per lane, so they hold no VGPRs in the loop.
+    using RowScalePair = float __attribute__((ext_vector_type(2)));
+    CK_TILE_DEVICE static RowScalePair* RowScaleLds()
+    {
+        __shared__ RowScalePair buf[kBlockSize];
+        return buf + get_thread_id();
+    }
+
+    // The fence keeps each read where it is used instead of hoisted out of the loop.
+    CK_TILE_DEVICE static RowScalePair LoadRowScales()
+    {
+        CompilerMemoryFence();
+        return *RowScaleLds();
     }
 
     // core to_global is declared only for gfx125 device passes; this header parses in all passes.
@@ -699,7 +810,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         [[maybe_unused]] const float* v_descale_ptr,
         [[maybe_unused]] index_t block_scale_size_kv,
         [[maybe_unused]] float v_descale,
-        [[maybe_unused]] const MxDescales& mx) const
+        [[maybe_unused]] const MxDescales& mx,
+        [[maybe_unused]] const MergedHeads& merged) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -722,10 +834,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
         auto s_acc              = SaccBlockTileType{};
-        // Band masks compare a per-element constant against a per-lane threshold.
+        // Band masks compare a per-element constant against a per-lane threshold; merged rows are
+        // not linear, so masked merged tiles keep the per-element check.
         constexpr bool kBandMask =
             std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
-            !Policy::template UseCountdownLoop<Problem>();
+            !Policy::template UseCountdownLoop<Problem>() && !(kMergeHeads && FmhaMask::IsMasking);
         [[maybe_unused]] const auto s_lane_origin = [] {
             if constexpr(kBandMask)
                 return TileLaneOrigin<SaccBlockTileType>();
@@ -772,6 +885,26 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
+        // Softmax scale of each lane row: scale_s, or the row head's own for merged descales.
+        [[maybe_unused]] auto row_scale =
+            make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+        if constexpr(kRowScale)
+        {
+            sweep_tile_span(decltype(row_scale)::get_distributed_spans()[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                row_scale(i_idx) =
+                    MergedRowScale(merged, q_origin.at(I0) + LaneRowOf<decltype(m)>(i_idx));
+            });
+            *RowScaleLds() =
+                RowScalePair{row_scale.get_thread_buffer()[I0], row_scale.get_thread_buffer()[I1]};
+        }
+        const auto scale_of = [&](auto i_idx) {
+            if constexpr(kRowScale)
+                return row_scale[i_idx];
+            else
+                return scale_s;
+        };
+
         const auto tile_range_result = [&]() {
             if constexpr(kHasSink)
                 return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -801,7 +934,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
                 if(__builtin_isinf_sign(sink_v) >= 0)
                 {
-                    set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                    if constexpr(kMergeHeads)
+                        sweep_tile_span(
+                            decltype(lse_acc)::get_distributed_spans()[I0], [&](auto idx0) {
+                                constexpr auto i_idx = make_tuple(idx0);
+                                lse_acc(i_idx)       = MergedSinkLogit(
+                                    merged, LaneRowOf<decltype(m)>(i_idx), scale_of(i_idx));
+                            });
+                    else
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                 }
                 else
                 {
@@ -1460,13 +1601,26 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
                     if(__builtin_expect(need_split_check || need_mask_check, false))
                     {
-                        SetTileIfLaneBase(
-                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                return (need_split_check && logical_seqlen_k_end <= col) ||
-                                       (need_mask_check && mask.IsOutOfBound(row, col));
-                            });
+                        if constexpr(kMergeHeads)
+                            SetTileIfRowPos(
+                                s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                MergedRowPositions<decltype(m)>(merged, q_origin.at(I0)),
+                                k_origin.at(I0),
+                                [&](index_t row, index_t col) {
+                                    return (need_split_check && logical_seqlen_k_end <= col) ||
+                                           (need_mask_check && mask.IsOutOfBound(row, col));
+                                });
+                        else
+                            SetTileIfLaneBase(
+                                s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&](auto tile_idx) {
+                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                    return (need_split_check && logical_seqlen_k_end <= col) ||
+                                           (need_mask_check && mask.IsOutOfBound(row, col));
+                                });
                         if constexpr(kProgressiveMax)
                             static_for<0, Geometry::kQkStages - 1, 1>{}([&](auto su) {
                                 Policy::template StageLaneMax<decltype(su)::value,
@@ -1565,13 +1719,21 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
-                            set_tile_if(s_acc,
-                                        -numeric<SMPLComputeDataType>::infinity(),
-                                        [&](auto tile_idx) {
-                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                            return is_masked_out(row, col);
-                                        });
+                            if constexpr(kMergeHeads)
+                                SetTileIfRowPos(
+                                    s_acc,
+                                    -numeric<SMPLComputeDataType>::infinity(),
+                                    MergedRowPositions<decltype(m)>(merged, q_origin.at(I0)),
+                                    k_origin.at(I0),
+                                    is_masked_out);
+                            else
+                                set_tile_if(s_acc,
+                                            -numeric<SMPLComputeDataType>::infinity(),
+                                            [&](auto tile_idx) {
+                                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                                return is_masked_out(row, col);
+                                            });
                         }
                     }
                 }
@@ -1604,8 +1766,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     float delta_m0;
                     float delta_m1;
                     // The bias path already scaled S into the log2 domain.
-                    const float softmax_scale = [&]() {
-                        if constexpr(BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
+                    const auto softmax_scale = [&]() {
+                        if constexpr(kRowScale)
+                        {
+                            const RowScalePair scales = LoadRowScales();
+                            return array<float, 2>{scales[0], scales[1]};
+                        }
+                        else if constexpr(BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
                             return scale_s;
                         else
                             return 1.0f;
@@ -1777,6 +1944,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             });
         }
 
+        if constexpr(kRowScale)
+        {
+            const RowScalePair scales         = LoadRowScales();
+            row_scale.get_thread_buffer()(I0) = scales[0];
+            row_scale.get_thread_buffer()(I1) = scales[1];
+        }
+
         auto finalize_real_tokens = [&]() {
             if constexpr(kStoreLSE)
             {
@@ -1792,7 +1966,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                     else
                     {
-                        lse_acc(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
+                        lse_acc(i_idx) = m_[i_idx] * scale_of(i_idx) / C_LOG2E + log(l_[i_idx]);
                     }
                 });
 
@@ -1826,28 +2000,37 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 const float sink_natural = sink_v * scale_s;
                 const float sink_log2    = sink_natural * C_LOG2E;
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
-                    constexpr auto i_idx = make_tuple(idx0);
+                    constexpr auto i_idx         = make_tuple(idx0);
+                    const float row_sink_natural = [&] {
+                        if constexpr(kMergeHeads)
+                            return MergedSinkLogit(
+                                merged, LaneRowOf<decltype(m)>(i_idx), scale_of(i_idx));
+                        else
+                            return sink_natural;
+                    }();
+                    const float row_sink_log2 =
+                        kMergeHeads ? row_sink_natural * C_LOG2E : sink_log2;
                     float output_scale;
                     float merged_lse;
-                    if(__builtin_isnan(sink_natural))
+                    if(__builtin_isnan(row_sink_natural))
                     {
-                        output_scale = sink_natural;
-                        merged_lse   = sink_natural;
+                        output_scale = row_sink_natural;
+                        merged_lse   = row_sink_natural;
                     }
-                    else if(l[i_idx] == 0.f || __builtin_isinf_sign(sink_natural) > 0)
+                    else if(l[i_idx] == 0.f || __builtin_isinf_sign(row_sink_natural) > 0)
                     {
                         output_scale = 0.f;
-                        merged_lse   = sink_natural;
+                        merged_lse   = row_sink_natural;
                     }
                     else
                     {
                         // The bias path keeps scale_s inside m.
                         const float real_log2 = BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS
                                                     ? m[i_idx]
-                                                    : m[i_idx] * scale_s;
-                        const float merged_max  = max(real_log2, sink_log2);
+                                                    : m[i_idx] * scale_of(i_idx);
+                        const float merged_max  = max(real_log2, row_sink_log2);
                         const float real_weight = SplitSoftmax::Exp2(real_log2 - merged_max);
-                        const float sink_weight = SplitSoftmax::Exp2(sink_log2 - merged_max);
+                        const float sink_weight = SplitSoftmax::Exp2(row_sink_log2 - merged_max);
                         const float merged_sum = __builtin_fmaf(l[i_idx], real_weight, sink_weight);
                         output_scale           = real_weight / merged_sum;
                         merged_lse             = merged_max / C_LOG2E + log(merged_sum);
@@ -1910,7 +2093,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                         const float* v_descale_ptr  = nullptr,
                                         index_t block_scale_size_kv = 1,
                                         float v_descale             = 1.0f,
-                                        const MxDescales& mx        = {}) const
+                                        const MxDescales& mx        = {},
+                                        const MergedHeads& merged   = {}) const
     {
         return run(q_dram_block_window_tmp,
                    k_dram_block_window_tmp,
@@ -1929,7 +2113,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                    v_descale_ptr,
                    block_scale_size_kv,
                    v_descale,
-                   mx);
+                   mx,
+                   merged);
     }
 };
 
