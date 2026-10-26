@@ -35,7 +35,7 @@ Target convertScalar(Source source, const ScalarConversionOptions& options) noex
     using Value = std::remove_cvref_t<Source>;
     static_assert(!std::is_reference_v<Target>);
     static_assert(std::is_arithmetic_v<Value> || detail::RuntimeIsComplexV<Value>,
-                  "Scalar conversion requires an arithmetic or std::complex source.");
+                  "Scalar conversion requires an arithmetic or floating std::complex source.");
     if constexpr (detail::RuntimeIsComplexV<Destination>) {
         using Component = typename Destination::value_type;
         if constexpr (detail::RuntimeIsComplexV<Value>) {

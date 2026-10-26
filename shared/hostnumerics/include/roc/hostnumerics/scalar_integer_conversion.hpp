@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <complex>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/scalar_conversion_options.hpp>
@@ -15,7 +16,8 @@ namespace roc::hostnumerics::detail {
 template <typename T>
 struct RuntimeIsComplex : std::false_type {};
 
-template <typename T>
+// std::complex is specified only for floating component types.
+template <std::floating_point T>
 struct RuntimeIsComplex<std::complex<T>> : std::true_type {};
 
 template <typename T>
