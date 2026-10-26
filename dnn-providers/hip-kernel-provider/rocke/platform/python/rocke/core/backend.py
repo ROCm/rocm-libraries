@@ -2242,6 +2242,89 @@ def lower_conv_winograd_gen(
     )
 
 
+def conv_winograd_fused_1d_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FusedWino1DSpec` -> flat dict (problem and W axis nested).
+
+    The C++ engine carries the default Toom-Cook interpolation points only, so
+    an axis with explicit ``pts`` is refused here rather than built with other
+    points."""
+    p = spec.problem
+    ax = spec.ax
+    if getattr(ax, "pts", None) is not None:
+        raise ValueError(
+            "conv_winograd_fused_1d_wmma: the C++ engine supports the default "
+            "interpolation points only (ax.pts must be None)"
+        )
+    return dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        ax=dict(m=ax.m, r=ax.r, seg=ax.seg, pts=None),
+        q=spec.q,
+        fk=spec.fk,
+        grid_blocks=spec.grid_blocks,
+        prefetch=spec.prefetch,
+        m_f16=spec.m_f16,
+        xf=spec.xf,
+        xf_batch=spec.xf_batch,
+        merge=spec.merge,
+        waves=spec.waves,
+        waves_per_eu=spec.waves_per_eu,
+        name=spec.name,
+    )
+
+
+def lower_conv_winograd_fused_1d_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FusedWino1DSpec` (the gfx1250 fused 1-D Winograd fwd)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fused_wino_1d(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_fused_1d_spec_to_dict(spec)
+    return _lower_family(
+        "conv_winograd_fused_1d_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_fused_1d_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_fused_1d_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
 def lower_img2col(
     spec: Any,
     *,

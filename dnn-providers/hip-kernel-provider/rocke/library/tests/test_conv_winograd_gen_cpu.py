@@ -201,3 +201,96 @@ def test_k3_taps_spec():
     assert winograd_gemm_reason(s3) is None
     assert winograd_gemm_reason(WinogradGemmWmmaSpec(taps=0)) is not None
     build_winograd_gemm_wmma(s3)
+
+
+# --- fused 1-D kernel: spec validation and IR builds ------------------------
+
+
+def _fspec(**kw):
+    from kernels.common.conv_winograd_fused_1d_wmma import FusedWino1DSpec
+
+    p = kw.pop(
+        "problem", ConvProblem(N=2, Hi=1, Wi=203, C=32, K=32, Y=1, X=11, pW=15, dW=3)
+    )
+    ax = kw.pop("ax", WG.WinoAxis(4, 11, 3))
+    return FusedWino1DSpec(problem=p, ax=ax, **kw)
+
+
+def test_fused_spec_geometry_and_rejects():
+    s = _fspec(q=2, fk=2, grid_blocks=4)
+    assert (s.n, s.S, s.tb, s.kb, s.vt) == (7, 3, 32, 32, 34)
+    assert s.raw_rows == 34 * 4 + 3
+    assert s.tile_blocks == 2 * 3 * 1 and s.grid() == 4
+    assert s.xf_tiles == 2 and s.xf_win == 16
+    with pytest.raises(ValueError):  # 2-D filter
+        _fspec(
+            problem=ConvProblem(N=1, Hi=5, Wi=5, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            ax=WG.WinoAxis(4, 3),
+        )
+    with pytest.raises(ValueError):  # C not a multiple of 32
+        _fspec(problem=ConvProblem(N=1, Hi=1, Wi=50, C=48, K=32, Y=1, X=11, pW=5))
+    with pytest.raises(ValueError):  # B^T of F(6,6) is not exact in fp16
+        _fspec(ax=WG.WinoAxis(6, 11, 2), xf="wmma")
+    with pytest.raises(ValueError):  # merge needs prefetch
+        _fspec(merge=True)
+    with pytest.raises(ValueError):  # LDS
+        _fspec(
+            problem=ConvProblem(N=1, Hi=1, Wi=5000, C=256, K=64, Y=1, X=11, pW=5), q=8
+        )
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(q=2, fk=2, grid_blocks=4),
+        dict(q=2, fk=2, xf="wmma", prefetch=True, m_f16=True, merge=True, xf_batch=8),
+        dict(q=1, fk=1, waves=4, prefetch=True, m_f16=True, merge=True),
+        dict(
+            q=2,
+            fk=2,
+            waves=4,
+            waves_per_eu=2,
+            xf="wmma",
+            prefetch=True,
+            m_f16=True,
+            merge=True,
+        ),
+    ],
+)
+def test_fused_builds(kw):
+    from rocke import compile_kernel
+    from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
+
+    s = _fspec(**kw)
+    compile_kernel(build_fused_wino_1d(s), arch="gfx1250")
+
+
+def _op_names(region):
+    out = set()
+    for op in region.ops:
+        out.add(op.name)
+        for r in op.regions:
+            out |= _op_names(r)
+    return out
+
+
+def test_fused_f47_builds():
+    """F(4,7): n = 10 bins with the VALU transform (B^T is not fp16-exact);
+    prefetch moves the next raw block with async global->LDS copies."""
+    from rocke import compile_kernel
+    from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
+
+    p = ConvProblem(N=2, Hi=1, Wi=517, C=64, K=64, Y=1, X=7, pW=15, dW=5)
+    s = _fspec(
+        problem=p,
+        ax=WG.WinoAxis(4, 7, 1),
+        q=2,
+        fk=4,
+        prefetch=True,
+        m_f16=True,
+        merge=True,
+        waves=4,
+    )
+    k = build_fused_wino_1d(s)
+    assert any("async" in nm for nm in _op_names(k.body))
+    compile_kernel(k, arch="gfx1250")
