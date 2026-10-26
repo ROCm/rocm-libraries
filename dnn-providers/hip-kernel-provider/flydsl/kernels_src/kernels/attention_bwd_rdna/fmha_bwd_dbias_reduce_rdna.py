@@ -1,10 +1,10 @@
 # Not vendored: RDNA smoke kernel for the SDPA backward; a copy of attention_bwd_cdna/fmha_bwd_dbias_reduce_gfx950.py with only its symbols renamed.
-"""FlyDSL dBias reduction for the split backward (gfx950): the broadcast-dim sum of the full-shape dB workspace.
+"""FlyDSL dBias reduction for the split backward (gfx11-generic smoke kernel): the broadcast-dim sum of the full-shape dB workspace.
 
-The dQ kernel writes `dB = dS` for the full (B, Hq, Sq, Sk) problem, one writer per element (`fmha_bwd_dq_gfx950`). When the bias is
+The dQ kernel writes `dB = dS` for the full (B, Hq, Sq, Sk) problem, one writer per element (the gfx950 dQ kernel, `attention_bwd_cdna/fmha_bwd_dq_gfx950.py`). When the bias is
 broadcast over batch and / or head and that dim is larger than 1, the user's dBias has fewer elements and the sum over the broadcast
 dims is this kernel's job (PyTorch + AOTriton do the same: `grad_bias` is full shape and autograd's `expand` backward is
-`sum_to`; `gap-closing/dbias-design.md`). Bias heads are the query heads (GQA bias is per query head).
+`sum_to`). Bias heads are the query heads (GQA bias is per query head).
 
     out[bo, ho, q, k] = sum over the reduced dims of ws[b, h, q, k]            (b = bo or all B, h = ho or all Hq)
 
@@ -23,7 +23,7 @@ accumulation (one output rounding apart at worst), not bit for bit.
     DBias         the user's dBias in the bias dtype, (B or 1, Hq or 1, Sq, Sk) with strides stride_out_{batch,head,seq}, unit column stride
     num_batch, num_head, seqlen_q, seqlen_k   the problem's B, Hq, Sq, Sk
     reduce_batch, reduce_head                  0 / 1: sum over that dim (DBias has extent 1 there) or copy it through
-    Both pointers are 16-byte aligned (the ABI convention of every kernel pointer in this sweep; `variant.alignment_for`).
+    Both pointers are 16-byte aligned (the ABI convention of every kernel pointer in this sweep).
 Reducing no dim is a strided copy; the caller skips the launch (and the workspace) in that case.
 
 **Layout and loads.** Grid = (cdiv(Sq * cdiv(Sk, 8), 256), planes), planes = output (batch, head) planes. A thread owns the 8-column

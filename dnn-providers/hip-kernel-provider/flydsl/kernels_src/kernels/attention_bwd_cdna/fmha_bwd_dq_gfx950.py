@@ -1044,15 +1044,13 @@ class BwdDqSoftmaxHelper(ParitySoftmaxHelper):
         measured the gap from each `v_exp_f32` to its first VALU consumer over
         ten dQ builds: the minimum anywhere was 8, with per-build minima of 8,
         9, 26, 50 and 54, against the *exactly 1* that AOTriton's dK/dV scan
-        reports and that phase 1 confirmed here. dQ is not near this cliff, and
+        reports and that the dK/dV build confirmed here. dQ is not near this cliff, and
         saying otherwise would overstate it.
 
         Imported anyway, because "not near the cliff" is a fact about one
         schedule and not about the kernel. AOTriton's live case became live
-        exactly that way -- issue 9's fix raised register pressure, the
-        schedule moved, and a latent gap became a zero-gap wrong answer. The
-        cost here is measured rather than assumed; see the plan's outcome
-        section for the register and ISA comparison.
+        exactly that way -- a fix there raised register pressure, the
+        schedule moved, and a latent gap became a zero-gap wrong answer.
         """
         if const_expr(start == 0):
             s_lo = [Vec(v_s[0])[r] for r in range_constexpr(16)]

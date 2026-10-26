@@ -52,7 +52,7 @@ constexpr const char* SHARED_WORKSPACE_TOKEN = "ws.bytes";
 constexpr const char* REDUCE_SYMBOL_16BIT = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 constexpr const char* REDUCE_SYMBOL_FP32 = "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1";
 
-/// The rows one slot ships, per dtype, as A4 generated them from the S1 catalogue.
+/// The rows one slot ships, per dtype, as the generators emit them from the S1 catalogue.
 struct SlotCount
 {
     const char* slot;

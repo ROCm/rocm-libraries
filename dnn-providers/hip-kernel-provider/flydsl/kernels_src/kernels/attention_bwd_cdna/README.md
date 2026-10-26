@@ -1,10 +1,12 @@
 # attention_bwd_cdna
 
-The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce and dSink reduce, in a 16-bit and an fp32 (native f32 MFMA) family, with the modules they share. Every file is written for this provider and has no upstream (`# Not vendored` header). "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources and pins come from.
+The gfx950 SDPA backward kernels: prep, dK/dV, dQ, merged, dBias reduce and dSink reduce, in a 16-bit and an fp32 (native f32 MFMA) family, with the modules they share. The files are written for this provider except `fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py`, which are AOTriton's (see *Origin*); each file's header says which. "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources and pins come from.
 
 ## Origin
 
 The FlyDSL SDPA backward sweep (an AMD-internal repository), at the commit whose pins are recorded in `tests/data/sdpa_bwd_reference.csv`. The kernel sources are the sweep snapshot's with three differences: the headers, the import lines (flat module imports became `kernels.attention_bwd_cdna` package imports, and the `sys.path` insertions were dropped), and black formatting. Docstring and comment references to the sweep's own files (`tools/`, `parity/`, `RP/`) name paths in that repository.
+
+`fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py` are AOTriton's `modules/flash/flyc/` files (MIT; Apache-2.0 header, FlyDSL Project Contributors; revision not recorded). They differ from the `attention_rdna4/` copies in the package imports, in `fmha_common_gfx1201.py` entering `scf.if` blocks through `kernels_common._if_then`, and in `fmha_abi_gfx1201.py`'s `prep_tensors`, which has no `v_heads_own`. The sweep snapshot's `fmha_bwd_dq_gfx950.py` and `fmha_dualwave_gfx950.py` also differ in comment text only: references to the sweep's issue numbers and phases are restated as the observation.
 
 The deliberate additions (each normalized source diff against the sweep shows these and nothing else):
 
