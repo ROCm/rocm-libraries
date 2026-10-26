@@ -148,6 +148,10 @@ class WinogradGemmWmmaSpec:
     # AMDGPU machine-scheduler strategy (rocke.core.codegen_policy), or None.
     sched: Optional[str] = "iterative-ilp"
     wave_size: int = 32
+    # Segmented (long-filter) Winograd: M[t] = sum_s V[t + s] U[s]. The
+    # reduction runs over (tap, channel chunk); V needs T + taps - 1 rows and
+    # U is laid out [G][taps][Kg][Cg]. 1 = the plain batched GEMM.
+    taps: int = 1
 
     @property
     def tile_m(self) -> int:
@@ -200,6 +204,7 @@ class WinogradGemmWmmaSpec:
             + ("" if self.lds_pad == "tdm" else f"_p{self.lds_pad}")
             + ("" if self.xcd_remap else "_noxcd")
             + ("" if self.sched else "_nosched")
+            + (f"_t{self.taps}" if self.taps > 1 else "")
         )
 
     def kernel_name(self) -> str:
@@ -217,13 +222,14 @@ class WinogradGemmWmmaSpec:
             "pf" if self.prefetch else "",
             f"x{self.num_xcds}" if self.xcd_remap else "",
             f"s{self.sched}" if self.sched else "",
+            f"taps{self.taps}" if self.taps > 1 else "",
             flags={"bf16": self.dtype == "bf16"},
         )
 
     # -- launch --
 
     def chunks(self, prob: WinogradGemmProblem) -> int:
-        return ceil_div(prob.Cg, self.tile_k)
+        return self.taps * ceil_div(prob.Cg, self.tile_k)
 
     def resolve_splits(self, prob: WinogradGemmProblem, splits: int) -> Tuple[int, int]:
         """``(splits, chunks per split)`` with no empty split (``splits`` is
@@ -334,6 +340,8 @@ def winograd_gemm_reason(
         return f"tile_k {spec.tile_k} must be a positive multiple of {WMMA_K}"
     if spec.stages < 2:
         return "stages must be >= 2"
+    if spec.taps < 1:
+        return "taps must be >= 1"
     if spec.epilogue not in EPILOGUES:
         return f"epilogue {spec.epilogue!r} not in {EPILOGUES}"
     if spec.lds_pad not in LDS_PADS:
@@ -377,8 +385,8 @@ def winograd_gemm_problem_reason(
     if spec.split_k and splits < 1:
         return f"split count {splits} < 1"
     elems = (
-        prob.T * prob.G * prob.Cg,
-        prob.G * prob.Kg * prob.Cg,
+        (prob.T + spec.taps - 1) * prob.G * prob.Cg,
+        prob.G * spec.taps * prob.Kg * prob.Cg,
         prob.T * prob.G * prob.Kg,
     )
     if 2 * max(elems) > _I32_MAX:
@@ -449,7 +457,9 @@ def build_winograd_gemm_wmma(
     ny = b.div(b.add(c_Kg, b.const_i32(BN - 1)), b.const_i32(BN))
     nxy = b.mul(nx, ny)
     n_tiles = b.mul(nxy, b.mul(c_nb, c_splits))
-    n_chunks = b.div(b.add(c_Cg, b.const_i32(CK - 1)), b.const_i32(CK))
+    TAPS = spec.taps
+    n_cc = b.div(b.add(c_Cg, b.const_i32(CK - 1)), b.const_i32(CK))
+    n_chunks = b.mul(n_cc, b.const_i32(TAPS)) if TAPS > 1 else n_cc
     row_v = b.mul(c_G, c_Cg)  # element stride between V rows
     out_row = b.mul(c_G, c_Kg)  # element stride between M rows
 
@@ -522,12 +532,25 @@ def build_winograd_gemm_wmma(
         for wave, opnd in ((0, 0), (U_WAVE, 1)):
             with b.scf_if(b.cmp_eq(wave_id, b.const_i32(wave))):
                 t = cur
-                c_k0 = b.mul(b.add(chunk0, q), b.const_i32(CK))
+                if TAPS > 1:
+                    # chunk -> (tap, channel chunk). V rows shift by the tap
+                    # (V has T + taps - 1 rows, so the extent stays >= 1);
+                    # U moves to slab ((g * taps + tap) * Kg + n0) * Cg.
+                    gq = b.add(chunk0, q)
+                    tap = b.div(gq, n_cc)
+                    c_k0 = b.mul(b.sub(gq, b.mul(tap, n_cc)), b.const_i32(CK))
+                    v_base = b.add(t.v_base, b.mul(tap, row_v))
+                    v_ext = b.sub(b.add(t.m_ext, b.const_i32(TAPS - 1)), tap)
+                    slab = b.add(b.mul(t.g, b.const_i32(TAPS - 1)), tap)
+                    u_base = b.add(b.mul(slab, b.mul(c_Kg, c_Cg)), t.u_base)
+                else:
+                    c_k0 = b.mul(b.add(chunk0, q), b.const_i32(CK))
+                    v_base, v_ext, u_base = t.v_base, t.m_ext, t.u_base
                 k_ext = b.smin(b.sub(c_Cg, c_k0), b.const_i32(CK))
                 ptr, base, ext, stride, rows, lds_off = (
-                    (V, t.v_base, t.m_ext, row_v, BM, 0)
+                    (V, v_base, v_ext, row_v, BM, 0)
                     if opnd == 0
-                    else (U, t.u_base, t.n_ext, c_Cg, BN, U_OFF)
+                    else (U, u_base, t.n_ext, c_Cg, BN, U_OFF)
                 )
                 b.tensor_load_to_lds(
                     *b.tdm_descriptor_2d(

@@ -127,6 +127,7 @@ rocke_winograd_gemm_wmma_spec_t rocke_winograd_gemm_wmma_spec_default(void)
     s.num_xcds = 8;
     s.sched = "iterative-ilp";
     s.wave_size = 32;
+    s.taps = 1;
     return s;
 }
 
@@ -164,7 +165,7 @@ void rocke_winograd_gemm_wmma_grid(const rocke_winograd_gemm_wmma_spec_t* spec,
                                    int nb,
                                    int grid[3])
 {
-    int n = wgw_ceil_div(Cg, spec->tile_k);
+    int n = spec->taps * wgw_ceil_div(Cg, spec->tile_k);
     int s = 1;
     if(spec->split_k)
     {
@@ -184,7 +185,7 @@ rocke_status_t rocke_winograd_gemm_wmma_kernel_name(const rocke_winograd_gemm_wm
                                                     char* out,
                                                     size_t out_cap)
 {
-    char wm[32], wn[32], fm[32], fn[32], tk[32], st[32], xc[32];
+    char wm[32], wn[32], fm[32], fn[32], tk[32], st[32], xc[32], taps[32];
     std::string pad = std::string("p") + wgw_str(spec->lds_pad, "tdm");
     std::string sched;
     snprintf(wm, sizeof wm, "wm%d", spec->waves_m);
@@ -199,6 +200,10 @@ rocke_status_t rocke_winograd_gemm_wmma_kernel_name(const rocke_winograd_gemm_wm
         xc[0] = '\0';
     if(wgw_sched_set(spec))
         sched = std::string("s") + spec->sched;
+    if(spec->taps > 1)
+        snprintf(taps, sizeof taps, "taps%d", spec->taps);
+    else
+        taps[0] = '\0';
     const char* parts[] = {wm,
                            wn,
                            fm,
@@ -210,7 +215,8 @@ rocke_status_t rocke_winograd_gemm_wmma_kernel_name(const rocke_winograd_gemm_wm
                            spec->split_k ? "sk" : "",
                            spec->prefetch ? "pf" : "",
                            xc,
-                           sched.c_str()};
+                           sched.c_str(),
+                           taps};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {wgw_is_bf16(spec->dtype) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "wino_gemm_wmma",
@@ -295,6 +301,11 @@ bool rocke_winograd_gemm_wmma_is_valid_spec(const rocke_winograd_gemm_wmma_spec_
     if(spec->stages < 2)
     {
         wgw_set_reason(reason, reason_cap, "stages must be >= 2");
+        return false;
+    }
+    if(spec->taps < 1)
+    {
+        wgw_set_reason(reason, reason_cap, "taps must be >= 1");
         return false;
     }
     epi = wgw_str(spec->epilogue, "");
@@ -385,14 +396,14 @@ struct wgw_ctx
     const char* wmma_op_id;
 
     int WAVE, WN, FM, FN, BM, BN, CK, NS, P, STAGE, U_OFF, KSTEPS, U_WAVE, OPS_PER_CHUNK;
-    int EB;
+    int TAPS, EB;
     bool split_k;
 
     rocke_value_t *V, *U, *D;
     rocke_value_t *c_T, *c_G, *c_Cg, *c_Kg, *c_splits, *c_cps, *c_g0, *c_nb;
     rocke_value_t *c0, *c1, *c2, *c8, *c16;
     rocke_value_t *tid, *wave_id, *lane, *l16, *lhalf, *wave_n, *wave_m;
-    rocke_value_t *nx, *ny, *nxy, *n_tiles, *n_chunks, *row_v, *out_row;
+    rocke_value_t *nx, *ny, *nxy, *n_tiles, *n_cc, *n_chunks, *row_v, *out_row;
     rocke_value_t *chunk0, *n_loc, *lds, *lds_addr, *col;
     wgw_tile cur;
     int tile0, pad_interval, pad_amount;
@@ -488,15 +499,47 @@ void issue(wgw_ctx& c, rocke_value_t* q)
         rocke_b_region_enter(b, gate.then_region);
         {
             const wgw_tile& t = c.cur;
-            rocke_value_t* c_k0;
+            rocke_value_t *c_k0, *v_base, *v_ext, *u_base;
+            if(c.TAPS > 1)
+            {
+                rocke_value_t* gq = rocke_b_add(b, c.chunk0, q);
+                rocke_value_t* tap = rocke_b_div(b, gq, c.n_cc);
+                {
+                    rocke_value_t* x = rocke_b_mul(b, tap, c.n_cc);
+                    rocke_value_t* y = rocke_b_sub(b, gq, x);
+                    rocke_value_t* z = ci(c, c.CK);
+                    c_k0 = rocke_b_mul(b, y, z);
+                }
+                {
+                    rocke_value_t* x = rocke_b_mul(b, tap, c.row_v);
+                    v_base = rocke_b_add(b, t.v_base, x);
+                }
+                {
+                    rocke_value_t* x = ci(c, c.TAPS - 1);
+                    rocke_value_t* y = rocke_b_add(b, t.m_ext, x);
+                    v_ext = rocke_b_sub(b, y, tap);
+                }
+                rocke_value_t* slab;
+                {
+                    rocke_value_t* x = ci(c, c.TAPS - 1);
+                    rocke_value_t* y = rocke_b_mul(b, t.g, x);
+                    slab = rocke_b_add(b, y, tap);
+                }
+                {
+                    rocke_value_t* x = rocke_b_mul(b, c.c_Kg, c.c_Cg);
+                    rocke_value_t* y = rocke_b_mul(b, slab, x);
+                    u_base = rocke_b_add(b, y, t.u_base);
+                }
+            }
+            else
             {
                 rocke_value_t* x = rocke_b_add(b, c.chunk0, q);
                 rocke_value_t* y = ci(c, c.CK);
                 c_k0 = rocke_b_mul(b, x, y);
+                v_base = t.v_base;
+                v_ext = t.m_ext;
+                u_base = t.u_base;
             }
-            rocke_value_t* v_base = t.v_base;
-            rocke_value_t* v_ext = t.m_ext;
-            rocke_value_t* u_base = t.u_base;
             rocke_value_t* k_ext;
             {
                 rocke_value_t* x = rocke_b_sub(b, c.c_Cg, c_k0);
@@ -865,6 +908,7 @@ rocke_kernel_def_t* rocke_build_winograd_gemm_wmma(rocke_ir_builder_t* b,
     c.KSTEPS = c.CK / WGW_WMMA_K;
     c.U_WAVE = wgw_waves(spec) > 1 ? 1 : 0;
     c.OPS_PER_CHUNK = wgw_waves(spec) > 1 ? 1 : 2;
+    c.TAPS = spec->taps;
     c.split_k = spec->split_k;
     c.EB = wgw_out_elem_bytes(spec);
 
@@ -928,7 +972,16 @@ rocke_kernel_def_t* rocke_build_winograd_gemm_wmma(rocke_ir_builder_t* b,
         rocke_value_t* x = ci(c, c.CK - 1);
         rocke_value_t* y = rocke_b_add(b, c.c_Cg, x);
         rocke_value_t* z = ci(c, c.CK);
-        c.n_chunks = rocke_b_div(b, y, z);
+        c.n_cc = rocke_b_div(b, y, z);
+    }
+    if(c.TAPS > 1)
+    {
+        rocke_value_t* x = ci(c, c.TAPS);
+        c.n_chunks = rocke_b_mul(b, c.n_cc, x);
+    }
+    else
+    {
+        c.n_chunks = c.n_cc;
     }
     c.row_v = rocke_b_mul(b, c.c_G, c.c_Cg);
     c.out_row = rocke_b_mul(b, c.c_G, c.c_Kg);

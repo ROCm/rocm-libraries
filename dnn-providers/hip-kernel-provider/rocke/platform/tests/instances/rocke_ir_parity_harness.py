@@ -4783,6 +4783,12 @@ def cases():
 
     for _case_id, _build_fn in (
         ("fp16_default", build_winograd_gemm_case()),
+        (
+            "bf16_sk_direct_taps2",
+            build_winograd_gemm_case(
+                dtype="bf16", split_k=True, epilogue="direct", taps=2, tile_k=64
+            ),
+        ),
         ("reduce_fp16", build_winograd_gemm_reduce_case("fp16")),
     ):
         add(
@@ -4790,6 +4796,44 @@ def cases():
             f"conv_winograd_gemm_wmma/gfx1250/{_case_id}",
             "gfx1250",
             _build_fn,
+        )
+
+    # --- conv_winograd_gen: generalized Winograd forward transforms ---
+    # K1 filter / K2 input / K4 output transforms of a segmented 1-D filter
+    # and a grouped 5x5 one. The full matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_winograd_gen_emit.*.
+    def build_winograd_gen_case(stage, prob, ay, ax, **spec_kw):
+        def _build():
+            from kernels.common import conv_winograd_gen as G
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+            spec = G.WinogradGenSpec(
+                problem=ConvProblem(**prob),
+                ax_y=G.WinoAxis(*ay),
+                ax_x=G.WinoAxis(*ax),
+                **spec_kw,
+            )
+            build = {
+                "K1": G.build_filter_transform,
+                "K2": G.build_input_transform,
+                "K4": G.build_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    _wg_1x11 = dict(N=2, Hi=1, Wi=200, C=64, K=64, Y=1, X=11, pW=5)
+    _wg_5x5 = dict(N=1, Hi=20, Wi=20, C=64, K=64, Y=5, X=5, pH=2, pW=2, groups=2)
+    for _case_id, _stage, _prob, _ay, _ax, _kw in (
+        ("1x11_6s2_k1", "K1", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("1x11_6s2_k2", "K2", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("5x5_f2_g2_bf16_k4", "K4", _wg_5x5, (2, 5), (2, 5), dict(io_dtype="bf16")),
+    ):
+        add(
+            "conv_winograd_gen",
+            f"conv_winograd_gen/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_gen_case(_stage, _prob, _ay, _ax, **_kw),
         )
 
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---

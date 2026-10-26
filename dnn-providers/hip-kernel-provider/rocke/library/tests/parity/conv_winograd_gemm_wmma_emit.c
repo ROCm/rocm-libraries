@@ -82,25 +82,40 @@ static int make_cfg(int idx,
         s->sched = NULL;
         return 0;
     case 11:
+        s->taps = 2;
+        return 0;
+    case 12:
+        s->dtype = "bf16";
+        s->taps = 3;
+        s->tile_k = 64;
+        s->stages = 3;
+        return 0;
+    case 13:
         r->dtype = "fp16";
         return 1;
-    case 12:
+    case 14:
         r->dtype = "bf16";
         return 1;
-    case 13:
+    case 15:
         *arch = "gfx950";
         return 0;
-    case 14:
+    case 16:
         s->tile_k = 48;
         s->lds_pad = "clip";
         return 0;
-    case 15:
+    case 17:
         s->waves_m = 1;
         s->waves_n = 1;
         s->frags_m = 4;
         s->frags_n = 2;
         s->tile_k = 64;
         s->stages = 3;
+        return 0;
+    case 18:
+        s->dtype = "bf16";
+        s->split_k = true;
+        s->taps = 2;
+        s->tile_k = 64;
         return 0;
     default:
         return -1;

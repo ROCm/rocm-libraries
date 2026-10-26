@@ -56,6 +56,7 @@ extern "C" {
  *      xcd_remap: bool = True; num_xcds: int = 8
  *      sched: Optional[str] = "iterative-ilp"
  *      wave_size: int = 32
+ *      taps: int = 1
  * ===================================================================== */
 typedef struct rocke_winograd_gemm_wmma_spec
 {
@@ -75,6 +76,7 @@ typedef struct rocke_winograd_gemm_wmma_spec
     int num_xcds; /* default 8 */
     const char* sched; /* default "iterative-ilp"; NULL = None */
     int wave_size; /* default 32 */
+    int taps; /* default 1 */
 } rocke_winograd_gemm_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults. */
@@ -96,7 +98,7 @@ void rocke_winograd_gemm_wmma_grid(const rocke_winograd_gemm_wmma_spec_t* spec,
                                    int grid[3]);
 
 /* kernel_name(): kernel_name_join(name, wm, wn, fm, fn, tk, st, p{lds_pad},
- * epilogue, [sk], [pf], [x{num_xcds}], [s{sched}], [bf16]). */
+ * epilogue, [sk], [pf], [x{num_xcds}], [s{sched}], [taps{taps}], [bf16]). */
 rocke_status_t rocke_winograd_gemm_wmma_kernel_name(const rocke_winograd_gemm_wmma_spec_t* spec,
                                                     char* out,
                                                     size_t out_cap);

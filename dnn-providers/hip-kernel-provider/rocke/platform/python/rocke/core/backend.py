@@ -1852,6 +1852,7 @@ def conv_winograd_gemm_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         num_xcds=spec.num_xcds,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        taps=spec.taps,
     )
 
 
@@ -1927,6 +1928,98 @@ def lower_conv_winograd_gemm_reduce(
         lambda: eng.conv_winograd_gemm_reduce_lower_llvm(sd, arch=arch),
         lambda: eng.conv_winograd_gemm_reduce_serialize_ir(sd, arch=arch),
         "wino_gemm_reduce",
+    )
+
+
+_WINOGRAD_GEN_STAGES = ("K1", "K2", "K4")
+
+
+def conv_winograd_gen_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
+    """:class:`WinogradGenSpec` + stage (``K1`` / ``K2`` / ``K4``) -> dict
+    (problem and axes nested). The C++ engine has the default Toom-Cook
+    points only, so an axis with explicit ``pts`` is rejected."""
+    if stage not in _WINOGRAD_GEN_STAGES:
+        raise ValueError(f"stage must be one of {_WINOGRAD_GEN_STAGES}, got {stage!r}")
+    p = spec.problem
+    axes = {}
+    for key in ("ax_y", "ax_x"):
+        a = getattr(spec, key)
+        if a.pts is not None:
+            raise ValueError(
+                "the C++ engine supports the default Winograd points only "
+                f"({key} has pts={a.pts!r})"
+            )
+        axes[key] = dict(m=a.m, r=a.r, seg=a.seg)
+    return dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        **axes,
+        io_dtype=spec.io_dtype,
+        operand_dtype=spec.operand_dtype,
+        vec=spec.vec,
+        block_size=spec.block_size,
+        nt_stores=spec.nt_stores,
+        name=spec.name,
+        stage=stage,
+    )
+
+
+def lower_conv_winograd_gen(
+    spec: Any,
+    stage: str,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower one stage (``K1`` filter, ``K2`` input, ``K4`` output transform)
+    of a :class:`WinogradGenSpec` (the generalized Winograd forward)."""
+    sd = conv_winograd_gen_spec_to_dict(spec, stage)
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common import conv_winograd_gen as G
+        from .lower_llvm import lower_kernel_to_llvm
+
+        build = {
+            "K1": G.build_filter_transform,
+            "K2": G.build_input_transform,
+            "K4": G.build_output_transform,
+        }[stage]
+        k = build(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    return _lower_family(
+        "conv_winograd_gen",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gen_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gen_serialize_ir(sd, arch=arch),
+        _name_of(spec),
     )
 
 

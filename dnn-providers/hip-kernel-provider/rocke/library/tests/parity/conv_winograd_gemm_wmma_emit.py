@@ -21,11 +21,14 @@
 #   8  bf16, split-K, direct epilogue
 #   9  fp16, lds_pad clip, no fragment prefetch
 #  10  fp16, no XCD remap, no scheduler strategy
-#  11  split-K reduce, fp16
-#  12  split-K reduce, bf16
-#  13  rejected by both engines: gfx950 (wave64, no TDM)
-#  14  rejected by both engines: tile_k 48 (not a multiple of 32)
-#  15  fp16, one wave (both transfers from wave 0), 4x2 fragments, 3 stages
+#  11  fp16, 2 taps (segmented K3)
+#  12  bf16, 3 taps, tile_k 64, 3 stages
+#  13  split-K reduce, fp16
+#  14  split-K reduce, bf16
+#  15  rejected by both engines: gfx950 (wave64, no TDM)
+#  16  rejected by both engines: tile_k 48 (not a multiple of 32)
+#  17  fp16, one wave (both transfers from wave 0), 4x2 fragments, 3 stages
+#  18  bf16, split-K, TDM epilogue, 2 taps, tile_k 64
 from _emit_common import run_emit
 from kernels.common.conv_winograd_gemm_wmma import (
     WinogradGemmReduceSpec,
@@ -50,11 +53,14 @@ def _spec(idx: int):
         8: S(dtype="bf16", split_k=True, epilogue="direct"),
         9: S(lds_pad="clip", prefetch=False),
         10: S(xcd_remap=False, sched=None),
-        11: WinogradGemmReduceSpec("fp16"),
-        12: WinogradGemmReduceSpec("bf16"),
-        13: (S(), "gfx950"),
-        14: S(tile_k=48, lds_pad="clip"),
-        15: S(waves_m=1, waves_n=1, frags_m=4, frags_n=2, tile_k=64, stages=3),
+        11: S(taps=2),
+        12: S(dtype="bf16", taps=3, tile_k=64, stages=3),
+        13: WinogradGemmReduceSpec("fp16"),
+        14: WinogradGemmReduceSpec("bf16"),
+        15: (S(), "gfx950"),
+        16: S(tile_k=48, lds_pad="clip"),
+        17: S(waves_m=1, waves_n=1, frags_m=4, frags_n=2, tile_k=64, stages=3),
+        18: S(dtype="bf16", split_k=True, taps=2, tile_k=64),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
