@@ -49,18 +49,20 @@ def _default_block_m(req: AttentionRequest) -> int:
     half as long. Measured on the 304-CU part at D128, both dtypes, causal
     without window or sinks: the 128-row tile wins every shape below that
     threshold and loses every shape at or above it. A 64-row tile loses almost
-    everywhere. Window and sink requests keep the shared tile, and so do
-    bottom-right (chunked) requests, whose KV split below is sized for it.
+    everywhere. The same under-fill holds at D64 and with sinks, so both take the
+    rule, except non-causal sinks on the D128 persistent grid: without the causal
+    diagonal no item gets shorter, and the doubled work only adds a second
+    persistent round. Window requests keep the shared tile (narrow windows have
+    their own geometry below), and so do bottom-right (chunked) requests, whose
+    KV split below is sized for it.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    if (
-        int(req.hdim_q) != 128
-        or int(req.sliding_window)
-        or bool(req.use_sinks)
-        or "causal_bottom_right" in req.features()
-    ):
+    if int(req.sliding_window) or "causal_bottom_right" in req.features():
+        return bm
+    causal = _parse_attention_mask_type(req.mask_type) != AttentionMaskType.NO_MASK
+    if bool(req.use_sinks) and not causal and int(req.hdim_q) == 128:
         return bm
     num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)

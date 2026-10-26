@@ -192,17 +192,22 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    /* FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
-       at the working dtype); no sliding window, as below. */
     if(p->use_alibi || p->use_qq_bias)
     {
         return false;
     }
-    if(p->softcap > 0 || p->use_sinks)
+    if(p->softcap > 0)
     {
         return false;
     }
-    if(p->sliding_window > 0)
+    /* FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+       at the working dtype), with no sliding window and no sinks. */
+    if(p->use_fp8 && (p->sliding_window > 0 || p->use_sinks))
+    {
+        return false;
+    }
+    /* Sliding window and sinks ride the combo at D64 and D128 only. */
+    if((p->sliding_window > 0 || p->use_sinks) && p->head_size != 64 && p->head_size != 128)
     {
         return false;
     }
@@ -528,6 +533,11 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
     if(enable_combo_2d(p) && p->sliding_window > 0)
     {
         return p->block_size;
+    }
+    /* Single-batch d128 sliding-window combo: T=64. */
+    if(enable_single_batch_combo(p) && p->sliding_window > 0 && p->head_size == 128)
+    {
+        return 64;
     }
     /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS, d64 -> 128. */
     if(enable_single_batch_combo(p))
@@ -1012,7 +1022,9 @@ rocke_attention_tiled_2d_spec_t
     s.use_transposed_half_local_pv = enable_transposed_qk_32x32(p);
 
     /* Transposed sub-flags: mirrors Python scalar_state / skip_legacy_qreg / mask_opts */
-    bool scalar_state = combo || subflags;
+    /* Sinks on the transposed 32x32 path seed the running max per lane row, which
+     * only the scalar-state layout maps correctly, so sinks always take it. */
+    bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p));
     bool skip_legacy_qreg = combo || subflags;
     bool bias_active = (p->softcap > 0) || p->use_alibi || p->use_qq_bias;
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;

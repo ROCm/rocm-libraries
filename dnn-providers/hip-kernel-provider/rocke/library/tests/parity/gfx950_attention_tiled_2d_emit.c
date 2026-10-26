@@ -1011,6 +1011,82 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_mask_limit = true;
         s->use_softmax_mfma_interleave = true;
         break;
+    /* d128 single-batch sliding-window + sinks combo selector spec
+     * (T=64, nw=4, transposed 32x32 + scalar state + half-local PV + interleave) */
+    case 60:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    /* d128 single-batch sinks (no window) full-combo selector spec
+     * (T=2*block_size, K single buffer, softmax/MFMA interleave) */
+    case 61:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    /* d64 single-batch sliding-window + sinks combo selector spec (long: early V; the
+     * short-prefill V double buffer has no C twin yet) */
+    case 62:
+        s->head_size = 64;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_early_v_schedule = true;
+        break;
     default:
         return -1;
     }

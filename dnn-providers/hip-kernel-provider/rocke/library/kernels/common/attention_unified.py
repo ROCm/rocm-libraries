@@ -1277,7 +1277,6 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype == "fp16"
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -1983,20 +1982,19 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         transposed routing.
       * dtype in {bf16, fp16} (the transposed softmax keeps m/l/acc in f32;
         fp16 winners were as accurate as flash).
-      * FP8 K/V is admitted without sliding window: the sync-dequant loader
-        stages K/V in LDS at the working dtype, which is what the combo reads.
-        The schedule levers the FP8 loader does not wire (K single-buffer,
+      * FP8 K/V is admitted without sliding window or sinks: the sync-dequant
+        loader stages K/V in LDS at the working dtype, which is what the combo
+        reads. The schedule levers the FP8 loader does not wire (K single-buffer,
         early-V, V double-buffer, Q direct-reg) stay off for it.
-      * no softcap / sinks (not wired into the transposed softmax VALU opts;
-        the spec validator rejects them).
+      * no softcap.
       * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
         them per-score, so biased single-batch prefill takes the combo path
-        instead of the fallback. Only softcap/sinks are excluded (above)
-        because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
-        faster here than the narrow 16x16 path (both numerically equal); other
-        SW shapes keep their existing routing, and the no-SW VALU sub-flags
-        auto-disable via _enable_transposed_subflags.
+        instead of the fallback.
+      * sliding window and sinks: D64 and D128, both dtypes, every block size.
+        The narrow 16x16 path they otherwise take is far slower there. The
+        no-SW VALU sub-flags auto-disable via _enable_transposed_subflags, and
+        sinks take the scalar-state layout (the only one that seeds the sink
+        on the right rows).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -2008,27 +2006,18 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.dtype not in ("bf16", "fp16"):
         return False
-    if problem.softcap > 0 or problem.use_sinks:
+    if problem.softcap > 0:
         return False
     # FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
-    # at the working dtype), with no sliding window.
-    if problem.use_fp8 and problem.sliding_window > 0:
+    # at the working dtype), with no sliding window and no sinks.
+    if problem.use_fp8 and (problem.sliding_window > 0 or problem.use_sinks):
         return False
-    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16 because that is the
-    # cohort we measured. bs in {32,64} would now also build safely under the
-    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
-    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
-    # raises -- but their combo speedup is unmeasured, so they keep their
-    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
-    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
-    # _enable_transposed_subflags.
-    if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype == "fp16"
-        and problem.block_size == 16
-    ):
+    # Sliding window and sinks ride the combo at D64 and D128, both dtypes and
+    # every block size: the narrow 16x16 path they otherwise take is far slower
+    # there. The no-SW VALU sub-flags auto-disable for SW via
+    # _enable_transposed_subflags, and sinks take the scalar-state layout.
+    windowed_or_sinks = problem.sliding_window > 0 or problem.use_sinks
+    if windowed_or_sinks and problem.head_size not in (64, 128):
         return False
     if problem.head_size not in (64, 128, 192):
         return False

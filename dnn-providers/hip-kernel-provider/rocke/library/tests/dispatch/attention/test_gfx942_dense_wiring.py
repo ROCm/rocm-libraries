@@ -651,6 +651,66 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
         default_grid = Gfx942AttentionDenseSpec(batch=2**30, persistent=False, **common)
         self.assertEqual(attention_dense_runtime_args(default_grid)["batch"], 2**30)
 
+    def test_under_filled_default_tile_covers_d64_and_sinks(self):
+        """The 128-row tile applies to every head size and to sinks (non-causal
+        sinks on the D128 persistent grid excepted): below the CU count it halves
+        block_m, at or above it the shared tile stays. A sliding window keeps its
+        own geometry."""
+        cases = (
+            # (kwargs, expected block_m): 256-row work = Sq/256 * Hq * B vs 304.
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=512, seqlen_k=512), 128),
+            (dict(hdim_q=64, hdim_v=64, nhead_q=64, seqlen_q=2048, seqlen_k=2048), 256),
+            (dict(nhead_q=128, seqlen_q=512, seqlen_k=512, use_sinks=True), 128),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+            (dict(nhead_q=128, seqlen_q=2048, seqlen_k=2048, use_sinks=True), 256),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            (
+                dict(nhead_q=128, seqlen_q=512, seqlen_k=512, batch=4, use_sinks=True),
+                256,
+            ),
+            # Non-causal sinks: D128 (persistent grid) keeps the shared tile, D64
+            # (one CTA per block) takes the 128-row one.
+            (
+                dict(
+                    nhead_q=128, seqlen_q=512, seqlen_k=512, mask_type=0, use_sinks=True
+                ),
+                256,
+            ),
+            (
+                dict(
+                    hdim_q=64,
+                    hdim_v=64,
+                    nhead_q=64,
+                    seqlen_q=512,
+                    seqlen_k=512,
+                    mask_type=0,
+                    use_sinks=True,
+                ),
+                128,
+            ),
+        )
+        with _Gfx942Arch():
+            for kw, block_m in cases:
+                with self.subTest(**kw):
+                    self.assertEqual(_spec(_req(**kw)).block_m, block_m)
+            wide_window = _spec(
+                _req(nhead_q=32, seqlen_q=2048, seqlen_k=2048, sliding_window=4096)
+            )
+            self.assertEqual(wide_window.block_m, 256)
+
 
 class TestGfx942SlidingWindow(unittest.TestCase):
     """Sliding-window pass-through and capability tests, mirroring gfx950's suite."""

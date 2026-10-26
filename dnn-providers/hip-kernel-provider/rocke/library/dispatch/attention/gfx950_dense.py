@@ -40,6 +40,14 @@ _DENSE_TILE = "default"
 # gfx950 CU count and the shipped occupancy hint.
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
+# Sliding-window default geometry. A band of width W visits about block_m + W
+# keys per query row, so the 128-row tile wastes fewer masked keys per row than
+# the 256-row one, and its smaller CTA lets two persistent CTAs share a CU. It
+# also doubles the K/V reads of the grid, so once the 256-row grid already holds
+# this many CTAs per CU the shared tile stays.
+_WINDOW_TILE = "bm128"
+_WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
+_WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
     {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
 )
@@ -174,7 +182,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
+    window = int(req.sliding_window)
+    shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
+    shared_ctas = -(-sq // shared_bm) * int(req.nhead_q) * int(req.batch)
+    num_cus = int(req.num_cus) or _DEFAULT_NUM_PERSISTENT
+    window_tile = bool(window) and (
+        shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+    )
+    geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
@@ -229,10 +244,12 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         waves_per_eu=_DEFAULT_WAVES_PER_EU,
         lds_v_row_pad=int(layout["lds_v_row_pad"]),
         persistent=variant.persistent,
-        num_persistent=_DEFAULT_NUM_PERSISTENT,
+        num_persistent=(
+            _WINDOW_NUM_PERSISTENT if window_tile else _DEFAULT_NUM_PERSISTENT
+        ),
         persist_decode="auto",
         ragged=ragged,
-        sliding_window=int(req.sliding_window),
+        sliding_window=window,
         use_sinks=bool(req.use_sinks),
         wide_lds_dma=variant.wide_lds_dma,
         nonpersist_decode=variant.nonpersist_decode,
