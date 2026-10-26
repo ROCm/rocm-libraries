@@ -653,10 +653,31 @@ namespace
                       HIPBLAS_STATUS_SUCCESS);
         }
 
-        hipblasStatus_t heuristic()
+        void transposeA()
         {
-            hipblasLtMatmulHeuristicResult_t result[1] = {};
-            int                              returned  = 0;
+            const hipblasOperation_t op = HIPBLAS_OP_T;
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                          matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutDestroy(Adesc), HIPBLAS_STATUS_SUCCESS);
+            Adesc = nullptr;
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kK, kM, kK),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void detach()
+        {
+            hipblasLtFusedEpilogueDescriptor_t none = nullptr;
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                          matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &none, sizeof(none)),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+
+        hipblasStatus_t heuristic(hipblasLtMatmulHeuristicResult_t* result   = nullptr,
+                                  int*                              returned = nullptr)
+        {
+            hipblasLtMatmulHeuristicResult_t scratch[1] = {};
+            int                              count      = 0;
             return hipblasLtMatmulAlgoGetHeuristic(handle,
                                                    matmulDesc,
                                                    Adesc,
@@ -665,8 +686,8 @@ namespace
                                                    Ddesc,
                                                    pref,
                                                    1,
-                                                   result,
-                                                   &returned);
+                                                   result ? result : scratch,
+                                                   returned ? returned : &count);
         }
 
         hipblasLtHandle_t                  handle     = nullptr;
@@ -677,6 +698,34 @@ namespace
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
     };
+
+    TEST_F(FusedA2ADispatch_pre_checkin, DetachRestoresThePlainHeuristic)
+    {
+        transposeA();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t plain    = {};
+        int                              returned = 0;
+        ASSERT_EQ(heuristic(&plain, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no plain BF16 TN solution in the loaded library";
+
+        registerOneRank();
+        completeAndAttach();
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        returned                                     = 0;
+        ASSERT_EQ(heuristic(&fusedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+        ASSERT_NE(memcmp(fusedResult.algo.data, plain.algo.data, sizeof(plain.algo.data)), 0);
+        detach();
+
+        hipblasLtMatmulHeuristicResult_t afterDetach = {};
+        returned                                     = 0;
+        ASSERT_EQ(heuristic(&afterDetach, &returned), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(returned, 1);
+        EXPECT_EQ(memcmp(afterDetach.algo.data, plain.algo.data, sizeof(plain.algo.data)), 0);
+    }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)
     {
