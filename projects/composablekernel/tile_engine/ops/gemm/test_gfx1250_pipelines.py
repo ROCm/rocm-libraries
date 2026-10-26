@@ -238,6 +238,27 @@ class TestValidationRules(unittest.TestCase):
             self.assertTrue(valid("comp_async", dt, 128), dt)
             self.assertTrue(valid("compv3", dt, 64), dt)
 
+    def test_8bit_32x32x128_warp_tile(self):
+        # fp8/bf8 32x32x128 is two 16x16x128 WMMA atoms per warp tile side; it
+        # is allowed on gfx1250 for 8-bit inputs only.
+        for dt in ("fp8", "bf8"):
+            self.assertTrue(vu.op_warp_tile_allowed("gfx1250", dt, [32, 32, 128]))
+            self.assertIn([32, 32, 128], vu.GFX1250_WARP_TILES[dt])
+        for dt in ("fp16", "bf16", "fp32", "int8"):
+            self.assertFalse(vu.op_warp_tile_allowed("gfx1250", dt, [32, 32, 128]))
+        for dt in ("fp8", "bf8"):
+            self.assertFalse(vu.op_warp_tile_allowed("gfx1250", dt, [32, 32, 64]))
+            self.assertFalse(vu.op_warp_tile_allowed("gfx1250", dt, [32, 16, 128]))
+        tile = (128, 128, 256, 2, 2, 1, 32, 32, 128)
+        for dt in ("fp8", "bf8"):
+            for pipe in ("comp_tdm", "comp_tdm_v2", "comp_async", "compv3"):
+                self.assertTrue(
+                    vu.is_tile_config_valid(
+                        *tile, dt, dt, "fp16", pipe, "rcr", "gfx1250", "gemm_universal"
+                    ),
+                    (dt, pipe),
+                )
+
     def test_comp_async_pad_trait_gate(self):
         ok = vu.is_trait_combination_valid
         for prefix in ("gemm_universal", "batched_gemm"):
