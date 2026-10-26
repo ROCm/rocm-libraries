@@ -30,9 +30,13 @@ inline std::string groupedCApiUnsupportedReason(const Arguments& arg)
     if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
        || arg.gradient)
         return "supports no epilogue, bias or aux output";
-    if(arg.scaleA != hipblaslt_scaling_format::none || arg.scaleB != hipblaslt_scaling_format::none
-       || arg.scaleC || arg.scaleD || arg.scaleE || arg.scaleAlpha_vector || arg.amaxD)
-        return "supports no scaling";
+    if(arg.scaleB != arg.scaleA
+       || (arg.scaleA != hipblaslt_scaling_format::none
+           && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0
+           && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
+        return "supports only the MX scale modes, the same on A and B";
+    if(arg.scaleC || arg.scaleD || arg.scaleE || arg.scaleAlpha_vector || arg.amaxD)
+        return "supports no scaling other than MX";
     if(arg.swizzle_a || arg.swizzle_b)
         return "supports no swizzled A or B";
     if(arg.scale_type != HIP_R_32F)
@@ -41,12 +45,14 @@ inline std::string groupedCApiUnsupportedReason(const Arguments& arg)
 }
 
 // One grouped problem for the C API: grouped layouts shared by all rotating blocks, and per
-// block a descriptor and device arrays of the per-group A, B, C and D pointers. The
-// descriptor holds the size hints and the launch setup, so each block keeps its own.
+// block a descriptor and device arrays of the per-group A, B, C and D pointers, and of the
+// MX scale pointers. The descriptor holds the size hints and the launch setup, so each
+// block keeps its own.
 class GroupedCApiProblem
 {
 public:
-    // a, b, c and d are [block][group] device addresses. Check status() before use.
+    // a, b, c and d, and scaleA and scaleB with MX, are [block][group] device addresses.
+    // Check status() before use.
     GroupedCApiProblem(hipblasLtHandle_t                      handle,
                        const Arguments&                       arg,
                        hipblasOperation_t                     transA,
@@ -62,6 +68,8 @@ public:
                        const std::vector<std::vector<void*>>& b,
                        const std::vector<std::vector<void*>>& c,
                        const std::vector<std::vector<void*>>& d,
+                       const std::vector<std::vector<void*>>& scaleA,
+                       const std::vector<std::vector<void*>>& scaleB,
                        size_t                                 maxWorkspaceBytes)
         : handle_(handle)
     {
@@ -82,6 +90,9 @@ public:
                    descs_.back(), HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(transB)))
                || !upload(ptrsA_, a[blk]) || !upload(ptrsB_, b[blk]) || !upload(ptrsC_, c[blk])
                || !upload(ptrsD_, d[blk]))
+                return;
+            if(arg.scaleA != hipblaslt_scaling_format::none
+               && !setScales(descs_.back(), arg.scaleA, scaleA[blk], scaleB[blk]))
                 return;
         }
 
@@ -122,7 +133,7 @@ public:
         for(auto l : {layA_, layB_, layC_, layD_})
             if(l)
                 hipblasLtMatrixLayoutDestroy(l);
-        for(auto* ptrs : {&ptrsA_, &ptrsB_, &ptrsC_, &ptrsD_, &dims_})
+        for(auto* ptrs : {&ptrsA_, &ptrsB_, &ptrsC_, &ptrsD_, &dims_, &scales_})
             for(void* p : *ptrs)
                 static_cast<void>(hipFree(p));
     }
@@ -216,6 +227,29 @@ private:
         return true;
     }
 
+    bool setScales(hipblasLtMatmulDesc_t     desc,
+                   hipblaslt_scaling_format  format,
+                   const std::vector<void*>& scaleA,
+                   const std::vector<void*>& scaleB)
+    {
+        hipblasLtMatmulMatrixScale_t mode
+            = format == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                  ? HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT
+                  : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+        if(!upload(scales_, scaleA) || !upload(scales_, scaleB))
+            return false;
+        void* arrayA = scales_[scales_.size() - 2];
+        void* arrayB = scales_.back();
+        return ok(hipblasLtMatmulDescSetAttribute(
+                   desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode)))
+               && ok(hipblasLtMatmulDescSetAttribute(
+                   desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode)))
+               && ok(hipblasLtMatmulDescSetAttribute(
+                   desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &arrayA, sizeof(arrayA)))
+               && ok(hipblasLtMatmulDescSetAttribute(
+                   desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &arrayB, sizeof(arrayB)));
+    }
+
     // A dimension shared by every group uses the scalar layout attribute, which lets the
     // library check kernels against the real size; otherwise it is a device array.
     bool makeLayout(hipblasLtMatrixLayout_t&    layout,
@@ -267,5 +301,5 @@ private:
     hipblasLtMatrixLayout_t            layD_ = nullptr;
     hipblasLtMatmulPreference_t        pref_ = nullptr;
     std::vector<hipblasLtMatmulDesc_t> descs_;
-    std::vector<void*>                 ptrsA_, ptrsB_, ptrsC_, ptrsD_, dims_;
+    std::vector<void*>                 ptrsA_, ptrsB_, ptrsC_, ptrsD_, dims_, scales_;
 };
