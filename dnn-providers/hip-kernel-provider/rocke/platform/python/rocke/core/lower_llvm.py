@@ -1813,6 +1813,45 @@ _GEP_ELEM_BYTES = {
     "double": 8,
 }
 
+# Declared on first use by a split global address (``_Lowerer._global_gep``).
+_READFIRSTLANE_P1 = "readfirstlane.p1"
+_READFIRSTLANE_P1_DECL = (
+    "declare ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1))"
+)
+
+# Bits of a scalar IR type held in vector registers. An i1 is a lane mask in
+# scalar registers; a type not listed counts as 32 bits.
+_REGISTER_BITS = {
+    "i1": 0,
+    "i4": 4,
+    "u4": 4,
+    "i8": 8,
+    "u8": 8,
+    "fp8e4m3": 8,
+    "bf8e5m2": 8,
+    "i16": 16,
+    "f16": 16,
+    "bf16": 16,
+    "i32": 32,
+    "f32": 32,
+    "tf32": 32,
+    "i64": 64,
+    "f64": 64,
+}
+
+
+def _register_words(t: Type) -> int:
+    """32-bit vector-register words one lane needs to hold a value of ``t``."""
+    if isinstance(t, SmemType):
+        return 0
+    if isinstance(t, PtrType):
+        return 1 if t.space == "lds" else 2
+    if isinstance(t, VectorType):
+        bits = t.count * _REGISTER_BITS.get(t.elem.name, 32)
+    else:
+        bits = _REGISTER_BITS.get(t.name, 32)
+    return (bits + 31) // 32
+
 
 def _i32_constant(v: Value) -> Optional[int]:
     """The value of an i32 ``arith.constant``, else None."""
@@ -1845,6 +1884,10 @@ class _IndexFacts:
     through, not trusted: nothing checks its claim. Only i32 values get
     bounds, so every bound the C++ mirror computes fits a 64-bit integer.
 
+    ``live_through_words`` is the largest live-through vector state of any
+    ``scf.for``: the 32-bit words per lane of the non-uniform values the loop
+    carries, plus those it reads from outside its body.
+
     Built before lowering starts, because the unrolled-loop lowering renames
     values while it runs and a loop's counter and carried values are told apart
     by name. Facts are keyed by value identity. Mirrored by
@@ -1858,8 +1901,14 @@ class _IndexFacts:
         self._facts: Dict[int, Tuple[Value, bool, Optional[Tuple[int, int]]]] = {}
         # id(scf.for op) -> its counter and carried values, by name.
         self._block_values: Dict[int, Dict[str, Value]] = {}
+        # Loops are the scf.for ops lowered as LLVM loops (not unrolled): the
+        # innermost one around each value's definition, and around each loop.
+        self._loop_of: Dict[int, Optional[int]] = {}
+        self._parent_loop: Dict[int, Optional[int]] = {}
+        self._loops: List[Optional[int]] = [None]
         self._find_block_values(kernel.body)
         self._visit(kernel.body)
+        self.live_through_words = self._max_loop_words(kernel.body)
 
     def uniform(self, v: Value) -> bool:
         fact = self._facts.get(id(v))
@@ -1911,6 +1960,22 @@ class _IndexFacts:
             return None
         return uniform, lane
 
+    def lane_hoistable(self, terms: List[Value], lane: Value) -> bool:
+        """Whether some loop varies a uniform term but not the per-lane term:
+        there LLVM's LICM reassociates ``base[uniform][lane]`` into
+        ``base[lane][uniform]`` and hoists ``base[lane]``, a 64-bit per-lane
+        pointer."""
+        around_lane = set()
+        loop = self._loop_of.get(id(lane))
+        while loop is not None:
+            around_lane.add(loop)
+            loop = self._parent_loop[loop]
+        for t in terms:
+            loop = self._loop_of.get(id(t))
+            if loop is not None and loop not in around_lane:
+                return True
+        return False
+
     def _record(self, v: Value, uniform: bool, bounds: Optional[Tuple[int, int]]) -> None:
         self._facts[id(v)] = (v, uniform, bounds)
 
@@ -1929,6 +1994,8 @@ class _IndexFacts:
 
     def _visit(self, region: Region) -> None:
         for op in region.ops:
+            for r in op.results:
+                self._loop_of[id(r)] = self._loops[-1]
             if op.name == "scf.for":
                 self._visit_for(op)
                 continue
@@ -1943,6 +2010,15 @@ class _IndexFacts:
         inits = op.operands[3 : 3 + num_iter]
         body = op.regions[0]
         values = self._block_values.get(id(op), {})
+        # _Lowerer._op_scf_for unrolls exactly these loops.
+        unrolled = op.attrs.get("unroll", False) and all(
+            v.op is not None and v.op.name == "arith.constant" for v in (lower, upper, step)
+        )
+        if not unrolled:
+            self._parent_loop[id(op)] = self._loops[-1]
+            self._loops.append(id(op))
+        for v in values.values():
+            self._loop_of[id(v)] = self._loops[-1]
         counted = all(self.uniform(v) for v in (lower, upper, step))
         iv = values.get(op.attrs.get("iv"))
         if iv is not None:
@@ -1969,8 +2045,55 @@ class _IndexFacts:
             if held == assumed:
                 break
             assumed = held
+        if not unrolled:
+            self._loops.pop()
         for r, u in zip(op.results, assumed):
             self._record(r, u, None)
+
+    def _max_loop_words(self, region: Region) -> int:
+        best = 0
+        for op in region.ops:
+            if op.name == "scf.for":
+                best = max(best, self._loop_words(op))
+            for inner in op.regions:
+                best = max(best, self._max_loop_words(inner))
+        return best
+
+    def _loop_words(self, loop: Op) -> int:
+        """Words of the non-uniform values ``loop`` carries or reads from
+        outside its body, each value counted once."""
+        inside: Set[int] = set()
+        self._collect_defined(loop.regions[0], inside)
+        block = self._block_values.get(id(loop), {})
+        inside.update(id(v) for v in block.values())
+        iv = loop.attrs.get("iv")
+        words = sum(
+            _register_words(v.type)
+            for name, v in block.items()
+            if name != iv and not self.uniform(v)
+        )
+        seen: Set[int] = set()
+        stack = [loop.regions[0]]
+        while stack:
+            for op in stack.pop().ops:
+                for v in op.operands:
+                    if id(v) in inside or id(v) in seen:
+                        continue
+                    seen.add(id(v))
+                    if not self.uniform(v):
+                        words += _register_words(v.type)
+                stack.extend(op.regions)
+        return words
+
+    def _collect_defined(self, region: Region, out: Set[int]) -> None:
+        """Add the values defined in ``region``: op results and the counters
+        and carried values of nested loops."""
+        for op in region.ops:
+            out.update(id(r) for r in op.results)
+            if op.name == "scf.for":
+                out.update(id(v) for v in self._block_values.get(id(op), {}).values())
+            for inner in op.regions:
+                self._collect_defined(inner, out)
 
     def _counter_bounds(
         self, iv: Value, lower: Value, upper: Value, step: Value
@@ -2448,8 +2571,16 @@ class _Lowerer:
     # ----- pre-pass: index facts for global addresses -----
 
     def _collect_index_facts(self) -> None:
-        if self._backend.splits_global_address:
-            self._index_facts = _IndexFacts(self.kernel, self._backend.arch.wave_size)
+        """Facts for :meth:`_global_gep` on a target that splits global
+        addresses, unless a loop of the kernel keeps more vector state live
+        than the register file holds. Such a kernel spills whatever its
+        addresses look like, and the split's scalar address registers and
+        changed schedule only grow the spill."""
+        if not self._backend.splits_global_address:
+            return
+        facts = _IndexFacts(self.kernel, self._backend.arch.wave_size)
+        if facts.live_through_words <= self._backend.arch.limits.vgprs:
+            self._index_facts = facts
 
     def _global_gep(
         self, gep: str, elem_ty: str, ptr: Value, idx: Value, idx_ty: str = "i32"
@@ -2468,11 +2599,12 @@ class _Lowerer:
         Every GEP sign-extends its index, so the chain computes the address of
         the single GEP whenever ``idx`` is not poison. The partial addresses
         are not known to be in bounds, so the chain carries no ``inbounds``.
-        The constants come right before the per-lane term so that the GEP the
-        per-lane term indexes is shared or loop-variant; LLVM's LICM otherwise
-        reassociates a single-use chain to hoist the loop-invariant per-lane
-        offset, which puts the per-lane term back into the base. Everything
-        else keeps the single GEP.
+        Where a loop varies a uniform term but not the per-lane term
+        (:meth:`_IndexFacts.lane_hoistable`), the uniform base passes through
+        ``readfirstlane``, which returns it unchanged because it is the same
+        in every lane: the opaque call stops LLVM's LICM from reassociating
+        the chain into a hoisted 64-bit per-lane pointer, which leaves only the
+        VGPR form. Everything else keeps the single GEP.
         """
         split = self._split_global_index(elem_ty, ptr, idx, idx_ty)
         cur = self._current()
@@ -2484,14 +2616,27 @@ class _Lowerer:
             return
         terms, constant, lane = split
         base = self._operand(ptr)
-        indices = [f"i32 {self._operand(t)}" for t in terms]
-        if constant:
-            indices.append(f"i64 {constant}")
-        for index in indices:
+        for t in terms:
             term_base = self._fresh("gbase")
             cur.emit(
                 f"  {term_base} = getelementptr {elem_ty}, ptr addrspace(1) "
-                f"{base}, {index}"
+                f"{base}, i32 {self._operand(t)}"
+            )
+            base = term_base
+        if self._index_facts.lane_hoistable(terms, lane):
+            self._decls[_READFIRSTLANE_P1] = _READFIRSTLANE_P1_DECL
+            self._need(_READFIRSTLANE_P1)
+            uniform_base = self._fresh("gbase")
+            cur.emit(
+                f"  {uniform_base} = call ptr addrspace(1) "
+                f"@llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) {base})"
+            )
+            base = uniform_base
+        if constant:
+            term_base = self._fresh("gbase")
+            cur.emit(
+                f"  {term_base} = getelementptr {elem_ty}, ptr addrspace(1) "
+                f"{base}, i64 {constant}"
             )
             base = term_base
         cur.emit(

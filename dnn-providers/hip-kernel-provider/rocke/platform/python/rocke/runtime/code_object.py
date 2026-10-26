@@ -167,8 +167,22 @@ def _comgr_compiler_info() -> CodeObjectCompilerInfo:
     )
 
 
+_direct_library_paths: dict[str | None, str] = {}
+
+
 def _direct_library_path() -> str | None:
-    explicit = os.environ.get(_DIRECT_LIB_ENV)
+    explicit = os.environ.get(_DIRECT_LIB_ENV) or None
+    path = _direct_library_paths.get(explicit)
+    if path is None:
+        path = _find_direct_library(explicit)
+        # A failed search is not remembered: the library may be built or put on
+        # the search path later in the same process.
+        if path is not None:
+            _direct_library_paths[explicit] = path
+    return path
+
+
+def _find_direct_library(explicit: str | None) -> str | None:
     if explicit:
         path = os.path.realpath(explicit)
         if not os.path.isfile(path):

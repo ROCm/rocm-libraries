@@ -706,6 +706,16 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
         }
     }
     {
+        /* if not target.supports_dtype_combo(ab, ab, "fp32"): return False, ...
+         * The catalog lists no 4x4x4 shape, so ask for any MFMA atom of the
+         * dtype: the targets without one are the ones without the 4x4x4 atom. */
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        if(!rocke_archtarget_supports_dtype_combo(target, ab, ab, "fp32", "mma"))
+        {
+            CK_DCONV4C_REJECT("missing 4x4x4 %s MFMA atom on %s", ab, arch);
+        }
+    }
+    {
         char why_[256];
         if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
         {
@@ -791,11 +801,6 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
                               arch);
         }
     }
-
-    /* The 4x4x4 atom is deliberately NOT gated through has_shape (catalog lists
-     * only the warp-tile shapes; comgr selects the 4x4x4 intrinsic on both
-     * targets). `target` is validated for resolution only. */
-    (void)target;
 
     if(reason != NULL && reason_cap > 0)
     {

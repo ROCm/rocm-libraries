@@ -22,6 +22,11 @@ namespace ckc
 static const int64_t LL_I32_MIN = -INT64_C(2147483647) - 1;
 static const int64_t LL_I32_MAX = INT64_C(2147483647);
 
+/* Python _READFIRSTLANE_P1 / _READFIRSTLANE_P1_DECL. */
+static const char* const LL_READFIRSTLANE_P1 = "readfirstlane.p1";
+static const char* const LL_READFIRSTLANE_P1_DECL
+    = "declare ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1))";
+
 /* Bounds of an i32 value. Operands of every bound computation are i32 bounds,
  * so sums, products and shifts of them fit int64. */
 typedef struct ll_bounds
@@ -40,19 +45,43 @@ typedef struct ll_fact
     ll_bounds_t bounds;
 } ll_fact_t;
 
-/* An scf.for counter or carried value (an entry of Python _block_values). */
+/* An scf.for counter or carried value (an entry of Python _block_values),
+ * keyed by (loop, value name); `loop` NULL marks an empty table slot. */
 typedef struct ll_block_value
 {
     const rocke_op_t* loop;
     const rocke_value_t* value;
+    uint64_t hash;
 } ll_block_value_t;
+
+/* The innermost loop (an scf.for lowered as an LLVM loop, not unrolled)
+ * around a value's definition; `value` NULL marks an empty table slot. */
+typedef struct ll_loop_of
+{
+    const rocke_value_t* value;
+    const rocke_op_t* loop;
+} ll_loop_of_t;
+
+/* A loop and the innermost loop around it. */
+typedef struct ll_loop_parent
+{
+    const rocke_op_t* loop;
+    const rocke_op_t* parent;
+} ll_loop_parent_t;
 
 struct rocke_ll_index_facts
 {
     ll_fact_t* slots; /* open addressing keyed by value pointer; cap is 2^k */
     size_t cap;
     size_t len;
-    ROCKE_VEC(ll_block_value_t) block_values;
+    ll_block_value_t* block_slots; /* open addressing keyed by (loop, name) */
+    size_t block_cap;
+    size_t block_len;
+    ll_loop_of_t* loop_slots; /* open addressing keyed by value pointer */
+    size_t loop_cap;
+    size_t loop_len;
+    ROCKE_VEC(ll_loop_parent_t) loop_parents;
+    ROCKE_VEC(const rocke_op_t*) loops; /* the loops around the op being visited */
     int64_t thread_id_max;
     int64_t lane_id_max;
 };
@@ -191,6 +220,85 @@ static void ll_record(rocke_lower_t* L,
     f->uniform = uniform;
     f->bounded = bounds != NULL;
     f->bounds = bounds != NULL ? *bounds : ll_bounds_t{0, 0};
+}
+
+static size_t ll_loop_slot(const rocke_ll_index_facts_t* F, const rocke_value_t* v)
+{
+    const uint64_t h = (uint64_t)(uintptr_t)v * UINT64_C(0x9E3779B97F4A7C15);
+    size_t i = (size_t)(h >> 32) & (F->loop_cap - 1);
+    while(F->loop_slots[i].value != NULL && F->loop_slots[i].value != v)
+        i = (i + 1) & (F->loop_cap - 1);
+    return i;
+}
+
+static void ll_alloc_loop_slots(rocke_lower_t* L, rocke_ll_index_facts_t* F, size_t cap)
+{
+    F->loop_cap = cap;
+    F->loop_slots = (ll_loop_of_t*)rocke_arena_calloc(&L->arena, cap * sizeof(ll_loop_of_t));
+    if(F->loop_slots == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
+}
+
+/* The innermost loop around the op being visited, or NULL. */
+static const rocke_op_t* ll_current_loop(const rocke_ll_index_facts_t* F)
+{
+    return F->loops.len > 0 ? F->loops.data[F->loops.len - 1] : NULL;
+}
+
+/* Python _IndexFacts._loop_of[id(v)] = the current loop. */
+static void ll_set_loop_of(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_value_t* v)
+{
+    if(2 * (F->loop_len + 1) > F->loop_cap)
+    {
+        const ll_loop_of_t* old = F->loop_slots;
+        const size_t old_cap = F->loop_cap;
+        ll_alloc_loop_slots(L, F, 2 * old_cap);
+        for(size_t i = 0; i < old_cap; i++)
+            if(old[i].value != NULL)
+                F->loop_slots[ll_loop_slot(F, old[i].value)] = old[i];
+    }
+    ll_loop_of_t* s = &F->loop_slots[ll_loop_slot(F, v)];
+    if(s->value == NULL)
+    {
+        s->value = v;
+        F->loop_len++;
+    }
+    s->loop = ll_current_loop(F);
+}
+
+static const rocke_op_t* ll_loop_of(const rocke_ll_index_facts_t* F, const rocke_value_t* v)
+{
+    const ll_loop_of_t* s = &F->loop_slots[ll_loop_slot(F, v)];
+    return s->value != NULL ? s->loop : NULL;
+}
+
+static const rocke_op_t* ll_parent_loop(const rocke_ll_index_facts_t* F, const rocke_op_t* loop)
+{
+    for(size_t i = 0; i < F->loop_parents.len; i++)
+        if(F->loop_parents.data[i].loop == loop)
+            return F->loop_parents.data[i].parent;
+    return NULL;
+}
+
+/* Python _IndexFacts.lane_hoistable: some loop varies a uniform term but not
+ * the per-lane term. */
+static bool ll_lane_hoistable(const rocke_ll_index_facts_t* F,
+                              const rocke_value_t* const* terms,
+                              size_t num_terms,
+                              const rocke_value_t* lane)
+{
+    for(size_t i = 0; i < num_terms; i++)
+    {
+        const rocke_op_t* loop = ll_loop_of(F, terms[i]);
+        if(loop == NULL)
+            continue;
+        bool around_lane = false;
+        for(const rocke_op_t* l = ll_loop_of(F, lane); l != NULL && !around_lane; l = ll_parent_loop(F, l))
+            around_lane = l == loop;
+        if(!around_lane)
+            return true;
+    }
+    return false;
 }
 
 static bool ll_is_param(const rocke_lower_t* L, const rocke_value_t* v)
@@ -469,7 +577,39 @@ static bool ll_is_result(const rocke_op_t* op, const rocke_value_t* v)
     return false;
 }
 
-/* Python _IndexFacts._find_block_values. */
+static uint64_t ll_block_hash(const rocke_op_t* loop, const char* name)
+{
+    uint64_t h = (uint64_t)(uintptr_t)loop * UINT64_C(0x9E3779B97F4A7C15);
+    for(const unsigned char* p = (const unsigned char*)name; *p; ++p)
+        h = (h ^ *p) * UINT64_C(1099511628211);
+    return h;
+}
+
+/* The slot of (loop, name), or the empty slot ending its probe run. */
+static size_t ll_block_slot(const rocke_ll_index_facts_t* F,
+                            const rocke_op_t* loop,
+                            const char* name,
+                            uint64_t h)
+{
+    size_t i = (size_t)(h >> 32) & (F->block_cap - 1);
+    while(F->block_slots[i].loop != NULL
+          && !(F->block_slots[i].hash == h && F->block_slots[i].loop == loop
+               && strcmp(F->block_slots[i].value->name, name) == 0))
+        i = (i + 1) & (F->block_cap - 1);
+    return i;
+}
+
+static void ll_alloc_block_slots(rocke_lower_t* L, rocke_ll_index_facts_t* F, size_t cap)
+{
+    F->block_cap = cap;
+    F->block_slots
+        = (ll_block_value_t*)rocke_arena_calloc(&L->arena, cap * sizeof(ll_block_value_t));
+    if(F->block_slots == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
+}
+
+/* Python _IndexFacts._find_block_values. The first value seen under a
+ * (loop, name) is the one kept. */
 static void ll_find_block_values(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_region_t* region)
 {
     for(int i = 0; i < region->num_ops; i++)
@@ -479,17 +619,24 @@ static void ll_find_block_values(rocke_lower_t* L, rocke_ll_index_facts_t* F, co
         {
             const rocke_value_t* v = op->operands[j];
             const rocke_op_t* loop = v->op;
-            if(loop == NULL || loop->opcode != ROCKE_OP_SCF_FOR || ll_is_result(loop, v))
+            if(loop == NULL || loop->opcode != ROCKE_OP_SCF_FOR || v->name == NULL
+               || ll_is_result(loop, v))
                 continue;
-            bool known = false;
-            for(size_t k = 0; k < F->block_values.len && !known; k++)
-                known = F->block_values.data[k].value == v;
-            if(known)
+            const uint64_t h = ll_block_hash(loop, v->name);
+            if(F->block_slots[ll_block_slot(F, loop, v->name, h)].loop != NULL)
                 continue;
-            int rc = 0;
-            rocke_vec_push(&L->arena, &F->block_values, (ll_block_value_t{loop, v}), rc);
-            if(rc != 0)
-                rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
+            if(2 * (F->block_len + 1) > F->block_cap)
+            {
+                const ll_block_value_t* old = F->block_slots;
+                const size_t old_cap = F->block_cap;
+                ll_alloc_block_slots(L, F, 2 * old_cap);
+                for(size_t k = 0; k < old_cap; k++)
+                    if(old[k].loop != NULL)
+                        F->block_slots[ll_block_slot(F, old[k].loop, old[k].value->name, old[k].hash)]
+                            = old[k];
+            }
+            F->block_slots[ll_block_slot(F, loop, v->name, h)] = ll_block_value_t{loop, v, h};
+            F->block_len++;
         }
         for(int r = 0; r < op->num_regions; r++)
             if(op->regions[r] != NULL)
@@ -503,13 +650,9 @@ static const rocke_value_t*
 {
     if(name == NULL)
         return NULL;
-    for(size_t k = 0; k < F->block_values.len; k++)
-    {
-        const ll_block_value_t* bv = &F->block_values.data[k];
-        if(bv->loop == loop && bv->value->name != NULL && strcmp(bv->value->name, name) == 0)
-            return bv->value;
-    }
-    return NULL;
+    const ll_block_value_t* bv
+        = &F->block_slots[ll_block_slot(F, loop, name, ll_block_hash(loop, name))];
+    return bv->loop != NULL ? bv->value : NULL;
 }
 
 static void ll_visit(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_region_t* region);
@@ -526,6 +669,21 @@ static void ll_visit_for(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rock
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
     const int num_inits = (int)ll_max(0, ll_min(num_iter, op->num_operands - 3));
     const rocke_region_t* body = op->regions[0];
+    /* _op_scf_for (control.cpp) unrolls exactly these loops. */
+    const bool unrolled = rocke_attr_get_bool(&op->attrs, "unroll", false) && rocke_ll_is_constant(lower)
+                          && rocke_ll_is_constant(upper) && rocke_ll_is_constant(step);
+    if(!unrolled)
+    {
+        int rc = 0;
+        rocke_vec_push(&L->arena, &F->loop_parents, (ll_loop_parent_t{op, ll_current_loop(F)}), rc);
+        if(rc == 0)
+            rocke_vec_push(&L->arena, &F->loops, op, rc);
+        if(rc != 0)
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
+    }
+    for(size_t k = 0; k < F->block_cap; k++)
+        if(F->block_slots[k].loop == op)
+            ll_set_loop_of(L, F, F->block_slots[k].value);
     const bool counted
         = ll_uniform(L, F, lower) && ll_uniform(L, F, upper) && ll_uniform(L, F, step);
     const rocke_value_t* iv = ll_block_value(F, op, rocke_attr_get_str(&op->attrs, "iv"));
@@ -572,6 +730,8 @@ static void ll_visit_for(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rock
         if(!changed)
             break;
     }
+    if(!unrolled)
+        F->loops.len--;
     for(int i = 0; i < num_inits && i < op->num_results; i++)
         ll_record(L, F, op->results[i], assumed[i], NULL);
 }
@@ -582,6 +742,8 @@ static void ll_visit(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_re
     for(int i = 0; i < region->num_ops; i++)
     {
         const rocke_op_t* op = region->ops[i];
+        for(int r = 0; r < op->num_results; r++)
+            ll_set_loop_of(L, F, op->results[r]);
         if(op->opcode == ROCKE_OP_SCF_FOR)
         {
             ll_visit_for(L, F, op);
@@ -599,6 +761,200 @@ static void ll_visit(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_re
     }
 }
 
+/* Python _REGISTER_BITS: bits of a scalar type held in vector registers; a
+ * type not listed counts as 32. */
+static int64_t ll_register_bits(const char* name)
+{
+    static const struct
+    {
+        const char* ty;
+        int64_t bits;
+    } table[] = {{"i1", 0},
+                 {"i4", 4},
+                 {"u4", 4},
+                 {"i8", 8},
+                 {"u8", 8},
+                 {"fp8e4m3", 8},
+                 {"bf8e5m2", 8},
+                 {"i16", 16},
+                 {"f16", 16},
+                 {"bf16", 16},
+                 {"i32", 32},
+                 {"f32", 32},
+                 {"tf32", 32},
+                 {"i64", 64},
+                 {"f64", 64}};
+    for(const auto& row : table)
+        if(name != NULL && strcmp(name, row.ty) == 0)
+            return row.bits;
+    return 32;
+}
+
+/* Python _register_words. */
+static int64_t ll_register_words(const rocke_type_t* t)
+{
+    int64_t bits = 0;
+    switch(t->kind)
+    {
+    case ROCKE_TYPE_SMEM:
+        return 0;
+    case ROCKE_TYPE_PTR:
+        return (t->space != NULL && strcmp(t->space, "lds") == 0) ? 1 : 2;
+    case ROCKE_TYPE_VECTOR:
+        bits = (int64_t)t->count * ll_register_bits(t->elem != NULL ? t->elem->name : NULL);
+        break;
+    default:
+        bits = ll_register_bits(t->name);
+        break;
+    }
+    return (bits + 31) / 32;
+}
+
+/* A set of values (open addressing keyed by value pointer; cap is 2^k). */
+typedef struct ll_value_set
+{
+    const rocke_value_t** slots; /* NULL marks an empty slot */
+    size_t cap;
+    size_t len;
+} ll_value_set_t;
+
+static void ll_set_init(rocke_lower_t* L, ll_value_set_t* S, size_t cap)
+{
+    S->cap = cap;
+    S->len = 0;
+    S->slots = (const rocke_value_t**)rocke_arena_calloc(&L->arena, cap * sizeof(*S->slots));
+    if(S->slots == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
+}
+
+static size_t ll_set_slot(const ll_value_set_t* S, const rocke_value_t* v)
+{
+    const uint64_t h = (uint64_t)(uintptr_t)v * UINT64_C(0x9E3779B97F4A7C15);
+    size_t i = (size_t)(h >> 32) & (S->cap - 1);
+    while(S->slots[i] != NULL && S->slots[i] != v)
+        i = (i + 1) & (S->cap - 1);
+    return i;
+}
+
+static bool ll_set_has(const ll_value_set_t* S, const rocke_value_t* v)
+{
+    return S->slots[ll_set_slot(S, v)] != NULL;
+}
+
+static void ll_set_add(rocke_lower_t* L, ll_value_set_t* S, const rocke_value_t* v)
+{
+    if(2 * (S->len + 1) > S->cap)
+    {
+        const rocke_value_t** old = S->slots;
+        const size_t old_cap = S->cap;
+        ll_set_init(L, S, 2 * old_cap);
+        for(size_t i = 0; i < old_cap; i++)
+            if(old[i] != NULL)
+            {
+                S->slots[ll_set_slot(S, old[i])] = old[i];
+                S->len++;
+            }
+    }
+    const size_t i = ll_set_slot(S, v);
+    if(S->slots[i] == NULL)
+    {
+        S->slots[i] = v;
+        S->len++;
+    }
+}
+
+/* Python _IndexFacts._collect_defined. */
+static void ll_collect_defined(rocke_lower_t* L,
+                               const rocke_ll_index_facts_t* F,
+                               const rocke_region_t* region,
+                               ll_value_set_t* out)
+{
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        for(int r = 0; r < op->num_results; r++)
+            ll_set_add(L, out, op->results[r]);
+        if(op->opcode == ROCKE_OP_SCF_FOR)
+            for(size_t k = 0; k < F->block_cap; k++)
+                if(F->block_slots[k].loop == op)
+                    ll_set_add(L, out, F->block_slots[k].value);
+        for(int r = 0; r < op->num_regions; r++)
+            if(op->regions[r] != NULL)
+                ll_collect_defined(L, F, op->regions[r], out);
+    }
+}
+
+/* Words of the non-uniform operands in `region` (any depth) that are defined
+ * outside the loop, each value counted once. */
+static int64_t ll_live_in_words(rocke_lower_t* L,
+                                const rocke_ll_index_facts_t* F,
+                                const rocke_region_t* region,
+                                const ll_value_set_t* inside,
+                                ll_value_set_t* seen)
+{
+    int64_t words = 0;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        for(int j = 0; j < op->num_operands; j++)
+        {
+            const rocke_value_t* v = op->operands[j];
+            if(ll_set_has(inside, v) || ll_set_has(seen, v))
+                continue;
+            ll_set_add(L, seen, v);
+            if(!ll_uniform(L, F, v))
+                words += ll_register_words(v->type);
+        }
+        for(int r = 0; r < op->num_regions; r++)
+            if(op->regions[r] != NULL)
+                words += ll_live_in_words(L, F, op->regions[r], inside, seen);
+    }
+    return words;
+}
+
+/* Python _IndexFacts._loop_words. */
+static int64_t ll_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_op_t* loop)
+{
+    if(loop->num_regions < 1 || loop->regions[0] == NULL)
+        return 0;
+    ll_value_set_t inside;
+    ll_set_init(L, &inside, 256);
+    ll_collect_defined(L, F, loop->regions[0], &inside);
+    const char* iv = rocke_attr_get_str(&loop->attrs, "iv");
+    int64_t words = 0;
+    for(size_t k = 0; k < F->block_cap; k++)
+    {
+        const ll_block_value_t* bv = &F->block_slots[k];
+        if(bv->loop != loop)
+            continue;
+        ll_set_add(L, &inside, bv->value);
+        if(!(iv != NULL && strcmp(bv->value->name, iv) == 0) && !ll_uniform(L, F, bv->value))
+            words += ll_register_words(bv->value->type);
+    }
+    ll_value_set_t seen;
+    ll_set_init(L, &seen, 256);
+    return words + ll_live_in_words(L, F, loop->regions[0], &inside, &seen);
+}
+
+/* Python _IndexFacts._max_loop_words. */
+static int64_t
+    ll_max_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_region_t* region)
+{
+    int64_t best = 0;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_SCF_FOR)
+            best = ll_max(best, ll_loop_words(L, F, op));
+        for(int r = 0; r < op->num_regions; r++)
+            if(op->regions[r] != NULL)
+                best = ll_max(best, ll_max_loop_words(L, F, op->regions[r]));
+    }
+    return best;
+}
+
+/* Python _Lowerer._collect_index_facts: no facts (every global address one
+ * GEP) when a loop keeps more vector state live than the register file. */
 void rocke_ll_collect_index_facts(rocke_lower_t* L)
 {
     if(!L->backend->splits_global_address)
@@ -611,11 +967,16 @@ void rocke_ll_collect_index_facts(rocke_lower_t* L)
     if(F == NULL)
         rocke_ll_fail(L, ROCKE_ERR_OOM, "index facts: arena OOM");
     ll_alloc_slots(L, F, 1024);
-    rocke_vec_init(&F->block_values);
+    ll_alloc_block_slots(L, F, 64);
+    ll_alloc_loop_slots(L, F, 1024);
+    rocke_vec_init(&F->loop_parents);
+    rocke_vec_init(&F->loops);
     F->thread_id_max = rocke_kernel_max_workgroup_size(L->kernel) - 1;
     F->lane_id_max = target->wave_size - 1;
     ll_find_block_values(L, F, L->kernel->body);
     ll_visit(L, F, L->kernel->body);
+    if(ll_max_loop_words(L, F, L->kernel->body) > target->limits.vgprs)
+        return;
     L->index_facts = F;
 }
 
@@ -711,18 +1072,36 @@ void rocke_ll_global_gep(rocke_lower_t* L,
         return;
     }
     const char* base = rocke_ll_operand(L, ptr);
-    for(size_t i = 0; i <= terms.len; i++)
+    for(size_t i = 0; i < terms.len; i++)
     {
-        const char* index;
-        if(i < terms.len)
-            index = rocke_arena_printf(&L->arena, "i32 %s", rocke_ll_operand(L, terms.data[i]));
-        else if(constant != 0)
-            index = rocke_arena_printf(&L->arena, "i64 %lld", (long long)constant);
-        else
-            break;
         const char* term_base = rocke_ll_fresh(L, "gbase");
-        rocke_ll_emitf(
-            L, "  %s = getelementptr %s, ptr addrspace(1) %s, %s", term_base, elem_ty, base, index);
+        rocke_ll_emitf(L,
+                       "  %s = getelementptr %s, ptr addrspace(1) %s, i32 %s",
+                       term_base,
+                       elem_ty,
+                       base,
+                       rocke_ll_operand(L, terms.data[i]));
+        base = term_base;
+    }
+    if(ll_lane_hoistable(L->index_facts, terms.data, terms.len, lane))
+    {
+        rocke_ll_need_dynamic(L, LL_READFIRSTLANE_P1, LL_READFIRSTLANE_P1_DECL);
+        const char* uniform_base = rocke_ll_fresh(L, "gbase");
+        rocke_ll_emitf(L,
+                       "  %s = call ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) %s)",
+                       uniform_base,
+                       base);
+        base = uniform_base;
+    }
+    if(constant != 0)
+    {
+        const char* term_base = rocke_ll_fresh(L, "gbase");
+        rocke_ll_emitf(L,
+                       "  %s = getelementptr %s, ptr addrspace(1) %s, i64 %lld",
+                       term_base,
+                       elem_ty,
+                       base,
+                       (long long)constant);
         base = term_base;
     }
     rocke_ll_emitf(L,

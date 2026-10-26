@@ -12,20 +12,38 @@ pub enum Scalar {
     I64,
     F16,
     F32,
+    BF16,
+    I16,
+    I8,
+    FP8E4M3,
+    BF8E5M2,
+    F64,
 }
 
 impl Scalar {
     pub fn bytes(self) -> u32 {
         match self {
-            Scalar::I1 => 1,
-            Scalar::F16 => 2,
+            Scalar::I1 | Scalar::I8 | Scalar::FP8E4M3 | Scalar::BF8E5M2 => 1,
+            Scalar::F16 | Scalar::BF16 | Scalar::I16 => 2,
             Scalar::I32 | Scalar::F32 => 4,
-            Scalar::I64 => 8,
+            Scalar::I64 | Scalar::F64 => 8,
         }
     }
 
     pub fn is_float(self) -> bool {
-        matches!(self, Scalar::F16 | Scalar::F32)
+        matches!(self, Scalar::F16 | Scalar::F32 | Scalar::BF16 | Scalar::F64)
+    }
+
+    /// 16-bit elements, held in one half of a 32-bit register and moved bit
+    /// for bit by loads, stores, selects and vector assembly.
+    pub fn is_half(self) -> bool {
+        matches!(self, Scalar::F16 | Scalar::BF16 | Scalar::I16)
+    }
+
+    /// 8-bit elements, packed four to a 32-bit register; fp8 and bf8 are
+    /// storage only (the kernels decode them with integer arithmetic).
+    pub fn is_byte(self) -> bool {
+        matches!(self, Scalar::I8 | Scalar::FP8E4M3 | Scalar::BF8E5M2)
     }
 }
 
@@ -57,7 +75,7 @@ impl Type {
     /// Number of 32-bit registers a value of this type occupies.
     pub fn dwords(&self) -> u32 {
         match self {
-            Type::Scalar(Scalar::I64) | Type::Ptr(_) => 2,
+            Type::Scalar(Scalar::I64) | Type::Scalar(Scalar::F64) | Type::Ptr(_) => 2,
             Type::Scalar(_) => 1,
             Type::Vec(elem, len) => (elem.bytes() * len).div_ceil(4),
             Type::Smem(..) => 1,
@@ -300,6 +318,59 @@ pub enum OpKind {
     Sync,
     ReadFirstLane,
     InlineAsmIdentity,
+    // scalar float ops
+    Fneg,
+    Fabs,
+    Fmin,
+    Fmax3,
+    Fmin3,
+    Fdiv,
+    Fdot2,
+    Exp2Fast,
+    RcpFast,
+    Rsqrt,
+    Tanh,
+    SitofpF32,
+    // integer odds and ends
+    Not,
+    GlobalPtrToI64,
+    // element-wise vector ops
+    VecAdd,
+    VecSub,
+    VecMul,
+    VecFma,
+    VecSplat,
+    VecBitcast,
+    VecUndef,
+    VecSelect,
+    VecSum,
+    // cross-lane ops
+    PermB32,
+    Permlanex16,
+    Permlane16,
+    Permlane64,
+    DsBpermute,
+    WaveAny,
+    WaveAll,
+    LaneId,
+    // atomics, fences, buffer stores, barriers
+    GlobalAtomicAdd,
+    Fence,
+    SyncLdsOnly,
+    TruncF32ToF16,
+    Rint,
+    SetPrio,
+    WaitCnt,
+    SchedBarrier,
+    SchedGroupBarrier,
+    BarrierBare,
+    /// `(smem, row, col)`: four f16 elements from `[row][col]` on.
+    SmemLoadV4,
+    /// `(smem, indices.., value)`, returns the old value.
+    LdsAtomicAdd,
+    DppXor,
+    QuadPerm,
+    MovDpp8,
     // internal forms produced by the optimizer (never parsed)
     KernArg,
     /// `(addr: ptr) {offset}`: load from a legalized 64-bit address.
@@ -312,6 +383,22 @@ pub enum OpKind {
     LLoad,
     /// `(smem, addr: i32, value) {offset}`.
     LStore,
+    /// `(smem, addr: i32, value) {offset}`: LDS atomic add, returns the old value.
+    LAtomicAdd,
+    // element types beyond f16/f32 (census W02, W09, W17, W18, W19)
+    /// `arith.trunc_f32_to_bf16`: `fptrunc float to bfloat`, as `cast_f32_to`.
+    TruncF32ToBf16,
+    /// `(rsrc, voffset, soffset) {offset}`: one element of the result type,
+    /// 2 or 4 bytes, zero when out of bounds.
+    BufferLoadScalar,
+    /// `(rsrc, voffset, soffset, value) {offset}`: one element, dropped when
+    /// out of bounds.
+    BufferStoreScalar,
+    /// `arith.cvt_f32_to_i8_sat`: round to nearest even, clamp to [-128, 127].
+    CvtF32ToI8Sat,
+    /// `(addr: ptr, value) {offset}`: legalized `memref.global_atomic_add`;
+    /// returns the old value.
+    GAtomicAdd,
 }
 
 impl OpKind {
@@ -380,6 +467,70 @@ impl OpKind {
             "tile.sync" => OpKind::Sync,
             "tile.readfirstlane" => OpKind::ReadFirstLane,
             "tile.inline_asm" => OpKind::InlineAsmIdentity,
+            "tile.buffer_load" | "tile.buffer_load_f16" | "tile.buffer_load_f16_d16" => OpKind::BufferLoadScalar,
+            "tile.buffer_load_vN_f16" => OpKind::BufferLoadVec,
+            "tile.buffer_store_f16" | "tile.buffer_store_f32" => OpKind::BufferStoreScalar,
+            "tile.buffer_store_vN_f32" => OpKind::BufferStoreVecF16,
+            "arith.trunc_f32_to_f16" => OpKind::TruncF32ToF16,
+            "arith.rint_f32" => OpKind::Rint,
+            // An SGPR-class hint on a uniform value; LLVM reads the first lane
+            // of a divergent one.
+            "tile.pin_sgpr" => OpKind::ReadFirstLane,
+            "tile.s_setprio" => OpKind::SetPrio,
+            "tile.s_waitcnt" => OpKind::WaitCnt,
+            "tile.sched_barrier" => OpKind::SchedBarrier,
+            "tile.sched_group_barrier" => OpKind::SchedGroupBarrier,
+            "tile.s_barrier_bare" => OpKind::BarrierBare,
+            "tile.smem_load_vN_f32" => OpKind::SmemLoadVec,
+            "tile.smem_store_vN_f32" => OpKind::SmemStoreVec,
+            "tile.smem_load_v4" => OpKind::SmemLoadV4,
+            "tile.lds_atomic_add" => OpKind::LdsAtomicAdd,
+            "tile.dpp_xor" => OpKind::DppXor,
+            "tile.quad_perm" => OpKind::QuadPerm,
+            "tile.mov_dpp8" => OpKind::MovDpp8,
+            "arith.trunc_f32_to_bf16" => OpKind::TruncF32ToBf16,
+            "tile.buffer_load_bf16" => OpKind::BufferLoadScalar,
+            "tile.buffer_store_bf16" => OpKind::BufferStoreScalar,
+            "tile.buffer_load_vN_bf16" => OpKind::BufferLoadVec,
+            "tile.buffer_store_vN_bf16" => OpKind::BufferStoreVecF16,
+            "arith.cvt_f32_to_i8_sat" => OpKind::CvtF32ToI8Sat,
+            "arith.fneg" => OpKind::Fneg,
+            "arith.fabs" => OpKind::Fabs,
+            "arith.fmin" => OpKind::Fmin,
+            "arith.fmax3" => OpKind::Fmax3,
+            "arith.fmin3" => OpKind::Fmin3,
+            "arith.fdiv" => OpKind::Fdiv,
+            "arith.fdot2" => OpKind::Fdot2,
+            "math.exp2_fast" => OpKind::Exp2Fast,
+            "math.rcp_fast" => OpKind::RcpFast,
+            "math.rsqrt" => OpKind::Rsqrt,
+            "math.tanh" => OpKind::Tanh,
+            "arith.sitofp_f32" => OpKind::SitofpF32,
+            "arith.not" => OpKind::Not,
+            "tile.global_ptr_to_i64" => OpKind::GlobalPtrToI64,
+            // The f16 helper forms of the typed global accesses.
+            "memref.global_load" => OpKind::GlobalLoad,
+            "memref.global_store" => OpKind::GlobalStore,
+            "vector.add" => OpKind::VecAdd,
+            "vector.sub" => OpKind::VecSub,
+            "vector.mul" => OpKind::VecMul,
+            "vector.fma" => OpKind::VecFma,
+            "vector.splat" => OpKind::VecSplat,
+            "vector.bitcast" => OpKind::VecBitcast,
+            "vector.undef" => OpKind::VecUndef,
+            "vector.select" => OpKind::VecSelect,
+            "vector.sum" => OpKind::VecSum,
+            "tile.perm_b32" => OpKind::PermB32,
+            "tile.permlanex16" => OpKind::Permlanex16,
+            "tile.permlane16" => OpKind::Permlane16,
+            "tile.permlane64" => OpKind::Permlane64,
+            "tile.ds_bpermute" => OpKind::DsBpermute,
+            "tile.wave_any" => OpKind::WaveAny,
+            "tile.wave_all" => OpKind::WaveAll,
+            "tile.lane_id" => OpKind::LaneId,
+            "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
+            "memref.fence" => OpKind::Fence,
+            "tile.sync_lds_only" => OpKind::SyncLdsOnly,
             _ => return None,
         })
     }
@@ -412,6 +563,30 @@ impl OpKind {
                 | OpKind::GAtomicAddF32
                 | OpKind::LLoad
                 | OpKind::LStore
+                | OpKind::SetPrio
+                | OpKind::WaitCnt
+                | OpKind::SchedBarrier
+                | OpKind::SchedGroupBarrier
+                | OpKind::BarrierBare
+                | OpKind::SmemLoadV4
+                | OpKind::LdsAtomicAdd
+                | OpKind::LAtomicAdd
+                | OpKind::DppXor
+                | OpKind::QuadPerm
+                | OpKind::MovDpp8
+                | OpKind::BufferLoadScalar
+                | OpKind::BufferStoreScalar
+                // Results depend on which lanes are active: no CSE or hoisting.
+                | OpKind::Permlanex16
+                | OpKind::Permlane16
+                | OpKind::Permlane64
+                | OpKind::DsBpermute
+                | OpKind::WaveAny
+                | OpKind::WaveAll
+                | OpKind::GlobalAtomicAdd
+                | OpKind::GAtomicAdd
+                | OpKind::Fence
+                | OpKind::SyncLdsOnly
         )
     }
 
@@ -427,6 +602,17 @@ impl OpKind {
                     | OpKind::GLoad
                     | OpKind::LLoad
                     | OpKind::InlineAsmIdentity
+                    | OpKind::SmemLoadV4
+                    | OpKind::DppXor
+                    | OpKind::QuadPerm
+                    | OpKind::MovDpp8
+                    | OpKind::BufferLoadScalar
+                    | OpKind::Permlanex16
+                    | OpKind::Permlane16
+                    | OpKind::Permlane64
+                    | OpKind::DsBpermute
+                    | OpKind::WaveAny
+                    | OpKind::WaveAll
             )
     }
 
@@ -439,6 +625,11 @@ impl OpKind {
                 | OpKind::BufferStoreVecF16
                 | OpKind::GStore
                 | OpKind::GAtomicAddF32
+                | OpKind::BufferStoreScalar
+                | OpKind::GlobalAtomicAdd
+                | OpKind::GAtomicAdd
+                // Later loads must see other agents' writes: none may use the scalar cache.
+                | OpKind::Fence
         )
     }
 }
@@ -503,17 +694,44 @@ pub struct Region {
     pub ops: Vec<Op>,
 }
 
+impl Drop for Region {
+    /// Takes nested regions apart from an explicit stack: the derived drop
+    /// would recurse once per level of nesting.
+    fn drop(&mut self) {
+        let mut stack: Vec<Region> = Vec::new();
+        for mut op in std::mem::take(&mut self.ops) {
+            stack.append(&mut op.regions);
+        }
+        while let Some(mut region) = stack.pop() {
+            for mut op in std::mem::take(&mut region.ops) {
+                stack.append(&mut op.regions);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Param {
     pub value: ValueId,
     pub name: String,
     pub ty: Type,
+    /// `noalias = b:true`: memory accessed through a pointer based on this
+    /// argument, if the kernel modifies it, is accessed through no pointer
+    /// not based on it.
+    pub noalias: bool,
+    /// `readonly = b:true`: the kernel does not write through this argument.
+    pub readonly: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct Kernel {
     pub name: String,
     pub max_workgroup_size: u32,
+    /// `waves_per_eu = [min, max]`: the occupancy range the kernel asks for
+    /// (LLVM's `amdgpu-waves-per-eu`); 0 leaves a bound open. Not an
+    /// occupancy cap: trading waves below the achievable count for a wider
+    /// scheduling window is slower on gfx1151.
+    pub waves_per_eu: (u32, u32),
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,

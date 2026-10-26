@@ -27,10 +27,23 @@
  *
  * usage: rocke_native_direct_code_object [--reps N] [--warmup N] [--only SUBSTR]
  *            [--expect-reject SUBSTR[,SUBSTR...]] [--dump DIR] [--json FILE]
- *            [--cpp-parse]
+ *            [--cpp-parse] [--modes plain,session,stream] [--ir-case NAME=FILE]
+ *            [--session-threads N] [--feed-bytes N]
  *   --dump writes <case>.cpp.ir (always) and <case>.cpp.hsaco into DIR.
  *   --cpp-parse also times the C++ parser (rocke_ir_parse) on the same text,
  *   after the timed stages, as a reference point for the cost of a text handoff.
+ *   --modes runs each case through these paths, interleaved rep by rep:
+ *     plain    rocke_ir_serialize, then rocke_codeobj_compile_rocke_ir_v1;
+ *     session  rocke_ir_serialize, then rocke_codeobj_session_compile_v1;
+ *     stream   a streaming serializer that feeds the session every
+ *              --feed-bytes bytes (default 16384) while it writes, then
+ *              rocke_codeobj_session_finish_v1.
+ *   Every mode must give the plain mode's image, and the streamed pieces must
+ *   join to rocke_ir_serialize's text. The session has --session-threads
+ *   workers (0, the default, lets the library choose).
+ *   --ir-case adds a case built by parsing FILE with rocke_ir_parse once,
+ *   outside the timing (kernels without a C++ builder, such as attention
+ *   backward); its build stage is 0.
  */
 
 #include "rocke/code_object_ffi.h"
@@ -50,7 +63,9 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -95,7 +110,368 @@ struct Case
     std::string family;
     Entry entry = Entry::RockeIr;
     BuildFn build;
+    /* For --ir-case: the kernel, parsed once into `parsed_builder`. */
+    std::shared_ptr<rocke_ir_builder_t> parsed_builder;
+    rocke_kernel_def_t* parsed = nullptr;
 };
+
+enum class Mode
+{
+    Plain,
+    Session,
+    Stream,
+};
+
+const char* mode_name(Mode m)
+{
+    return m == Mode::Plain ? "plain" : m == Mode::Session ? "session" : "stream";
+}
+
+/* ------------------------------------------------------------------------
+ * Streaming serializer: rocke_ir_serialize's output (core/ir/serialize.cpp,
+ * same algorithms, line for line), handed to a sink every `flush_bytes` bytes
+ * at a line end while it is being written. The harness checks that the pieces
+ * join to rocke_ir_serialize's text for every case.
+ * ------------------------------------------------------------------------ */
+class StreamSerializer
+{
+public:
+    StreamSerializer(size_t flush_bytes, std::function<void(const char*, size_t)> sink)
+        : flush_bytes_(flush_bytes), sink_(std::move(sink))
+    {
+        out_.reserve(flush_bytes * 2 + 4096);
+    }
+
+    void serialize(const rocke_kernel_def_t* k)
+    {
+        out_ += "ckdsl.ir v1\n";
+        out_ += "kernel @";
+        out_ += k->name ? k->name : "";
+        out_ += " {\n";
+        if(k->attrs.count > 0)
+        {
+            indent(1);
+            out_ += "attrs ";
+            attr_map(&k->attrs);
+            out_ += '\n';
+        }
+        indent(1);
+        out_ += "params {\n";
+        for(int i = 0; i < k->num_params; ++i)
+        {
+            const rocke_param_t* p = k->params[i];
+            indent(2);
+            out_ += '%';
+            out_ += (p && p->name) ? p->name : "";
+            out_ += " : ";
+            const rocke_type_t* t = p ? p->type : nullptr;
+            out_ += (t && t->name) ? t->name : "";
+            if(p && p->attrs.count > 0)
+            {
+                out_ += ' ';
+                attr_map(&p->attrs);
+            }
+            out_ += '\n';
+        }
+        indent(1);
+        out_ += "}\n";
+        region(k->body, 1);
+        out_ += "}\n";
+        flush();
+    }
+
+private:
+    void maybe_flush()
+    {
+        if(out_.size() >= flush_bytes_)
+            flush();
+    }
+
+    void flush()
+    {
+        if(!out_.empty())
+            sink_(out_.data(), out_.size());
+        out_.clear();
+    }
+
+    void indent(int depth)
+    {
+        for(int i = 0; i < depth; ++i)
+            out_ += "  ";
+    }
+
+    void escape(const char* s)
+    {
+        if(!s)
+            return;
+        for(const char* p = s; *p; ++p)
+        {
+            const char ch = *p;
+            if(ch == '\\')
+                out_ += "\\\\";
+            else if(ch == '"')
+                out_ += "\\\"";
+            else if(ch == '\n')
+                out_ += "\\n";
+            else if(ch == '\t')
+                out_ += "\\t";
+            else
+                out_ += ch;
+        }
+    }
+
+    void float_repr(double f)
+    {
+        if(f != f)
+        {
+            out_ += "nan";
+            return;
+        }
+        char sci[64];
+        int p;
+        for(p = 0; p <= 17; ++p)
+        {
+            std::snprintf(sci, sizeof(sci), "%.*e", p, f);
+            if(std::strtod(sci, nullptr) == f)
+                break;
+        }
+        if(p > 17)
+        {
+            p = 17;
+            std::snprintf(sci, sizeof(sci), "%.*e", p, f);
+        }
+        const char* s = sci;
+        bool negative = false;
+        if(*s == '-')
+        {
+            negative = true;
+            ++s;
+        }
+        if(s[0] == 'i' || s[0] == 'I')
+        {
+            if(negative)
+                out_ += '-';
+            out_ += "inf";
+            return;
+        }
+        char digits[40];
+        int nd = 0;
+        digits[nd++] = *s++;
+        if(*s == '.')
+        {
+            ++s;
+            while(*s && *s != 'e' && *s != 'E')
+                digits[nd++] = *s++;
+        }
+        digits[nd] = '\0';
+        int exp = 0;
+        if(*s == 'e' || *s == 'E')
+        {
+            ++s;
+            exp = std::atoi(s);
+        }
+        while(nd > 1 && digits[nd - 1] == '0')
+            digits[--nd] = '\0';
+        const int decpt = exp + 1;
+        if(negative)
+            out_ += '-';
+        if(decpt <= -4 || decpt > 16)
+        {
+            out_ += digits[0];
+            if(nd > 1)
+            {
+                out_ += '.';
+                out_ += digits + 1;
+            }
+            const int e = decpt - 1;
+            out_ += 'e';
+            out_ += e < 0 ? '-' : '+';
+            int ae = e < 0 ? -e : e;
+            char eb[8];
+            int en = 0;
+            do
+            {
+                eb[en++] = static_cast<char>('0' + ae % 10);
+                ae /= 10;
+            } while(ae);
+            while(en < 2)
+                eb[en++] = '0';
+            while(en > 0)
+                out_ += eb[--en];
+        }
+        else if(decpt <= 0)
+        {
+            out_ += "0.";
+            for(int i = 0; i < -decpt; ++i)
+                out_ += '0';
+            out_ += digits;
+        }
+        else if(decpt >= nd)
+        {
+            out_ += digits;
+            for(int i = 0; i < decpt - nd; ++i)
+                out_ += '0';
+            out_ += ".0";
+        }
+        else
+        {
+            out_.append(digits, static_cast<size_t>(decpt));
+            out_ += '.';
+            out_ += digits + decpt;
+        }
+    }
+
+    void attr_value(const rocke_attr_value_t* v)
+    {
+        char num[32];
+        switch(v->kind)
+        {
+        case ROCKE_ATTR_BOOL:
+            out_ += v->u.b ? "b:true" : "b:false";
+            break;
+        case ROCKE_ATTR_INT:
+            std::snprintf(num, sizeof(num), "i:%lld", static_cast<long long>(v->u.i));
+            out_ += num;
+            break;
+        case ROCKE_ATTR_FLOAT:
+            out_ += "f:";
+            float_repr(v->u.f);
+            break;
+        case ROCKE_ATTR_STR:
+            out_ += "s:\"";
+            escape(v->u.s);
+            out_ += '"';
+            break;
+        case ROCKE_ATTR_LIST:
+            out_ += "l:[ ";
+            for(int i = 0; i < v->u.list.count; ++i)
+            {
+                if(i > 0)
+                    out_ += ", ";
+                attr_map(v->u.list.items[i]);
+            }
+            out_ += " ]";
+            break;
+        case ROCKE_ATTR_INT_LIST:
+            out_ += "l:[ ";
+            for(int i = 0; i < v->u.ilist.count; ++i)
+            {
+                if(i > 0)
+                    out_ += ", ";
+                std::snprintf(num, sizeof(num), "i:%lld", static_cast<long long>(v->u.ilist.ints[i]));
+                out_ += num;
+            }
+            out_ += " ]";
+            break;
+        default:
+            break;
+        }
+    }
+
+    void attr_map(const rocke_attr_map_t* m)
+    {
+        const int count = m ? m->count : 0;
+        if(count <= 0)
+        {
+            out_ += "{ }";
+            return;
+        }
+        /* A fresh array per map, as nested maps (iter_args) sort their own. */
+        std::vector<const rocke_attr_entry_t*> order;
+        order.reserve(static_cast<size_t>(count));
+        for(int i = 0; i < count; ++i)
+            order.push_back(&m->entries[i]);
+        std::qsort(order.data(), order.size(), sizeof(order[0]), [](const void* pa, const void* pb) {
+            const auto* a = *static_cast<const rocke_attr_entry_t* const*>(pa);
+            const auto* b = *static_cast<const rocke_attr_entry_t* const*>(pb);
+            return std::strcmp(a->key ? a->key : "", b->key ? b->key : "");
+        });
+        out_ += "{ ";
+        for(int i = 0; i < count; ++i)
+        {
+            if(i > 0)
+                out_ += ", ";
+            out_ += order[i]->key ? order[i]->key : "";
+            out_ += " = ";
+            attr_value(&order[i]->value);
+        }
+        out_ += " }";
+    }
+
+    void op(const rocke_op_t* op, int depth)
+    {
+        indent(depth);
+        if(op->num_results > 0)
+        {
+            for(int i = 0; i < op->num_results; ++i)
+            {
+                if(i > 0)
+                    out_ += ", ";
+                const rocke_value_t* r = op->results[i];
+                out_ += (r && r->name) ? r->name : "";
+                out_ += " : ";
+                const rocke_type_t* t = r ? r->type : nullptr;
+                out_ += (t && t->name) ? t->name : "";
+            }
+            out_ += " = ";
+        }
+        out_ += op->name ? op->name : "";
+        out_ += " ( ";
+        for(int i = 0; i < op->num_operands; ++i)
+        {
+            if(i > 0)
+                out_ += ", ";
+            const rocke_value_t* o = op->operands[i];
+            out_ += (o && o->name) ? o->name : "";
+        }
+        out_ += " )";
+        if(op->attrs.count > 0)
+        {
+            out_ += ' ';
+            attr_map(&op->attrs);
+        }
+        if(op->loc != nullptr)
+        {
+            out_ += " @loc \"";
+            escape(op->loc);
+            out_ += '"';
+        }
+        out_ += '\n';
+        maybe_flush();
+        for(int r = 0; r < op->num_regions; ++r)
+            region(op->regions[r], depth + 1);
+    }
+
+    void region(const rocke_region_t* region, int depth)
+    {
+        indent(depth);
+        out_ += "region @";
+        out_ += (region && region->label) ? region->label : "";
+        out_ += " {\n";
+        if(region)
+        {
+            for(int i = 0; i < region->num_ops; ++i)
+                op(region->ops[i], depth + 1);
+        }
+        indent(depth);
+        out_ += "}\n";
+        maybe_flush();
+    }
+
+    size_t flush_bytes_;
+    std::function<void(const char*, size_t)> sink_;
+    std::string out_;
+};
+
+/* Settings shared by every case. */
+struct Settings
+{
+    std::vector<Mode> modes = {Mode::Plain};
+    size_t feed_bytes = 16384;
+    rocke_codeobj_session_v1* session = nullptr;
+};
+
+Settings g_settings;
 
 Case fwd_case(int head_size, bool causal)
 {
@@ -284,14 +660,18 @@ int32_t compile_ir(Entry entry, const std::string& ir, rocke_codeobj_compile_res
                                     : rocke_codeobj_compile_rocke_ir_v1(&request, result);
 }
 
-Outcome run_once(const Case& c)
+/* One pass of case `c` through `mode`. With `keep_ir`, the serialized text is
+ * kept in the outcome (the streamed pieces are joined outside the timing of
+ * the producer only then). */
+Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
 {
     Outcome out;
     rocke_ir_builder_t builder;
+    const bool prebuilt = c.parsed != nullptr;
     const auto t0 = Clock::now();
-    rocke_kernel_def_t* kernel = c.build(&builder);
+    rocke_kernel_def_t* kernel = prebuilt ? c.parsed : c.build(&builder);
     const auto t1 = Clock::now();
-    if(!kernel || !rocke_ir_builder_ok(&builder))
+    if(!prebuilt && (!kernel || !rocke_ir_builder_ok(&builder)))
     {
         const char* message = rocke_ir_builder_error(&builder);
         const std::string detail = message ? message : "unknown builder failure";
@@ -299,31 +679,71 @@ Outcome run_once(const Case& c)
         throw std::runtime_error(c.name + ": C++ builder failed: " + detail);
     }
     char* text = nullptr;
-    const rocke_status_t serialized = rocke_ir_serialize(kernel, &text);
-    const auto t2 = Clock::now();
-    if(serialized != ROCKE_OK || !text)
-    {
-        std::free(text);
-        rocke_ir_builder_free(&builder);
-        throw std::runtime_error(c.name + ": C++ IR serialization failed");
-    }
-    const size_t text_size = std::strlen(text);
-
-    rocke_codeobj_compile_request_v1 request = {};
-    request.struct_size = sizeof(request);
-    request.serialized_ir = reinterpret_cast<const uint8_t*>(text);
-    request.serialized_ir_size = text_size;
+    size_t text_size = 0;
+    std::string streamed;
     rocke_codeobj_compile_result_v1 result = {};
     result.struct_size = sizeof(result);
-    const auto t3 = Clock::now();
-    const int32_t status = c.entry == Entry::WmmaGemm
-                               ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
-                               : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
-    const auto t4 = Clock::now();
+    Clock::time_point t2, t3, t4;
+    if(mode == Mode::Stream)
+    {
+        bool fed = true;
+        StreamSerializer producer(g_settings.feed_bytes, [&](const char* data, size_t size) {
+            fed = fed
+                  && rocke_codeobj_session_feed_v1(g_settings.session, reinterpret_cast<const uint8_t*>(data), size)
+                         == 0;
+            if(keep_ir)
+                streamed.append(data, size);
+        });
+        producer.serialize(kernel);
+        t2 = Clock::now();
+        if(!fed)
+            throw std::runtime_error(c.name + ": rocke_codeobj_session_feed_v1 refused a piece");
+        t3 = Clock::now();
+        rocke_codeobj_session_finish_v1(g_settings.session, &result);
+        t4 = Clock::now();
+        if(keep_ir)
+        {
+            char* reference = nullptr;
+            if(rocke_ir_serialize(kernel, &reference) != ROCKE_OK || !reference || streamed != reference)
+            {
+                std::free(reference);
+                throw std::runtime_error(c.name + ": the streamed pieces differ from rocke_ir_serialize");
+            }
+            std::free(reference);
+        }
+    }
+    else
+    {
+        const rocke_status_t serialized = rocke_ir_serialize(kernel, &text);
+        t2 = Clock::now();
+        if(serialized != ROCKE_OK || !text)
+        {
+            std::free(text);
+            if(!prebuilt)
+                rocke_ir_builder_free(&builder);
+            throw std::runtime_error(c.name + ": C++ IR serialization failed");
+        }
+        text_size = std::strlen(text);
+        rocke_codeobj_compile_request_v1 request = {};
+        request.struct_size = sizeof(request);
+        request.serialized_ir = reinterpret_cast<const uint8_t*>(text);
+        request.serialized_ir_size = text_size;
+        t3 = Clock::now();
+        const int32_t status = c.entry == Entry::WmmaGemm ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
+                               : mode == Mode::Session
+                                   ? rocke_codeobj_session_compile_v1(g_settings.session, &request, &result)
+                                   : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
+        t4 = Clock::now();
+        if(status != 0 && result.status == 0)
+            result.status = status;
+    }
     const std::string diagnostics = bytes_to_string(result.diagnostics, result.diagnostics_size);
     out.symbol = kernel->name ? kernel->name : "";
-    out.ir.assign(text, text_size);
-    if(status != 0 || result.status != 0)
+    if(mode == Mode::Stream)
+        out.ir = std::move(streamed);
+    else if(keep_ir)
+        out.ir.assign(text, text_size);
+    if(result.status != 0)
         out.compile_error = diagnostics.empty() ? "rejected without a diagnostic" : diagnostics;
     else
     {
@@ -335,7 +755,8 @@ Outcome run_once(const Case& c)
     const auto t5 = Clock::now();
     rocke_codeobj_compile_result_dispose_v1(&result);
     std::free(text);
-    rocke_ir_builder_free(&builder);
+    if(!prebuilt)
+        rocke_ir_builder_free(&builder);
     const auto t6 = Clock::now();
 
     const auto s0 = Clock::now();
@@ -417,13 +838,30 @@ struct Report
     bool rejected = false;
 };
 
-/* Runs one case (see the file comment), prints its table row and returns its
- * JSON object. Throws on build or serialize failure, on a bad image and on
- * nondeterminism; a compile rejection is returned, not thrown. */
+Report report_mode(const Case& c,
+                   Mode mode,
+                   const std::vector<Sample>& samples,
+                   const Outcome& first,
+                   double first_ms,
+                   bool rejected);
+
+/* The modes a case runs in: the GEMM entry point has no session variant. */
+std::vector<Mode> modes_for(const Case& c)
+{
+    if(c.entry == Entry::WmmaGemm)
+        return {Mode::Plain};
+    return g_settings.modes;
+}
+
+/* Runs one case (see the file comment) in every mode, prints a table row per
+ * mode and returns the JSON objects. Throws on build or serialize failure, on
+ * a bad image, on nondeterminism and when modes disagree; a compile rejection
+ * is returned, not thrown. */
 Report measure_case(const Case& c, int reps, int warmup, const std::string& dump_dir)
 {
+    const std::vector<Mode> modes = modes_for(c);
     const auto first_start = Clock::now();
-    const Outcome first = run_once(c);
+    const Outcome first = run_once(c, modes.front());
     const double first_ms = ms_between(first_start, Clock::now());
     const bool rejected = !first.compile_error.empty();
     if(!dump_dir.empty())
@@ -434,17 +872,45 @@ Report measure_case(const Case& c, int reps, int warmup, const std::string& dump
         if(!dump_dir.empty())
             write_file(dump_dir + "/" + c.name + ".cpp.hsaco", first.hsaco.data(), first.hsaco.size());
     }
+    for(size_t m = 1; m < modes.size(); ++m)
+    {
+        const Outcome other = run_once(c, modes[m]);
+        if(other.ir != first.ir || other.hsaco != first.hsaco || other.compile_error != first.compile_error)
+            throw std::runtime_error(c.name + ": mode " + mode_name(modes[m]) + " disagrees with "
+                                     + mode_name(modes.front()));
+    }
     for(int w = 1; w < warmup; ++w)
-        run_once(c);
-    std::vector<Sample> samples;
-    samples.reserve(static_cast<size_t>(reps));
+        for(Mode mode : modes)
+            run_once(c, mode, false);
+    std::vector<std::vector<Sample>> by_mode(modes.size());
     for(int r = 0; r < reps; ++r)
     {
-        Outcome o = run_once(c);
-        if(o.ir != first.ir || o.hsaco != first.hsaco || o.compile_error != first.compile_error)
-            throw std::runtime_error(c.name + ": repeated compiles are not deterministic");
-        samples.push_back(std::move(o.sample));
+        for(size_t k = 0; k < modes.size(); ++k)
+        {
+            const size_t m = (k + static_cast<size_t>(r)) % modes.size();
+            Outcome o = run_once(c, modes[m], false);
+            if(o.hsaco != first.hsaco || o.compile_error != first.compile_error)
+                throw std::runtime_error(c.name + ": repeated compiles are not deterministic");
+            by_mode[m].push_back(std::move(o.sample));
+        }
     }
+    std::string json_rows;
+    for(size_t m = 0; m < modes.size(); ++m)
+    {
+        const Report row = report_mode(c, modes[m], by_mode[m], first, first_ms, rejected);
+        json_rows += (m ? "," : "") + row.json;
+    }
+    return {json_rows, rejected};
+}
+
+/* The table row and JSON object of one case in one mode. */
+Report report_mode(const Case& c,
+                   Mode mode,
+                   const std::vector<Sample>& samples,
+                   const Outcome& first,
+                   double first_ms,
+                   bool rejected)
+{
     auto med = [&](auto field) {
         std::vector<double> v;
         for(const Sample& s : samples)
@@ -465,17 +931,18 @@ Report measure_case(const Case& c, int reps, int warmup, const std::string& dump
         });
     }
     const double parse = phase_medians.count("parse") ? phase_medians["parse"] : 0.0;
+    const std::string label = c.name + (g_settings.modes.size() > 1 ? std::string(" [") + mode_name(mode) + "]" : "");
     if(rejected)
-        std::printf("%-32s %9.4f %9.4f  REJECTED: %s\n", c.name.c_str(), build, serialize,
+        std::printf("%-40s %9.4f %9.4f  REJECTED: %s\n", label.c_str(), build, serialize,
                     first.compile_error.c_str());
     else
-        std::printf("%-32s %9.4f %9.4f %9.4f %9.4f %9.4f %9.3f %8.1f %8zu\n", c.name.c_str(), build,
+        std::printf("%-40s %9.4f %9.4f %9.4f %9.4f %9.4f %9.3f %8.1f %8zu\n", label.c_str(), build,
                     serialize, compile, parse, lean, first_ms, first.ir.size() / 1024.0,
                     first.hsaco.size());
 
     /* The GEMM graph also goes to the generic entry point once, for the record. */
     std::string generic_verdict;
-    if(c.entry == Entry::WmmaGemm)
+    if(c.entry == Entry::WmmaGemm && mode == Mode::Plain)
     {
         rocke_codeobj_compile_result_v1 result;
         const int32_t status = compile_ir(Entry::RockeIr, first.ir, &result);
@@ -489,9 +956,12 @@ Report measure_case(const Case& c, int reps, int warmup, const std::string& dump
     std::fflush(stdout);
 
     std::ostringstream json;
-    json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"entry\":\""
+    json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"mode\":\"" << mode_name(mode)
+         << "\",\"entry\":\""
          << (c.entry == Entry::WmmaGemm ? "rocke_codeobj_compile_gfx1151_wmma_gemm_v1"
-                                        : "rocke_codeobj_compile_rocke_ir_v1")
+             : mode == Mode::Plain      ? "rocke_codeobj_compile_rocke_ir_v1"
+             : mode == Mode::Session    ? "rocke_codeobj_session_compile_v1"
+                                        : "rocke_codeobj_session_feed_v1+rocke_codeobj_session_finish_v1")
          << "\",\"symbol\":\"" << json_escape(first.symbol) << "\",\"ir_bytes\":" << first.ir.size()
          << ",\"ir_lines\":" << count_newlines(first.ir.data(), first.ir.size())
          << ",\"hsaco_bytes\":" << first.hsaco.size() << ",\"stats\":\"" << json_escape(first.stats)
@@ -521,8 +991,10 @@ try
 {
     int reps = 3;
     int warmup = 1;
+    int session_threads = 0;
     std::string only, dump_dir, json_path;
     std::vector<std::string> expect_reject;
+    std::vector<std::pair<std::string, std::string>> ir_cases;
     for(int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -550,20 +1022,92 @@ try
             dump_dir = argv[++i];
         else if(arg == "--json")
             json_path = argv[++i];
+        else if(arg == "--modes")
+        {
+            g_settings.modes.clear();
+            std::stringstream list(argv[++i]);
+            std::string item;
+            while(std::getline(list, item, ','))
+            {
+                if(item == "plain")
+                    g_settings.modes.push_back(Mode::Plain);
+                else if(item == "session")
+                    g_settings.modes.push_back(Mode::Session);
+                else if(item == "stream")
+                    g_settings.modes.push_back(Mode::Stream);
+                else
+                    throw std::runtime_error("unknown mode " + item);
+            }
+            if(g_settings.modes.empty())
+                throw std::runtime_error("--modes needs at least one mode");
+        }
+        else if(arg == "--ir-case")
+        {
+            const std::string spec = argv[++i];
+            const size_t eq = spec.find('=');
+            if(eq == std::string::npos || eq == 0)
+                throw std::runtime_error("--ir-case takes NAME=FILE");
+            ir_cases.emplace_back(spec.substr(0, eq), spec.substr(eq + 1));
+        }
+        else if(arg == "--session-threads")
+            session_threads = parse_count(argv[++i], 0, 256, "--session-threads");
+        else if(arg == "--feed-bytes")
+            g_settings.feed_bytes = static_cast<size_t>(parse_count(argv[++i], 1, 1 << 30, "--feed-bytes"));
         else
             throw std::runtime_error("unknown argument " + arg);
     }
     if(rocke_codeobj_ffi_abi_version() != ROCKE_CODEOBJ_FFI_ABI_VERSION)
         throw std::runtime_error("Rust code-object library has an incompatible ABI");
+    const bool needs_session = std::any_of(g_settings.modes.begin(), g_settings.modes.end(),
+                                           [](Mode m) { return m != Mode::Plain; });
+    if(needs_session)
+    {
+        rocke_codeobj_session_options_v1 options = {};
+        options.struct_size = sizeof(options);
+        options.worker_threads = static_cast<uint32_t>(session_threads);
+        if(rocke_codeobj_session_create_v1(&options, &g_settings.session) != 0)
+            throw std::runtime_error("rocke_codeobj_session_create_v1 failed");
+    }
+    struct SessionGuard
+    {
+        ~SessionGuard()
+        {
+            rocke_codeobj_session_free_v1(g_settings.session);
+            g_settings.session = nullptr;
+        }
+    } session_guard;
+
+    std::vector<Case> cases = all_cases();
+    for(const auto& [name, path] : ir_cases)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if(!file)
+            throw std::runtime_error("cannot read " + path);
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        Case c;
+        c.name = name;
+        c.family = "ir";
+        c.parsed_builder = std::shared_ptr<rocke_ir_builder_t>(new rocke_ir_builder_t, [](rocke_ir_builder_t* b) {
+            rocke_ir_builder_free(b);
+            delete b;
+        });
+        rocke_ir_builder_init(c.parsed_builder.get(), "parse");
+        if(rocke_ir_parse(text.c_str(), c.parsed_builder.get(), &c.parsed) != ROCKE_OK || !c.parsed)
+        {
+            const char* message = rocke_ir_builder_error(c.parsed_builder.get());
+            throw std::runtime_error(name + ": rocke_ir_parse failed: " + (message ? message : "?"));
+        }
+        cases.push_back(std::move(c));
+    }
 
     std::ostringstream json;
     json << "{\"arch\":\"" << kArch << "\",\"reps\":" << reps << ",\"warmup\":" << warmup
          << ",\"cases\":[";
-    std::printf("%-32s %9s %9s %9s %9s %9s %9s %8s %8s\n", "case", "build", "serialize",
+    std::printf("%-40s %9s %9s %9s %9s %9s %9s %8s %8s\n", "case", "build", "serialize",
                 "compile", "parse", "lean", "first", "ir_kb", "hsaco");
     int ran = 0;
     std::vector<std::string> failures;
-    for(const Case& c : all_cases())
+    for(const Case& c : cases)
     {
         if(!only.empty() && c.name.find(only) == std::string::npos)
             continue;
@@ -581,7 +1125,7 @@ try
         }
         catch(const std::exception& error)
         {
-            std::printf("%-32s FAILED: %s\n", c.name.c_str(), error.what());
+            std::printf("%-40s FAILED: %s\n", c.name.c_str(), error.what());
             std::fflush(stdout);
             json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"error\":\""
                  << json_escape(error.what()) << "\"}";

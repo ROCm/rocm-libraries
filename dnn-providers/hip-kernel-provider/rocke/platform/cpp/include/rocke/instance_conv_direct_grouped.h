@@ -256,15 +256,17 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
                                              size_t reason_cap);
 
 /* is_valid_spec_4c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {fp16, bf16}; "same"
- * padding; stride 1; cpg==kpg==4; block_groups % 16 == 0; block_q % 4 == 0;
+ * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {fp16, bf16}; the
+ * target has an MFMA atom of that dtype (the catalog lists no 4x4x4 shape;
+ * the targets without any MFMA atom are the ones without the 4x4x4 f16 /
+ * bf16 (_1k) atom); "same" padding; stride 1; cpg==kpg==4;
+ * block_groups % 16 == 0; block_q % 4 == 0;
  * groups % block_groups == 0; KH*KW <= ROCKE_DCONV4C_MAX_TAPS; the stage_rows
  * / waves_q rules; dgrad_weights_lds needs dgrad_fused_weights, a target with
  * ds_read_tr and at most ROCKE_DCONV4C_MAX_WL_PASSES staging passes;
  * stage_rows needs at most ROCKE_DCONV4C_MAX_ROW_PASSES row passes and fits
- * the target's LDS. The 4x4x4 f16 / bf16 (_1k) atom is NOT gated
- * through has_shape (catalog lists only warp tiles; comgr selects it on both
- * targets). On reject writes the reason and returns false; else "ok" + true. */
+ * the target's LDS. On reject writes the reason and returns false; else
+ * "ok" + true. */
 bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
                                         const char* arch,
                                         char* reason,

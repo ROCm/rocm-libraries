@@ -92,13 +92,15 @@ fn has_phys(inst: &MInst) -> bool {
 }
 
 /// What `may_sink_past` reads of an instruction: its flags, whether nothing
-/// may pass it, whether it writes LDS, and 64-bit signatures of the
-/// virtual-register units it defines and uses (a shared unit sets a common bit).
+/// may pass it, whether it writes LDS, its global memory tag, and 64-bit
+/// signatures of the virtual-register units it defines and uses (a shared
+/// unit sets a common bit).
 #[derive(Clone, Copy)]
 struct SinkFacts {
     flags: u32,
     fence: bool,
     lds_write: bool,
+    mem: u16,
     defs: u64,
     uses: u64,
 }
@@ -112,11 +114,12 @@ impl SinkFacts {
         let flags = x.op.flags();
         SinkFacts {
             flags,
-            fence: flags & (F_BRANCH | F_END | F_DEF_EXEC) != 0
+            fence: flags & (F_BRANCH | F_END | F_DEF_EXEC | F_FENCE) != 0
                 || matches!(x.op, Opc::SBarrier | Opc::SSendmsg)
                 || has_phys(x),
             // LDS reads (loads, swizzles) define a register; LDS writes do not.
             lds_write: flags & F_LDS != 0 && x.defs.is_empty(),
+            mem: x.mem,
             defs: unit_signature(&x.defs),
             uses: unit_signature(&x.uses),
         }
@@ -130,9 +133,10 @@ fn may_sink_past(c: &MInst, cs: &SinkFacts, x: &MInst, xs: &SinkFacts) -> bool {
         return false;
     }
     let vmem = F_VMEM_LOAD | F_VMEM_STORE;
+    let aliased = super::alias::may_alias(cs.mem, xs.mem);
     if (cf & F_LDS != 0 && xf & F_LDS != 0 && (cs.lds_write || xs.lds_write))
-        || (cf & F_VMEM_STORE != 0 && xf & vmem != 0)
-        || (cf & vmem != 0 && xf & F_VMEM_STORE != 0)
+        || (cf & F_VMEM_STORE != 0 && xf & vmem != 0 && aliased)
+        || (cf & vmem != 0 && xf & F_VMEM_STORE != 0 && aliased)
     {
         return false;
     }
@@ -331,7 +335,7 @@ pub fn fuse_valu(f: &mut MFunc) {
 /// `budget` dwords of loads move ahead of any one instruction, which bounds
 /// the extra register pressure.
 pub fn sink_load_uses(f: &mut MFunc, budget: u32) {
-    let fixed = F_DEF_SCC | F_USE_SCC | F_USE_VCC | F_DEF_EXEC | F_BRANCH | F_END | F_SMEM;
+    let fixed = F_DEF_SCC | F_USE_SCC | F_USE_VCC | F_DEF_EXEC | F_BRANCH | F_END | F_SMEM | F_FENCE;
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
     // Block number + 1 of the units loaded so far in that block.
     let mut loaded = vec![0u32; units.len()];
@@ -340,10 +344,10 @@ pub fn sink_load_uses(f: &mut MFunc, budget: u32) {
         let insts = &mut block.insts;
         let mut candidate = vec![false; insts.len()];
         for (i, inst) in insts.iter().enumerate() {
-            // VMEM loads write in issue order, so a VMEM load's tied
-            // destination does not stall it; an LDS load's does.
+            // Loads write in issue order, so a d16 load's tied destination
+            // does not stall it.
             let load = inst.op.flags() & (F_VMEM_LOAD | F_LDS) != 0;
-            let in_order = inst.op.flags() & F_VMEM_LOAD != 0;
+            let in_order = inst.op.flags() & F_VMEM_LOAD != 0 || lds_merge(inst);
             candidate[i] = inst
                 .uses
                 .iter()
@@ -391,16 +395,7 @@ pub fn sink_load_uses(f: &mut MFunc, budget: u32) {
 
 /// Cycles from issue until the scheduler lets a reader of the result issue.
 fn result_latency(inst: &MInst) -> u32 {
-    let flags = inst.op.flags();
-    match inst.op.fmt() {
-        Fmt::Pseudo if flags & F_USE_EXEC == 0 => 0,
-        _ if flags & F_VMEM_LOAD != 0 => 300,
-        _ if flags & (F_LDS | F_SMEM) != 0 => 40,
-        _ if flags & F_WMMA != 0 => 16,
-        _ if flags & F_TRANS != 0 => 10,
-        Fmt::Sop1 | Fmt::Sop2 | Fmt::Sopc | Fmt::Sopk => 2,
-        _ => 5,
-    }
+    super::gen_isa::result_latency(inst.op)
 }
 
 /// Reorders each block so that instructions do not wait on results still in
@@ -434,13 +429,14 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex) -> Vec<MI
     let mut readers: Vec<(u32, u32)> = Vec::with_capacity(2 * n);
     let (mut scc_def, mut scc_readers) = (None, Vec::new());
     let (mut barrier, mut since_barrier) = (None, Vec::new());
-    // Last write and the reads since, of LDS and of global memory. SMEM
-    // reads only kernel arguments and memory the kernel does not write.
+    // Last write and the reads since, of LDS and of global memory (by
+    // `alias` tag). SMEM reads only kernel arguments and memory the kernel
+    // does not write.
     let mut lds = (None, Vec::new());
-    let mut vmem = (None, Vec::new());
+    let mut vmem = super::alias::GlobalOrder::default();
     for (i, inst) in insts.iter().enumerate() {
         let flags = inst.op.flags();
-        if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM) != 0
+        if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
             || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
             || has_phys(inst)
         {
@@ -459,16 +455,26 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex) -> Vec<MI
             }
             since_barrier.push(i);
         }
-        let in_order = flags & F_VMEM_LOAD != 0;
-        for u in inst.uses.iter().flat_map(|o| units.of(o)) {
-            if last_def[u] != NO_INST {
-                let d = last_def[u] as usize;
-                // VMEM loads write in issue order, so a tied d16 chain does not wait.
-                let ordered = in_order && insts[d].op.flags() & F_VMEM_LOAD != 0;
-                edge(d, i, if ordered { 0 } else { result_latency(&insts[d]) });
+        // VMEM loads, and separately DS operations, write their results in
+        // issue order, so a d16 load's tied half does not wait on one of its kind.
+        let in_order = if flags & F_VMEM_LOAD != 0 {
+            F_VMEM_LOAD
+        } else if lds_merge(inst) {
+            F_LDS
+        } else {
+            0
+        };
+        for o in &inst.uses {
+            let tied = inst.defs.contains(o);
+            for u in units.of(o) {
+                if last_def[u] != NO_INST {
+                    let d = last_def[u] as usize;
+                    let ordered = tied && insts[d].op.flags() & in_order != 0;
+                    edge(d, i, if ordered { 0 } else { result_latency(&insts[d]) });
+                }
+                readers.push((i as u32, reader_head[u]));
+                reader_head[u] = readers.len() as u32 - 1;
             }
-            readers.push((i as u32, reader_head[u]));
-            reader_head[u] = readers.len() as u32 - 1;
         }
         for u in inst.defs.iter().flat_map(|o| units.of(o)) {
             if last_def[u] != NO_INST {
@@ -504,7 +510,8 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex) -> Vec<MI
         let memory = if flags & F_LDS != 0 {
             Some((&mut lds, !inst.defs.is_empty()))
         } else if flags & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
-            Some((&mut vmem, flags & F_VMEM_STORE == 0))
+            vmem.access(i as u32, inst.mem, flags & F_VMEM_STORE == 0, |from| edge(from as usize, i, 0));
+            None
         } else {
             None
         };
@@ -595,6 +602,91 @@ fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex) -> Vec<MI
     }
     let mut slots: Vec<Option<MInst>> = insts.into_iter().map(Some).collect();
     order.into_iter().map(|i| slots[i].take().expect("each instruction is scheduled once")).collect()
+}
+
+/// How long a schedule keeps a SIMD busy, for choosing between schedules
+/// that differ in occupancy: per block, weighted by 8 to the power of its
+/// loop depth, the cycles one wave needs alone (latencies exposed) and the
+/// cycles it spends issuing.
+pub struct ScheduleCost {
+    blocks: Vec<(u64, u64, u64)>,
+}
+
+impl ScheduleCost {
+    /// Weighted cycles per wave when `waves` waves per SIMD hide each
+    /// other's latency: a block takes the longer of its latency share and
+    /// its issue time.
+    pub fn cycles(&self, waves: u32) -> u64 {
+        let w = u64::from(waves.max(1));
+        self.blocks.iter().map(|&(weight, latency, issue)| weight * (latency / w).max(issue)).sum()
+    }
+
+    /// Weighted issue cycles: no schedule of these instructions takes less.
+    pub fn issue(&self) -> u64 {
+        self.blocks.iter().map(|&(weight, _, issue)| weight * issue).sum()
+    }
+}
+
+/// The latency model of `schedule_cost`: memory results arrive in issue
+/// order per counter, VMEM loads after 500 cycles, LDS after 64, SMEM after
+/// 200; a WMMA occupies the VALU for 16 cycles and a transcendental for 4.
+pub fn schedule_cost(f: &MFunc) -> ScheduleCost {
+    let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+    // Physical registers first, then the virtual-register units.
+    let keys = |o: &Opnd| reg_keys(o).chain(units.of(o).map(|u| NREGS + u));
+    let mut ready = vec![0u64; NREGS + units.len()];
+    let blocks = f
+        .blocks
+        .iter()
+        .map(|block| {
+            ready.fill(0);
+            let (mut cycle, mut issue, mut vm_done, mut lgkm_done) = (0u64, 0u64, 0u64, 0u64);
+            for inst in &block.insts {
+                let flags = inst.op.flags();
+                if matches!(inst.op, Opc::SBarrier | Opc::SBarrierLds) {
+                    cycle = cycle.max(lgkm_done).max(if inst.op == Opc::SBarrier { vm_done } else { 0 });
+                }
+                let in_order = flags & F_VMEM_LOAD != 0 || lds_merge(inst);
+                let operands_ready = inst
+                    .uses
+                    .iter()
+                    .filter(|o| !(in_order && inst.defs.contains(o)))
+                    .flat_map(keys)
+                    .map(|k| ready[k])
+                    .max()
+                    .unwrap_or(0);
+                let (cost, done) = if inst.op.fmt() == Fmt::Pseudo && flags & F_USE_EXEC == 0 {
+                    (0, operands_ready)
+                } else {
+                    let start = cycle.max(operands_ready);
+                    let cost = if flags & F_WMMA != 0 {
+                        16
+                    } else if flags & F_TRANS != 0 {
+                        4
+                    } else {
+                        1
+                    };
+                    cycle = start + cost;
+                    let done = if flags & F_VMEM_LOAD != 0 {
+                        vm_done = vm_done.max(start + 500);
+                        vm_done
+                    } else if flags & (F_LDS | F_SMEM) != 0 && !inst.defs.is_empty() {
+                        lgkm_done = lgkm_done.max(start + if flags & F_SMEM != 0 { 200 } else { 64 });
+                        lgkm_done
+                    } else {
+                        cycle
+                    };
+                    (cost, done)
+                };
+                issue += cost;
+                for k in inst.defs.iter().flat_map(keys) {
+                    ready[k] = done;
+                }
+            }
+            (8u64.pow(block.loop_depth.min(4)), cycle, issue)
+        })
+        .collect();
+    ScheduleCost { blocks }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -799,18 +891,14 @@ pub fn insert_delay_alu(f: &mut MFunc) {
                 out.push(inst);
                 continue;
             }
-            let kind = match fmt {
-                Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b | Fmt::Vopc | Fmt::Vop3p | Fmt::Vopd => {
-                    if inst.op.flags() & F_TRANS != 0 {
-                        AluKind::Trans
-                    } else {
-                        AluKind::Valu
-                    }
-                }
-                Fmt::Sop1 | Fmt::Sop2 | Fmt::Sopc | Fmt::Sopk | Fmt::Sopp => AluKind::Salu,
+            let (class, latency) = super::gen_isa::delay(inst.op);
+            let kind = match class {
+                super::gen_isa::Delay::Valu => AluKind::Valu,
+                super::gen_isa::Delay::Trans => AluKind::Trans,
+                super::gen_isa::Delay::Salu => AluKind::Salu,
                 _ => AluKind::Other,
             };
-            if matches!(fmt, Fmt::Ds | Fmt::Global | Fmt::Mubuf) {
+            if super::gen_isa::delay_clears(inst.op) {
                 state.clear();
             } else if kind != AluKind::Other {
                 let mut need = AluDelay::default();
@@ -837,11 +925,6 @@ pub fn insert_delay_alu(f: &mut MFunc) {
                 }
             }
             if kind != AluKind::Other {
-                let latency = match kind {
-                    AluKind::Trans => 10,
-                    AluKind::Valu => 5,
-                    _ => 2,
-                };
                 for o in &inst.defs {
                     for u in alu_units(o) {
                         state.set(u, AluDelay::issued(kind, latency));
@@ -920,7 +1003,7 @@ pub fn expand_pseudos(f: &mut MFunc) -> Result<(), CompileError> {
                     out.push(MInst::new(Opc::VCvtF16F32, [dst], [inst.uses[0]]));
                     out.push(MInst::new(Opc::VCvtF16F32, [dst], [inst.uses[1]]).with_mods(M_OPSEL_DST));
                 }
-                Opc::ImplicitDef => {}
+                Opc::ImplicitDef | Opc::SchedBarrier => {}
                 _ => out.push(inst),
             }
         }
@@ -1048,31 +1131,58 @@ fn reg_keys(o: &Opnd) -> impl Iterator<Item = usize> {
     start..start + n
 }
 
+/// Whether `inst` is an LDS d16 load, which writes one half of its
+/// destination and keeps the other.
+fn lds_merge(inst: &MInst) -> bool {
+    inst.op.flags() & (F_LDS | F_TIED) == F_LDS | F_TIED
+}
+
 /// One step of the wait model; returns the wait to insert before `inst`.
 fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
     let flags = inst.op.flags();
     let vmem_load = flags & F_VMEM_LOAD != 0;
+    let lds_merge = lds_merge(inst);
     let mut need_vm = NONE;
     let mut need_lgkm = NONE;
     for o in inst.uses.iter().chain(inst.defs.iter()) {
         // VMEM loads write VGPRs in issue order, and a d16 load merges into
         // the half it keeps when it writes, so neither a load's destination
-        // nor that tied source waits for an earlier VMEM load.
-        let in_order = vmem_load && inst.defs.contains(o);
+        // nor that tied source waits for an earlier VMEM load. The same holds
+        // for LDS: a wave's DS results are written in issue order, and an
+        // LDS d16 load writes only its half when its data returns.
+        let tied = inst.defs.contains(o);
         for k in reg_keys(o) {
-            if !in_order {
+            if !(vmem_load && tied) {
                 need_vm = need_vm.min(state.vm.get(k));
             }
-            need_lgkm = need_lgkm.min(state.lgkm.get(k));
+            if !(lds_merge && tied) {
+                need_lgkm = need_lgkm.min(state.lgkm.get(k));
+            }
         }
     }
-    if inst.op == Opc::SBarrier {
+    if matches!(inst.op, Opc::SBarrier | Opc::SWaitcntVscnt) {
         if state.vm_any {
             need_vm = 0;
         }
         if state.lgkm_any {
             need_lgkm = 0;
         }
+    }
+    if inst.op == Opc::SWaitcntExplicit {
+        let (vm, lgkm) = ((inst.imm >> 10) & 0x3f, (inst.imm >> 4) & 0x3f);
+        if vm < 0x3f {
+            state.vm.wait(vm as u8);
+            state.vm_any &= vm != 0;
+        }
+        // Scalar loads return out of order: only lgkmcnt(0) settles them.
+        if lgkm == 0 || (lgkm < 0x3f && !state.smem) {
+            state.lgkm.wait(lgkm as u8);
+            state.lgkm_any &= lgkm != 0;
+            state.smem &= lgkm != 0;
+        }
+    }
+    if inst.op == Opc::SBarrierLds && state.lgkm_any {
+        need_lgkm = 0;
     }
     if need_lgkm != NONE && state.smem {
         need_lgkm = 0;
@@ -1095,14 +1205,15 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
     } else {
         None
     };
-    if flags & F_VMEM_LOAD != 0 {
+    let counters = super::gen_isa::counters(inst.op);
+    if counters & super::gen_isa::CNT_VM != 0 {
         state.vm.issue(&inst.defs);
         state.vm_any = true;
     }
-    if flags & (F_LDS | F_SMEM) != 0 {
+    if counters & super::gen_isa::CNT_LGKM != 0 {
         state.lgkm.issue(&inst.defs);
         state.lgkm_any = true;
-        if flags & F_SMEM != 0 {
+        if counters & super::gen_isa::CNT_SMEM != 0 {
             state.smem = true;
         }
     }
@@ -1172,10 +1283,7 @@ pub fn insert_waitcnt(f: &mut MFunc) {
 }
 
 fn is_valu(op: Opc) -> bool {
-    matches!(
-        op.fmt(),
-        Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b | Fmt::Vopc | Fmt::Vop3p | Fmt::Vopd
-    )
+    super::gen_isa::is_valu(op)
 }
 
 fn ranges_overlap(a: &Opnd, b: &Opnd) -> bool {
@@ -1204,10 +1312,10 @@ pub fn fix_wmma_hazards(f: &mut MFunc) {
         let insts = std::mem::take(&mut f.blocks[b].insts);
         let mut out: Vec<MInst> = Vec::with_capacity(insts.len());
         for inst in insts {
-            if inst.op.flags() & F_WMMA != 0 {
+            if super::gen_isa::hazards(inst.op) & super::gen_isa::HZ_WMMA_AB != 0 {
                 let prev = out.iter().rev().find(|i| is_valu(i.op));
                 let hazard = |p: &MInst| {
-                    p.op.flags() & F_WMMA != 0
+                    super::gen_isa::hazards(p.op) & super::gen_isa::HZ_WMMA_D != 0
                         && (ranges_overlap(&p.defs[0], &inst.uses[0]) || ranges_overlap(&p.defs[0], &inst.uses[1]))
                 };
                 let needs = match prev {
@@ -1221,6 +1329,62 @@ pub fn fix_wmma_hazards(f: &mut MFunc) {
             out.push(inst);
         }
         f.blocks[b].insts = out;
+    }
+}
+
+/// What one `s_clause` may group: gfx11 hard clauses hold VMEM loads, stores
+/// or atomics of one encoding only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ClauseKind {
+    Load(Fmt),
+    Store(Fmt),
+    Atomic(Fmt),
+}
+
+fn clause_kind(op: Opc) -> Option<ClauseKind> {
+    let (fmt, flags) = (op.fmt(), op.flags());
+    if !matches!(fmt, Fmt::Global | Fmt::Mubuf) || flags & (F_VMEM_LOAD | F_VMEM_STORE) == 0 {
+        return None;
+    }
+    let name = op.name();
+    if name.starts_with("scratch_") {
+        None
+    } else if name.contains("atomic") {
+        Some(ClauseKind::Atomic(fmt))
+    } else if flags & F_VMEM_LOAD != 0 {
+        Some(ClauseKind::Load(fmt))
+    } else {
+        Some(ClauseKind::Store(fmt))
+    }
+}
+
+/// The most instructions one `s_clause` may cover on gfx11: longer clauses
+/// can trigger a hardware bug (LLVM's `FeatureMaxHardClauseLength32`).
+const MAX_CLAUSE: usize = 32;
+
+/// Puts `s_clause` before each run of two or more adjacent VMEM stores of
+/// one encoding, so that the run issues without other waves' memory
+/// instructions in between. A wait, SALU or VALU instruction ends a run.
+/// Loads and atomics stay unclaused: their clauses run no faster on gfx1151.
+pub fn form_clauses(f: &mut MFunc) {
+    for block in f.blocks.iter_mut() {
+        let kind_of: Vec<Option<ClauseKind>> =
+            block.insts.iter().map(|i| clause_kind(i.op).filter(|k| matches!(k, ClauseKind::Store(_)))).collect();
+        let mut out = Vec::with_capacity(block.insts.len() + 8);
+        let mut run = 0;
+        for (i, inst) in std::mem::take(&mut block.insts).into_iter().enumerate() {
+            if run == 0 {
+                if let Some(k) = kind_of[i] {
+                    run = kind_of[i..].iter().take(MAX_CLAUSE).take_while(|&&x| x == Some(k)).count();
+                    if run > 1 {
+                        out.push(MInst::new(Opc::SClause, [], []).with_imm(run as i64 - 1));
+                    }
+                }
+            }
+            run = run.saturating_sub(1);
+            out.push(inst);
+        }
+        block.insts = out;
     }
 }
 
@@ -1375,6 +1539,194 @@ mod tests {
                     lazy.wait(need);
                 }
                 assert_eq!(lazy.counts(), counts);
+            }
+        }
+    }
+
+    fn v(reg: u16) -> Opnd {
+        Opnd::P(Phys::V(reg), 1)
+    }
+
+    fn func(insts: Vec<MInst>) -> MFunc {
+        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new() }
+    }
+
+    fn with_waits(f: &MFunc) -> Vec<(Opc, i64)> {
+        f.blocks[0].insts.iter().map(|i| (i.op, if i.op == Opc::SWaitcnt { i.imm } else { 0 })).collect()
+    }
+
+    #[test]
+    fn lds_d16_merge_does_not_wait_for_the_kept_half() {
+        let mut f = func(vec![
+            MInst::new(Opc::DsLoadU16, [v(1)], [v(10)]),
+            MInst::new(Opc::DsLoadU16D16Hi, [v(1)], [v(11), v(1)]),
+            MInst::new(Opc::DsBpermuteB32, [v(2)], [v(12), v(13)]),
+            MInst::new(Opc::DsLoadU16D16, [v(2)], [v(14), v(2)]),
+            MInst::new(Opc::VAddNcU32, [v(3)], [v(1), v(2)]),
+        ]);
+        insert_waitcnt(&mut f);
+        assert_eq!(
+            with_waits(&f),
+            [
+                (Opc::DsLoadU16, 0),
+                (Opc::DsLoadU16D16Hi, 0),
+                (Opc::DsBpermuteB32, 0),
+                (Opc::DsLoadU16D16, 0),
+                (Opc::SWaitcnt, waitcnt_imm(NONE, 0)),
+                (Opc::VAddNcU32, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn d16_merges_still_wait_across_counters() {
+        // A VMEM load and an LDS merge into one register complete in either order.
+        let mut f = func(vec![
+            MInst::new(Opc::GLoadB32, [v(1)], [Opnd::P(Phys::V(10), 2)]),
+            MInst::new(Opc::DsLoadU16D16Hi, [v(1)], [v(12), v(1)]),
+            MInst::new(Opc::DsLoadU16, [v(2)], [v(13)]),
+            MInst::new(Opc::GLoadD16HiB16, [v(2)], [Opnd::P(Phys::V(14), 2), v(2)]),
+        ]);
+        insert_waitcnt(&mut f);
+        assert_eq!(
+            with_waits(&f),
+            [
+                (Opc::GLoadB32, 0),
+                (Opc::SWaitcnt, waitcnt_imm(0, NONE)),
+                (Opc::DsLoadU16D16Hi, 0),
+                (Opc::DsLoadU16, 0),
+                (Opc::SWaitcnt, waitcnt_imm(NONE, 0)),
+                (Opc::GLoadD16HiB16, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn schedule_cost_rewards_overlapped_loads_until_waves_hide_them() {
+        let load = |d: u32, a: u32| MInst::new(Opc::GLoadB32, [r(d)], [r(a)]);
+        let mut serial = func(vec![load(1, 0), add(2, 1), load(3, 0), add(4, 3)]);
+        let mut overlapped = func(vec![load(1, 0), load(3, 0), add(2, 1), add(4, 3)]);
+        serial.blocks[0].loop_depth = 1;
+        overlapped.blocks[0].loop_depth = 1;
+        let (s, o) = (schedule_cost(&serial), schedule_cost(&overlapped));
+        // One wave alone exposes two load latencies, or one when they overlap.
+        assert_eq!(s.cycles(1), 8 * 1002);
+        assert_eq!(o.cycles(1), 8 * 502);
+        // With enough waves both only issue: four instructions.
+        assert_eq!(s.cycles(1024), 8 * 4);
+        assert_eq!(o.cycles(1024), s.issue());
+    }
+
+    #[test]
+    fn schedule_cost_follows_physical_registers_and_barriers() {
+        let lds = MInst::new(Opc::DsLoadB32, [v(1)], [v(9)]);
+        let use_it = MInst::new(Opc::VAddNcU32, [v(2)], [v(1), Opnd::Imm(1)]);
+        assert_eq!(schedule_cost(&func(vec![lds.clone(), use_it.clone()])).cycles(1), 65);
+        // A barrier waits for the load even when nothing reads it.
+        let barrier = MInst::new(Opc::SBarrier, [], []);
+        assert_eq!(schedule_cost(&func(vec![lds, barrier, add(3, 4)])).cycles(1), 66);
+    }
+
+    fn mem(op: Opc) -> MInst {
+        if op.flags() & F_VMEM_LOAD != 0 {
+            MInst::new(op, [v(1)], [Opnd::P(Phys::V(10), 2)])
+        } else {
+            MInst::new(op, [], [Opnd::P(Phys::V(10), 2), v(1)])
+        }
+    }
+
+    fn clauses(insts: Vec<MInst>) -> Vec<(Opc, i64)> {
+        let mut f = func(insts);
+        form_clauses(&mut f);
+        f.blocks[0].insts.iter().map(|i| (i.op, if i.op == Opc::SClause { i.imm } else { 0 })).collect()
+    }
+
+    #[test]
+    fn clauses_cover_runs_of_adjacent_stores_only() {
+        let wait = MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(0, NONE));
+        let got = clauses(vec![
+            mem(Opc::GStoreB128),
+            mem(Opc::GStoreB128),
+            mem(Opc::GStoreD16HiB16),
+            wait,
+            mem(Opc::GStoreB32),
+            mem(Opc::GLoadB32),
+            mem(Opc::GLoadD16HiB16),
+            mem(Opc::GAtomicAddF32),
+            mem(Opc::GAtomicAddF32),
+            mem(Opc::GStoreB32),
+            mem(Opc::BufStoreB32),
+            mem(Opc::ScratchStoreB32),
+            mem(Opc::ScratchStoreB32),
+            add(2, 1),
+            mem(Opc::BufStoreB32),
+            mem(Opc::BufStoreB16),
+        ]);
+        let ops: Vec<Opc> = got.iter().map(|&(op, _)| op).collect();
+        assert_eq!(ops.iter().filter(|&&op| op == Opc::SClause).count(), 2);
+        assert_eq!(got[0], (Opc::SClause, 2));
+        assert_eq!(&ops[1..4], [Opc::GStoreB128, Opc::GStoreB128, Opc::GStoreD16HiB16]);
+        let last = ops.len() - 3;
+        assert_eq!(got[last], (Opc::SClause, 1));
+        assert_eq!(&ops[last + 1..], [Opc::BufStoreB32, Opc::BufStoreB16]);
+    }
+
+    #[test]
+    fn clauses_hold_at_most_32_instructions() {
+        let got = clauses((0..40).map(|_| mem(Opc::GStoreB32)).collect());
+        assert_eq!(got[0], (Opc::SClause, 31));
+        assert_eq!(got[33], (Opc::SClause, 7));
+        assert_eq!(got.len(), 42);
+    }
+
+    #[test]
+    fn every_clause_is_followed_by_its_count_of_one_store_kind() {
+        let pool = [
+            Opc::GStoreB32,
+            Opc::GStoreB128,
+            Opc::BufStoreB32,
+            Opc::GLoadB32,
+            Opc::GAtomicAddF32,
+            Opc::ScratchStoreB32,
+            Opc::SWaitcnt,
+            Opc::VAddNcU32,
+            Opc::SNop,
+        ];
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: usize| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        for _ in 0..300 {
+            let insts: Vec<MInst> = (0..next(120))
+                .map(|_| match pool[next(pool.len())] {
+                    Opc::VAddNcU32 => add(2, 1),
+                    op @ (Opc::SWaitcnt | Opc::SNop) => MInst::new(op, [], []),
+                    op => mem(op),
+                })
+                .collect();
+            let mut f = func(insts.clone());
+            form_clauses(&mut f);
+            let out = &f.blocks[0].insts;
+            let kept: Vec<Opc> = out.iter().map(|i| i.op).filter(|&op| op != Opc::SClause).collect();
+            assert_eq!(kept, insts.iter().map(|i| i.op).collect::<Vec<_>>());
+            let mut i = 0;
+            while i < out.len() {
+                let kind = clause_kind(out[i].op).filter(|k| matches!(k, ClauseKind::Store(_)));
+                if out[i].op == Opc::SClause {
+                    let n = out[i].imm as usize + 1;
+                    assert!((2..=MAX_CLAUSE).contains(&n));
+                    let body = &out[i + 1..i + 1 + n];
+                    let first = clause_kind(body[0].op);
+                    assert!(matches!(first, Some(ClauseKind::Store(_))));
+                    assert!(body.iter().all(|b| clause_kind(b.op) == first));
+                    i += 1 + n;
+                } else {
+                    // Outside clauses no two adjacent stores share a kind.
+                    let next_kind = out.get(i + 1).and_then(|n| clause_kind(n.op));
+                    assert!(kind.is_none() || next_kind != kind);
+                    i += 1;
+                }
             }
         }
     }

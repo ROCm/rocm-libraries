@@ -28,19 +28,10 @@ pub struct Part {
 
 /// The VOPD form of `inst`, if it has one.
 pub fn part(inst: &MInst) -> Option<Part> {
-    let (code, y_only) = match inst.op {
-        Opc::VMulF32 => (3, false),
-        Opc::VAddF32 => (4, false),
-        Opc::VSubF32 => (5, false),
-        Opc::VSubrevF32 => (6, false),
-        Opc::VMovB32 => (8, false),
-        Opc::VMaxF32 => (10, false),
-        Opc::VMinF32 => (11, false),
-        Opc::VAddNcU32 => (16, true),
-        Opc::VLshlrevB32 => (17, true),
-        Opc::VAndB32 => (18, true),
-        _ => return None,
-    };
+    if inst.op == Opc::VFmaF32 {
+        return fmac_part(inst);
+    }
+    let (code, y_only) = super::gen_isa::vopd(inst.op)?;
     let [Opnd::P(Phys::V(dst), 1)] = inst.defs[..] else {
         return None;
     };
@@ -52,6 +43,42 @@ pub fn part(inst: &MInst) -> Option<Part> {
     };
     let src0_ok = matches!(src0, Opnd::P(Phys::V(_) | Phys::S(_), 1) | Opnd::Imm(_));
     (inst.mods == 0 && src0_ok).then_some(Part { code, y_only, dst, src0, vsrc1 })
+}
+
+/// `v_fma_f32 d, a, b, d` (allocation gives the addend the result's
+/// register where it dies) as `v_dual_fmac_f32 d, a, b`: the multiplication
+/// commutes, so either factor in a VGPR serves as `vsrc1`.
+fn fmac_part(inst: &MInst) -> Option<Part> {
+    let [Opnd::P(Phys::V(dst), 1)] = inst.defs[..] else {
+        return None;
+    };
+    let &[a, b, c] = &inst.uses[..] else {
+        return None;
+    };
+    if inst.mods != 0 || c != Opnd::P(Phys::V(dst), 1) {
+        return None;
+    }
+    let (src0, vsrc1) = match (a, b) {
+        (_, Opnd::P(Phys::V(r), 1)) => (a, r),
+        (Opnd::P(Phys::V(r), 1), _) => (b, r),
+        _ => return None,
+    };
+    let src0_ok = matches!(src0, Opnd::P(Phys::V(_) | Phys::S(_), 1) | Opnd::Imm(_));
+    src0_ok.then_some(Part { code: 0, y_only: false, dst, src0, vsrc1: Some(vsrc1) })
+}
+
+/// Each `v_fma_f32` still in the `fmac_part` form after pairing as the
+/// four-byte `v_fmac_f32`: unrolled bodies outgrow the instruction cache.
+pub fn shrink_fmac(f: &mut MFunc) {
+    for inst in f.blocks.iter_mut().flat_map(|b| b.insts.iter_mut()) {
+        if inst.op != Opc::VFmaF32 {
+            continue;
+        }
+        if let Some(Part { src0, vsrc1: Some(r), .. }) = fmac_part(inst) {
+            inst.op = Opc::VFmacF32;
+            inst.uses = [src0, Opnd::P(Phys::V(r), 1)].into();
+        }
+    }
 }
 
 fn literal(o: &Opnd) -> Option<u32> {
@@ -99,18 +126,37 @@ pub fn pair(first: &Part, second: &Part) -> Option<(Part, Part)> {
     }
 }
 
-/// The VOPD instruction that issues `x` and `y`.
+/// The VOPD instruction that issues `x` and `y`. An `fmac` half also lists
+/// its destination as a third source (it is read; encoding skips it) where
+/// the four operand slots allow. Where they do not, the read stays implicit:
+/// passes after pairing only place ALU delay hints, and wait counts were
+/// inserted from the unpaired instructions.
 pub fn dual(x: &Part, y: &Part) -> MInst {
-    let mut uses = Uses::new();
-    for p in [x, y] {
-        uses.push(p.src0);
+    let explicit = |p: &Part| -> Uses {
+        let mut s = Uses::new();
+        s.push(p.src0);
         if let Some(r) = p.vsrc1 {
-            uses.push(Opnd::P(Phys::V(r), 1));
+            s.push(Opnd::P(Phys::V(r), 1));
         }
+        s
+    };
+    let (mut xs, mut ys) = (explicit(x), explicit(y));
+    let reads = |p: &Part| usize::from(p.code == 0);
+    if xs.len() + ys.len() + reads(x) + reads(y) <= 4 {
+        for (s, p) in [(&mut xs, x), (&mut ys, y)] {
+            if p.code == 0 {
+                s.push(Opnd::P(Phys::V(p.dst), 1));
+            }
+        }
+    }
+    let nx = xs.len() as u32;
+    let mut uses = xs;
+    for &o in ys.iter() {
+        uses.push(o);
     }
     let defs = [Opnd::P(Phys::V(x.dst), 1), Opnd::P(Phys::V(y.dst), 1)];
     let mut inst = MInst::new(Opc::VDual, defs, uses).with_imm(x.code as i64 | (y.code as i64) << 8);
-    inst.mods = 1 + u32::from(x.vsrc1.is_some());
+    inst.mods = nx;
     inst
 }
 
@@ -193,6 +239,18 @@ pub fn form_pairs(f: &mut MFunc) {
     }
 }
 
+/// VOPD instructions in `f`, and their count with each weighted by eight
+/// per loop level.
+pub fn count_pairs(f: &MFunc) -> (u32, u64) {
+    let mut pairs = (0u32, 0u64);
+    for block in &f.blocks {
+        let n = block.insts.iter().filter(|i| i.op == Opc::VDual).count();
+        pairs.0 += n as u32;
+        pairs.1 += (n as u64) << (3 * block.loop_depth.min(6));
+    }
+    pairs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +298,18 @@ mod tests {
         assert!(part(&mov(0, Opnd::P(Phys::VccLo, 1))).is_none());
         assert!(part(&bin(Opc::VSubNcU32, 0, v(1), 2)).is_none());
         assert!(part(&MInst::new(Opc::VFmaF32, [v(0)], [v(1), v(2), v(3)])).is_none());
+        // An fma whose addend is its destination is fmac; a VGPR factor
+        // becomes vsrc1, and a negated or two-scalar fma has no form.
+        let fmac = part(&fma(0, v(1), v(2))).expect("fmac");
+        assert_eq!((fmac.code, fmac.src0, fmac.vsrc1), (0, v(1), Some(2)));
+        let swapped = part(&fma(0, v(1), s(2))).expect("fmac");
+        assert_eq!((swapped.src0, swapped.vsrc1), (s(2), Some(1)));
+        assert!(part(&fma(0, v(1), v(2)).with_mods(M_NEG0)).is_none());
+        assert!(part(&fma(0, s(1), Opnd::Imm(2))).is_none());
+    }
+
+    fn fma(dst: u16, a: Opnd, b: Opnd) -> MInst {
+        MInst::new(Opc::VFmaF32, [v(dst)], [a, b, v(dst)])
     }
 
     #[test]
@@ -271,7 +341,13 @@ mod tests {
     // Expected words from `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.
     #[test]
     fn encodings() {
-        let cases: [(MInst, MInst, &[u32]); 7] = [
+        let cases: [(MInst, MInst, &[u32]); 10] = [
+            // v_dual_fmac_f32 v0, v1, v2 :: v_dual_add_f32 v3, v4, v5
+            (fma(0, v(1), v(2)), bin(Opc::VAddF32, 3, v(4), 5), &[0xC808_0501, 0x0002_0B04]),
+            // v_dual_mul_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, s4, v5
+            (bin(Opc::VMulF32, 0, v(1), 2), fma(3, s(4), v(5)), &[0xC8C0_0501, 0x0002_0A04]),
+            // v_dual_fmac_f32 v10, 0x40490fdb, v12 :: v_dual_mov_b32 v13, v14
+            (fma(10, Opnd::Imm(0x4049_0fdb), v(12)), mov(13, v(14)), &[0xC810_18FF, 0x0A0C_010E, 0x4049_0FDB]),
             // v_dual_mul_f32 v0, v1, v2 :: v_dual_add_f32 v3, v4, v5
             (bin(Opc::VMulF32, 0, v(1), 2), bin(Opc::VAddF32, 3, v(4), 5), &[0xC8C8_0501, 0x0002_0B04]),
             // v_dual_mov_b32 v0, s1 :: v_dual_add_nc_u32 v3, 5, v4
@@ -307,6 +383,36 @@ mod tests {
 
     fn block(insts: Vec<MInst>) -> MFunc {
         MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new() }
+    }
+
+    // Expected words from `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.
+    #[test]
+    fn unpaired_fmac_takes_the_four_byte_form() {
+        let kept = [
+            MInst::new(Opc::VFmaF32, [v(0)], [v(1), v(2), v(3)]),
+            fma(0, v(1), v(2)).with_mods(M_NEG0),
+            fma(0, s(1), Opnd::Imm(2)),
+        ];
+        let shrunk: [(MInst, &[u32]); 4] = [
+            // v_fmac_f32_e32 v0, v1, v2
+            (fma(0, v(1), v(2)), &[0x5600_0501]),
+            // v_fmac_f32_e32 v3, s4, v5
+            (fma(3, v(5), s(4)), &[0x5606_0A04]),
+            // v_fmac_f32_e32 v10, 0x40490fdb, v12
+            (fma(10, Opnd::Imm(0x4049_0fdb), v(12)), &[0x5614_18FF, 0x4049_0FDB]),
+            // v_fmac_f32_e32 v7, 1.0, v8
+            (fma(7, Opnd::Imm(0x3f80_0000), v(8)), &[0x560E_10F2]),
+        ];
+        let mut f = block(kept.iter().chain(shrunk.iter().map(|(i, _)| i)).cloned().collect());
+        shrink_fmac(&mut f);
+        let (out_kept, out_shrunk) = f.blocks[0].insts.split_at(kept.len());
+        for (before, after) in kept.iter().zip(out_kept) {
+            assert_eq!((after.op, &after.uses[..], after.mods), (before.op, &before.uses[..], before.mods));
+        }
+        for ((before, expected), after) in shrunk.iter().zip(out_shrunk) {
+            assert_eq!(after.op, Opc::VFmacF32, "{before:?}");
+            assert_eq!(words(after), *expected, "{before:?}");
+        }
     }
 
     #[test]
@@ -380,14 +486,30 @@ mod tests {
             let exec = *regs.get(&126).unwrap_or(&7);
             srcs.iter().fold(mix(name(op), exec), |h, o| mix(h, read(regs, o)))
         };
+        // a * b + c, with the factors in either order.
+        let fma = |regs: &std::collections::BTreeMap<u32, u64>, a: &Opnd, b: &Opnd, c: &Opnd| -> u64 {
+            let exec = *regs.get(&126).unwrap_or(&7);
+            let (x, y) = (read(regs, a), read(regs, b));
+            mix(mix(mix(name(Opc::VFmaF32), exec), x.min(y) ^ x.max(y).rotate_left(7)), read(regs, c))
+        };
         for inst in insts {
             if inst.op == Opc::VDual {
                 let (nx, cx, cy) = (inst.mods as usize, inst.imm as u8, (inst.imm >> 8) as u8);
                 let op_of = |c: u8| *OPS.iter().find(|&&op| part_code(op) == c).expect("component");
-                let x = valu(&regs, op_of(cx), &inst.uses[..nx]);
-                let y = valu(&regs, op_of(cy), &inst.uses[nx..]);
+                let half = |c: u8, srcs: &[Opnd], dst: &Opnd| {
+                    if c == 0 {
+                        fma(&regs, &srcs[0], &srcs[1], dst)
+                    } else {
+                        valu(&regs, op_of(c), srcs)
+                    }
+                };
+                let x = half(cx, &inst.uses[..nx], &inst.defs[0]);
+                let y = half(cy, &inst.uses[nx..], &inst.defs[1]);
                 regs.insert(keys(&inst.defs[0]).start, x);
                 regs.insert(keys(&inst.defs[1]).start, y);
+            } else if inst.op == Opc::VFmaF32 {
+                let value = fma(&regs, &inst.uses[0], &inst.uses[1], &inst.uses[2]);
+                regs.insert(keys(&inst.defs[0]).start, value);
             } else if OPS.contains(&inst.op) || inst.op == Opc::VMulLoU32 {
                 let value = valu(&regs, inst.op, &inst.uses);
                 regs.insert(keys(&inst.defs[0]).start, value);
@@ -434,6 +556,12 @@ mod tests {
                     3 if next(2) == 0 => MInst::new(Opc::SAndSaveexecB32, [s(next(3) as u16)], [s(next(3) as u16)]),
                     3 => MInst::new(Opc::SMovB32, [Opnd::P(Phys::ExecLo, 1)], [s(next(3) as u16)]),
                     4 => MInst::new(Opc::SAddU32, [s(next(3) as u16)], [s(next(3) as u16), Opnd::Imm(1)]),
+                    5 if next(2) == 0 => {
+                        // An fma in the fmac form, or with another addend.
+                        let (d, a, b) = (next(12) as u16, src0(&mut next), src0(&mut next));
+                        let c = if next(3) == 0 { vr(&mut next) } else { v(d) };
+                        MInst::new(Opc::VFmaF32, [v(d)], [a, b, c])
+                    }
                     _ => {
                         let op = OPS[next(OPS.len() as u32) as usize];
                         if op == Opc::VMovB32 {

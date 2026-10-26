@@ -38,6 +38,8 @@ fn full_range(ty: &Type) -> Option<Range> {
         Type::Scalar(Scalar::I32) => Some(Range::new(I32_MIN, I32_MAX)),
         Type::Scalar(Scalar::I64) => Some(Range::new(i64::MIN, i64::MAX)),
         Type::Scalar(Scalar::I1) => Some(Range::new(0, 1)),
+        Type::Scalar(Scalar::I16) => Some(Range::new(i16::MIN as i64, i16::MAX as i64)),
+        Type::Scalar(Scalar::I8) => Some(Range::new(i8::MIN as i64, i8::MAX as i64)),
         _ => None,
     }
 }
@@ -199,7 +201,9 @@ fn is_int(ty: &Type) -> bool {
 fn wrap(ty: &Type, value: i128) -> i64 {
     match ty {
         Type::Scalar(Scalar::I32) => value as i32 as i64,
+        Type::Scalar(Scalar::I16) => value as i16 as i64,
         Type::Scalar(Scalar::I1) => (value & 1) as i64,
+        Type::Scalar(Scalar::I8) => value as i8 as i64,
         _ => value as i64,
     }
 }
@@ -253,6 +257,21 @@ pub struct Workspace {
 /// An LDS allocation and a byte range `[lo, hi)` of it.
 type LdsExtent = (ValueId, i64, i64);
 
+/// Most emptied op vectors kept for reuse; `take_buffer` scans them all.
+const MAX_SPARE: usize = 64;
+
+/// Keeps an emptied vector for reuse; when `spare` is full, in place of the
+/// smallest one if it is larger.
+fn keep_buffer(spare: &mut Vec<Vec<Op>>, buffer: Vec<Op>) {
+    if spare.len() < MAX_SPARE {
+        spare.push(buffer);
+    } else if let Some(i) = (0..spare.len()).min_by_key(|&i| spare[i].capacity()) {
+        if spare[i].capacity() < buffer.capacity() {
+            spare[i] = buffer;
+        }
+    }
+}
+
 /// An empty vector with room for `len` ops: the smallest of `spare` that
 /// fits, else a new one.
 fn take_buffer(spare: &mut Vec<Vec<Op>>, len: usize) -> Vec<Op> {
@@ -295,6 +314,48 @@ struct Simplifier<'k> {
     rewrote: bool,
     /// Whether a non-constant op has been visited at depth 1.
     past_constants: bool,
+    /// `body_clobbers` of the loops scanned so far, by induction variable.
+    loop_clobbers: FxHashMap<ValueId, bool>,
+    /// Nesting of `emit` calls inside the simplification of one op.
+    rewrite_depth: u32,
+    /// The first error met while simplifying an emitted op.
+    failure: Option<CompileError>,
+    /// What the driver does after `visit` left an op with regions or a
+    /// known branch; `Done` otherwise.
+    step: Step,
+}
+
+/// Deepest nesting of rewrites while simplifying one op. Every rule's output
+/// is simpler than its input, so real chains stay a few levels deep; this
+/// bounds the stack should a rule pair ever cycle.
+const MAX_REWRITE_DEPTH: u32 = 64;
+
+/// A region being simplified: the ops still to visit and the output so far.
+struct OpenRegion {
+    input: std::collections::VecDeque<Op>,
+    out: Vec<Op>,
+    mark: usize,
+}
+
+/// What the sweep does next with a visited op.
+enum Step {
+    /// The op is in the output, or replaced.
+    Done,
+    /// Visit this region's ops in place of the op (a statically known branch).
+    Splice(Region),
+    /// Simplify these regions of the op in order, then finish it.
+    Enter(Op, Vec<Region>, Finish),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Finish {
+    Push,
+    /// Push it with full ranges for its results.
+    FullRanges,
+}
+
+fn malformed(message: impl Into<String>) -> CompileError {
+    CompileError::new("ROCKE_DIRECT_MALFORMED", message)
 }
 
 impl<'k> Simplifier<'k> {
@@ -339,10 +400,11 @@ impl<'k> Simplifier<'k> {
         let value = self.kernel.new_value("%k", ty.clone());
         self.sync_len();
         self.facts.konst[value.0 as usize] = Some(konst);
-        if let Konst::Int(v) = konst {
+        if let (Konst::Int(v), false) = (konst, ty == Type::Scalar(Scalar::F64)) {
             self.facts.range[value.0 as usize] = Some(Range::new(v, v));
         }
         let (ity, attr) = match (&ty, konst) {
+            (Type::Scalar(Scalar::F64), Konst::Int(v)) => ("f64", Attr::Float(f64::from_bits(v as u64))),
             (Type::Scalar(Scalar::I64), Konst::Int(v)) => ("i64", Attr::Int(v)),
             (Type::Scalar(Scalar::I1), Konst::Int(v)) => ("i1", Attr::Int(v)),
             (_, Konst::Int(v)) => ("i32", Attr::Int(v)),
@@ -369,6 +431,19 @@ impl<'k> Simplifier<'k> {
         self.constant(ty.clone(), Konst::Int(value))
     }
 
+    /// Whether a commutative op's operands `(a, b)` must swap to be in the
+    /// one canonical order every rule assumes: any constant (integer or
+    /// float) second, otherwise the lower value first. A strict order, so
+    /// an op put in order is never swapped back.
+    fn out_of_order(&self, a: ValueId, b: ValueId) -> bool {
+        let konst = |v: ValueId| self.facts.konst.get(v.0 as usize).is_some_and(Option::is_some);
+        let (a_const, b_const) = (konst(a), konst(b));
+        (a_const && !b_const) || (a_const == b_const && a > b)
+    }
+
+    /// Appends a new op and simplifies it in turn. After the first failure
+    /// (a rewrite chain nested deeper than `MAX_REWRITE_DEPTH`), nothing more
+    /// is visited and `visit` reports the failure.
     fn emit(
         &mut self,
         kind: OpKind,
@@ -380,9 +455,26 @@ impl<'k> Simplifier<'k> {
         self.rewrote = true;
         let result = self.kernel.new_value("%t", ty);
         self.sync_len();
+        if self.failure.is_some() {
+            return result;
+        }
+        if self.rewrite_depth >= MAX_REWRITE_DEPTH {
+            self.failure = Some(CompileError::new(
+                "ROCKE_DIRECT_INTERNAL",
+                format!("simplification rewrites nest deeper than {MAX_REWRITE_DEPTH} at {kind:?}"),
+            ));
+            return result;
+        }
         let op = mk_op(kind, [result], operands, attrs);
-        self.visit(op, out)
-            .expect("synthesized ops are always valid");
+        self.rewrite_depth += 1;
+        let visited = self.visit(op, out);
+        self.rewrite_depth -= 1;
+        if let Err(error) = visited {
+            self.failure.get_or_insert(error);
+        } else if !matches!(self.step, Step::Done) {
+            self.step = Step::Done;
+            self.failure.get_or_insert(CompileError::new("ROCKE_DIRECT_INTERNAL", "a synthesized op has regions"));
+        }
         self.resolve(result)
     }
 
@@ -466,20 +558,128 @@ impl<'k> Simplifier<'k> {
         self.lds_writes.clear();
     }
 
-    fn region(&mut self, region: Region) -> Result<Region, CompileError> {
-        let mark = self.cse.mark();
+    fn open(&mut self, mut region: Region) -> OpenRegion {
+        let ops = std::mem::take(&mut region.ops);
         self.depth += 1;
-        let mut ops = region.ops;
-        let mut out = take_buffer(&mut self.spare, ops.len());
-        for op in ops.drain(..) {
-            self.visit(op, &mut out)?;
-        }
-        self.spare.push(ops);
-        self.depth -= 1;
-        self.cse.truncate(mark);
-        Ok(Region { ops: out })
+        OpenRegion { out: take_buffer(&mut self.spare, ops.len()), input: ops.into(), mark: self.cse.mark() }
     }
 
+    fn close(&mut self, open: OpenRegion) -> Region {
+        keep_buffer(&mut self.spare, open.input.into());
+        self.depth -= 1;
+        self.cse.truncate(open.mark);
+        Region { ops: open.out }
+    }
+
+    /// Simplifies `body` in one forward pass in program order, nesting
+    /// through explicit stacks rather than recursion.
+    fn region(&mut self, body: Region) -> Result<Region, CompileError> {
+        let mut regions = vec![self.open(body)];
+        let mut owners: Vec<(Op, std::vec::IntoIter<Region>, Finish)> = Vec::new();
+        loop {
+            let top = regions.last_mut().expect("the body stays open until the end");
+            while let Some(op) = top.input.pop_front() {
+                self.visit(op, &mut top.out)?;
+                if self.failure.is_some() || !matches!(self.step, Step::Done) {
+                    break;
+                }
+            }
+            if let Some(error) = self.failure.take() {
+                return Err(error);
+            }
+            let step = std::mem::replace(&mut self.step, Step::Done);
+            if matches!(step, Step::Done) {
+                let region = self.close(regions.pop().expect("an open region"));
+                let Some((mut op, mut rest, finish)) = owners.pop() else {
+                    return Ok(region);
+                };
+                op.regions.push(region);
+                if let Some(next) = rest.next() {
+                    owners.push((op, rest, finish));
+                    let open = self.open(next);
+                    regions.push(open);
+                    continue;
+                }
+                let out = &mut regions.last_mut().expect("the owner's region is open").out;
+                self.complete(op, finish, out);
+                continue;
+            }
+            match step {
+                Step::Done => {}
+                Step::Splice(mut region) => {
+                    let input = &mut regions.last_mut().expect("an open region").input;
+                    for inner in std::mem::take(&mut region.ops).into_iter().rev() {
+                        input.push_front(inner);
+                    }
+                }
+                Step::Enter(op, inner, finish) => {
+                    let mut rest = inner.into_iter();
+                    match rest.next() {
+                        Some(first) => {
+                            owners.push((op, rest, finish));
+                            let open = self.open(first);
+                            regions.push(open);
+                        }
+                        None => {
+                            let out = &mut regions.last_mut().expect("an open region").out;
+                            self.complete(op, finish, out);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether the body of the loop with induction variable `iv` may change
+    /// what an LDS load reads, looking inside `scf.for` and `scf.if` but not
+    /// inside other ops. The scan stops at the first such op and records the
+    /// answer for every loop it went into: those it left found none, those
+    /// still open contain this one. Loops are visited outside in, so no op
+    /// is scanned twice in a sweep.
+    fn body_clobbers(&mut self, iv: ValueId, body: &Region) -> bool {
+        if let Some(&known) = self.loop_clobbers.get(&iv) {
+            return known;
+        }
+        let mut stack: Vec<(std::slice::Iter<Op>, Option<ValueId>)> = vec![(body.ops.iter(), Some(iv))];
+        while let Some((ops, _)) = stack.last_mut() {
+            let Some(op) = ops.next() else {
+                if let Some((_, Some(done))) = stack.pop() {
+                    self.loop_clobbers.insert(done, false);
+                }
+                continue;
+            };
+            match op.kind {
+                OpKind::For | OpKind::If | OpKind::IfElse => {
+                    let inner = (op.kind == OpKind::For).then(|| op.block_args.first().copied()).flatten();
+                    stack.extend(op.regions.iter().map(|r| (r.ops.iter(), inner)));
+                }
+                kind if may_clobber_lds(kind) => {
+                    for (_, open) in &stack {
+                        if let Some(open) = open {
+                            self.loop_clobbers.insert(*open, true);
+                        }
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Completes an op whose regions are all simplified.
+    fn complete(&mut self, op: Op, finish: Finish, out: &mut Vec<Op>) {
+        if finish == Finish::FullRanges {
+            for &result in &op.results {
+                let ty = self.ty(result);
+                self.facts.range[result.0 as usize] = full_range(&ty);
+            }
+        }
+        out.push(op);
+    }
+
+    /// Simplifies `op` into `out`, or leaves in `self.step` what the driver
+    /// does with it.
     fn visit(&mut self, mut op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
         self.sync_len();
         for operand in op.operands.iter_mut() {
@@ -499,6 +699,10 @@ impl<'k> Simplifier<'k> {
                     (Some(Attr::Int(v)), Type::Scalar(Scalar::F32)) => Konst::F32((*v as f32).to_bits()),
                     (Some(Attr::Float(v)), Type::Scalar(Scalar::F32)) => Konst::F32((*v as f32).to_bits()),
                     (Some(Attr::Int(v)), _) if is_int(&ty) => Konst::Int(wrap(&ty, *v as i128)),
+                    (Some(Attr::Int(v)), Type::Scalar(Scalar::I16 | Scalar::I8)) => Konst::Int(wrap(&ty, *v as i128)),
+                    // An f64 constant is carried as its bit pattern.
+                    (Some(Attr::Float(v)), Type::Scalar(Scalar::F64)) => Konst::Int(v.to_bits() as i64),
+                    (Some(Attr::Int(v)), Type::Scalar(Scalar::F64)) => Konst::Int((*v as f64).to_bits() as i64),
                     (Some(Attr::Float(v)), _) if is_int(&ty) => Konst::Int(wrap(&ty, *v as i128)),
                     _ => {
                         return Err(CompileError::new(
@@ -512,7 +716,7 @@ impl<'k> Simplifier<'k> {
                 Ok(())
             }
             OpKind::For => {
-                let mut body = op.regions.pop().expect("scf.for has a body");
+                let body = op.regions.pop().ok_or_else(|| malformed("scf.for without a body"))?;
                 let iv = op.block_args[0];
                 if let (Some(lb), Some(ub)) = (self.range(op.operands[0]), self.range(op.operands[1])) {
                     let step = self.int(op.operands[2]).unwrap_or(0);
@@ -521,12 +725,10 @@ impl<'k> Simplifier<'k> {
                     }
                 }
                 // Through the back edge, the body's LDS writes precede it.
-                if self.lds_cse && clobbers_lds(&body) {
+                if self.lds_cse && self.body_clobbers(iv, &body) {
                     self.clobber_lds();
                 }
-                body = self.region(body)?;
-                op.regions.push(body);
-                out.push(op);
+                self.step = Step::Enter(op, vec![body], Finish::Push);
                 Ok(())
             }
             OpKind::If | OpKind::IfElse => {
@@ -534,39 +736,26 @@ impl<'k> Simplifier<'k> {
                 if let Some(c) = self.int(cond) {
                     // Statically known branch: splice the taken region in place.
                     let taken = if c != 0 {
-                        Some(op.regions.swap_remove(0))
+                        op.regions.first().is_some().then(|| op.regions.swap_remove(0))
                     } else if op.kind == OpKind::IfElse {
-                        Some(op.regions.pop().expect("if_else has two regions"))
+                        op.regions.pop()
                     } else {
                         None
                     };
                     self.changed = true;
                     self.rewrote = true;
-                    if let Some(region) = taken {
-                        for inner in region.ops {
-                            self.visit(inner, out)?;
-                        }
-                    }
+                    self.step = taken.map_or(Step::Done, Step::Splice);
                     return Ok(());
                 }
                 let regions = std::mem::take(&mut op.regions);
-                for region in regions {
-                    let simplified = self.region(region)?;
-                    op.regions.push(simplified);
-                }
-                out.push(op);
+                self.step = Step::Enter(op, regions, Finish::Push);
                 Ok(())
             }
             kind if kind.is_pure() && op.results.len() == 1 => {
                 let result = op.results[0];
-                if is_commutative(kind) && op.operands.len() == 2 {
-                    let (a, b) = (op.operands[0], op.operands[1]);
-                    let a_const = self.facts.konst[a.0 as usize].is_some();
-                    let b_const = self.facts.konst[b.0 as usize].is_some();
-                    if (a_const && !b_const) || (a_const == b_const && a > b) {
-                        op.operands.swap(0, 1);
-                        self.rewrote = true;
-                    }
+                if is_commutative(kind) && op.operands.len() == 2 && self.out_of_order(op.operands[0], op.operands[1]) {
+                    op.operands.swap(0, 1);
+                    self.rewrote = true;
                 }
                 if let Some(value) = self.simplify(&op, out)? {
                     self.rewrote = true;
@@ -610,9 +799,10 @@ impl<'k> Simplifier<'k> {
                         _ => self.clobber_lds(),
                     }
                 }
-                for region in std::mem::take(&mut op.regions) {
-                    let simplified = self.region(region)?;
-                    op.regions.push(simplified);
+                if !op.regions.is_empty() {
+                    let regions = std::mem::take(&mut op.regions);
+                    self.step = Step::Enter(op, regions, Finish::FullRanges);
+                    return Ok(());
                 }
                 for &result in &op.results {
                     let ty = self.ty(result);
@@ -685,8 +875,8 @@ impl<'k> Simplifier<'k> {
                 }
             }
             OpKind::Lshr => {
-                let k = self.int(op.operands[1])?;
-                if ty != Type::Scalar(Scalar::I32) || !(0..32).contains(&k) {
+                let k = self.int(op.operands[1])? & 31;
+                if ty != Type::Scalar(Scalar::I32) {
                     return None;
                 }
                 let a = r(0)?;
@@ -700,11 +890,7 @@ impl<'k> Simplifier<'k> {
             }
             OpKind::Shl => {
                 let a = wide(r(0)?);
-                let k = self.int(op.operands[1])?;
-                let bits = if ty == Type::Scalar(Scalar::I64) { 64 } else { 32 };
-                if !(0..bits).contains(&k) {
-                    return None;
-                }
+                let k = self.int(op.operands[1])? & (shift_width(&ty) - 1);
                 let (lo, hi) = (a.0 << k, a.1 << k);
                 if op.attr(SHL_NSW).is_some() {
                     return clamp_range(&ty, lo, hi);
@@ -719,10 +905,7 @@ impl<'k> Simplifier<'k> {
             }
             OpKind::Ashr => {
                 let a = r(0)?;
-                let k = self.int(op.operands[1])?;
-                if !(0..64).contains(&k) {
-                    return None;
-                }
+                let k = self.int(op.operands[1])? & (shift_width(&ty) - 1);
                 Some(Range::new(a.lo >> k, a.hi >> k))
             }
             OpKind::UmulHi => {
@@ -751,6 +934,16 @@ impl<'k> Simplifier<'k> {
                 let (a, b) = (r(1)?, r(2)?);
                 Some(Range::new(a.lo.min(b.lo), a.hi.max(b.hi)))
             }
+            OpKind::Zext if self.ty(op.operands[0]) == Type::Scalar(Scalar::I16) => match r(0) {
+                Some(a) if a.nonneg() => Some(a),
+                _ => Some(Range::new(0, u16::MAX as i64)),
+            },
+            OpKind::Trunc if ty == Type::Scalar(Scalar::I16) => r(0).filter(|a| a.lo >= i16::MIN as i64 && a.hi <= i16::MAX as i64),
+            OpKind::Zext if matches!(self.ty(op.operands[0]), Type::Scalar(s) if s.is_byte()) => match r(0) {
+                Some(a) if a.nonneg() => Some(a),
+                _ => Some(Range::new(0, u8::MAX as i64)),
+            },
+            OpKind::Trunc if ty == Type::Scalar(Scalar::I8) => r(0).filter(|a| a.lo >= i8::MIN as i64 && a.hi <= i8::MAX as i64),
             OpKind::Zext => {
                 let a = r(0)?;
                 if a.nonneg() {
@@ -771,6 +964,7 @@ impl<'k> Simplifier<'k> {
                 }
             }
             OpKind::Cmp | OpKind::Fcmp => Some(Range::new(0, 1)),
+            OpKind::LaneId => Some(Range::new(0, 31)),
             _ => None,
         }
     }
@@ -781,6 +975,9 @@ impl<'k> Simplifier<'k> {
         let ty = self.ty(result);
         let operands = &op.operands;
         let c = |s: &Self, i: usize| s.int(operands[i]);
+        if op.kind == OpKind::Tanh && ty == Type::Scalar(Scalar::F32) {
+            return Ok(Some(self.tanh(operands[0], out)));
+        }
         if self.nosimplify {
             if op.kind == OpKind::Mod && ty == Type::Scalar(Scalar::I32) {
                 let (a, b) = (operands[0], operands[1]);
@@ -812,7 +1009,7 @@ impl<'k> Simplifier<'k> {
                         if ca == Some(0) {
                             return Ok(Some(b));
                         }
-                        if ca.is_some() && cb.is_none() {
+                        if self.out_of_order(a, b) {
                             return Ok(Some(self.emit(OpKind::Add, ty, [b, a], op.attrs.clone(), out)));
                         }
                         let plain_nsw = op.attr("wrap").is_none();
@@ -863,7 +1060,7 @@ impl<'k> Simplifier<'k> {
                         }
                     }
                     OpKind::Mul => {
-                        if ca.is_some() && cb.is_none() {
+                        if self.out_of_order(a, b) {
                             return Ok(Some(self.emit(OpKind::Mul, ty, [b, a], op.attrs.clone(), out)));
                         }
                         let nsw = op.attr("wrap").is_none();
@@ -893,8 +1090,17 @@ impl<'k> Simplifier<'k> {
                             _ => {}
                         }
                     }
-                    OpKind::Shl if cb == Some(0) => return Ok(Some(a)),
-                    OpKind::Lshr | OpKind::Ashr if cb == Some(0) => return Ok(Some(a)),
+                    OpKind::Shl | OpKind::Lshr | OpKind::Ashr if cb.is_some() => {
+                        let k = cb.unwrap_or(0);
+                        let amount = k & (shift_width(&ty) - 1);
+                        if amount == 0 {
+                            return Ok(Some(a));
+                        }
+                        if amount != k {
+                            let kv = self.int_const(&ty, amount);
+                            return Ok(Some(self.emit(op.kind, ty, [a, kv], op.attrs.clone(), out)));
+                        }
+                    }
                     OpKind::And => {
                         if a == b {
                             return Ok(Some(a));
@@ -981,6 +1187,31 @@ impl<'k> Simplifier<'k> {
                 let (a, b) = (operands[0], operands[1]);
                 let pred = op.str_attr("pred").unwrap_or("lt");
                 let bool_ty = Type::Scalar(Scalar::I1);
+                // Values zero- (sign-) extended from i32 compare as the i32
+                // values do, unsigned (signed).
+                let extensions = match (self.def_of(a), self.def_of(b)) {
+                    (Some(da), Some(db)) if da.kind == db.kind && matches!(da.kind, OpKind::Zext | OpKind::Sext) => {
+                        Some((da.kind, da.operand(0), db.operand(0)))
+                    }
+                    _ => None,
+                };
+                if let Some((kind, na, nb)) = extensions {
+                    let i32t = Type::Scalar(Scalar::I32);
+                    if self.ty(na) == i32t && self.ty(nb) == i32t {
+                        let same = ["lt", "le", "gt", "ge", "eq", "ne", "ult"].into_iter().find(|&p| p == pred);
+                        let narrow = match (kind, pred) {
+                            (OpKind::Sext, _) => same.map(|p| (p, na, nb)),
+                            (OpKind::Zext, "eq" | "ne" | "ult") => same.map(|p| (p, na, nb)),
+                            (OpKind::Zext, "lt") => Some(("ult", na, nb)),
+                            (OpKind::Zext, "gt") => Some(("ult", nb, na)),
+                            _ => None,
+                        };
+                        if let Some((p, x, y)) = narrow {
+                            let attrs = vec![(Text::from("pred"), Attr::Str(p.into()))];
+                            return Ok(Some(self.emit(OpKind::Cmp, bool_ty, [x, y], attrs, out)));
+                        }
+                    }
+                }
                 if let (Some(ra), Some(rb)) = (self.range(a), self.range(b)) {
                     let known = match pred {
                         "lt" => decide(ra.hi < rb.lo, ra.lo >= rb.hi),
@@ -1014,6 +1245,8 @@ impl<'k> Simplifier<'k> {
                     let src_ty = self.ty(src);
                     let value = match (op.kind, &src_ty) {
                         (OpKind::Zext, Type::Scalar(Scalar::I32)) => v as u32 as i64,
+                        (OpKind::Zext, Type::Scalar(Scalar::I16)) => v as u16 as i64,
+                        (OpKind::Zext, Type::Scalar(Scalar::I8)) => v as u8 as i64,
                         (OpKind::Zext, Type::Scalar(Scalar::I1)) => v & 1,
                         (OpKind::Sext, Type::Scalar(Scalar::I1)) => -(v & 1),
                         _ => v,
@@ -1060,6 +1293,12 @@ impl<'k> Simplifier<'k> {
                 }
                 Ok(None)
             }
+            // fptrunc(fpext(x)) back to x's type is x, NaN payloads included,
+            // as LLVM folds it; converting would quiet a signaling NaN.
+            OpKind::CastF32To | OpKind::TruncF32ToBf16 => Ok(self
+                .def_of(operands[0])
+                .filter(|d| d.kind == OpKind::CastToF32 && *self.kernel.ty(d.operand(0)) == ty)
+                .map(|d| d.operand(0))),
             _ => Ok(None),
         }
     }
@@ -1093,6 +1332,47 @@ impl<'k> Simplifier<'k> {
 
     fn def_of(&self, value: ValueId) -> Option<Def> {
         self.defs.get(value.0 as usize).copied().flatten()
+    }
+
+    /// f32 `math.tanh` composed exactly as the LLVM lowering composes it
+    /// (OCML's tanhF): below |x| = 0.625 a minimax polynomial, else
+    /// 1 - 2 / (exp2(2 log2(e) |x|) + 1) with a fast reciprocal; then x's sign.
+    fn tanh(&mut self, x: ValueId, out: &mut Vec<Op>) -> ValueId {
+        let (f32t, i32t) = (Type::Scalar(Scalar::F32), Type::Scalar(Scalar::I32));
+        let target = |t: &'static str| vec![(Text::from("target"), Attr::Str(t.into()))];
+        let float = |s: &mut Self, v: f64| s.constant(Type::Scalar(Scalar::F32), Konst::F32((v as f32).to_bits()));
+        // `0x1.<frac>p<e>` with a 24-bit fraction (all exact in f32).
+        let hex = |frac: u32, e: i32| (1.0 + frac as f64 / (1u64 << 24) as f64) * 2f64.powi(e);
+        let one = float(self, 1.0);
+        let neg_two = float(self, -2.0);
+        let two_log2e = float(self, 2.0 * 1.4426950408889634);
+        let cutoff = float(self, 0.625);
+        let coeffs = [-hex(0x758e7a, -8), hex(0x521192, -6), -hex(0xb8389c, -5), hex(0x110704, -3), -hex(0x555532, -2)];
+        let c: Vec<ValueId> = coeffs.iter().map(|&v| float(self, v)).collect();
+        let sign_mask = self.int_const(&i32t, i32::MIN as i64);
+        let abs_mask = self.int_const(&i32t, i32::MAX as i64);
+        let x_bits = self.emit(OpKind::Bitcast, i32t.clone(), [x], target("i32"), out);
+        let sign = self.emit(OpKind::And, i32t.clone(), [x_bits, sign_mask], [], out);
+        let abs_bits = self.emit(OpKind::And, i32t.clone(), [x_bits, abs_mask], [], out);
+        let abs_x = self.emit(OpKind::Bitcast, f32t.clone(), [abs_bits], target("f32"), out);
+        let y2 = self.emit(OpKind::Fmul, f32t.clone(), [abs_x, abs_x], [], out);
+        let mut p = self.emit(OpKind::Fma, f32t.clone(), [y2, c[0], c[1]], [], out);
+        for &k in &c[2..] {
+            p = self.emit(OpKind::Fma, f32t.clone(), [y2, p, k], [], out);
+        }
+        let yp = self.emit(OpKind::Fmul, f32t.clone(), [abs_x, p], [], out);
+        let poly = self.emit(OpKind::Fma, f32t.clone(), [y2, yp, abs_x], [], out);
+        let scaled = self.emit(OpKind::Fmul, f32t.clone(), [two_log2e, abs_x], [], out);
+        let e = self.emit(OpKind::Exp2, f32t.clone(), [scaled], [], out);
+        let den = self.emit(OpKind::Fadd, f32t.clone(), [e, one], [], out);
+        let inv = self.emit(OpKind::RcpFast, f32t.clone(), [den], [], out);
+        let far = self.emit(OpKind::Fma, f32t.clone(), [neg_two, inv, one], [], out);
+        let pred = vec![(Text::from("pred"), Attr::Str("olt".into()))];
+        let small = self.emit(OpKind::Fcmp, Type::Scalar(Scalar::I1), [abs_x, cutoff], pred, out);
+        let mag = self.emit(OpKind::Select, f32t.clone(), [small, poly, far], [], out);
+        let mag_bits = self.emit(OpKind::Bitcast, i32t.clone(), [mag], target("i32"), out);
+        let bits = self.emit(OpKind::Or, i32t, [mag_bits, sign], [], out);
+        self.emit(OpKind::Bitcast, f32t, [bits], target("f32"), out)
     }
 
     fn div_by_const(&mut self, x: ValueId, d: i64, ty: &Type, out: &mut Vec<Op>) -> Result<Option<ValueId>, CompileError> {
@@ -1183,14 +1463,25 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::GlobalAtomicAddF32
                 | OpKind::GAtomicAddF32
                 | OpKind::BufferStoreVecF16
+                | OpKind::SmemLoadV4
+                | OpKind::SetPrio
+                | OpKind::WaitCnt
+                | OpKind::SchedBarrier
+                | OpKind::SchedGroupBarrier
+                | OpKind::DppXor
+                | OpKind::QuadPerm
+                | OpKind::MovDpp8
+                | OpKind::BufferLoadScalar
+                | OpKind::BufferStoreScalar
+                | OpKind::GlobalAtomicAdd
+                | OpKind::GAtomicAdd
+                | OpKind::Permlanex16
+                | OpKind::Permlane16
+                | OpKind::Permlane64
+                | OpKind::DsBpermute
+                | OpKind::WaveAny
+                | OpKind::WaveAll
         ))
-}
-
-fn clobbers_lds(region: &Region) -> bool {
-    region.ops.iter().any(|op| match op.kind {
-        OpKind::For | OpKind::If | OpKind::IfElse => op.regions.iter().any(clobbers_lds),
-        kind => may_clobber_lds(kind),
-    })
 }
 
 fn is_commutative(kind: OpKind) -> bool {
@@ -1221,6 +1512,18 @@ fn decide(is_true: bool, is_false: bool) -> Option<bool> {
     }
 }
 
+/// The width a shift amount counts modulo: LLVM leaves a shift by the width
+/// or more undefined, and gfx11 shifts use the amount's low bits.
+fn shift_width(ty: &Type) -> i64 {
+    match ty {
+        Type::Scalar(Scalar::I64) => 64,
+        Type::Scalar(Scalar::I16) => 16,
+        Type::Scalar(Scalar::I8) => 8,
+        Type::Scalar(Scalar::I1) => 1,
+        _ => 32,
+    }
+}
+
 fn fold_binary(kind: OpKind, ty: &Type, x: i64, y: i64) -> Option<i64> {
     let bits = match ty {
         Type::Scalar(Scalar::I64) => 64,
@@ -1244,9 +1547,10 @@ fn fold_binary(kind: OpKind, ty: &Type, x: i64, y: i64) -> Option<i64> {
         OpKind::Xor => (x ^ y) as i128,
         OpKind::Smin => xw.min(yw),
         OpKind::Smax => xw.max(yw),
-        OpKind::Shl if (0..bits).contains(&y) => xw << y,
-        OpKind::Lshr if (0..bits).contains(&y) => (unsigned(x) >> y) as i128,
-        OpKind::Ashr if (0..bits).contains(&y) => xw >> y,
+        // A shift amount counts modulo the width, as the hardware takes it.
+        OpKind::Shl => xw << (y & (bits - 1)),
+        OpKind::Lshr => (unsigned(x) >> (y & (bits - 1))) as i128,
+        OpKind::Ashr => xw >> (y & (bits - 1)),
         OpKind::Div if y != 0 => xw / yw,
         OpKind::Mod if y != 0 => xw % yw,
         OpKind::UmulHi if bits == 32 => ((unsigned(x) * unsigned(y)) >> 32) as i128,
@@ -1322,6 +1626,7 @@ impl<'k> Simplifier<'k> {
         let mut lds_writes = std::mem::take(&mut ws.lds_writes);
         lds_writes.clear();
         let nosimplify = super::debug_flag("nosimplify");
+        let lds_cse = !nosimplify && !ws.keep_lds_loads && !super::debug_flag("noldscse");
         let mut s = Self {
             kernel,
             facts,
@@ -1332,7 +1637,7 @@ impl<'k> Simplifier<'k> {
             changed: false,
             defs,
             nosimplify,
-            lds_cse: !nosimplify && !ws.keep_lds_loads && !super::debug_flag("noldscse"),
+            lds_cse,
             lds_epoch: 0,
             lds_writes,
             lds_since: std::mem::take(&mut ws.lds_since),
@@ -1342,6 +1647,10 @@ impl<'k> Simplifier<'k> {
             nested_constants: Vec::new(),
             rewrote: false,
             past_constants: false,
+            loop_clobbers: FxHashMap::default(),
+            rewrite_depth: 0,
+            failure: None,
+            step: Step::Done,
         };
         s.sync_len();
         for param in &s.kernel.params {
@@ -1384,13 +1693,13 @@ pub struct Sweep {
 pub fn sweep(kernel: &mut Kernel, ws: &mut Workspace) -> Result<Sweep, CompileError> {
     let mut simplifier = Simplifier::new(kernel, ws);
     let body = std::mem::take(&mut simplifier.kernel.body);
-    let mut rest = simplifier.region(body)?.ops;
+    let mut rest = std::mem::take(&mut simplifier.region(body)?.ops);
     let len = simplifier.top_constants.len() + simplifier.nested_constants.len() + rest.len();
     let mut ops = take_buffer(&mut simplifier.spare, len);
     ops.append(&mut simplifier.top_constants);
     ops.append(&mut simplifier.nested_constants);
     ops.append(&mut rest);
-    simplifier.spare.push(rest);
+    keep_buffer(&mut simplifier.spare, rest);
     simplifier.kernel.body = Region { ops };
     let result = Sweep { changed: simplifier.changed, rewrote: simplifier.rewrote };
     let count = simplifier.kernel.values.len();
@@ -1410,18 +1719,26 @@ pub fn simplify(kernel: &mut Kernel) -> Result<SimplifyResult, CompileError> {
 // Loop-invariant code motion
 // ---------------------------------------------------------------------------
 
-fn collect_defs(region: &Region, out: &mut Vec<ValueId>) {
-    for op in &region.ops {
-        out.extend(op.results.iter().copied());
-        out.extend(op.block_args.iter().copied());
-        for inner in &op.regions {
-            collect_defs(inner, out);
-        }
-    }
-}
-
 fn hoistable(kind: OpKind) -> bool {
     kind.is_pure() && !matches!(kind, OpKind::Constant | OpKind::ConstantVec | OpKind::Yield)
+}
+
+/// A region being rebuilt by a walk that finishes each op after its
+/// regions: the ops still to visit, the output so far, and the op whose
+/// regions are being walked (taken out one at a time) with the index of
+/// the region out.
+struct Rebuild<T> {
+    input: std::vec::IntoIter<Op>,
+    out: Vec<Op>,
+    parked: Option<(Op, usize)>,
+    data: T,
+}
+
+impl<T> Rebuild<T> {
+    fn new(mut region: Region, data: T) -> Self {
+        let ops = std::mem::take(&mut region.ops);
+        Rebuild { out: Vec::with_capacity(ops.len()), input: ops.into_iter(), parked: None, data }
+    }
 }
 
 /// Hoists loop-invariant pure ops out of `scf.for` bodies, innermost first.
@@ -1429,117 +1746,226 @@ pub fn licm(kernel: &mut Kernel) -> bool {
     if super::debug_flag("nolicm") {
         return false;
     }
-    let mut variant = vec![false; kernel.values.len()];
-    licm_region(&mut kernel.body, &mut variant, &mut Vec::new())
-}
-
-/// `variant` is all false on entry and on return.
-fn licm_region(region: &mut Region, variant: &mut [bool], defs: &mut Vec<ValueId>) -> bool {
+    // Loops are numbered from 1 in preorder; `home` holds the innermost loop
+    // around each value's definition (0: none), so an operand is defined in
+    // loop `l` or a loop inside it when its home is in `l..=last`, where
+    // `last` is the number of the last loop inside `l`.
+    let mut home = vec![0u32; kernel.values.len()];
+    let mut loops = 0u32;
     let mut changed = false;
-    let mut i = 0;
-    while i < region.ops.len() {
-        for inner in region.ops[i].regions.iter_mut() {
-            changed |= licm_region(inner, variant, defs);
-        }
-        if region.ops[i].kind == OpKind::For {
-            let op = &mut region.ops[i];
-            defs.clear();
-            defs.extend(op.block_args.iter().copied());
-            collect_defs(&op.regions[0], defs);
-            for v in defs.iter() {
-                variant[v.0 as usize] = true;
-            }
-            let hoisted: Vec<Op> = op.regions[0]
-                .ops
-                .extract_if(.., |inner| {
-                    let invariant = hoistable(inner.kind) && inner.operands.iter().all(|v| !variant[v.0 as usize]);
-                    if invariant {
-                        for result in &inner.results {
-                            variant[result.0 as usize] = false;
-                        }
-                    }
-                    invariant
-                })
-                .collect();
-            for v in defs.iter() {
-                variant[v.0 as usize] = false;
-            }
-            if !hoisted.is_empty() {
-                changed = true;
-                let n = hoisted.len();
-                region.ops.splice(i..i, hoisted);
-                i += n;
-            }
-        }
-        i += 1;
+    // An open region: its ops (taken out of their op), the next to visit,
+    // the loop its ops are in and, for a loop body, that loop's number, and
+    // where it goes back (op index, region index) in the region below.
+    struct Open {
+        region: Region,
+        next: usize,
+        at: u32,
+        own: u32,
+        slot: Option<(usize, usize)>,
     }
-    changed
+    let mut stack = vec![Open { region: std::mem::take(&mut kernel.body), next: 0, at: 0, own: 0, slot: None }];
+    loop {
+        let top = stack.last_mut().expect("the body stays open until the end");
+        if top.next == top.region.ops.len() {
+            let done = stack.pop().expect("an open region");
+            let Some((i, k)) = done.slot else {
+                kernel.body = done.region;
+                return changed;
+            };
+            let parent = stack.last_mut().expect("a walked region has a parent");
+            let op = &mut parent.region.ops[i];
+            op.regions[k] = done.region;
+            if k + 1 < op.regions.len() {
+                let next = std::mem::take(&mut op.regions[k + 1]);
+                let (at, own) = if op.kind == OpKind::For { (done.own, done.own) } else { (parent.at, parent.own) };
+                stack.push(Open { region: next, next: 0, at, own, slot: Some((i, k + 1)) });
+                continue;
+            }
+            parent.next = i + 1;
+            if op.kind == OpKind::For {
+                let (first, last, at) = (done.own, loops, parent.at);
+                let inside = |v: &ValueId, home: &[u32]| home.get(v.0 as usize).is_some_and(|&h| (first..=last).contains(&h));
+                let hoisted: Vec<Op> = op.regions[0]
+                    .ops
+                    .extract_if(.., |inner| {
+                        let invariant = hoistable(inner.kind) && !inner.operands.iter().any(|v| inside(v, &home));
+                        if invariant {
+                            for result in &inner.results {
+                                home[result.0 as usize] = at;
+                            }
+                        }
+                        invariant
+                    })
+                    .collect();
+                if !hoisted.is_empty() {
+                    changed = true;
+                    let n = hoisted.len();
+                    parent.region.ops.splice(i..i, hoisted);
+                    parent.next += n;
+                }
+            }
+            continue;
+        }
+        let i = top.next;
+        let op = &mut top.region.ops[i];
+        for v in &op.results {
+            if let Some(h) = home.get_mut(v.0 as usize) {
+                *h = top.at;
+            }
+        }
+        let (at, own) = if op.kind == OpKind::For {
+            loops += 1;
+            for v in &op.block_args {
+                if let Some(h) = home.get_mut(v.0 as usize) {
+                    *h = loops;
+                }
+            }
+            (loops, loops)
+        } else {
+            (top.at, top.own)
+        };
+        if op.regions.is_empty() {
+            top.next = i + 1;
+            continue;
+        }
+        let first = std::mem::take(&mut op.regions[0]);
+        stack.push(Open { region: first, next: 0, at, own, slot: Some((i, 0)) });
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Dead code elimination
 // ---------------------------------------------------------------------------
 
-fn count_uses(region: &Region, uses: &mut Vec<u32>) {
-    for op in &region.ops {
+fn count_uses(region: &Region, uses: &mut [u32]) {
+    super::analysis::preorder(region, |op| {
         for operand in &op.operands {
-            uses[operand.0 as usize] += 1;
+            if let Some(count) = uses.get_mut(operand.0 as usize) {
+                *count += 1;
+            }
         }
-        for inner in &op.regions {
-            count_uses(inner, uses);
-        }
-    }
+    });
 }
 
-fn has_side_effects(region: &Region) -> bool {
-    region.ops.iter().any(|op| match op.kind {
-        OpKind::For | OpKind::If | OpKind::IfElse => op.regions.iter().any(has_side_effects),
-        OpKind::Yield => false,
-        kind => !kind.is_removable(),
-    })
-}
-
-fn release_uses(op: &Op, uses: &mut Vec<u32>) {
-    for operand in &op.operands {
-        uses[operand.0 as usize] -= 1;
-    }
+fn release_uses(op: &Op, uses: &mut [u32]) {
+    let mut release = |op: &Op| {
+        for operand in &op.operands {
+            if let Some(count) = uses.get_mut(operand.0 as usize) {
+                *count = count.saturating_sub(1);
+            }
+        }
+    };
+    release(op);
     for inner in &op.regions {
-        for nested in &inner.ops {
-            release_uses(nested, uses);
-        }
+        super::analysis::preorder(inner, &mut release);
     }
 }
 
-/// Removes, walking backwards, ops whose results are all unused.
-fn dce_region(region: &mut Region, uses: &mut Vec<u32>) -> bool {
+/// Removes, walking backwards, ops whose results are all unused. A
+/// structured op's regions are swept before it is decided: it goes when its
+/// results are unused and nothing left inside it has a side effect (what
+/// the sweep removes never has one).
+fn dce_region(body: &mut Region, uses: &mut [u32]) -> bool {
+    struct Open {
+        region: Region,
+        /// Ops `..next` are still to decide.
+        next: usize,
+        dead: Vec<bool>,
+        /// Whether a kept op of the region has a side effect, tracked only
+        /// under a structured op whose results are unused (`track`).
+        effects: bool,
+        track: bool,
+        /// The op whose regions are being swept, and whether it is still
+        /// to decide; the side effects found in its regions so far.
+        parked: Option<(usize, bool, bool)>,
+        /// Where the region goes back: (op index, region index) in the parent.
+        slot: Option<(usize, usize)>,
+    }
+    let open = |mut region: Region, slot, track| {
+        let n = region.ops.len();
+        let region = Region { ops: std::mem::take(&mut region.ops) };
+        Open { region, next: n, dead: vec![false; n], effects: false, track, parked: None, slot }
+    };
+    let dead_results = |op: &Op, uses: &[u32]| op.results.iter().all(|r| uses.get(r.0 as usize).is_none_or(|&n| n == 0));
     let mut changed = false;
-    let mut dead = vec![false; region.ops.len()];
-    for i in (0..region.ops.len()).rev() {
-        let op = &mut region.ops[i];
-        let dead_results = op.results.iter().all(|r| uses[r.0 as usize] == 0);
-        let removable = match op.kind {
-            OpKind::For | OpKind::If | OpKind::IfElse => dead_results && !op.regions.iter().any(has_side_effects),
-            OpKind::Yield | OpKind::Return => false,
-            kind => dead_results && kind.is_removable() && !op.results.is_empty(),
-        };
-        if removable {
-            release_uses(op, uses);
-            dead[i] = true;
-            changed = true;
+    let mut stack = vec![open(std::mem::take(body), None, false)];
+    loop {
+        let top = stack.last_mut().expect("the body stays open until the end");
+        if top.next == 0 {
+            let mut done = stack.pop().expect("an open region");
+            if done.dead.contains(&true) {
+                let mut i = 0;
+                done.region.ops.retain(|_| {
+                    i += 1;
+                    !done.dead[i - 1]
+                });
+            }
+            let Some((i, k)) = done.slot else {
+                *body = done.region;
+                return changed;
+            };
+            let parent = stack.last_mut().expect("a swept region has a parent");
+            parent.region.ops[i].regions[k] = done.region;
+            let (_, deciding, effects) = parent.parked.as_mut().expect("the op is parked");
+            *effects |= done.effects;
+            let (deciding, effects) = (*deciding, *effects);
+            if k + 1 < parent.region.ops[i].regions.len() {
+                let next = std::mem::take(&mut parent.region.ops[i].regions[k + 1]);
+                stack.push(open(next, Some((i, k + 1)), done.track));
+                continue;
+            }
+            parent.parked = None;
+            if deciding {
+                let op = &parent.region.ops[i];
+                if dead_results(op, uses) && !effects {
+                    release_uses(op, uses);
+                    parent.dead[i] = true;
+                    changed = true;
+                } else {
+                    parent.effects |= effects;
+                }
+            }
             continue;
         }
-        for inner in op.regions.iter_mut() {
-            changed |= dce_region(inner, uses);
+        // Decide ops from the back until one has regions to sweep first.
+        let mut descend = None;
+        while top.next > 0 {
+            top.next -= 1;
+            let i = top.next;
+            let op = &top.region.ops[i];
+            let deciding = matches!(op.kind, OpKind::For | OpKind::If | OpKind::IfElse);
+            if !deciding {
+                let removable = match op.kind {
+                    OpKind::Yield | OpKind::Return => false,
+                    kind => dead_results(op, uses) && kind.is_removable() && !op.results.is_empty(),
+                };
+                if removable {
+                    release_uses(op, uses);
+                    top.dead[i] = true;
+                    changed = true;
+                    continue;
+                }
+                if top.track {
+                    top.effects |= op.kind != OpKind::Yield && !op.kind.is_removable();
+                }
+            }
+            if op.regions.is_empty() {
+                if deciding && dead_results(op, uses) {
+                    release_uses(op, uses);
+                    top.dead[i] = true;
+                    changed = true;
+                }
+                continue;
+            }
+            descend = Some((i, deciding));
+            break;
         }
+        let Some((i, deciding)) = descend else { continue };
+        let track = top.track || (deciding && dead_results(&top.region.ops[i], uses));
+        let first = std::mem::take(&mut top.region.ops[i].regions[0]);
+        top.parked = Some((i, deciding, false));
+        stack.push(open(first, Some((i, 0)), track));
     }
-    if dead.contains(&true) {
-        let mut i = 0;
-        region.ops.retain(|_| {
-            i += 1;
-            !dead[i - 1]
-        });
-    }
-    changed
 }
 
 pub fn dce(kernel: &mut Kernel) -> bool {
@@ -1941,17 +2367,19 @@ impl<'k> Legalizer<'k> {
         let Type::Smem(elem, shape) = self.kernel.ty(smem).clone() else {
             return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", "LDS access through a non-smem value"));
         };
-        if indices.len() != shape.len() || !(1..=2).contains(&indices.len()) {
-            return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", "LDS access of rank other than 1 or 2"));
+        if indices.len() != shape.len() || indices.is_empty() {
+            return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", "LDS access of rank other than its allocation's"));
         }
         let bytes = elem.bytes() as i64;
         let i32t = Type::Scalar(Scalar::I32);
         let mut constant = 0i64;
         let mut linear: Option<ValueId> = None;
+        // LDS addresses are 32 bits: the constant part wraps as the LLVM
+        // lowering's i32 GEP arithmetic does.
         for (dim, &index) in indices.iter().enumerate() {
-            let stride: i64 = shape[dim + 1..].iter().map(|&d| d as i64).product();
+            let stride = shape[dim + 1..].iter().fold(1i64, |s, &d| s.wrapping_mul(d as i64));
             let (base, k) = self.split(index);
-            constant += k * stride;
+            constant = constant.wrapping_add(k.wrapping_mul(stride));
             if let Some(base) = base {
                 let scaled = if stride == 1 {
                     base
@@ -1973,16 +2401,86 @@ impl<'k> Legalizer<'k> {
                 self.new_op(OpKind::Shl, i32t.clone(), [index, s], out)
             }
         };
-        Ok((addr, constant * bytes))
+        Ok((addr, constant.wrapping_mul(bytes)))
     }
 
-    fn region(&mut self, region: &mut Region) -> Result<(), CompileError> {
-        let scope = self.bases.len();
-        let mut out = Vec::with_capacity(region.ops.len());
-        for mut op in std::mem::take(&mut region.ops) {
-            for inner in op.regions.iter_mut() {
-                self.region(inner)?;
+    /// `tile.smem_load_v4` as the LLVM lowering writes it: four 16-bit loads
+    /// of consecutive elements inserted into a vector. isel merges the chain
+    /// into one vector load where the address is known to be aligned.
+    fn smem_load_v4(&mut self, op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
+        let smem = op.operands[0];
+        let ty = self.kernel.ty(op.results[0]).clone();
+        let elem = ty.elem();
+        if ty != Type::Vec(elem, 4) || elem.bytes() != 2 {
+            return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("tile.smem_load_v4 of {ty:?}")));
+        }
+        let (addr, offset) = self.lds_address(smem, &op.operands[1..], out)?;
+        let mut vector = self.kernel.new_value("%v4", ty.clone());
+        self.mark(vector, false);
+        let fill = [
+            ("elem".into(), Attr::Str("f16".into())),
+            ("fill".into(), Attr::Float(0.0)),
+            ("vec".into(), Attr::Int(4)),
+        ];
+        out.push(mk_op(OpKind::ConstantVec, [vector], [], fill));
+        for t in 0..4 {
+            let value = self.kernel.new_value("%v4e", Type::Scalar(elem));
+            self.mark(value, false);
+            let attrs = [("offset".into(), Attr::Int(offset.wrapping_add(2 * t))), ("align".into(), Attr::Int(2))];
+            out.push(mk_op(OpKind::LLoad, [value], [smem, addr], attrs));
+            let next = if t == 3 { op.results[0] } else { self.kernel.new_value("%v4", ty.clone()) };
+            self.mark(next, false);
+            out.push(mk_op(OpKind::Insert, [next], [vector, value], [("index".into(), Attr::Int(t))]));
+            vector = next;
+        }
+        Ok(())
+    }
+
+    /// Legalizes `body`, each op after its regions, nesting through an
+    /// explicit stack. Scalar bases are scoped to the region they are built in.
+    fn region(&mut self, body: &mut Region) -> Result<(), CompileError> {
+        let mut stack = vec![Rebuild::new(std::mem::take(body), self.bases.len())];
+        loop {
+            let top = stack.last_mut().expect("the body stays open until the end");
+            let mut nested = None;
+            for op in top.input.by_ref() {
+                if op.regions.is_empty() {
+                    self.op(op, &mut top.out)?;
+                } else {
+                    nested = Some(op);
+                    break;
+                }
             }
+            let Some(mut op) = nested else {
+                let mut done = stack.pop().expect("an open region");
+                self.bases.truncate(done.data);
+                let region = Region { ops: std::mem::take(&mut done.out) };
+                let Some(parent) = stack.last_mut() else {
+                    *body = region;
+                    return Ok(());
+                };
+                let (mut op, index) = parent.parked.take().expect("a walked region has its op parked");
+                op.regions[index] = region;
+                if index + 1 < op.regions.len() {
+                    let next = std::mem::take(&mut op.regions[index + 1]);
+                    parent.parked = Some((op, index + 1));
+                    let scope = self.bases.len();
+                    stack.push(Rebuild::new(next, scope));
+                    continue;
+                }
+                self.op(op, &mut parent.out)?;
+                continue;
+            };
+            let first = std::mem::take(&mut op.regions[0]);
+            top.parked = Some((op, 0));
+            let scope = self.bases.len();
+            stack.push(Rebuild::new(first, scope));
+        }
+    }
+
+    #[inline(always)]
+    fn op(&mut self, mut op: Op, out: &mut Vec<Op>) -> Result<(), CompileError> {
+        {
             if op.kind.is_pure() && op.results.len() == 1 {
                 let i = op.results[0].0 as usize;
                 if self.defs.len() <= i {
@@ -1994,8 +2492,8 @@ impl<'k> Legalizer<'k> {
             let vec = op.int_attr("vec").unwrap_or(1);
             match op.kind {
                 OpKind::GlobalLoad | OpKind::GlobalLoadVec => {
-                    let bytes = self.kernel.ty(op.results[0]).elem().bytes();
-                    let (addr, offset) = self.global_address(op.operands[0], op.operands[1], bytes, &mut out);
+                    let step = index_step(op.kind, self.kernel.ty(op.results[0]));
+                    let (addr, offset) = self.global_address(op.operands[0], op.operands[1], step, out);
                     // Defaults mirror the LLVM lowering.
                     let default = if op.kind == OpKind::GlobalLoadVec { vec * 2 } else { 1 };
                     let mut attrs = std::mem::take(&mut op.attrs);
@@ -2007,7 +2505,8 @@ impl<'k> Legalizer<'k> {
                 OpKind::GlobalStore | OpKind::GlobalStoreVec | OpKind::GlobalAtomicAddF32 => {
                     let value = op.operands[2];
                     let bytes = self.kernel.ty(value).elem().bytes();
-                    let (addr, offset) = self.global_address(op.operands[0], op.operands[1], bytes, &mut out);
+                    let step = index_step(op.kind, self.kernel.ty(value));
+                    let (addr, offset) = self.global_address(op.operands[0], op.operands[1], step, out);
                     let default = match op.kind {
                         OpKind::GlobalStoreVec => vec * bytes as i64,
                         OpKind::GlobalAtomicAddF32 => 4,
@@ -2022,9 +2521,19 @@ impl<'k> Legalizer<'k> {
                     operands.push(value);
                     out.push(mk_op(kind, [], operands, attrs));
                 }
+                OpKind::GlobalAtomicAdd => {
+                    let value = op.operands[2];
+                    let step = index_step(op.kind, self.kernel.ty(value));
+                    let (addr, offset) = self.global_address(op.operands[0], op.operands[1], step, out);
+                    let ordering = op.attr("ordering").cloned().unwrap_or(Attr::Str("monotonic".into()));
+                    let mut operands = addr;
+                    operands.push(value);
+                    let attrs = vec![("offset".into(), Attr::Int(offset)), ("ordering".into(), ordering)];
+                    out.push(mk_op(OpKind::GAtomicAdd, op.results, operands, attrs));
+                }
                 OpKind::SmemLoadVec => {
                     let smem = op.operands[0];
-                    let (addr, offset) = self.lds_address(smem, &op.operands[1..], &mut out)?;
+                    let (addr, offset) = self.lds_address(smem, &op.operands[1..], out)?;
                     let bytes = self.kernel.ty(op.results[0]).elem().bytes() as i64;
                     let natural = if matches!(vec, 3 | 6 | 12) { 12 / vec } else { vec * bytes };
                     let mut attrs = std::mem::take(&mut op.attrs);
@@ -2037,7 +2546,7 @@ impl<'k> Legalizer<'k> {
                     let smem = op.operands[0];
                     let value = *op.operands.last().expect("store has a value");
                     let count = op.operands.len();
-                    let (addr, offset) = self.lds_address(smem, &op.operands[1..count - 1], &mut out)?;
+                    let (addr, offset) = self.lds_address(smem, &op.operands[1..count - 1], out)?;
                     let bytes = self.kernel.ty(value).elem().bytes() as i64;
                     let default = if op.kind == OpKind::SmemStoreVec { vec * bytes } else { bytes };
                     let mut attrs = std::mem::take(&mut op.attrs);
@@ -2046,7 +2555,18 @@ impl<'k> Legalizer<'k> {
                     attrs.push(("align".into(), Attr::Int(align.unwrap_or(default))));
                     out.push(mk_op(OpKind::LStore, [], [smem, addr, value], attrs));
                 }
-                OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 => {
+                OpKind::SmemLoadV4 => self.smem_load_v4(op, out)?,
+                OpKind::LdsAtomicAdd => {
+                    if !matches!(op.str_attr("ordering"), None | Some("monotonic")) {
+                        return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", "LDS atomic with ordering other than monotonic"));
+                    }
+                    let smem = op.operands[0];
+                    let value = *op.operands.last().expect("atomic has a value");
+                    let count = op.operands.len();
+                    let (addr, offset) = self.lds_address(smem, &op.operands[1..count - 1], out)?;
+                    out.push(mk_op(OpKind::LAtomicAdd, op.results, [smem, addr, value], [("offset".into(), Attr::Int(offset))]));
+                }
+                OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar => {
                     let voffset = op.operands[1];
                     let (base, k) = self.split(voffset);
                     let mut offset = 0;
@@ -2062,9 +2582,21 @@ impl<'k> Legalizer<'k> {
                 _ => out.push(op),
             }
         }
-        self.bases.truncate(scope);
-        region.ops = out;
         Ok(())
+    }
+}
+
+/// Bytes one index step of a global access of a `ty` value covers, as the
+/// LLVM lowering's GEP steps: the typed forms (`global_load_typed` /
+/// `global_store_typed`) over the whole value type, the `_vN` forms and the
+/// atomics over one element. A step is the type's allocation size: a
+/// pointer's is 8, a vector's the next power of two of its bytes
+/// (`<3 x float>` steps 16), so every step is a power of two.
+fn index_step(kind: OpKind, ty: &Type) -> u32 {
+    match (ty, kind) {
+        (Type::Vec(elem, n), OpKind::GlobalLoad | OpKind::GlobalStore) => (elem.bytes() * n).next_power_of_two(),
+        (Type::Ptr(_), _) => 8,
+        (other, _) => other.elem().bytes(),
     }
 }
 
@@ -2103,20 +2635,31 @@ pub fn kernarg_layout(kernel: &Kernel) -> (Vec<u32>, u32) {
 }
 
 fn mark_param_uses(region: &Region, param_of: &[Option<u32>], used: &mut [bool]) {
-    for op in &region.ops {
+    super::analysis::preorder(region, |op| {
         for operand in &op.operands {
             if let Some(&Some(param)) = param_of.get(operand.0 as usize) {
                 used[param as usize] = true;
             }
         }
-        for inner in &op.regions {
-            mark_param_uses(inner, param_of, used);
+    });
+}
+
+/// Calls `f` on every op of `region` and of the regions nested in it, in
+/// no particular order.
+fn for_each_op_mut(region: &mut Region, mut f: impl FnMut(&mut Op)) {
+    let mut stack = vec![region];
+    while let Some(region) = stack.pop() {
+        for op in region.ops.iter_mut() {
+            f(op);
+            if !op.regions.is_empty() {
+                stack.extend(op.regions.iter_mut());
+            }
         }
     }
 }
 
 fn substitute(region: &mut Region, map: &[Option<ValueId>]) {
-    for op in region.ops.iter_mut() {
+    for_each_op_mut(region, |op| {
         if op.kind != OpKind::KernArg {
             for operand in op.operands.iter_mut() {
                 if let Some(&Some(to)) = map.get(operand.0 as usize) {
@@ -2124,10 +2667,38 @@ fn substitute(region: &mut Region, map: &[Option<ValueId>]) {
                 }
             }
         }
-        for inner in op.regions.iter_mut() {
-            substitute(inner, map);
+    });
+}
+
+/// `Kernel::compact_values` without recursion.
+fn compact_values(kernel: &mut Kernel) -> Vec<u32> {
+    let mut map = vec![DROPPED; kernel.values.len()];
+    for param in &kernel.params {
+        map[param.value.0 as usize] = 0;
+    }
+    super::analysis::preorder(&kernel.body, |op| {
+        for v in op.results.iter().chain(op.operands.iter()).chain(&op.block_args) {
+            map[v.0 as usize] = 0;
+        }
+    });
+    let mut next = 0;
+    for (old, new) in map.iter_mut().enumerate() {
+        if *new != DROPPED {
+            *new = next;
+            kernel.values.swap(next as usize, old);
+            next += 1;
         }
     }
+    kernel.values.truncate(next as usize);
+    for param in &mut kernel.params {
+        param.value.0 = map[param.value.0 as usize];
+    }
+    for_each_op_mut(&mut kernel.body, |op| {
+        for v in op.results.iter_mut().chain(op.operands.iter_mut()).chain(op.block_args.iter_mut()) {
+            v.0 = map[v.0 as usize];
+        }
+    });
+    map
 }
 
 /// Inserts one `KernArg` load per used parameter at the kernel entry, in
@@ -2172,7 +2743,7 @@ pub fn place_kernargs(kernel: &mut Kernel) {
 /// offsets along. Passes compare values only for equality and relative
 /// order, so this changes nothing but the size of the tables they index.
 pub fn compact(kernel: &mut Kernel, ws: &mut Workspace, lds: &mut FxHashMap<ValueId, u32>) {
-    let map = kernel.compact_values();
+    let map = compact_values(kernel);
     ws.facts.renumber(&map);
     ws.konst_values.clear();
     *lds = lds
@@ -2194,6 +2765,7 @@ pub fn optimize_keeping_lds_loads(kernel: &mut Kernel, lds: &mut FxHashMap<Value
 }
 
 fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws: Workspace) -> Result<Facts, CompileError> {
+    super::unroll::unroll_loops(kernel, lds)?;
     // LDS loads merge once addresses are legalized: equal addresses are then
     // equal values, and stores have extents.
     let keep_lds_loads = std::mem::replace(&mut ws.keep_lds_loads, true);
@@ -2228,6 +2800,7 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     sweep(kernel, &mut ws)?;
     dce(kernel);
     compact(kernel, &mut ws, lds);
+    super::loadorder::order_global_loads(&mut kernel.body);
     Ok(ws.facts)
 }
 
@@ -2461,5 +3034,247 @@ kernel @fill_probe {
         let mut stores = Vec::new();
         global_stores(&kernel.body, &mut stores);
         assert_eq!(stores, [3, 2]);
+    }
+
+    /// The paged attention V gather: a row's block-table load gets the
+    /// `[sbase, voffset]` form because its index depends on a load that
+    /// legalization cannot yet prove uniform, and is selected as a scalar
+    /// load afterwards.
+    #[test]
+    fn scalar_loads_keep_the_lane_offset() {
+        let text = r#"ckdsl.ir v1
+kernel @smem_offset_probe {
+  attrs { max_workgroup_size = i:64 }
+  params {
+    %T : ptr<i32,global> { align = i:4, readonly = b:true }
+    %Y : ptr<i32,global>
+  }
+  region @entry {
+    %tid : i32 = gpu.thread_id (  ) { axis = s:"x" }
+    %c0 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c1 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %n : i32 = memref.global_load_typed ( %T, %c0 ) { align = i:4, elem_type = s:"i32" }
+    %lt : i1 = arith.cmp ( %c1, %n ) { pred = s:"lt" }
+    %i : i32 = arith.select ( %lt, %c1, %c0 )
+    %x : i32 = memref.global_load_typed ( %T, %i ) { align = i:4, elem_type = s:"i32" }
+    %s : i32 = arith.add ( %x, %n )
+    memref.global_store_typed ( %Y, %tid, %s ) { align = i:4, elem_type = s:"i32" }
+    cf.return (  )
+  }
+}
+"#;
+        use super::super::mir::{Opc, Opnd};
+        let mut kernel = super::super::parse::parse(text).unwrap();
+        let (mut lds, lds_size) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let uniform = super::super::analysis::classify(&kernel);
+        let lane_form = kernel.body.ops.iter().filter(|op| op.kind == OpKind::GLoad && op.operands.len() == 2);
+        assert!(lane_form.clone().count() == 1 && lane_form.clone().all(|op| uniform[op.results[0].0 as usize]));
+        let sel = super::super::isel::select(&kernel, &facts, uniform, &lds, lds_size).unwrap();
+        let loads: Vec<(Opnd, i64)> = sel
+            .func
+            .blocks
+            .iter()
+            .flat_map(|b| &b.insts)
+            .filter(|i| i.op == Opc::SLoadB32 && !matches!(i.uses[0], Opnd::R(v) if v.reg == 0))
+            .map(|i| (i.uses[0], i.imm))
+            .collect();
+        // T[0] and T[i] are different addresses.
+        assert_eq!(loads.len(), 2);
+        assert_ne!(loads[0], loads[1]);
+    }
+
+    fn probe(params: &str, body: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @probe {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %Y : ptr<f32,global>\n    %n : i32\n{params}  }}\n  \
+             region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n{body}    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn insts(text: &str) -> Vec<super::super::mir::MInst> {
+        let compiled = super::super::compile(text).unwrap_or_else(|e| panic!("{e}"));
+        compiled.func.blocks.into_iter().flat_map(|b| b.insts).collect()
+    }
+
+    fn all_ops(region: &Region) -> Vec<&Op> {
+        let mut out = Vec::new();
+        super::super::analysis::preorder(region, |op| out.push(op));
+        out
+    }
+
+    /// The speed-out crash inputs, minimized: a float constant in integer
+    /// arithmetic made `visit` and `simplify` swap the operands back and
+    /// forth until the stack overflowed. Validation now refuses such IR;
+    /// the optimizer itself terminates on it too, either operand order.
+    #[test]
+    fn mixed_type_constants_do_not_cycle() {
+        let int = "    %k : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5 }\n";
+        let float = "    %f : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:0.0 }\n";
+        let uses = "    %a : i32 = arith.add ( %k, %f )\n    %m : i32 = arith.mul ( %k, %f )\n    %s : i32 = arith.sub ( %f, %k )\n    \
+                    %b : i32 = arith.add ( %f, %k )\n    %t : i32 = arith.add ( %a, %m )\n    %u : i32 = arith.add ( %t, %s )\n    \
+                    %v : i32 = arith.add ( %u, %b )\n    %e : f32 = arith.bitcast ( %v )\n    \
+                    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4 }\n";
+        for text in [probe("", &format!("{int}{float}{uses}")), probe("", &format!("{float}{int}{uses}"))] {
+            let run = move || {
+                let mut kernel = super::super::parse::parse(&text).unwrap();
+                let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+                let _ = optimize(&mut kernel, &mut lds);
+                super::super::compile(&text).err().map(|e| e.kind)
+            };
+            let refused = std::thread::Builder::new().stack_size(1 << 20).spawn(run).unwrap().join().expect("terminates");
+            assert_eq!(refused, Some("ROCKE_DIRECT_MALFORMED"));
+        }
+    }
+
+    /// A shift by the width or more is undefined in LLVM. Here the amount
+    /// counts modulo the width, as gfx11 takes a runtime amount, in constant
+    /// folding, in range analysis and in code.
+    #[test]
+    fn oversized_shift_amounts_count_modulo_the_width() {
+        let body = "    %c3 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:3 }\n    \
+                    %c10 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:10 }\n    \
+                    %c40 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:40 }\n    \
+                    %m1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:-1 }\n    \
+                    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+                    %folded : i32 = arith.shl ( %c3, %c40 )\n    %f1 : f32 = arith.bitcast ( %folded )\n    \
+                    memref.global_store_typed ( %Y, %c0, %f1 ) { align = i:4 }\n    \
+                    %x : i32 = arith.shl ( %tid, %c10 )\n    %a : i32 = arith.ashr ( %x, %c40 )\n    %b : i32 = arith.shl ( %x, %m1 )\n    \
+                    %z : i1 = arith.cmp ( %a, %c0 ) { pred = s:\"eq\" }\n    scf.if ( %z )\n      region @then {\n        \
+                    %f2 : f32 = arith.bitcast ( %b )\n        memref.global_store_typed ( %Y, %tid, %f2 ) { align = i:4 }\n      }\n    \
+                    %w : i64 = arith.zext ( %tid )\n    %c70 : i64 = arith.constant (  ) { ity = s:\"i64\", value = i:70 }\n    \
+                    %l : i64 = arith.shl ( %w, %c70 )\n    %t : i32 = arith.trunc ( %l )\n    %f3 : f32 = arith.bitcast ( %t )\n    \
+                    memref.global_store_typed ( %Y, %n, %f3 ) { align = i:4 }\n";
+        let text = probe("", body);
+        let mut kernel = super::super::parse::parse(&text).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let ops = all_ops(&kernel.body);
+        // 3 << 40 is 3 << 8.
+        assert!(ops.iter().any(|op| op.kind == OpKind::Constant && facts.int(op.results[0]) == Some(768)));
+        // Every constant amount is in range: x >> 40 became x >> 8, x << -1
+        // x << 31 and the i64 shift by 70 one by 6.
+        let mut amounts = Vec::new();
+        for op in &ops {
+            if matches!(op.kind, OpKind::Shl | OpKind::Lshr | OpKind::Ashr) {
+                if let Some(k) = facts.int(op.operands[1]) {
+                    amounts.push(k);
+                }
+            }
+        }
+        assert!(amounts.contains(&8) && amounts.contains(&31) && amounts.contains(&6), "{amounts:?}");
+        assert!(amounts.iter().all(|k| (0..64).contains(k) && *k != 40 && *k != 70), "{amounts:?}");
+        // (tid << 10) >> 8 can be nonzero, so the branch stays.
+        assert!(ops.iter().any(|op| op.kind == OpKind::If));
+        assert!(super::super::compile(&text).is_ok());
+    }
+
+    /// A loop step of 0 runs the body forever when the loop is entered, in
+    /// the LLVM lowering (no `mustprogress`) and here: nothing assumes the
+    /// loop ends or bounds its induction variable.
+    #[test]
+    fn zero_step_loops_keep_their_meaning() {
+        let body = "    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+                    scf.for ( %c0, %n, %c0 ) { iv = s:\"%i\", iv_type = s:\"i32\" }\n      region @body {\n        \
+                    %f : f32 = arith.bitcast ( %i )\n        memref.global_store_typed ( %Y, %tid, %f ) { align = i:4 }\n        \
+                    scf.yield (  )\n      }\n    %g : f32 = arith.bitcast ( %n )\n    memref.global_store_typed ( %Y, %tid, %g ) { align = i:4 }\n";
+        let text = probe("", body);
+        let mut kernel = super::super::parse::parse(&text).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let ops = all_ops(&kernel.body);
+        let lp = ops.iter().find(|op| op.kind == OpKind::For).expect("the loop stays");
+        assert_eq!(facts.int(lp.operands[2]), Some(0));
+        assert_eq!(facts.range_of(lp.block_args[0]), None);
+        // Both stores remain, and the loop branches back while iv < n.
+        assert_eq!(ops.iter().filter(|op| op.kind == OpKind::GStore).count(), 2);
+        let code = insts(&text);
+        assert!(code.iter().any(|i| i.op == super::super::mir::Opc::SCbranchScc1));
+    }
+
+    #[test]
+    fn invariant_ops_leave_nested_loops() {
+        let body = "    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+                    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+                    scf.for ( %c0, %n, %c1 ) { iv = s:\"%i\", iv_type = s:\"i32\" }\n      region @body {\n        \
+                    scf.for ( %c0, %n, %c1 ) { iv = s:\"%j\", iv_type = s:\"i32\" }\n          region @body {\n            \
+                    %m : i32 = arith.mul ( %n, %n )\n            %p : i32 = arith.add ( %m, %j )\n            \
+                    %f : f32 = arith.bitcast ( %p )\n            memref.global_store_typed ( %Y, %tid, %f ) { align = i:4 }\n            \
+                    scf.yield (  )\n          }\n        scf.yield (  )\n      }\n";
+        let mut kernel = super::super::parse::parse(&probe("", body)).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        optimize(&mut kernel, &mut lds).unwrap();
+        let top: Vec<OpKind> = kernel.body.ops.iter().map(|op| op.kind).collect();
+        assert!(top.contains(&OpKind::Mul), "n * n is hoisted out of both loops: {top:?}");
+        let outer = kernel.body.ops.iter().find(|op| op.kind == OpKind::For).unwrap();
+        assert!(all_ops(&outer.regions[0]).iter().all(|op| op.kind != OpKind::Mul));
+    }
+
+    /// The LLVM lowering zero-extends an i32 `tile.global_ptr_add` offset.
+    #[test]
+    fn pointer_offsets_are_unsigned() {
+        let body = "    %off : i32 = arith.sub ( %n, %tid )\n    %q : ptr<f32,global> = tile.global_ptr_add ( %Y, %off )\n    \
+                    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    %f : f32 = arith.bitcast ( %tid )\n    \
+                    memref.global_store_typed ( %q, %c0, %f ) { align = i:4 }\n";
+        use super::super::mir::Opc;
+        let code = insts(&probe("", body));
+        assert!(!code.iter().any(|i| matches!(i.op, Opc::SAshrI32 | Opc::VAshrrevI32)));
+    }
+
+    /// Typed accesses step over the whole type (`getelementptr <4 x float>`
+    /// in the LLVM lowering), the vector forms over one element.
+    #[test]
+    fn typed_vector_stores_step_over_the_vector() {
+        let body = "    %v : vec<f32x4> = arith.constant_vec (  ) { fill = f:1.0 }\n    \
+                    memref.global_store_typed ( %Y, %tid, %v ) { align = i:16 }\n    \
+                    memref.global_store_vN ( %Y, %tid, %v ) { align = i:4, vec = i:4 }\n";
+        let mut kernel = super::super::parse::parse(&probe("", body)).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let mut shifts: Vec<i64> = all_ops(&kernel.body)
+            .iter()
+            .filter(|op| op.kind == OpKind::Shl)
+            .filter_map(|op| facts.int(op.operands[1]))
+            .collect();
+        shifts.sort();
+        assert_eq!(shifts, [2, 4]);
+    }
+
+    /// A typed access steps over its type's allocation size, as LLVM's GEP:
+    /// `<3 x float>` takes 16 bytes (`v96:128` in the AMDGPU data layout).
+    #[test]
+    fn typed_vector_steps_are_allocation_sizes() {
+        let body = "    %v : vec<f32x3> = arith.constant_vec (  ) { fill = f:1.0 }\n    \
+                    memref.global_store_typed ( %Y, %tid, %v ) { align = i:16 }\n";
+        let mut kernel = super::super::parse::parse(&probe("", body)).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let ops = all_ops(&kernel.body);
+        let shifts: Vec<i64> = ops.iter().filter(|op| op.kind == OpKind::Shl).filter_map(|op| facts.int(op.operands[1])).collect();
+        assert_eq!(shifts, [4]);
+        assert!(!ops.iter().any(|op| op.kind == OpKind::Mul));
+    }
+
+    #[test]
+    fn readfirstlane_keeps_both_halves() {
+        let body = "    %w : i64 = arith.zext ( %tid )\n    %c33 : i64 = arith.constant (  ) { ity = s:\"i64\", value = i:33 }\n    \
+                    %s : i64 = arith.shl ( %w, %c33 )\n    %r : i64 = tile.readfirstlane ( %s )\n    \
+                    memref.global_store_typed ( %Z, %tid, %r ) { align = i:8 }\n";
+        use super::super::mir::Opc;
+        let code = insts(&probe("    %Z : ptr<i64,global>\n", body));
+        // The low word is 0; the high word, tid << 1, is read from the first lane.
+        assert!(code.iter().any(|i| i.op == Opc::VReadfirstlaneB32));
+    }
+
+    /// A `gpu.block_id` without an axis is x, as in the LLVM lowering.
+    #[test]
+    fn block_id_axis_defaults_to_x() {
+        let body = "    %b : i32 = gpu.block_id (  )\n    %f : f32 = arith.bitcast ( %b )\n    \
+                    memref.global_store_typed ( %Y, %b, %f ) { align = i:4 }\n";
+        let mut kernel = super::super::parse::parse(&probe("", body)).unwrap();
+        let (mut lds, lds_size) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let uniform = super::super::analysis::classify(&kernel);
+        let sel = super::super::isel::select(&kernel, &facts, uniform, &lds, lds_size).unwrap();
+        assert_eq!(sel.wg_ids, [true, false, false]);
     }
 }

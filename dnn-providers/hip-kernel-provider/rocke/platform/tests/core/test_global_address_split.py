@@ -6,8 +6,11 @@ On a target whose backend turns the switch on (gfx1151 today), a global access
 whose i32 element index is wave-uniform terms plus one non-negative, bounded
 per-lane term, off a uniform pointer, lowers to a GEP chain -- uniform terms,
 then the summed constants, then the per-lane term -- so the AMDGPU backend can
-address it with an SGPR base and a VGPR offset. Every other access, and every
-access on every other target, keeps the single ``getelementptr inbounds``.
+address it with an SGPR base and a VGPR offset. Where a loop varies a uniform
+term but not the per-lane term, the uniform base passes through
+``readfirstlane`` first. Every other access, every access of a kernel whose
+loop live-through vector state exceeds the register file, and every access on
+every other target, keeps the single ``getelementptr inbounds``.
 
 No GPU: text lowering through both engines (the C++ half skips when the engine
 is not importable), plus an optional COMGR compile + ``llvm-objdump`` check that
@@ -76,6 +79,16 @@ def test_switch_is_on_for_gfx1151_only():
     assert on == ["gfx1151"]
 
 
+_RFL_DECL = "declare ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1))"
+
+
+def _readfirstlane_of(base: str) -> str:
+    return (
+        rf"(%gbase\.\d+) = call ptr addrspace\(1\) @llvm\.amdgcn\.readfirstlane\.p1"
+        rf"\(ptr addrspace\(1\) {re.escape(base)}\)\n"
+    )
+
+
 def test_uniform_plus_lane_index_splits_on_gfx1151():
     ll = _lower(_gather(_row), "gfx1151")
     base = re.search(
@@ -88,8 +101,50 @@ def test_uniform_plus_lane_index_splits_on_gfx1151():
         ll,
     )
     assert not _single_gep(ll)
+    # No loop, so nothing for LICM to reassociate.
+    assert "readfirstlane" not in ll
     # The store's index is the lane term alone: nothing uniform to split off.
     assert re.search(r"= getelementptr inbounds half, ptr addrspace\(1\) %D, i32 %tid", ll)
+
+
+def test_loop_varying_base_goes_through_readfirstlane():
+    """The row (counter times stride) varies in the loop, the thread id does
+    not: the uniform base is a readfirstlane, which the per-lane GEP indexes."""
+    ll = _lower(_loop_kernel(unroll=False, carry_lane=False), "gfx1151")
+    base = re.search(r"(%gbase\.\d+) = getelementptr float, ptr addrspace\(1\) %S, ", ll)
+    assert base, ll
+    uniform = re.search(_readfirstlane_of(base.group(1)), ll)
+    assert uniform, ll
+    assert re.search(
+        rf"= getelementptr float, ptr addrspace\(1\) {re.escape(uniform.group(1))}, i32 %tid",
+        ll,
+    )
+    assert ll.splitlines().count(_RFL_DECL) == 1
+
+
+def test_unrolled_loop_needs_no_readfirstlane():
+    ll = _lower(_loop_kernel(unroll=True, carry_lane=False), "gfx1151")
+    assert len(re.findall(r"= getelementptr float, ptr addrspace\(1\) %gbase\.\d+, i32 %tid", ll)) == 4
+    assert "readfirstlane" not in ll
+
+
+def test_loop_varying_lane_term_needs_no_readfirstlane():
+    """A per-lane term that changes every iteration cannot be hoisted."""
+    b = IRBuilder("split_lane_varies")
+    src = b.param("S", PtrType(F32, "global"), readonly=True)
+    dst = b.param("D", PtrType(F32, "global"))
+    stride = b.param("stride", I32)
+    tid, bid = b.thread_id_x(), b.block_id_x()
+    row = b.mul(bid, stride)
+    loop = b.scf_for_iter(b.const_i32(0), b.const_i32(4), b.const_i32(1), [("acc", b.const_f32(0.0))])
+    with loop as (k, (acc,)):
+        lane = b.mul(tid, b.add(k, b.const_i32(1)))
+        b.scf_yield(b.fadd(acc, b.global_load(src, b.add(row, lane), F32)))
+    b.global_store(dst, tid, loop.results[0])
+    b.ret()
+    ll = _lower(b.kernel, "gfx1151")
+    assert _is_split(ll, "float")
+    assert "readfirstlane" not in ll
 
 
 @pytest.mark.parametrize(
@@ -209,6 +264,68 @@ def test_carried_value_updated_per_lane_is_not_uniform(unroll):
     assert not _is_split(ll, "float")
 
 
+def _wide_loop_kernel(accumulators: int):
+    """A k loop carrying ``accumulators`` per-lane ``vec<8 x f32>`` sums (8 words
+    each) and reading a per-lane vector from outside the loop, around a
+    splittable gather."""
+    b = IRBuilder(f"split_budget_{accumulators}")
+    src = b.param("S", PtrType(F32, "global"), readonly=True)
+    dst = b.param("D", PtrType(F32, "global"))
+    stride = b.param("stride", I32)
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    seed = b.global_load_vN(src, b.mul(tid, b.const_i32(8)), F32, 8)
+    init = [(f"acc{i}", seed) for i in range(accumulators)]
+    loop = b.scf_for_iter(b.const_i32(0), n, b.const_i32(1), init)
+    with loop as (k, accs):
+        v = b.global_load(src, b.add(b.mul(k, stride), tid), F32)
+        step = b.vector_add(b.vector_splat(v, 8), seed)
+        b.scf_yield(*[b.vector_add(a, step) for a in accs])
+    total = loop.results[0]
+    for r in loop.results[1:]:
+        total = b.vector_add(total, r)
+    b.global_store(dst, tid, b.vector_sum(total))
+    b.ret()
+    return b.kernel
+
+
+def test_register_words():
+    from rocke.core.ir import BF16, I1, SmemType, VectorType
+    from rocke.core.lower_llvm import _register_words
+
+    assert _register_words(VectorType(F16, 16)) == 8
+    assert _register_words(VectorType(F32, 3)) == 3
+    assert _register_words(F16) == 1
+    assert _register_words(VectorType(BF16, 3)) == 2
+    assert _register_words(I1) == 0
+    assert _register_words(PtrType(F16, "global")) == 2
+    assert _register_words(PtrType(F16, "lds")) == 1
+    assert _register_words(SmemType(F16, (16, 16))) == 0
+
+
+def test_live_through_words_counts_carried_and_live_in_state():
+    from rocke.core.lower_llvm import _IndexFacts
+
+    # Two carried vec<8 x f32> sums, the vec<8 x f32> read from outside, and
+    # the thread id; the pointers, stride and bounds are uniform.
+    facts = _IndexFacts(_wide_loop_kernel(2), 32)
+    assert facts.live_through_words == 2 * 8 + 8 + 1
+
+
+@pytest.mark.parametrize("accumulators,split", [(16, True), (31, False)])
+def test_loop_state_past_the_register_file_keeps_the_single_gep(accumulators, split):
+    """gfx1151 has 256 VGPRs per lane: 16 sums keep 137 words live through the
+    loop, 31 keep 257, and such a kernel spills whatever its addresses look like."""
+    from rocke.core.lower_llvm import _IndexFacts
+
+    kernel = _wide_loop_kernel(accumulators)
+    words = _IndexFacts(kernel, 32).live_through_words
+    assert (words <= backend_for("gfx1151").arch.limits.vgprs) is split
+    ll = _lower(kernel, "gfx1151")
+    assert _is_split(ll, "float") is split
+    assert ("readfirstlane.p1" in ll) is split
+
+
 def _parity_kernels():
     yield "row", _gather(_row)
     yield "lane_bytes", _gather(
@@ -223,6 +340,8 @@ def _parity_kernels():
             yield f"loop_u{int(unroll)}_c{int(carry_lane)}", _loop_kernel(
                 unroll=unroll, carry_lane=carry_lane
             )
+    for accumulators in (16, 31):
+        yield f"budget_{accumulators}", _wide_loop_kernel(accumulators)
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201", "gfx950"])

@@ -51,17 +51,22 @@ if(BUILD_TESTING)
 
     # C++ builder -> C++ serializer -> Rust direct compiler for gfx1151
     # attention, convolution and GEMM; also a per-stage compile-time harness
-    # (--reps N --json FILE --dump DIR). The C++ conv builder emits
-    # tile.buffer_load_vN_f16 where the Python builder emits tile.buffer_load_vN,
-    # and the direct compiler parses only the latter, so conv is expected to be
-    # rejected until the builders agree; the harness fails once it compiles.
+    # (--reps N --json FILE --dump DIR). The direct compiler now takes the C++
+    # conv builder's tile.buffer_load_vN_f16 too, so every case must compile.
     add_executable(rocke_native_direct_code_object
                    runtime/test_native_direct_code_object.cpp)
     target_link_libraries(rocke_native_direct_code_object PRIVATE rocke_core)
     rocke_link_codeobj_ffi(rocke_native_direct_code_object)
     add_test(NAME rocke_native_direct_code_object
-             COMMAND rocke_native_direct_code_object --reps 3 --expect-reject conv)
+             COMMAND rocke_native_direct_code_object --reps 3)
     set_tests_properties(rocke_native_direct_code_object
+                         PROPERTIES LABELS "ckc;integration;host")
+    # The same through a compile session and a streamed input: every mode must
+    # give the plain image, and the streamed pieces the serializer's text.
+    add_test(NAME rocke_native_direct_code_object_session
+             COMMAND rocke_native_direct_code_object --reps 2 --modes plain,session,stream
+                     --feed-bytes 4096)
+    set_tests_properties(rocke_native_direct_code_object_session
                          PROPERTIES LABELS "ckc;integration;host")
   endif()
 
@@ -117,6 +122,24 @@ if(BUILD_TESTING)
   set_target_properties(rocke_ir_types PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
+
+  add_executable(rocke_ir_serialize_value_table core/test_ir_serialize_value_table.cpp)
+  target_link_libraries(rocke_ir_serialize_value_table PRIVATE rocke_core)
+  add_test(NAME rocke_ir_serialize_value_table COMMAND rocke_ir_serialize_value_table)
+  set_tests_properties(rocke_ir_serialize_value_table PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_serialize_value_table)
+  set_target_properties(rocke_ir_serialize_value_table PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_ir_serialize_value_table RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_serialize_value_table)
+
+  add_executable(rocke_global_address_split core/test_global_address_split.cpp)
+  target_link_libraries(rocke_global_address_split PRIVATE rocke_core)
+  add_test(NAME rocke_global_address_split COMMAND rocke_global_address_split)
+  set_tests_properties(rocke_global_address_split PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_global_address_split)
+  set_target_properties(rocke_global_address_split PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_global_address_split RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_global_address_split)
 
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)

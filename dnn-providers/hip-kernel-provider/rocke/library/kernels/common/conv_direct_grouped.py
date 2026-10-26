@@ -1293,22 +1293,26 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     The 4c kernel uses the tiny ``mfma_f32_4x4x4_f16`` atom, or
     ``mfma_f32_4x4x4_bf16`` (the ``_1k`` intrinsic) for bf16 I/O (16
     independent 4x4x4 matmuls per wave). Both intrinsics are selectable on
-    gfx942 and gfx950, so the kernel is arch-neutral: ``arch`` is
-    validated against :class:`rocke.core.arch.ArchTarget` (unknown gfx
-    names rejected) but does not change the emitted MFMA. The 4x4x4 atom
-    is deliberately not gated through the MMA catalog ``has_shape`` check
-    because the catalog lists only the warp-tile (16x16 / 32x32) shapes,
-    while comgr selects the 4x4x4 intrinsic directly on both targets.
+    gfx942 and gfx950, so the kernel is arch-neutral there: ``arch`` does
+    not change the emitted MFMA. The MMA catalog lists only the warp-tile
+    (16x16 / 32x32) shapes, so the 4x4x4 atom cannot be looked up with
+    ``has_shape``; a target is refused when its catalog has no MFMA atom of
+    the I/O dtype at all. Among the catalogued targets those are exactly the
+    ones where the 4x4x4 intrinsics do not select: the wave32 WMMA targets
+    (gfx1151 among them).
     """
     from rocke.core.arch import ArchTarget
 
     try:
-        ArchTarget.from_gfx(arch)
+        target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
+    if not target.supports_dtype_combo(ab_dtype, ab_dtype, "fp32"):
+        return False, f"missing 4x4x4 {ab_dtype} MFMA atom on {arch}"
     why = forward_padding_reason(p)
     if why is not None:
         return False, why
@@ -1674,7 +1678,8 @@ def build_direct_conv_4c(spec: DirectConv4cSpec, *, arch: str = "gfx950") -> Ker
     ``arch`` (``"gfx942"`` / ``"gfx950"``) selects the target GPU. The
     ``mfma_f32_4x4x4_{f16,bf16}`` atom this kernel uses is selectable on both
     targets, so the kernel is arch-neutral; ``arch`` is validated (via
-    :func:`is_valid_spec_4c`) but does not change the emitted IR.
+    :func:`is_valid_spec_4c`, which refuses a target without the atom) but
+    does not change the emitted IR.
     """
     spec.validate()
     ok, why = is_valid_spec_4c(spec, arch=arch)

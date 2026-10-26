@@ -1,14 +1,42 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-//! Register allocation: per-dword liveness, copy coalescing and first-fit
-//! assignment. There is no spilling; running out of registers is an error.
+//! Register allocation.
+//!
+//! The machine IR is in SSA form at dword granularity: every (virtual
+//! register, dword) unit has one definition that dominates its uses, except
+//! loop-carried registers (defined before the loop and again by the copy at
+//! its latch, a phi web already resolved into copies) and tied operands
+//! (accumulate-in-place WMMA, d16 loads), whose second definition is the
+//! two-address form of a new value. Blocks are laid out with every block
+//! after its dominators, so a value's first live slot is its definition.
+//!
+//! Liveness is per unit, as segments of that linear slot order. `pressure`
+//! is the most units of a class live at one slot, a lower bound on the
+//! registers of any assignment. `allocate` coalesces copies, then colors
+//! register groups (a coalesced set of virtual registers at fixed dword
+//! offsets) greedily in order of their first definition. For single-dword
+//! values in SSA form this is coloring a chordal interference graph in a
+//! perfect elimination order: whatever free register each value takes, the
+//! registers in use at a definition are those of the values live there, so
+//! `pressure` registers suffice and the choice among free ones is free to
+//! serve dual issue. Tuples are placed to keep free space contiguous; when
+//! a group still does not fit, the budget grows to the next register count
+//! that keeps the occupancy, and only past the hardware limit does the
+//! allocation fail.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::mir::*;
+pub use super::spill::{SpillConfig, SpillStats};
 use crate::error::CompileError;
 
-const NUM_SGPRS: u32 = 106;
-const NUM_VGPRS: u32 = 256;
+/// SGPRs an allocation may hand out (s0..s105; VCC follows).
+pub const MAX_SGPRS: u32 = 106;
+pub const MAX_VGPRS: u32 = 256;
+
+/// Instructions below which a second thread costs more than it saves.
+pub(super) const PARALLEL_MIN_INSTS: usize = 4096;
 
 #[derive(Clone)]
 struct Bits(Vec<u64>);
@@ -50,7 +78,7 @@ impl Bits {
 }
 
 /// Inclusive slot range; instruction `i` reads at `2i` and writes at `2i+1`.
-type Seg = (u32, u32);
+pub(super) type Seg = (u32, u32);
 
 /// Appends `segs` to `out` sorted, with overlapping or adjacent ones joined.
 fn normalize_into(segs: &mut [Seg], out: &mut Vec<Seg>) {
@@ -94,6 +122,10 @@ fn segs_of<'a>(table: &'a [Seg], &(start, len): &UnitSegs) -> &'a [Seg] {
 struct Occupancy {
     regs: usize,
     bits: Vec<u64>,
+    /// Per register, `stride` words with a bit for each word of `bits` that
+    /// holds a taken slot, so long segments test 64 words at once.
+    taken: Vec<u64>,
+    stride: usize,
 }
 
 /// A segment's first and last word index with the masks of its bits there.
@@ -103,10 +135,26 @@ fn check_of((s, e): Seg) -> Check {
     (s / 64, e / 64, !0u64 << (s % 64), !0u64 >> (63 - e % 64))
 }
 
+/// Bit `j` set where `base + j` is a multiple of `align`.
+fn aligned_positions(base: u32, align: u32) -> u64 {
+    match align {
+        0 | 1 => !0,
+        2 if base % 2 == 0 => 0x5555_5555_5555_5555,
+        4 if base % 4 == 0 => 0x1111_1111_1111_1111,
+        _ => (0..64).filter(|&j| (base + j) % align == 0).fold(0, |m, j| m | 1 << j),
+    }
+}
+
 impl Occupancy {
     fn new(regs: u32, slots: usize) -> Self {
         let words = slots.div_ceil(64).max(1);
-        Occupancy { regs: regs as usize, bits: vec![0; regs as usize * words] }
+        let stride = words.div_ceil(64);
+        Occupancy {
+            regs: regs as usize,
+            bits: vec![0; regs as usize * words],
+            taken: vec![0; regs as usize * stride],
+            stride,
+        }
     }
 
     fn free_at(&self, reg: usize, (first, last, low, high): Check) -> bool {
@@ -114,9 +162,24 @@ impl Occupancy {
         if first == last {
             return word(first) & low & high == 0;
         }
-        word(first) & low == 0 && (first + 1..last).all(|w| word(w) == 0) && word(last) & high == 0
+        word(first) & low == 0 && word(last) & high == 0 && self.empty_within(reg, first + 1, last)
     }
 
+    /// Whether register `reg` holds no slot in words `from..to`.
+    fn empty_within(&self, reg: usize, from: u32, to: u32) -> bool {
+        if from >= to {
+            return true;
+        }
+        let row = &self.taken[reg * self.stride..][..self.stride];
+        let (a, b) = (from as usize, to as usize - 1);
+        let (low, high) = (!0u64 << (a % 64), !0u64 >> (63 - b % 64));
+        if a / 64 == b / 64 {
+            return row[a / 64] & low & high == 0;
+        }
+        row[a / 64] & low == 0 && row[a / 64 + 1..b / 64].iter().all(|&x| x == 0) && row[b / 64] & high == 0
+    }
+
+    #[cfg(test)]
     fn free(&self, reg: u32, segs: &[Seg]) -> bool {
         assert!((reg as usize) < self.regs, "register {reg} out of range");
         segs.iter().all(|&seg| self.free_at(reg as usize, check_of(seg)))
@@ -125,6 +188,67 @@ impl Occupancy {
     /// Whether register `at + k` is free for every `(k, check)`.
     fn free_from(&self, at: u32, checks: &[(u32, Check)]) -> bool {
         checks.iter().all(|&(k, check)| self.free_at((at + k) as usize, check))
+    }
+
+    /// The lowest multiple `at` of `align` with `at + size <= limit` that is
+    /// `free_from`, as trying each in turn finds it. Past the first few,
+    /// positions go 64 at a time: the first and last word of every check
+    /// rule most of them out together, and `free_from` decides the rest in
+    /// order.
+    fn first_free(&self, checks: &[(u32, Check)], size: u32, align: u32, limit: u32) -> Option<u32> {
+        let last = limit.checked_sub(size)?;
+        let mut at = 0;
+        for _ in 0..4 {
+            if at > last {
+                return None;
+            }
+            if self.free_from(at, checks) {
+                return Some(at);
+            }
+            at += align;
+        }
+        let mut base = at / 64 * 64;
+        // Positions of the first chunk below `at` are tried.
+        let mut untried = !0u64 << (at - base);
+        while base <= last {
+            let n = (last - base + 1).min(64);
+            let mut ok = aligned_positions(base, align) & (!0u64 >> (64 - n)) & untried;
+            untried = !0;
+            for &(k, (first, end, low, high)) in checks {
+                if ok == 0 {
+                    break;
+                }
+                let start = (base + k) as usize;
+                if first == end {
+                    ok &= self.free_bits(first, low & high, start, n);
+                } else {
+                    ok &= self.free_bits(first, low, start, n);
+                    if ok != 0 {
+                        ok &= self.free_bits(end, high, start, n);
+                    }
+                }
+            }
+            while ok != 0 {
+                let at = base + ok.trailing_zeros();
+                if self.free_from(at, checks) {
+                    return Some(at);
+                }
+                ok &= ok - 1;
+            }
+            base += 64;
+        }
+        None
+    }
+
+    /// Bit `j` (`j < n`) set where register `start + j` holds none of the
+    /// slots of `mask` in word `w`.
+    fn free_bits(&self, w: u32, mask: u64, start: usize, n: u32) -> u64 {
+        let row = &self.bits[w as usize * self.regs + start..][..n as usize];
+        let mut free = 0;
+        for (j, &word) in row.iter().enumerate() {
+            free |= u64::from(word & mask == 0) << j;
+        }
+        free
     }
 
     fn take(&mut self, reg: u32, segs: &[Seg]) {
@@ -142,20 +266,27 @@ impl Occupancy {
                 }
                 self.bits[word(last)] |= high;
             }
+            let row = &mut self.taken[reg * self.stride..][..self.stride];
+            for w in first as usize..=last as usize {
+                row[w / 64] |= 1 << (w % 64);
+            }
         }
     }
 }
 
-pub struct Allocation {
-    pub num_sgprs: u32,
-    pub num_vgprs: u32,
+/// Liveness of every (virtual register, dword) unit.
+#[derive(Clone)]
+pub(super) struct Live {
+    /// First unit of each virtual register; the last entry is the unit count.
+    pub(super) base: Vec<usize>,
+    /// First instruction of each block in the linear order, then the total.
+    pub(super) first: Vec<u32>,
+    /// Each unit's live segments, as a range of `table`.
+    unit_segs: Vec<UnitSegs>,
+    table: Vec<Seg>,
 }
 
-struct Units {
-    base: Vec<usize>,
-}
-
-impl Units {
+impl Live {
     fn of(&self, o: &Opnd) -> Option<std::ops::Range<usize>> {
         match o {
             Opnd::R(v) => {
@@ -165,66 +296,90 @@ impl Units {
             _ => None,
         }
     }
-}
 
-fn find(parent: &mut [(u32, u8)], v: u32) -> (u32, u8) {
-    let (p, off) = parent[v as usize];
-    if p == v {
-        return (v, 0);
+    pub(super) fn slots(&self) -> usize {
+        2 * *self.first.last().expect("non-empty") as usize
     }
-    let (root, poff) = find(parent, p);
-    parent[v as usize] = (root, off + poff);
-    (root, off + poff)
+
+    pub(super) fn segs(&self, unit: usize) -> &[Seg] {
+        segs_of(&self.table, &self.unit_segs[unit])
+    }
 }
 
-pub fn allocate(f: &mut MFunc) -> Result<Allocation, CompileError> {
-    allocate_unless(f, None).map(|a| a.expect("never skipped"))
+/// Units live out of each block, by backward dataflow; the units and block
+/// offsets come in `live`, whose segments are not yet filled.
+fn dataflow(f: &MFunc) -> Result<(Live, LiveOut), CompileError> {
+    let insts: usize = f.blocks.iter().map(|b| b.insts.len()).sum();
+    let units: usize = f.vregs.iter().map(|r| r.size as usize).sum();
+    // Sets of every unit per block cost little for a few blocks; across
+    // many, only the units that can cross a block boundary get them.
+    dataflow_with(f, f.blocks.len() * units.div_ceil(64) > insts)
 }
 
-/// Like `allocate`, but returns `Ok(None)`, leaving `f` as it is, when
-/// `skip(n)` holds for `n`, a number of VGPRs that every assignment uses
-/// at least: the most VGPR dwords live at one point.
-pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Result<Option<Allocation>, CompileError> {
+/// `dataflow`, over the units that can cross a block boundary if `sparse`,
+/// else over all of them; the result is the same.
+fn dataflow_with(f: &MFunc, sparse: bool) -> Result<(Live, LiveOut), CompileError> {
     let nv = f.vregs.len();
     let mut base = vec![0usize; nv + 1];
     for i in 0..nv {
         base[i + 1] = base[i] + f.vregs[i].size as usize;
     }
-    let units = Units { base };
-    let nunits = units.base[nv];
+    let nunits = base[nv];
     let nblocks = f.blocks.len();
     let mut first = vec![0u32; nblocks + 1];
     for b in 0..nblocks {
         first[b + 1] = first[b] + f.blocks[b].insts.len() as u32;
     }
-
-    // Block-local upward-exposed uses and definitions.
-    let mut uses = vec![Bits::new(nunits); nblocks];
-    let mut defs = vec![Bits::new(nunits); nblocks];
-    for (b, block) in f.blocks.iter().enumerate() {
+    let live = Live { base, first, unit_segs: Vec::new(), table: Vec::new() };
+    for block in &f.blocks {
         for inst in &block.insts {
-            for o in &inst.uses {
-                if let Some(range) = units.of(o) {
-                    for u in range {
-                        if !defs[b].get(u) {
-                            uses[b].set(u);
-                        }
-                    }
-                }
-            }
-            for o in &inst.defs {
-                if let Some(range) = units.of(o) {
-                    for u in range {
-                        defs[b].set(u);
+            for o in inst.defs.iter().chain(&inst.uses) {
+                if let Opnd::R(v) = o {
+                    if v.off as u32 + v.n as u32 > f.vregs[v.reg as usize].size as u32 {
+                        return Err(CompileError::new(
+                            "ROCKE_DIRECT_INTERNAL",
+                            format!("operand {}[{}:{}] is outside its register", v.reg, v.off, v.off + v.n - 1),
+                        ));
                     }
                 }
             }
         }
     }
+
+    // Block-local upward-exposed uses and definitions; sparse, by unit
+    // number among the crossing units (`unit_of` maps back).
+    let (crossing, uses, defs, unit_of) = if sparse {
+        crossing_sets(f, &live, nunits)
+    } else {
+        let mut uses = vec![Bits::new(nunits); nblocks];
+        let mut defs = vec![Bits::new(nunits); nblocks];
+        for (b, block) in f.blocks.iter().enumerate() {
+            for inst in &block.insts {
+                for o in &inst.uses {
+                    if let Some(range) = live.of(o) {
+                        for u in range {
+                            if !defs[b].get(u) {
+                                uses[b].set(u);
+                            }
+                        }
+                    }
+                }
+                for o in &inst.defs {
+                    if let Some(range) = live.of(o) {
+                        for u in range {
+                            defs[b].set(u);
+                        }
+                    }
+                }
+            }
+        }
+        (nunits, uses, defs, None)
+    };
+    let unit_of = |d: usize| unit_of.as_ref().map_or(d, |units| units[d] as usize);
     let succs: Vec<Vec<usize>> = (0..nblocks).map(|b| f.successors(b)).collect();
-    let mut live_in = vec![Bits::new(nunits); nblocks];
-    let mut live_out = vec![Bits::new(nunits); nblocks];
-    let mut inb = Bits::new(nunits);
+    let mut live_in = vec![Bits::new(crossing); nblocks];
+    let mut live_out = vec![Bits::new(crossing); nblocks];
+    let mut inb = Bits::new(crossing);
     loop {
         let mut changed = false;
         for b in (0..nblocks).rev() {
@@ -244,40 +399,160 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
             break;
         }
     }
-    let unit_owner = |u: usize| -> usize { units.base.partition_point(|&b| b <= u) - 1 };
-    for u in live_in[0].ones() {
-        let owner = unit_owner(u);
-        if f.vregs[owner].fixed.is_none() {
-            return Err(CompileError::new(
-                "ROCKE_DIRECT_INTERNAL",
-                format!("virtual register {owner} is used before it is defined"),
-            ));
+    if nblocks > 0 {
+        for u in live_in[0].ones().map(unit_of) {
+            let owner = live.base.partition_point(|&b| b <= u) - 1;
+            if f.vregs[owner].fixed.is_none() {
+                return Err(CompileError::new(
+                    "ROCKE_DIRECT_INTERNAL",
+                    format!("virtual register {owner} is used before it is defined"),
+                ));
+            }
         }
     }
+    let mut out = LiveOut { start: Vec::with_capacity(nblocks + 1), units: Vec::new() };
+    out.start.push(0);
+    for bits in &live_out {
+        out.units.extend(bits.ones().map(|d| unit_of(d) as u32));
+        out.start.push(out.units.len() as u32);
+    }
+    Ok((live, out))
+}
 
+/// Per block, the upward-exposed uses and the definitions of the units some
+/// block reads before writing (only those can be live across a block
+/// boundary), numbered densely in unit order; and the unit of each number.
+fn crossing_sets(f: &MFunc, live: &Live, nunits: usize) -> (usize, Vec<Bits>, Vec<Bits>, Option<Vec<u32>>) {
+    let nblocks = f.blocks.len();
+    // Block + 1 marks a unit defined, or recorded as exposed, in the block
+    // at hand; the uses and definitions go in (block, unit) pairs.
+    let (mut defined, mut exposed) = (vec![0u32; nunits], vec![0u32; nunits]);
+    let (mut ue, mut de): (Vec<(u32, u32)>, Vec<(u32, u32)>) = (Vec::new(), Vec::new());
+    for (b, block) in f.blocks.iter().enumerate() {
+        let mark = b as u32 + 1;
+        for inst in &block.insts {
+            for o in &inst.uses {
+                if let Some(range) = live.of(o) {
+                    for u in range {
+                        if defined[u] != mark && exposed[u] != mark {
+                            exposed[u] = mark;
+                            ue.push((b as u32, u as u32));
+                        }
+                    }
+                }
+            }
+            for o in &inst.defs {
+                if let Some(range) = live.of(o) {
+                    for u in range {
+                        if defined[u] != mark {
+                            defined[u] = mark;
+                            de.push((b as u32, u as u32));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut dense = exposed;
+    dense.fill(u32::MAX);
+    for &(_, u) in &ue {
+        dense[u as usize] = 0;
+    }
+    let mut unit_of = Vec::new();
+    for (u, d) in dense.iter_mut().enumerate() {
+        if *d == 0 {
+            *d = unit_of.len() as u32;
+            unit_of.push(u as u32);
+        }
+    }
+    let crossing = unit_of.len();
+    let mut uses = vec![Bits::new(crossing); nblocks];
+    let mut defs = vec![Bits::new(crossing); nblocks];
+    for &(b, u) in &ue {
+        uses[b as usize].set(dense[u as usize] as usize);
+    }
+    for &(b, u) in &de {
+        if dense[u as usize] != u32::MAX {
+            defs[b as usize].set(dense[u as usize] as usize);
+        }
+    }
+    (crossing, uses, defs, Some(unit_of))
+}
+
+/// The units live out of each block, in increasing order.
+struct LiveOut {
+    start: Vec<u32>,
+    units: Vec<u32>,
+}
+
+impl LiveOut {
+    fn of(&self, block: usize) -> impl Iterator<Item = usize> + '_ {
+        self.units[self.start[block] as usize..self.start[block + 1] as usize].iter().map(|&u| u as usize)
+    }
+}
+
+/// Buffers `analyze_reusing` fills, kept between analyses of one function as
+/// it changes: refilling memory in use costs a fraction of fresh memory.
+#[derive(Default)]
+pub(super) struct LiveScratch {
+    raw: Vec<(u32, Seg)>,
+    end: Vec<u32>,
+    by_unit: Vec<u32>,
+    sorted: Vec<Seg>,
+    fill: Vec<u32>,
+    /// The tables of a liveness no longer needed.
+    table: Vec<Seg>,
+    unit_segs: Vec<UnitSegs>,
+}
+
+impl LiveScratch {
+    /// Keeps the tables of `live` for the next analysis.
+    pub(super) fn recycle(&mut self, live: Live) {
+        self.table = live.table;
+        self.unit_segs = live.unit_segs;
+    }
+}
+
+/// Per-unit liveness by backward dataflow over the blocks, then the live
+/// segments of each unit in linear slot order.
+pub(super) fn analyze(f: &MFunc) -> Result<Live, CompileError> {
+    analyze_reusing(f, &mut LiveScratch::default())
+}
+
+/// `analyze`, in the buffers of `scratch`.
+pub(super) fn analyze_reusing(f: &MFunc, scratch: &mut LiveScratch) -> Result<Live, CompileError> {
+    let (mut live, live_out) = dataflow(f)?;
+    let nunits = *live.base.last().expect("non-empty");
+    let nblocks = f.blocks.len();
     // Live segments per unit, gathered as (unit, segment) and then sorted
     // into one table of normalized per-unit runs.
-    let mut raw: Vec<(u32, Seg)> = Vec::with_capacity(2 * first[nblocks] as usize);
-    let mut end = vec![0u32; nunits];
+    let first = &live.first;
+    let LiveScratch { raw, end, by_unit, sorted, fill, table, unit_segs } = scratch;
+    raw.clear();
+    raw.reserve(2 * first[nblocks] as usize);
+    end.clear();
+    end.resize(nunits, 0);
+    let mut cur = Bits::new(nunits);
     for (b, block) in f.blocks.iter().enumerate() {
         if block.insts.is_empty() {
             continue;
         }
         let start_slot = 2 * first[b];
         let end_slot = 2 * first[b + 1] - 1;
-        let mut live = live_out[b].clone();
-        for u in live.ones() {
+        cur.0.fill(0);
+        for u in live_out.of(b) {
+            cur.set(u);
             end[u] = end_slot;
         }
         for (k, inst) in block.insts.iter().enumerate().rev() {
             let i = first[b] + k as u32;
             let dslot = if inst.op.flags() & F_EARLY != 0 { 2 * i } else { 2 * i + 1 };
             for o in &inst.defs {
-                if let Some(range) = units.of(o) {
+                if let Some(range) = live.of(o) {
                     for u in range {
-                        if live.get(u) {
+                        if cur.get(u) {
                             raw.push((u as u32, (dslot, end[u])));
-                            live.clear(u);
+                            cur.clear(u);
                         } else {
                             raw.push((u as u32, (dslot, dslot)));
                         }
@@ -285,35 +560,42 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
                 }
             }
             for o in &inst.uses {
-                if let Some(range) = units.of(o) {
+                if let Some(range) = live.of(o) {
                     for u in range {
-                        if !live.get(u) {
-                            live.set(u);
+                        if !cur.get(u) {
+                            cur.set(u);
                             end[u] = 2 * i;
                         }
                     }
                 }
             }
         }
-        for u in live.ones() {
+        for u in cur.ones() {
             raw.push((u as u32, (start_slot, end[u])));
         }
     }
-    let mut by_unit = vec![0u32; nunits + 1];
-    for &(u, _) in &raw {
+    by_unit.clear();
+    by_unit.resize(nunits + 1, 0);
+    for &(u, _) in raw.iter() {
         by_unit[u as usize + 1] += 1;
     }
     for u in 0..nunits {
         by_unit[u + 1] += by_unit[u];
     }
-    let mut sorted: Vec<Seg> = vec![(0, 0); raw.len()];
-    let mut fill = by_unit.clone();
-    for &(u, seg) in &raw {
+    sorted.clear();
+    sorted.resize(raw.len(), (0, 0));
+    fill.clear();
+    fill.extend_from_slice(by_unit);
+    for &(u, seg) in raw.iter() {
         sorted[fill[u as usize] as usize] = seg;
         fill[u as usize] += 1;
     }
-    let mut table: Vec<Seg> = Vec::with_capacity(raw.len());
-    let mut unit_segs: Vec<UnitSegs> = vec![(0, 0); nunits];
+    let mut table = std::mem::take(table);
+    table.clear();
+    table.reserve(raw.len());
+    let mut unit_segs = std::mem::take(unit_segs);
+    unit_segs.clear();
+    unit_segs.resize(nunits, (0, 0));
     for u in 0..nunits {
         let run = &mut sorted[by_unit[u] as usize..by_unit[u + 1] as usize];
         if !run.is_empty() {
@@ -322,34 +604,166 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
             unit_segs[u] = (start as u32, (table.len() - start) as u32);
         }
     }
-    let slots = 2 * first[nblocks] as usize;
-    if let Some(skip) = skip {
-        // Units live at the same slot get distinct registers.
-        let mut delta = vec![0i32; slots + 1];
-        for v in (0..nv).filter(|&v| f.vregs[v].class == Class::V) {
-            for u in units.base[v]..units.base[v + 1] {
-                for &(s, e) in segs_of(&table, &unit_segs[u]) {
-                    delta[s as usize] += 1;
-                    delta[e as usize + 1] -= 1;
-                }
+    live.unit_segs = unit_segs;
+    live.table = table;
+    Ok(live)
+}
+
+/// The most units of each register class live at one slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pressure {
+    pub vgprs: u32,
+    pub sgprs: u32,
+}
+
+/// Units of `class` live at each slot.
+pub(super) fn profile(f: &MFunc, live: &Live, class: Class) -> Vec<u32> {
+    let slots = live.slots();
+    let mut delta = vec![0i32; slots + 1];
+    for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == class) {
+        for u in live.base[v]..live.base[v + 1] {
+            for &(s, e) in live.segs(u) {
+                delta[s as usize] += 1;
+                delta[e as usize + 1] -= 1;
             }
         }
-        let (mut live, mut most) = (0i32, 0i32);
-        for d in delta {
-            live += d;
-            most = most.max(live);
-        }
-        if skip(most as u32) {
-            return Ok(None);
+    }
+    let mut level = 0i32;
+    delta.truncate(slots);
+    delta
+        .into_iter()
+        .map(|d| {
+            level += d;
+            level as u32
+        })
+        .collect()
+}
+
+fn pressure_of(f: &MFunc, live: &Live) -> Pressure {
+    let most = |class| profile(f, live, class).into_iter().max().unwrap_or(0);
+    Pressure { vgprs: most(Class::V), sgprs: most(Class::S) }
+}
+
+/// The most VGPR and SGPR dwords live at one point of `f`: every assignment
+/// uses at least that many registers. Counts the live units slot by slot,
+/// as `profile` does over `analyze`'s segments, without building them.
+pub fn pressure(f: &MFunc) -> Result<Pressure, CompileError> {
+    let (live, live_out) = dataflow(f)?;
+    let nunits = *live.base.last().expect("non-empty");
+    let mut is_v = Bits::new(nunits);
+    for v in (0..f.vregs.len()).filter(|&v| f.vregs[v].class == Class::V) {
+        for u in live.base[v]..live.base[v + 1] {
+            is_v.set(u);
         }
     }
+    let mut most = Pressure::default();
+    let mut cur = Bits::new(nunits);
+    for (b, block) in f.blocks.iter().enumerate() {
+        cur.0.fill(0);
+        let mut n = [0u32; 2];
+        for u in live_out.of(b) {
+            cur.set(u);
+            n[!is_v.get(u) as usize] += 1;
+        }
+        for inst in block.insts.iter().rev() {
+            let early = inst.op.flags() & F_EARLY != 0;
+            let units = |o: &Opnd| live.of(o).into_iter().flatten();
+            // Write slot: the units live after, plus results nothing reads.
+            let mut extra = [0u32; 2];
+            if !early {
+                for u in inst.defs.iter().flat_map(units) {
+                    if !cur.get(u) {
+                        extra[!is_v.get(u) as usize] += 1;
+                    }
+                }
+            }
+            most.vgprs = most.vgprs.max(n[0] + extra[0]);
+            most.sgprs = most.sgprs.max(n[1] + extra[1]);
+            for u in inst.defs.iter().flat_map(units) {
+                if cur.get(u) {
+                    cur.clear(u);
+                    n[!is_v.get(u) as usize] -= 1;
+                }
+            }
+            for u in inst.uses.iter().flat_map(units) {
+                if !cur.get(u) {
+                    cur.set(u);
+                    n[!is_v.get(u) as usize] += 1;
+                }
+            }
+            // Read slot: the units live before, plus early-clobber results.
+            let mut extra = [0u32; 2];
+            if early {
+                for u in inst.defs.iter().flat_map(units) {
+                    if !cur.get(u) {
+                        extra[!is_v.get(u) as usize] += 1;
+                    }
+                }
+            }
+            most.vgprs = most.vgprs.max(n[0] + extra[0]);
+            most.sgprs = most.sgprs.max(n[1] + extra[1]);
+        }
+    }
+    Ok(most)
+}
 
-    // Coalescing: map whole groups into other groups at a dword offset. A
-    // group is its root's units; merged groups are never read again.
-    let mut parent: Vec<(u32, u8)> = (0..nv as u32).map(|v| (v, 0)).collect();
-    let mut gsize: Vec<u32> = f.vregs.iter().map(|r| r.size as u32).collect();
-    let mut galign: Vec<u8> = f.vregs.iter().map(|r| r.align).collect();
-    let mut gfixed: Vec<Option<u16>> = f.vregs.iter().map(|r| r.fixed).collect();
+/// Registers an allocation may use: VGPRs past `vgprs` would lower the
+/// occupancy. Assignment stays within the pressure when it can and never
+/// exceeds these.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub vgprs: u32,
+    pub sgprs: u32,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits { vgprs: MAX_VGPRS, sgprs: MAX_SGPRS }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Allocation {
+    pub num_sgprs: u32,
+    pub num_vgprs: u32,
+    /// The pressure of the function as allocated, where spilling measured
+    /// it (the caller knows it otherwise).
+    pub pressure: Pressure,
+    pub spill: SpillStats,
+    /// Only packing tuples first kept the assignment within the hardware.
+    pub tight: bool,
+}
+
+pub(super) fn find(parent: &mut [(u32, u8)], v: u32) -> (u32, u8) {
+    let (p, off) = parent[v as usize];
+    if p == v {
+        return (v, 0);
+    }
+    let (root, poff) = find(parent, p);
+    parent[v as usize] = (root, off + poff);
+    (root, off + poff)
+}
+
+/// Coalesced register groups: each virtual register maps to a root at a
+/// dword offset; a root's group is `gsize` dwords with the strictest
+/// alignment and the precolor of its members.
+pub(super) struct Groups {
+    pub(super) parent: Vec<(u32, u8)>,
+    pub(super) gsize: Vec<u32>,
+    galign: Vec<u8>,
+    pub(super) gfixed: Vec<Option<u16>>,
+}
+
+/// Merges copy-related groups whose units are never live at once, hottest
+/// copies first; a merged group's units get the union of the segments.
+pub(super) fn coalesce(f: &MFunc, live: &mut Live) -> Groups {
+    let nv = f.vregs.len();
+    let mut g = Groups {
+        parent: (0..nv as u32).map(|v| (v, 0)).collect(),
+        gsize: f.vregs.iter().map(|r| r.size as u32).collect(),
+        galign: f.vregs.iter().map(|r| r.align).collect(),
+        gfixed: f.vregs.iter().map(|r| r.fixed).collect(),
+    };
     let mut copies: Vec<(u32, usize, usize)> = Vec::new();
     for (b, block) in f.blocks.iter().enumerate() {
         for (k, inst) in block.insts.iter().enumerate() {
@@ -362,7 +776,8 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
     if super::debug_flag("nocoalesce") {
         copies.clear();
     }
-    let group_unit = |v: u32, k: u32| units.base[v as usize] + k as usize;
+    let base = live.base.clone();
+    let group_unit = |v: u32, k: u32| base[v as usize] + k as usize;
     let mut both: Vec<Seg> = Vec::new();
     for &(_, b, k) in &copies {
         let inst = &f.blocks[b].insts[k];
@@ -372,115 +787,374 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
         if f.vregs[d.reg as usize].class != f.vregs[s.reg as usize].class {
             continue;
         }
-        let (rd, od) = find(&mut parent, d.reg);
-        let (rs, os) = find(&mut parent, s.reg);
+        let (rd, od) = find(&mut g.parent, d.reg);
+        let (rs, os) = find(&mut g.parent, s.reg);
         let od = od as i32 + d.off as i32;
         let os = os as i32 + s.off as i32;
         if rd == rs {
             continue;
         }
-        let try_merge = |x: u32, y: u32, delta: i32, unit_segs: &[UnitSegs], gsize: &[u32], galign: &[u8], gfixed: &[Option<u16>]| -> bool {
-            let sx = gsize[x as usize] as i32;
-            let sy = gsize[y as usize] as i32;
-            if delta < 0 || delta + sx > sy || gfixed[x as usize].is_some() {
+        let try_merge = |x: u32, y: u32, delta: i32, g: &Groups, live: &Live| -> bool {
+            let sx = g.gsize[x as usize] as i32;
+            let sy = g.gsize[y as usize] as i32;
+            if delta < 0 || delta + sx > sy || g.gfixed[x as usize].is_some() {
                 return false;
             }
-            let ax = galign[x as usize] as i32;
+            let ax = g.galign[x as usize] as i32;
             if delta % ax != 0 {
                 return false;
             }
-            if let Some(p) = gfixed[y as usize] {
+            if let Some(p) = g.gfixed[y as usize] {
                 if (p as i32 + delta) % ax != 0 {
                     return false;
                 }
             }
             (0..sx as u32).all(|k| {
-                let a = segs_of(&table, &unit_segs[group_unit(x, k)]);
-                let b = segs_of(&table, &unit_segs[group_unit(y, k + delta as u32)]);
+                let a = live.segs(group_unit(x, k));
+                let b = live.segs(group_unit(y, k + delta as u32));
                 !overlaps(a, b)
             })
         };
-        let (x, y, delta) = if try_merge(rs, rd, od - os, &unit_segs, &gsize, &galign, &gfixed) {
+        let (x, y, delta) = if try_merge(rs, rd, od - os, &g, live) {
             (rs, rd, od - os)
-        } else if try_merge(rd, rs, os - od, &unit_segs, &gsize, &galign, &gfixed) {
+        } else if try_merge(rd, rs, os - od, &g, live) {
             (rd, rs, os - od)
         } else {
             continue;
         };
-        for k in 0..gsize[x as usize] {
+        for k in 0..g.gsize[x as usize] {
             let from = group_unit(x, k);
             let to = group_unit(y, k + delta as u32);
             both.clear();
-            both.extend_from_slice(segs_of(&table, &unit_segs[to]));
-            both.extend_from_slice(segs_of(&table, &unit_segs[from]));
-            let start = table.len();
-            normalize_into(&mut both, &mut table);
-            unit_segs[to] = (start as u32, (table.len() - start) as u32);
-            unit_segs[from] = (0, 0);
+            both.extend_from_slice(live.segs(to));
+            both.extend_from_slice(live.segs(from));
+            let start = live.table.len();
+            normalize_into(&mut both, &mut live.table);
+            live.unit_segs[to] = (start as u32, (live.table.len() - start) as u32);
+            live.unit_segs[from] = (0, 0);
         }
-        gsize[x as usize] = 0;
-        galign[y as usize] = galign[y as usize].max(galign[x as usize]);
-        if gfixed[y as usize].is_none() {
-            gfixed[y as usize] = gfixed[x as usize];
+        g.gsize[x as usize] = 0;
+        g.galign[y as usize] = g.galign[y as usize].max(g.galign[x as usize]);
+        if g.gfixed[y as usize].is_none() {
+            g.gfixed[y as usize] = g.gfixed[x as usize];
         }
-        parent[x as usize] = (y, delta as u8);
+        g.parent[x as usize] = (y, delta as u8);
+    }
+    g
+}
+
+/// Allocates within the hardware limits, without spilling.
+pub fn allocate(f: &mut MFunc) -> Result<Allocation, CompileError> {
+    allocate_within(f, Limits::default())
+}
+
+/// Allocates registers for `f` without spilling. `budget` is the register
+/// count that keeps the occupancy: when the first fit needs more, a second
+/// assignment packs tuples first, and the one using fewer VGPRs is kept.
+/// The result may exceed the budget; only past the hardware does this fail.
+pub fn allocate_within(f: &mut MFunc, budget: Limits) -> Result<Allocation, CompileError> {
+    let mut live = analyze(f)?;
+    let groups = coalesce(f, &mut live);
+    let hard = Limits { vgprs: budget.vgprs.max(MAX_VGPRS), sgprs: budget.sgprs.max(MAX_SGPRS) };
+    let (phys, used, tight) = assign_best(f, &live, groups, budget, hard, 1).map_err(overflow_error)?;
+    rewrite(f, &phys);
+    let pressure = Pressure::default();
+    Ok(Allocation { num_sgprs: used.sgprs, num_vgprs: used.vgprs, pressure, spill: SpillStats::default(), tight })
+}
+
+/// The registers of each class an assignment of `f` needs, with no limit:
+/// at least its pressure, more where tuples fragment the register file.
+pub fn assignment_need(f: &MFunc) -> Result<Pressure, CompileError> {
+    let mut live = analyze(f)?;
+    let groups = coalesce(f, &mut live);
+    let unbounded = Limits { vgprs: 4 * MAX_VGPRS, sgprs: 4 * MAX_SGPRS };
+    let (_, used, _) = assign_best(f, &live, groups, Limits::default(), unbounded, 1).map_err(overflow_error)?;
+    Ok(used)
+}
+
+/// Allocates within `limits`, spilling when more dwords of a class are live
+/// at once than its limit, or when the assignment does not fit: SGPRs to
+/// VGPR lanes first (which adds VGPRs), then VGPRs to LDS and scratch.
+pub fn allocate_spilling(f: &mut MFunc, limits: Limits, cfg: SpillConfig) -> Result<Allocation, CompileError> {
+    allocate_spilling_on(f, limits, cfg, 1)
+}
+
+/// `allocate_spilling` on up to `threads` threads; the result is the same.
+pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConfig, threads: usize) -> Result<Allocation, CompileError> {
+    let first = pressure(f)?;
+    let fits = |a: &Allocation| a.num_vgprs <= limits.vgprs && a.num_sgprs <= limits.sgprs;
+    if first.vgprs <= limits.vgprs && first.sgprs <= limits.sgprs {
+        let mut g = f.clone();
+        if let Ok(a) = allocate_within(&mut g, limits) {
+            if fits(&a) {
+                *f = g;
+                return Ok(Allocation { pressure: first, ..a });
+            }
+        }
+    }
+    let mut spiller = super::spill::Spiller::new(f, cfg);
+    let (mut target_s, mut target_v) = (limits.sgprs.min(MAX_SGPRS), limits.vgprs.min(MAX_VGPRS));
+    // The liveness of `f` as it stands, while a step leaves `f` unchanged.
+    let mut known = None;
+    loop {
+        spiller.reduce(f, Class::S, target_s, &mut known)?;
+        spiller.reduce(f, Class::V, target_v, &mut known)?;
+        let mut live = match known.take() {
+            Some(live) => live,
+            None => spiller.analyze(f)?,
+        };
+        let pressure = pressure_of(f, &live);
+        // Coalescing merges segments; the next round starts from `f` as is.
+        known = Some(live.clone());
+        let groups = coalesce(f, &mut live);
+        let hard = Limits { vgprs: limits.vgprs.min(MAX_VGPRS), sgprs: limits.sgprs.min(MAX_SGPRS) };
+        // Fragmentation can need more registers than are live at once:
+        // then spill further below the limit.
+        let assigned = assign_best(f, &live, groups, hard, hard, threads);
+        spiller.recycle(live);
+        match assigned {
+            Ok((phys, used, tight)) if used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs => {
+                rewrite(f, &phys);
+                let spill = spiller.finish(f)?;
+                return Ok(Allocation { num_sgprs: used.sgprs, num_vgprs: used.vgprs, pressure, spill, tight });
+            }
+            Ok((_, used, _)) => {
+                if used.sgprs > hard.sgprs {
+                    target_s = target_s.saturating_sub(used.sgprs - hard.sgprs).max(8);
+                }
+                if used.vgprs > hard.vgprs {
+                    target_v = target_v.saturating_sub(used.vgprs - hard.vgprs).max(16);
+                }
+            }
+            Err(o) if o.class == Class::V && target_v > 16 => target_v -= o.size.clamp(2, 8),
+            Err(o) if o.class == Class::S && target_s > 8 => target_s -= o.size.clamp(1, 4),
+            Err(o) => return Err(overflow_error(o)),
+        }
+    }
+}
+
+fn overflow_error(o: Overflow) -> CompileError {
+    let what = if o.class == Class::S { "SGPRs" } else { "VGPRs" };
+    CompileError::new("ROCKE_DIRECT_REGISTERS", format!("out of {what}: no room for a {}-dword value", o.size))
+}
+
+/// Registers of each class an assignment uses.
+type Used = Pressure;
+
+/// Why an assignment failed: the class and the size of the group that found
+/// no room within the limit.
+struct Overflow {
+    class: Class,
+    size: u32,
+}
+
+/// Assigns in order of first definition, each group taking its preferred
+/// register or the first fit. If that needs more VGPRs than `budget`, but
+/// at most a tuple's worth more (or does not fit `hard`), also with larger
+/// groups first and no preferences (which packs tuples better), keeping the
+/// one using fewer VGPRs. Each may use registers up to `hard`. The flag
+/// tells that the first assignment did not fit `hard`. With `threads` above
+/// one, a large function packs tuples first meanwhile, in case it is asked
+/// for; the result is the same.
+fn assign_best(
+    f: &MFunc,
+    live: &Live,
+    groups: Groups,
+    budget: Limits,
+    hard: Limits,
+    threads: usize,
+) -> Result<(Vec<u32>, Used, bool), Overflow> {
+    let fits = |r: &Result<(Vec<u32>, Used), Overflow>| r.as_ref().is_ok_and(|(_, u)| u.vgprs <= budget.vgprs);
+    // Packing tuples first recovers a few registers, not more than a tuple's.
+    let near = |r: &Result<(Vec<u32>, Used), Overflow>| match r {
+        Err(_) => true,
+        Ok((_, u)) => u.vgprs <= budget.vgprs + 8,
+    };
+    let (mut best, packed) = if threads > 1 && live.slots() >= 2 * PARALLEL_MIN_INSTS {
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            let packed = s.spawn(|| assign(f, live, &groups, hard, Order::BigFirst, Some(&stop)));
+            let best = assign(f, live, &groups, hard, Order::Preferred, None);
+            if fits(&best) || !near(&best) {
+                stop.store(true, Ordering::Relaxed);
+            }
+            (best, Some(packed.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))))
+        })
+    } else {
+        (assign(f, live, &groups, hard, Order::Preferred, None), None)
+    };
+    let first_fit_failed = best.is_err();
+    if !fits(&best) && near(&best) {
+        let next = packed.unwrap_or_else(|| assign(f, live, &groups, hard, Order::BigFirst, None));
+        best = match (&best, &next) {
+            (Ok((_, a)), Ok((_, b))) if b.vgprs < a.vgprs => next,
+            (Err(_), Ok(_)) => next,
+            _ => best,
+        };
+    }
+    best.map(|(phys, used)| (phys, used, first_fit_failed))
+}
+
+/// How `assign` orders and places groups.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Order {
+    /// By first definition, each at its preferred register when free.
+    Preferred,
+    /// Larger groups first, each at the first fit.
+    BigFirst,
+}
+
+/// Registers groups would like to share: in an accumulation chain (an
+/// `v_fma_f32` whose result is the addend of another), the result with its
+/// addend (where that dies there), which makes it the two-address `fmac`
+/// VOPD dual-issues. Outside chains the addend's register is often rewritten
+/// right away, and taking it there can put a write just behind a
+/// transcendental reading the same register. Per root: (other root, offset
+/// of this root's base from the other's).
+fn affinities(f: &MFunc, groups: &Groups) -> Affinities {
+    let mut parent = groups.parent.clone();
+    let mut prefs = Vec::new();
+    let plain_fma = |i: &MInst| i.op == Opc::VFmaF32 && i.mods == 0;
+    let mut addend = vec![false; f.vregs.len()];
+    for inst in f.blocks.iter().flat_map(|b| b.insts.iter()).filter(|i| plain_fma(i)) {
+        if let Opnd::R(c) = inst.uses[2] {
+            addend[c.reg as usize] = true;
+        }
+    }
+    for inst in f.blocks.iter().flat_map(|b| b.insts.iter()) {
+        if !plain_fma(inst) {
+            continue;
+        }
+        let (Opnd::R(d), Opnd::R(c)) = (inst.defs[0], inst.uses[2]) else {
+            continue;
+        };
+        if f.vregs[d.reg as usize].class != Class::V || f.vregs[c.reg as usize].class != Class::V || !addend[d.reg as usize] {
+            continue;
+        }
+        let (rd, od) = find(&mut parent, d.reg);
+        let (rc, oc) = find(&mut parent, c.reg);
+        if rd != rc {
+            let delta = (oc as i32 + c.off as i32) - (od as i32 + d.off as i32);
+            prefs.push((rd, rc, delta));
+            prefs.push((rc, rd, -delta));
+        }
+    }
+    Affinities::new(f.vregs.len(), &prefs)
+}
+
+/// Each root's affinities in the order found, in one table.
+struct Affinities {
+    start: Vec<u32>,
+    pairs: Vec<(u32, i32)>,
+}
+
+impl Affinities {
+    /// From (root, other root, offset) triples.
+    fn new(roots: usize, prefs: &[(u32, u32, i32)]) -> Self {
+        let mut start = vec![0u32; roots + 1];
+        for &(root, _, _) in prefs {
+            start[root as usize + 1] += 1;
+        }
+        for r in 0..roots {
+            start[r + 1] += start[r];
+        }
+        let mut next = start.clone();
+        let mut pairs = vec![(0, 0); prefs.len()];
+        for &(root, other, delta) in prefs {
+            pairs[next[root as usize] as usize] = (other, delta);
+            next[root as usize] += 1;
+        }
+        Affinities { start, pairs }
     }
 
-    // First-fit assignment of group roots.
+    fn of(&self, root: u32) -> &[(u32, i32)] {
+        &self.pairs[self.start[root as usize] as usize..self.start[root as usize + 1] as usize]
+    }
+}
+
+/// One greedy assignment of the group roots to physical registers: each
+/// takes the lowest position free over all its units' live segments or,
+/// with `Order::Preferred`, first the register of an assigned group it has
+/// an affinity with. Precolored groups go first, then groups by first
+/// definition (with `Order::BigFirst`, by size and then first definition).
+/// In order of first definition the registers taken at a definition are
+/// those of the values live there, so preferring one free register over
+/// another costs single-dword SSA values nothing; holes in loop-carried
+/// values and tuples can still make it cost, hence the other order.
+/// `stop` set ends it early with a meaningless `Err`.
+fn assign(
+    f: &MFunc,
+    live: &Live,
+    groups: &Groups,
+    limits: Limits,
+    order: Order,
+    stop: Option<&AtomicBool>,
+) -> Result<(Vec<u32>, Used), Overflow> {
+    let nv = f.vregs.len();
+    let slots = live.slots();
+    let big_first = order == Order::BigFirst;
+    let prefs = if order == Order::Preferred { affinities(f, groups) } else { Affinities::new(nv, &[]) };
+    let mut placed = vec![false; nv];
+    let Groups { parent, gsize, galign, gfixed } = groups;
+    let group_unit = |v: u32, k: u32| live.base[v as usize] + k as usize;
     let start_of = |v: u32| -> u32 {
         (0..gsize[v as usize])
-            .filter_map(|k| segs_of(&table, &unit_segs[group_unit(v, k)]).first().map(|x| x.0))
+            .filter_map(|k| live.segs(group_unit(v, k)).first().map(|x| x.0))
             .min()
             .unwrap_or(u32::MAX)
     };
-    let mut roots: Vec<(bool, u32, std::cmp::Reverse<u32>, u32)> = (0..nv as u32)
-        .filter(|&v| parent[v as usize].0 == v)
-        .map(|v| (gfixed[v as usize].is_none(), start_of(v), std::cmp::Reverse(gsize[v as usize]), v))
-        .collect();
-    roots.sort_unstable();
-    let mut occ_s = Occupancy::new(NUM_SGPRS, slots);
-    let mut occ_v = Occupancy::new(NUM_VGPRS, slots);
+    // Precolored groups, then the others, each by (rank, start, size
+    // downward, register) packed into one integer.
+    let key = |v: u32| -> u128 {
+        let size = gsize[v as usize];
+        let rank = if big_first { u32::MAX - size } else { 0 };
+        (rank as u128) << 96 | (start_of(v) as u128) << 64 | ((u32::MAX - size) as u128) << 32 | v as u128
+    };
+    let (mut fixed, mut free) = (Vec::new(), Vec::new());
+    for v in (0..nv as u32).filter(|&v| parent[v as usize].0 == v) {
+        let bucket = if gfixed[v as usize].is_some() { &mut fixed } else { &mut free };
+        bucket.push(key(v));
+    }
+    fixed.sort_unstable();
+    free.sort_unstable();
+    let roots = fixed.into_iter().chain(free).map(|key| key as u32);
+    let mut occ_s = Occupancy::new(limits.sgprs.max(MAX_SGPRS), slots);
+    let mut occ_v = Occupancy::new(limits.vgprs.max(MAX_VGPRS), slots);
     let mut assign = vec![0u32; nv];
-    let mut max_s = 0u32;
-    let mut max_v = 0u32;
+    let mut used = Used::default();
     let mut checks: Vec<(u32, Check)> = Vec::new();
-    for &(_, _, _, root) in &roots {
+    for root in roots {
+        if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+            return Err(Overflow { class: Class::V, size: 0 });
+        }
         let class = f.vregs[root as usize].class;
         let size = gsize[root as usize];
         let align = galign[root as usize].max(1) as u32;
         let (occ, limit) = match class {
-            Class::S => (&mut occ_s, NUM_SGPRS),
-            Class::V => (&mut occ_v, NUM_VGPRS),
+            Class::S => (&mut occ_s, limits.sgprs),
+            Class::V => (&mut occ_v, limits.vgprs),
         };
-        let segs = |k: u32| segs_of(&table, &unit_segs[group_unit(root, k)]);
-        let fits = |occ: &Occupancy, at: u32| -> bool { (0..size).all(|k| occ.free(at + k, segs(k))) };
+        let segs = |k: u32| live.segs(group_unit(root, k));
+        checks.clear();
+        for k in 0..size {
+            checks.extend(segs(k).iter().map(|&seg| (k, check_of(seg))));
+        }
         let chosen = if let Some(p) = gfixed[root as usize] {
+            // Precolored inputs sit at fixed hardware registers, budget or not.
             let p = p as u32;
-            if !fits(occ, p) {
-                return Err(CompileError::new(
-                    "ROCKE_DIRECT_INTERNAL",
-                    format!("precolored register {p} conflicts"),
-                ));
+            if !occ.free_from(p, &checks) {
+                return Err(Overflow { class, size });
             }
             p
         } else {
-            checks.clear();
-            for k in 0..size {
-                checks.extend(segs(k).iter().map(|&seg| (k, check_of(seg))));
-            }
-            let mut at = 0;
-            loop {
-                if at + size > limit {
-                    let what = if class == Class::S { "SGPRs" } else { "VGPRs" };
-                    return Err(CompileError::new(
-                        "ROCKE_DIRECT_REGISTERS",
-                        format!("out of {what}: no room for a {size}-dword value (no spilling)"),
-                    ));
-                }
-                if occ.free_from(at, &checks) {
-                    break at;
-                }
-                at += align;
+            let preferred = prefs.of(root).iter().find_map(|&(other, delta)| {
+                let at = u32::try_from(assign[other as usize] as i32 + delta).ok()?;
+                (placed[other as usize] && at % align == 0 && at + size <= limit && occ.free_from(at, &checks))
+                    .then_some(at)
+            });
+            match preferred {
+                Some(at) => at,
+                None => occ.first_free(&checks, size, align, limit).ok_or(Overflow { class, size })?,
             }
         };
         for k in 0..size {
@@ -488,26 +1162,32 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
             if !segs.is_empty() {
                 occ.take(chosen + k, segs);
                 match class {
-                    Class::S => max_s = max_s.max(chosen + k + 1),
-                    Class::V => max_v = max_v.max(chosen + k + 1),
+                    Class::S => used.sgprs = used.sgprs.max(chosen + k + 1),
+                    Class::V => used.vgprs = used.vgprs.max(chosen + k + 1),
                 }
             }
         }
         assign[root as usize] = chosen;
+        placed[root as usize] = true;
     }
-
-    // Rewrite to physical registers and drop identity copies.
-    let phys: Vec<u32> = (0..nv as u32)
+    let mut parent = parent.clone();
+    let phys = (0..nv as u32)
         .map(|v| {
             let (root, off) = find(&mut parent, v);
             assign[root as usize] + off as u32
         })
         .collect();
+    Ok((phys, used))
+}
+
+/// Replaces virtual registers by `phys[reg] + off` and drops identity copies.
+fn rewrite(f: &mut MFunc, phys: &[u32]) {
+    let vregs = std::mem::take(&mut f.vregs);
     let phys_of = |o: &Opnd| -> Opnd {
         match o {
             Opnd::R(v) => {
                 let p = phys[v.reg as usize] + v.off as u32;
-                let phys = match f.vregs[v.reg as usize].class {
+                let phys = match vregs[v.reg as usize].class {
                     Class::S => Phys::S(p as u16),
                     Class::V => Phys::V(p as u16),
                 };
@@ -516,8 +1196,7 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
             other => *other,
         }
     };
-    let mut blocks = std::mem::take(&mut f.blocks);
-    for block in blocks.iter_mut() {
+    for block in f.blocks.iter_mut() {
         for inst in block.insts.iter_mut() {
             for o in inst.defs.iter_mut() {
                 *o = phys_of(o);
@@ -528,16 +1207,101 @@ pub fn allocate_unless(f: &mut MFunc, skip: Option<&dyn Fn(u32) -> bool>) -> Res
         }
         block.insts.retain(|inst| !(inst.op == Opc::Copy && inst.defs[0] == inst.uses[0]));
     }
-    f.blocks = blocks;
-    Ok(Some(Allocation {
-        num_sgprs: max_s,
-        num_vgprs: max_v,
-    }))
+    f.vregs = vregs;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Units live out of each block by the plain dataflow over every unit.
+    fn dense_live_out(f: &MFunc) -> Vec<Vec<usize>> {
+        let (live, _) = dataflow(f).expect("analyzes");
+        let (units, blocks) = (*live.base.last().expect("non-empty"), f.blocks.len());
+        let (mut uses, mut defs) = (vec![vec![false; units]; blocks], vec![vec![false; units]; blocks]);
+        for (b, block) in f.blocks.iter().enumerate() {
+            for inst in &block.insts {
+                for u in inst.uses.iter().filter_map(|o| live.of(o)).flatten() {
+                    uses[b][u] |= !defs[b][u];
+                }
+                for u in inst.defs.iter().filter_map(|o| live.of(o)).flatten() {
+                    defs[b][u] = true;
+                }
+            }
+        }
+        let (mut live_in, mut live_out) = (vec![vec![false; units]; blocks], vec![vec![false; units]; blocks]);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for b in (0..blocks).rev() {
+                for s in f.successors(b) {
+                    for u in 0..units {
+                        changed |= live_in[s][u] && !live_out[b][u];
+                        live_out[b][u] |= live_in[s][u];
+                    }
+                }
+                for u in 0..units {
+                    let inside = uses[b][u] || live_out[b][u] && !defs[b][u];
+                    changed |= inside != live_in[b][u];
+                    live_in[b][u] = inside;
+                }
+            }
+        }
+        live_out.iter().map(|out| (0..units).filter(|&u| out[u]).collect()).collect()
+    }
+
+    #[test]
+    fn dataflow_over_crossing_units_matches_every_unit() {
+        for seed in 0..40 {
+            let f = super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30);
+            let want = dense_live_out(&f);
+            for sparse in [false, true] {
+                let (_, out) = dataflow_with(&f, sparse).expect("analyzes");
+                let got: Vec<Vec<usize>> = (0..f.blocks.len()).map(|b| out.of(b).collect()).collect();
+                assert_eq!(got, want, "seed {seed}, sparse {sparse}");
+            }
+        }
+    }
+
+    #[test]
+    fn pressure_counts_what_the_segments_hold() {
+        for seed in 0..40 {
+            let f = super::super::spill::tests::random_kernel(seed, 20 + seed as usize, 5 + seed as usize % 30);
+            let live = analyze(&f).expect("analyzes");
+            assert_eq!(pressure(&f).expect("analyzes"), pressure_of(&f, &live), "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn assignment_uses_the_pressure_for_single_dword_ssa_values() {
+        // Straight-line values with arbitrary lifetimes: a chordal
+        // (interval) interference graph, colored in definition order.
+        let mut f = MFunc::default();
+        let mut insts = Vec::new();
+        let mut live: Vec<u32> = Vec::new();
+        let mut seed = 7u64;
+        let mut next = |n: usize| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        for i in 0..400u32 {
+            f.vregs.push(VRegInfo { class: Class::V, size: 1, align: 1, fixed: None });
+            let src = if live.is_empty() { Opnd::Imm(i) } else { Opnd::R(VRef { reg: live[next(live.len())], off: 0, n: 1 }) };
+            insts.push(MInst::new(Opc::VAddNcU32, [Opnd::R(VRef { reg: i, off: 0, n: 1 })], [Opnd::Imm(1), src]));
+            live.push(i);
+            while live.len() > 3 && (next(5) < 2 || live.len() > 100) {
+                let v = live.swap_remove(next(live.len()));
+                insts.push(MInst::new(Opc::GStoreB32, [], [Opnd::R(VRef { reg: v, off: 0, n: 1 }); 2]));
+            }
+        }
+        for v in live {
+            insts.push(MInst::new(Opc::GStoreB32, [], [Opnd::R(VRef { reg: v, off: 0, n: 1 }); 2]));
+        }
+        f.blocks.push(MBlock { insts, loop_depth: 0 });
+        let p = pressure(&f).expect("analyzes");
+        let a = allocate(&mut f).expect("fits");
+        assert_eq!(a.num_vgprs, p.vgprs);
+    }
 
     #[test]
     fn occupancy_matches_segment_overlap() {
@@ -548,6 +1312,51 @@ mod tests {
         for &p in &probes {
             assert_eq!(occ.free(1, &[p]), !overlaps(&[p], &held), "{p:?}");
             assert!(occ.free(0, &[p]));
+        }
+    }
+
+    #[test]
+    fn first_free_is_the_first_position_free_from() {
+        let mut seed = 0x51f1_5eed_0bad_cafeu64;
+        let mut next = |n: u32| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as u32 % n
+        };
+        for round in 0..300 {
+            let (regs, slots) = (if round % 3 == 0 { 300 } else { 256 }, 64 * (1 + next(12)));
+            let mut occ = Occupancy::new(regs, slots as usize);
+            for _ in 0..next(3000) {
+                let reg = next(regs);
+                let start = next(slots);
+                let span = if next(4) == 0 { slots } else { 90 };
+                let seg = (start, (start + next(span)).min(slots - 1));
+                if occ.free(reg, &[seg]) {
+                    occ.take(reg, &[seg]);
+                }
+            }
+            for _ in 0..20 {
+                let size = 1 + next(6);
+                let align = [1, 1, 2, 4, 3][next(5) as usize];
+                let limit = [regs, 256, 200, 7, size, size - 1][next(6) as usize];
+                let mut checks = Vec::new();
+                for k in 0..size {
+                    for _ in 0..next(4) {
+                        let start = next(slots);
+                        let len = if next(5) == 0 { next(slots) } else { next(150) };
+                        checks.push((k, check_of((start, (start + len).min(slots - 1)))));
+                    }
+                }
+                let mut want = None;
+                let mut at = 0;
+                while at + size <= limit {
+                    if occ.free_from(at, &checks) {
+                        want = Some(at);
+                        break;
+                    }
+                    at += align;
+                }
+                assert_eq!(occ.first_free(&checks, size, align, limit), want, "round {round}");
+            }
         }
     }
 

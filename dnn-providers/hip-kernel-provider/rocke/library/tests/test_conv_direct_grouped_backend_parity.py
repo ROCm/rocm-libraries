@@ -392,6 +392,25 @@ class TestBackendBoth(unittest.TestCase):
                 self.assertIn(needle, msgs[0])
                 self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
 
+    def test_mfma_atom_rejects_match(self):
+        # A target without the 4x4x4 MFMA atom (gfx1151, wave32 WMMA): the
+        # same reason in both engines, forward and dgrad, fp16 and bf16.
+        for dtype, ab in (("fp16", "f16"), ("bf16", "bf16")):
+            for spec in (
+                DirectConv4cSpec(problem=_p4(dtype)),
+                make_dgrad_4c_spec(_p4(dtype), dgrad_fused_weights=True),
+            ):
+                msgs = []
+                for backend in ("python", "cpp"):
+                    with self.assertRaises(Exception) as cm:
+                        lower_conv_direct_grouped(
+                            spec, kind="4c", arch="gfx1151", backend=backend
+                        )
+                    msgs.append(str(cm.exception))
+                with self.subTest(dtype=dtype, spec=spec.name):
+                    self.assertIn(f"missing 4x4x4 {ab} MFMA atom on gfx1151", msgs[0])
+                    self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
+
 
 if __name__ == "__main__":
     unittest.main()

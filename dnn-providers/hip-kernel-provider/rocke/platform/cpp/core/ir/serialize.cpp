@@ -26,6 +26,7 @@
 
 #include "rocke/ir_serialize.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1327,82 +1328,221 @@ static char* lr_next(line_reader_t* lr)
 }
 
 /* ====================================================================== *
+ *                String-keyed hash map (value table, renames)            *
+ * ====================================================================== */
+
+/* Open addressing with linear probing over arena-allocated slots, grown at
+ * half load. Keys are NUL-terminated strings the caller keeps alive for the
+ * map's lifetime. Removal shifts the rest of the probe run back, so no
+ * tombstones build up. */
+typedef struct name_slot
+{
+    const char* key; /* NULL marks an empty slot */
+    uint64_t hash;
+    void* ptr;
+    int num;
+} name_slot_t;
+
+typedef struct name_map
+{
+    name_slot_t* slots;
+    size_t count;
+    size_t cap; /* 0, or a power of two >= 64 */
+    int shift; /* 64 - log2(cap) */
+    rocke_arena_t* arena;
+} name_map_t;
+
+static void nm_init(name_map_t* m, rocke_arena_t* arena)
+{
+    m->slots = NULL;
+    m->count = 0;
+    m->cap = 0;
+    m->shift = 0;
+    m->arena = arena;
+}
+
+/* FNV-1a. */
+static uint64_t nm_hash(const char* key)
+{
+    uint64_t h = UINT64_C(14695981039346656037);
+    for(const unsigned char* p = (const unsigned char*)key; *p; ++p)
+    {
+        h ^= *p;
+        h *= UINT64_C(1099511628211);
+    }
+    return h;
+}
+
+/* Fibonacci hashing spreads FNV's weak low bits over the slot index. */
+static size_t nm_home(const name_map_t* m, uint64_t hash)
+{
+    return (size_t)((hash * UINT64_C(0x9E3779B97F4A7C15)) >> m->shift);
+}
+
+/* The slot holding `key`, else the empty slot that ends its probe run.
+ * Requires cap > 0. */
+static size_t nm_find(const name_map_t* m, const char* key, uint64_t hash)
+{
+    const size_t mask = m->cap - 1;
+    size_t i = nm_home(m, hash);
+    while(m->slots[i].key != NULL
+          && !(m->slots[i].hash == hash && strcmp(m->slots[i].key, key) == 0))
+    {
+        i = (i + 1) & mask;
+    }
+    return i;
+}
+
+static int nm_grow(name_map_t* m)
+{
+    const size_t cap = m->cap ? 2 * m->cap : 64;
+    name_slot_t* slots = (name_slot_t*)rocke_arena_calloc(m->arena, cap * sizeof(name_slot_t));
+    if(!slots)
+    {
+        return -1;
+    }
+    const name_slot_t* old = m->slots;
+    const size_t old_cap = m->cap;
+    int bits = 0;
+    while(((size_t)1 << bits) < cap)
+    {
+        ++bits;
+    }
+    m->slots = slots;
+    m->cap = cap;
+    m->shift = 64 - bits;
+    for(size_t i = 0; i < old_cap; ++i)
+    {
+        if(old[i].key != NULL)
+        {
+            m->slots[nm_find(m, old[i].key, old[i].hash)] = old[i];
+        }
+    }
+    return 0;
+}
+
+/* The slot of `key`, or NULL if absent. */
+static name_slot_t* nm_get(const name_map_t* m, const char* key)
+{
+    if(m->cap == 0)
+    {
+        return NULL;
+    }
+    const size_t i = nm_find(m, key, nm_hash(key));
+    return m->slots[i].key != NULL ? &m->slots[i] : NULL;
+}
+
+/* The slot of `key`, inserted with a NULL ptr and a zero num if absent
+ * (*added reports which); NULL on OOM. */
+static name_slot_t* nm_upsert(name_map_t* m, const char* key, bool* added)
+{
+    const uint64_t hash = nm_hash(key);
+    *added = false;
+    if(m->cap != 0)
+    {
+        const size_t i = nm_find(m, key, hash);
+        if(m->slots[i].key != NULL)
+        {
+            return &m->slots[i];
+        }
+    }
+    if(2 * (m->count + 1) > m->cap && nm_grow(m) != 0)
+    {
+        return NULL;
+    }
+    name_slot_t* s = &m->slots[nm_find(m, key, hash)];
+    s->key = key;
+    s->hash = hash;
+    s->ptr = NULL;
+    s->num = 0;
+    m->count++;
+    *added = true;
+    return s;
+}
+
+static void nm_remove(name_map_t* m, const char* key)
+{
+    if(m->cap == 0)
+    {
+        return;
+    }
+    const size_t mask = m->cap - 1;
+    size_t hole = nm_find(m, key, nm_hash(key));
+    if(m->slots[hole].key == NULL)
+    {
+        return;
+    }
+    /* A later slot of the run moves into the hole unless its home lies
+     * cyclically in (hole, j]: then the hole does not cut its probe path. */
+    for(size_t j = (hole + 1) & mask; m->slots[j].key != NULL; j = (j + 1) & mask)
+    {
+        const size_t home = nm_home(m, m->slots[j].hash);
+        const bool reachable = hole <= j ? (hole < home && home <= j) : (hole < home || home <= j);
+        if(!reachable)
+        {
+            m->slots[hole] = m->slots[j];
+            hole = j;
+        }
+    }
+    m->slots[hole].key = NULL;
+    m->slots[hole].ptr = NULL;
+    m->count--;
+}
+
+/* ====================================================================== *
  *                       Value table (name -> Value)                      *
  * ====================================================================== */
 
-typedef struct val_entry
-{
-    const char* name;
-    rocke_value_t* value;
-} val_entry_t;
-
+/* Python's `values` dict, plus a memo of the opcode of each op name seen
+ * (rocke_opcode_from_name scans every opcode name). */
 typedef struct val_table
 {
-    val_entry_t* entries;
-    int count;
-    int cap;
+    name_map_t values; /* SSA id -> rocke_value_t* in ptr */
+    name_map_t opcodes; /* op name -> rocke_opcode_t in num */
     rocke_ir_builder_t* b;
 } val_table_t;
 
 static rocke_value_t* vt_get(val_table_t* vt, const char* name)
 {
-    for(int i = 0; i < vt->count; ++i)
-    {
-        if(strcmp(vt->entries[i].name, name) == 0)
-        {
-            return vt->entries[i].value;
-        }
-    }
-    return NULL;
+    const name_slot_t* s = nm_get(&vt->values, name);
+    return s ? (rocke_value_t*)s->ptr : NULL;
 }
 
 static int vt_put(val_table_t* vt, const char* name, rocke_value_t* v)
 {
     /* overwrite if present (later defs shadow within block scope handling). */
-    for(int i = 0; i < vt->count; ++i)
+    bool added = false;
+    name_slot_t* s = nm_upsert(&vt->values, name, &added);
+    if(!s)
     {
-        if(strcmp(vt->entries[i].name, name) == 0)
-        {
-            vt->entries[i].value = v;
-            return 0;
-        }
+        return -1;
     }
-    if(vt->count >= vt->cap)
-    {
-        int nc = vt->cap ? vt->cap * 2 : 32;
-        val_entry_t* ne
-            = (val_entry_t*)rocke_arena_alloc(&vt->b->arena, sizeof(val_entry_t) * (size_t)nc);
-        if(!ne)
-        {
-            return -1;
-        }
-        if(vt->entries && vt->count)
-        {
-            memcpy(ne, vt->entries, sizeof(val_entry_t) * (size_t)vt->count);
-        }
-        vt->entries = ne;
-        vt->cap = nc;
-    }
-    vt->entries[vt->count].name = name;
-    vt->entries[vt->count].value = v;
-    vt->count++;
+    s->ptr = v;
     return 0;
 }
 
 static void vt_remove(val_table_t* vt, const char* name)
 {
-    for(int i = 0; i < vt->count; ++i)
+    nm_remove(&vt->values, name);
+}
+
+/* rocke_opcode_from_name(opname), resolved once per distinct name. */
+static rocke_opcode_t vt_opcode(val_table_t* vt, const char* opname)
+{
+    const name_slot_t* hit = nm_get(&vt->opcodes, opname);
+    if(hit)
     {
-        if(strcmp(vt->entries[i].name, name) == 0)
-        {
-            for(int j = i; j + 1 < vt->count; ++j)
-            {
-                vt->entries[j] = vt->entries[j + 1];
-            }
-            vt->count--;
-            return;
-        }
+        return (rocke_opcode_t)hit->num;
     }
+    const rocke_opcode_t opcode = rocke_opcode_from_name(opname);
+    const char* key = rocke_arena_strdup(&vt->b->arena, opname);
+    bool added = false;
+    name_slot_t* s = key ? nm_upsert(&vt->opcodes, key, &added) : NULL;
+    if(s)
+    {
+        s->num = (int)opcode;
+    }
+    return opcode;
 }
 
 /* ====================================================================== *
@@ -1709,7 +1849,7 @@ static rocke_op_t* parse_op(rocke_ir_builder_t* b, line_reader_t* lr, val_table_
     }
     memcpy(opname, rest, opname_len);
     opname[opname_len] = '\0';
-    rocke_opcode_t opcode = rocke_opcode_from_name(opname);
+    rocke_opcode_t opcode = vt_opcode(vt, opname);
     if(opcode == ROCKE_OP_INVALID)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown opcode '%s'", opname);
@@ -2239,9 +2379,8 @@ static rocke_status_t
     rocke_attr_map_init(&k->attrs);
 
     val_table_t vt;
-    vt.entries = NULL;
-    vt.count = 0;
-    vt.cap = 0;
+    nm_init(&vt.values, &b->arena);
+    nm_init(&vt.opcodes, &b->arena);
     vt.b = b;
 
     /* optional kernel attrs line */
@@ -2339,49 +2478,21 @@ static rocke_status_t
  *                    Canonicalization (spec 7)                           *
  * ====================================================================== */
 
+/* Old SSA id -> its canonical id "%N", N the id's first-definition index. */
 typedef struct rename_table
 {
-    const char** olds; /* arena array */
-    int count;
-    int cap;
+    name_map_t ids; /* old id -> canonical id string in ptr */
     rocke_ir_builder_t* b;
 } rename_table_t;
 
-static int rn_index(rename_table_t* rt, const char* name)
-{
-    for(int i = 0; i < rt->count; ++i)
-    {
-        if(strcmp(rt->olds[i], name) == 0)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
 static void rn_add(rename_table_t* rt, const char* name)
 {
-    if(rn_index(rt, name) >= 0)
+    bool added = false;
+    name_slot_t* s = nm_upsert(&rt->ids, name, &added);
+    if(s && added)
     {
-        return;
+        s->ptr = (void*)rocke_arena_printf(&rt->b->arena, "%%%d", (int)(rt->ids.count - 1));
     }
-    if(rt->count >= rt->cap)
-    {
-        int nc = rt->cap ? rt->cap * 2 : 64;
-        const char** na
-            = (const char**)rocke_arena_alloc(&rt->b->arena, sizeof(char*) * (size_t)nc);
-        if(!na)
-        {
-            return;
-        }
-        if(rt->olds && rt->count)
-        {
-            memcpy(na, rt->olds, sizeof(char*) * (size_t)rt->count);
-        }
-        rt->olds = na;
-        rt->cap = nc;
-    }
-    rt->olds[rt->count++] = name;
 }
 
 static void walk_region_defs(rename_table_t* rt, const rocke_region_t* region);
@@ -2438,12 +2549,8 @@ static void walk_region_defs(rename_table_t* rt, const rocke_region_t* region)
  */
 static const char* rn_get(rename_table_t* rt, const char* old)
 {
-    int idx = rn_index(rt, old);
-    if(idx < 0)
-    {
-        return old;
-    }
-    return rocke_arena_printf(&rt->b->arena, "%%%d", idx);
+    const name_slot_t* s = nm_get(&rt->ids, old);
+    return s ? (const char*)s->ptr : old;
 }
 
 /* Recursively rebuild a kernel with renamed SSA ids and loc stripped, then
@@ -2556,9 +2663,7 @@ rocke_status_t rocke_ir_canonicalize(const char* text, char** out_text)
     }
 
     rename_table_t rt;
-    rt.olds = NULL;
-    rt.count = 0;
-    rt.cap = 0;
+    nm_init(&rt.ids, &b.arena);
     rt.b = &b;
 
     /* def order: params first (ABI), then pre-order op walk. */

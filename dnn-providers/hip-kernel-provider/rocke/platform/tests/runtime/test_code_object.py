@@ -70,6 +70,28 @@ def test_direct_library_override_must_name_a_file(monkeypatch, tmp_path) -> None
         code_object._direct_library_path()
 
 
+def test_direct_library_path_is_resolved_once_per_setting(
+    monkeypatch, tmp_path
+) -> None:
+    library = tmp_path / "rocke_codeobj_ffi.dll"
+    library.write_bytes(b"")
+    monkeypatch.setattr(code_object, "_direct_library_paths", {})
+    monkeypatch.setenv("ROCKE_CODEOBJ_DIRECT_LIB", str(library))
+    first = code_object._direct_library_path()
+    library.unlink()
+    assert code_object._direct_library_path() == first
+
+
+def test_failed_direct_library_search_is_retried(monkeypatch) -> None:
+    monkeypatch.setattr(code_object, "_direct_library_paths", {})
+    found = iter([None, "rocke_codeobj_ffi"])
+    monkeypatch.setattr(
+        code_object.ctypes.util, "find_library", lambda name: next(found)
+    )
+    assert code_object._direct_library_path() is None
+    assert code_object._direct_library_path() == "rocke_codeobj_ffi"
+
+
 def test_missing_direct_library_fails_without_fallback(monkeypatch) -> None:
     monkeypatch.setattr(code_object, "_direct_library_path", lambda: None)
     with pytest.raises(code_object.CodeObjectError, match="ROCKE_BUILD_RUST_CODEOBJ"):

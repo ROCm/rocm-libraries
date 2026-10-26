@@ -680,7 +680,8 @@ const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname);
 
 /* Pre-pass: on a target whose backend splits_global_address, compute the
  * uniformity and bounds facts of every kernel value into L->index_facts
- * (Python _collect_index_facts). Must run before rocke_ll_lower_region: the
+ * (Python _collect_index_facts), unless a loop keeps more vector state live
+ * than the target's VGPRs. Must run before rocke_ll_lower_region: the
  * unrolled-loop lowering renames values while it runs. */
 void rocke_ll_collect_index_facts(rocke_lower_t* L);
 

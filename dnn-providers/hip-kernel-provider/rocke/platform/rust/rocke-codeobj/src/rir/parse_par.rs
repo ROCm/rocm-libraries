@@ -18,15 +18,23 @@
 //! pass.
 //!
 //! Every name must be defined once. Anything the sequential parser would have
-//! to decide (a name defined again, any error, an unusual shape) makes `parse`
-//! return `None`, and the caller parses the whole input sequentially, so the
-//! kernel or the error is always the sequential parser's.
+//! to decide (a name defined again, any error, an unusual shape) makes the
+//! parse return `None`, and the caller parses the whole input sequentially, so
+//! the kernel or the error is always the sequential parser's.
+//!
+//! The shared state owns all it holds, so the workers can be scoped threads
+//! (`parse`), a session's persistent threads (`parse_pooled`), or threads that
+//! scanned chunks of a stream as they arrived (`stream`). The input reaches it
+//! through a `Source`: one string, or a string per chunk.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::ast::{Kernel, Op, OpKind, Operands, Param, Region, Results, Scalar, Type, ValueDef, ValueId};
-use super::parse::{expected_regions, for_args, name_hash, prologue, scan_op, Lines};
+use super::hashcons::{key_hash, ConstTable};
+use super::parse::{expected_regions, for_args, name_hash, prologue, scan_op, shareable_before, Lines};
+use super::scan::Level;
+use super::scan_line;
 
 /// Operand placeholder until the second pass.
 const UNRESOLVED: ValueId = ValueId(u32::MAX);
@@ -34,18 +42,43 @@ const UNRESOLVED: ValueId = ValueId(u32::MAX);
 /// sequential parser, which runs on the caller's stack as before.
 const ATTR_DEPTH: u32 = 64;
 /// Worker stack; workers recurse only through attributes, at most `ATTR_DEPTH`.
-const WORKER_STACK: usize = 512 << 10;
+pub(super) const WORKER_STACK: usize = 512 << 10;
 /// Default chunking: enough chunks per thread to balance threads that start
 /// late, but not so small that per-chunk work dominates.
 const CHUNKS_PER_THREAD: usize = 4;
 const MIN_CHUNK_BYTES: usize = 16 << 10;
 /// A table entry names a definition by chunk and index, plus one, in 32 bits.
 const INDEX_BITS: u32 = 20;
-const MAX_CHUNKS: usize = (1 << (32 - INDEX_BITS)) - 1;
+pub(super) const MAX_CHUNKS: usize = (1 << (32 - INDEX_BITS)) - 1;
 const MAX_DEFS: usize = (1 << INDEX_BITS) - 2;
 const MAX_PROBES: usize = 1 << 12;
 
-/// A name in the input text, by byte range, with its hash.
+/// Where the parse reads each chunk: a string holding the chunk at
+/// `bounds[k]` and at least every line after it up to the next one that is
+/// not blank or a comment, and the offset of that string in the whole input.
+/// Chunk 0 holds the header and parameters.
+pub(super) trait Source: Send + Sync {
+    fn segment(&self, chunk: usize) -> (&str, usize);
+}
+
+/// The whole input as one string.
+impl Source for str {
+    fn segment(&self, _: usize) -> (&str, usize) {
+        (self, 0)
+    }
+}
+
+/// One string per chunk, with the offset of each in the input.
+pub(super) struct Segments(pub(super) Vec<(Arc<str>, usize)>);
+
+impl Source for Segments {
+    fn segment(&self, chunk: usize) -> (&str, usize) {
+        let (text, base) = &self.0[chunk];
+        (text, *base)
+    }
+}
+
+/// A name, by byte range in its chunk's segment, with its hash.
 #[derive(Clone, Copy)]
 struct Name {
     at: u32,
@@ -94,12 +127,15 @@ enum Kind {
     /// Result `k` of the chunk's `structure`-th op with regions, defined after
     /// the op's last region.
     After { structure: u32, k: u32 },
+    /// A repeated constant (see `hashcons`): another name, at its own line and
+    /// region, for the value of the chunk's `Line` definition with this index.
+    Alias(u32),
 }
 
 #[derive(Clone, Copy)]
 struct Def {
     name: Name,
-    /// Offset of the defining line.
+    /// Offset of the defining line in the input.
     pos: u32,
     /// Innermost region at the defining line: the index of a region opened in
     /// this chunk, or `-1 - k` for the region `k` levels out from the
@@ -118,8 +154,8 @@ struct Structured {
 enum Event {
     /// A `region @` line after `ops` ops of the chunk; `ok` if it ends with `{`.
     Header { ops: u32, ok: bool },
-    /// A `}` line after `ops` ops and `defs` line definitions of the chunk,
-    /// and whether the next line is a region header.
+    /// A `}` line at input offset `pos`, after `ops` ops and `defs` line
+    /// definitions of the chunk, and whether the next line is a region header.
     Close { pos: u32, ops: u32, defs: u32, header_next: bool },
     /// The chunk's op `op` is its `index`-th op with regions.
     Structured { index: u32, op: u32 },
@@ -127,7 +163,7 @@ enum Event {
 
 /// What the first pass learns about a chunk, shared read-only afterwards.
 #[derive(Default)]
-struct Info {
+pub(super) struct Info {
     defs: Vec<Def>,
     structs: Vec<Structured>,
     events: Vec<Event>,
@@ -139,7 +175,7 @@ struct Info {
 
 /// The first pass's ops and what the second pass needs to finish them.
 #[derive(Default)]
-struct Work {
+pub(super) struct Work {
     ops: Vec<Op>,
     op_pos: Vec<u32>,
     op_region: Vec<i32>,
@@ -151,12 +187,13 @@ struct Work {
     types: Vec<Type>,
 }
 
-/// A chunk's finished ops, and the names and types of its values in value
-/// order. (A value's name range is an offset into the kernel's name storage,
-/// so the values themselves are made in order on the calling thread.)
+/// A chunk's finished ops, and the names (with the chunk whose segment holds
+/// each) and types of its values in value order. (A value's name range is an
+/// offset into the kernel's name storage, so the values themselves are made
+/// in order on the calling thread.)
 struct Out {
     ops: Vec<Op>,
-    values: Vec<(Name, Type)>,
+    values: Vec<(u32, Name, Type)>,
 }
 
 /// Lock-free open-addressing table from names to definitions. A slot holds
@@ -171,12 +208,11 @@ impl Table {
         Table { mask: len - 1, slots: (0..len).map(|_| AtomicU64::new(0)).collect() }
     }
 
-    /// Enters `handle` under `name`; `None` if the name is already there or
-    /// the table is too full.
-    fn insert(&self, text: &str, name: Name, handle: u32, name_of: impl Fn(u32) -> Option<Name>) -> Option<()> {
-        let entry = (name.hash as u64) << 32 | (handle as u64 + 1);
-        let key = name.str(text);
-        let mut i = name.hash as usize & self.mask;
+    /// Enters `handle` under `key`; `None` if the key is already there or the
+    /// table is too full.
+    fn insert<'s>(&self, key: &str, hash: u32, handle: u32, key_of: impl Fn(u32) -> Option<&'s str>) -> Option<()> {
+        let entry = (hash as u64) << 32 | (handle as u64 + 1);
+        let mut i = hash as usize & self.mask;
         for _ in 0..MAX_PROBES {
             let mut slot = self.slots[i].load(Ordering::Acquire);
             if slot == 0 {
@@ -185,7 +221,7 @@ impl Table {
                     Err(now) => slot = now,
                 }
             }
-            if (slot >> 32) as u32 == name.hash && name_of(slot as u32 - 1)?.str(text) == key {
+            if (slot >> 32) as u32 == hash && key_of(slot as u32 - 1)? == key {
                 return None;
             }
             i = (i + 1) & self.mask;
@@ -193,15 +229,14 @@ impl Table {
         None
     }
 
-    fn find(&self, text: &str, name: Name, name_of: impl Fn(u32) -> Option<Name>) -> Option<u32> {
-        let key = name.str(text);
-        let mut i = name.hash as usize & self.mask;
+    fn find<'s>(&self, key: &str, hash: u32, key_of: impl Fn(u32) -> Option<&'s str>) -> Option<u32> {
+        let mut i = hash as usize & self.mask;
         for _ in 0..MAX_PROBES {
             let slot = self.slots[i].load(Ordering::Acquire);
             if slot == 0 {
                 return None;
             }
-            if (slot >> 32) as u32 == name.hash && name_of(slot as u32 - 1)?.str(text) == key {
+            if (slot >> 32) as u32 == hash && key_of(slot as u32 - 1)? == key {
                 return Some(slot as u32 - 1);
             }
             i = (i + 1) & self.mask;
@@ -267,9 +302,9 @@ impl Walk {
     }
 }
 
-struct Shared<'t> {
-    text: &'t str,
-    /// Byte range of each chunk; chunk 0 holds the parameters.
+/// The parse's state, shared by the threads working on it.
+pub(super) struct Shared {
+    /// Byte range of each chunk in its segment; chunk 0 holds the parameters.
     bounds: Vec<(usize, usize)>,
     infos: Vec<OnceLock<Info>>,
     work: Vec<Mutex<Option<Work>>>,
@@ -277,37 +312,246 @@ struct Shared<'t> {
     claimed: Vec<AtomicBool>,
     resolved: Vec<AtomicBool>,
     table: Table,
+    /// Definitions enter the table when their chunk is scanned, or, for
+    /// chunks scanned before the table could be sized (a stream), in a pass
+    /// of their own once all are scanned.
+    enter_later: bool,
     walk: OnceLock<Option<Walk>>,
     next_scan: AtomicUsize,
     scanned: AtomicUsize,
+    next_enter: AtomicUsize,
+    entered: AtomicUsize,
     /// Workers that have begun running.
     started: AtomicUsize,
     failed: AtomicBool,
+    /// A worker panicked; the caller panics too, as with scoped threads.
+    panicked: AtomicBool,
+    /// Repeated constants are bound to the earlier one (see `hashcons`).
+    hashcons: bool,
+    /// Vector level of the line scans (`scan`).
+    level: Level,
 }
 
-/// Sets `failed` if its thread unwinds, so that no thread waits for work a
-/// panicked thread claimed.
-struct FailOnPanic<'a>(&'a AtomicBool);
+/// Sets `failed` (and `panicked`) if its thread unwinds, so that no thread
+/// waits for work a panicked thread claimed.
+struct FailOnPanic<'a>(&'a Shared);
 
 impl Drop for FailOnPanic<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            self.0.store(true, Ordering::Release);
+            self.0.panicked.store(true, Ordering::Release);
+            self.0.failed.store(true, Ordering::Release);
         }
     }
 }
 
-impl<'t> Shared<'t> {
+/// The first pass over the chunk `seg[start..end]`, where `seg` is at input
+/// offset `base` and holds the lines after the chunk as `Source` requires;
+/// `None` if the chunk needs the sequential parser.
+pub(super) fn scan_chunk<'s>(
+    seg: &'s str,
+    base: usize,
+    start: usize,
+    end: usize,
+    hashcons: bool,
+    level: Level,
+) -> Option<(Info, Work)> {
+    let mut lines = Lines::new(seg, start, end).scanning(level);
+    let mut info = Info::default();
+    let mut work = Work::default();
+    let estimate = (end - start) / 64;
+    work.ops.reserve(estimate);
+    work.op_pos.reserve(estimate);
+    work.op_region.reserve(estimate);
+    work.op_defs.reserve(estimate);
+    work.uses.reserve(estimate * 3 / 2);
+    work.types.reserve(estimate);
+    info.defs.reserve(estimate);
+    let next_line = |lines: &mut Lines<'s>| -> Option<&'s str> {
+        match lines.peek() {
+            Some(next) => Some(next),
+            None => Lines::new(seg, end, seg.len()).peek(),
+        }
+    };
+    let header_next = |lines: &mut Lines<'s>| next_line(lines).is_some_and(|next| next.starts_with("region @"));
+    let mut open: Vec<u32> = Vec::new();
+    let mut closed_outer = 0i32;
+    let mut pending: Vec<(&'s str, Type)> = Vec::new();
+    // Constants of this chunk by key (see `hashcons`). A scope is a region
+    // opened in the chunk (its index, open while `local_open` says so) or
+    // the region `j` levels out from the one open at the chunk's start
+    // (`INHERITED | j`, open until `closed_outer` passes `j`).
+    const INHERITED: u32 = 1 << 31;
+    let mut consts = ConstTable::new();
+    let mut local_open: Vec<bool> = Vec::new();
+    while let Some(line) = lines.next_line() {
+        let pos = (base + offset(seg, line) as usize) as u32;
+        if line == "}" {
+            let next = header_next(&mut lines);
+            let ops = work.ops.len() as u32;
+            info.events.push(Event::Close { pos, ops, defs: info.line_defs, header_next: next });
+            match open.pop() {
+                Some(r) => local_open[r as usize] = false,
+                None => closed_outer += 1,
+            }
+            continue;
+        }
+        if line.starts_with("region @") {
+            info.events.push(Event::Header { ops: work.ops.len() as u32, ok: line.ends_with('{') });
+            open.push(info.headers);
+            local_open.push(true);
+            info.headers += 1;
+            continue;
+        }
+        let region = open.last().map_or(-1 - closed_outer, |&r| r as i32);
+        let masks = scan_line::masks(level, line);
+        let constant = if hashcons { scan_line::const_key_with(line, masks.as_ref()) } else { None };
+        let constant = constant.filter(|_| shareable_before(next_line(&mut lines)));
+        let scope = open.last().copied().unwrap_or(INHERITED | closed_outer as u32);
+        let visible = |s: u32| match s & INHERITED {
+            0 => local_open[s as usize],
+            _ => (s & !INHERITED) as i32 >= closed_outer,
+        };
+        if let Some((name, key)) = constant {
+            if let Some(target) = consts.lookup(key, key_hash(key), visible) {
+                info.defs.push(Def { name: Name::of(seg, name), pos, region, kind: Kind::Alias(target.0) });
+                continue;
+            }
+        }
+        let mut operands = Operands::new();
+        let uses = &mut work.uses;
+        let scanned = scan_op(
+            line,
+            masks.as_ref(),
+            &mut operands,
+            &mut pending,
+            |name, _| {
+                uses.push(Name::of(seg, name));
+                Ok(UNRESOLVED)
+            },
+            ATTR_DEPTH,
+        )
+        .ok()?;
+        let structured = header_next(&mut lines);
+        let op_index = work.ops.len() as u32;
+        let op = Op {
+            kind: scanned.kind,
+            results: Results::new(),
+            operands,
+            attrs: scanned.attrs,
+            regions: Vec::new(),
+            block_args: Vec::new(),
+        };
+        let regions = expected_regions(op.kind);
+        if structured != (regions > 0) {
+            return None;
+        }
+        let mut line_def = |info: &mut Info, name: &'s str, kind: Kind, ty: Type| {
+            info.defs.push(Def { name: Name::of(seg, name), pos, region, kind });
+            info.line_defs += 1;
+            info.line_bytes += name.len();
+            work.types.push(ty);
+        };
+        if structured {
+            let structure = info.structs.len() as u32;
+            if op.kind == OpKind::For {
+                let (iv, iter_args) = for_args(&op, pending.len()).ok()?;
+                let args = std::iter::once((iv, Type::Scalar(Scalar::I32))).chain(iter_args);
+                for (name, ty) in args {
+                    let slot = info.line_defs;
+                    line_def(&mut info, quoted_in(line, &name)?, Kind::ForArg { slot, structure }, ty);
+                }
+            }
+            let results: Vec<(Name, Type)> = pending.drain(..).map(|(name, ty)| (Name::of(seg, name), ty)).collect();
+            for (k, &(name, _)) in results.iter().enumerate() {
+                info.defs.push(Def { name, pos, region, kind: Kind::After { structure, k: k as u32 } });
+            }
+            info.structs.push(Structured { regions, results });
+            info.events.push(Event::Structured { index: structure, op: op_index });
+        } else {
+            for (name, ty) in pending.drain(..) {
+                let slot = info.line_defs;
+                line_def(&mut info, name, Kind::Line(slot), ty);
+            }
+        }
+        work.ops.push(op);
+        work.op_pos.push(pos);
+        work.op_region.push(region);
+        work.op_defs.push(info.defs.len() as u32);
+        if let Some((_, key)) = constant {
+            // The table's value is the index of the constant's definition.
+            consts.insert(key, key_hash(key), ValueId(info.defs.len() as u32 - 1), scope);
+        }
+    }
+    info.ops = work.ops.len() as u32;
+    if info.defs.len() > MAX_DEFS {
+        return None;
+    }
+    Some((info, work))
+}
+
+impl Shared {
+    /// State for chunks at `bounds` (entry 0 for the parameters, whose
+    /// definitions `params` holds) and a table for an input of `len` bytes
+    /// after the parameters.
+    pub(super) fn new(bounds: Vec<(usize, usize)>, params: Info, len: usize, enter_later: bool, hashcons: bool) -> Option<Shared> {
+        let n = bounds.len() - 1;
+        if n > MAX_CHUNKS || params.defs.len() > MAX_DEFS {
+            return None;
+        }
+        // Sized for the corpus's line lengths at under half full, and kept below
+        // the size the heap serves from fresh pages for bodies up to about 1 MiB.
+        let table_len = (len / 36 + 2 * params.defs.len()).next_power_of_two().max(1024);
+        let sh = Shared {
+            bounds,
+            infos: (0..=n).map(|_| OnceLock::new()).collect(),
+            work: (0..=n).map(|_| Mutex::new(None)).collect(),
+            out: (0..=n).map(|_| Mutex::new(None)).collect(),
+            claimed: (0..=n).map(|_| AtomicBool::new(false)).collect(),
+            resolved: (0..=n).map(|_| AtomicBool::new(false)).collect(),
+            table: Table::new(table_len),
+            enter_later,
+            walk: OnceLock::new(),
+            next_scan: AtomicUsize::new(1),
+            scanned: AtomicUsize::new(0),
+            next_enter: AtomicUsize::new(0),
+            entered: AtomicUsize::new(0),
+            started: AtomicUsize::new(0),
+            failed: AtomicBool::new(false),
+            panicked: AtomicBool::new(false),
+            hashcons,
+            level: Level::detect(),
+        };
+        sh.infos[0].set(params).ok()?;
+        Some(sh)
+    }
+
+    /// Hands over the first pass of chunks `1..=scans.len()`, done elsewhere.
+    pub(super) fn scanned_already(&self, scans: Vec<(Info, Work)>) -> Option<()> {
+        let count = scans.len();
+        for (k, (info, work)) in scans.into_iter().enumerate() {
+            self.infos[k + 1].set(info).ok()?;
+            *self.work[k + 1].lock().ok()? = Some(work);
+        }
+        self.next_scan.store(count + 1, Ordering::Relaxed);
+        self.scanned.store(count, Ordering::Release);
+        Some(())
+    }
+
     fn chunks(&self) -> usize {
         self.bounds.len() - 1
     }
 
-    fn fail(&self) {
+    pub(super) fn fail(&self) {
         self.failed.store(true, Ordering::Release);
     }
 
     fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
+    }
+
+    pub(super) fn panicked(&self) -> bool {
+        self.panicked.load(Ordering::Acquire)
     }
 
     fn claim(&self, next: &AtomicUsize) -> Option<usize> {
@@ -316,11 +560,11 @@ impl<'t> Shared<'t> {
     }
 
     /// Resolves chunk `k` unless another thread has claimed it; `false` on failure.
-    fn resolve_unclaimed(&self, w: &Walk, k: usize) -> bool {
+    fn resolve_unclaimed<S: Source + ?Sized>(&self, src: &S, w: &Walk, k: usize) -> bool {
         if self.claimed[k].swap(true, Ordering::AcqRel) {
             return true;
         }
-        if self.failed() || self.resolve(w, k).is_none() {
+        if self.failed() || self.resolve(src, w, k).is_none() {
             self.fail();
             return false;
         }
@@ -351,139 +595,64 @@ impl<'t> Shared<'t> {
         self.infos.get(chunk)?.get()?.defs.get((handle & ((1 << INDEX_BITS) - 1)) as usize)
     }
 
-    fn enter(&self, chunk: usize) -> Option<()> {
+    /// The name a table handle stands for.
+    fn key_of<'s, S: Source + ?Sized>(&self, src: &'s S, handle: u32) -> Option<&'s str> {
+        let def = self.def(handle)?;
+        Some(def.name.str(src.segment((handle >> INDEX_BITS) as usize).0))
+    }
+
+    fn enter<S: Source + ?Sized>(&self, src: &S, chunk: usize) -> Option<()> {
         let info = self.infos[chunk].get()?;
+        let seg = src.segment(chunk).0;
         for (i, def) in info.defs.iter().enumerate() {
             let handle = (chunk as u32) << INDEX_BITS | i as u32;
-            self.table.insert(self.text, def.name, handle, |h| self.def(h).map(|d| d.name))?;
+            self.table.insert(def.name.str(seg), def.name.hash, handle, |h| self.key_of(src, h))?;
         }
         Some(())
     }
 
-    /// Scans chunks until none is left, then waits for the other threads';
-    /// the chunks this thread scanned, or `None` if the parse failed.
-    fn scan_all(&self) -> Option<Vec<usize>> {
+    /// Scans chunks until none is left, then waits for the other threads'
+    /// (and, when definitions enter later, enters them); the chunks this
+    /// thread scanned, or `None` if the parse failed.
+    fn scan_all<S: Source + ?Sized>(&self, src: &S) -> Option<Vec<usize>> {
         let mut mine = Vec::new();
         while let Some(k) = self.claim(&self.next_scan) {
             if self.failed() {
                 return None;
             }
-            if self.scan(k).is_none() {
+            if self.scan(src, k).is_none() {
                 self.fail();
                 return None;
             }
             mine.push(k);
         }
-        self.wait(|| self.scanned.load(Ordering::Acquire) == self.chunks()).then_some(mine)
+        if !self.wait(|| self.scanned.load(Ordering::Acquire) == self.chunks()) {
+            return None;
+        }
+        if self.enter_later {
+            while let Some(k) = self.claim(&self.next_enter) {
+                if self.failed() || self.enter(src, k).is_none() {
+                    self.fail();
+                    return None;
+                }
+                self.entered.fetch_add(1, Ordering::Release);
+            }
+            if !self.wait(|| self.entered.load(Ordering::Acquire) == self.chunks() + 1) {
+                return None;
+            }
+        }
+        Some(mine)
     }
 
     /// First pass over chunk `k`.
-    fn scan(&self, k: usize) -> Option<()> {
-        let text = self.text;
+    fn scan<S: Source + ?Sized>(&self, src: &S, k: usize) -> Option<()> {
+        let (seg, base) = src.segment(k);
         let (start, end) = self.bounds[k];
-        let mut lines = Lines::new(text, start, end);
-        let mut info = Info::default();
-        let mut work = Work::default();
-        let estimate = (end - start) / 64;
-        work.ops.reserve(estimate);
-        work.op_pos.reserve(estimate);
-        work.op_region.reserve(estimate);
-        work.op_defs.reserve(estimate);
-        work.uses.reserve(estimate * 3 / 2);
-        work.types.reserve(estimate);
-        info.defs.reserve(estimate);
-        let header_next = |lines: &mut Lines<'t>| match lines.peek() {
-            Some(next) => next.starts_with("region @"),
-            None => Lines::new(text, end, text.len()).peek().is_some_and(|next| next.starts_with("region @")),
-        };
-        let mut open: Vec<u32> = Vec::new();
-        let mut closed_outer = 0i32;
-        let mut pending: Vec<(&'t str, Type)> = Vec::new();
-        while let Some(line) = lines.next_line() {
-            let pos = offset(text, line);
-            if line == "}" {
-                let next = header_next(&mut lines);
-                let ops = work.ops.len() as u32;
-                info.events.push(Event::Close { pos, ops, defs: info.line_defs, header_next: next });
-                if open.pop().is_none() {
-                    closed_outer += 1;
-                }
-                continue;
-            }
-            if line.starts_with("region @") {
-                info.events.push(Event::Header { ops: work.ops.len() as u32, ok: line.ends_with('{') });
-                open.push(info.headers);
-                info.headers += 1;
-                continue;
-            }
-            let region = open.last().map_or(-1 - closed_outer, |&r| r as i32);
-            let mut operands = Operands::new();
-            let uses = &mut work.uses;
-            let scanned = scan_op(
-                line,
-                &mut operands,
-                &mut pending,
-                |name, _| {
-                    uses.push(Name::of(text, name));
-                    Ok(UNRESOLVED)
-                },
-                ATTR_DEPTH,
-            )
-            .ok()?;
-            let structured = header_next(&mut lines);
-            let op_index = work.ops.len() as u32;
-            let op = Op {
-                kind: scanned.kind,
-                results: Results::new(),
-                operands,
-                attrs: scanned.attrs,
-                regions: Vec::new(),
-                block_args: Vec::new(),
-            };
-            let regions = expected_regions(op.kind);
-            if structured != (regions > 0) {
-                return None;
-            }
-            let mut line_def = |info: &mut Info, name: &'t str, kind: Kind, ty: Type| {
-                info.defs.push(Def { name: Name::of(text, name), pos, region, kind });
-                info.line_defs += 1;
-                info.line_bytes += name.len();
-                work.types.push(ty);
-            };
-            if structured {
-                let structure = info.structs.len() as u32;
-                if op.kind == OpKind::For {
-                    let (iv, iter_args) = for_args(&op, pending.len()).ok()?;
-                    let args = std::iter::once((iv, Type::Scalar(Scalar::I32))).chain(iter_args);
-                    for (name, ty) in args {
-                        let slot = info.line_defs;
-                        line_def(&mut info, quoted_in(line, &name)?, Kind::ForArg { slot, structure }, ty);
-                    }
-                }
-                let results: Vec<(Name, Type)> =
-                    pending.drain(..).map(|(name, ty)| (Name::of(text, name), ty)).collect();
-                for (k, &(name, _)) in results.iter().enumerate() {
-                    info.defs.push(Def { name, pos, region, kind: Kind::After { structure, k: k as u32 } });
-                }
-                info.structs.push(Structured { regions, results });
-                info.events.push(Event::Structured { index: structure, op: op_index });
-            } else {
-                for (name, ty) in pending.drain(..) {
-                    let slot = info.line_defs;
-                    line_def(&mut info, name, Kind::Line(slot), ty);
-                }
-            }
-            work.ops.push(op);
-            work.op_pos.push(pos);
-            work.op_region.push(region);
-            work.op_defs.push(info.defs.len() as u32);
-        }
-        info.ops = work.ops.len() as u32;
-        if info.defs.len() > MAX_DEFS {
-            return None;
-        }
+        let (info, work) = scan_chunk(seg, base, start, end, self.hashcons, self.level)?;
         self.infos[k].set(info).ok()?;
-        self.enter(k)?;
+        if !self.enter_later {
+            self.enter(src, k)?;
+        }
         *self.work[k].lock().ok()? = Some(work);
         self.scanned.fetch_add(1, Ordering::Release);
         Some(())
@@ -619,15 +788,22 @@ impl<'t> Shared<'t> {
         }
     }
 
-    /// Resolves `name`, used at offset `pos` in region `at`, to the value it
-    /// names there: the definition must come before the use, and the use must
-    /// be inside the definition's scope.
-    fn lookup(&self, w: &Walk, name: Name, pos: u32, at: u32) -> Option<ValueId> {
-        let handle = self.table.find(self.text, name, |h| self.def(h).map(|d| d.name))?;
+    /// Resolves `name`, used in chunk `chunk` at offset `pos` in region `at`,
+    /// to the value it names there: the definition must come before the use,
+    /// and the use must be inside the definition's scope.
+    fn lookup<S: Source + ?Sized>(&self, src: &S, w: &Walk, chunk: usize, name: Name, pos: u32, at: u32) -> Option<ValueId> {
+        let key = name.str(src.segment(chunk).0);
+        let handle = self.table.find(key, name.hash, |h| self.key_of(src, h))?;
         let chunk = (handle >> INDEX_BITS) as usize;
         let def = self.def(handle)?;
         let (defined, scope, id) = match def.kind {
             Kind::Line(slot) => (def.pos, w.region(chunk, def.region)?, w.line_id(chunk, slot)),
+            Kind::Alias(target) => {
+                let Kind::Line(slot) = self.infos[chunk].get()?.defs.get(target as usize)?.kind else {
+                    return None;
+                };
+                (def.pos, w.region(chunk, def.region)?, w.line_id(chunk, slot))
+            }
             Kind::ForArg { slot, structure } => {
                 (def.pos, w.structs[(w.sbase[chunk] + structure) as usize].first_region, w.line_id(chunk, slot))
             }
@@ -641,14 +817,14 @@ impl<'t> Shared<'t> {
 
     /// Defines the results of the op `emit` names, at their place in the
     /// chunk's values.
-    fn emit(&self, emit: &Emit, values: &mut Vec<(Name, Type)>) -> Option<()> {
+    fn emit(&self, emit: &Emit, values: &mut Vec<(u32, Name, Type)>) -> Option<()> {
         let st = self.infos[emit.chunk as usize].get()?.structs.get(emit.index as usize)?;
-        values.extend(st.results.iter().cloned());
+        values.extend(st.results.iter().map(|(name, ty)| (emit.chunk, *name, ty.clone())));
         Some(())
     }
 
     /// Second pass over chunk `k`.
-    fn resolve(&self, w: &Walk, k: usize) -> Option<()> {
+    fn resolve<S: Source + ?Sized>(&self, src: &S, w: &Walk, k: usize) -> Option<()> {
         let info = self.infos[k].get()?;
         let Work { mut ops, op_pos, op_region, op_defs, uses, types } = self.work[k].lock().ok()?.take()?;
         let count = (w.vbase[k + 1] - w.vbase[k]) as usize;
@@ -663,7 +839,7 @@ impl<'t> Shared<'t> {
             let pos = op_pos[o];
             let at = w.region(k, op_region[o])?;
             for operand in op.operands.iter_mut() {
-                *operand = self.lookup(w, *used.next()?, pos, at)?;
+                *operand = self.lookup(src, w, k, *used.next()?, pos, at)?;
             }
             while d < op_defs[o] as usize {
                 let def = &info.defs[d];
@@ -677,7 +853,7 @@ impl<'t> Shared<'t> {
                         }
                         let id = ValueId(next);
                         next += 1;
-                        values.push((def.name, types.next()?));
+                        values.push((k as u32, def.name, types.next()?));
                         if matches!(def.kind, Kind::Line(_)) {
                             op.results.push(id);
                         } else {
@@ -687,6 +863,7 @@ impl<'t> Shared<'t> {
                     Kind::After { structure, k: r } => {
                         op.results.push(ValueId(w.structs[(w.sbase[k] + structure) as usize].first_id + r));
                     }
+                    Kind::Alias(_) => {}
                 }
             }
         }
@@ -705,13 +882,13 @@ impl<'t> Shared<'t> {
     /// A worker resolves the chunks it scanned first, while their lines,
     /// names and table entries are still in its cache, then any left, in
     /// text order as the stitching needs them.
-    fn worker(&self) {
+    pub(super) fn worker<S: Source + ?Sized>(&self, src: &S) {
         self.started.fetch_add(1, Ordering::Release);
-        let _guard = FailOnPanic(&self.failed);
-        let Some(mine) = self.scan_all() else { return };
+        let _guard = FailOnPanic(self);
+        let Some(mine) = self.scan_all(src) else { return };
         let Some(w) = self.walk() else { return };
         for k in mine.into_iter().chain(1..=self.chunks()) {
-            if !self.resolve_unclaimed(w, k) {
+            if !self.resolve_unclaimed(src, w, k) {
                 return;
             }
         }
@@ -720,12 +897,11 @@ impl<'t> Shared<'t> {
     /// The calling thread: scans like a worker, then stitches the chunks'
     /// ops into regions in text order, resolving a chunk itself when no
     /// thread has claimed it yet.
-    fn lead(&self, header: Header) -> Option<Kernel> {
-        let _guard = FailOnPanic(&self.failed);
-        self.scan_all()?;
+    pub(super) fn lead<S: Source + ?Sized>(&self, src: &S, header: Header) -> Option<Kernel> {
+        let _guard = FailOnPanic(self);
+        self.scan_all(src)?;
         let w = self.walk()?;
-        let text = self.text;
-        let Header { name, max_workgroup_size, params, mut values, mut names } = header;
+        let Header { name, max_workgroup_size, waves_per_eu, params, mut values, mut names } = header;
         let n = self.chunks();
         values.reserve_exact(w.vbase[n + 1] as usize - values.len());
         names.reserve_exact(w.nbase[n + 1] - names.len());
@@ -735,15 +911,15 @@ impl<'t> Shared<'t> {
         let mut owner = None;
         let mut next_region = 0;
         for k in 1..=n {
-            if !self.resolve_unclaimed(w, k) || !self.wait(|| self.resolved[k].load(Ordering::Acquire)) {
+            if !self.resolve_unclaimed(src, w, k) || !self.wait(|| self.resolved[k].load(Ordering::Acquire)) {
                 return None;
             }
             let out = self.out[k].lock().ok()?.take()?;
             if names.len() != w.nbase[k] {
                 return None;
             }
-            for (name, ty) in out.values {
-                values.push(ValueDef::new(&mut names, name.str(text), ty));
+            for (chunk, name, ty) in out.values {
+                values.push(ValueDef::new(&mut names, name.str(src.segment(chunk as usize).0), ty));
             }
             let info = self.infos[k].get()?;
             let mut ops = out.ops.into_iter();
@@ -794,17 +970,52 @@ impl<'t> Shared<'t> {
         if !stack.is_empty() || values.len() != w.vbase[n + 1] as usize {
             return None;
         }
-        Some(Kernel { name, max_workgroup_size, params, body: body?, values, names })
+        Some(Kernel { name, max_workgroup_size, waves_per_eu, params, body: body?, values, names })
     }
 }
 
 /// The kernel line, attributes and parameters, parsed on the calling thread.
-struct Header {
+pub(super) struct Header {
     name: String,
     max_workgroup_size: u32,
+    waves_per_eu: (u32, u32),
     params: Vec<Param>,
     values: Vec<ValueDef>,
     names: String,
+}
+
+/// The header and parameter definitions of `text`, and where its body
+/// starts; `None` when the sequential parser must decide.
+pub(super) fn header(text: &str) -> Option<(Header, Info, usize)> {
+    if text.len() >= u32::MAX as usize {
+        return None;
+    }
+    let mut lines = Lines::new(text, 0, text.len());
+    let prologue = prologue(&mut lines).ok()?;
+    let body_start = lines.pos();
+    let mut header = Header {
+        name: prologue.name,
+        max_workgroup_size: prologue.max_workgroup_size,
+        waves_per_eu: prologue.waves_per_eu,
+        params: Vec::with_capacity(prologue.params.len()),
+        values: Vec::new(),
+        names: String::new(),
+    };
+    let mut params = Info::default();
+    for (pname, ty, noalias, readonly) in prologue.params {
+        let at = offset(text, pname) as usize;
+        if at == 0 || text.as_bytes()[at - 1] != b'%' {
+            return None;
+        }
+        let name = &text[at - 1..at + pname.len()];
+        let value = ValueId(header.values.len() as u32);
+        header.values.push(ValueDef::new(&mut header.names, name, ty.clone()));
+        params.defs.push(Def { name: Name::of(text, name), pos: 0, region: 0, kind: Kind::Line(params.line_defs) });
+        params.line_defs += 1;
+        params.line_bytes += name.len();
+        header.params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
+    }
+    Some((header, params, body_start))
 }
 
 /// Chunk byte ranges covering `text[start..]`, each ending after a newline
@@ -834,63 +1045,20 @@ fn chunk_bounds(text: &str, start: usize, threads: usize, chunk_bytes: usize) ->
     bounds
 }
 
-/// Parses `text` on up to `threads` threads, or `None` when the sequential
-/// parser must decide.
-pub(super) fn parse(text: &str, threads: usize, chunk_bytes: usize) -> Option<Kernel> {
-    if text.len() >= u32::MAX as usize {
-        return None;
-    }
-    let mut lines = Lines::new(text, 0, text.len());
-    let prologue = prologue(&mut lines).ok()?;
-    let body_start = lines.pos();
-
-    let mut header = Header {
-        name: prologue.name,
-        max_workgroup_size: prologue.max_workgroup_size,
-        params: Vec::with_capacity(prologue.params.len()),
-        values: Vec::new(),
-        names: String::new(),
-    };
-    let mut params = Info::default();
-    for (pname, ty) in prologue.params {
-        let at = offset(text, pname) as usize;
-        if at == 0 || text.as_bytes()[at - 1] != b'%' {
-            return None;
-        }
-        let name = &text[at - 1..at + pname.len()];
-        let value = ValueId(header.values.len() as u32);
-        header.values.push(ValueDef::new(&mut header.names, name, ty.clone()));
-        params.defs.push(Def { name: Name::of(text, name), pos: 0, region: 0, kind: Kind::Line(params.line_defs) });
-        params.line_defs += 1;
-        params.line_bytes += name.len();
-        header.params.push(Param { value, name: pname.to_string(), ty });
-    }
-
+/// The shared state and header for parsing `text` on `threads` threads.
+fn prepare(text: &str, threads: usize, chunk_bytes: usize, hashcons: bool) -> Option<(Shared, Header)> {
+    let (header, params, body_start) = header(text)?;
     let bounds = chunk_bounds(text, body_start, threads, chunk_bytes);
-    let n = bounds.len() - 1;
-    if n > MAX_CHUNKS || params.defs.len() > MAX_DEFS {
-        return None;
-    }
-    // Sized for the corpus's line lengths at under half full, and kept below
-    // the size the heap serves from fresh pages for bodies up to about 1 MiB.
-    let table_len = ((text.len() - body_start) / 36 + 2 * params.defs.len()).next_power_of_two().max(1024);
-    let sh = Shared {
-        text,
-        bounds,
-        infos: (0..=n).map(|_| OnceLock::new()).collect(),
-        work: (0..=n).map(|_| Mutex::new(None)).collect(),
-        out: (0..=n).map(|_| Mutex::new(None)).collect(),
-        claimed: (0..=n).map(|_| AtomicBool::new(false)).collect(),
-        resolved: (0..=n).map(|_| AtomicBool::new(false)).collect(),
-        table: Table::new(table_len),
-        walk: OnceLock::new(),
-        next_scan: AtomicUsize::new(1),
-        scanned: AtomicUsize::new(0),
-        started: AtomicUsize::new(0),
-        failed: AtomicBool::new(false),
-    };
-    sh.infos[0].set(params).ok()?;
-    sh.enter(0)?;
+    let sh = Shared::new(bounds, params, text.len() - body_start, false, hashcons)?;
+    sh.enter(text, 0)?;
+    Some((sh, header))
+}
+
+/// Parses `text` on up to `threads` scoped threads, or `None` when the
+/// sequential parser must decide.
+pub(super) fn parse(text: &str, threads: usize, chunk_bytes: usize, hashcons: bool) -> Option<Kernel> {
+    let (sh, header) = prepare(text, threads, chunk_bytes, hashcons)?;
+    let n = sh.chunks();
     std::thread::scope(|s| {
         // Thread creation is serialized and slow, and the scope must join
         // every thread it starts. Stop starting threads once the first pass
@@ -900,12 +1068,12 @@ pub(super) fn parse(text: &str, threads: usize, chunk_bytes: usize) -> Option<Ke
             if sh.next_scan.load(Ordering::Relaxed) > n || spawned - 1 - sh.started.load(Ordering::Acquire) >= 2 {
                 break;
             }
-            let worker = std::thread::Builder::new().stack_size(WORKER_STACK).spawn_scoped(s, || sh.worker());
+            let worker = std::thread::Builder::new().stack_size(WORKER_STACK).spawn_scoped(s, || sh.worker(text));
             if worker.is_err() {
                 break;
             }
         }
-        let kernel = sh.lead(header);
+        let kernel = sh.lead(text, header);
         if kernel.is_none() {
             sh.fail();
         }
@@ -913,14 +1081,55 @@ pub(super) fn parse(text: &str, threads: usize, chunk_bytes: usize) -> Option<Ke
     })
 }
 
+/// A job for a persistent worker thread.
+pub(super) type Job = Box<dyn FnOnce() + Send + 'static>;
+
+/// `parse` with up to `threads - 1` workers taken from persistent threads
+/// through `spawn`, which runs a job on one of them. The calling thread does
+/// not wait for the workers: once the kernel is stitched, any still running
+/// only find nothing left to do.
+pub(super) fn parse_pooled(
+    spawn: &dyn Fn(Job),
+    text: &Arc<str>,
+    threads: usize,
+    chunk_bytes: usize,
+    hashcons: bool,
+) -> Option<Kernel> {
+    let (sh, header) = prepare(text, threads, chunk_bytes, hashcons)?;
+    let sh = Arc::new(sh);
+    run_pooled(spawn, &sh, text, threads, header)
+}
+
+/// Runs a prepared parse: workers through `spawn`, the lead on this thread.
+pub(super) fn run_pooled<S: Source + ?Sized + 'static>(
+    spawn: &dyn Fn(Job),
+    sh: &Arc<Shared>,
+    src: &Arc<S>,
+    threads: usize,
+    header: Header,
+) -> Option<Kernel> {
+    for _ in 1..threads.min(sh.chunks() + 1) {
+        let (sh, src) = (Arc::clone(sh), Arc::clone(src));
+        spawn(Box::new(move || sh.worker(&*src)));
+    }
+    let kernel = sh.lead(&**src, header);
+    if kernel.is_none() {
+        sh.fail();
+    }
+    if sh.panicked() {
+        panic!("a parse worker panicked");
+    }
+    kernel
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::rir::parse::{parse_chunked, parse_parallel, parse_with_threads};
 
     /// Loops with iteration arguments and several results, branches with one
     /// and two regions, results used after their regions, and names used
     /// far from where they are defined.
-    fn kernel(blocks: usize) -> String {
+    pub(crate) fn kernel(blocks: usize) -> String {
         let mut t = String::from(
             "ckdsl.ir v1\nkernel @t {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %n : i32\n    \
              %p : ptr<f32,global> { align = i:4 }\n  }\n  region @entry {\n    \
@@ -947,7 +1156,7 @@ mod tests {
         t + "    cf.return (  )\n  }\n}\n"
     }
 
-    fn outcome(r: Result<crate::rir::ast::Kernel, crate::CompileError>) -> String {
+    pub(crate) fn outcome(r: Result<crate::rir::ast::Kernel, crate::CompileError>) -> String {
         match r {
             Ok(k) => format!("{k:?}"),
             Err(e) => format!("error: {}", e.message),

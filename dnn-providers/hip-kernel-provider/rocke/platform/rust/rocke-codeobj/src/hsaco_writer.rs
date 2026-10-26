@@ -198,6 +198,11 @@ pub struct KernelObjectSpec<'a> {
     pub rsrc1: u32,
     pub rsrc2: u32,
     pub rsrc3: u32,
+    /// Scratch bytes per work-item (spill slots); nonzero needs SCRATCH_EN
+    /// in `rsrc2`.
+    pub private_segment_size: u32,
+    /// VGPR dwords spilled, for the metadata.
+    pub vgpr_spill_count: u32,
 }
 
 fn metadata_argument(bytes: &mut Vec<u8>, arg: &KernelArgMeta) {
@@ -251,6 +256,8 @@ fn gemm_spec<'a>(symbol: &'a str, code: &'a [u8]) -> KernelObjectSpec<'a> {
         rsrc1: 0xe0af_0003,
         rsrc2: 0x0000_0184,
         rsrc3: 0x60,
+        private_segment_size: 0,
+        vgpr_spill_count: 0,
     }
 }
 
@@ -284,7 +291,7 @@ fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
     msgpack_str(&mut descriptor, ".name");
     msgpack_str(&mut descriptor, symbol);
     msgpack_str(&mut descriptor, ".private_segment_fixed_size");
-    msgpack_uint(&mut descriptor, 0);
+    msgpack_uint(&mut descriptor, spec.private_segment_size);
     msgpack_str(&mut descriptor, ".sgpr_count");
     msgpack_uint(&mut descriptor, spec.sgpr_count);
     msgpack_str(&mut descriptor, ".sgpr_spill_count");
@@ -298,7 +305,7 @@ fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
     msgpack_str(&mut descriptor, ".vgpr_count");
     msgpack_uint(&mut descriptor, spec.vgpr_count);
     msgpack_str(&mut descriptor, ".vgpr_spill_count");
-    msgpack_uint(&mut descriptor, 0);
+    msgpack_uint(&mut descriptor, spec.vgpr_spill_count);
     msgpack_str(&mut descriptor, ".wavefront_size");
     msgpack_uint(&mut descriptor, 32);
     msgpack_str(&mut descriptor, ".workgroup_processor_mode");
@@ -392,7 +399,13 @@ fn append_symbol(
     append_u64(symbols, size);
 }
 
-fn regular_symbols(strings: &RegularStringTable, layout: Layout, code_size: usize, num_vgpr: u32) -> Vec<u8> {
+fn regular_symbols(
+    strings: &RegularStringTable,
+    layout: Layout,
+    code_size: usize,
+    num_vgpr: u32,
+    private_segment_size: u32,
+) -> Vec<u8> {
     const SHN_ABS: u16 = 0xfff1;
     let mut symbols = vec![0; 24];
     append_symbol(
@@ -401,7 +414,7 @@ fn regular_symbols(strings: &RegularStringTable, layout: Layout, code_size: usiz
         0,
         0,
         SHN_ABS,
-        0,
+        private_segment_size as u64,
         0,
     );
     append_symbol(&mut symbols, strings.num_agpr, 0, 0, SHN_ABS, 0, 0);
@@ -510,6 +523,7 @@ fn sysv_hash_table(symbol: &str) -> Vec<u8> {
 fn kernel_descriptor(text_vaddr: usize, rodata: usize, spec: &KernelObjectSpec) -> Vec<u8> {
     let mut descriptor = vec![0_u8; 64];
     put_u32(&mut descriptor, 0, spec.group_segment_size);
+    put_u32(&mut descriptor, 4, spec.private_segment_size);
     put_u32(&mut descriptor, 8, spec.kernarg_size);
     put_u64(
         &mut descriptor,
@@ -669,7 +683,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     };
 
     let dynsym = dynamic_symbols(symbol, layout.text_vaddr, layout.rodata, code.len());
-    let symtab = regular_symbols(&regular_strings, layout, code.len(), spec.vgpr_count);
+    let symtab = regular_symbols(&regular_strings, layout, code.len(), spec.vgpr_count, spec.private_segment_size);
     assert_eq!(symtab.len(), SYMBOL_TABLE_SIZE);
     let rodata = kernel_descriptor(layout.text_vaddr, layout.rodata, spec);
     let dynamic = dynamic_table(layout, dynstr.len());
@@ -1041,6 +1055,22 @@ mod tests {
         assert_eq!(facts.flags, 0x4a);
         assert_eq!(facts.metadata_notes, 1);
         assert!(facts.exported_symbols.iter().any(|item| item == SYMBOL));
+    }
+
+    #[test]
+    fn scratch_size_reaches_descriptor_metadata_and_symbol() {
+        let mut spec = gemm_spec(SYMBOL, &[0u8; 8]);
+        spec.private_segment_size = 100;
+        spec.vgpr_spill_count = 24;
+        let image = write_kernel_object(&spec).unwrap();
+        validate_hsaco(&image, &[SYMBOL.to_string()]).unwrap();
+        let note = metadata_note_for(&spec);
+        let find = |key: &str| note.windows(key.len()).position(|w| w == key.as_bytes()).expect("key") + key.len();
+        // msgpack positive fixint 100 and 24 follow their keys.
+        assert_eq!(note[find(".private_segment_fixed_size")], 100);
+        assert_eq!(note[find(".vgpr_spill_count")], 24);
+        let rodata = image.windows(4).position(|w| w == spec.rsrc1.to_le_bytes()).expect("descriptor") - 48;
+        assert_eq!(u32::from_le_bytes(image[rodata + 4..rodata + 8].try_into().unwrap()), 100);
     }
 
     #[test]

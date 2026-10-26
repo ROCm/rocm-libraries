@@ -531,6 +531,28 @@ def test_dgrad_cpg4_4c_lds_forms_are_gfx950_only():
         assert not any(j.spec_kwargs["dgrad_weights_lds"] for _, j in cell)
 
 
+def test_dgrad_cpg4_4c_is_not_cached_without_the_atom():
+    """The 4x4x4 MFMA atom is CDNA-only: gfx1151 (wave32 WMMA) caches no 4c
+    kernel and its validator says why; gfx942 and gfx950 keep theirs."""
+    for arch in ("gfx1151", "gfx942", "gfx950"):
+        target = ArchTarget.from_gfx(arch)
+        for dtype in ("fp16", "bf16"):
+            for caps in dks.DIRECT_CAPABILITIES[_4C][1]:
+                n_raw, cell = dks._caps_jobs(
+                    arch, target.wave_size, _4C, "dgrad", caps, dtype
+                )
+                assert n_raw > 0
+                assert bool(cell) == (arch != "gfx1151"), (arch, dtype, caps)
+    caps = dks.DIRECT_CAPABILITIES[_4C][1][0]
+    knobs = dict(block_q=4, block_groups=16, dgrad_weights_lds=False, stage_rows=False)
+    for dtype, ab in (("fp16", "f16"), ("bf16", "bf16")):
+        spec = dks.make_spec(_4C, dks.probe_problem(caps, dtype, _4C), knobs, 32)
+        assert dks.validate_spec(_4C, spec, "gfx1151") == (
+            False,
+            f"missing 4x4x4 {ab} MFMA atom on gfx1151",
+        )
+
+
 def test_dgrad_cpg4_4c_binary_is_found_by_identity():
     target = ArchTarget.from_gfx(_ARCH)
     for caps in dks.DIRECT_CAPABILITIES[_4C][1]:

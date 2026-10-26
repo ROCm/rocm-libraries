@@ -88,6 +88,72 @@ ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_compile_rocke_ir_v1(
 ROCKE_CODEOBJ_FFI_API void
     rocke_codeobj_compile_result_dispose_v1(rocke_codeobj_compile_result_v1* result);
 
+/*
+ * Compile sessions.
+ *
+ * A session is an opaque object the caller creates, owns and frees. It holds
+ * what consecutive compiles reuse: a pool of persistent worker threads that
+ * parse large inputs in parallel (so a compile pays no thread start), and the
+ * state of an input being streamed. The library keeps no global or
+ * thread-local state; everything lives in the session.
+ *
+ * Results are exactly those of rocke_codeobj_compile_rocke_ir_v1 on the same
+ * input: the same HSACO bytes, and the same status and "<kind>: <message>"
+ * diagnostics on failure.
+ *
+ * Thread safety: a session may be used from any thread, but calls on ONE
+ * session must not overlap in time. A call that would overlap another on the
+ * same session fails without touching the session (compile/finish: status 1
+ * with a "ROCKE_DIRECT_SESSION: ..." diagnostic; feed: returns 1). Different
+ * sessions are independent and may be used concurrently, and
+ * rocke_codeobj_compile_rocke_ir_v1 needs no session at all. Free a session
+ * only when no call is using it; freeing stops and joins its threads.
+ *
+ * Streaming: call rocke_codeobj_session_feed_v1 any number of times with
+ * consecutive pieces of one serialized kernel (pieces may split lines or
+ * UTF-8 sequences anywhere), then rocke_codeobj_session_finish_v1, which
+ * compiles everything fed since the last finish and ends the stream. While
+ * the producer keeps writing, completed lines are parsed on the session's
+ * threads. feed copies the bytes; the caller may reuse its buffer at once.
+ */
+typedef struct rocke_codeobj_session_v1 rocke_codeobj_session_v1;
+
+typedef struct rocke_codeobj_session_options_v1
+{
+    uint32_t struct_size; /* sizeof(rocke_codeobj_session_options_v1) */
+    uint32_t worker_threads; /* threads to start; 0 picks a default from the machine */
+} rocke_codeobj_session_options_v1;
+
+/* Creates a session in *session (options may be NULL for the defaults).
+ * Returns 0, or 1 with *session = NULL when session is NULL, struct_size does
+ * not match, or the session cannot be created. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_create_v1(
+    const rocke_codeobj_session_options_v1* options, rocke_codeobj_session_v1** session);
+
+/* Stops and joins the session's threads and frees it; NULL is ignored. */
+ROCKE_CODEOBJ_FFI_API void rocke_codeobj_session_free_v1(rocke_codeobj_session_v1* session);
+
+/* rocke_codeobj_compile_rocke_ir_v1 using the session's threads. Same request
+ * and result conventions; dispose the result as usual. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_compile_v1(rocke_codeobj_session_v1* session,
+                                                              const rocke_codeobj_compile_request_v1* request,
+                                                              rocke_codeobj_compile_result_v1* result);
+
+/* Appends size bytes at data to the input being streamed (starting a stream
+ * if none is). Returns 0, or 1 without effect for a NULL session, NULL data
+ * with size > 0, or an overlapping call. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_feed_v1(rocke_codeobj_session_v1* session,
+                                                           const uint8_t* data,
+                                                           size_t size);
+
+/* Compiles everything fed since the last finish, as
+ * rocke_codeobj_compile_rocke_ir_v1 would compile it whole (an empty or
+ * non-UTF-8 input fails the same way), and ends the stream. Result
+ * conventions as for the other entry points; executable_seconds counts from
+ * this call, not the overlapped parsing before it. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_finish_v1(rocke_codeobj_session_v1* session,
+                                                             rocke_codeobj_compile_result_v1* result);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

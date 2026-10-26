@@ -224,6 +224,37 @@ class TestDgrad4cSpec(unittest.TestCase):
         )
         self.assertIsNone(dgrad_4c_spec_for_problem(p, arch="gfx000"))
 
+    def test_targets_without_the_4x4x4_atom_are_refused(self):
+        # The 4x4x4 atom is MFMA-only: a wave32 WMMA target gets a reason, not
+        # IR that neither compiler can select; gfx942 / gfx950 still accept.
+        from kernels.common.conv_direct_grouped import direct_dgrad_spec_for_problem
+
+        no_atom = ("gfx1151", "gfx11-generic", "gfx1201", "gfx12-generic", "gfx1250")
+        for dtype, ab in (("fp16", "f16"), ("bf16", "bf16")):
+            for K in (1, 3):
+                p = _problem(N=1, H=64, W=64, groups=64, dtype=dtype, K=K)
+                fprop = DirectConv4cSpec(problem=p)
+                dgrad = make_dgrad_4c_spec(p, block_groups=32, dgrad_fused_weights=True)
+                for spec in (fprop, dgrad):
+                    for arch in no_atom:
+                        with self.subTest(dtype=dtype, K=K, spec=spec.name, arch=arch):
+                            ok, why = is_valid_spec_4c(spec, arch=arch)
+                            self.assertFalse(ok)
+                            self.assertEqual(
+                                why, f"missing 4x4x4 {ab} MFMA atom on {arch}"
+                            )
+                    with self.assertRaisesRegex(ValueError, "missing 4x4x4"):
+                        build_direct_conv_4c(spec, arch="gfx1151")
+                    for arch in ("gfx942", "gfx950"):
+                        with self.subTest(dtype=dtype, K=K, spec=spec.name, arch=arch):
+                            self.assertEqual(
+                                is_valid_spec_4c(spec, arch=arch), (True, "ok")
+                            )
+                self.assertIsNone(dgrad_4c_spec_for_problem(p, arch="gfx1151"))
+                self.assertIsNone(direct_dgrad_spec_for_problem(p, arch="gfx1151"))
+                for arch in ("gfx942", "gfx950"):
+                    self.assertIsNotNone(dgrad_4c_spec_for_problem(p, arch=arch))
+
     def test_fused_spec_plumbing(self):
         p = _problem(N=2, H=13, W=13, groups=32)
         s = make_dgrad_4c_spec(p, block_q=8, block_groups=32, dgrad_fused_weights=True)

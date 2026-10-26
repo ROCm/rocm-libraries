@@ -19,6 +19,9 @@ use std::borrow::Cow;
 use std::hash::Hasher;
 
 use super::ast::{Attr, Kernel, Op, OpKind, Operands, Param, Region, Results, Scalar, Text, Type, ValueDef, ValueId};
+use super::hashcons::{key_hash, ConstTable};
+use super::scan::{self, Level, Masks};
+use super::scan_line::{canonical_with, const_key_with};
 use crate::error::CompileError;
 
 /// Inputs smaller than this are parsed on the calling thread: starting
@@ -84,6 +87,12 @@ fn parse_scalar(text: &str) -> Result<Scalar, CompileError> {
         "i64" => Ok(Scalar::I64),
         "f16" => Ok(Scalar::F16),
         "f32" => Ok(Scalar::F32),
+        "bf16" => Ok(Scalar::BF16),
+        "i16" => Ok(Scalar::I16),
+        "i8" => Ok(Scalar::I8),
+        "fp8e4m3" => Ok(Scalar::FP8E4M3),
+        "bf8e5m2" => Ok(Scalar::BF8E5M2),
+        "f64" => Ok(Scalar::F64),
         other => Err(err(format!("unsupported element type {other:?}"))),
     }
 }
@@ -95,13 +104,19 @@ fn scalar_of(text: &[u8]) -> Option<Scalar> {
         b"i64" => Scalar::I64,
         b"f16" => Scalar::F16,
         b"f32" => Scalar::F32,
+        b"bf16" => Scalar::BF16,
+        b"i16" => Scalar::I16,
+        b"i8" => Scalar::I8,
+        b"fp8e4m3" => Scalar::FP8E4M3,
+        b"bf8e5m2" => Scalar::BF8E5M2,
+        b"f64" => Scalar::F64,
         _ => return None,
     })
 }
 
 /// `parse_type(text)` for the spellings the DSL emits for values (no spaces),
 /// `None` for anything else.
-fn quick_type(text: &[u8]) -> Option<Type> {
+pub(super) fn quick_type(text: &[u8]) -> Option<Type> {
     if let Some(scalar) = scalar_of(text) {
         return Some(Type::Scalar(scalar));
     }
@@ -138,6 +153,9 @@ interned!(
     "dwords", "xor_mask", "exclusive", "max_workgroup_size", "scheduler_strategy", "i1", "i32", "i64",
     "f16", "f32", "lt", "le", "gt", "ge", "eq", "ne", "ult", "olt", "ole", "ogt", "oge", "oeq", "one",
     "une", "x", "y", "z", "modular", "", "=v,0", "wmma_f32_16x16x16_f16",
+    "bf16", "wmma_f32_16x16x16_bf16", "i16", "i8", "wmma_i32_16x16x16_iu8", "wmma_i32_16x16x16_iu4",
+    "fp8e4m3", "bf8e5m2", "f64",
+    "ordering", "scope", "monotonic", "acquire", "release", "agent", "workgroup",
 );
 
 fn spaced_at(bytes: &[u8], at: usize) -> bool {
@@ -280,9 +298,13 @@ fn utf8_width(first: u8) -> usize {
     }
 }
 
+/// Deepest nesting of attribute maps and lists the sequential parser takes.
+/// Their parse recurses; the DSL nests three levels.
+const MAX_ATTR_NESTING: u32 = 1024;
+
 /// Parses `{ key = value, ... }`. Maps and lists may nest `depth` levels deep;
-/// the sequential parser passes `u32::MAX`, a worker thread with a small
-/// stack a bound it can afford.
+/// the sequential parser passes `MAX_ATTR_NESTING`, a worker thread with a
+/// small stack a bound it can afford.
 fn parse_attr_map(scanner: &mut Scanner<'_>, depth: u32) -> Result<Vec<(Text, Attr)>, CompileError> {
     if depth == 0 {
         return Err(err("attributes nested too deeply"));
@@ -403,11 +425,18 @@ pub(super) struct Lines<'a> {
     pos: usize,
     end: usize,
     peeked: Option<(&'a str, usize)>,
+    /// Vector level of the newline search (`scan`).
+    level: Level,
 }
 
 impl<'a> Lines<'a> {
     pub(super) fn new(text: &'a str, pos: usize, end: usize) -> Self {
-        Self { text, pos, end, peeked: None }
+        Self { text, pos, end, peeked: None, level: Level::Scalar }
+    }
+
+    /// The same lines, found with the vector level `level`.
+    pub(super) fn scanning(self, level: Level) -> Self {
+        Self { level, ..self }
     }
 
     pub(super) fn peek(&mut self) -> Option<&'a str> {
@@ -416,7 +445,10 @@ impl<'a> Lines<'a> {
         }
         let mut pos = self.pos;
         while pos < self.end {
-            let end = self.text[pos..self.end].find('\n').map_or(self.end, |n| pos + n);
+            let end = match self.level {
+                Level::Scalar => self.text[pos..self.end].find('\n').map_or(self.end, |n| pos + n),
+                level => scan::find_newline(level, &self.text.as_bytes()[..self.end], pos).unwrap_or(self.end),
+            };
             let line = trim(&self.text[pos..end]);
             pos = (end + 1).min(self.end);
             if !(line.is_empty() || line.starts_with('#')) {
@@ -486,16 +518,16 @@ fn is_name_byte(b: u8) -> bool {
 /// knows. For such a line the general scan in `scan_op` finds exactly these
 /// parts: no earlier ` ( ` or later ` = ` can occur, the result entry cannot
 /// split, and the first `)` closes the operand list.
-struct Canonical<'a> {
-    result: Option<(&'a str, Type)>,
-    opname: &'a str,
+pub(super) struct Canonical<'a> {
+    pub(super) result: Option<(&'a str, Type)>,
+    pub(super) opname: &'a str,
     /// The operand names joined by `, `.
-    operands: &'a str,
+    pub(super) operands: &'a str,
     /// Text after the closing `)`.
-    tail: &'a str,
+    pub(super) tail: &'a str,
 }
 
-fn canonical(line: &str) -> Option<Canonical<'_>> {
+pub(super) fn canonical(line: &str) -> Option<Canonical<'_>> {
     let b = line.as_bytes();
     let n = b.len();
     let mut i = 0;
@@ -686,14 +718,16 @@ pub(super) struct ScannedOp<'a> {
 /// with the op name for its error), the attributes, and the result names and
 /// types appended to `results`. Errors come in the order the checks are
 /// written here, which is the order of the original single-pass parser.
+/// `masks` are the line's byte classes (`scan`), if the caller has them.
 pub(super) fn scan_op<'a>(
     line: &'a str,
+    masks: Option<&Masks>,
     operands: &mut Operands,
     results: &mut Vec<(&'a str, Type)>,
     mut operand: impl FnMut(&'a str, &'a str) -> Result<ValueId, CompileError>,
     depth: u32,
 ) -> Result<ScannedOp<'a>, CompileError> {
-    if let Some(parts) = canonical(line) {
+    if let Some(parts) = canonical_with(line, masks) {
         let opname = parts.opname;
         let kind = OpKind::from_name(opname)
             .ok_or_else(|| err(format!("op {opname:?} is not supported by the direct backend")))?;
@@ -783,9 +817,7 @@ pub(super) fn for_args(op: &Op, results: usize) -> Result<(String, Vec<(String, 
     if iter_args.len() + 3 != op.operands.len() || iter_args.len() != results {
         return Err(err("scf.for operand/iter_arg/result counts disagree"));
     }
-    if op.bool_attr("unroll") == Some(true) {
-        return Err(err("unrolled scf.for is not supported by the direct backend"));
-    }
+    // `unroll = true` is honored by `unroll::unroll_loops` before optimization.
     Ok((iv_name, iter_args))
 }
 
@@ -802,8 +834,25 @@ pub(super) fn expected_regions(kind: OpKind) -> usize {
 pub(super) struct Prologue<'a> {
     pub name: String,
     pub max_workgroup_size: u32,
-    /// Parameter names without the `%`, and their types.
-    pub params: Vec<(&'a str, Type)>,
+    pub waves_per_eu: (u32, u32),
+    /// Parameter names without the `%`, their types, and whether they are
+    /// `noalias` and `readonly`.
+    pub params: Vec<(&'a str, Type, bool, bool)>,
+}
+
+/// `noalias` and `readonly` of a parameter's attribute map: a key holds when
+/// every occurrence is `b:true`. A map that does not parse states neither;
+/// the other attributes are ignored.
+fn param_facts(attrs: &str) -> (bool, bool) {
+    let mut scanner = Scanner::new(attrs);
+    let Ok(map) = parse_attr_map(&mut scanner, MAX_ATTR_NESTING) else {
+        return (false, false);
+    };
+    let holds = |key: &str| {
+        let mut values = map.iter().filter(|(k, _)| k == key).map(|(_, v)| v).peekable();
+        values.peek().is_some() && values.all(|v| *v == Attr::Bool(true))
+    };
+    (holds("noalias"), holds("readonly"))
 }
 
 /// Parses the header, the kernel line, its attributes and the parameters.
@@ -822,14 +871,23 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         .to_string();
 
     let mut max_workgroup_size = 1024u32;
+    let mut waves_per_eu = (0u32, 0u32);
     if let Some(attrs_line) = lines.peek().filter(|line| line.starts_with("attrs ")) {
         lines.next()?;
         let mut scanner = Scanner::new(&attrs_line["attrs ".len()..]);
-        for (key, value) in parse_attr_map(&mut scanner, u32::MAX)? {
+        for (key, value) in parse_attr_map(&mut scanner, MAX_ATTR_NESTING)? {
             match (&*key, value) {
-                ("max_workgroup_size", Attr::Int(size)) => max_workgroup_size = size as u32,
+                ("max_workgroup_size", Attr::Int(size)) => max_workgroup_size = u32::try_from(size).unwrap_or(0),
                 // Selects LLVM's machine scheduler only; it carries no semantics.
                 ("scheduler_strategy", Attr::Str(_)) => {}
+                // An occupancy hint, `n` or `[min, max]` waves per SIMD.
+                ("waves_per_eu", Attr::Int(n)) if (0..=16).contains(&n) => waves_per_eu = (n as u32, n as u32),
+                ("waves_per_eu", Attr::List(range)) => match range[..] {
+                    [Attr::Int(lo), Attr::Int(hi)] if (0..=16).contains(&lo) && (0..=16).contains(&hi) => {
+                        waves_per_eu = (lo as u32, hi as u32)
+                    }
+                    _ => return Err(err(format!("malformed kernel attribute waves_per_eu {range:?}"))),
+                },
                 (other, _) => {
                     return Err(err(format!(
                         "kernel attribute {other:?} is not supported by the direct backend"
@@ -848,9 +906,9 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         if line == "}" {
             break;
         }
-        let head = match line.find('{') {
-            Some(brace) => &line[..brace],
-            None => line,
+        let (head, (noalias, readonly)) = match line.find('{') {
+            Some(brace) => (&line[..brace], param_facts(&line[brace..])),
+            None => (line, (false, false)),
         };
         let colon = find_spaced(head, ':').ok_or_else(|| err(format!("bad param line {line:?}")))?;
         let pname = head[..colon].trim().trim_start_matches('%');
@@ -858,9 +916,9 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
         if !matches!(ty, Type::Scalar(Scalar::I32 | Scalar::I64 | Scalar::F32) | Type::Ptr(_)) {
             return Err(err(format!("unsupported kernel argument type for %{pname}")));
         }
-        params.push((pname, ty));
+        params.push((pname, ty, noalias, readonly));
     }
-    Ok(Prologue { name, max_workgroup_size, params })
+    Ok(Prologue { name, max_workgroup_size, waves_per_eu, params })
 }
 
 /// One definition of a name: the value, the scope it was made in, the
@@ -971,6 +1029,31 @@ impl Names {
         let slot = self.slot(name, hash);
         let start = self.names.len() as u32;
         self.values.push(ValueDef::new(&mut self.names, name, ty));
+        self.bind(value, hash, slot, start);
+        value
+    }
+
+    /// Binds `name` to the existing `value`, as `define` binds a new one.
+    pub(super) fn alias(&mut self, name: &str, value: ValueId) {
+        let hash = name_hash(name);
+        let slot = self.slot(name, hash);
+        let start = self.names.len() as u32;
+        self.names.push_str(name);
+        self.bind(value, hash, slot, start);
+    }
+
+    /// The innermost open scope.
+    pub(super) fn scope(&self) -> u32 {
+        *self.scopes.last().expect("scope stack is never empty")
+    }
+
+    pub(super) fn is_open(&self, scope: u32) -> bool {
+        self.open[scope as usize]
+    }
+
+    /// Binds the name just appended to `names` at `start` (whose `slot`
+    /// lookup was made before) to `value` in the innermost scope.
+    fn bind(&mut self, value: ValueId, hash: u32, slot: Result<usize, usize>, start: u32) {
         let scope = *self.scopes.last().expect("scope stack is never empty");
         let mut binding = Binding { value, scope, shadows: 0, hash, name: (start, self.names.len() as u32) };
         let index = self.bindings.len() as u32 + 1;
@@ -997,7 +1080,6 @@ impl Names {
                 }
             }
         }
-        value
     }
 
     fn lookup(&self, name: &str, opname: &str) -> Result<ValueId, CompileError> {
@@ -1027,6 +1109,18 @@ struct Parser<'a> {
     /// Regions being filled, innermost last; `open[i]` owns `regions[i + 1]`.
     regions: Vec<Region>,
     open: Vec<OpenOp<'a>>,
+    consts: ConstTable<'a>,
+    /// Repeated constants are bound to the earlier one (see `hashcons`).
+    hashcons: bool,
+    /// Vector level of the line scans (`scan`).
+    level: Level,
+}
+
+/// Whether a constant line followed by the line `next` may be bound to an
+/// earlier constant: not when a region follows (the op would own it) nor when
+/// a `}` does (the op ends its region, which validation looks at).
+pub(super) fn shareable_before(next: Option<&str>) -> bool {
+    !next.is_some_and(|next| next == "}" || next.starts_with("region @"))
 }
 
 impl<'a> Parser<'a> {
@@ -1063,7 +1157,14 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(_) => {
-                    let op = self.op(lines)?;
+                    let line = lines.next()?;
+                    let masks = super::scan_line::masks(self.level, line);
+                    let constant = if self.hashcons { const_key_with(line, masks.as_ref()) } else { None };
+                    if let Some((name, key)) = constant.filter(|_| shareable_before(lines.peek())) {
+                        self.constant(line, masks.as_ref(), name, key)?;
+                        continue;
+                    }
+                    let op = self.op(line, masks.as_ref())?;
                     if lines.region_follows() {
                         self.open.push(op);
                         self.open_region(lines)?;
@@ -1075,16 +1176,31 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A constant line without regions: bound to the visible constant with the
+    /// same key (see `hashcons`), or parsed and entered as one.
+    fn constant(&mut self, line: &'a str, masks: Option<&Masks>, name: &'a str, key: &'a str) -> Result<(), CompileError> {
+        let hash = key_hash(key);
+        let names = &self.names;
+        if let Some(value) = self.consts.lookup(key, hash, |scope| names.is_open(scope)) {
+            self.names.alias(name, value);
+            return Ok(());
+        }
+        let op = self.op(line, masks)?;
+        self.finish(op)?;
+        let value = self.regions.last().and_then(|r| r.ops.last()).map(|op| op.results[0]).expect("the constant");
+        self.consts.insert(key, hash, value, self.names.scope());
+        Ok(())
+    }
+
     /// Parses an op line into the innermost region. The loop body sees the
     /// induction variable and iteration arguments; the results become visible
     /// after the op (`finish`).
-    fn op(&mut self, lines: &mut Lines<'a>) -> Result<OpenOp<'a>, CompileError> {
-        let line = lines.next()?;
+    fn op(&mut self, line: &'a str, masks: Option<&Masks>) -> Result<OpenOp<'a>, CompileError> {
         let pending = self.pending.len();
         let mut operands = Operands::new();
         let names = &self.names;
         let lookup = |name, opname| names.lookup(name, opname);
-        let scanned = scan_op(line, &mut operands, &mut self.pending, lookup, u32::MAX)?;
+        let scanned = scan_op(line, masks, &mut operands, &mut self.pending, lookup, MAX_ATTR_NESTING)?;
         let results = self.pending.len() - pending;
         let mut op = Op {
             kind: scanned.kind,
@@ -1130,16 +1246,24 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn parse_sequential(text: &str) -> Result<Kernel, CompileError> {
-    let mut lines = Lines::new(text, 0, text.len());
+fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> {
+    let level = Level::detect();
+    let mut lines = Lines::new(text, 0, text.len()).scanning(level);
     let prologue = prologue(&mut lines)?;
-    let mut parser =
-        Parser { names: Names::new(text.len()), pending: Vec::new(), regions: Vec::new(), open: Vec::new() };
+    let mut parser = Parser {
+        names: Names::new(text.len()),
+        pending: Vec::new(),
+        regions: Vec::new(),
+        open: Vec::new(),
+        consts: ConstTable::new(),
+        hashcons,
+        level,
+    };
     parser.names.enter();
     let mut params = Vec::with_capacity(prologue.params.len());
-    for (pname, ty) in prologue.params {
+    for (pname, ty, noalias, readonly) in prologue.params {
         let value = parser.names.define(&format!("%{pname}"), ty.clone());
-        params.push(Param { value, name: pname.to_string(), ty });
+        params.push(Param { value, name: pname.to_string(), ty, noalias, readonly });
     }
     let body = parser.body(&mut lines)?;
     if lines.next()? != "}" {
@@ -1151,6 +1275,7 @@ fn parse_sequential(text: &str) -> Result<Kernel, CompileError> {
     Ok(Kernel {
         name: prologue.name,
         max_workgroup_size: prologue.max_workgroup_size,
+        waves_per_eu: prologue.waves_per_eu,
         params,
         body,
         values: parser.names.values,
@@ -1190,19 +1315,30 @@ pub fn parse_with_threads(text: &str, threads: usize) -> Result<Kernel, CompileE
 /// so tests can put chunk boundaries anywhere.
 #[doc(hidden)]
 pub fn parse_chunked(text: &str, threads: usize, chunk_bytes: usize) -> Result<Kernel, CompileError> {
+    parse_options(text, threads, chunk_bytes, !super::debug_flag("nohashcons"))
+}
+
+/// `parse_chunked` without hash-consing constants (`hashcons`): the kernel as
+/// written, which the optimizer turns into the same code.
+#[doc(hidden)]
+pub fn parse_plain(text: &str, threads: usize, chunk_bytes: usize) -> Result<Kernel, CompileError> {
+    parse_options(text, threads, chunk_bytes, false)
+}
+
+pub(super) fn parse_options(text: &str, threads: usize, chunk_bytes: usize, hashcons: bool) -> Result<Kernel, CompileError> {
     if threads > 1 {
-        if let Some(kernel) = super::parse_par::parse(text, threads, chunk_bytes) {
+        if let Some(kernel) = super::parse_par::parse(text, threads, chunk_bytes, hashcons) {
             return Ok(kernel);
         }
     }
-    parse_sequential(text)
+    parse_sequential(text, hashcons)
 }
 
 /// The parallel path alone: `None` where `parse_chunked` falls back to the
 /// sequential parser.
 #[doc(hidden)]
 pub fn parse_parallel(text: &str, threads: usize, chunk_bytes: usize) -> Option<Kernel> {
-    super::parse_par::parse(text, threads.max(1), chunk_bytes)
+    super::parse_par::parse(text, threads.max(1), chunk_bytes, true)
 }
 
 #[cfg(test)]
@@ -1344,6 +1480,7 @@ mod tests {
         let mut results = Vec::new();
         let scanned = scan_op(
             line,
+            None,
             &mut operands,
             &mut results,
             |name, _| {
