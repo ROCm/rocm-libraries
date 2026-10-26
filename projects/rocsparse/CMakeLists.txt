@@ -120,11 +120,8 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
-option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
-option(BUILD_WITH_ELL_TRSV "Enable ELL format support in rocsparse_spsv and rocsparse_sptrsv" ON)
-option(BUILD_WITH_DIAGONAL_SOLVE "Enable the diagonal solve in rocsparse_sptrsv and rocsparse_sptrsm" ON)
 option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
+option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -187,7 +184,7 @@ if(COMMAND rocm_check_target_ids)
           TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
-                  "gfx1150;gfx1151;gfx1152;gfx1153"
+                  "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
                   "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     endif()
 else()
@@ -195,7 +192,7 @@ else()
     if(TARGET_ID_SUPPORT)
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                                 "gfx1030;gfx1100;gfx1101;gfx1102"
-                                "gfx1150;gfx1151;gfx1152;gfx1153"
+                                "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
                                 "gfx1200;gfx1201;gfx1250;gfx1250-strict")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
@@ -228,7 +225,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "5.1.0")
+set(VERSION_STRING "5.2.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")

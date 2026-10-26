@@ -4,7 +4,7 @@
 ################################################################################
 # Unit tests for the ClusterLoad (TDM multicast) component.
 #
-# Covers Tensile/Components/ClusterLoad.py: capability-based selection, the
+# Covers tensilelite/Components/ClusterLoad.py: capability-based selection, the
 # topology decision (usesCombinedMask / maskSgprName), the SGPR
 # declare/undeclare, and the emitted assembly of computeMasks /
 # applyToDescriptor. These emit no GPU work themselves, so the asm string is the
@@ -20,7 +20,7 @@ import sys
 import pytest
 from contextlib import contextmanager
 from types import SimpleNamespace
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +29,7 @@ WAVESIZE_32 = 32
 
 def _init_rocisa_gfx1250():
     from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
     isa = gfxToIsa("gfx1250")
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
@@ -47,7 +47,7 @@ def _rocisa_gfx1250():
 
 
 def _c():
-    from Tensile.Components.ClusterLoad import ClusterLoadTDM
+    from tensilelite.Components.ClusterLoad import ClusterLoadTDM
     return ClusterLoadTDM()
 
 
@@ -87,7 +87,7 @@ class _StubWriter:
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
-            pap=False, streamKMulticast=False):
+            pap=False, streamKMulticast=False, tdmFuse=0, mx=False):
     # The component derives the StreamK cluster multicast from StreamK == 3 +
     # ClusterDim[0] > 1 + StreamKForceDPOnly, so drive it by setting those (every
     # streamKMulticast=True case below uses a ClusterDim with Cs > 1).
@@ -100,10 +100,12 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "NumWaves": numWaves,
         "UseSubtileImpl": useSubtile,
         "TDMInst": tdmInst,
-        "ProblemType": {"Sparse": sparse},
+        "ProblemType": {"Sparse": sparse, "MXBlockA": 32 if mx else 0,
+                        "MXBlockB": 32 if mx else 0},
         "PrefetchAcrossPersistent": pap,
         "StreamK": 3 if streamKMulticast else 0,
         "StreamKForceDPOnly": 1 if streamKMulticast else 0,
+        "TDMFuse": tdmFuse,
     }
 
 
@@ -113,16 +115,16 @@ class TestFind:
     # Mirrors the production call sites, which resolve the component via the
     # concrete ClusterLoadTDM.find(writer) (capability-gated selection).
     def test_find_returns_tdm_impl_on_gfx1250(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         comp = ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=3))
         assert isinstance(comp, ClusterLoadTDM)
 
     def test_find_returns_none_without_tdm(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=False, tdm_inst=0)) is None
 
     def test_find_returns_none_when_tdm_inst_not_3(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=0)) is None
 
 
@@ -344,6 +346,65 @@ class TestApplyToDescriptor:
             assert str(mod).strip() == ""
         else:
             assert expected in str(mod)
+
+
+_CLUSTERS = [(2, 4), (4, 2), (4, 4)]
+_TENSORS = ("A", "B", "MXSA", "MXSB")
+
+
+def _maskAxisOnWave(name, wave):
+    if name == "MulticastMask":
+        return "A" if wave % 2 == 0 else "B"
+    return name[-1]
+
+
+class TestMaskAxisPerGrouping:
+    """A/MXSA multicast along the maskA axis and B/MXSB along the maskB axis."""
+
+    @pytest.mark.parametrize("clusterDim", _CLUSTERS)
+    @pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
+    def test_every_wave_uses_its_tensors_axis(self, tdmFuse, clusterDim):
+        comp = _c()
+        from tensilelite.Components.TDMFuse import tdmWavePartition
+        k = _kernel(clusterDim=clusterDim, tdmFuse=tdmFuse, mx=True)
+        for tc in _TENSORS:
+            name = comp.maskSgprName(k, tc, waveSeparated=True)
+            _, waves = tdmWavePartition(k, tc)
+            assert waves, tc
+            for w in waves:
+                assert _maskAxisOnWave(name, w) == tc[-1], (tdmFuse, tc, w, name)
+
+    @pytest.mark.parametrize("clusterDim", _CLUSTERS)
+    @pytest.mark.parametrize("tdmFuse, combined", [(0, True), (1, False), (2, False), (3, False)])
+    def test_combined_only_for_mx_ab(self, tdmFuse, combined, clusterDim):
+        k = _kernel(clusterDim=clusterDim, tdmFuse=tdmFuse, mx=True)
+        assert _c().usesCombinedMask(k) is combined
+        w = _StubWriter()
+        _c().declareSgprs(w, k)
+        expected = ["MulticastMask"] if combined else ["MulticastMaskA", "MulticastMaskB"]
+        assert [n for n, _ in w.defined] == expected
+        w = _StubWriter()
+        _c().undeclareSgprs(w, k)
+        assert w.undefined == expected
+
+    @pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+    def test_split_masks_computed_and_attached(self, tdmFuse):
+        # ClusterDim=[2,4] -> maskA = 1|4|16|64 = 0x55, maskB = 0x3.
+        k = _kernel(clusterDim=(2, 4), tdmFuse=tdmFuse, mx=True)
+        src = str(_c().computeMasks(_StubWriter(), k, sgprWgX=61, sgprWgY=62,
+                                    sgprNWgX=63, sTmp=60))
+        assert "s_lshl_b32 s[sgprMulticastMaskA], 0x55, s61" in src
+        assert "s_lshl_b32 s[sgprMulticastMaskB], 0x3, s62" in src
+        assert "setMulticastMask_OddWave" not in src
+        for tc in ("MXSA", "MXSB"):
+            group1 = "tdm%sGroup1" % tc
+            mod = _c().applyToDescriptor(_StubWriter(), k, group1, tc, waveSeparated=True)
+            assert ("s_or_b32 s[sgpr%s], s[sgpr%s], s[sgprMulticastMask%s]"
+                    % (group1, group1, tc[-1])) in str(mod)
+
+    def test_declined_grouping_keeps_combined_mask(self):
+        # Without MX scales TDMFuse=1 falls back to the MX_AB row.
+        assert _c().usesCombinedMask(_kernel(clusterDim=(2, 4), tdmFuse=1, mx=False))
 
 
 if __name__ == "__main__":
