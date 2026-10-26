@@ -16,6 +16,11 @@
  * row-streaming kernel (KH^2 * KW), which is what keeps large filters cheap to
  * compile.
  *
+ * dgrad = true (stride 1): the same kernel computes a depthwise dgrad as the
+ * forward correlation of dY with the filter rotated by 180 degrees at padding
+ * KH-1-PAD / KW-1-PAD_W, reading dY and writing dX through the dgrad kernarg
+ * block.
+ *
  * Byte-identical to the Python source: every rocke_b_* call below is issued in
  * the order Python evaluates the matching expression (arguments left to
  * right, innermost first).
@@ -34,6 +39,7 @@
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
@@ -48,6 +54,8 @@ struct dwt_ctx
     rocke_ir_builder_t* b;
     const rocke_dconv_params_t* params;
     int is_bf16;
+    int dgrad;
+    int KH;
     int KW;
     int S;
     int BW;
@@ -74,9 +82,19 @@ rocke_value_t* dwt_load(const dwt_ctx* c, rocke_value_t* rsrc, rocke_value_t* of
 void dwt_load_w_row(const dwt_ctx* c, rocke_value_t* r, rocke_value_t** out)
 {
     rocke_ir_builder_t* b = c->b;
-    rocke_value_t* row_off
-        = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * 2)));
+    rocke_value_t* row_off;
     int s;
+    if(c->dgrad)
+    {
+        /* Rotated filter: row r is stored row KH-1-r, reversed. */
+        r = rocke_b_sub(b, rocke_b_const_i32(b, c->KH - 1), r);
+        row_off = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * 2)));
+        for(s = 0; s < c->KW; ++s)
+            out[s] = dwt_load(
+                c, c->b_rsrc, rocke_b_add(b, row_off, rocke_b_const_i32(b, 2 * (c->KW - 1 - s))));
+        return;
+    }
+    row_off = rocke_b_add(b, c->w_ch_off, rocke_b_mul(b, r, rocke_b_const_i32(b, c->KW * 2)));
     for(s = 0; s < c->KW; ++s)
         out[s] = dwt_load(c, c->b_rsrc, rocke_b_add(b, row_off, rocke_b_const_i32(b, 2 * s)));
 }
@@ -129,7 +147,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     char reason[ROCKE_ERR_MSG_CAP];
     rocke_dconv_params_t params;
     dwt_ctx c;
-    int BW, TH, WAVE, S, KH, KW, PAD, n_cols, n_acc, ph;
+    int BW, TH, WAVE, S, KH, KW, PAD, PAD_W, n_cols, n_acc, ph;
     rocke_value_t *c1, *c_wave, *zero_f32;
     rocke_value_t *tid, *wave_id, *lane, *bx, *by, *bz;
     rocke_value_t *n_h_tiles, *n, *h_tile, *q0, *h0, *ch, *ch_in_range;
@@ -164,12 +182,35 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
                        "max_workgroup_size",
                        rocke_direct_depthwise_tiled_threads_per_block(spec));
 
-    rocke_dconv_emit_params(b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+    if(spec->dgrad)
+    {
+        /* Read dY, write dX: the forward roles of the extents swap. The dgrad
+         * block already binds the dY strides to the A slot. */
+        rocke_value_t* t;
+        rocke_dconv_emit_params(
+            b, &params, "dgrad", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        t = params.p_Hi;
+        params.p_Hi = params.p_Ho;
+        params.p_Ho = t;
+        t = params.p_Wi;
+        params.p_Wi = params.p_Wo;
+        params.p_Wo = t;
+        PAD = KH - 1 - p->PAD;
+        PAD_W = KW - 1 - rocke_direct_conv_problem_pad_w(p);
+    }
+    else
+    {
+        rocke_dconv_emit_params(
+            b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+        PAD_W = PAD;
+    }
 
     memset(&c, 0, sizeof c);
     c.b = b;
     c.params = &params;
     c.is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
+    c.dgrad = spec->dgrad ? 1 : 0;
+    c.KH = KH;
     c.KW = KW;
     c.S = S;
     c.BW = BW;
@@ -219,7 +260,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     c.col_terms = (rocke_value_t**)alloca((size_t)n_cols * sizeof(rocke_value_t*));
     {
         rocke_value_t* q_s = rocke_b_mul(b, q0, rocke_b_const_i32(b, S));
-        rocke_value_t* wi_tile = rocke_b_add(b, q_s, rocke_b_const_i32(b, -PAD));
+        rocke_value_t* wi_tile = rocke_b_add(b, q_s, rocke_b_const_i32(b, -PAD_W));
         int col;
         for(col = 0; col < n_cols; ++col)
         {
@@ -370,11 +411,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
 
     /* Epilogue: one store per output of the tile. */
     {
-        rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(b, &params);
         int t, w_out;
-        if(!d_dyn)
-            return NULL;
-        d_desc = &d_dyn->base;
+        d_desc = NULL;
+        if(!spec->dgrad)
+        {
+            rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(b, &params);
+            if(!d_dyn)
+                return NULL;
+            d_desc = &d_dyn->base;
+        }
         for(t = 0; t < TH; ++t)
         {
             rocke_value_t* ho = rocke_b_add(b, h0, rocke_b_const_i32(b, t));
@@ -390,12 +435,25 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
                 const char* off_names[4] = {"n", "h", "w", "k"};
                 rocke_value_t* off_vals[4];
 
-                off_vals[0] = n;
-                off_vals[1] = ho;
-                off_vals[2] = wo;
-                off_vals[3] = ch;
-                rocke_transforms_descriptor_offset(
-                    b, d_desc, off_names, off_vals, 4, &d_off, &d_valid);
+                if(spec->dgrad)
+                {
+                    /* dX[n, ho, wo, ch] through the dgrad block's dX strides. */
+                    rocke_value_t* m_n = rocke_b_mul(b, n, params.p_D_stride_n);
+                    rocke_value_t* m_h = rocke_b_mul(b, ho, params.p_D_stride_ho);
+                    rocke_value_t* nh = rocke_b_add(b, m_n, m_h);
+                    rocke_value_t* m_w = rocke_b_mul(b, wo, params.p_D_stride_wo);
+                    rocke_value_t* wc = rocke_b_add(b, m_w, ch);
+                    d_off = rocke_b_add(b, nh, wc);
+                }
+                else
+                {
+                    off_vals[0] = n;
+                    off_vals[1] = ho;
+                    off_vals[2] = wo;
+                    off_vals[3] = ch;
+                    rocke_transforms_descriptor_offset(
+                        b, d_desc, off_names, off_vals, 4, &d_off, &d_valid);
+                }
                 safe_d = rocke_b_select(b, ok, rocke_b_mul(b, d_off, c.c_half), c.oob_sentinel);
                 if(c.is_bf16)
                     rocke_b_buffer_store_bf16(
