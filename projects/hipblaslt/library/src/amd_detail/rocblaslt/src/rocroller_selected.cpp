@@ -13,8 +13,12 @@ bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
     if(prob.bias != nullptr || prob.batch_count != 1)
         return false;
 
-    // Compare hipDataType directly. Converting through rocRoller's enum throws
-    // on a format that enum does not name, and this predicate must only decline.
+    // Asked in the types hipBLASLt already uses, not a generator's: this target
+    // builds without rocRoller's headers so that a checkout without
+    // shared/rocroller still compiles it. normalizeOperandType answers
+    // HIPBLASLT_DATATYPE_INVALID for a format no ranked kernel handles, which
+    // is the "unset" case and not a refusal. Comparing here also avoids
+    // hip2RocRollerType, which throws on a format it cannot name.
     const auto scaleType = normalizeOperandType(prob.scale_type);
     if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
         return false;
