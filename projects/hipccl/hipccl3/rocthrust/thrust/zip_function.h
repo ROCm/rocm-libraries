@@ -195,7 +195,7 @@ THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_functio
 THRUST_NAMESPACE_END
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-_THRUST_LIBCXX_BEGIN_NAMESPACE_CUDA
+_THRUST_LIBCXX_NAMESPACE_BEGIN
 #else
 namespace internal
 {
@@ -204,7 +204,7 @@ template <typename F>
 struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::zip_function<F>> : proclaims_copyable_arguments<F>
 {};
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-_THRUST_LIBCXX_END_NAMESPACE_CUDA
+_THRUST_LIBCXX_NAMESPACE_END
 #else
 } // namespace internal
 #endif
