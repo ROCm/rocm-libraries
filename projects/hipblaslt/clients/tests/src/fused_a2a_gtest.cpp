@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
 #include <chrono>
@@ -763,6 +764,37 @@ namespace
         EXPECT_EQ(
             memcmp(forcedResult.algo.data, fusedResult.algo.data, sizeof(fusedResult.algo.data)),
             0);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, GetAllAlgosOmitsTheFusedSolution)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t fusedResult = {};
+        int                              returned    = 0;
+        ASSERT_EQ(heuristic(&fusedResult, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+        const int fusedIndex = hipblaslt_ext::getIndexFromAlgo(fusedResult.algo);
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> all;
+        ASSERT_EQ(hipblaslt_ext::getAllAlgos(handle,
+                                             hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                             HIPBLAS_OP_T,
+                                             HIPBLAS_OP_N,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIP_R_16BF,
+                                             HIPBLAS_COMPUTE_32F,
+                                             all),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_FALSE(all.empty());
+        for(hipblasLtMatmulHeuristicResult_t& result : all)
+            EXPECT_NE(hipblaslt_ext::getIndexFromAlgo(result.algo), fusedIndex);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingExtent)

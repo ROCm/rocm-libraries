@@ -11,6 +11,7 @@
 #include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/KernelArguments.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 
 #include <memory>
 #include <stdexcept>
@@ -103,6 +104,30 @@ TEST(FusedA2AProblem, SegmentNeedsCuCount)
     EXPECT_THROW(
         appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 0),
         std::runtime_error);
+}
+
+TEST(FusedA2AProblem, GemmTypeOnlyMatchesTheFusedMode)
+{
+    auto fused = fusedProblem(3072, 512, 3072, 2, 2048);
+    auto plain = fused;
+    plain.setFusedA2A(FusedA2A::Disabled);
+
+    ContractionSolution solution;
+    solution.problemType.transA      = fused.transA();
+    solution.problemType.transB      = fused.transB();
+    solution.problemType.aType       = fused.a().dataType();
+    solution.problemType.bType       = fused.b().dataType();
+    solution.problemType.cType       = fused.c().dataType();
+    solution.problemType.dType       = fused.d().dataType();
+    solution.problemType.computeType = fused.computeType();
+
+    solution.problemType.fusedA2A = FusedA2A::GemmA2A;
+    EXPECT_TRUE(isGemmTypeSame(solution, fused));
+    EXPECT_FALSE(isGemmTypeSame(solution, plain));
+
+    solution.problemType.fusedA2A = FusedA2A::Disabled;
+    EXPECT_FALSE(isGemmTypeSame(solution, fused));
+    EXPECT_TRUE(isGemmTypeSame(solution, plain));
 }
 
 namespace
