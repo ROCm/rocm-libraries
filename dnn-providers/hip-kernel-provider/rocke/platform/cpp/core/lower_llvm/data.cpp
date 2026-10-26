@@ -300,7 +300,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
-    {"ds.read.tr16.b128", "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"},
     {"ds.load.tr16.b128.v8bf16",
      "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"},
     {"ds.load.tr16.b128.v8f16",

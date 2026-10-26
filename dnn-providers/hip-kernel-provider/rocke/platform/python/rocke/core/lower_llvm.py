@@ -45,6 +45,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     BF16,
     F32,
     F16,
@@ -768,16 +769,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "ds.read.tr16.b64": (
         "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"
     ),
-    # gfx950 ``ds_read_b128_tr_b16`` — wide transposed-LDS read returning
-    # ``<8 x i16>`` per lane (the K-packed MFMA B-operand layout for the
-    # 16x16x32 / 32x32x16 atoms; one LDS op vs two paired b64 reads).
-    "ds.read.tr16.b128": (
-        "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
-    ),
     # gfx1250 (gfx1250) wave32 transpose-LDS read: ``ds_load_tr16_b128`` returns
-    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). This is the
-    # gfx1250 counterpart of gfx950's ``ds_read_tr16_b128`` (different opcode +
-    # wave32 lane distribution).
+    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). gfx950 has
+    # no wide transpose read; LLVM has no ``ds.read.tr16.b128``.
     "ds.load.tr16.b128.v8bf16": (
         "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"
     ),
@@ -5273,12 +5267,10 @@ class _Lowerer:
         )
 
     def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        """``ds_read_b128_tr_b16`` -- gfx950 wide transpose-read.
+        """``ds_load_tr16_b128`` -- gfx1250 wide transpose-read.
 
-        Reads twice the bytes per lane vs the b64 sibling. The
-        intrinsic returns ``<8 x i16>`` (= 16 bytes per lane), which
-        we bitcast to ``<8 x half>`` / ``<8 x bfloat>`` to match the
-        IR result type.
+        The backend selects an element-typed intrinsic that returns
+        ``<8 x half>`` or ``<8 x bfloat>``. Other targets raise.
         """
         smem = op.operands[0]
         indices = list(op.operands[1:])
@@ -5294,24 +5286,9 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec(elem_name)
         self._need(need_key)
-        elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        want_ty = f"<8 x {elem_ty}>"
-        if ret_ty == want_ty:
-            # Element-type-specific intrinsic (gfx1250 selects ``.v8f16`` /
-            # ``.v8bf16`` to match the op): no reinterpret needed.
-            self._current().emit(
-                f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-        else:
-            # gfx950 returns a type-agnostic ``<8 x i16>``; reinterpret the raw
-            # 16-bit lanes as the requested half/bfloat element.
-            raw = self._fresh("trw.raw")
-            self._current().emit(
-                f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast {ret_ty} {raw} to {want_ty}"
-            )
+        self._current().emit(
+            f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+        )
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline-asm lowering (ADDITIVE).
@@ -6950,8 +6927,12 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering.
+        unrolled (straight-line) or normal (loop) lowering. Both refuse a
+        loop that carries a buffer descriptor.
         """
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 

@@ -312,6 +312,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
 
         rocke_value_t** S_n;
         rocke_value_t* m_new;
+        rocke_value_t* m_safe;
         rocke_value_t* l_local;
         rocke_value_t* alpha;
         rocke_value_t* new_l_val;
@@ -465,10 +466,16 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
 
         /* ---------------- online (m,l) update ----------------
          * Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-         * other 3 lanes. */
+         * other 3 lanes. m_new is the running max (m_val included), so
+         * alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+         * tile-local max would overflow alpha once a tile scores ~128 log2 units
+         * below an earlier one. Until the row has an unmasked key (or, in
+         * segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+         * instead, so P and alpha are 0, not NaN. A row with neither in the
+         * segment stores m = -inf, which the reduce kernel weights by 0. */
         {
             rocke_value_t* local_max = ctx->neg_inf;
-            rocke_value_t* full_max_raw;
+            rocke_value_t* tile_max;
             rocke_value_t* ok;
             rocke_value_t* sum_p = ctx->zero_f;
             for(reg = 0; reg < 4; reg++)
@@ -478,15 +485,16 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                     local_max = rocke_b_fmax(b, local_max, masked[n * 4 + reg]);
                 }
             }
-            full_max_raw = rocke__row_reduce(b, local_max, true);
-            ok = rocke_b_fcmp(b, "ogt", full_max_raw, ctx->neg_inf);
-            m_new = rocke_b_select(b, ok, full_max_raw, ctx->zero_f);
+            tile_max = rocke__row_reduce(b, local_max, true);
+            m_new = rocke_b_fmax(b, m_val, tile_max);
+            ok = rocke_b_fcmp(b, "ogt", m_new, ctx->neg_inf);
+            m_safe = rocke_b_select(b, ok, m_new, ctx->zero_f);
             for(reg = 0; reg < 4; reg++)
             {
                 for(n = 0; n < cfg->QK_N_TILES; n++)
                 {
                     rocke_value_t* p
-                        = rocke_b_exp2_fast(b, rocke_b_fsub(b, masked[n * 4 + reg], m_new));
+                        = rocke_b_exp2_fast(b, rocke_b_fsub(b, masked[n * 4 + reg], m_safe));
                     p_regs[n * 4 + reg] = p;
                     sum_p = rocke_b_fadd(b, sum_p, p);
                 }
@@ -494,7 +502,7 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
             l_local = rocke__row_reduce(b, sum_p, false);
         }
 
-        alpha = rocke_b_exp2_fast(b, rocke_b_fsub(b, m_val, m_new));
+        alpha = rocke_b_exp2_fast(b, rocke_b_fsub(b, m_val, m_safe));
         new_l_val = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), l_local);
 
         if(cfg->KV_FP8)

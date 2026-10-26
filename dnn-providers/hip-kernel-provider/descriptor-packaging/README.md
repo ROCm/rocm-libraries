@@ -70,8 +70,9 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires six roots: production, plus five over the four authored test sets
-(`shared` packs twice, once into each test binary's discovery root).
+The provider wires seven roots: production, plus six over the four authored test sets.
+`shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
+twice, once for each test binary, so each binary reads its own archive.
 
 | Root | Source | Ships |
 |---|---|---|
@@ -682,8 +683,9 @@ attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
   a combination is caught only if a UKD with it is listed in `UKDS`.
-- **The key is the UKD `name`, not its `id`.** Ids are `uuid4` values regenerated on every
-  ingestor run; names encode the specialization and are unique.
+- **The key is the UKD `name`, not its `id`.** Ids are random UUIDs, kept across
+  regenerations of an installed bundle but not derived from content; names encode the
+  specialization and are unique.
 - **Derive reads the root with the packer's own loader** (`load_flat_input`): it sees
   the descriptors the packer sees (hidden paths skipped) and refuses what the packer
   refuses. Which KDPs ship is the packer's `kdp_survives`, which UKDs ship its

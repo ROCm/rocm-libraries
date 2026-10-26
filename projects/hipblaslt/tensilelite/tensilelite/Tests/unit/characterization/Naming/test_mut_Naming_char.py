@@ -3,6 +3,7 @@
 
 """Mutation-focused assertions for the canonical solution naming helpers."""
 
+import re
 from copy import deepcopy
 
 import pytest
@@ -209,6 +210,40 @@ def test_tdmfuse_is_named_only_when_nonzero(make_state):
     assert "TDMF2" in names[2]
     assert "TDMF3" in names[3]
     assert len(set(names.values())) == 4
+
+
+def test_register_allocation_is_named_only_off_the_default(make_state):
+    names = {
+        value: N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+        for value in (0, 1, 2, 3)
+    }
+
+    assert "STRA" not in names[0]
+    assert "STRA1" in names[1]
+    assert "STRA2" in names[2]
+    assert "STRA3" in names[3]
+    assert len(set(names.values())) == 4
+
+
+def test_register_allocation_config_strings_are_named_by_their_mode(make_state):
+    def name(value):
+        return N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+
+    assert name("apply") == name(2) == name("2,classes=s") == name("apply,classes=vs")
+    assert re.search(r"_STRA2(_|$)", name("apply,classes=vs"))
+    assert "STRA" not in name("off,classes=vs")
+
+
+def test_register_allocation_configs_with_one_mode_share_a_name(make_state):
+    # The name carries the mode only. Spellings of one config, and different
+    # configs with that mode, name one kernel.
+    def name(value):
+        return N.getKernelNameMin(
+            make_state(StinkyTofuRegisterAllocation=value), splitGSU=False)
+
+    assert name("apply") == name(2) == name("apply,classes=s") == name("apply,classes=vs")
 
 
 def test_empty_custom_kernel_name_is_not_emitted_as_parameter(make_state):

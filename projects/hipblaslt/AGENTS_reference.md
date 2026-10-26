@@ -32,6 +32,6 @@ cd build/clients && ./hipblaslt-test --gtest_filter='*quick*'
 
 Runtime device-library lookup: `HIPBLASLT_TENSILE_LIBPATH` must point **directly** at the dir containing `TensileLibrary_lazy_<arch>.dat` and the code objects (e.g. `build/Tensile/library` or `/opt/rocm/lib/hipblaslt/library`). If unset, the loader resolves relative to the loaded shared library. Matmul tests will fail without a device library for the running GPU.
 
-To skip a test on a known-broken platform, add an entry under `clients/tests/data/known_bugs.yaml` (matched by `function`/`initialization`/`known_bug_platforms`).
+To exclude a test on a known-broken platform, add an entry under `clients/tests/data/known_bugs.yaml` (matched by `function`/`initialization`/`known_bug_platforms`). Matching cases are left out before registration, so they do not show up in `--gtest_list_tests` or as skipped. An entry with no `known_bug_platforms` excludes the case on every platform.
 
 `rtest.py` at the repo root is a build-driven test runner — not the usual entry point for local dev.

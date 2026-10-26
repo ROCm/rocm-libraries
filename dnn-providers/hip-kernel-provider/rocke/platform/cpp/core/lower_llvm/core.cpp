@@ -168,13 +168,12 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
  *
  * Written with designated initializers so a row reads as the set of Python
  * ISABackend overrides it stands for -- the defaults (legacy s_waitcnt, no
- * async counter, type-agnostic tr16) are what the Python base class supplies. */
+ * async counter, no wide tr16 read) are what the Python base class supplies. */
 #define LL_BACKEND_CDNA_DEFAULTS                                                              \
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_CDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx9_10, .kind = ROCKE_LL_ISA_CDNA,             \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
 /* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
@@ -184,8 +183,7 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_RDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx11, .kind = ROCKE_LL_ISA_RDNA,               \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
 static const rocke_isa_backend_t LL_BACKEND_GFX950
     = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS, .has_fp8_scale_conversion = true};
