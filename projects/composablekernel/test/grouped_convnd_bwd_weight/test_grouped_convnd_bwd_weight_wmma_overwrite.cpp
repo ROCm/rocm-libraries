@@ -1021,19 +1021,53 @@ void CheckTemporaryMetadataConsumer()
 
 // The ordinary vectorized catalog configuration, not a scalar split-one row.
 template <ck::index_t D, typename T>
-using VectorizedWrw = DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<
-    D, std::conditional_t<D == 2, NHWGC, NDHWGC>,
-    std::conditional_t<D == 2, GKYXC, GKZYXC>, std::conditional_t<D == 2, NHWGK, NDHWGK>,
-    T, T, T, float, PassThrough, PassThrough, PassThrough,
-    ConvolutionBackwardWeightSpecialization::Default, 64, 32, 32, 32, 8, 16, 16, 2, 1,
-    S<4, 8, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 2, 2, 0,
-    S<4, 16, 1>, S<2, 0, 1>, S<1, 0, 2>, 1, 2, 2, 0,
-    1, 1, S<1, 8, 1, 8>, 2, Intrawave, PipeV1>;
+using VectorizedWrw =
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<D,
+                                               std::conditional_t<D == 2, NHWGC, NDHWGC>,
+                                               std::conditional_t<D == 2, GKYXC, GKZYXC>,
+                                               std::conditional_t<D == 2, NHWGK, NDHWGK>,
+                                               T,
+                                               T,
+                                               T,
+                                               float,
+                                               PassThrough,
+                                               PassThrough,
+                                               PassThrough,
+                                               ConvolutionBackwardWeightSpecialization::Default,
+                                               64,
+                                               32,
+                                               32,
+                                               32,
+                                               8,
+                                               16,
+                                               16,
+                                               2,
+                                               1,
+                                               S<4, 8, 1>,
+                                               S<2, 0, 1>,
+                                               S<1, 0, 2>,
+                                               1,
+                                               2,
+                                               2,
+                                               0,
+                                               S<4, 16, 1>,
+                                               S<2, 0, 1>,
+                                               S<1, 0, 2>,
+                                               1,
+                                               2,
+                                               2,
+                                               0,
+                                               1,
+                                               1,
+                                               S<1, 8, 1, 8>,
+                                               2,
+                                               Intrawave,
+                                               PipeV1>;
 
 template <ck::index_t D, typename T>
 void CheckVectorizedOutputContract(const ck::utils::conv::ConvParam& param, ck::index_t split)
 {
-    using In = std::conditional_t<D == 2, NHWGC, NDHWGC>;
+    using In  = std::conditional_t<D == 2, NHWGC, NDHWGC>;
     using Wei = std::conditional_t<D == 2, GKYXC, GKZYXC>;
     using Out = std::conditional_t<D == 2, NHWGK, NDHWGK>;
     const auto in_desc =
@@ -1054,14 +1088,22 @@ void CheckVectorizedOutputContract(const ck::utils::conv::ConvParam& param, ck::
         std::size_t spatial = 0;
         for(ck::index_t d = 0; d < D; ++d)
             spatial += (d + 2) * index[3 + d];
-        tensor(index) = ck::type_convert<T>((index[0] % 3 == 0 ? -1.f : 1.f) *
-                                            (1.f + (2 * index[0] + index[1] + index[2] + spatial) % 3));
+        tensor(index) =
+            ck::type_convert<T>((index[0] % 3 == 0 ? -1.f : 1.f) *
+                                (1.f + (2 * index[0] + index[1] + index[2] + spatial) % 3));
     });
-    using Reference = ck::tensor_operation::host::ReferenceConvBwdWeight<
-        D, T, T, T, PassThrough, PassThrough, PassThrough>;
-    auto reference = Reference::MakeArgument(in, expected, out, param.conv_filter_strides_,
-                                             param.conv_filter_dilations_, param.input_left_pads_,
-                                             param.input_right_pads_, PassThrough{}, PassThrough{}, PassThrough{});
+    using Reference = ck::tensor_operation::host::
+        ReferenceConvBwdWeight<D, T, T, T, PassThrough, PassThrough, PassThrough>;
+    auto reference = Reference::MakeArgument(in,
+                                             expected,
+                                             out,
+                                             param.conv_filter_strides_,
+                                             param.conv_filter_dilations_,
+                                             param.input_left_pads_,
+                                             param.input_right_pads_,
+                                             PassThrough{},
+                                             PassThrough{},
+                                             PassThrough{});
     Reference::MakeInvoker().Run(reference);
     ck::DeviceMem in_device(sizeof(T) * in.mDesc.GetElementSpaceSize());
     ck::DeviceMem out_device(sizeof(T) * out.mDesc.GetElementSpaceSize());
@@ -1082,10 +1124,23 @@ void CheckVectorizedOutputContract(const ck::utils::conv::ConvParam& param, ck::
     copy(param.input_left_pads_, left);
     copy(param.input_right_pads_, right);
     VectorizedWrw<D, T> op;
-    auto argument = op.MakeArgumentPointer(
-        in_device.GetDeviceBuffer(), wei_device.GetDeviceBuffer(), out_device.GetDeviceBuffer(),
-        il, is, wl, ws, ol, os, strides, dilations, left, right,
-        PassThrough{}, PassThrough{}, PassThrough{}, split);
+    auto argument = op.MakeArgumentPointer(in_device.GetDeviceBuffer(),
+                                           wei_device.GetDeviceBuffer(),
+                                           out_device.GetDeviceBuffer(),
+                                           il,
+                                           is,
+                                           wl,
+                                           ws,
+                                           ol,
+                                           os,
+                                           strides,
+                                           dilations,
+                                           left,
+                                           right,
+                                           PassThrough{},
+                                           PassThrough{},
+                                           PassThrough{},
+                                           split);
     ASSERT_TRUE(op.IsSupportedArgument(argument.get()));
     EXPECT_EQ(ck::tensor_operation::device::IsOutputFullyDefined(op, argument.get()), split == 1);
     for(float poison : {113.f, -87.f})
@@ -1096,10 +1151,10 @@ void CheckVectorizedOutputContract(const ck::utils::conv::ConvParam& param, ck::
         wei_device.FromDevice(actual.mData.data());
         expected.ForEach([&](const auto& tensor, const auto& index) {
             const float want = ck::type_convert<float>(tensor(index));
-            const float got = ck::type_convert<float>(actual(index));
+            const float got  = ck::type_convert<float>(actual(index));
             EXPECT_TRUE(std::isfinite(got));
-            EXPECT_EQ(got, want) << "group=" << index[0] << " k=" << index[1]
-                                 << " c=" << index[2] << " split=" << split;
+            EXPECT_EQ(got, want) << "group=" << index[0] << " k=" << index[1] << " c=" << index[2]
+                                 << " split=" << split;
         });
     }
 }

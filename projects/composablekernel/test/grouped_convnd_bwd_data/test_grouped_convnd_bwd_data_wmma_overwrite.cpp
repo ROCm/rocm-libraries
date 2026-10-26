@@ -58,11 +58,11 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param, bool has_spatial_
 
     // Keep groups distinct (including opposite signs) and all products exactly representable.
     out.ForEach([&](auto& tensor, const auto& index) {
-        const auto g = index[0];
-        const auto n = index[1];
-        const auto k = index[2];
+        const auto g      = index[0];
+        const auto n      = index[1];
+        const auto k      = index[2];
         const float value = (g == 0 ? 0.25f : -0.25f * (g + 1)) * (1.f + (n + k) % 3);
-        tensor(index) = ck::type_convert<DataType>(value);
+        tensor(index)     = ck::type_convert<DataType>(value);
     });
     wei.ForEach([&](auto& tensor, const auto& index) {
         const auto g      = index[0];
@@ -120,108 +120,106 @@ void CheckDirtyOutput(const ck::utils::conv::ConvParam& param, bool has_spatial_
     bool executed = false;
     for(const auto& op : instances)
     {
-            auto arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
-                                               wei_device.GetDeviceBuffer(),
-                                               {},
-                                               in_device.GetDeviceBuffer(),
-                                               out_lengths,
-                                               out_strides,
-                                               wei_lengths,
-                                               wei_strides,
-                                               {},
-                                               {},
-                                               in_lengths,
-                                               in_strides,
-                                               filter_strides,
-                                               filter_dilations,
-                                               left_pads,
-                                               right_pads,
-                                               PassThrough{},
-                                               PassThrough{},
-                                               PassThrough{},
-                                               1);
-            if(!op->IsSupportedArgument(arg.get()))
-            {
-                continue;
-            }
+        auto arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
+                                           wei_device.GetDeviceBuffer(),
+                                           {},
+                                           in_device.GetDeviceBuffer(),
+                                           out_lengths,
+                                           out_strides,
+                                           wei_lengths,
+                                           wei_strides,
+                                           {},
+                                           {},
+                                           in_lengths,
+                                           in_strides,
+                                           filter_strides,
+                                           filter_dilations,
+                                           left_pads,
+                                           right_pads,
+                                           PassThrough{},
+                                           PassThrough{},
+                                           PassThrough{},
+                                           1);
+        if(!op->IsSupportedArgument(arg.get()))
+        {
+            continue;
+        }
 
-            if(!ck::tensor_operation::device::IsOutputFullyDefined(*op, arg.get()))
-                continue;
-            const std::string name = op->GetTypeString(); // Diagnostics only.
+        if(!ck::tensor_operation::device::IsOutputFullyDefined(*op, arg.get()))
+            continue;
+        const std::string name = op->GetTypeString(); // Diagnostics only.
 
-            // A non-packed group stride must never receive a capability promise,
-            // even if the implementation accepts this descriptor for invocation.
-            auto nonpacked_strides = in_strides;
-            ++nonpacked_strides[0];
-            auto nonpacked_arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
-                                                        wei_device.GetDeviceBuffer(),
-                                                        {},
-                                                        in_device.GetDeviceBuffer(),
-                                                        out_lengths,
-                                                        out_strides,
-                                                        wei_lengths,
-                                                        wei_strides,
-                                                        {},
-                                                        {},
-                                                        in_lengths,
-                                                        nonpacked_strides,
-                                                        filter_strides,
-                                                        filter_dilations,
-                                                        left_pads,
-                                                        right_pads,
-                                                        PassThrough{},
-                                                        PassThrough{},
-                                                        PassThrough{},
-                                                        1);
-            EXPECT_FALSE(ck::tensor_operation::device::IsOutputFullyDefined(*op, nonpacked_arg.get()));
+        // A non-packed group stride must never receive a capability promise,
+        // even if the implementation accepts this descriptor for invocation.
+        auto nonpacked_strides = in_strides;
+        ++nonpacked_strides[0];
+        auto nonpacked_arg = op->MakeArgumentPointer(out_device.GetDeviceBuffer(),
+                                                     wei_device.GetDeviceBuffer(),
+                                                     {},
+                                                     in_device.GetDeviceBuffer(),
+                                                     out_lengths,
+                                                     out_strides,
+                                                     wei_lengths,
+                                                     wei_strides,
+                                                     {},
+                                                     {},
+                                                     in_lengths,
+                                                     nonpacked_strides,
+                                                     filter_strides,
+                                                     filter_dilations,
+                                                     left_pads,
+                                                     right_pads,
+                                                     PassThrough{},
+                                                     PassThrough{},
+                                                     PassThrough{},
+                                                     1);
+        EXPECT_FALSE(ck::tensor_operation::device::IsOutputFullyDefined(*op, nonpacked_arg.get()));
 
-            ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));
-            op->SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());
-            auto invoker = op->MakeInvokerPointer();
-            for(int run = 0; run < 2; ++run)
-            {
-                // Re-poison the same allocation before each independent launch.
-                in_device.ToDevice(poisoned.mData.data());
-                invoker->Run(arg.get(), StreamConfig{nullptr, false});
-                in_device.FromDevice(actual.mData.data());
-                executed = true;
+        ck::DeviceMem workspace(op->GetWorkSpaceSize(arg.get()));
+        op->SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());
+        auto invoker = op->MakeInvokerPointer();
+        for(int run = 0; run < 2; ++run)
+        {
+            // Re-poison the same allocation before each independent launch.
+            in_device.ToDevice(poisoned.mData.data());
+            invoker->Run(arg.get(), StreamConfig{nullptr, false});
+            in_device.FromDevice(actual.mData.data());
+            executed = true;
 
-                std::size_t checked = 0;
-                std::size_t holes   = 0;
-                expected.ForEach([&](const auto& tensor, const auto& index) {
-                    const float want = ck::type_convert<float>(tensor(index));
-                    const float got  = ck::type_convert<float>(actual(index));
-                    ++checked;
-                    if(has_spatial_holes)
-                    {
-                        bool is_hole = false;
-                        for(ck::index_t d = 0; d < NDimSpatial; ++d)
-                        {
-                            is_hole |= index[3 + d] % 2 != 0;
-                        }
-                        if(is_hole)
-                        {
-                            ++holes;
-                            EXPECT_EQ(want, 0.f);
-                            EXPECT_EQ(got, 0.f) << name << " group=" << index[0];
-                        }
-                    }
-                    EXPECT_TRUE(std::isfinite(want));
-                    EXPECT_TRUE(std::isfinite(got)) << name << " group=" << index[0];
-                    EXPECT_NEAR(got, want, 0.5f)
-                        << name << " run=" << run << " group=" << index[0]
-                        << " batch=" << index[1] << " channel=" << index[2];
-                });
-                EXPECT_EQ(checked, expected.mDesc.GetElementSize());
+            std::size_t checked = 0;
+            std::size_t holes   = 0;
+            expected.ForEach([&](const auto& tensor, const auto& index) {
+                const float want = ck::type_convert<float>(tensor(index));
+                const float got  = ck::type_convert<float>(actual(index));
+                ++checked;
                 if(has_spatial_holes)
                 {
-                    EXPECT_GT(holes, 0u);
+                    bool is_hole = false;
+                    for(ck::index_t d = 0; d < NDimSpatial; ++d)
+                    {
+                        is_hole |= index[3 + d] % 2 != 0;
+                    }
+                    if(is_hole)
+                    {
+                        ++holes;
+                        EXPECT_EQ(want, 0.f);
+                        EXPECT_EQ(got, 0.f) << name << " group=" << index[0];
+                    }
                 }
+                EXPECT_TRUE(std::isfinite(want));
+                EXPECT_TRUE(std::isfinite(got)) << name << " group=" << index[0];
+                EXPECT_NEAR(got, want, 0.5f) << name << " run=" << run << " group=" << index[0]
+                                             << " batch=" << index[1] << " channel=" << index[2];
+            });
+            EXPECT_EQ(checked, expected.mDesc.GetElementSize());
+            if(has_spatial_holes)
+            {
+                EXPECT_GT(holes, 0u);
             }
+        }
     }
-    EXPECT_TRUE(executed) << "No supported output-qualified instance executed for "
-                          << NDimSpatial << "D"
-                          << (has_spatial_holes ? ", stride-2" : ", 1x1");
+    EXPECT_TRUE(executed) << "No supported output-qualified instance executed for " << NDimSpatial
+                          << "D" << (has_spatial_holes ? ", stride-2" : ", 1x1");
 }
 
 template <typename DataType>
@@ -231,8 +229,8 @@ void Run2d()
                                   false);
     // Group and channel tails require scalar loads/stores; every logical element
     // must still be written despite padded GEMM M/N tiles.
-    CheckDirtyOutput<2, DataType>(
-        {2, 4, 2, 5, 3, {1, 1}, {3, 5}, {1, 1}, {1, 1}, {0, 0}, {0, 0}}, false);
+    CheckDirtyOutput<2, DataType>({2, 4, 2, 5, 3, {1, 1}, {3, 5}, {1, 1}, {1, 1}, {0, 0}, {0, 0}},
+                                  false);
     CheckDirtyOutput<2, DataType>({2, 2, 2, 16, 16, {1, 1}, {4, 6}, {2, 2}, {1, 1}, {0, 0}, {0, 0}},
                                   true);
 }

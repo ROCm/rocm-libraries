@@ -131,8 +131,7 @@ bool CheckCKApplicability(const ProblemDescription& problem, bool use_tf32)
 template <typename DataType>
 std::vector<std::string> FillValidKernels(const ProblemDescription& problem, bool use_tf32)
 {
-    auto kernels =
-        FillValidKernelsCommon<DeviceOpGBwdPtrs, CKArgs, DataType>(problem, use_tf32);
+    auto kernels = FillValidKernelsCommon<DeviceOpGBwdPtrs, CKArgs, DataType>(problem, use_tf32);
     if constexpr(std::is_same_v<DataType, float>)
     {
         if(!use_tf32)
@@ -254,10 +253,9 @@ ck_impl_bwd_get_solution(const miopen::ExecutionContext* ctx,
         std::string kid(kernel_id);
         if(miopen::solver::conv::IsNativePointwiseBwdKernel(kid))
         {
-            auto solution = use_tf32
-                                ? ConvSolution{miopenStatusInvalidValue}
-                                : miopen::solver::conv::NativePointwiseBwdSolution(
-                                      *ctx, *problem, kid);
+            auto solution =
+                use_tf32 ? ConvSolution{miopenStatusInvalidValue}
+                         : miopen::solver::conv::NativePointwiseBwdSolution(*ctx, *problem, kid);
             *out_solution = new ConvSolution(std::move(solution));
             return;
         }
@@ -295,8 +293,9 @@ extern "C" ck_impl_status_t ck_impl_bwd_get_all_kernel_type_strings(CKKernelList
         auto result = std::make_unique<CKKernelListHandle>();
 
         auto ptrs = DeviceOpGBwdPtrs<float>::GetInstances();
-        std::vector<std::unique_ptr<
-            ck::tensor_operation::device::instance::DeviceNCHWPointwiseBwdData>> native;
+        std::vector<
+            std::unique_ptr<ck::tensor_operation::device::instance::DeviceNCHWPointwiseBwdData>>
+            native;
         native.reserve(2);
         ck::tensor_operation::device::instance::
             add_device_grouped_conv2d_bwd_data_nchw_pointwise_f32_instances(native);

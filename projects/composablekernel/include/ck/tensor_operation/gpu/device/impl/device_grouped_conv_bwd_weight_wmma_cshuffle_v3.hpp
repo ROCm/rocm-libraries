@@ -182,7 +182,8 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
                                         ComputeTypeA,
                                         ComputeTypeB>
 #ifndef CK_CODE_GEN_RTC
-    , public GroupedConvOutputDefinition
+    ,
+      public GroupedConvOutputDefinition
 #endif
 {
     static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
@@ -600,13 +601,11 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             // spatial stride and C stride 1. Only a dense, nonoverlapping weight tensor
             // gives each logical weight (and each group) a distinct Set destination.
             long_index_t packed_weight_stride = Conv_C_;
-            is_packed_weight_ = Conv_G_ > 0 && Conv_N_ > 0 && Conv_K_ > 0 && Conv_C_ > 0 &&
-                                e_g_k_c_xs_lengths[0] == Conv_G_ &&
-                                e_g_k_c_xs_lengths[2] == Conv_C_ &&
-                                a_g_n_k_wos_lengths[0] == Conv_G_ &&
-                                a_g_n_k_wos_lengths[1] == Conv_N_ &&
-                                a_g_n_k_wos_lengths[2] == Conv_K_ &&
-                                e_g_k_c_xs_strides_transposed[2] == 1;
+            is_packed_weight_ =
+                Conv_G_ > 0 && Conv_N_ > 0 && Conv_K_ > 0 && Conv_C_ > 0 &&
+                e_g_k_c_xs_lengths[0] == Conv_G_ && e_g_k_c_xs_lengths[2] == Conv_C_ &&
+                a_g_n_k_wos_lengths[0] == Conv_G_ && a_g_n_k_wos_lengths[1] == Conv_N_ &&
+                a_g_n_k_wos_lengths[2] == Conv_K_ && e_g_k_c_xs_strides_transposed[2] == 1;
             for(index_t i = NDimSpatial + 2; i >= 3; --i)
             {
                 if(e_g_k_c_xs_lengths[i] <= 0 || packed_weight_stride <= 0 ||

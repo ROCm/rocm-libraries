@@ -399,10 +399,10 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
         CK_IMPL_THROW_IF_NULL(kernel_id, CK_IMPL_STATUS_BAD_PARAM, "Null kernel_id");
         if(miopen::solver::conv::IsNativePointwiseFwdKernel(kernel_id))
         {
-            auto solution = use_tf32
-                                ? miopen::solver::ConvSolution{miopenStatusInvalidValue}
-                                : miopen::solver::conv::NativePointwiseFwdSolution(
-                                      *ctx, *problem, kernel_id);
+            auto solution =
+                use_tf32
+                    ? miopen::solver::ConvSolution{miopenStatusInvalidValue}
+                    : miopen::solver::conv::NativePointwiseFwdSolution(*ctx, *problem, kernel_id);
             *out_solution = new miopen::solver::ConvSolution(std::move(solution));
             return;
         }
@@ -439,8 +439,7 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                  DeviceOpGFwdPtrs<T, TCompute>,
                                                  CKArgs,
                                                  miopen::conv::DataInvokeParams,
-                                                 true>(
-                    *ctx, *problem, std::string(kernel_id));
+                                                 true>(*ctx, *problem, std::string(kernel_id));
             },
             [&](auto data_type_val, auto compute_type_val) {
                 using T        = decltype(data_type_val);
