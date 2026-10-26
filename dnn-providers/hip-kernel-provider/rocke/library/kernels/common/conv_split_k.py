@@ -77,6 +77,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _wg_N,
     wgrad_atomic_epilogue_available,
     wgrad_two_stage_available,
+    wgrad_wmma_split_k_available,
 )
 from kernels.common.conv_implicit_gemm_wgrad_two_stage import wgrad_workspace_nbytes
 
@@ -191,6 +192,13 @@ def _resolve_wgrad(
     layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None, wave_size)
     if gm > 1:
         atomic_why = "a merged tile reduces through the workspace only"
+    elif wave_size == 32 and not wgrad_wmma_split_k_available(arch):
+        # Same gate as is_valid_wgrad_spec: the WMMA epilogue needs the float
+        # global atomics the arch catalog marks as run on a device.
+        atomic_why = (
+            f"{arch} has no validated float global atomics "
+            "(has_global_float_atomic_add)"
+        )
     elif layout_ok and epilogue == "default" and _is_16bit(dtype) and wave_size != 32:
         atomic_why = "the default epilogue emits no packed 16-bit atomic"
     atomic_ok = atomic_why == "ok"
