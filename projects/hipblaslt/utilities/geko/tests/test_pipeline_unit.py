@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+import geko.optim.optim as optim_mod
 from geko import pipeline
 from geko.schemas import RunState
 
@@ -627,10 +628,10 @@ def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.
             rows.append({"m": 8, "n": 8, "batch_count": 1, "k": 8, "hipblaslt-Gflops": 1.0})
         return pd.DataFrame(rows)
 
-    monkeypatch.setattr(pipeline.library, "create", _create)
-    monkeypatch.setattr(pipeline.bench, "run", _bench)
+    monkeypatch.setattr(optim_mod.library, "create", _create)
+    monkeypatch.setattr(optim_mod.bench, "run", _bench)
 
-    pipeline.process_duplicates(str(tmp_path / "hip"), optim_dir, devices=[0])
+    optim_mod.process_duplicates(str(tmp_path / "hip"), optim_dir, devices=[0])
 
     built = {logic.parent.name for logic, _out in created}
     assert built == {"build_BBS_TN_0", "build_BBS_TN_1"}
