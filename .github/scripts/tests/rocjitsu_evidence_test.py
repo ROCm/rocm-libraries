@@ -1,12 +1,16 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -14,6 +18,8 @@ class EvidenceTest(unittest.TestCase):
     def test_xdist_retains_passing_subprocess_output_and_metadata_before_deletion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            ini = root / "pytest.ini"
+            ini.write_text("[pytest]\n")
             test = root / "test_example.py"
             test.write_text(
                 """
@@ -41,6 +47,8 @@ def test_skip():
                     "-m",
                     "pytest",
                     str(test),
+                    "-c",
+                    str(ini),
                     "-p",
                     "rocjitsu_evidence",
                     "-p",
@@ -76,6 +84,12 @@ def test_skip():
                     self.assertIn("unsupported mode", item["reports"]["call"]["detail"])
                     continue
                 passing.append(item)
+                self.assertEqual(item["pytest"]["rootpath"], str(root))
+                self.assertEqual(item["pytest"]["inipath"], str(ini))
+                self.assertEqual(
+                    item["pytest"]["ini_sha256"],
+                    hashlib.sha256(ini.read_bytes()).hexdigest(),
+                )
                 self.assertEqual([p["name"] for p in item["phases"]], ["build", "run"])
                 self.assertTrue(all(p["completed"] for p in item["phases"]))
                 self.assertTrue(all(p["wall_seconds"] > 0 for p in item["phases"]))
@@ -98,6 +112,69 @@ def test_skip():
                     len(json.loads(p.read_text())["selected"]) == 3 for p in collections
                 )
             )
+
+    def test_helper_output_survives_killed_pytest_without_a_call_report(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            test = root / "test_example.py"
+            test.write_text(
+                """
+import subprocess, sys
+def _call_helper_in_subprocess(module, func, config, output_dir, artifact_dir, tensile_args):
+    script = "import sys, time; print('partial client verdict', flush=True); print('partial stderr', file=sys.stderr, flush=True); time.sleep(60)"
+    subprocess.run([sys.executable, '-c', script], check=True)
+def test_interrupted(tmp_path):
+    _call_helper_in_subprocess('test_config_run', '_run', 'config', str(tmp_path), str(tmp_path), [])
+"""
+            )
+            scripts = Path(__file__).resolve().parents[1]
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    str(test),
+                    "-p",
+                    "rocjitsu_evidence",
+                    "--capture=fd",
+                    "--rocjitsu-evidence-dir",
+                    str(root / "evidence"),
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                ],
+                env=os.environ
+                | dict(
+                    PYTHONPATH=str(scripts),
+                    PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
+                    PYTHONDONTWRITEBYTECODE="1",
+                ),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + 10
+            try:
+                while time.monotonic() < deadline:
+                    logs = list((root / "evidence").glob("*/call-stderr.log"))
+                    if logs and "partial stderr" in logs[0].read_text():
+                        break
+                    self.assertIsNone(proc.poll(), "pytest exited before the helper")
+                    time.sleep(0.01)
+                else:
+                    self.fail("helper output was not retained while pytest ran")
+            finally:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+            directory = logs[0].parent
+            self.assertIn(
+                "partial client verdict", (directory / "call-stdout.log").read_text()
+            )
+            self.assertIn("partial stderr", (directory / "call-stderr.log").read_text())
+            metadata = json.loads((directory / "item.json").read_text())
+            self.assertNotIn("call", metadata["reports"])
+            self.assertFalse(metadata["phases"][0]["completed"])
 
     def test_rejects_capture_mode_that_drops_success_output(self):
         with tempfile.TemporaryDirectory() as temporary:

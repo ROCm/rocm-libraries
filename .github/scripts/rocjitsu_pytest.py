@@ -135,41 +135,29 @@ def describe_process(pid):
 
 def native_stacks(pid):
     command = ["gdb", "-p", str(pid), "-batch", "-nx", "-ex", "thread apply all bt"]
-    attempts = [command]
-    # Without CAP_SYS_PTRACE, Yama only lets ancestors attach; CI has sudo.
-    if os.geteuid() != 0 and shutil.which("sudo"):
-        attempts.append(["sudo", "-n", *command])
     if not shutil.which("gdb"):
         return "gdb not found"
-    outputs = []
-    for attempt in attempts:
-        try:
-            result = subprocess.run(
-                attempt, capture_output=True, text=True, timeout=120
-            )
-        except subprocess.TimeoutExpired:
-            outputs.append(f"{attempt[0]} timed out")
-            continue
-        outputs.append(result.stdout + result.stderr)
-        if "Thread " in result.stdout:
-            break
-    return "\n".join(outputs)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        return "gdb timed out"
+    return result.stdout + result.stderr
 
 
 def record_stall(nodeid, directory):
     """Save what a still-running test's processes are doing before its timeout."""
     directory.mkdir(parents=True, exist_ok=True)
     name = re.sub(r"[^\w.-]+", "_", nodeid)[-150:]
-    lines = [f"{nodeid} still running; worker pid {os.getpid()}"]
-    for pid in descendants(os.getpid()):
-        try:
-            lines += describe_process(pid)
-            # Shell wrappers are single-threaded; the emulating client is not.
-            if len(list(Path(f"/proc/{pid}/task").iterdir())) > 1:
-                lines.append(native_stacks(pid))
-        except OSError as error:
-            lines.append(f"pid {pid}: {error}")
-    (directory / f"{name}.txt").write_text("\n".join(lines) + "\n")
+    with (directory / f"{name}.txt").open("w", buffering=1) as output:
+        output.write(f"{nodeid} still running; worker pid {os.getpid()}\n")
+        for pid in descendants(os.getpid()):
+            try:
+                output.write("\n".join(describe_process(pid)) + "\n")
+                # Shell wrappers are single-threaded; the emulating client is not.
+                if len(list(Path(f"/proc/{pid}/task").iterdir())) > 1:
+                    output.write(native_stacks(pid) + "\n")
+            except OSError as error:
+                output.write(f"pid {pid}: {error}\n")
 
 
 @pytest.hookimpl(wrapper=True)

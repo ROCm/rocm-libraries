@@ -8,6 +8,7 @@ Metadata is copied before the test or queue deletes successful output. FD
 capture keeps passing helper output available even when pytest uses xdist.
 """
 
+import contextlib
 import functools
 import hashlib
 import inspect
@@ -36,6 +37,43 @@ def markers(item):
         dict(name=m.name, args=list(m.args), kwargs=m.kwargs)
         for m in item.iter_markers()
     ]
+
+
+def configuration_identity(config):
+    return dict(
+        version=pytest.__version__,
+        rootpath=str(config.rootpath),
+        inipath=str(config.inipath) if config.inipath else None,
+        ini_sha256=digest(config.inipath) if config.inipath else None,
+    )
+
+
+@contextlib.contextmanager
+def helper_output(directory):
+    """Write inherited helper output to evidence before pytest can be killed."""
+    with contextlib.ExitStack() as stack:
+        streams = []
+        for fd, name in ((1, "stdout"), (2, "stderr")):
+            saved = os.dup(fd)
+            stack.callback(os.close, saved)
+            path = directory / f"call-{name}.log"
+            output = stack.enter_context(path.open("ab", buffering=0))
+            offset = output.tell()
+            stack.callback(os.dup2, saved, fd)
+            os.dup2(output.fileno(), fd)
+            streams.append((fd, saved, path, offset))
+        try:
+            yield
+        finally:
+            for fd, saved, _, _ in streams:
+                os.dup2(saved, fd)
+            # Replay only this phase into pytest's FD capture for normal reports.
+            for _, saved, path, offset in streams:
+                with path.open("rb") as source, os.fdopen(
+                    os.dup(saved), "wb", buffering=0
+                ) as captured:
+                    source.seek(offset)
+                    shutil.copyfileobj(source, captured)
 
 
 def describe(item):
@@ -78,6 +116,7 @@ class Evidence:
             self.directory / f"collection-{worker}.json",
             dict(
                 schema=1,
+                pytest=configuration_identity(config),
                 keyword=config.getoption("keyword"),
                 markexpr=config.getoption("markexpr"),
                 collected=collected,
@@ -102,7 +141,13 @@ class Evidence:
                     source_sha256=job["source_sha256"],
                     job=job,
                 )
-            metadata.update(schema=1, phases=[], reports={}, worker=os.getpid())
+            metadata.update(
+                schema=1,
+                phases=[],
+                reports={},
+                worker=os.getpid(),
+                pytest=configuration_identity(item.config),
+            )
             self.items[item.nodeid] = directory, metadata
             write_json(directory / "item.json", metadata)
         return self.items[item.nodeid]
@@ -152,7 +197,8 @@ class Evidence:
             start = time.monotonic()
             before = resource.getrusage(resource.RUSAGE_CHILDREN)
             try:
-                result = original(*args, **kwargs)
+                with helper_output(directory):
+                    result = original(*args, **kwargs)
                 phase["completed"] = True
                 return result
             finally:

@@ -30,6 +30,7 @@ def commands(strategy, root, plan, env, workers, seconds, suite):
         "--capture=fd",
         "--client-lock-scope=worker",
         "--timeout=" + str(seconds),
+        "--rocjitsu-stall-dump-after=" + str(min(120, seconds / 2)),
         "--prebuilt-client=" + env["TENSILELITE_CLIENT"],
         "--global-parameters=LibraryFormat='msgpack'",
     ]

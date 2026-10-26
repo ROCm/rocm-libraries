@@ -177,8 +177,8 @@ jobs:
         if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential libdrm-dev
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential libdrm-dev
           build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
           cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
@@ -275,13 +275,6 @@ jobs:
           print("\n".join(sorted(f"{d.metadata['Name']}=={d.version}" for d in distributions())))
           PY
 
-      # Stall reports include native stacks when gdb is available.
-      - name: Install gdb
-        continue-on-error: true
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gdb
-
       - name: Resolve frozen calibration cohort
         if: ${{ inputs.case_filter == 'calibration16' }}
         run: |
@@ -301,6 +294,7 @@ jobs:
           mirage run --profile "${MIRAGE_PROFILE}" --in-process \
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
             python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
+              -c "${TENSILELITE_ROOT}/pytest.ini" \
               -p rocjitsu_shape_plan -p rocjitsu_evidence --capture=fd --collect-only -q -p no:cacheprovider \
               --rocjitsu-evidence-dir="${REPORT_DIR}/collection" \
               --rocjitsu-shape-plan="${REPORT_DIR}/shape-plan.json" \
