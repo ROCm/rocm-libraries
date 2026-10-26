@@ -70,11 +70,13 @@ from ..Common.ValidParameters import validParameters, \
                                             _expectedParamTypes, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
+                                            parseStinkyTofuRegisterAllocation, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
-from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
+  b_rotate_reason as segBRotateReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -400,7 +402,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 
 
 # _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
-# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# tensilelite/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
 # They are re-imported above and re-exported here for the existing test
 # module (tensilelite/Tests/unit/test_validateParameterTypes.py) that imports
@@ -754,7 +756,7 @@ class Solution(collections.abc.Mapping):
         assert self.isaInfoMap[isa].asmCaps["SupportedISA"]
         self._state['ISA'] = IsaVersion(isa[0], isa[1], isa[2])
       else:
-        # When calling from Tensile, the ISA is typically not defined.
+        # When calling from TensileLite, the ISA is typically not defined.
         printWarning(f"ISA not set on config using {targetIsas[0]}.")
         self._state['ISA'] = targetIsas[0]
 
@@ -767,6 +769,12 @@ class Solution(collections.abc.Mapping):
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
+    # StinkyTofuRegisterAllocation is a mode or a StinkyTofu config string. Keep its
+    # shortest spelling, so two spellings of one configuration compare equal and the
+    # logic files record one; a configuration that is only a mode stays an int.
+    if "StinkyTofuRegisterAllocation" in self._state:
+      self._state["StinkyTofuRegisterAllocation"] = parseStinkyTofuRegisterAllocation(
+          self._state["StinkyTofuRegisterAllocation"])[0]
     # User-facing StinkyTofuParameters -> internal _StinkyTofuParameters. The public key is
     # removed; the internal copy tags the kernel name when set and is dropped before the logic yaml.
     self._state.pop("StinkyTofuParameters", None)
@@ -1050,11 +1058,12 @@ class Solution(collections.abc.Mapping):
           or state["MacroTile1"] != state["MacroTile"][1]:
         reject(state, printRejectionReason, "MacroTile mismatch")
 
-    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950
+    # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950/gfx11
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
+      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11) \
+          and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
@@ -2954,12 +2963,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthA. VectorWidthA still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 1:
-          #   state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
-          # else:
-          state["VectorWidthA"] = 1
+        if state["ProblemType"]["Sparse"] == 1:
+          state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
       else:
         state["VectorWidthA"] = 1
 
@@ -2973,12 +2978,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthB. VectorWidthB still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 2:
-          #   state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
-          # else:
-          state["VectorWidthB"] = 1
+        if state["ProblemType"]["Sparse"] == 2:
+          state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
       else:
         state["VectorWidthB"] = 1
 
@@ -3020,6 +3021,8 @@ class Solution(collections.abc.Mapping):
     state["enableLDSTrMXSA"] = False
     state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytesB)
     state["enableLDSTrMXSB"] = False
+    state["enableLDSTrMetadata"] = state["ProblemType"]["Sparse"] and state["ProblemType"]["MetadataLayout"] \
+      and isLDSTrEnabled(isaInfoMap[isa].asmCaps, hasLDSTrans=True, unrollMajorLDS=False, dtv=False, numBytes=1)
 
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
@@ -3043,6 +3046,13 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
+    if state["enableLDSTrMetadata"]:
+      state["VectorWidthMetadata"] = 1
+      if state["ProblemType"]["Sparse"] == 1:
+        state["VectorWidthA"] = 1
+      elif state["ProblemType"]["Sparse"] == 2:
+        state["VectorWidthB"] = 1
+
     if state["_ScheduleIterAlg"] == 2:
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
@@ -3054,7 +3064,7 @@ class Solution(collections.abc.Mapping):
       if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
               or (state["PrefetchGlobalRead"] > 1 and \
                   (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
-              or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
+              or (state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]))):
         state["ExpandPointerSwap"] = False
 
     #################################################################
@@ -5570,16 +5580,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
         return False
 
-    state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
-    if state["enableLDSTrMetadata"]:
-      state["VectorWidthMetadata"] = 1
-
-      # the VetorWidth of the sparse matrix and metadta need to be the same.
-      if state["ProblemType"]["Sparse"] == 1:
-        state["VectorWidthA"] = 1
-      else:
-        state["VectorWidthB"] = 1
-
     wmmaV3 = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
     if wmmaV3:
       # Todo: f64 needs to verify bank conflict.
@@ -6456,7 +6456,10 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesReduction = state["MaxLDS"]
 
     # lds max occupancy
-    ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
+    # MaxOccupancy counts workgroups per CU (CDNA) / per WGP (RDNA), so the floor must divide
+    # the same pool getOccupancy does: gfx11 shares one 128 KB pool per WGP (2x DeviceLDS).
+    ldsPoolOccupancy = (2 if isa[0] == 11 else 1) * isaInfoMap[isa].archCaps["DeviceLDS"]
+    ldsSizeOccupancy = ldsPoolOccupancy // state["MaxOccupancy"]
     ldsNumBytesOccupancy = ldsSizeOccupancy
 
 
@@ -6899,6 +6902,12 @@ class Solution(collections.abc.Mapping):
         if state["LoopIters"] % (state["PrefetchLocalRead"]+1) != 0:
           reject(state, "dot2 kernel does not support LoopIters(%u) %% (PLR+1)(%u) != 0" % (state["LoopIters"], state["PrefetchLocalRead"]+1))
 
+    if (state["EnableMatrixInstruction"] and not state["ClusterLocalRead"] and state["PrefetchLocalRead"] == 2
+        and state["LoopIters"] >= 4 and state["ProblemType"]["MacDataTypeA"].numBytes() < 4
+        and state["ProblemType"]["MacDataTypeB"].numBytes() < 4):
+      reject(state, printRejectionReason, "PrefetchLocalRead=2 with ClusterLocalRead=0 and numByte<4 does not support LoopIters>=4")
+      return
+
     # reject iterations are not enough to use wider local read
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
@@ -7156,12 +7165,16 @@ class Solution(collections.abc.Mapping):
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
     else: # mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
-      # Restrict GRVW/VW combos so shift-ptr logic will work
-      if state["GlobalReadVectorWidthA"] > 1 \
+      # Restrict GRVW/VW combos so shift-ptr logic will work.
+      # gfx11 dot2 with K-contiguous operands reads along K and never shifts pointers.
+      gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
+      dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
+      dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
+      if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \
           and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
-      if state["GlobalReadVectorWidthB"] > 1 \
+      if state["GlobalReadVectorWidthB"] > 1 and not dotNoShiftB \
           and state["GlobalReadVectorWidthB"] != state["VectorWidthB"]:
           reject(state, printRejectionReason, "GlobalReadVectorWidthB %u must be == VectorWidthB %u or == 1" % \
                   (state["GlobalReadVectorWidthB"], state["VectorWidthB"]))
@@ -7376,6 +7389,12 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
+
+    if state["LDSSegmentBRotate"]:
+      _bRotReason = segBRotateReason(state, isPersistent(state))
+      if _bRotReason is not None:
+        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
+        return
 
   ########################################
   @ staticmethod
