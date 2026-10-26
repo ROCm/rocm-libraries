@@ -17,7 +17,7 @@ Tensile/Components/Subtile/SubtileLREmit.py.
 
 import pytest
 
-from Tensile.SolutionStructs.Validators.Subtile import (
+from tensilelite.SolutionStructs.Validators.Subtile import (
     _SUBTILE_DS_IMM_LIMIT,
     _subtileMaxLRDsOffset,
 )

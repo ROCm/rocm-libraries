@@ -3,8 +3,8 @@
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Validators.Subtile import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Validators.Subtile import (
     _SUBTILE_STACK_FULL_LINE,
     _SUBTILE_STACK_SIZES,
     _subtileStackForTile,
