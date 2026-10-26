@@ -326,7 +326,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
     for(const auto& ranked : *ranked_p)
     {
         const auto& kernel_str = std::get<0>(ranked);
-        const auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        const auto it          = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
         if(it == valid_kernels.end())
             continue;
 
