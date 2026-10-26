@@ -174,12 +174,23 @@ def test_generic_targets_are_catalogued_and_disjoint() -> None:
 
 
 def test_cpp_target_identity_matches_python() -> None:
-    """Compare the native CTest executable with Python when a build is supplied."""
+    """Compare the native CTest executable with Python when a build is supplied.
+
+    The C++ engine keeps its own copy of the generic target table, so every
+    generic processor and every member read from arch_specs.json is an input:
+    a member missing from, or misspelled in, the C++ copy resolves to a
+    different catalog row there and fails the comparison.
+    """
+    from rocke.core.arch.target import _load_generic_targets
+
     executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
     if not executable:
         pytest.skip("set ROCKE_ARCH_TARGET_TEST_EXE to the native target identity test")
+    generic_targets = _load_generic_targets()
     targets = [
         *known_arches(),
+        *generic_targets,
+        *(member for members in generic_targets.values() for member in members),
         "gfx1101",
         "gfx1170",
         "gfx1101_bad",

@@ -2,25 +2,29 @@
 // SPDX-License-Identifier: MIT
 //
 // Public wrapper for the MIOpen public/private library split: the extern "C"
-// stubs for the entry points that do more than pass a call through. Every other
-// entry point in <miopen/miopen.h> has a generated pass-through stub in
+// stubs for the entry points that do more than pass a call through, and for the
+// wrapper's own functions in <miopen/hipdnn_forwarding.h>. Every other entry
+// point in <miopen/miopen.h> has a generated pass-through stub in
 // wrapper_passthrough.cpp. This file is compiled into libMIOpen.so.
 //
-// Apart from miopenGetErrorString, each stub opens with a dispatch macro
-// (routing.hpp), which forwards the call to hipDNN when MIOPEN_HIPDNN_FORWARDING
-// and the compile-time forwarding set say so; otherwise the stub calls the
-// matching _impl symbol in the private library (libMIOpen_private.so), declared
-// in miopen_impl.h. The private library's definitions are renamed to _impl by
-// force-including miopen_private_rename.h, so these stubs are the only
-// definitions of the public miopenFoo names. This file is compiled without that
-// rename header, so it sees the public names from <miopen/miopen.h>.
+// Apart from miopenGetErrorString and the wrapper's own functions (which have
+// no _impl), each stub opens with a dispatch macro (routing.hpp), which forwards
+// the call to hipDNN when MIOPEN_HIPDNN_FORWARDING and the compile-time
+// forwarding set say so; otherwise the stub calls the matching _impl symbol in
+// the private library (libMIOpen_private.so), declared in miopen_impl.h. The
+// private library's definitions are renamed to _impl by force-including
+// miopen_private_rename.h, so these stubs are the only definitions of the public
+// miopenFoo names. This file is compiled without that rename header, so it sees
+// the public names from <miopen/miopen.h>.
 //
 // To give an entry point custom behaviour, move its stub from
 // wrapper_passthrough.cpp into this file, edit it, and rerun
 // script/generate_wrapper_sources.py, which skips every entry point defined
 // here. Forgetting to rerun it leaves two definitions of the stub and a
 // "duplicate symbol" (lld) or "multiple definition" (GNU ld) link error. A new
-// public entry point needs no edit here.
+// miopen.h entry point needs no edit here. A new wrapper-only function does: it
+// is declared in hipdnn_forwarding.h, listed in
+// test/public_abi/wrapper_only_symbols.txt, and its stub is written here.
 //
 // Pass the stub's own function token to MIOPEN_WRAPPER_DISPATCH, never a string
 // or a neighbouring stub's name. The wrong name trips an assertion in a debug
@@ -37,6 +41,9 @@
 #endif
 
 #include <miopen/miopen.h>
+// Without this header's MIOPEN_EXPORT declaration, hidden visibility would leave
+// miopenGetLastForwardedError unexported.
+#include <miopen/hipdnn_forwarding.h>
 
 #include "hipdnn_conv.hpp"
 #include "hipdnn_graph.hpp"
@@ -56,6 +63,16 @@ extern "C" const char* miopenGetErrorString(miopenStatus_t error)
     if(const char* const forwarded = ::miopen::wrapper::hipdnn::PrefixedErrorString(error, native))
         return forwarded;
     return native;
+}
+
+// No dispatch macro: its MIOpen route would clear the state read here.
+extern "C" miopenStatus_t miopenGetLastForwardedError(miopenStatus_t* forwardedStatus)
+{
+    if(forwardedStatus == nullptr)
+        return miopenStatusBadParm;
+    if(!::miopen::wrapper::hipdnn::LastForwardedFailure(forwardedStatus))
+        *forwardedStatus = miopenStatusSuccess;
+    return miopenStatusSuccess;
 }
 
 extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)

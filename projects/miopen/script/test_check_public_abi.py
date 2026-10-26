@@ -855,12 +855,16 @@ def test_a_private_library_with_no_renamed_symbols_is_an_error():
 # --------------------------------------------------------------------------
 
 
-def run_check_wrapper(tmp_path, monkeypatch, wrapper, private, extra=()):
+def run_check_wrapper(
+    tmp_path, monkeypatch, wrapper, private, extra=(), wrapper_only=()
+):
     """Run `check-wrapper` through main() against stand-ins for the two libraries."""
     baseline = tmp_path / "public_symbols.baseline"
     baseline.write_text("miopenFoo\nmiopenBar\nmiopenExcluded\n")
     excluded = tmp_path / "excluded_symbols.txt"
     excluded.write_text("miopenExcluded\n")
+    listed = tmp_path / "wrapper_only_symbols.txt"
+    listed.write_text("".join(sym + "\n" for sym in wrapper_only))
     libs = {"libMIOpen.so": wrapper, "libMIOpen_private.so": private}
     monkeypatch.setattr(abi, "open_elf", lambda path, what: libs[path])
     return abi.main(
@@ -871,6 +875,8 @@ def run_check_wrapper(tmp_path, monkeypatch, wrapper, private, extra=()):
             str(baseline),
             "--excluded",
             str(excluded),
+            "--wrapper-only",
+            str(listed),
             "--private-lib",
             "libMIOpen_private.so",
             *extra,
@@ -961,6 +967,91 @@ def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
     assert "not a flag-on private library" in capsys.readouterr().err
 
 
+# --------------------------------------------------------------------------
+# Wrapper-only functions
+#
+# The flag-on wrapper exports a few functions of its own, declared in a header
+# installed only with the flag on and absent from the flag-off baseline. They
+# have no _impl, so none of the files that mirror miopen.h lists them.
+# --------------------------------------------------------------------------
+
+ACCESSOR = "miopenGetLastForwardedError"
+
+
+def test_check_wrapper_passes_an_exported_wrapper_only_symbol(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    result = run_check_wrapper(
+        tmp_path, monkeypatch, wrapper, good_private(), wrapper_only=(ACCESSOR,)
+    )
+    assert result == 0
+    assert "wrapper public-abi symbol check: PASS" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_missing_wrapper_only_symbol(
+    tmp_path, monkeypatch, capsys
+):
+    result = run_check_wrapper(
+        tmp_path, monkeypatch, good_wrapper(), good_private(), wrapper_only=(ACCESSOR,)
+    )
+    assert result == 1
+    assert f"missing from build: {ACCESSOR}" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_wrapper_only_symbol_in_the_baseline(
+    tmp_path, monkeypatch, capsys
+):
+    """A symbol the flag-off build exports too is not wrapper-only.
+
+    Listing it leaves the expected set unchanged, so only this finding fails.
+    """
+    result = run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(),
+        good_private(),
+        wrapper_only=("miopenFoo",),
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "wrapper-only symbols file lists symbols that are in the baseline" in out
+    assert "  miopenFoo\n" in out
+
+
+def run_with_public_header(tmp_path, monkeypatch, header_text):
+    header = tmp_path / "miopen.h"
+    header.write_text(header_text)
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    return run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        wrapper,
+        good_private(),
+        extra=("--public-header", str(header)),
+        wrapper_only=(ACCESSOR,),
+    )
+
+
+def test_check_wrapper_fails_a_wrapper_only_symbol_declared_in_miopen_h(
+    tmp_path, monkeypatch, capsys
+):
+    header = f"MIOPEN_EXPORT miopenStatus_t {ACCESSOR}(miopenStatus_t* status);\n"
+    assert run_with_public_header(tmp_path, monkeypatch, header) == 1
+    out = capsys.readouterr().out
+    assert "wrapper-only symbols file lists entry points that ARE declared" in out
+    assert f"  {ACCESSOR}\n" in out
+
+
+def test_check_wrapper_ignores_a_wrapper_only_symbol_named_in_a_comment(
+    tmp_path, monkeypatch, capsys
+):
+    """miopen.h may point readers at the function without declaring it."""
+    header = f"/* Flag-on builds also offer {ACCESSOR}. */\n// See {ACCESSOR}.\n"
+    assert run_with_public_header(tmp_path, monkeypatch, header) == 0
+    assert "no wrapper-only symbol appears in miopen.h" in capsys.readouterr().out
+
+
 def test_check_installed_headers_exempts_the_private_directory_by_default(tmp_path):
     root = staged(
         tmp_path,
@@ -986,34 +1077,84 @@ def test_check_installed_headers_that_cannot_run_exits_2(tmp_path):
 # --------------------------------------------------------------------------
 # The check-headers command
 #
-# It checks two things: the hand-written stubs in wrapper.cpp, and the
-# provider's declarations of the range entry points against the library's
-# definitions.
+# It checks three things: the hand-written stubs in wrapper.cpp, the wrapper's
+# own functions (the hipdnn_forwarding.h header, the list of them, and their
+# stubs), and the provider's declarations of the range entry points against the
+# library's definitions.
 # --------------------------------------------------------------------------
 
+EMPTY_WRAPPER_HEADER = "#pragma once\n#include <miopen/miopen.h>\n"
+ACCESSOR_HEADER = f"""#pragma once
+#include <miopen/miopen.h>
+#ifdef MIOPEN_BETA_API
+MIOPEN_EXPORT miopenStatus_t {ACCESSOR}(miopenStatus_t* forwardedStatus);
+#endif
+"""
+NO_WRAPPER_ONLY_FUNCTIONS = "# nothing yet\n"
 
-def headers_inputs(tmp_path, wrapper=None, provider_decls=None):
-    """Write the three inputs and return the flags that point `check-headers` at them."""
-    wrapper_path = tmp_path / "wrapper.cpp"
-    wrapper_path.write_text(
-        wrapper
-        or wrapper_source(
-            stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
-        )
+
+def create_wrapper(*stubs: str) -> str:
+    return wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"), *stubs
     )
+
+
+def accessor_stub(
+    body: str = "    *forwardedStatus = miopenStatusSuccess;",
+    param: str = "miopenStatus_t* forwardedStatus",
+) -> str:
+    return f"""
+extern "C" miopenStatus_t {ACCESSOR}({param})
+{{
+{body}
+    return miopenStatusSuccess;
+}}
+"""
+
+
+def headers_inputs(
+    tmp_path,
+    wrapper=None,
+    provider_decls=None,
+    wrapper_header=EMPTY_WRAPPER_HEADER,
+    wrapper_only=NO_WRAPPER_ONLY_FUNCTIONS,
+):
+    """Write the inputs and return the flags that point `check-headers` at them.
+
+    ``False`` for `wrapper`, `provider_decls`, `wrapper_header` or `wrapper_only`
+    leaves that flag off, so the command has to find the file itself.
+    """
+    flags = []
+    if wrapper is not False:
+        wrapper_path = tmp_path / "wrapper.cpp"
+        wrapper_path.write_text(wrapper or create_wrapper())
+        flags += ["--wrapper", str(wrapper_path)]
     definitions = tmp_path / "convolution_api.cpp"
     definitions.write_text(DEFINITIONS_SOURCE)
-    flags = [
-        "--wrapper",
-        str(wrapper_path),
-        "--range-definitions",
-        str(definitions),
-    ]
+    flags += ["--range-definitions", str(definitions)]
     if provider_decls is not False:
         provider = tmp_path / "MiopenApi.hpp"
         provider.write_text(provider_decls or CONSUMER_SOURCE)
         flags += ["--provider-api", str(provider)]
+    if wrapper_header is not False:
+        header = tmp_path / "hipdnn_forwarding.h"
+        header.write_text(wrapper_header)
+        flags += ["--wrapper-header", str(header)]
+    if wrapper_only is not False:
+        listed = tmp_path / "wrapper_only_symbols.txt"
+        listed.write_text(wrapper_only)
+        flags += ["--wrapper-only", str(listed)]
     return flags
+
+
+def with_accessor(**overrides):
+    """The inputs for one consistent wrapper-only function, `overrides` on top."""
+    return {
+        "wrapper_header": ACCESSOR_HEADER,
+        "wrapper_only": f"{ACCESSOR}\n",
+        "wrapper": create_wrapper(accessor_stub()),
+        **overrides,
+    }
 
 
 def run_check_headers(tmp_path, flags, *extra):
@@ -1089,3 +1230,143 @@ def test_check_headers_skips_an_absent_provider_unless_it_is_required(
     out = capsys.readouterr().out
     assert "FAIL:" in out
     assert "--require-provider was passed" in out
+
+
+def test_check_headers_skips_a_checkout_without_wrapper_cpp(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, wrapper=False)) == 0
+    out = capsys.readouterr().out
+    assert "SKIP" in out
+    assert "src/private/wrapper.cpp: not tracked at HEAD" in out
+
+
+# --------------------------------------------------------------------------
+# check-headers on the wrapper's own functions
+# --------------------------------------------------------------------------
+
+
+def test_check_headers_passes_a_consistent_wrapper_only_function(tmp_path, capsys):
+    """Its stub must be held to its own rules, not to the forwarding stubs'."""
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **with_accessor())) == 0
+    out = capsys.readouterr().out
+    assert "all 1 wrapper-only functions have a stub in wrapper.cpp" in out
+    assert "all 2 wrapper stubs forward to their own _impl symbol" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_check_headers_fails_when_the_header_and_list_disagree(tmp_path, capsys):
+    inputs = with_accessor(wrapper_only="")
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert f"- declared in hipdnn_forwarding.h, not listed: {ACCESSOR}" in out
+    assert "A function only the flag-on wrapper exports is declared in" in out
+
+
+def test_check_headers_fails_a_missing_wrapper_only_stub(tmp_path, capsys):
+    inputs = with_accessor(wrapper=create_wrapper())
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    assert f"{ACCESSOR} has no stub in wrapper.cpp" in capsys.readouterr().out
+
+
+def test_check_headers_fails_a_drifted_wrapper_only_prototype(tmp_path, capsys):
+    drifted = create_wrapper(accessor_stub(param="int* forwardedStatus"))
+    inputs = with_accessor(wrapper=drifted)
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert "wrapper.cpp prototypes have drifted from hipdnn_forwarding.h" in out
+    assert "int*" in out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_with_a_dispatch_macro(
+    tmp_path, capsys
+):
+    body = (
+        f"    MIOPEN_WRAPPER_DISPATCH({ACCESSOR});\n"
+        "    *forwardedStatus = miopenStatusSuccess;"
+    )
+    inputs = with_accessor(wrapper=create_wrapper(accessor_stub(body=body)))
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    assert f"{ACCESSOR} carries a dispatch macro" in capsys.readouterr().out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_calling_an_impl(tmp_path, capsys):
+    body = f"    return {ACCESSOR}_impl(forwardedStatus);"
+    inputs = with_accessor(wrapper=create_wrapper(accessor_stub(body=body)))
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    assert f"{ACCESSOR} calls {ACCESSOR}_impl" in capsys.readouterr().out
+
+
+def test_check_headers_treats_an_untracked_wrapper_header_and_list_as_empty(
+    tmp_path, monkeypatch, capsys
+):
+    """Removing the optional files must not turn the gate off."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    flags = headers_inputs(tmp_path, wrapper_header=False, wrapper_only=False)
+    assert run_check_headers(tmp_path, flags) == 0
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "include_wrapper/miopen/hipdnn_forwarding.h is not part of this tree" in out
+    assert "test/public_abi/wrapper_only_symbols.txt is not part of this tree" in out
+    assert "wrapper_only_symbols.txt lists exactly the 0 hipdnn_forwarding.h" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_check_headers_keeps_checking_without_the_wrapper_header_and_list(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    flags = headers_inputs(
+        tmp_path,
+        wrapper=wrapper_source(stub("miopenCreate", "")),
+        wrapper_header=False,
+        wrapper_only=False,
+    )
+    assert run_check_headers(tmp_path, flags) == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "miopenCreate has no MIOPEN_WRAPPER_DISPATCH" in out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    """With no header nothing declares the stub, so it is judged as a forwarding
+    stub, and fails for having no dispatch macro."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    inputs = with_accessor(wrapper_header=False, wrapper_only=False)
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert f"{ACCESSOR} has no MIOPEN_WRAPPER_DISPATCH" in out
+
+
+def test_check_headers_fails_a_listed_symbol_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    inputs = with_accessor(wrapper_header=False)
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert f"+ listed, not declared in hipdnn_forwarding.h: {ACCESSOR}" in out
+
+
+def test_check_headers_fails_a_declared_symbol_when_the_list_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    inputs = with_accessor(wrapper_only=False)
+    assert run_check_headers(tmp_path, headers_inputs(tmp_path, **inputs)) == 1
+    out = capsys.readouterr().out
+    assert f"- declared in hipdnn_forwarding.h, not listed: {ACCESSOR}" in out
+
+
+def test_check_headers_still_fails_a_tracked_but_unreadable_wrapper_header(
+    tmp_path, monkeypatch, capsys
+):
+    """Only an untracked file counts as empty; a broken checkout stays an error."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=True))
+    flags = headers_inputs(tmp_path, wrapper_header=False)
+    assert run_check_headers(tmp_path, flags) == 2
+    assert "hipdnn_forwarding.h" in capsys.readouterr().err

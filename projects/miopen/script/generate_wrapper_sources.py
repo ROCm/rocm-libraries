@@ -29,6 +29,12 @@ To give an entry point custom behaviour, move its stub from
 wrapper_passthrough.cpp into wrapper.cpp, edit it, and rerun this script; it
 skips every entry point wrapper.cpp already defines.
 
+wrapper.cpp also holds the stubs of the wrapper's own functions, declared in
+include_wrapper/miopen/hipdnn_forwarding.h instead of miopen.h. Only a flag-on
+build exports them and they have no _impl, so nothing is generated for them.
+This script reads that header only to accept those stubs, and refuses a name
+that both headers declare.
+
 The output is formatted with clang-format, so the committed text depends on its
 version. The version is pinned in .pre-commit-config.yaml and any other is
 refused: different versions wrap lines differently, so the gate could pass on
@@ -61,8 +67,8 @@ from check_public_abi import (
     squash,
 )
 
-# The value each macro has while miopen.h is read, as the library's build sees
-# it. Conditionals are evaluated against this table rather than flattened, so an
+# The value each macro has while miopen.h and hipdnn_forwarding.h are read, as
+# the library's build sees it. Conditionals are evaluated against this table rather than flattened, so an
 # #else branch cannot contribute declarations. MIOPEN_BETA_API is defined for the
 # whole build in CMakeLists.txt. The include guard reads as undefined because
 # this is the first time the header is seen. __cplusplus and __clang__ only
@@ -77,6 +83,7 @@ KNOWN_MACROS = {
 STATUS_TYPE = "miopenStatus_t"
 
 PUBLIC_HEADER_RELPATH = "include/miopen/miopen.h"
+WRAPPER_ONLY_HEADER_RELPATH = "include_wrapper/miopen/hipdnn_forwarding.h"
 WRAPPER_RELPATH = "src/private/wrapper.cpp"
 RENAME_RELPATH = "src/private/miopen_private_rename.h"
 IMPL_RELPATH = "src/private/miopen_impl.h"
@@ -377,7 +384,9 @@ def parse_param(text: str, function: str, where: str) -> Param:
     )
 
 
-def parse_public_header(source: str, what: str = "miopen.h") -> list[EntryPoint]:
+def parse_public_header(
+    source: str, what: str = "miopen.h", allow_empty: bool = False
+) -> list[EntryPoint]:
     """Collect every MIOPEN_EXPORT declaration, in declaration order."""
     text = active_text(source, what)
     entries: dict[str, EntryPoint] = {}
@@ -420,13 +429,39 @@ def parse_public_header(source: str, what: str = "miopen.h") -> list[EntryPoint]
         entries[name] = EntryPoint(
             name=name, ret=squash(parsed.group("ret")), params=tuple(params), line=line
         )
-    if not entries:
+    if not entries and not allow_empty:
         raise AbiError(f"no MIOPEN_EXPORT declarations found in {what}")
     return list(entries.values())
 
 
-def hand_written_stubs(wrapper_source: str, entries: list[EntryPoint]) -> set[str]:
-    """The entry points wrapper.cpp defines itself, which are not generated."""
+def wrapper_only_names(source: str | None, entries: list[EntryPoint]) -> set[str]:
+    """The functions hipdnn_forwarding.h declares; None means there is no header."""
+    if source is None:
+        return set()
+    names = {
+        e.name
+        for e in parse_public_header(source, "hipdnn_forwarding.h", allow_empty=True)
+    }
+    both = sorted(names & {e.name for e in entries})
+    if both:
+        raise AbiError(
+            "declared in both miopen.h and hipdnn_forwarding.h: "
+            + ", ".join(both)
+            + ". A function both builds export belongs in miopen.h alone"
+        )
+    return names
+
+
+def hand_written_stubs(
+    wrapper_source: str,
+    entries: list[EntryPoint],
+    wrapper_only: frozenset[str] | set[str] = frozenset(),
+) -> set[str]:
+    """The entry points wrapper.cpp defines itself, which are not generated.
+
+    ``wrapper_only`` names the functions declared in hipdnn_forwarding.h, whose
+    stubs are hand-written by definition.
+    """
     protos, _forwards, _dispatches = parse_wrapper(wrapper_source)
     # parse_wrapper cannot see a body that contains a nested block. Leaving such
     # a stub out would generate a second definition of it, so count the
@@ -439,12 +474,12 @@ def hand_written_stubs(wrapper_source: str, entries: list[EntryPoint]) -> set[st
             " could be read. A stub body with a nested { } block is not supported;"
             " move that logic into a helper function"
         )
-    declared = {entry.name for entry in entries}
+    declared = {entry.name for entry in entries} | set(wrapper_only)
     unknown = sorted(set(protos) - declared)
     if unknown:
         raise AbiError(
-            "wrapper.cpp defines entry points that miopen.h does not declare: "
-            + ", ".join(unknown)
+            "wrapper.cpp defines entry points that neither miopen.h nor"
+            " hipdnn_forwarding.h declares: " + ", ".join(unknown)
         )
     return set(protos)
 
@@ -684,14 +719,15 @@ def run(args: argparse.Namespace) -> int:
     outputs = outputs_for(miopen_rel)
     reasons: dict[str, str] = {}
 
-    def read(rel: str, may_be_new: bool = False) -> str | None:
-        """Read one file. ``may_be_new`` is for an output the first run creates."""
+    def read(rel: str, may_be_new: bool = False, optional: bool = False) -> str | None:
+        """Read one file. ``may_be_new`` is for an output the first run creates,
+        ``optional`` for an input whose absence is meaningful."""
         path = repo_root / rel
         if args.check:
             return read_tracked_source(path, repo_root, reasons)
         if path.is_file():
             return path.read_text(encoding="utf-8")
-        if may_be_new and path.parent.is_dir():
+        if optional or (may_be_new and path.parent.is_dir()):
             return None
         raise AbiError(
             f"{rel} is not on disk. Writing regenerates every file, so the whole"
@@ -716,7 +752,10 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     entries = parse_public_header(public_source)
-    hand_written = hand_written_stubs(wrapper_source, entries)
+    wrapper_only = wrapper_only_names(
+        read(f"{miopen_rel}/{WRAPPER_ONLY_HEADER_RELPATH}", optional=True), entries
+    )
+    hand_written = hand_written_stubs(wrapper_source, entries, wrapper_only)
     check_dispatchable(entries, hand_written)
     texts = build_texts(entries, hand_written)
 

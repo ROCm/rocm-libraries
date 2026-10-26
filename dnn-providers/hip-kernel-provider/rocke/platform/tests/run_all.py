@@ -130,7 +130,9 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 
 # Native C++ test binaries that a pytest file drives through an env var. With a
 # configured build each one is resolved from CTest, so its pytest cases run
-# instead of skipping: (env var, CTest name, label).
+# instead of skipping: (env var, CTest name, label). The installed rocke_pytest
+# CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
+# binaries; add a new pair in both places.
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
@@ -143,6 +145,16 @@ NATIVE_PARITY_TESTS = (
         "ROCKE_UNSIGNED_INT_OPS_CLI",
         "rocke_unsigned_int_ops",
         "native unsigned integer op C API parity",
+    ),
+    (
+        "ROCKE_ARCH_TARGET_TEST_EXE",
+        "rocke_arch_target_identity",
+        "native target identity parity",
+    ),
+    (
+        "ROCKE_BUFFER_RSRC_HIP_TEST",
+        "rocke_buffer_rsrc_hip",
+        "native buffer descriptor HIP parity",
     ),
 )
 

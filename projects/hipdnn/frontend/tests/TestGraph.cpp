@@ -13,6 +13,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #endif
@@ -225,6 +226,18 @@ public:
             flags.push_back(s.supportsExhaustive);
         }
         return flags;
+    }
+
+    /// Get the workspace estimate stored on each plan spec (for assertions).
+    std::vector<int64_t> getPlanSpecWorkspaceSizes() const
+    {
+        std::vector<int64_t> sizes;
+        sizes.reserve(_planSpecs.size());
+        for(const auto& s : _planSpecs)
+        {
+            sizes.push_back(s.workspaceSize);
+        }
+        return sizes;
     }
 
     /// Get the knob IDs stored on each plan spec (for assertions).
@@ -4687,8 +4700,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
     // Mock engine descriptor creation
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
-        .Times(2)
-        .WillRepeatedly(
+        .WillOnce(
             [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
                 *descriptor = engineDesc;
                 return HIPDNN_STATUS_SUCCESS;
@@ -4698,19 +4710,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
         *_mockBackend,
         backendSetAttribute(
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     const int64_t engineId = 42;
     EXPECT_CALL(
         *_mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
-        .Times(2)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Mock getting knob count - return 0 (no knobs available)
     EXPECT_CALL(*_mockBackend,
@@ -4935,12 +4943,12 @@ static void
 }
 
 // Helper to build a graph and mock engine descriptor creation for knob queries.
+// Expects exactly one engine descriptor create, attribute set and finalize.
 // Returns the fake engine descriptor pointer.
 static hipdnnBackendDescriptor_t
     buildGraphAndMockEngine(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
                             Graph& graph,
-                            hipdnnHandle_t handle,
-                            int engineDescTimes = 1)
+                            hipdnnHandle_t handle)
 {
     createBasicBatchnormGraph(graph);
     EXPECT_TRUE(graph.validate().is_good());
@@ -4955,8 +4963,7 @@ static hipdnnBackendDescriptor_t
 
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE001);
     EXPECT_CALL(*mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(
+        .WillOnce(
             [engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
                 *descriptor = engineDesc;
                 return HIPDNN_STATUS_SUCCESS;
@@ -4966,18 +4973,14 @@ static hipdnnBackendDescriptor_t
         *mockBackend,
         backendSetAttribute(
             engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     EXPECT_CALL(
         *mockBackend,
         backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(*mockBackend, backendFinalize(engineDesc))
-        .Times(engineDescTimes)
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     return engineDesc;
 }
@@ -5407,9 +5410,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
@@ -5497,7 +5498,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB002);
@@ -5581,7 +5582,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one deprecated int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB003);
@@ -5664,9 +5665,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock one int knob available on the engine
     auto knobInfoDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB010);
@@ -5754,9 +5753,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    // Engine descriptor is created twice in create_execution_plan_ext:
-    // once in get_knob_lookup_for_engine, once in initializeEngineConfig
-    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle, 2);
+    auto engineDesc = buildGraphAndMockEngine(_mockBackend, graph, _handle);
 
     // Mock two int knobs available on the engine
     auto knobInfoDesc1 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB020);
@@ -8063,7 +8060,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtProducesVectorOfSizeOne)
 
     const int64_t engineId = 42;
 
-    // Mock: get_knob_lookup_for_engine - return empty knobs
+    // Mock: engine descriptor whose knob query returns no knobs
     auto engineDesc2 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xAA01);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
         .WillRepeatedly(
@@ -8575,9 +8572,21 @@ TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
     GraphTestUtils graph;
     graph.injectValidCompiledPlan(1, 0, false);
 
-    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
-        .Times(1)
-        .WillOnce(Return(HIPDNN_STATUS_EXECUTION_FAILED));
+    bool executeFailed = false;
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(1).WillOnce([&](auto, auto, auto) {
+        executeFailed = true;
+        return HIPDNN_STATUS_EXECUTION_FAILED;
+    });
+
+    // The failure path must reset the profiling context after the failed step: the reset
+    // releases the gate and drains the stream before another measurement can run.
+    int resetsAfterFailure = 0;
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_PROFILING_RESET_EXT, _, _, _))
+        .WillRepeatedly([&](auto, auto, auto, auto, auto) {
+            resetsAfterFailure += executeFailed ? 1 : 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
@@ -8586,6 +8595,7 @@ TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
     EXPECT_FALSE(timing.elapsedMs.has_value());
+    EXPECT_EQ(resetsAfterFailure, 1);
 }
 
 TEST_F(TestGraph, TimedExecuteRejectsNoActivePlanAndResetsTiming)
@@ -9329,6 +9339,163 @@ TEST_F(TestGraph, AddEnginePropagatesSupportsExhaustiveFalseWithoutBenchmarkingK
     const auto flags = graph.getPlanSpecSupportsExhaustive();
     ASSERT_EQ(flags.size(), 1u);
     EXPECT_FALSE(flags[0]);
+}
+
+namespace
+{
+
+// Mocks the engine-config workspace query. The reported size depends on whether knob settings
+// were applied (HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES) to the engine config being queried, which is
+// how the benchmarking estimate differs from the default one. Optionally fails the finalize of an
+// engine config that carries knob settings.
+struct EngineConfigWorkspaceMock
+{
+    std::set<hipdnnBackendDescriptor_t> withKnobs;
+    std::uintptr_t nextHandle = 0x7000;
+    int knobQueries = 0;
+};
+
+std::shared_ptr<EngineConfigWorkspaceMock> mockEngineConfigWorkspace(
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+    int64_t defaultWorkspace,
+    int64_t knobWorkspace,
+    bool failFinalizeWithKnobs = false)
+{
+    auto state = std::make_shared<EngineConfigWorkspaceMock>();
+
+    EXPECT_CALL(*mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([state](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(state->nextHandle++);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, _, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([state](hipdnnBackendDescriptor_t desc,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                const void*) {
+            state->withKnobs.insert(desc);
+            ++state->knobQueries;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([=](hipdnnBackendDescriptor_t desc,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t,
+                            int64_t*,
+                            void* out) {
+            *static_cast<int64_t*>(out)
+                = state->withKnobs.count(desc) != 0 ? knobWorkspace : defaultWorkspace;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    if(failFinalizeWithKnobs)
+    {
+        EXPECT_CALL(*mockBackend, backendFinalize(_))
+            .Times(AnyNumber())
+            .WillRepeatedly([state](hipdnnBackendDescriptor_t desc) {
+                return state->withKnobs.count(desc) != 0 ? HIPDNN_STATUS_BAD_PARAM
+                                                         : HIPDNN_STATUS_SUCCESS;
+            });
+    }
+    return state;
+}
+
+// Exposes the benchmarking knob on the mocked engine so add_engine() treats it as exhaustive-capable.
+void exposeBenchmarkingKnob(std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+                            hipdnnBackendDescriptor_t engineDesc)
+{
+    auto knobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
+    mockKnobInfoQueryRepeated(mockBackend, engineDesc, {knobDesc});
+    setupKnobDescriptorMockRepeated(mockBackend,
+                                    knobDesc,
+                                    hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME,
+                                    "Benchmarking knob",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{0}});
+}
+
+} // namespace
+
+// For an engine that exposes the benchmarking knob, the stored estimate covers its priming
+// configuration: it is the larger of the default and the knob-on workspace, in both directions.
+TEST_F(TestGraph, AddEngineEstimateTakesBenchmarkingWorkspaceWhenLarger)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 100, 500);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{500});
+    EXPECT_EQ(state->knobQueries, 1);
+}
+
+TEST_F(TestGraph, AddEngineEstimateKeepsDefaultWorkspaceWhenLarger)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 700, 300);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{700});
+}
+
+// An engine without the benchmarking knob is queried once, with no knob settings.
+TEST_F(TestGraph, AddEngineEstimateIgnoresBenchmarkingForEngineWithoutTheKnob)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto knobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {knobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    knobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{256}});
+    const auto state = mockEngineConfigWorkspace(_mockBackend, 100, 500);
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{100});
+    EXPECT_EQ(state->knobQueries, 0);
+}
+
+// If the knob-on query fails, the estimate falls back to the default one and says so, since the
+// fallback can be too low for the priming plan.
+TEST_F(TestGraph, AddEngineEstimateWarnsWhenBenchmarkingQueryFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+    exposeBenchmarkingKnob(_mockBackend, engineDesc);
+    const auto state
+        = mockEngineConfigWorkspace(_mockBackend, 100, 500, /*failFinalizeWithKnobs=*/true);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto result = graph.add_engine(42, {});
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getPlanSpecWorkspaceSizes(), std::vector<int64_t>{100});
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_WARN, "Workspace estimate with knob settings failed"));
 }
 
 TEST_F(TestGraph, AddEngineSweepRejectsInvalidAxisKnob)
@@ -12804,6 +12971,150 @@ TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
     {
         ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
         EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+    }
+}
+
+namespace
+{
+// Drives autotune's real executeWithPlanTimed() path with a backend whose stalled
+// measurements read a finite negative elapsed time, the shape observed on Windows for
+// short work. The first `negativeStalledReadings` stalled measurements read -0.01 ms;
+// every other measurement reads 1.0 ms. STALL_USED follows the last arm, as the
+// descriptor does.
+struct NegativeStalledBackend
+{
+    int negativeStalledReadings = 0;
+    int stallArmCount = 0;
+    bool armed = false;
+
+    void install(::testing::NiceMock<Mock_hipdnn_backend>& backend)
+    {
+        ON_CALL(backend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t attribute,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void*) {
+                if(attribute == HIPDNN_ATTR_PROFILING_RESET_EXT)
+                {
+                    armed = false;
+                }
+                else if(attribute == HIPDNN_ATTR_PROFILING_STALL_ARM_EXT)
+                {
+                    armed = true;
+                    ++stallArmCount;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(backend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* out) {
+                const bool negative = armed && negativeStalledReadings > 0;
+                negativeStalledReadings -= negative ? 1 : 0;
+                *static_cast<float*>(out) = negative ? -0.01f : 1.0f;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(backend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* out) {
+                *static_cast<bool*>(out) = armed;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+};
+
+std::vector<AutotuneResult> autotuneTwoCompiledPlans(GraphTestUtils& graph,
+                                                     hipdnnHandle_t handle,
+                                                     const AutotuneConfig& config)
+{
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(handle, variantPack, nullptr, config, {}, &results);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    return results;
+}
+} // namespace
+
+// One negative stalled reading is replaced in place: the pass stays stalled and every
+// candidate still ranks on DEVICE_ONLY samples.
+TEST_F(TestGraph, AutotuneReplacesOneNegativeStalledReadingWithoutRestart)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    NegativeStalledBackend backend;
+    backend.negativeStalledReadings = 1;
+    backend.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 2;
+    config.warmupIterations = 0;
+
+    const auto results = autotuneTwoCompiledPlans(graph, _handle, config);
+    ASSERT_EQ(results.size(), 2u);
+    // Four recorded samples plus the one replaced negative reading, all stalled.
+    EXPECT_EQ(backend.stallArmCount, 2 * config.timedIterations + 1);
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+        EXPECT_FLOAT_EQ(r.minTimeMs, 1.0f) << r.engineName;
+    }
+}
+
+// Stalled readings that stay negative exhaust the candidate's retry budget. That must not
+// drop the candidate: the comparison restarts unstalled once and every candidate ranks.
+TEST_F(TestGraph, AutotuneRestartsUnstalledAfterThreeNegativeStalledReadings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    NegativeStalledBackend backend;
+    backend.negativeStalledReadings = std::numeric_limits<int>::max();
+    backend.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+    config.maxIterations = 5;
+    config.windowSize = 3;
+    config.warmupIterations = 0;
+
+    const auto results = autotuneTwoCompiledPlans(graph, _handle, config);
+    ASSERT_EQ(results.size(), 2u);
+    // Only the first candidate is measured stalled: its first sample and both retries.
+    EXPECT_EQ(backend.stallArmCount, 3);
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::UNSTALLED) << r.engineName;
+        EXPECT_FLOAT_EQ(r.minTimeMs, 1.0f) << r.engineName;
     }
 }
 

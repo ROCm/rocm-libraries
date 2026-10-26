@@ -147,9 +147,11 @@ jobs:
       # file it never read.
       #
       # The hand-written parts are checked from source too: the few stubs in
-      # wrapper.cpp, and the provider's declarations of the
-      # GetWorkSpaceSizeRange entry points. Neither check needs a build, so
-      # unlike the ABI gate below they run in seconds, before the configure
+      # wrapper.cpp, the wrapper's own functions (declared in
+      # hipdnn_forwarding.h, listed in wrapper_only_symbols.txt, stubbed in
+      # wrapper.cpp), and the provider's declarations of the
+      # GetWorkSpaceSizeRange entry points. None of these checks needs a build,
+      # so unlike the ABI gate below they run in seconds, before the configure
       # step, and fail fast. They share this job with that gate to keep the
       # split checks in one place.
       - name: Public/private header consistency check

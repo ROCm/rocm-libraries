@@ -3,12 +3,14 @@
 
 """gfx1151 standalone FP16 WMMA attention reference cohort."""
 
+from reference_common.cases import index_cases
+
 from ...implementations import wmma
 from ...contract import Case
 
 NAME = "gfx1151"
 CASES = wmma.CASES
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="SDPA")
 
 
 def prepare(case: Case, library_root: str) -> wmma.Prepared:

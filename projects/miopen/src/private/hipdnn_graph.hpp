@@ -35,7 +35,8 @@ namespace hipdnn {
 
 // True when hipDNN can serve a forwarded call. Loads the backend on first use, so
 // a process that forwards nothing should never reach it. The answer is cached for
-// the process, and a false one also prints one line to stderr saying why.
+// the process, and a false one also prints one line to stderr saying why, unless
+// MIOPEN_LOG_LEVEL hides errors.
 bool IsAvailable();
 
 // Drops whatever hipDNN state was created for this MIOpen handle. Called from
@@ -46,25 +47,28 @@ bool IsAvailable();
 void ReleaseHandle(miopenHandle_t handle) noexcept;
 
 // Replacement text for miopenGetErrorString when the last wrapped call on this
-// thread was forwarded and failed with `status`, or null otherwise. This keeps a
-// forwarded failure distinguishable from the same status raised by MIOpen,
-// without a new public symbol. The text is fixed per status and lives for the
-// whole process, like MIOpen's own strings, so a caller may keep the pointer.
-// The failure's reason, when recorded, goes to stderr instead.
+// thread was forwarded and failed with `status`, or null otherwise. The text is
+// fixed per status and lives for the whole process, like MIOpen's own strings,
+// so a caller may keep the pointer. The failure's reason, when recorded, goes to
+// stderr instead.
+//
+// This lets a user reading a log tell a forwarded failure from the same status
+// raised by MIOpen itself; programs can ask miopenGetLastForwardedError instead.
 const char* PrefixedErrorString(miopenStatus_t status, const char* nativeMessage) noexcept;
 
 // Every stub that MIOpen serves calls this, so a later MIOpen failure with the
 // same status is not reported as forwarded.
 void ClearForwardedFailure() noexcept;
 
+// Writes the status of this thread's last forwarded failure and returns true, or
+// returns false when the last wrapped call was not a failed forwarded one.
+bool LastForwardedFailure(miopenStatus_t* status) noexcept;
+
 // The hipDNN path for every entry point that has no forwarding of its own yet;
 // each is swapped for a real implementation as it lands. Until then, an entry
-// point added to the forwarding set fails loudly here instead of silently
-// running MIOpen. Inline because every translation unit with stubs needs it.
-inline miopenStatus_t ForwardingNotImplemented(const char* /*entryPoint*/)
-{
-    return miopenStatusNotImplemented;
-}
+// point added to the forwarding set fails loudly here, with its failure recorded
+// like any other forwarded one, instead of silently running MIOpen.
+miopenStatus_t ForwardingNotImplemented(const char* entryPoint);
 
 // One value per kind of graph the wrapper builds. Kept in one list so that the
 // values stay distinct as operations are added: it is the first element of
@@ -92,8 +96,9 @@ struct PlanKey
     }
 };
 
-// Records a forwarded failure for miopenGetErrorString to report, writes
-// `reason` to stderr unless MIOPEN_LOG_LEVEL hides errors, and returns `status`.
+// Records a forwarded failure for miopenGetErrorString and
+// miopenGetLastForwardedError to report, writes `reason` to stderr unless
+// MIOPEN_LOG_LEVEL hides errors, and returns `status`.
 miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason);
 
 // Records the exception being handled as a forwarded miopenStatusUnknownError,

@@ -7,8 +7,9 @@ and what it must preserve.
 
 The baseline inventory is the known-good installation plus the complete engine tree:
 UED, referenced KMD, dispatch, optional heuristic, shared/per-pack matchers, KDPs and
-inline/standalone UKDs. Resolve by UUID, not filename — pointwise ADD/MUL/SUB share a
-KMD whose filename does not follow the individual packs.
+inline/standalone UKDs, plus every trained UHD the UED's role maps bind and its
+`heuristics/<ued-id>/` subtree. Resolve by UUID, not filename — pointwise ADD/MUL/SUB
+share a KMD whose filename does not follow the individual packs.
 
 Take the installed half with `projects/hipdnn/tools/IngestorGenerator/tools/inventory.py`: kernels per
 KDP (from `kernelDescriptors`), source kinds, distinct metadata tuples (`--group-by
@@ -58,6 +59,12 @@ retained UUID, as must consumer IDs in the enclosing KDP's
 its own declaration. Do not overwrite a live shared descriptor because scratch
 generation emitted one.
 
+A trained UHD records the UED, KMD and matcher ids and revisions it was measured against
+(`trained_against`), so the role maps, revisions and matchers are retained identities
+too. A splice that changes KMD fields, a matcher or a revision invalidates the bound
+models. RUNBOOK stage 6's **Trained heuristics survive regeneration only by intent**
+owns the retain, retrain or drop decision.
+
 Append new entries to an existing KDP without dropping its siblings. Packaged changes
 enter the authored production source root and are repacked; a packed descriptor cannot
 be edited and paired with its old descriptor/schema/arch/payload-bound evidence. A new
@@ -84,7 +91,7 @@ Two packer rules govern what that walk accepts:
 - **An `embedded_source` `source_file` must be able to act as an identity.** It is never
   normalised, so a `..` segment is rejected (one file would take two identities) and an
   absolute path is rejected (the emitted key must be the same on every machine). Write
-  it relative to the descriptor's own folder, for example `kernels/MyKernel.cpp`.
+  it relative to the descriptor's own folder, for example `kernels/<Kernel>.cpp`.
 
 The one registration a generated engine needs is the **kernel source**, and only for
 `kernel_source.kind == "embedded_source"`:

@@ -380,6 +380,64 @@ extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)
         gen.hand_written_stubs(wrapper, entries)
 
 
+ACCESSOR = "miopenGetLastForwardedError"
+ACCESSOR_STUB = f"""
+extern "C" miopenStatus_t {ACCESSOR}(miopenStatus_t* forwardedStatus)
+{{
+    *forwardedStatus = miopenStatusSuccess;
+    return miopenStatusSuccess;
+}}
+"""
+
+
+def test_a_wrapper_only_function_is_read_from_the_header():
+    entries = parse(entry("miopenCreate"))
+    source = header(
+        "#ifdef MIOPEN_BETA_API",
+        entry(ACCESSOR, "miopenStatus_t* forwardedStatus"),
+        "#endif",
+    )
+    assert gen.wrapper_only_names(source, entries) == {ACCESSOR}
+
+
+def test_no_forwarding_header_means_no_wrapper_only_functions():
+    assert gen.wrapper_only_names(None, parse(entry("miopenCreate"))) == set()
+
+
+def test_a_forwarding_header_may_declare_nothing():
+    source = header("typedef int miopenThing;")
+    assert gen.wrapper_only_names(source, parse(entry("miopenCreate"))) == set()
+
+
+def test_a_name_declared_in_both_headers_is_rejected():
+    entries = parse(entry("miopenCreate"))
+    source = header(entry("miopenCreate"))
+    with pytest.raises(abi.AbiError, match="both miopen.h and hipdnn_forwarding.h"):
+        gen.wrapper_only_names(source, entries)
+
+
+def test_a_wrapper_only_stub_is_accepted_and_never_generated():
+    entries = parse(entry("miopenCreate"))
+    wrapper = WRAPPER_WITH_ONE_STUB.replace("miopenDestroy", "miopenCreate") + (
+        ACCESSOR_STUB
+    )
+    hand_written = gen.hand_written_stubs(wrapper, entries, {ACCESSOR})
+    assert ACCESSOR in hand_written
+    # It is not in miopen.h, so none of the generated files can mention it.
+    for text in (
+        gen.render_passthrough(entries, hand_written),
+        gen.render_rename_header(entries),
+        gen.render_impl_header(entries),
+    ):
+        assert ACCESSOR not in text
+
+
+def test_a_stub_that_neither_header_declares_is_rejected_naming_both():
+    entries = parse(entry("miopenCreate"))
+    with pytest.raises(abi.AbiError, match="neither miopen.h nor hipdnn_forwarding.h"):
+        gen.hand_written_stubs(ACCESSOR_STUB, entries)
+
+
 def test_an_entry_point_that_is_not_status_returning_needs_a_hand_written_stub():
     entries = parse(
         entry("miopenGetErrorString", "miopenStatus_t error", ret="const char*")
@@ -884,3 +942,53 @@ def test_the_provider_is_formatted_with_its_own_style_even_when_only_git_has_it(
     assert tree.run("--check") == 0
     log = (tmp_path / "clang-format.log").read_text(encoding="utf-8")
     assert f"{GENERATED[3]} | # provider style" in log
+
+
+FORWARDING_HEADER_PATH = "include_wrapper/miopen/hipdnn_forwarding.h"
+
+
+def add_wrapper_only_function(tree: Tree) -> None:
+    tree.write(
+        tree.miopen / FORWARDING_HEADER_PATH,
+        header(entry(ACCESSOR, "miopenStatus_t* forwardedStatus")),
+    )
+    wrapper = tree.miopen / "src/private/wrapper.cpp"
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8") + ACCESSOR_STUB, encoding="utf-8"
+    )
+
+
+def test_a_wrapper_only_function_changes_none_of_the_generated_files(tmp_path):
+    plain = Tree(tmp_path / "plain")
+    assert plain.run() == 0
+    with_function = Tree(tmp_path / "with")
+    add_wrapper_only_function(with_function)
+    assert with_function.run() == 0
+    for rel in GENERATED:
+        assert with_function.path(rel).read_bytes() == plain.path(rel).read_bytes(), rel
+
+
+def test_a_wrapper_only_stub_without_its_header_is_rejected(tmp_path, capsys):
+    tree = Tree(tmp_path)
+    add_wrapper_only_function(tree)
+    tree.path(f"projects/miopen/{FORWARDING_HEADER_PATH}").unlink()
+    assert tree.run() == 2
+    assert f"{ACCESSOR}" in capsys.readouterr().err
+
+
+def test_a_name_in_both_headers_exits_2(tmp_path, capsys):
+    tree = Tree(tmp_path)
+    tree.write(tree.miopen / FORWARDING_HEADER_PATH, header(entry("miopenCreate")))
+    assert tree.run() == 2
+    assert "both miopen.h and hipdnn_forwarding.h" in capsys.readouterr().err
+
+
+def test_check_passes_when_the_forwarding_header_is_not_tracked(
+    tmp_path, monkeypatch, capsys
+):
+    tree = Tree(tmp_path)
+    assert tree.run() == 0
+    sparse(monkeypatch, {})
+    capsys.readouterr()
+    assert tree.run("--check", "--require-provider") == 0
+    assert "wrapper source generation check: PASS" in capsys.readouterr().out
