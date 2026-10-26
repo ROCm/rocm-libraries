@@ -113,7 +113,8 @@ private:
 ///
 /// After the fill, the O and stats inputs of each SDPA backward node are replaced by
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
-/// recipe they were filled with.
+/// recipe they were filled with. A node whose forward cannot be derived makes the
+/// result unsupported, with the reason.
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,

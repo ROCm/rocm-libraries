@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +12,8 @@
 #include <ostream>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -678,7 +681,7 @@ struct SdpaBwdOptions
     bool runtimeScale = false;
     bool causal = false;
     bool attnMask = false;
-    bool dropout = false;
+    std::optional<float> dropoutProbability;
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -756,9 +759,9 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     {
         attrs.add_attn_mask_tensor_uid(11);
     }
-    if(opts.dropout)
+    if(opts.dropoutProbability.has_value())
     {
-        attrs.add_dropout_probability(0.1f);
+        attrs.add_dropout_probability(*opts.dropoutProbability);
     }
     auto bwd = attrs.Finish();
 
@@ -776,25 +779,32 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
 
 // Fills the graph with O and stats forced to 0.5, which no forward of these
 // shapes produces everywhere, so a derived value is told apart from a filled one.
-InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRecipes recipes = {})
+FillResult fillSdpaBwd(const GraphResult& gr,
+                       InputTensorMap& inputs,
+                       const std::vector<int64_t>& ownedUids,
+                       InputFillRecipes recipes = {})
 {
     recipes.set(4, FillRecipe::fixed(0.5f));
     recipes.set(6, FillRecipe::fixed(0.5f));
+    return fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+}
+
+InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRecipes recipes = {})
+{
     const auto leafUids = gr.leafInputUids({7, 8, 9});
     auto inputs = makeTensorsFromGraph(gr, leafUids);
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillSdpaBwd(gr, inputs, leafUids, std::move(recipes));
     EXPECT_TRUE(result.filled) << result.reason;
     return inputs;
 }
 
-// Recomputes the forward from the filled Q, K and V: every row of
-// exp(Q K^T * scale - lse) sums to 1 over its unmasked keys, and O is that row's
-// weighted sum of V. A causal graph masks keys after the query (top-left aligned).
+// Recomputes the forward from the filled Q, K and V (and the [1, 1, Sq, Skv] float
+// mask, if any): every row of exp(Q K^T * scale + mask - lse) sums to 1 over its
+// unmasked keys, and O is that row's weighted sum of V. A causal graph masks keys
+// after the query (top-left aligned).
 template <class T>
-void expectOAndStatsAreForwardOfQkv(InputTensorMap& inputs,
-                                    float scale,
-                                    bool causal,
-                                    float oTolerance)
+void expectOAndStatsAreForwardOfQkv(
+    InputTensorMap& inputs, float scale, bool causal, float oTolerance, const float* mask = nullptr)
 {
     const auto& q = typedTensor<T>(inputs, 1);
     const auto& k = typedTensor<T>(inputs, 2);
@@ -822,7 +832,8 @@ void expectOAndStatsAreForwardOfQkv(InputTensorMap& inputs,
                     score += static_cast<float>(q.getHostValue(0, h, sq, d))
                              * static_cast<float>(k.getHostValue(0, h, skv, d));
                 }
-                const float p = std::exp((score * scale) - rowLse);
+                const float maskTerm = mask != nullptr ? mask[(sq * kSdpaSeqKv) + skv] : 0.0f;
+                const float p = std::exp((score * scale) + maskTerm - rowLse);
                 rowSum += p;
                 for(int64_t d = 0; d < kSdpaHeadDim; ++d)
                 {
@@ -849,6 +860,22 @@ void expectAllEqual(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
     {
         ASSERT_EQ(data[i], value) << "element " << i;
     }
+}
+
+// O and stats are replaced by the forward of Q, K and V even over an explicit
+// override, which is what a bundle's metadata "inputs" entry for them becomes.
+// Causal and scaled, with [B, H, Sq, 1] stats, as the SdpaBackward sweeps declare them.
+template <class T>
+void expectCausalScaledOAndStatsAreDerived(DataType ioType, float oTolerance)
+{
+    SdpaBwdOptions opts;
+    opts.ioType = ioType;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectOAndStatsAreForwardOfQkv<T>(inputs, 0.35f, /*causal=*/true, oTolerance);
 }
 
 } // namespace
@@ -936,21 +963,17 @@ TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-// O and stats are replaced by the forward of Q, K and V even over an explicit
-// override, which is what a bundle's metadata "inputs" entry for them becomes.
-// bf16 with [B, H, Sq, 1] stats, as the SdpaBackward sweeps declare them.
 TEST(TestFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkv)
 {
-    SdpaBwdOptions opts;
-    opts.ioType = DataType::BFLOAT16;
-    opts.attnScale = 0.35f;
-    opts.causal = true;
-    const auto gr = buildSdpaBwdGraph(opts);
-    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
-
     // O is stored as bf16: 8 significant bits on values below 1.
-    expectOAndStatsAreForwardOfQkv<hipdnn_data_sdk::types::bfloat16>(
-        inputs, 0.35f, /*causal=*/true, /*oTolerance=*/1e-2f);
+    expectCausalScaledOAndStatsAreDerived<hipdnn_data_sdk::types::bfloat16>(DataType::BFLOAT16,
+                                                                            1e-2f);
+}
+
+TEST(TestFillInputs, SdpaBwdHalfOAndStatsAreTheForwardOfQkv)
+{
+    // O is stored as fp16: 11 significant bits on values below 1.
+    expectCausalScaledOAndStatsAreDerived<hipdnn_data_sdk::types::half>(DataType::HALF, 1e-3f);
 }
 
 // A runtime scale is read from its filled value, not taken as 1.
@@ -966,32 +989,64 @@ TEST(TestFillInputs, SdpaBwdDerivationUsesFilledRuntimeScale)
     expectOAndStatsAreForwardOfQkv<float>(inputs, 0.25f, /*causal=*/false, /*oTolerance=*/1e-5f);
 }
 
-// Graphs whose forward adds a mask or applies dropout are left to the fill, so
-// O and stats keep their filled values.
-TEST(TestFillInputs, SdpaBwdWithAttnMaskKeepsFilledOAndStats)
+// The filled additive mask enters the forward, broadcast over the batch and heads.
+TEST(TestFillInputs, SdpaBwdDerivationAddsTheAttnMask)
 {
     SdpaBwdOptions opts;
     opts.attnMask = true;
     const auto gr = buildSdpaBwdGraph(opts);
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
-    expectAllEqual(*inputs.at(4), 0.5f);
-    expectAllEqual(*inputs.at(6), 0.5f);
+    expectOAndStatsAreForwardOfQkv<float>(inputs,
+                                          1.0f,
+                                          /*causal=*/false,
+                                          /*oTolerance=*/1e-5f,
+                                          static_cast<const float*>(inputs.at(11)->rawHostData()));
 }
 
-TEST(TestFillInputs, SdpaBwdWithDropoutKeepsFilledOAndStats)
+TEST(TestFillInputs, SdpaBwdWithDropoutIsRefused)
 {
     SdpaBwdOptions opts;
-    opts.dropout = true;
+    opts.dropoutProbability = 0.1f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+
+    const auto result = fillSdpaBwd(gr, inputs, leafUids);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+}
+
+// A zero dropout probability is no dropout, so O and stats are still derived.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutIsDerived)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.0f;
     const auto gr = buildSdpaBwdGraph(opts);
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
-    expectAllEqual(*inputs.at(4), 0.5f);
-    expectAllEqual(*inputs.at(6), 0.5f);
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
 }
 
-// The CPU reference takes the LSE only as [B, H, Sq, 1], so rank-3 stats are left
-// as filled and the backward reference rejects the graph when it runs.
+// Unlike a fused graph, where neither O nor stats is an input, owning O and stats
+// but not Q leaves them underivable: Q's values are not known at fill time.
+TEST(TestFillInputs, SdpaBwdWithComputedQIsRefused)
+{
+    const auto gr = buildSdpaBwdGraph({});
+    auto ownedUids = gr.leafInputUids({7, 8, 9});
+    ownedUids.erase(std::remove(ownedUids.begin(), ownedUids.end(), 1), ownedUids.end());
+    auto inputs = makeTensorsFromGraph(gr, ownedUids);
+
+    const auto result = fillSdpaBwd(gr, inputs, ownedUids);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("Q is computed by the graph"), std::string::npos) << result.reason;
+}
+
+// The CPU reference takes the LSE only as [B, H, Sq, 1]. Rank-3 stats are left as
+// filled rather than refused: the backward reference rejects the graph with the
+// same check and fails it, which a skip at fill time would hide.
 TEST(TestFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStats)
 {
     SdpaBwdOptions opts;
