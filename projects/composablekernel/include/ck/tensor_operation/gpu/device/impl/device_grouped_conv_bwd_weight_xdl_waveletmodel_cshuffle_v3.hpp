@@ -284,7 +284,8 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeA    = InDataType,
           typename ComputeTypeB    = ComputeTypeA,
           index_t NumGroupsToMerge = 1,
-          bool DirectLoad          = false>
+          bool DirectLoad          = false,
+          bool UseTdm              = false>
 struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -302,6 +303,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
     static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<WeiElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<OutElementwiseOperation, element_wise::PassThrough>);
+
+    static_assert(!(UseTdm && NumGroupsToMerge > 1), "NumGroupsToMerge must be 1 when using TDM");
 
     // AK0PerBlock = K0PerBlock / K1. Transfer cluster K0 dim must not exceed it,
     // otherwise thread_slice_k0 = AK0PerBlock / K0_cluster truncates to 0.
@@ -363,7 +366,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
                                        K1Number,
                                        K0PerBlock / K1Number,
                                        NumGroupsToMerge,
-                                       ConvBackwardWeightSpecialization>{};
+                                       ConvBackwardWeightSpecialization,
+                                       index_t,
+                                       UseTdm>{};
 
     template <ck::index_t NDim, typename ck::enable_if<NDim == 1, bool>::type = false>
     static auto GetABCGridDesc()
@@ -497,8 +502,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         ComputeTypeA,
         ComputeTypeB,
         DirectLoad,
-        false,
-        false,
+        UseTdm, // UseTdmA
+        false,  // UseTdmB
+        false,  // UseNamedBarrier
         UseLdsTranspose>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
@@ -798,10 +804,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         template <typename GridwiseGemm>
         float RunImp(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
+            const index_t GemmM = UseTdm ? arg.a_grid_desc_k0_m_k1_.GetLength(I0)
+                                         : arg.a_grid_desc_k0_m_k1_.GetLength(I1);
             const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
             const index_t GemmK =
-                arg.a_grid_desc_k0_m_k1_.GetLength(I0) * arg.a_grid_desc_k0_m_k1_.GetLength(I2);
+                arg.b_grid_desc_k0_n_k1_.GetLength(I0) * arg.b_grid_desc_k0_n_k1_.GetLength(I2);
 
             const ADataType* p_a_grid = arg.p_a_grid_;
             const BDataType* p_b_grid = arg.p_b_grid_;
@@ -819,7 +826,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
             const bool has_main_k_block_loop = GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
 
             const auto num_k_per_block =
-                arg.a_grid_desc_k0_m_k1_.GetLength(Number<0>{}) / gemm_arg.KBatch;
+                arg.b_grid_desc_k0_n_k1_.GetLength(Number<0>{}) / gemm_arg.KBatch;
 
             const auto clear_workspace = [&]() {
                 if(arg.k_batch_ > 1)
@@ -1365,6 +1372,10 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         if constexpr(DirectLoad)
         {
             str << "_DirectLoad";
+        }
+        if constexpr(UseTdm)
+        {
+            str << "_Tdm";
         }
         str << "<" << TileLoadThreadGroupSize << "l," << TileMathThreadGroupSize << "m, "
             << MPerBlock << ", "

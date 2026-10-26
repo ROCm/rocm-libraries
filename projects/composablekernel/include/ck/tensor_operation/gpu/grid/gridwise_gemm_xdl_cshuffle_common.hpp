@@ -100,6 +100,7 @@ template <typename ALayout,
           bool DirectLoad      = false,
           bool IsMxGemm        = false,
           bool LargeTensors    = false,
+          bool UseTdmA         = false,
           bool UseTdmB         = false,
           bool UseLdsTranspose = false>
 struct GridwiseGemm_xdl_cshuffle_base
@@ -401,7 +402,7 @@ struct GridwiseGemm_xdl_cshuffle_base
             }
             else
             {
-                if constexpr(MLdsLayer == 1)
+                if constexpr(MLdsLayer == 1 || UseTdmA)
                 {
                     return make_naive_tensor_descriptor(
                         make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number),
