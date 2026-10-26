@@ -10,7 +10,11 @@ if(GPU_TARGETS MATCHES "gfx125")
   set(_comp_tdm_v3_archs ${SUPPORTED_GPU_TARGETS})
   list(FILTER _comp_tdm_v3_archs INCLUDE REGEX "^gfx125")
   set_property(TARGET ${EXAMPLE_COMP_TDM_V3_FP8} PROPERTY HIP_ARCHITECTURES ${_comp_tdm_v3_archs})
-  set(EXAMPLE_COMP_TDM_V3_FP8_COMPILE_OPTIONS -mllvm -enable-noalias-to-md-conversion=0)
+  # Re-enable the post-RA machine scheduler that the top-level CMakeLists turns off: it issues the
+  # LDS fragment reads in bursts with progressive waits instead of draining before each WMMA
+  # (the last occurrence of the option wins).
+  set(EXAMPLE_COMP_TDM_V3_FP8_COMPILE_OPTIONS -mllvm -enable-noalias-to-md-conversion=0
+      "SHELL: -mllvm -enable-post-misched=1")
   if(CK_USE_OCP_FP8)
     list(APPEND EXAMPLE_COMP_TDM_V3_FP8_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
   endif()

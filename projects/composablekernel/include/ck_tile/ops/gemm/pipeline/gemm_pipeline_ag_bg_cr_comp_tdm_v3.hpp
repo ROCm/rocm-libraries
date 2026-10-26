@@ -368,6 +368,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 #endif
             auto stage_wait = [&]() {
 #if CK_TDM_V3_LIGHT_ARRIVE
+                // Pin the wait too: the post-RA scheduler would otherwise move the WMMAs that
+                // follow the signal below the wait, closing the overlap window.
+                __builtin_amdgcn_sched_barrier(0);
                 __builtin_amdgcn_s_barrier_wait(-1);
 #else
                 workgroup_barrier_wait();
