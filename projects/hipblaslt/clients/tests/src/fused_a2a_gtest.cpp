@@ -173,6 +173,27 @@ namespace
                 queues.size() * sizeof(hipblasLtSdmaQueue_t));
         }
 
+        hipblasStatus_t addPrologue()
+        {
+            return hipblasLtFusedPrologueAdd(fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
+        }
+
+        hipblasStatus_t setPeerBPtrs(const std::vector<void*>& ptrs)
+        {
+            return hipblasLtFusedEpilogueSetAttribute(
+                fused,
+                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
+                ptrs.data(),
+                ptrs.size() * sizeof(void*));
+        }
+
+        hipblasStatus_t setGatherBuffer(uintptr_t address)
+        {
+            void* buffer = reinterpret_cast<void*>(address);
+            return hipblasLtFusedEpilogueSetAttribute(
+                fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER, &buffer, sizeof(buffer));
+        }
+
         hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
     };
 
@@ -291,6 +312,71 @@ namespace
         const std::vector<hipblasLtSdmaQueue_t> tooManyQueues(HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1,
                                                               fakeQueue(0x2000));
         EXPECT_EQ(setQueues(tooManyQueues), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST(FusedA2ALifecycle_pre_checkin, PrologueAddRejectsNullDescriptor)
+    {
+        EXPECT_EQ(hipblasLtFusedPrologueAdd(nullptr, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, PrologueAddAcceptsAllToAll)
+    {
+        EXPECT_EQ(addPrologue(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, PrologueAddRejectsUnrecognizedStage)
+    {
+        EXPECT_EQ(hipblasLtFusedPrologueAdd(fused, static_cast<hipblasLtFuseablePrologue_t>(4242)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, PrologueAddRejectsDuplicateAllToAll)
+    {
+        ASSERT_EQ(addPrologue(), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(addPrologue(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, PrologueDoesNotJoinAnEpilogue)
+    {
+        ASSERT_EQ(addA2A(), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(addPrologue(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, EpilogueDoesNotJoinAPrologue)
+    {
+        ASSERT_EQ(addPrologue(), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(addA2A(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, PeerBPtrsAreSizedAndBoundedLikeTheOtherPerRankArrays)
+    {
+        EXPECT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x1000)}), HIPBLAS_STATUS_SUCCESS);
+
+        void* one = reinterpret_cast<void*>(0x1000);
+        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS, &one, 0),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(
+            hipblasLtFusedEpilogueSetAttribute(
+                fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS, &one, sizeof(void*) + 1),
+            HIPBLAS_STATUS_INVALID_VALUE);
+
+        const std::vector<void*> tooMany(HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1,
+                                         reinterpret_cast<void*>(0x1000));
+        EXPECT_EQ(setPeerBPtrs(tooMany), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ABuilder_pre_checkin, GatherBufferMustBe128ByteAligned)
+    {
+        EXPECT_EQ(setGatherBuffer(0x1000), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(setGatherBuffer(0x1080), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(setGatherBuffer(0x1040), HIPBLAS_STATUS_INVALID_VALUE);
+
+        void* buffer = reinterpret_cast<void*>(0x1000);
+        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                      fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER, &buffer, 4),
+                  HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     /************************************************************************

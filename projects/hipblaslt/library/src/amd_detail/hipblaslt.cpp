@@ -88,6 +88,7 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 struct hipblasLtFusedEpilogueDescriptor
 {
     std::vector<hipblasLtFuseableEpilogue_t> stages;
+    std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
 
     // HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX parameters. The per-rank arrays are
     // sized by the caller's SetAttribute call; that their length is the
@@ -98,6 +99,10 @@ struct hipblasLtFusedEpilogueDescriptor
     uint32_t                          comm_channel   = 0;
     std::vector<void*>                a2a_recv_ptrs;
     std::vector<hipblasLtSdmaQueue_t> a2a_queues;
+
+    // HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX parameters.
+    std::vector<void*> a2a_peer_b_ptrs;
+    void*              a2a_gather_buffer = nullptr;
 };
 
 namespace
@@ -111,11 +116,30 @@ namespace
         return false;
     }
 
+    bool fused_prologue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
+                                  hipblasLtFuseablePrologue_t             p)
+    {
+        for(auto s : d->prologue_stages)
+            if(s == p)
+                return true;
+        return false;
+    }
+
     bool fused_epilogue_stage_recognized(hipblasLtFuseableEpilogue_t stage)
     {
         switch(stage)
         {
         case HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX:
+            return true;
+        }
+        return false;
+    }
+
+    bool fused_prologue_stage_recognized(hipblasLtFuseablePrologue_t stage)
+    {
+        switch(stage)
+        {
+        case HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX:
             return true;
         }
         return false;
@@ -795,7 +819,7 @@ try
         status = HIPBLAS_STATUS_INVALID_VALUE;
     }
     else if(fused_epilogue_has_stage(desc, epilogue)
-            || !fused_epilogue_stage_composes(desc, epilogue))
+            || !fused_epilogue_stage_composes(desc, epilogue) || !desc->prologue_stages.empty())
     {
         log_error(__func__, "epilogue stage does not compose with the stages already added");
         status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -803,6 +827,35 @@ try
     else
     {
         desc->stages.push_back(epilogue);
+    }
+
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedPrologueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
+                                          hipblasLtFuseablePrologue_t        prologue)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedPrologueAdd");
+    hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
+
+    if(desc == nullptr || !fused_prologue_stage_recognized(prologue))
+    {
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else if(!desc->prologue_stages.empty() || !desc->stages.empty())
+    {
+        log_error(__func__, "prologue stage does not compose with the stages already added");
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else
+    {
+        desc->prologue_stages.push_back(prologue);
     }
 
     rocblaslt::Debug::Instance().markerStop();
@@ -909,6 +962,39 @@ try
         const size_t count = sizeInBytes / sizeof(hipblasLtSdmaQueue_t);
         desc->a2a_queues.assign(count, hipblasLtSdmaQueue_t{});
         memcpy(desc->a2a_queues.data(), buf, sizeInBytes);
+        break;
+    }
+    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS:
+    {
+        if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
+           || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
+        {
+            log_error(__func__, "invalid all-to-all peer-B array size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        const size_t count = sizeInBytes / sizeof(void*);
+        desc->a2a_peer_b_ptrs.assign(count, nullptr);
+        memcpy(desc->a2a_peer_b_ptrs.data(), buf, sizeInBytes);
+        break;
+    }
+    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER:
+    {
+        if(sizeInBytes < sizeof(void*))
+        {
+            log_error(__func__, "invalid all-to-all gather buffer buf size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        void* buffer = nullptr;
+        memcpy(&buffer, buf, sizeof(buffer));
+        if(reinterpret_cast<uintptr_t>(buffer) % 128 != 0)
+        {
+            log_error(__func__, "all-to-all gather buffer must be 128-byte aligned");
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        desc->a2a_gather_buffer = buffer;
         break;
     }
     default:
