@@ -144,40 +144,18 @@ class Shape {
         return order;
     }
 
-    size_t selectedCount(const IndexRange& range) const {
-        if (range.stride == 0) throw std::runtime_error("Index range stride must be nonzero.");
-        if (range.first >= elementCount()) return 0;
-        return std::min(1 + (elementCount() - 1 - range.first) / range.stride, range.maxElements);
-    }
-
-    size_t selectedCount(const std::set<size_t>& indices) const {
-        if (!indices.empty() && *indices.rbegin() >= elementCount())
-            throw std::runtime_error("Explicit index exceeds logical element count.");
-        return indices.size();
-    }
-
-    bool selectsAll(const IndexRange& range) const {
-        return selectedCount(range) == elementCount();
-    }
-    bool selectsAll(const std::set<size_t>& indices) const {
-        return selectedCount(indices) == elementCount();
-    }
-
-    // Materialize the range only when the caller needs an explicit list.
-    std::vector<size_t> selectedIndices(const IndexRange& range) const {
-        std::vector<size_t> result(selectedCount(range));
-        for (size_t ordinal = 0; ordinal < result.size(); ++ordinal)
-            result[ordinal] = range.first + ordinal * range.stride;
-        return result;
-    }
-
-    // Order lists all axes from slowest to fastest. The coordinate span is reused
-    // and remains valid only during the callback. No flat-index list is allocated.
+    // Visit flat indices and their coordinates in the original axis order.
+    // Order must list every axis once, from slowest to fastest. Both overloads
+    // validate inputs before callbacks, including empty work. The coordinate span
+    // is borrowed and reused; it remains valid only during the callback. Callback
+    // exceptions propagate. No flat-index list is allocated.
+    //
+    // A range is clipped to elementCount(); a start beyond it yields no work.
     template <typename Function>
     void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        const size_t count = selectedCount(range);
+        const size_t count = range.count(elementCount());
         if (count == 0) return;
         std::vector<size_t> coordinates(rank());
         computeCoordinates(range.first, order, coordinates);
@@ -196,13 +174,13 @@ class Shape {
         }
     }
 
-    // The set supplies ascending unique flat indices; Shape supplies their coordinates.
-    // Bounds and order are checked before the first callback, including empty work.
+    // The set supplies ascending unique flat indices, all less than elementCount().
     template <typename Function>
     void forEachCoordinate(const std::set<size_t>& indices, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        (void)selectedCount(indices);
+        if (!indices.empty() && *indices.rbegin() >= elementCount())
+            throw std::runtime_error("Explicit index exceeds logical element count.");
         std::vector<size_t> coordinates(rank());
         for (size_t index : indices) {
             computeCoordinates(index, order, coordinates);

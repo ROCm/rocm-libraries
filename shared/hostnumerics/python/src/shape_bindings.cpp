@@ -19,6 +19,16 @@ nb::tuple shapeTuple(const Shape& shape) {
     return nb::tuple(
         nb::cast(std::vector<size_t>(shape.dimensions().begin(), shape.dimensions().end())));
 }
+
+template <typename Indices>
+std::vector<std::vector<size_t>> selectedCoordinates(const Shape& shape, const Indices& indices,
+                                                     const std::vector<size_t>& order) {
+    std::vector<std::vector<size_t>> result;
+    shape.forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> coordinates) {
+        result.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    return result;
+}
 }  // namespace
 
 namespace roc::hostnumerics::python_bindings {
@@ -174,62 +184,31 @@ See linear_index for the nested-loop interpretation of order. A shape with a
 zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
 )doc")
         .def("index_order_last_dimension_fastest", &Shape::indexOrderLastDimensionFastest)
-        .def("selected_count",
-             nb::overload_cast<const IndexRange&>(&Shape::selectedCount, nb::const_), "range"_a)
-        .def("selected_count",
-             nb::overload_cast<const std::set<size_t>&>(&Shape::selectedCount, nb::const_),
-             "indices"_a)
-        .def("selects_all", nb::overload_cast<const IndexRange&>(&Shape::selectsAll, nb::const_),
-             "range"_a)
-        .def("selects_all",
-             nb::overload_cast<const std::set<size_t>&>(&Shape::selectsAll, nb::const_),
-             "indices"_a)
-        .def("selected_indices", &Shape::selectedIndices, "range"_a)
-        .def(
-            "selected_coordinates",
-            [](const Shape& shape, const IndexRange& range, const std::vector<size_t>& order) {
-                std::vector<std::vector<size_t>> result;
-                shape.forEachCoordinate(
-                    range, order, [&](size_t, std::span<const size_t> coordinates) {
-                        result.emplace_back(coordinates.begin(), coordinates.end());
-                    });
-                return result;
-            },
-            "range"_a, "order"_a)
-        .def(
-            "selected_coordinates",
-            [](const Shape& shape, const std::set<size_t>& indices,
-               const std::vector<size_t>& order) {
-                std::vector<std::vector<size_t>> result;
-                shape.forEachCoordinate(
-                    indices, order, [&](size_t, std::span<const size_t> coordinates) {
-                        result.emplace_back(coordinates.begin(), coordinates.end());
-                    });
-                return result;
-            },
-            "indices"_a, "order"_a)
+        .def("selected_coordinates", &selectedCoordinates<IndexRange>, "range"_a, "order"_a,
+             R"doc(
+Return owning coordinate lists for the range clipped to element_count.
+Order must be a complete slowest-to-fastest axis permutation, even for empty
+work. Each coordinate list uses the original axis order.
+)doc")
+        .def("selected_coordinates", &selectedCoordinates<std::set<size_t>>, "indices"_a, "order"_a,
+             R"doc(
+Return owning coordinate lists for ascending unique flat indices in the set.
+Every index must be less than element_count. Bounds and the complete
+slowest-to-fastest axis permutation are checked before traversal, including
+empty work. Each coordinate list uses the original axis order.
+)doc")
         .def(
             "selected_coordinates_last_dimension_fastest",
             [](const Shape& shape, const IndexRange& range) {
-                std::vector<std::vector<size_t>> result;
-                shape.forEachCoordinateLastDimensionFastest(
-                    range, [&](size_t, std::span<const size_t> coordinates) {
-                        result.emplace_back(coordinates.begin(), coordinates.end());
-                    });
-                return result;
+                return selectedCoordinates(shape, range, shape.indexOrderLastDimensionFastest());
             },
-            "range"_a)
+            "range"_a, "Return owning coordinate lists for a range with the last axis fastest.")
         .def(
             "selected_coordinates_last_dimension_fastest",
             [](const Shape& shape, const std::set<size_t>& indices) {
-                std::vector<std::vector<size_t>> result;
-                shape.forEachCoordinateLastDimensionFastest(
-                    indices, [&](size_t, std::span<const size_t> coordinates) {
-                        result.emplace_back(coordinates.begin(), coordinates.end());
-                    });
-                return result;
+                return selectedCoordinates(shape, indices, shape.indexOrderLastDimensionFastest());
             },
-            "indices"_a)
+            "indices"_a, "Return owning coordinate lists for a set with the last axis fastest.")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())
