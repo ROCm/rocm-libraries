@@ -61,7 +61,6 @@ namespace TensileLite
         std::shared_ptr<MLPNet>                    model;
         SolutionFeatures                           solFeatures;
         ProblemFeatures                            probFeatures;
-        mutable std::atomic<bool>                  lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -101,7 +100,7 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            SolutionVector<MySolution>  solutions = findTopSolutions(problem, hardware, 1);
+            SolutionVector<MySolution>  solutions = findTopSolutions(problem, hardware, 1).solutions;
             std::shared_ptr<MySolution> solution  = nullptr;
             if(solutions.size() > 0)
                 solution = solutions[0];
@@ -129,9 +128,9 @@ namespace TensileLite
             return rv;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             std::vector<float> problemkey
                 = ProblemKey::keyForProblem<std::vector<float>, MyProblem, float>(
@@ -195,13 +194,8 @@ namespace TensileLite
             }
 
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
-            return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            const bool alreadyRetAll = (rv.size() < numSolutions);
+            return {std::move(rv), alreadyRetAll};
         }
 
         virtual SolutionSet<MySolution>

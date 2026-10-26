@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
@@ -1421,8 +1422,11 @@ namespace TensileLite
 
         ProblemType problemType;
 
-        // This will be calculated when getSolution is called
-        size_t requiredHostWorkspaceSizePerProblem = static_cast<size_t>(-1);
+        // This will be calculated when getSolution is called.
+        // Grouped-GEMM paths fill it in lazily with no lock, and every writer stores
+        // the same value, so it is atomic. The class already holds mutexes (CacheMap
+        // members), so it is not copied; nothing serializes or memcpy's this field.
+        std::atomic<size_t> requiredHostWorkspaceSizePerProblem{static_cast<size_t>(-1)};
 
         /// Debugging purposes.  Shouldn't contain any vital information that isn't
         /// somewhere else.

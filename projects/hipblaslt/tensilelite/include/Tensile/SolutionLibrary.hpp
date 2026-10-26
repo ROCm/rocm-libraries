@@ -171,6 +171,22 @@ namespace TensileLite
     using SolutionVector = std::vector<std::shared_ptr<MySolution>>;
 
     /**
+ * Result of SolutionLibrary::findTopSolutions().
+ *
+ * alreadyRetAll is true when the search could not reach the requested number
+ * of solutions, i.e. `solutions` already holds everything the library can
+ * return for this problem. It describes this call only and travels with the
+ * result, so concurrent searches on the same library object cannot observe
+ * each other's value.
+ */
+    template <typename MySolution>
+    struct TopSolutionsResult
+    {
+        SolutionVector<MySolution> solutions;
+        bool                       alreadyRetAll = true;
+    };
+
+    /**
  * \ingroup SolutionLibrary
  *
  * @brief Abstract base class for Library objects that can provide a
@@ -263,16 +279,11 @@ namespace TensileLite
    *
    * May return `nullptr` if no such object exists.
    */
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int              numSolutions) const
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const
         {
-            return SolutionVector<MySolution>();
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const
-        {
-            return true;
+            return TopSolutionsResult<MySolution>();
         }
 
         virtual SolutionVector<MySolution>

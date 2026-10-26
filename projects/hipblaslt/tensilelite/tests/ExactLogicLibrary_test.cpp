@@ -72,12 +72,13 @@ namespace
             return "StubTop";
         }
 
-        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
-                                                             Hardware const&,
-                                                             int) const override
+        TopSolutionsResult<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
+                                                                 Hardware const&,
+                                                                 int) const override
         {
-            return m_solution ? SolutionVector<ContractionSolution>({m_solution})
-                              : SolutionVector<ContractionSolution>();
+            return {m_solution ? SolutionVector<ContractionSolution>({m_solution})
+                               : SolutionVector<ContractionSolution>(),
+                    true};
         }
 
     private:
@@ -195,11 +196,12 @@ namespace
             return "Recording";
         }
 
-        SolutionVector<ContractionSolution>
+        TopSolutionsResult<ContractionSolution>
             findTopSolutions(ContractionProblemGemm const&, Hardware const&, int) const override
         {
-            return m_solution ? SolutionVector<ContractionSolution>({m_solution})
-                              : SolutionVector<ContractionSolution>();
+            return {m_solution ? SolutionVector<ContractionSolution>({m_solution})
+                               : SolutionVector<ContractionSolution>(),
+                    true};
         }
 
         SolutionLibrarySearchType lastSearchType() const
@@ -350,7 +352,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesEqualityAndRangeByDefault)
     auto        problem = dummyProblem();
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"equality", "range", "prediction"}));
 }
 
@@ -361,7 +363,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsEqualityAndRangeWhenStreamKSche
     problem.setParams().setStreamKTileSchedulingMode(1);
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"prediction"}));
 }
 
@@ -372,7 +374,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsEqualityAndRangeWhenStreamKSche
     problem.setParams().setStreamKTileSchedulingMode(2);
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"prediction"}));
 }
 
@@ -384,7 +386,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsSkipsEqualityAndRangeWhenStreamK5For
     auto        problem = dummyProblem();
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"prediction"}));
 }
 
@@ -396,7 +398,7 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticDoesNotSkipEqualityAndRan
     auto        problem = dummyProblem();
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"equality", "range", "prediction"}));
 }
 
@@ -409,6 +411,6 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
     problem.setParams().setStreamKTileSchedulingMode(1);
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
-    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"equality", "range", "prediction"}));
 }

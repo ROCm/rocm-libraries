@@ -138,16 +138,15 @@ namespace TensileLite
             return rv;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             // TODO-
             //   Can remove this override since the base SolutionLibrary has done the same thing
             // FreeSize pool is simply a table, no ranking information.
             // Return empty to indicate not supported for heuristic.
-            SolutionVector<MySolution> solutions;
-            return solutions;
+            return TopSolutionsResult<MySolution>();
         }
 
         virtual SolutionVector<MySolution>

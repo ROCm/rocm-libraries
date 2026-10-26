@@ -63,7 +63,6 @@ namespace TensileLite
     {
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
         std::vector<Row>          rows;
-        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)
@@ -259,9 +258,9 @@ namespace TensileLite
             return concatenate(this->type(), " library (", rows.size(), " rows)");
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             SolutionVector<MySolution> rv, solutions;
             const bool                 debug   = Debug::Instance().printPropertyEvaluation();
@@ -272,9 +271,6 @@ namespace TensileLite
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
-
-            // false in case of early return;
-            lastFindTopRetAll = false;
 
             for(auto const& row : rows)
             {
@@ -289,7 +285,8 @@ namespace TensileLite
                 if(row.first(problem, hardware))
                 {
                     solutions
-                        = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
+                        = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size())
+                              .solutions;
 
                     // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
                     if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
@@ -329,19 +326,15 @@ namespace TensileLite
                     }
 
                     rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
+                    // false in case of early return
                     if(rv.size() == numSolutions)
-                        return rv;
+                        return {std::move(rv), false};
                 }
             }
 
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
-            return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            const bool alreadyRetAll = (rv.size() < numSolutions);
+            return {std::move(rv), alreadyRetAll};
         }
 
         virtual SolutionVector<MySolution>

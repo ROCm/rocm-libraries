@@ -5101,7 +5101,8 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    auto solutions
+        = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount).solutions;
 
     // Library logic can rank a custom kernel ahead of the kernels it replaces. For
     // a pointer-array problem drop it and widen the search, so the caller still
@@ -5121,7 +5122,7 @@ inline auto getSolutions(
            || found < static_cast<size_t>(request))
             break;
         request += static_cast<int>(dropped);
-        solutions = library->findTopSolutions(tensile_prob, *hardware, request);
+        solutions = library->findTopSolutions(tensile_prob, *hardware, request).solutions;
     }
 
     if(reportEmpty && solutions.empty())

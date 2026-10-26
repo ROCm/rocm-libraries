@@ -55,8 +55,6 @@ namespace TensileLite
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
 
-        mutable std::atomic<bool> lastFindTopRetAll = false;
-
         static std::string Type()
         {
             return "Prediction";
@@ -89,7 +87,7 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            auto                        topSolutions = findTopSolutions(problem, hardware, 1);
+            auto                        topSolutions = findTopSolutions(problem, hardware, 1).solutions;
             std::shared_ptr<MySolution> solution;
             if(!topSolutions.empty())
             {
@@ -140,9 +138,9 @@ namespace TensileLite
             return rv;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
             size_t                     m     = 1;
@@ -241,13 +239,8 @@ namespace TensileLite
                 }
             }
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
-            return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            const bool alreadyRetAll = (rv.size() < numSolutions);
+            return {std::move(rv), alreadyRetAll};
         }
 
         virtual SolutionVector<MySolution>

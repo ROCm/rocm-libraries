@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/Tensile.hpp>
+#include <atomic>
 #include <optional>
 
 namespace TensileLite
@@ -286,7 +287,26 @@ namespace TensileLite
         size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
-        mutable int isStandardCUs            = -1; // -1: unset, 0:false, 1:true
+        // Lazily computed by isStandardCU(); -1: unset, 0:false, 1:true.
+        // Another thread can read this while it is being filled in, so it is atomic.
+        // AMDGPU is copied (it is a cache key), and std::atomic is not copyable, so a
+        // copy takes a snapshot of the value.
+        struct LazyFlag
+        {
+            LazyFlag() = default;
+            LazyFlag(LazyFlag const& other)
+                : value(other.value.load())
+            {
+            }
+            LazyFlag& operator=(LazyFlag const& other)
+            {
+                value.store(other.value.load());
+                return *this;
+            }
+
+            std::atomic<int> value{-1};
+        };
+        mutable LazyFlag isStandardCUs;
         std::string deviceName;
 
         virtual bool   isStandardCU() const;

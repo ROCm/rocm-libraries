@@ -526,6 +526,9 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *
  *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
  *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *
+ *  Distinct handles may be used concurrently from different threads, for example one handle per stream.
+ *  They share process-wide library caches (loaded solution libraries, code-object adapters, and heuristic result caches), which the library synchronizes internally.  
  *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():

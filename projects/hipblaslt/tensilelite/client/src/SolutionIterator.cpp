@@ -633,14 +633,16 @@ namespace TensileLite
                 if(m_predictionThreshold > 1.0)
                 {
                     m_solutions
-                        = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
+                        = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions)
+                              .solutions;
                 }
                 else
                 {
                     if(m_numSolutions != -1)
                     {
                         m_solutions
-                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
+                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions)
+                              .solutions;
                     }
                 }
             }

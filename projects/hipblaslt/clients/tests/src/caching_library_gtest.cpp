@@ -205,11 +205,11 @@ namespace
             return {};
         }
 
-        SolutionVector<MockSolution>
+        TopSolutionsResult<MockSolution>
             findTopSolutions(MockProblem const& problem, Hardware const&, int) const override
         {
             ++findTopCalls;
-            return {makeSolution(problem.id)};
+            return {{makeSolution(problem.id)}, true};
         }
 
         SolutionVector<MockSolution> findTopSolutionsGroupedGemm(
@@ -297,12 +297,12 @@ TEST(CachingLibraryCollision, smoke_FindTopSolutionsDistinguishesCollidingProble
     CachingLibrary<MockProblem, MockSolution> library(sub);
     auto                                      gpu = makeGpu();
 
-    auto topA = library.findTopSolutions(a, gpu, 1);
+    auto topA = library.findTopSolutions(a, gpu, 1).solutions;
     ASSERT_EQ(topA.size(), 1u);
     ASSERT_NE(topA[0], nullptr);
     EXPECT_EQ(topA[0]->id, 1);
 
-    auto topB = library.findTopSolutions(b, gpu, 1);
+    auto topB = library.findTopSolutions(b, gpu, 1).solutions;
     ASSERT_EQ(topB.size(), 1u);
     ASSERT_NE(topB[0], nullptr);
     EXPECT_EQ(topB[0]->id, 2)
@@ -401,14 +401,14 @@ namespace
             return {};
         }
 
-        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const& problem,
-                                                             Hardware const&,
-                                                             int) const override
+        TopSolutionsResult<ContractionSolution> findTopSolutions(ContractionProblemGemm const& problem,
+                                                                 Hardware const&,
+                                                                 int) const override
         {
             ++findTopCalls;
             if(!accepts(problem))
                 return {};
-            return {solution};
+            return {{solution}, true};
         }
 
         SolutionVector<ContractionSolution>
@@ -479,8 +479,8 @@ namespace
         EXPECT_TRUE(library.findBestSolution(rejected, gpu) == nullptr)
             << "findBestSolution served a solution cached for a problem the predicate accepts";
 
-        EXPECT_EQ(library.findTopSolutions(accepted, gpu, 1).size(), 1u);
-        EXPECT_TRUE(library.findTopSolutions(rejected, gpu, 1).empty())
+        EXPECT_EQ(library.findTopSolutions(accepted, gpu, 1).solutions.size(), 1u);
+        EXPECT_TRUE(library.findTopSolutions(rejected, gpu, 1).solutions.empty())
             << "findTopSolutions served solutions cached for a problem the predicate accepts";
 
         EXPECT_EQ(library.findTopSolutionsGroupedGemm({accepted}, gpu, 1).size(), 1u);
@@ -534,7 +534,7 @@ TEST(CachingLibraryCollision, smoke_NonZeroBetaValuesShareCacheEntry)
     auto                                   gpu = makeGpu();
 
     for(double beta : {0.5, 2.0, 1.0})
-        EXPECT_EQ(library.findTopSolutions(makeProblem(beta), gpu, 1).size(), 1u);
+        EXPECT_EQ(library.findTopSolutions(makeProblem(beta), gpu, 1).solutions.size(), 1u);
     EXPECT_EQ(sub->findTopCalls, 1);
 }
 
@@ -581,8 +581,8 @@ TEST(CachingLibraryCollision, smoke_IdenticalProblemIsServedFromCache)
     CachingLibrary<ContractionProblemGemm> library(sub);
     auto                                   gpu = makeGpu();
 
-    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
-    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
+    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).solutions.size(), 1u);
+    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).solutions.size(), 1u);
     EXPECT_EQ(sub->findTopCalls, 1);
 }
 

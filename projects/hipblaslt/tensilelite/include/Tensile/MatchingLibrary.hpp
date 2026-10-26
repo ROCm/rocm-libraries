@@ -50,7 +50,6 @@ namespace TensileLite
         using Element = std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>;
         using Table   = Matching::MatchingTable<MyProblem, Element, std::shared_ptr<MySolution>>;
         std::shared_ptr<Table>    table;
-        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -142,9 +141,9 @@ namespace TensileLite
             return rv;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             typename Table::Transform transform
                 = [&](Element library) -> std::shared_ptr<MySolution> {
@@ -166,13 +165,8 @@ namespace TensileLite
             }
 
             // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (solutions.size() < numSolutions);
-            return solutions;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            const bool alreadyRetAll = (solutions.size() < numSolutions);
+            return {std::move(solutions), alreadyRetAll};
         }
 
         virtual SolutionVector<MySolution>

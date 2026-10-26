@@ -44,6 +44,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -69,6 +70,7 @@
 // For Serialization::objectToMap, used to walk a legacy document's top level.
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include "FallbackTestUtils.hpp"
 #include "SolutionIterator.hpp"
 #include "TestData.hpp"
 
@@ -532,7 +534,11 @@ namespace
     /// Rewrites a legacy {solutions, library} msgpack document into the indexed
     /// layout, re-packing each solution object into the blob. Mirrors what
     /// LibraryIO.writeMsgPackIndexed does on the Python side.
-    std::vector<uint8_t> toIndexed(msgpack::object const& legacy)
+    ///
+    /// With singleTree, the tree is one Single leaf for the lowest index
+    /// instead of the legacy tree. A Single leaf answers getSolutionByIndex
+    /// from the index alone, so a caller needs no matching problem.
+    std::vector<uint8_t> toIndexed(msgpack::object const& legacy, bool singleTree = false)
     {
         std::unordered_map<std::string, msgpack::object> top;
         Serialization::objectToMap(legacy, top);
@@ -575,7 +581,19 @@ namespace
         packer.pack_bin(static_cast<uint32_t>(blob.size()));
         packer.pack_bin_body(blob.data(), static_cast<uint32_t>(blob.size()));
         packer.pack(std::string("library"));
-        packer.pack(top.at("library"));
+        if(singleTree)
+        {
+            int64_t lowest = table.at(0);
+            for(size_t i = 0; i < table.size(); i += 3)
+                lowest = std::min(lowest, table[i]);
+            packer.pack_map(2);
+            packer.pack(std::string("type"));
+            packer.pack(std::string("Single"));
+            packer.pack(std::string("index"));
+            packer.pack(static_cast<int>(lowest));
+        }
+        else
+            packer.pack(top.at("library"));
 
         return std::vector<uint8_t>(out.data(), out.data() + out.size());
     }
@@ -743,6 +761,7 @@ namespace
     struct PlaceholderIndexedShardTest : public TempDirTest
     {
         std::vector<int> shardIndices;
+        bool             singleTree = false;
 
         fs::path masterPath() const
         {
@@ -766,7 +785,7 @@ namespace
             in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 
             auto handle  = msgpack::unpack(bytes.data(), bytes.size());
-            auto indexed = toIndexed(handle.get());
+            auto indexed = toIndexed(handle.get(), singleTree);
             if(indexed.empty())
                 return false;
 
@@ -853,6 +872,71 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     // selects through the tree and re-fetches by index from getting two.
     auto viaCache = master->solutionSources.begin()->second->get(index);
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
+}
+
+// H2: a cold placeholder reached from several threads at once. Every caller
+// must come back with the loaded shard's solution, so none may see the tree
+// before the loading thread has finished publishing the shard. Each round uses
+// a freshly loaded, still-cold placeholder.
+TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsAllSeeTheLoadedShard)
+{
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    constexpr int kRounds  = 25;
+    constexpr int kThreads = 8;
+
+    const int      index    = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU   device   = TensileLite::testing::makeDevice(TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto     problem  = TensileLite::testing::dummyProblem();
+    int            failures = 0;
+
+    for(int round = 0; round < kRounds; ++round)
+    {
+        auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(
+            masterPath().string());
+        ASSERT_NE(lib, nullptr);
+        auto* master = dynamic_cast<Master*>(lib.get());
+        ASSERT_NE(master, nullptr);
+        ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+        auto* placeholder = placeholderOf(master);
+        ASSERT_NE(placeholder, nullptr);
+
+        if(round == 0)
+        {
+            // Control: a lone caller resolves the index, so a null below is the
+            // race and not the problem or hardware chosen here.
+            ASSERT_NE(placeholder->getSolutionByIndex(problem, device, index), nullptr)
+                << "single-threaded lookup failed; test inputs are unusable";
+            continue;
+        }
+
+        std::atomic<bool> go{false};
+        std::atomic<int>  bad{0};
+        std::vector<std::thread> threads;
+        for(int t = 0; t < kThreads; ++t)
+            threads.emplace_back([&] {
+                while(!go.load())
+                    std::this_thread::yield();
+                try
+                {
+                    if(!placeholder->getSolutionByIndex(problem, device, index))
+                        ++bad;
+                }
+                catch(...)
+                {
+                    ++bad;
+                }
+            });
+        go = true;
+        for(auto& th : threads)
+            th.join();
+        failures += bad.load();
+    }
+
+    EXPECT_EQ(failures, 0) << "threads saw a half-loaded placeholder";
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

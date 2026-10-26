@@ -156,7 +156,6 @@ namespace TensileLite
         mutable SolutionMap<MySolution>                         solutions;
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
-        mutable std::atomic<bool>                               lastFindTopRetAll = false;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -544,9 +543,9 @@ namespace TensileLite
             return library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             if(Debug::Instance().printSolutionSelectionTime())
             {
@@ -555,22 +554,13 @@ namespace TensileLite
                 auto   end    = std::chrono::steady_clock::now();
                 double time   = std::chrono::duration<double, std::micro>(end - start).count();
                 std::cout << "Solution selection time: " << time << " us" << std::endl;
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
 
                 return result;
             }
             else
             {
-                const auto& result = library->findTopSolutions(problem, hardware, numSolutions);
-                lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
-
-                return result;
+                return library->findTopSolutions(problem, hardware, numSolutions);
             }
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
