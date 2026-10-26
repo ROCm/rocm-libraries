@@ -300,7 +300,7 @@ for each thread's coalesced output chunk:
 - It is then held to the gridDim.z budget and the i32 workspace.
 - It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and on pointwise or 3-D problems.
 
-The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
+The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `kernels.conv.engine_bridge.lower_conv_implicit_gemm` resolves `-1` first.
 
 Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23) and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
 
@@ -1186,11 +1186,11 @@ builds the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride
 1/2 and offers a problem only the widths `tile_w_candidates` would pick for it.
 
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
-`cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
+`library/cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 33+)
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
-`rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
+`rocke_library_engine.conv_direct_nongrouped_*` / `kernels.conv.engine_bridge.lower_conv_direct_nongrouped`.
 
 ## Stem Dgrad on WMMA (gfx1250)
 
@@ -1232,13 +1232,13 @@ are `DGRAD_PATCH_KNOBS` over `DGRAD_PATCH_SIZES` and `DGRAD_SMALLC_KNOBS` over
 `DGRAD_SMALLC_STEMS` (`kernels/conv/direct_aot_jobs.py`, variants
 `direct_dgrad_patch_wmma` / `direct_dgrad_smallc_wmma`).
 
-C++ engine twins: `cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.cpp`
+C++ engine twins: `library/cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.cpp`
 (shared staging in `instance_conv_dgrad_stem_wmma_internal.hpp`); byte-identity
 gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
 (llvm23 lane), Python IR golden `conv_dgrad_{patch,smallc}_wmma/*` in
 `tests/instances/rocke_ir_parity_harness.py`, bindings
-`rocke_engine.conv_dgrad_{patch,smallc}_wmma_*` /
-`rocke.core.backend.lower_conv_dgrad_{patch,smallc}_wmma`.
+`rocke_library_engine.conv_dgrad_{patch,smallc}_wmma_*` /
+`kernels.conv.engine_bridge.lower_conv_dgrad_{patch,smallc}_wmma`.
 
 ## Direct Dgrad on WMMA (gfx1250)
 
@@ -1629,7 +1629,7 @@ in fp32.
   The LDS-DMA kernels (tiled, `DwWgradLdsSpec`, gather) also require a wave64
   target with 16-byte `buffer_load ... lds` (`async_lds_max_dwords >= 4`).
 
-C++ engine twins: `rocke_build_direct_wgrad_tiled` (`cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
+C++ engine twins: `rocke_build_direct_wgrad_tiled` (`library/cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
 also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_dw_wgrad.cpp`), `rocke_build_direct_wgrad_gather`
 (`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`

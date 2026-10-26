@@ -8,7 +8,7 @@ validator gates and their agreement between ``validate()``,
 mode x reduction x arch x groups matrix, the AOT kernarg ABI and launch values
 (the partition block), the host-side launch plan (grid, workspace layout,
 determinism) against the C port, and byte-identical lowering between the two
-engines through the ``rocke_engine`` binding.
+engines through the ``rocke_library_engine`` binding.
 
 GPU numerics live in ``test_conv_wgrad_streamk_gpu.py``.
 """
@@ -65,11 +65,13 @@ def _spec(problem=_DENSE, *, dtype_d="fp16", edge=32, **kw) -> WgradConvSpec:
 
 
 def _engine():
-    """The ``rocke_engine`` binding, or skip the calling test."""
-    from rocke.core.backend import BackendError, _import_engine
+    """The ``rocke_library_engine`` binding, or skip the calling test."""
+    from rocke.core.backend import BackendError, import_engine
+
+    from kernels.conv.engine_bridge import ENGINE_MODULE
 
     try:
-        return _import_engine()
+        return import_engine(ENGINE_MODULE)
     except BackendError as e:
         raise unittest.SkipTest(f"C++ engine not importable: {e}") from None
 

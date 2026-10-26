@@ -333,7 +333,7 @@ class ConvKOuterFragmentReader:
     Shared by the wgrad and dgrad instances -- two families plus a lane-map
     that is easy to get subtly wrong is exactly the placement rule for
     ``helpers/``. Mirrors ``rocke_conv_tr_frag`` in the C++ engine
-    (``cpp/instances/common/conv_implicit_gemm_conv_compute_phase.cpp``);
+    (``library/cpp/instances/common/conv_implicit_gemm_conv_compute_phase.cpp``);
     the two must stay byte-identical, so keep the emission order below in
     lockstep with it.
 

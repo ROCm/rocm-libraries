@@ -137,14 +137,14 @@ class TestSmallSpecs(unittest.TestCase):
         gate only covers the IR of specs both engines build)."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
             probe_problem,
         )
         from kernels.conv.direct_variants import make_direct_spec
-        from rocke.core.backend import (
+        from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_wmma_spec_to_dict,
             conv_direct_fwd_smallk_wmma_spec_to_dict,
         )
@@ -230,8 +230,8 @@ class TestSmallSpecs(unittest.TestCase):
         missing, mistyped or partial problem raises."""
         import pytest
 
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import (
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_wmma_spec_to_dict,
             conv_direct_fwd_smallk_wmma_spec_to_dict,
         )

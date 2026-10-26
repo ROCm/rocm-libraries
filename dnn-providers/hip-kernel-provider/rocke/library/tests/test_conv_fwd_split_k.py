@@ -605,7 +605,7 @@ class TestSplitKAutoBuild(unittest.TestCase):
         )
 
     def test_the_backend_resolves_auto_for_the_cpp_engine(self):
-        from rocke.core import backend
+        from kernels.conv import engine_bridge as backend
 
         seen = []
 
@@ -613,8 +613,8 @@ class TestSplitKAutoBuild(unittest.TestCase):
             seen.append(spec.split_k)
 
         with mock.patch.object(
-            backend, "_lower_family", _fake_lower_family
-        ), mock.patch.object(backend, "_import_engine", lambda: None):
+            backend, "lower_family", _fake_lower_family
+        ), mock.patch.object(backend, "import_engine", lambda module: None):
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx1250")
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx950")
         self.assertEqual(seen, [4, 1])
@@ -667,7 +667,7 @@ class TestSplitKSpecDict(unittest.TestCase):
     """The Python-to-C++ spec dict carries the split-K fields as they are."""
 
     def test_fields_are_forwarded(self):
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         d = conv_implicit_gemm_spec_to_dict(
             _spec(split_k=2, split_k_cluster=4, pipeline="mem", num_load_waves=3)
@@ -679,7 +679,7 @@ class TestSplitKSpecDict(unittest.TestCase):
     def test_a_spec_without_them_is_rejected(self):
         # A spec object missing a field is malformed: it must not be read as
         # an unsplit, cluster-free kernel with four load waves.
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         spec = _spec(split_k=2)
         for missing in ("split_k", "split_k_cluster", "num_load_waves"):
@@ -697,10 +697,10 @@ class TestSplitKSpecDict(unittest.TestCase):
 
 def _engine_or_skip(case):
     try:
-        import rocke_engine  # type: ignore
+        import rocke_library_engine  # type: ignore
     except ImportError:
-        case.skipTest("rocke_engine (the C++ engine extension) is not built")
-    return rocke_engine
+        case.skipTest("rocke_library_engine (the conv C++ extension) is not built")
+    return rocke_library_engine
 
 
 class TestEngineAgreement(unittest.TestCase):
@@ -710,7 +710,7 @@ class TestEngineAgreement(unittest.TestCase):
     def test_split_k_with_a_fused_epilogue_is_rejected_by_both(self):
         _engine_or_skip(self)
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         for epi in (
             ConvAccumulatorEpilogue(bias=1.0),
@@ -726,7 +726,7 @@ class TestEngineAgreement(unittest.TestCase):
     def test_unsplit_fused_epilogue_lowers_identically(self):
         _engine_or_skip(self)
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
-        from rocke.core.backend import lower_conv_implicit_gemm
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
 
         # fp16: the C++ conv implicit-GEMM builder stages A/B in LDS as f16
         # whatever the dtype (a separate, pre-existing mirror gap), so bf16
@@ -773,16 +773,20 @@ class TestSplitKReduceEngine(unittest.TestCase):
 
     def test_overlong_name_is_an_error_not_a_stale_builder(self):
         try:
-            import rocke_engine  # type: ignore
+            import rocke_library_engine  # type: ignore
         except ImportError:
-            self.skipTest("rocke_engine (the C++ engine extension) is not built")
+            self.skipTest("rocke_library_engine (the conv C++ extension) is not built")
         spec = dict(dtype_d="bf16", vec=4, name="x" * 300)
         with self.assertRaisesRegex(Exception, "kernel name does not fit"):
-            rocke_engine.conv_fwd_split_k_reduce_lower_llvm(spec, arch="gfx1250")
+            rocke_library_engine.conv_fwd_split_k_reduce_lower_llvm(
+                spec, arch="gfx1250"
+            )
         with self.assertRaisesRegex(Exception, "kernel name does not fit"):
-            rocke_engine.conv_fwd_split_k_reduce_serialize_ir(spec, arch="gfx1250")
+            rocke_library_engine.conv_fwd_split_k_reduce_serialize_ir(
+                spec, arch="gfx1250"
+            )
         # A name that fits still builds.
-        ll = rocke_engine.conv_fwd_split_k_reduce_lower_llvm(
+        ll = rocke_library_engine.conv_fwd_split_k_reduce_lower_llvm(
             dict(dtype_d="bf16", vec=4), arch="gfx1250"
         )
         self.assertIn("conv_fwd_splitk_reduce", ll)

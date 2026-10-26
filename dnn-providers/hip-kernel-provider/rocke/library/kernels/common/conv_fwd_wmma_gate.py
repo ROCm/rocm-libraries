@@ -34,7 +34,7 @@ What each family reads from here:
 The other shape rules of each family stay in its own ``*_reason``.
 
 The C++ engine mirrors this module in
-``platform/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
+``library/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
 in the same order and the same rejection messages.
 """
 

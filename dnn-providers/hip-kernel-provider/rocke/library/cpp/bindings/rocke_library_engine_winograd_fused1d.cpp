@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * bindings/rocke_engine_winograd_fused1d.cpp -- bindings of the fused 1-D
+ * library/cpp/bindings/rocke_library_engine_winograd_fused1d.cpp -- bindings of the fused 1-D
  * Winograd forward family (see winograd_glue.hpp). Registered via
  * register_winograd_fused1d(), adding:
  *   conv_winograd_fused_1d_wmma_lower_llvm(spec, arch)
@@ -70,13 +70,13 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     err[0] = '\0';
     rocke_status_t st = rocke_winograd_fused_1d_lower_to_llvm(
         &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
-    return take_lowered(st, ll, err, "rocke_engine.conv_winograd_fused_1d_wmma_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_winograd_fused_1d_wmma_lower_llvm");
 }
 
 std::string serialize_ir(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
-    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_winograd_fused_1d_wmma_serialize_ir",
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_winograd_fused_1d_wmma_serialize_ir",
                                 rocke_winograd_fused_1d_spec_t,
                                 fu_build_spec,
                                 rocke_build_winograd_fused_1d_new(&b, &s, arch.c_str()));
@@ -85,7 +85,7 @@ std::string serialize_ir(const py::dict& d, const std::string& arch)
 std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
-    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_winograd_fused_1d_wmma_verify",
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_winograd_fused_1d_wmma_verify",
                              rocke_winograd_fused_1d_spec_t,
                              fu_build_spec,
                              rocke_build_winograd_fused_1d_new(&b, &s, arch.c_str()));

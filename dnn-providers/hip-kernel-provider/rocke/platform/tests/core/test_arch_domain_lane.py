@@ -649,6 +649,13 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
 
 
 BINDINGS = PLATFORM / "cpp" / "bindings"
+# Library families bind from library/cpp/bindings (rocke_library_engine); the
+# same rules hold there. Scanned when the sibling tree is present.
+BINDING_SOURCES = [
+    d
+    for d in (BINDINGS, PLATFORM.parent / "library" / "cpp" / "bindings")
+    if d.is_dir()
+]
 
 
 @_needs_sources
@@ -666,7 +673,8 @@ def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
     """
     offenders = [
         f"{path.name}:{n}"
-        for path in sorted(BINDINGS.glob("*.cpp"))
+        for bindings in BINDING_SOURCES
+        for path in sorted(bindings.glob("*.cpp"))
         for n, line in enumerate(path.read_text().splitlines(), 1)
         if "rocke_lower_kernel_to_llvm(" in line
     ]
@@ -690,7 +698,7 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
     call = re.compile(r"rocke_\w*to_llvm\w*\(")
     handled = re.compile(r"take_lowered\(|take_ll\(|throw_if_arch_domain\(")
     offenders = []
-    for path in sorted(BINDINGS.glob("*.cpp")):
+    for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.cpp")):
         text = path.read_text()
         for m in call.finditer(text):
             end = text.find("\n}\n", m.end())

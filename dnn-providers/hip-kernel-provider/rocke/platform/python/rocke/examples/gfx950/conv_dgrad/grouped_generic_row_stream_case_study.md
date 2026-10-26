@@ -13,7 +13,7 @@ the generic row stream the cached variant `direct_grouped_dgrad_fused` runs
 over the transposed problem for the grouped dgrad shapes it covers (see
 [`dgrad_fused_weights_case_study.md`](dgrad_fused_weights_case_study.md)).
 C++ mirror: `rocke_build_direct_conv`
-(`platform/cpp/instances/common/conv_direct_grouped_build_generic.cpp`).
+(`library/cpp/instances/common/conv_direct_grouped_build_generic.cpp`).
 
 **Knobs.** `prefetch_rows`, `lds_only_sync`, `waves_m`, `lds_pad`,
 `stage_out`, `xcd_tiles`, and the AOT-only `row_guard` / `row_exit`. Their

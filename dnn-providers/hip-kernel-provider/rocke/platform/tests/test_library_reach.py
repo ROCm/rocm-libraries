@@ -38,7 +38,6 @@ ALLOWED = {
     "dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/extract_rocke_isa.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/profile_register_usage.py": 2,
-    "python/rocke/core/backend.py": 6,
     "python/rocke/core/lower_cktile.py": 2,
     "python/rocke/examples/common/hip_lowering_parity.py": 4,
     "python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py": 5,
