@@ -135,6 +135,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
+    static constexpr bool kUsesGlobalCausalOrder       = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
@@ -419,6 +420,36 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         });
     }
 
+    // (row, col) of the lane's element whose distributed index is zero.
+    template <typename Tensor>
+    CK_TILE_DEVICE static auto TileLaneOrigin()
+    {
+        constexpr auto dstr = typename Tensor::StaticTileDistribution{};
+        return make_tensor_adaptor_coordinate(
+                   dstr.get_ps_ys_to_xs_adaptor(),
+                   container_concat(get_partition_index(dstr),
+                                    array<index_t, dstr.get_num_of_dimension_y()>{}))
+            .get_bottom_index();
+    }
+
+    // Sets the elements whose constant (row, col) part, the lane part excluded, passes pred, so
+    // each element costs compares against per-lane thresholds.
+    template <typename Tensor, typename DataType, typename Predicate>
+    CK_TILE_DEVICE static void SetTileIfConstPart(Tensor& tensor, DataType value, Predicate pred)
+    {
+        constexpr auto dstr  = typename Tensor::StaticTileDistribution{};
+        constexpr auto spans = Tensor::get_distributed_spans();
+        using PartitionIndex = remove_cvref_t<decltype(get_partition_index(dstr))>;
+        sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                constexpr auto idx = make_tuple(idx0, idx1);
+                const auto x = get_x_indices_from_distributed_indices(dstr, idx, PartitionIndex{});
+                if(pred(x.at(number<0>{}), x.at(number<1>{})))
+                    tensor(idx) = value;
+            });
+        });
+    }
+
     // Byte i of a WMMA scale operand covers K elements [32i, 32i + 32) of the lane's row.
     CK_TILE_DEVICE static int32_t LoadMxRowScale(const e8m0_t* ptr, index_t row, index_t stride)
     {
@@ -691,6 +722,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
         auto s_acc              = SaccBlockTileType{};
+        // Band masks compare a per-element constant against a per-lane threshold.
+        constexpr bool kBandMask =
+            std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
+            !Policy::template UseCountdownLoop<Problem>();
+        [[maybe_unused]] const auto s_lane_origin = [] {
+            if constexpr(kBandMask)
+                return TileLaneOrigin<SaccBlockTileType>();
+            else
+                return 0;
+        }();
 
         const auto f_max        = [](auto e0, auto e1) { return max(e0, e1); };
         using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
@@ -826,6 +867,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                              bias_dram_block_window_tmp.get_window_lengths(),
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
+        // The next KV tile's bias is in flight while the current tile is scored.
+        [[maybe_unused]] auto bias_next = [&] {
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                return load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
+            else
+                return 0;
+        }();
 
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
@@ -1358,7 +1406,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 {
                     if constexpr(!kKDescaleWithScaleS)
                         tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                    const auto bias_tile = load_tile(bias_dram_window);
+                    const auto bias_tile = bias_next;
                     tile_elementwise_inout(
                         [](auto& x, const auto& y) {
                             x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
@@ -1450,6 +1498,52 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                             });
                     }
                 }
+                else if constexpr(kBandMask)
+                {
+                    const auto ninf                     = -numeric<SMPLComputeDataType>::infinity();
+                    const index_t q0                    = q_origin.at(I0);
+                    const index_t k0                    = k_origin.at(I0);
+                    const index_t lr                    = s_lane_origin.at(I0);
+                    const index_t lc                    = s_lane_origin.at(I1);
+                    [[maybe_unused]] const index_t diag = k0 - q0;
+                    // Sink keys of in-range rows escape every bound but the right one.
+                    [[maybe_unused]] const index_t ts =
+                        (mask.GetWindowY() < mask.GetYTotal() ? mask.GetSink() : 0) - 1 - k0 - lc;
+                    [[maybe_unused]] const index_t tr = mask.GetXTotal() - 1 - q0 - lr;
+                    auto mask_if                      = [&](auto out) {
+                        if constexpr(kHasSink && FmhaMask::IsMasking)
+                            SetTileIfConstPart(s_acc, ninf, [&](index_t r, index_t c) {
+                                return out(r, c) && !(c <= ts && r <= tr);
+                            });
+                        else
+                            SetTileIfConstPart(s_acc, ninf, out);
+                    };
+                    // Also covers the tile-aligned split end, which only adds out-of-window keys.
+                    if(k0 + kN0 > mask.GetXTotal())
+                    {
+                        const index_t t = mask.GetXTotal() - 1 - k0 - lc;
+                        mask_if([&](index_t, index_t c) { return c > t; });
+                    }
+                    if constexpr(FmhaMask::IsMasking)
+                    {
+                        if(diag + (kN0 - 1) >= mask.GetWindowX())
+                        {
+                            const index_t t = mask.GetWindowX() - 1 - diag - (lc - lr);
+                            SetTileIfConstPart(
+                                s_acc, ninf, [&](index_t r, index_t c) { return c - r > t; });
+                        }
+                        if(diag - (kM0 - 1) <= -mask.GetWindowY())
+                        {
+                            const index_t t = 1 - mask.GetWindowY() - diag - (lc - lr);
+                            mask_if([&](index_t r, index_t c) { return c - r < t; });
+                        }
+                        if(q0 + kM0 > mask.GetYTotal())
+                        {
+                            const index_t t = mask.GetYTotal() - 1 - q0 - lr;
+                            mask_if([&](index_t r, index_t) { return r > t; });
+                        }
+                    }
+                }
                 else
                 {
                     const bool needs_tail_predicate = k_origin.at(I0) + kN0 > logical_seqlen_k_end;
@@ -1492,6 +1586,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                 }
                 move_tile_window(bias_dram_window, {0, kN0});
+                // Unguarded loads issue together; out-of-range keys are masked to -inf.
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                    bias_next = load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
             };
 
             auto run_softmax = [&] {

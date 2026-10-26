@@ -166,6 +166,17 @@ static inline constexpr bool uses_fixed_segmented_lds_arena_v = []() {
         return false;
 }();
 
+template <typename T>
+using has_global_causal_order = decltype(T::kUsesGlobalCausalOrder);
+
+template <typename T>
+static inline constexpr bool uses_global_causal_order_v = []() {
+    if constexpr(is_detected<has_global_causal_order, T>::value)
+        return static_cast<bool>(T::kUsesGlobalCausalOrder);
+    else
+        return false;
+}();
+
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -1746,6 +1757,28 @@ struct FmhaFwdKernel
             {
                 const index_t num_tile_n1 =
                     ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
+                if constexpr(kHasMask && !kIsGroupMode && !kHasDropout &&
+                             detail::uses_global_causal_order_v<FmhaPipeline>)
+                {
+                    // Square causal: visit the longest tiles across all batches and heads first.
+                    if(kargs.seqlen_q == kargs.seqlen_k && kargs.window_size_left < 0 &&
+                       kargs.window_size_right == 0 && num_tile_n1 == 1)
+                    {
+                        const index_t num_head = gridDim.x;
+                        const index_t num_bh   = num_head * static_cast<index_t>(gridDim.z);
+                        const index_t linear_id =
+                            blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+                        const index_t rank    = linear_id / num_bh;
+                        const index_t bh      = linear_id - rank * num_bh;
+                        const index_t i_batch = bh / num_head;
+                        // The divisions are lowered to VALU; keep the indices in SGPRs.
+                        return ck_tile::make_tuple(
+                            amd_wave_read_first_lane(static_cast<index_t>(gridDim.y) - 1 - rank),
+                            index_t{0},
+                            amd_wave_read_first_lane(bh - i_batch * num_head),
+                            amd_wave_read_first_lane(i_batch));
+                    }
+                }
                 if constexpr(kHasMask && !kIsGroupMode && !kHasDropout && kUseBatchLocalCausalOrder)
                 {
                     // Square causal tiles have monotonically increasing work along Q.
