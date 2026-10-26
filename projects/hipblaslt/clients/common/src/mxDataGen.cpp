@@ -446,6 +446,18 @@ std::vector<float> generateData(T                           dgen,
                   ? scaleBytes.size() / kBlocks
                   : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
 
+        // The grid has to describe the whole buffer. The swizzle checks this too, but
+        // the transpose below indexes mnExtent * kBlocks entries and would run off both
+        // vectors first. A free-dim contiguous operand whose K is not a multiple of the
+        // block size lands here: the generator blocks along the contiguous dimension, so
+        // its scale count does not factor into the K blocks the swizzle expects.
+        if(mnExtent * kBlocks != scaleBytes.size())
+            throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
+                                     + std::to_string(mnExtent) + " x "
+                                     + std::to_string(kBlocks) + " covers "
+                                     + std::to_string(mnExtent * kBlocks) + " of "
+                                     + std::to_string(scaleBytes.size()) + " scales");
+
         // The swizzle reads its input as [MN][K block]. A K-contiguous operand's
         // natural scales are already in that order; a free-dim contiguous one's
         // are [K block][MN] and must be transposed first.
