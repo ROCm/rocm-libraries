@@ -309,6 +309,13 @@ class TestGfx125D192Codegen(unittest.TestCase):
             "vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
             "ntrload_nsink_gfx125.cpp"
         )
+        fp8_sched_source = (
+            "fmha_fwd_d128_fp8bf16_batch_b128x128x128x128x128x128_"
+            "r4x1x1_r4x1x1_w16x16x128_w16x16x128_o2_qr_tdm_fp8_sched_"
+            "vr_pssk_nlogits_nbias_nmask_nlse_ndropout_nskip_pertensor_"
+            "ntrload_nsink_gfx125.cpp"
+        )
+        fp8_tdm_source = fp8_sched_source.replace("_qr_tdm_fp8_sched_", "_qr_tdm_")
         sources = (
             _D192_BATCH_NMASK_FILENAME,
             _D192_BATCH_N128_FILENAME,
@@ -317,6 +324,11 @@ class TestGfx125D192Codegen(unittest.TestCase):
             _D192_BATCH_MASK_FILENAME,
             _D192_GROUP_NMASK_FILENAME,
             d256_source,
+            fp8_sched_source,
+            fp8_sched_source.replace("_fp8bf16_", "_mxfp8_").replace(
+                "_pertensor_", "_mx_"
+            ),
+            fp8_tdm_source,
         )
 
         def configure():
@@ -365,7 +377,7 @@ endforeach()
             self.assertNotIn("-wwm-regalloc=fast", commands[source])
             self.assertEqual(
                 "-amdgpu-expert-scheduling-mode" in commands[source],
-                source != d256_source,
+                source not in (d256_source, fp8_tdm_source),
             )
 
     def test_receipts_emit_d192_sched_and_fallback_tiles(self):
@@ -1275,6 +1287,222 @@ class TestGfx125V128Codegen(unittest.TestCase):
             for receipt, count in ((0, 8), (100, 4), (200, 4), (600, 8)):
                 with self.subTest(dtype=dtype, receipt=receipt):
                     self.check_d128_emission(dtype, receipt, count)
+
+    def test_fp8_sched_dispatched_before_qr_tdm(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], "*d128_fp8bf16_batch*", 0, [128], "simplified"
+        )
+        self.assertTrue(any(k.F_pipeline.tag == "qr_tdm_fp8_sched" for k in kernels))
+        api = pool.render("test")
+        self.assertLess(
+            api.rindex("QRKSVS_TDM_SCHED_FP8"),
+            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+        )
+        # No seqlen_q condition gates qr_tdm_fp8_sched.
+        for k in kernels:
+            if k.F_pipeline.tag == "qr_tdm_fp8_sched":
+                self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
+        self.assertIn("a.block_scale_size_q > 0 && a.block_scale_size_kv > 0", api)
+        self.assertIn("a.block_scale_size_q % 128 == 0", api)
+        self.assertIn("a.block_scale_size_kv % 32 == 0", api)
+        # The FP8 sched tile runs two workgroups per CU, one with an elementwise bias.
+        for k in kernels:
+            if k.F_pipeline.tag == "qr_tdm_fp8_sched":
+                self.assertEqual(
+                    k.F_tile.F_occupancy, 1 if k.F_pipeline.F_bias == "bias" else 2
+                )
+        # BLOCKSCALE qr_tdm and qr_tdm_fp8_sched share one kv-scale row via the lcm.
+        self.assertIn("ck_tile::lcm(", pool.render_block_scale_size_kv())
+
+    def test_mxfp8_emits_only_fp8_sched(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], "*d128_mxfp8*", 0, [128], "simplified"
+        )
+        self.assertTrue(kernels)
+        self.assertEqual({k.F_mode for k in kernels}, {"batch", "group"})
+        for k in kernels:
+            with self.subTest(kernel=k.name):
+                self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
+                self.assertEqual(k.F_pipeline.F_vlayout, "row")
+                self.assertEqual(k.F_pipeline.F_qscale, "mx")
+                self.assertEqual(k.F_tile.F_occupancy, 2)
+        api = pool.render("test")
+        self.assertIn("reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0", api)
+        self.assertIn("a.batch_stride_k_descale % 4 == 0", api)
+        # No seqlen_q condition gates qr_tdm_fp8_sched.
+        for k in kernels:
+            self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
+
+    def test_mxfp8bf16_mirrors_mxfp8(self):
+        key = lambda k: (
+            k.F_mode,
+            k.F_tile.name,
+            k.F_pipeline.tag,
+            k.F_pipeline.F_qscale,
+            k.F_pipeline.F_mask,
+            k.F_pipeline.F_lse,
+            k.F_pipeline.F_sink,
+            k.F_pipeline.F_bias,
+        )
+        traits = {}
+        for dtype in ("mxfp8", "mxfp8bf16"):
+            pool, kernels = get_fwd_blobs(
+                ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+            )
+            self.assertTrue(all(k.F_dtype == dtype for k in kernels))
+            traits[dtype] = Counter(key(k) for k in kernels)
+            if dtype == "mxfp8bf16":
+                self.assertIn('t.data_type.compare("mxfp8bf16")', pool.render("test"))
+                self.assertIn("FmhaFwdMxFp8Bf16", kernels[0].render())
+        # Only the O type differs: same pipelines, tiles and feature variants.
+        self.assertTrue(traits["mxfp8bf16"])
+        self.assertEqual(traits["mxfp8bf16"], traits["mxfp8"])
+
+    def test_fp8_and_fp8fp32_outputs_emit_fp8_sched(self):
+        for dtype in ("fp8", "fp8fp32"):
+            with self.subTest(dtype=dtype):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
+                )
+                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                self.assertEqual(
+                    sorted({k.F_pipeline.F_qscale for k in sched}),
+                    ["blockscale", "no", "perhead", "pertensor"],
+                )
+                for k in sched:
+                    self.assertEqual(k.F_dtype, dtype)
+                    self.assertEqual(
+                        k.F_tile.F_occupancy, 1 if k.F_pipeline.F_bias == "bias" else 2
+                    )
+                api = pool.render("test")
+                self.assertLess(
+                    api.rindex("QRKSVS_TDM_SCHED_FP8"),
+                    api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+                )
+
+    def test_fp8_sched_emits_lse_variants(self):
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+            with self.subTest(dtype=dtype):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
+                )
+                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                per_lse = 2 if dtype == "mxfp8" else 16
+                self.assertEqual(
+                    Counter((k.F_pipeline.F_mask, k.F_pipeline.F_lse) for k in sched),
+                    Counter(
+                        {
+                            (mask, lse): per_lse
+                            for mask in ("s_no", "s_mask")
+                            for lse in ("f", "t")
+                        }
+                    ),
+                )
+
+    def test_fp8_sched_emits_mask_variants(self):
+        for mask_impl, masks in (
+            ("simplified", ("s_no", "s_mask")),
+            ("generic", ("no", "causal", "generic")),
+        ):
+            for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+                with self.subTest(dtype=dtype, mask_impl=mask_impl):
+                    pool, kernels = get_fwd_blobs(
+                        ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], mask_impl
+                    )
+                    sched = [
+                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
+                    ]
+                    per_mask = 4 if dtype == "mxfp8" else 32
+                    self.assertEqual(
+                        Counter(k.F_pipeline.F_mask for k in sched),
+                        Counter({mask: per_mask for mask in masks}),
+                    )
+                    if dtype != "mxfp8":
+                        api = pool.render("test")
+                        self.assertLess(
+                            api.rindex("QRKSVS_TDM_SCHED_FP8"),
+                            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+                        )
+
+    def test_fp8_sched_emits_sink_variants(self):
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+            with self.subTest(dtype=dtype):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+                )
+                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                key = lambda k: (
+                    k.F_mode,
+                    k.F_pipeline.F_qscale,
+                    k.F_pipeline.F_mask,
+                    k.F_pipeline.F_lse,
+                )
+                by_sink = {
+                    sink: Counter(key(k) for k in sched if k.F_pipeline.F_sink == sink)
+                    for sink in ("f", "t")
+                }
+                self.assertTrue(by_sink["t"])
+                self.assertEqual(by_sink["t"], by_sink["f"])
+                for k in sched:
+                    sink = k.F_pipeline.F_sink == "t"
+                    constraint = str(k.F_pipeline.F_constraint)
+                    # The virtual sink is compiled in exactly for the F_sink instances.
+                    self.assertIn(
+                        "FmhaTdmSchedFp8PolicyFor<fmha_pipeline_problem>, "
+                        + ("true" if sink else "false"),
+                        k.render(),
+                    )
+                    self.assertEqual("a.sink_ptr == nullptr" in constraint, not sink)
+                    # Mask sink tokens are handled in-kernel, MX included.
+                    self.assertNotIn("sink_size", constraint)
+
+    def test_fp8_sched_emits_elementwise_bias_variants(self):
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+            with self.subTest(dtype=dtype):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+                )
+                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                key = lambda k: (
+                    k.F_mode,
+                    k.F_pipeline.F_qscale,
+                    k.F_pipeline.F_mask,
+                    k.F_pipeline.F_lse,
+                    k.F_pipeline.F_sink,
+                )
+                by_bias = {
+                    bias: Counter(key(k) for k in sched if k.F_pipeline.F_bias == bias)
+                    for bias in ("no", "bias", "alibi")
+                }
+                self.assertTrue(by_bias["no"])
+                self.assertFalse(by_bias["alibi"])
+                # MX + bias is not implemented; the other dtypes mirror the no-bias set.
+                if dtype == "mxfp8":
+                    self.assertFalse(by_bias["bias"])
+                else:
+                    self.assertEqual(by_bias["bias"], by_bias["no"])
+                    self.assertIn("bias_enum::elementwise_bias", pool.render("test"))
+                for k in sched:
+                    if k.F_pipeline.F_bias == "bias":
+                        self.assertEqual(k.F_tile.F_occupancy, 1)
+                        self.assertIn("_o1_qr_tdm_fp8_sched_", k.name)
+
+    def test_fp8_sched_group_mode_mirrors_batch(self):
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+            with self.subTest(dtype=dtype):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+                )
+                traits = {
+                    mode: Counter(
+                        (k.F_pipeline.F_qscale, k.F_pipeline.F_mask, k.F_pipeline.F_lse)
+                        for k in kernels
+                        if k.F_pipeline.tag == "qr_tdm_fp8_sched" and k.F_mode == mode
+                    )
+                    for mode in ("batch", "group")
+                }
+                self.assertTrue(traits["group"])
+                self.assertEqual(traits["group"], traits["batch"])
 
     def check_d128_emission(self, dtype, receipt, count):
         pool, kernels = get_fwd_blobs(

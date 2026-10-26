@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -129,6 +131,15 @@ struct TestConfigs<FmhaFwdMxFp8>
     {
         return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 16);
     }
+};
+
+// MXFP8 with a BF16 O exists only on gfx125x qr_tdm_fp8_sched: d=128, row-major V.
+template <>
+struct TestConfigs<FmhaFwdMxFp8Bf16> : TestConfigs<FmhaFwdMxFp8>
+{
+    static constexpr auto HDimValues        = std::array{std::tuple{128, -1}};
+    static constexpr auto IsVRowmajorValues = std::array{true};
+    static constexpr bool def_is_v_rowmajor = true;
 };
 
 template <>
@@ -718,6 +729,20 @@ enum class sink_kind
 // sink phase is carried by the local-window tuples below instead.
 constexpr auto kStreamLlmMask = "b:-1,0,2";
 
+// On gfx125x the FP8 suites below must reach qr_tdm_fp8_sched, not fall back to another pipeline.
+void ExpectFp8Sched(const std::string& kernel_name, bool is_v_rowmajor)
+{
+    constexpr bool is_mx =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
+    constexpr bool is_fp8 =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16, FmhaFwdFp8Fp32>::value;
+    if(!ck_tile::is_gfx125_supported())
+        return;
+    // MX has no other gfx125x pipeline; FP8 prefers it at every seqlen_q.
+    if((is_mx && is_v_rowmajor) || is_fp8)
+        EXPECT_NE(kernel_name.find("qr_tdm_fp8_sched"), std::string::npos) << kernel_name;
+}
+
 class QuantScale
     : public TestWithParam<std::tuple<mode_enum,
                                       const char*,
@@ -806,6 +831,497 @@ TEST_P(QuantScale, DataTypeConfig)
         1,         // pack_gqa
         stream_config);
     CHECK_RESULT(result);
+}
+
+// Elementwise bias across the quantization scales, with the sink logit and sink tokens.
+class QuantScaleBias : public QuantScale
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleBias,
+    Combine(ModeValues,
+            QScaleValues,
+            // streamllm swaps in kStreamLlmMask; the t:128,30 rows carry the live sink tokens.
+            Values(sink_kind::none, sink_kind::gptoss, sink_kind::streamllm),
+            Values(std::tuple{2, 2, 1, 55, 256, "0"},   // GQA, seqlen_q << seqlen_k
+                   std::tuple{1, 3, -1, 300, 129, "0"}, // query/key tails
+                   std::tuple{2, 1, -1, 256, 256, "1"}, // causal
+                   std::tuple{1, 4, 2, 256, 256, "0"},  // GQA ratio 2 (bias turns Pack-GQA off)
+                   std::tuple{1, 2, 1, 1024, 1024, "t:128,30,128"},
+                   // num_sink_loop 4: the bias window jumps from the sink tokens mid-loop
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512"})));
+
+TEST_P(QuantScaleBias, DataTypeConfig)
+{
+    auto [mode, qscale, sink, dims_mask]                       = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    const std::string mask = sink == sink_kind::streamllm ? kStreamLlmMask : mask_str;
+    const int init_sink    = sink == sink_kind::gptoss ? 1 : 0;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "e",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        1,         // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, def_is_v_rowmajor);
+}
+
+// LSE across every quantization scale; MXFP8 adds row-major V, the layout gfx125x MX runs on.
+class QuantScaleLse
+    : public TestWithParam<
+          std::tuple<mode_enum, const char*, bool, std::tuple<int, int, int, int, int>>>
+{
+};
+
+static auto LseVRowmajorValues =
+    ValuesIn(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8> ? std::vector<bool>{false, true}
+                                                          : std::vector<bool>{def_is_v_rowmajor});
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QuantScaleLse,
+                         Combine(ModeValues,
+                                 QScaleValues,
+                                 LseVRowmajorValues,
+                                 Values(std::tuple{2, 2, 1, 55, 256},       // GQA, short query
+                                        std::tuple{1, 3, -1, 100, 51},      // seqlen_q > seqlen_k
+                                        std::tuple{1, 4, 2, 256, 256},      // tile multiple
+                                        std::tuple{2, 2, -1, 300, 1000}))); // query/key tails
+
+TEST_P(QuantScaleLse, DataTypeConfig)
+{
+    auto [mode, qscale, is_v_rowmajor, dims]         = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k] = dims;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        true,  // lse
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        "0",   // mask_str
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        1, // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+// Causal and sliding-window masks across every quantization scale, with and without LSE.
+class QuantScaleMask
+    : public TestWithParam<std::tuple<mode_enum,
+                                      const char*,
+                                      bool,
+                                      bool,
+                                      std::tuple<int, int, int, int, int, std::string>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleMask,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(false, true), // lse
+            LseVRowmajorValues,
+            Values(std::tuple{1, 2, 1, 300, 1000, "t"},       // causal top-left, key tail
+                   std::tuple{2, 2, -1, 1000, 300, "b"},      // causal bottom-right, empty rows
+                   std::tuple{1, 2, 1, 256, 256, "t:128,30"}, // sliding window, tile multiple
+                   std::tuple{1, 3, -1, 500, 700, "b:128,30"},
+                   std::tuple{2, 2, 1, 129, 161, "b:-1,64"})));
+
+TEST_P(QuantScaleMask, DataTypeConfig)
+{
+    auto [mode, qscale, lse, is_v_rowmajor, dims_mask]         = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        1, // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+// Variable-length groups with physical Q/K padding; the runner drops K padding for MX types.
+class QuantScaleGroupPad
+    : public TestWithParam<std::tuple<const char*, bool, std::string, std::tuple<int, int>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QuantScaleGroupPad,
+                         Combine(QScaleValues,
+                                 Values(false, true), // lse
+                                 Values("0", "t", "b:128,30"),
+                                 Values(std::tuple{2, 1}, std::tuple{4, 2})));
+
+TEST_P(QuantScaleGroupPad, DataTypeConfig)
+{
+    auto [qscale, lse, mask_str, heads] = GetParam();
+    auto [nhead, nhead_k]               = heads;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::group,
+        3, // batch
+        nhead,
+        nhead_k,
+        {100, 300, 129},
+        {161, 600, 129},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,               // seqlen_knew
+        {128, 384, 256}, // seqlen_qpads
+        {256, 640, 256}, // seqlen_kpads
+        {},              // q_eff_lens_per_batch
+        {},              // kv_eff_lens_per_batch
+        0,               // rotary_dim
+        true,            // i_perm
+        true,            // o_perm
+        0,               // scale_s
+        0,               // logits_soft_cap
+        true,            // is_v_rowmajor
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        1, // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, true);
+}
+
+// Per-head sink logit (init_sink) and mask sink tokens across every quantization scale and LSE.
+class QuantScaleSink
+    : public TestWithParam<std::tuple<mode_enum,
+                                      const char*,
+                                      bool,
+                                      bool,
+                                      std::tuple<int, int, int, int, int, std::string, int>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleSink,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(false, true), // lse
+            LseVRowmajorValues,
+            Values(std::tuple{2, 2, 1, 300, 1000, "0", 1},  // sink logit, GQA, key tail
+                   std::tuple{1, 3, -1, 1000, 256, "0", 1}, // sink logit, seqlen_q > seqlen_k
+                   std::tuple{1, 4, 2, 256, 256, "0", 1},   // sink logit, tile multiple
+                   std::tuple{2, 2, -1, 1000, 300, "b", 1}, // sink logit, empty rows
+                   // gpt-oss: sliding window plus sink logit, GQA ratio 4
+                   std::tuple{2, 4, 1, 1024, 1024, "t:127,0", 1},
+                   std::tuple{1, 2, -1, 700, 1300, "b:128,0", 1},
+                   // StreamingLLM sink tokens: prologue jump, num_sink_loop 4, key tail
+                   std::tuple{1, 2, 1, 1024, 1024, "t:128,30,128", 0},
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512", 1},
+                   std::tuple{1, 2, -1, 1000, 1300, "b:128,30,200", 1})));
+
+TEST_P(QuantScaleSink, DataTypeConfig)
+{
+    auto [mode, qscale, lse, is_v_rowmajor, dims_mask]                    = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, init_sink] = dims_mask;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        1,         // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+// Elementwise bias with LSE, including the early exit of empty rows next to a sink logit.
+class QuantScaleBiasLse : public QuantScale
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QuantScaleBiasLse,
+                         Combine(ModeValues,
+                                 QScaleValues,
+                                 Values(sink_kind::none, sink_kind::gptoss),
+                                 Values(std::tuple{1, 3, -1, 300, 129, "0"},  // tails
+                                        std::tuple{2, 2, -1, 1000, 300, "b"}, // early exit
+                                        std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512"})));
+
+TEST_P(QuantScaleBiasLse, DataTypeConfig)
+{
+    auto [mode, qscale, sink, dims_mask]                       = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        true,  // lse
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "e",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,                                 // do_validation
+        sink == sink_kind::gptoss ? 1 : 0, // init_sink_value
+        1,                                 // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, def_is_v_rowmajor);
+}
+
+// MX batch instances without LSE, mask or sink; every other MX sweep adds one of them.
+class QuantScaleMxBase
+    : public TestWithParam<std::tuple<bool, bool, std::tuple<int, int, int, int, int>>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(QuantScaleMxBase);
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleMxBase,
+    Combine(EnableTestIf(ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value),
+            LseVRowmajorValues,
+            Values(std::tuple{1, 2, -1, 128, 128},   // one tile
+                   std::tuple{2, 4, 2, 256, 256},    // GQA, tile multiple
+                   std::tuple{2, 3, 1, 300, 1000},   // query/key tails
+                   std::tuple{1, 2, -1, 1000, 161},  // seqlen_q > seqlen_k
+                   std::tuple{2, 2, -1, 17, 333}))); // short query
+
+TEST_P(QuantScaleMxBase, DataTypeConfig)
+{
+    auto [_, is_v_rowmajor, dims]                    = GetParam();
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k] = dims;
+
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        is_v_rowmajor,
+        false, // lse
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        "0",   // mask_str
+        "mx",
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        "3",  // init_method
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        1, // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_RESULT(result);
+    ExpectFp8Sched(kernel_name, is_v_rowmajor);
 }
 #endif
 
@@ -1780,8 +2296,11 @@ static std::vector<PaddingParam> BuildPaddingParams()
 {
     std::vector<PaddingParam> params;
 
-    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8Bf16, FmhaFwdMxFp8, FmhaFwdMxFp4>::
-                     value)
+    if constexpr(ck_tile::is_any_of<DataTypeConfig,
+                                    FmhaFwdFp8Bf16,
+                                    FmhaFwdMxFp8,
+                                    FmhaFwdMxFp8Bf16,
+                                    FmhaFwdMxFp4>::value)
     {
         return params;
     }
