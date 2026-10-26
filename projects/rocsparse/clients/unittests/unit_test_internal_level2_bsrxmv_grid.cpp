@@ -433,6 +433,56 @@ protected:
                               "grid-stride loop.";
     }
 
+    // A non-null bsr_mask_ptr with size_of_mask == 0 selects no block rows: the
+    // call must succeed and leave y untouched.
+    template <typename T>
+    void check_empty_mask(rocsparse_int block_dim)
+    {
+        const bsr_matrix<T> m = make_matrix<T>(block_dim, rocsparse_direction_row);
+
+        device_vector<rocsparse_int> d_row_ptr{m.row_ptr};
+        device_vector<rocsparse_int> d_end_ptr{m.end_ptr};
+        device_vector<rocsparse_int> d_col_ind{m.col_ind};
+        device_vector<T>             d_val{m.val};
+        device_vector<T>             d_x{m.x};
+        device_vector<T>             d_y{
+            std::vector<T>(static_cast<size_t>(m.mb) * block_dim, static_cast<T>(Y_INIT))};
+        device_vector<rocsparse_int> d_mask{std::vector<rocsparse_int>{0}};
+        ASSERT_TRUE(d_row_ptr.ptr && d_end_ptr.ptr && d_col_ind.ptr && d_val.ptr && d_x.ptr
+                    && d_y.ptr && d_mask.ptr);
+
+        MatDescr descr;
+        const T  alpha = static_cast<T>(ALPHA);
+        const T  beta  = static_cast<T>(BETA);
+
+        EXPECT_EQ(xbsrxmv(handle,
+                          rocsparse_direction_row,
+                          rocsparse_operation_none,
+                          0,
+                          m.mb,
+                          m.nb,
+                          m.nnzb,
+                          &alpha,
+                          descr.d,
+                          d_val,
+                          d_mask,
+                          d_row_ptr,
+                          d_end_ptr,
+                          d_col_ind,
+                          block_dim,
+                          d_x,
+                          &beta,
+                          d_y),
+                  rocsparse_status_success)
+            << "block_dim=" << block_dim;
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<T> got = to_host(d_y.ptr, d_y.n);
+        const std::vector<T> want(got.size(), static_cast<T>(Y_INIT));
+        const int64_t        bad = first_mismatch(got, want);
+        EXPECT_EQ(bad, -1) << "block_dim=" << block_dim << ": empty mask wrote y entry " << bad;
+    }
+
     // Block dims whose wave64 dispatch target is one of the files AISPARSE-702
     // fixes (5x5, 8x8, 16x16, 17_32). Safe to assert on every architecture.
     static std::vector<rocsparse_int> block_dims_in_scope()
@@ -549,5 +599,16 @@ TEST_F(BsrxmvGridClamp, double_block_dims_5_and_8_reach_the_templated_kernels)
             check_with_grid_x<double>(block_dim, rocsparse_direction_row, mask, grid_x);
             check_with_grid_x<double>(block_dim, rocsparse_direction_column, mask, grid_x);
         }
+    }
+}
+
+// Every launcher that sizes its grid as one block per (masked) block row,
+// including the general one (block_dim 7 and 40), with an empty mask. Double
+// reaches the templated 5x5 and 8x8 kernels on wave64.
+TEST_F(BsrxmvGridClamp, empty_mask_leaves_y_untouched)
+{
+    for(rocsparse_int block_dim : {5, 7, 8, 16, 17, 32, 40})
+    {
+        check_empty_mask<double>(block_dim);
     }
 }

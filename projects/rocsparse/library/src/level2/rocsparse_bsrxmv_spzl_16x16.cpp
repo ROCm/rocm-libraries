@@ -242,6 +242,12 @@ void rocsparse::bsrxmvn_16x16(rocsparse_handle     handle,
 
     const J size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
 
+    // An empty mask selects no block rows, and a zero-sized grid is an invalid launch.
+    if(size == 0)
+    {
+        return;
+    }
+
     // One block per block row, clamped to the device's grid.x limit. `size` is J
     // (instantiated as int64_t), so handing it to dim3 unclamped narrows it to
     // unsigned int and silently drops most of the matrix. The kernel grid-strides
