@@ -161,7 +161,12 @@ uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestinati
         return convertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
                                     signedDestination, options);
     } else if constexpr (std::is_integral_v<Value>) {
-        return convertIntegralToIntegerBits(source, bits, signedDestination, options);
+        // Standard integer comparisons exclude character types. Widen integral
+        // sources without changing their values or signedness.
+        using Integer = std::conditional_t<std::is_signed_v<Value>, int64_t, uint64_t>;
+        static_assert(std::numeric_limits<Value>::digits <= std::numeric_limits<Integer>::digits);
+        return convertIntegralToIntegerBits(static_cast<Integer>(source), bits, signedDestination,
+                                            options);
     } else if constexpr (std::is_floating_point_v<Value>) {
         return convertFloatingToIntegerBits(source, bits, signedDestination, options);
     } else {

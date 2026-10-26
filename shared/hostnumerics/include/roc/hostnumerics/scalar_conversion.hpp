@@ -50,17 +50,24 @@ Target convertScalarValue(Source source, const ScalarConversionOptions& options)
 }  // namespace roc::hostnumerics::detail
 
 namespace roc::hostnumerics {
-// Convert a native numeric value without encoding it. Callers must specify
-// integer rounding and overflow policies. For a non-Boolean integer destination T,
+// Convert a native numeric value without encoding it. Target is a non-reference
+// C++ arithmetic type (integers up to 64 bits) or std::complex with a float,
+// double, or long double component. Source may also be a C++ enum, which converts
+// using its underlying numeric value.
+// Callers must specify integer rounding and overflow policies. These apply only
+// to non-Boolean integer destinations. For such a destination T,
 // the result is cast<T>(f_T(g(x))): g rounds TowardZero or NearestEven, leaving
 // integral inputs unchanged; f_T applies Identity, Saturate, or ModuloWrap for T.
 // Identity leaves g(x) unchanged, Saturate clamps it to T's range, and ModuloWrap
 // reduces it modulo 2^N, where N is T's bit width, with a two's-complement
 // interpretation for signed T.
-// Identity requires g(x) to fit in T before the final cast. Input must not be NaN,
-// and infinity requires Saturate. Complex-to-real input must have a zero
-// imaginary component. Floating destinations use native casts, and Boolean
-// conversion tests for a nonzero value; both ignore the integer policies.
+// Identity requires g(x) to fit in T before the final cast. For non-Boolean
+// integer destinations, input must not be NaN, and infinity requires Saturate.
+// Conversion from complex to any non-complex Target, including bool, requires a
+// zero imaginary component. Complex destinations convert components separately.
+// Floating destinations use native casts: finite input must be within the
+// destination's finite range. Integer policies do not control floating overflow,
+// precision loss, or rounding. Boolean conversion tests for a nonzero value.
 // Policies must be valid when used. This function does not validate inputs or
 // report conversion failures.
 // For example, convertScalar<int8_t>(128.75, {IntegerRounding::TowardZero,
