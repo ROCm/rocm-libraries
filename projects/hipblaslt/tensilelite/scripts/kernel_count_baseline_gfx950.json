@@ -1,154 +1,278 @@
 {
   "benchmark_runs/fp32_tn.yaml": {
     "gfx950": {
-      "problem_0_s_TN_Batched_Bias": 160
+      "problem_0_s_TN_Batched_Bias": {
+        "actual": 2048,
+        "expected": 4096
+      }
     }
   },
   "client/rotate_mode0.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 2
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "client/rotate_mode1.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 2
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "comm/gfx950/fused_a2a.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched": 2
-    }
-  },
-  "ductile/gfx950/bf16_tn_dp.yaml": {
-    "gfx950": {
-      "problem_0_B_TN_Batched_Bias": 19177565847552
-    }
-  },
-  "ductile/gfx950/bf16_tn_multi_size_single_kernel.yaml": {
-    "gfx950": {
-      "problem_0_B_TN_Batched_Bias": 57532697542656
-    }
-  },
-  "ductile/gfx950/bf16_tn_streamK.yaml": {
-    "gfx950": {
-      "problem_0_B_TN_Batched_Bias": 57532697542656
-    }
-  },
-  "ductile/gfx950/f16_nt_multi_size.yaml": {
-    "gfx950": {
-      "problem_0_H_NT_Batched_Bias": 43149523156992
-    }
-  },
-  "ductile/gfx950/f32_tt_batched.yaml": {
-    "gfx950": {
-      "problem_0_S_TT_Batched_Bias": 31701690482688
-    }
-  },
-  "ductile/gfx950/f8bf16_tn_cms.yaml": {
-    "gfx950": {
-      "problem_0_F8_TN_Batched_Bias": 42268920643584
-    }
-  },
-  "ductile/gfx950/xf32_nn.yaml": {
-    "gfx950": {
-      "problem_0_S_NN_Batched_Bias": 63403380965376
+      "problem_0_b_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "exception/f16_cf32_nan.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched": 16
+      "problem_0_h_NN_Batched": {
+        "actual": 4,
+        "expected": 16
+      }
     }
   },
   "gemm/ag.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 12,
-      "problem_1_h_TN_Batched_Bias": 12,
-      "problem_2_h_NT_Batched_Bias": 12,
-      "problem_3_h_TT_Batched_Bias": 12
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_2_h_NT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_3_h_TT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      }
     }
   },
   "gemm/bf16_tn.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 4096
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 2048,
+        "expected": 4096
+      }
     }
   },
   "gemm/bf16_tn_predict.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 832
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 416,
+        "expected": 832
+      }
     }
   },
   "gemm/bufferLoadStore0.yaml": {
     "gfx950": {
-      "problem_0_C_NN_Batched": 3072,
-      "problem_10_D_NT_Batched": 6144,
-      "problem_11_D_TN_Batched": 12288,
-      "problem_12_D_TT_Batched": 3072,
-      "problem_13_S_NN_Batched": 3072,
-      "problem_14_S_NT_Batched": 6144,
-      "problem_15_S_TN_Batched": 12288,
-      "problem_16_S_TT_Batched": 3072,
-      "problem_1_C_NT_Batched": 6144,
-      "problem_2_C_TN_Batched": 12288,
-      "problem_3_C_TT_Batched": 3072,
-      "problem_4_C_NT_Batched": 3072,
-      "problem_5_C_TN_Batched": 3072,
-      "problem_6_C_TT_Batched": 3072,
-      "problem_7_C_TT_Batched": 3072,
-      "problem_8_C_TT_Batched": 3072,
-      "problem_9_D_NN_Batched": 3072
+      "problem_0_C_NN_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_10_D_NT_Batched": {
+        "actual": 1656,
+        "expected": 6144
+      },
+      "problem_11_D_TN_Batched": {
+        "actual": 868,
+        "expected": 6144
+      },
+      "problem_12_D_TT_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_13_S_NN_Batched": {
+        "actual": 828,
+        "expected": 3072
+      },
+      "problem_14_S_NT_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_15_S_TN_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_16_S_TT_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_1_C_NT_Batched": {
+        "actual": 744,
+        "expected": 3072
+      },
+      "problem_2_C_TN_Batched": {
+        "actual": 372,
+        "expected": 3072
+      },
+      "problem_3_C_TT_Batched": {
+        "actual": 744,
+        "expected": 6144
+      },
+      "problem_4_C_NT_Batched": {
+        "actual": 434,
+        "expected": 6144
+      },
+      "problem_5_C_TN_Batched": {
+        "actual": 372,
+        "expected": 3072
+      },
+      "problem_6_C_TT_Batched": {
+        "actual": 480,
+        "expected": 3072
+      },
+      "problem_7_C_TT_Batched": {
+        "actual": 1656,
+        "expected": 6144
+      },
+      "problem_8_C_TT_Batched": {
+        "actual": 560,
+        "expected": 6144
+      },
+      "problem_9_D_NN_Batched": {
+        "actual": 480,
+        "expected": 3072
+      }
     }
   },
   "gemm/cgemm.yaml": {
     "gfx950": {
-      "problem_0_C_NN_Batched": 12288,
-      "problem_1_C_NT_Batched": 12288,
-      "problem_2_C_TN_Batched": 12288,
-      "problem_3_C_TT_Batched": 12288,
-      "problem_4_C_NT_Batched": 12288,
-      "problem_5_C_TN_Batched": 12288,
-      "problem_6_C_TT_Batched": 12288,
-      "problem_7_C_TT_Batched": 12288,
-      "problem_8_C_TT_Batched": 12288
+      "problem_0_C_NN_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_1_C_NT_Batched": {
+        "actual": 2760,
+        "expected": 6144
+      },
+      "problem_2_C_TN_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_3_C_TT_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_4_C_NT_Batched": {
+        "actual": 2760,
+        "expected": 6144
+      },
+      "problem_5_C_TN_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_6_C_TT_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_7_C_TT_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      },
+      "problem_8_C_TT_Batched": {
+        "actual": 2480,
+        "expected": 6144
+      }
     }
   },
   "gemm/fp16_HH_BHS_bf16mfma.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 4096
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 2048,
+        "expected": 4096
+      }
     }
   },
   "gemm/fp16_tn.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched_Bias": 8192,
-      "problem_1_h_TN_Batched_Bias": 76,
-      "problem_2_H_TN_Batched_Bias": 4
+      "problem_0_h_TN_Batched_Bias": {
+        "actual": 4096,
+        "expected": 8192
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 76,
+        "expected": 76
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "gemm/fp16_use_e.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 32,
-      "problem_1_h_TN_Batched_Bias": 8
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 32
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 8
+      }
     }
   },
   "gemm/fp16fp32mix.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 1,
-      "problem_1_h_TN_Batched_Bias": 1,
-      "problem_2_h_NT_Batched_Bias": 1,
-      "problem_3_h_TT_Batched_Bias": 1,
-      "problem_4_h_NN_Batched_Bias": 1,
-      "problem_5_h_NT_Batched_Bias": 1,
-      "problem_6_h_TN_Batched_Bias": 1,
-      "problem_7_h_TT_Batched_Bias": 1
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_h_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_h_TT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_4_h_NN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_5_h_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_6_h_TN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_7_h_TT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/fp32_nt.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched_Bias": 1
+      "problem_0_s_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/fp32_scalealphavec.yaml": {
     "gfx950": {
-      "problem_0_s_TN_Batched_Bias": 6
+      "problem_0_s_TN_Batched_Bias": {
+        "actual": 6,
+        "expected": 6
+      }
     }
   },
   "gemm/fp32_tn.yaml": {
@@ -158,773 +282,2054 @@
   },
   "gemm/gemm_bias_strided_batched_broadcast_gfx940.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 24,
-      "problem_1_h_TN_Batched_Bias": 24,
-      "problem_2_h_NN_Batched_Bias": 24,
-      "problem_3_h_TN_Batched_Bias": 24,
-      "problem_4_b_NN_Batched_Bias": 24,
-      "problem_5_b_TN_Batched_Bias": 24,
-      "problem_6_b_NN_Batched_Bias": 24,
-      "problem_7_b_TN_Batched_Bias": 24,
-      "problem_8_i8_NN_Batched_Bias": 24,
-      "problem_9_i8_TN_Batched_Bias": 24
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_2_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_3_h_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_4_b_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_5_b_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_6_b_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_7_b_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_8_i8_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 24
+      },
+      "problem_9_i8_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 24
+      }
     }
   },
   "gemm/gemm_bias_strided_batched_gfx940.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 24,
-      "problem_1_h_TN_Batched_Bias": 24,
-      "problem_2_h_NN_Batched_Bias": 24,
-      "problem_3_h_TN_Batched_Bias": 24,
-      "problem_4_b_NN_Batched_Bias": 24,
-      "problem_5_b_TN_Batched_Bias": 24,
-      "problem_6_b_NN_Batched_Bias": 24,
-      "problem_7_b_TN_Batched_Bias": 24,
-      "problem_8_i8_NN_Batched_Bias": 24,
-      "problem_9_i8_TN_Batched_Bias": 24
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_2_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_3_h_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_4_b_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_5_b_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_6_b_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_7_b_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_8_i8_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 24
+      },
+      "problem_9_i8_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 24
+      }
     }
   },
   "gemm/gfx950/agntab_coverage_gfx950.yaml": {
     "gfx950": {
-      "problem_0_b_NN_Batched": 256,
-      "problem_10_b_NT_Batched": 64,
-      "problem_11_b_TT_Batched": 64,
-      "problem_1_b_TN_Batched": 256,
-      "problem_2_b_NT_Batched": 256,
-      "problem_3_b_TT_Batched": 256,
-      "problem_4_b_NN_Batched": 128,
-      "problem_5_b_TN_Batched": 128,
-      "problem_6_b_NT_Batched": 128,
-      "problem_7_b_TT_Batched": 128,
-      "problem_8_b_NN_Batched": 64,
-      "problem_9_b_TN_Batched": 64
+      "problem_0_b_NN_Batched": {
+        "actual": 48,
+        "expected": 128
+      },
+      "problem_10_b_NT_Batched": {
+        "actual": 48,
+        "expected": 128
+      },
+      "problem_11_b_TT_Batched": {
+        "actual": 48,
+        "expected": 128
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 48,
+        "expected": 128
+      },
+      "problem_2_b_NT_Batched": {
+        "actual": 192,
+        "expected": 256
+      },
+      "problem_3_b_TT_Batched": {
+        "actual": 192,
+        "expected": 256
+      },
+      "problem_4_b_NN_Batched": {
+        "actual": 192,
+        "expected": 256
+      },
+      "problem_5_b_TN_Batched": {
+        "actual": 192,
+        "expected": 256
+      },
+      "problem_6_b_NT_Batched": {
+        "actual": 64,
+        "expected": 64
+      },
+      "problem_7_b_TT_Batched": {
+        "actual": 64,
+        "expected": 64
+      },
+      "problem_8_b_NN_Batched": {
+        "actual": 64,
+        "expected": 64
+      },
+      "problem_9_b_TN_Batched": {
+        "actual": 64,
+        "expected": 64
+      }
     }
   },
   "gemm/gfx950/bf16_cvt.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched": 1
+      "problem_0_b_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/custom_mainloop_scheduling.yaml": {
     "gfx950": {
-      "problem_0_b_NN_Batched_Bias": 2,
-      "problem_1_h_NN_Batched": 2,
-      "problem_2_b_TT_Batched_Bias": 2,
-      "problem_3_h_TT_Batched": 2,
-      "problem_4_b_TN_Batched_Bias": 2,
-      "problem_5_h_TN_Batched": 2,
-      "problem_6_f8_TN_Batched": 2,
-      "problem_7_b_NT_Batched_Bias": 2,
-      "problem_8_h_NT_Batched": 2
+      "problem_0_b_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_2_b_TT_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_3_h_TT_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_4_b_TN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_5_h_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_6_f8_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_7_b_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_8_h_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/custom_mainloop_scheduling_tf32.yaml": {
     "gfx950": {
-      "problem_0_S_TN_Batched": 1,
-      "problem_1_S_NN_Batched_Bias": 1,
-      "problem_2_S_NT_Batched_Bias": 1
+      "problem_0_S_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_S_NN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_S_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/dot2_gfx950.yaml": {
     "gfx950": {
-      "problem_0_b_TT_Batched_Bias": 2880,
-      "problem_1_b_NN_Batched_Bias": 2880
+      "problem_0_b_TT_Batched_Bias": {
+        "actual": 248,
+        "expected": 2880
+      },
+      "problem_1_b_NN_Batched_Bias": {
+        "actual": 248,
+        "expected": 2880
+      }
     }
   },
   "gemm/gfx950/dtl.yaml": {
     "gfx950": {
-      "problem_0_S_TN_Batched": 144,
-      "problem_10_h_TN_Batched": 2160,
-      "problem_11_h_TT_Batched": 8640,
-      "problem_12_h_TT_Batched": 30,
-      "problem_13_h_NT_Batched": 1920,
-      "problem_14_b_TN_Batched": 2304,
-      "problem_1_S_NT_Batched": 1440,
-      "problem_2_f8_TN_Batched": 3072,
-      "problem_3_f8_NT_Batched": 4608,
-      "problem_4_h_TT_Batched": 960,
-      "problem_5_f8b8_TN_Batched": 3072,
-      "problem_6_f8_NN_Batched": 6912,
-      "problem_7_h_NN_Batched": 2304,
-      "problem_8_f8_TT_Batched": 6912,
-      "problem_9_h_NN_Batched": 9216
+      "problem_0_S_TN_Batched": {
+        "actual": 56,
+        "expected": 144
+      },
+      "problem_10_h_TN_Batched": {
+        "actual": 144,
+        "expected": 320
+      },
+      "problem_11_h_TT_Batched": {
+        "actual": 544,
+        "expected": 1440
+      },
+      "problem_12_h_TT_Batched": {
+        "actual": 1984,
+        "expected": 3072
+      },
+      "problem_13_h_NT_Batched": {
+        "actual": 672,
+        "expected": 4608
+      },
+      "problem_14_b_TN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_S_NT_Batched": {
+        "actual": 144,
+        "expected": 960
+      },
+      "problem_2_f8_TN_Batched": {
+        "actual": 1984,
+        "expected": 3072
+      },
+      "problem_3_f8_NT_Batched": {
+        "actual": 1232,
+        "expected": 6912
+      },
+      "problem_4_h_TT_Batched": {
+        "actual": 208,
+        "expected": 2304
+      },
+      "problem_5_f8b8_TN_Batched": {
+        "actual": 1344,
+        "expected": 6912
+      },
+      "problem_6_f8_NN_Batched": {
+        "actual": 3636,
+        "expected": 9216
+      },
+      "problem_7_h_NN_Batched": {
+        "actual": 4,
+        "expected": 24
+      },
+      "problem_8_f8_TT_Batched": {
+        "actual": 6,
+        "expected": 20
+      },
+      "problem_9_h_NN_Batched": {
+        "actual": 1256,
+        "expected": 2160
+      }
     }
   },
   "gemm/gfx950/f16f8mix_ss.yaml": {
     "gfx950": {
-      "problem_0_F8_NN_Batched": 4
+      "problem_0_F8_NN_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "gemm/gfx950/f16f8mix_ss_stoch.yaml": {
     "gfx950": {
-      "problem_0_F8_NN_Batched": 4
+      "problem_0_F8_NN_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "gemm/gfx950/f8b8hs.yaml": {
     "gfx950": {
-      "problem_0_F8B8_TT_Batched": 192,
-      "problem_1_F8B8_TN_Batched": 192,
-      "problem_2_F8B8_NT_Batched": 96,
-      "problem_3_F8B8_NN_Batched": 192
+      "problem_0_F8B8_TT_Batched": {
+        "actual": 192,
+        "expected": 192
+      },
+      "problem_1_F8B8_TN_Batched": {
+        "actual": 192,
+        "expected": 192
+      },
+      "problem_2_F8B8_NT_Batched": {
+        "actual": 96,
+        "expected": 96
+      },
+      "problem_3_F8B8_NN_Batched": {
+        "actual": 192,
+        "expected": 192
+      }
     }
   },
   "gemm/gfx950/f8f16mix_f8s.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched_Bias": 4,
-      "problem_1_h_NN_Batched_Bias": 4,
-      "problem_2_h_TN_Batched_Bias": 4,
-      "problem_3_h_TT_Batched_Bias": 4
+      "problem_0_h_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_1_h_NN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_2_h_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_3_h_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "gemm/gfx950/fp16_use_e_wide_store.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched": 2
+      "problem_0_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "gemm/gfx950/fp8.yaml": {
     "gfx950": {
-      "problem_0_F8_TT_Batched": 576,
-      "problem_1_F8_TN_Batched": 576,
-      "problem_2_F8_NT_Batched": 288,
-      "problem_3_F8_NN_Batched": 576
+      "problem_0_F8_TT_Batched": {
+        "actual": 480,
+        "expected": 576
+      },
+      "problem_1_F8_TN_Batched": {
+        "actual": 480,
+        "expected": 576
+      },
+      "problem_2_F8_NT_Batched": {
+        "actual": 240,
+        "expected": 288
+      },
+      "problem_3_F8_NN_Batched": {
+        "actual": 480,
+        "expected": 576
+      }
     }
   },
   "gemm/gfx950/general_wgm.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 12
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      }
     }
   },
   "gemm/gfx950/i8_gsu_gfx950.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched": 1,
-      "problem_1_i8_NN_Batched": 1,
-      "problem_2_i8_NN_Batched": 1,
-      "problem_3_i8_NN_Batched": 1
+      "problem_0_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/lds160K.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched": 1152
+      "problem_0_h_TN_Batched": {
+        "actual": 312,
+        "expected": 1152
+      }
     }
   },
   "gemm/gfx950/lds_tr.yaml": {
     "gfx950": {
-      "problem_0_b_NN_Batched": 24,
-      "problem_10_h_TT_Batched": 6,
-      "problem_11_h_TT_Batched": 6,
-      "problem_12_h_NN_Batched": 1,
-      "problem_13_H_NN_Batched": 3,
-      "problem_1_b_NN_Batched": 12,
-      "problem_2_h_NN_Batched": 12,
-      "problem_3_h_NN_Batched": 12,
-      "problem_4_b_NT_Batched": 12,
-      "problem_5_b_NT_Batched": 12,
-      "problem_6_h_NT_Batched": 12,
-      "problem_7_h_NT_Batched": 12,
-      "problem_8_b_TT_Batched": 6,
-      "problem_9_b_TT_Batched": 6
+      "problem_0_b_NN_Batched": {
+        "actual": 12,
+        "expected": 24
+      },
+      "problem_10_h_TT_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_11_h_TT_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_12_h_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_13_H_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_b_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_2_h_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_3_h_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_4_b_NT_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_5_b_NT_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_6_h_NT_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_7_h_NT_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_8_b_TT_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_9_b_TT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/mx32f4_tn.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_Bias_MX": 768
+      "problem_0_F4_TN_Batched_Bias_MX": {
+        "actual": 64,
+        "expected": 768
+      }
     }
   },
   "gemm/gfx950/mxfp4_mxfp4_bf16_tn_act.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_Bias_MX": 24
+      "problem_0_F4_TN_Batched_Bias_MX": {
+        "actual": 10,
+        "expected": 24
+      }
     }
   },
   "gemm/gfx950/mxfp4_mxfp4_fp32_tn_act.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_Bias_MX": 36
+      "problem_0_F4_TN_Batched_Bias_MX": {
+        "actual": 6,
+        "expected": 36
+      }
     }
   },
   "gemm/gfx950/mxfp8_residual_fail_classes_repro.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1,
-      "problem_1_F8_TN_Batched_MX": 1,
-      "problem_2_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/mxfp8_verify_fail_repro.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1,
-      "problem_1_F8_TN_Batched_MX": 1,
-      "problem_2_F8_TN_Batched_MX": 1,
-      "problem_3_F8_TN_Batched_MX": 1,
-      "problem_4_F8_TN_Batched_MX": 1,
-      "problem_5_F8_TN_Batched_MX": 1,
-      "problem_6_F8_TN_Batched_MX": 1,
-      "problem_7_F8_TN_Batched_MX": 1,
-      "problem_8_F8_TN_Batched_MX": 1,
-      "problem_9_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_4_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_5_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_6_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_7_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_8_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_9_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/plr_zero.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched": 3456,
-      "problem_1_h_NN_Batched": 2304,
-      "problem_2_h_TT_Batched": 1872,
-      "problem_3_h_NT_Batched": 2016,
-      "problem_4_f8_TN_Batched": 648
+      "problem_0_h_TN_Batched": {
+        "actual": 874,
+        "expected": 3456
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 178,
+        "expected": 648
+      },
+      "problem_2_h_TT_Batched": {
+        "actual": 78,
+        "expected": 216
+      },
+      "problem_3_h_NT_Batched": {
+        "actual": 2,
+        "expected": 4
+      },
+      "problem_4_f8_TN_Batched": {
+        "actual": 624,
+        "expected": 2304
+      }
     }
   },
   "gemm/gfx950/preloop_local_read_wait.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched": 1
+      "problem_0_F8_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/ss_bss.yaml": {
     "gfx950": {
-      "problem_0_b_NT_Batched": 60,
-      "problem_1_b_TN_Batched": 60,
-      "problem_2_b_NN_Batched_Bias": 72,
-      "problem_3_b_TT_Batched_Bias": 8
+      "problem_0_b_NT_Batched": {
+        "actual": 47,
+        "expected": 60
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 47,
+        "expected": 60
+      },
+      "problem_2_b_NN_Batched_Bias": {
+        "actual": 72,
+        "expected": 72
+      },
+      "problem_3_b_TT_Batched_Bias": {
+        "actual": 8,
+        "expected": 8
+      }
     }
   },
   "gemm/gfx950/subtile_bf16.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched": 372,
-      "problem_1_b_TN_Batched": 48,
-      "problem_2_b_TN_Batched": 36,
-      "problem_3_b_TN_Batched": 2,
-      "problem_4_b_TN_Batched": 1,
-      "problem_5_b_TN_Batched": 16,
-      "problem_6_b_TN_Batched_Bias": 42,
-      "problem_7_b_TN_Batched_Bias": 12,
-      "problem_8_b_TN_Batched_Bias": 18,
-      "problem_9_b_TN_Batched_Bias": 18
+      "problem_0_b_TN_Batched": {
+        "actual": 372,
+        "expected": 372
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 26,
+        "expected": 48
+      },
+      "problem_2_b_TN_Batched": {
+        "actual": 36,
+        "expected": 36
+      },
+      "problem_3_b_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_4_b_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_5_b_TN_Batched": {
+        "actual": 14,
+        "expected": 16
+      },
+      "problem_6_b_TN_Batched_Bias": {
+        "actual": 42,
+        "expected": 42
+      },
+      "problem_7_b_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_8_b_TN_Batched_Bias": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_9_b_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 18
+      }
     }
   },
   "gemm/gfx950/subtile_fp8.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched": 1,
-      "problem_1_F8_TN_Batched": 1,
-      "problem_2_F8_TN_Batched": 22,
-      "problem_3_F8_TN_Batched": 2,
-      "problem_4_F8_TN_Batched": 6,
-      "problem_5_F8_TN_Batched": 5,
-      "problem_6_F8_TN_Batched": 22,
-      "problem_7_F8_TN_Batched": 6,
-      "problem_8_F8_TN_Batched": 5
+      "problem_0_F8_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_F8_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_F8_TN_Batched": {
+        "actual": 22,
+        "expected": 22
+      },
+      "problem_3_F8_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_4_F8_TN_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_5_F8_TN_Batched": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_6_F8_TN_Batched": {
+        "actual": 22,
+        "expected": 22
+      },
+      "problem_7_F8_TN_Batched": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_8_F8_TN_Batched": {
+        "actual": 5,
+        "expected": 5
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp4.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 90,
-      "problem_100_F4_TT_Batched_MX": 3,
-      "problem_101_F4_TT_Batched_MX": 18,
-      "problem_102_F4_TT_Batched_MX": 2,
-      "problem_103_F4_TT_Batched_MX": 8,
-      "problem_104_F4_TT_Batched_MX": 2,
-      "problem_105_F4_TT_Batched_MX": 4,
-      "problem_106_F4_TT_Batched_MX": 16,
-      "problem_107_F4_TT_Batched_Bias_MX": 12,
-      "problem_108_F4_TT_Batched_MX": 6,
-      "problem_109_F4_TT_Batched_MX": 5,
-      "problem_10_F4_TN_Batched_MX": 36,
-      "problem_110_F4_TT_Batched_MX": 1,
-      "problem_111_F4_TT_Batched_MX": 20,
-      "problem_112_F4_TT_Batched_MX": 3,
-      "problem_113_F4_TT_Batched_MX": 18,
-      "problem_114_F4_TT_Batched_MX": 2,
-      "problem_115_F4_TT_Batched_MX": 8,
-      "problem_116_F4_TT_Batched_MX": 2,
-      "problem_117_F4_TT_Batched_MX": 4,
-      "problem_118_F4_TT_Batched_MX": 16,
-      "problem_119_F4_TT_Batched_Bias_MX": 12,
-      "problem_11_F4_TN_Batched_Bias_MX": 18,
-      "problem_120_F4_NN_Batched_MX": 52,
-      "problem_121_F4_NN_Batched_MX": 8,
-      "problem_122_F4_TT_Batched_MX": 52,
-      "problem_123_F4_TT_Batched_MX": 8,
-      "problem_124_F4_NN_Batched_Bias_MX": 12,
-      "problem_125_F4_TT_Batched_Bias_MX": 12,
-      "problem_126_F4_NT_Batched_MX": 1,
-      "problem_127_F4_NN_Batched_MX": 1,
-      "problem_128_F4_TT_Batched_MX": 1,
-      "problem_129_F4_TN_Batched_MX": 1,
-      "problem_12_F4_NT_Batched_MX": 6,
-      "problem_13_F4_NT_Batched_MX": 5,
-      "problem_14_F4_NT_Batched_MX": 1,
-      "problem_15_F4_NT_Batched_MX": 20,
-      "problem_16_F4_NT_Batched_MX": 3,
-      "problem_17_F4_NT_Batched_MX": 18,
-      "problem_18_F4_NT_Batched_MX": 2,
-      "problem_19_F4_NT_Batched_MX": 8,
-      "problem_1_F4_TN_Batched_MX": 24,
-      "problem_20_F4_NT_Batched_MX": 2,
-      "problem_21_F4_NT_Batched_MX": 4,
-      "problem_22_F4_NT_Batched_MX": 16,
-      "problem_23_F4_NT_Batched_Bias_MX": 12,
-      "problem_24_F4_NT_Batched_MX": 6,
-      "problem_25_F4_NT_Batched_MX": 5,
-      "problem_26_F4_NT_Batched_MX": 1,
-      "problem_27_F4_NT_Batched_MX": 20,
-      "problem_28_F4_NT_Batched_MX": 3,
-      "problem_29_F4_NT_Batched_MX": 18,
-      "problem_2_F4_TN_Batched_MX": 30,
-      "problem_30_F4_NT_Batched_MX": 2,
-      "problem_31_F4_NT_Batched_MX": 8,
-      "problem_32_F4_NT_Batched_MX": 2,
-      "problem_33_F4_NT_Batched_MX": 4,
-      "problem_34_F4_NT_Batched_MX": 16,
-      "problem_35_F4_NT_Batched_Bias_MX": 12,
-      "problem_36_F4_NT_Batched_MX": 6,
-      "problem_37_F4_NT_Batched_MX": 5,
-      "problem_38_F4_NT_Batched_MX": 1,
-      "problem_39_F4_NT_Batched_MX": 20,
-      "problem_3_F4_TN_Batched_Bias_MX": 18,
-      "problem_40_F4_NT_Batched_MX": 3,
-      "problem_41_F4_NT_Batched_MX": 18,
-      "problem_42_F4_NT_Batched_MX": 2,
-      "problem_43_F4_NT_Batched_MX": 8,
-      "problem_44_F4_NT_Batched_MX": 2,
-      "problem_45_F4_NT_Batched_MX": 4,
-      "problem_46_F4_NT_Batched_MX": 16,
-      "problem_47_F4_NT_Batched_Bias_MX": 12,
-      "problem_48_F4_NN_Batched_MX": 6,
-      "problem_49_F4_NN_Batched_MX": 5,
-      "problem_4_F4_TN_Batched_MX": 30,
-      "problem_50_F4_NN_Batched_MX": 1,
-      "problem_51_F4_NN_Batched_MX": 20,
-      "problem_52_F4_NN_Batched_MX": 3,
-      "problem_53_F4_NN_Batched_MX": 18,
-      "problem_54_F4_NN_Batched_MX": 2,
-      "problem_55_F4_NN_Batched_MX": 8,
-      "problem_56_F4_NN_Batched_MX": 2,
-      "problem_57_F4_NN_Batched_MX": 4,
-      "problem_58_F4_NN_Batched_MX": 16,
-      "problem_59_F4_NN_Batched_Bias_MX": 12,
-      "problem_5_F4_TN_Batched_Bias_MX": 30,
-      "problem_60_F4_NN_Batched_MX": 6,
-      "problem_61_F4_NN_Batched_MX": 5,
-      "problem_62_F4_NN_Batched_MX": 1,
-      "problem_63_F4_NN_Batched_MX": 20,
-      "problem_64_F4_NN_Batched_MX": 3,
-      "problem_65_F4_NN_Batched_MX": 18,
-      "problem_66_F4_NN_Batched_MX": 2,
-      "problem_67_F4_NN_Batched_MX": 8,
-      "problem_68_F4_NN_Batched_MX": 2,
-      "problem_69_F4_NN_Batched_MX": 4,
-      "problem_6_F4_TN_Batched_Bias_MX": 18,
-      "problem_70_F4_NN_Batched_MX": 16,
-      "problem_71_F4_NN_Batched_Bias_MX": 12,
-      "problem_72_F4_NN_Batched_MX": 6,
-      "problem_73_F4_NN_Batched_MX": 5,
-      "problem_74_F4_NN_Batched_MX": 1,
-      "problem_75_F4_NN_Batched_MX": 20,
-      "problem_76_F4_NN_Batched_MX": 3,
-      "problem_77_F4_NN_Batched_MX": 18,
-      "problem_78_F4_NN_Batched_MX": 2,
-      "problem_79_F4_NN_Batched_MX": 8,
-      "problem_7_F4_TN_Batched_Bias_MX": 6,
-      "problem_80_F4_NN_Batched_MX": 2,
-      "problem_81_F4_NN_Batched_MX": 4,
-      "problem_82_F4_NN_Batched_MX": 16,
-      "problem_83_F4_NN_Batched_Bias_MX": 12,
-      "problem_84_F4_TT_Batched_MX": 6,
-      "problem_85_F4_TT_Batched_MX": 5,
-      "problem_86_F4_TT_Batched_MX": 1,
-      "problem_87_F4_TT_Batched_MX": 20,
-      "problem_88_F4_TT_Batched_MX": 3,
-      "problem_89_F4_TT_Batched_MX": 18,
-      "problem_8_F4_TN_Batched_MX": 39,
-      "problem_90_F4_TT_Batched_MX": 2,
-      "problem_91_F4_TT_Batched_MX": 8,
-      "problem_92_F4_TT_Batched_MX": 2,
-      "problem_93_F4_TT_Batched_MX": 4,
-      "problem_94_F4_TT_Batched_MX": 16,
-      "problem_95_F4_TT_Batched_Bias_MX": 12,
-      "problem_96_F4_TT_Batched_MX": 6,
-      "problem_97_F4_TT_Batched_MX": 5,
-      "problem_98_F4_TT_Batched_MX": 1,
-      "problem_99_F4_TT_Batched_MX": 20,
-      "problem_9_F4_TN_Batched_MX": 72
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 90,
+        "expected": 90
+      },
+      "problem_100_F4_TT_Batched_MX": {
+        "actual": 16,
+        "expected": 24
+      },
+      "problem_101_F4_TT_Batched_MX": {
+        "actual": 30,
+        "expected": 30
+      },
+      "problem_102_F4_TT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_103_F4_TT_Batched_MX": {
+        "actual": 30,
+        "expected": 30
+      },
+      "problem_104_F4_TT_Batched_MX": {
+        "actual": 30,
+        "expected": 30
+      },
+      "problem_105_F4_TT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_106_F4_TT_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_107_F4_TT_Batched_Bias_MX": {
+        "actual": 39,
+        "expected": 39
+      },
+      "problem_108_F4_TT_Batched_MX": {
+        "actual": 72,
+        "expected": 72
+      },
+      "problem_109_F4_TT_Batched_MX": {
+        "actual": 36,
+        "expected": 36
+      },
+      "problem_10_F4_TN_Batched_MX": {
+        "actual": 12,
+        "expected": 18
+      },
+      "problem_110_F4_TT_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_111_F4_TT_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_112_F4_TT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_113_F4_TT_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_114_F4_TT_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_115_F4_TT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_116_F4_TT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_117_F4_TT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_118_F4_TT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_119_F4_TT_Batched_Bias_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_11_F4_TN_Batched_Bias_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_120_F4_NN_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_121_F4_NN_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_122_F4_TT_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_123_F4_TT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_124_F4_NN_Batched_Bias_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_125_F4_TT_Batched_Bias_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_126_F4_NT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_127_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_128_F4_TT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_129_F4_TN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_12_F4_NT_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_13_F4_NT_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_14_F4_NT_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_15_F4_NT_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_16_F4_NT_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_17_F4_NT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_18_F4_NT_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_19_F4_NT_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_1_F4_TN_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_20_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_21_F4_NT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_22_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_23_F4_NT_Batched_Bias_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_24_F4_NT_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_25_F4_NT_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_26_F4_NT_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_27_F4_NT_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_28_F4_NT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_29_F4_NT_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_2_F4_TN_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_30_F4_NT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_31_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_32_F4_NT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_33_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_34_F4_NT_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_35_F4_NT_Batched_Bias_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_36_F4_NT_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_37_F4_NT_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_38_F4_NT_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_39_F4_NT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_F4_TN_Batched_Bias_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_40_F4_NT_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_41_F4_NT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_42_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_43_F4_NT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_44_F4_NT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_45_F4_NT_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_46_F4_NT_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_47_F4_NT_Batched_Bias_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_48_F4_NN_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_49_F4_NN_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_4_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_50_F4_NN_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_51_F4_NN_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_52_F4_NN_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_53_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_54_F4_NN_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_55_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_56_F4_NN_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_57_F4_NN_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_58_F4_NN_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_59_F4_NN_Batched_Bias_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_5_F4_TN_Batched_Bias_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_60_F4_NN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_61_F4_NN_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_62_F4_NN_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_63_F4_NN_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_64_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_65_F4_NN_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_66_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_67_F4_NN_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_68_F4_NN_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_69_F4_NN_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_6_F4_TN_Batched_Bias_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_70_F4_NN_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_71_F4_NN_Batched_Bias_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_72_F4_NN_Batched_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_73_F4_NN_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_74_F4_NN_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_75_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_76_F4_NN_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_77_F4_NN_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_78_F4_NN_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_79_F4_NN_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_7_F4_TN_Batched_Bias_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_80_F4_NN_Batched_MX": {
+        "actual": 6,
+        "expected": 6
+      },
+      "problem_81_F4_NN_Batched_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_82_F4_NN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_83_F4_NN_Batched_Bias_MX": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_84_F4_TT_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_85_F4_TT_Batched_MX": {
+        "actual": 18,
+        "expected": 18
+      },
+      "problem_86_F4_TT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_87_F4_TT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_88_F4_TT_Batched_MX": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_89_F4_TT_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_8_F4_TN_Batched_MX": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_90_F4_TT_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_91_F4_TT_Batched_MX": {
+        "actual": 52,
+        "expected": 52
+      },
+      "problem_92_F4_TT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_93_F4_TT_Batched_MX": {
+        "actual": 52,
+        "expected": 52
+      },
+      "problem_94_F4_TT_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_95_F4_TT_Batched_Bias_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_96_F4_TT_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_97_F4_TT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_98_F4_TT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_99_F4_TT_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_9_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 12,
-      "problem_1_F8_TN_Batched_MX": 12,
-      "problem_2_F8_TN_Batched_MX": 1,
-      "problem_3_F8_TN_Batched_MX": 3,
-      "problem_4_F8_TN_Batched_MX": 1,
-      "problem_5_F8_TN_Batched_MX": 1,
-      "problem_6_F8_TN_Batched_MX": 1,
-      "problem_7_F8_TN_Batched_MX": 1,
-      "problem_8_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_F8_TN_Batched_MX": {
+        "actual": 10,
+        "expected": 12
+      },
+      "problem_2_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_F8_TN_Batched_MX": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_4_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_5_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_6_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_7_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_8_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_bias_sav.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_Bias_MX": 5,
-      "problem_1_F8_TN_Batched_MX": 5,
-      "problem_2_F8_TN_Batched_Bias_MX": 4
+      "problem_0_F8_TN_Batched_Bias_MX": {
+        "actual": 5,
+        "expected": 5
+      },
+      "problem_1_F8_TN_Batched_MX": {
+        "actual": 2,
+        "expected": 5
+      },
+      "problem_2_F8_TN_Batched_Bias_MX": {
+        "actual": 1,
+        "expected": 4
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_correctness_regression.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_correctness_regression_mt192x256_plr1_wgm4.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_correctness_regression_mt256x192_plr1_wgm1.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_correctness_regression_mt256x320_plr0_wgm1.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_correctness_regression_mt320x256_plr1_wgm4.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_multi_du_multi_partition.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 4
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_tail_loop.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 12
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 8,
+        "expected": 12
+      }
     }
   },
   "gemm/gfx950/subtile_mxfp8_tail_loop_smoke.yaml": {
     "gfx950": {
-      "problem_0_F8_TN_Batched_MX": 1
+      "problem_0_F8_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/gfx950/xfp32.yaml": {
     "gfx950": {
-      "problem_0_S_NT_Batched": 504,
-      "problem_1_S_TN_Batched": 6,
-      "problem_2_S_NN_Batched": 24,
-      "problem_3_S_TT_Batched": 6
+      "problem_0_S_NT_Batched": {
+        "actual": 120,
+        "expected": 504
+      },
+      "problem_1_S_TN_Batched": {
+        "actual": 24,
+        "expected": 64
+      },
+      "problem_2_S_NN_Batched": {
+        "actual": 51,
+        "expected": 54
+      },
+      "problem_3_S_TT_Batched": {
+        "actual": 6,
+        "expected": 6
+      }
     }
   },
   "gemm/gsuasb.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched": 12,
-      "problem_1_h_NN_Batched_Bias": 8,
-      "problem_2_h_NN_Batched_Bias": 10
+      "problem_0_h_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_h_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_2_h_NN_Batched_Bias": {
+        "actual": 10,
+        "expected": 10
+      }
     }
   },
   "gemm/gsuc.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched_Bias": 24
+      "problem_0_h_TN_Batched_Bias": {
+        "actual": 24,
+        "expected": 24
+      }
     }
   },
   "gemm/i8_gsu_gfx940.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched": 1,
-      "problem_1_i8_NN_Batched": 1,
-      "problem_2_I8_NN_Batched": 1,
-      "problem_3_I8_NN_Batched": 1
+      "problem_0_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_i8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_I8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_I8_NN_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/large_size.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 1
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/lsu_i8.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched": 1536
+      "problem_0_I8_NN_Batched": {
+        "actual": 120,
+        "expected": 1536
+      }
     }
   },
   "gemm/mbskPrefetchOpt.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched": 240
+      "problem_0_h_TN_Batched": {
+        "actual": 36,
+        "expected": 240
+      }
     }
   },
   "gemm/nan_bounds_check_odd_padding.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched": 1
+      "problem_0_h_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/ulsgro1.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 1728,
-      "problem_1_b_NN_Batched_Bias": 32,
-      "problem_2_b_TT_Batched_Bias": 1,
-      "problem_3_b_NT_Batched_Bias": 2
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 1080,
+        "expected": 1728
+      },
+      "problem_1_b_NN_Batched_Bias": {
+        "actual": 20,
+        "expected": 32
+      },
+      "problem_2_b_TT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_3_b_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 2
+      }
     }
   },
   "gemm/use_beta_false.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched": 1,
-      "problem_1_h_NT_Batched": 1
+      "problem_0_h_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1_h_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "gemm/wgm.yaml": {
     "gfx950": {
-      "problem_0_b_TN_Batched_Bias": 24
+      "problem_0_b_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 24
+      }
     }
   },
   "gemm/zgemm.yaml": {
     "gfx950": {
-      "problem_0_Z_NT_Batched": 10752,
-      "problem_1_Z_NT_Batched": 10752,
-      "problem_2_Z_TN_Batched": 10752,
-      "problem_3_Z_TT_Batched": 10752,
-      "problem_4_Z_NT_Batched": 10752,
-      "problem_5_Z_TN_Batched": 10752,
-      "problem_6_Z_TT_Batched": 10752,
-      "problem_7_Z_TT_Batched": 10752,
-      "problem_8_Z_TT_Batched": 10752
+      "problem_0_Z_NT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_1_Z_NT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_2_Z_TN_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_3_Z_TT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_4_Z_NT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_5_Z_TN_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_6_Z_TT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_7_Z_TT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      },
+      "problem_8_Z_TT_Batched": {
+        "actual": 2112,
+        "expected": 5376
+      }
     }
   },
   "gradient/fp16_gradient_activation.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched": 32,
-      "problem_1_h_TN_Batched": 32
+      "problem_0_h_NN_Batched": {
+        "actual": 16,
+        "expected": 32
+      },
+      "problem_1_h_TN_Batched": {
+        "actual": 8,
+        "expected": 32
+      }
     }
   },
   "gradient/fp16_gradient_bias.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 2,
-      "problem_1_h_TN_Batched_Bias": 16,
-      "problem_2_h_NN_Batched_Bias": 64,
-      "problem_3_h_TT_Batched_Bias": 32,
-      "problem_4_h_TN_Batched_Bias": 48,
-      "problem_5_h_NT_Batched_Bias": 72
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_2_h_NN_Batched_Bias": {
+        "actual": 32,
+        "expected": 64
+      },
+      "problem_3_h_TT_Batched_Bias": {
+        "actual": 32,
+        "expected": 32
+      },
+      "problem_4_h_TN_Batched_Bias": {
+        "actual": 48,
+        "expected": 48
+      },
+      "problem_5_h_NT_Batched_Bias": {
+        "actual": 72,
+        "expected": 72
+      }
     }
   },
   "gradient/gfx950/bf16_gradient_bias.yaml": {
     "gfx950": {
-      "problem_0_b_NN_Batched_Bias": 2,
-      "problem_1_b_TN_Batched_Bias": 16,
-      "problem_2_b_NN_Batched_Bias": 64,
-      "problem_3_b_TT_Batched_Bias": 32,
-      "problem_4_b_TN_Batched_Bias": 48,
-      "problem_5_b_NT_Batched_Bias": 72
+      "problem_0_b_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_b_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_2_b_NN_Batched_Bias": {
+        "actual": 32,
+        "expected": 64
+      },
+      "problem_3_b_TT_Batched_Bias": {
+        "actual": 32,
+        "expected": 32
+      },
+      "problem_4_b_TN_Batched_Bias": {
+        "actual": 48,
+        "expected": 48
+      },
+      "problem_5_b_NT_Batched_Bias": {
+        "actual": 72,
+        "expected": 72
+      }
     }
   },
   "groupedgemm/grouped_gemm.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 16,
-      "problem_1_h_TN_Batched_Bias": 8,
-      "problem_2_h_NT_Batched_Bias": 8,
-      "problem_3_h_TT_Batched_Bias": 8
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_1_h_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_2_h_NT_Batched_Bias": {
+        "actual": 8,
+        "expected": 8
+      },
+      "problem_3_h_TT_Batched_Bias": {
+        "actual": 8,
+        "expected": 8
+      }
     }
   },
   "groupedgemm/grouped_gemm_userargs.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 4,
-      "problem_1_h_NN_Batched": 2,
-      "problem_2_h_NN_Batched": 2
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_2_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "gsu/auto_gsu.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched_Bias": 16
+      "problem_0_h_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      }
     }
   },
   "gsu/auto_gsu_zero_dim.yaml": {
     "gfx950": {
-      "problem_0_h_TN_Batched_Bias": 16
+      "problem_0_h_TN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      }
     }
   },
   "gsu/f32_gsu.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 12
+      "problem_0_s_NT_Batched": {
+        "actual": 8,
+        "expected": 12
+      }
     }
   },
   "gsu/gsu_mbsk.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched_Bias": 2
+      "problem_0_h_NT_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "sparse/gfx94x/bf16_activation.yaml": {
     "gfx950": {
-      "problem_0_B_TN_Batched": 4
+      "problem_0_B_TN_Batched": {
+        "actual": 3,
+        "expected": 4
+      }
     }
   },
   "sparse/gfx94x/bf16_gate_r.yaml": {
     "gfx950": {
-      "problem_0_B_NN_Batched_Bias": 16,
-      "problem_1_B_NT_Batched_Bias": 16,
-      "problem_2_B_NN_Batched_Bias": 16,
-      "problem_3_B_NT_Batched_Bias": 16
+      "problem_0_B_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_1_B_NT_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_2_B_NN_Batched_Bias": {
+        "actual": 6,
+        "expected": 16
+      },
+      "problem_3_B_NT_Batched_Bias": {
+        "actual": 6,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx94x/fp16_activation.yaml": {
     "gfx950": {
-      "problem_0_H_TN_Batched": 4
+      "problem_0_H_TN_Batched": {
+        "actual": 3,
+        "expected": 4
+      }
     }
   },
   "sparse/gfx94x/fp16_gate_r.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 16,
-      "problem_1_H_NT_Batched_Bias": 16,
-      "problem_2_H_NN_Batched_Bias": 16,
-      "problem_3_H_NT_Batched_Bias": 16
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_1_H_NT_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_2_H_NN_Batched_Bias": {
+        "actual": 6,
+        "expected": 16
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 6,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx94x/i8_activation.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched": 2
+      "problem_0_I8_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "sparse/gfx94x/spmm_bf16.yaml": {
     "gfx950": {
-      "problem_0_B_TN_Batched_Bias": 8
+      "problem_0_B_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      }
     }
   },
   "sparse/gfx94x/spmm_bf16_sb.yaml": {
     "gfx950": {
-      "problem_0_B_TN_Batched_Bias": 8,
-      "problem_1_B_TT_Batched": 2,
-      "problem_2_B_TT_Batched": 2
+      "problem_0_B_TN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_1_B_TT_Batched": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_2_B_TT_Batched": {
+        "actual": 160,
+        "expected": 384
+      }
     }
   },
   "sparse/gfx94x/spmm_fp16_mi16.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 2,
-      "problem_1_H_NN_Batched_Bias": 32,
-      "problem_2_H_TN_Batched_Bias": 32,
-      "problem_3_H_NT_Batched_Bias": 16,
-      "problem_4_H_TT_Batched_Bias": 16
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_H_NN_Batched_Bias": {
+        "actual": 8,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 32
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 16
+      },
+      "problem_4_H_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx94x/spmm_fp16_mi16_sb.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 2,
-      "problem_1_H_NN_Batched_Bias": 32,
-      "problem_2_H_TN_Batched_Bias": 64,
-      "problem_3_H_NT_Batched_Bias": 16,
-      "problem_4_H_TT_Batched_Bias": 16,
-      "problem_5_H_NT_Batched_Bias": 1
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_H_NN_Batched_Bias": {
+        "actual": 12,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 22,
+        "expected": 64
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_4_H_TT_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_5_H_NT_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "sparse/gfx94x/spmm_fp16_mi32.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 2,
-      "problem_1_H_NN_Batched_Bias": 144,
-      "problem_2_H_TN_Batched_Bias": 24,
-      "problem_3_H_NT_Batched_Bias": 12,
-      "problem_4_H_TT_Batched_Bias": 12
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_H_NN_Batched_Bias": {
+        "actual": 24,
+        "expected": 144
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      },
+      "problem_4_H_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      }
     }
   },
   "sparse/gfx94x/spmm_fp16_mi32_sb.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 2,
-      "problem_1_H_NN_Batched_Bias": 144,
-      "problem_2_H_TN_Batched_Bias": 24,
-      "problem_3_H_NT_Batched_Bias": 12,
-      "problem_4_H_TT_Batched_Bias": 36
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_H_NN_Batched_Bias": {
+        "actual": 36,
+        "expected": 144
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 24
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_4_H_TT_Batched_Bias": {
+        "actual": 18,
+        "expected": 36
+      }
     }
   },
   "sparse/gfx94x/spmm_gsuc.yaml": {
     "gfx950": {
-      "problem_0_H_TN_Batched_Bias": 192,
-      "problem_1_H_TN_Batched_Bias": 192
+      "problem_0_H_TN_Batched_Bias": {
+        "actual": 72,
+        "expected": 192
+      },
+      "problem_1_H_TN_Batched_Bias": {
+        "actual": 168,
+        "expected": 192
+      }
     }
   },
   "sparse/gfx94x/spmm_i8_mi16.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched_Bias": 144,
-      "problem_1_I8_TN_Batched_Bias": 24,
-      "problem_2_I8_NT_Batched_Bias": 12,
-      "problem_3_I8_TT_Batched_Bias": 12
+      "problem_0_I8_NN_Batched_Bias": {
+        "actual": 24,
+        "expected": 144
+      },
+      "problem_1_I8_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_2_I8_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      },
+      "problem_3_I8_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      }
     }
   },
   "sparse/gfx94x/spmm_i8_mi16_sb.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched_Bias": 144,
-      "problem_1_I8_TN_Batched_Bias": 24,
-      "problem_2_I8_NT_Batched_Bias": 12,
-      "problem_3_I8_TT_Batched_Bias": 12
+      "problem_0_I8_NN_Batched_Bias": {
+        "actual": 36,
+        "expected": 144
+      },
+      "problem_1_I8_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 24
+      },
+      "problem_2_I8_NT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_3_I8_TT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      }
     }
   },
   "sparse/gfx94x/spmm_i8_mi32.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched_Bias": 144,
-      "problem_1_I8_TN_Batched_Bias": 24,
-      "problem_2_I8_NT_Batched_Bias": 12,
-      "problem_3_I8_TT_Batched_Bias": 12
+      "problem_0_I8_NN_Batched_Bias": {
+        "actual": 24,
+        "expected": 144
+      },
+      "problem_1_I8_TN_Batched_Bias": {
+        "actual": 8,
+        "expected": 24
+      },
+      "problem_2_I8_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      },
+      "problem_3_I8_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 12
+      }
     }
   },
   "sparse/gfx94x/spmm_i8_mi32_sb.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched_Bias": 144,
-      "problem_1_I8_TN_Batched_Bias": 24,
-      "problem_2_I8_NT_Batched_Bias": 12,
-      "problem_3_I8_TT_Batched_Bias": 12
+      "problem_0_I8_NN_Batched_Bias": {
+        "actual": 36,
+        "expected": 144
+      },
+      "problem_1_I8_TN_Batched_Bias": {
+        "actual": 12,
+        "expected": 24
+      },
+      "problem_2_I8_NT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_3_I8_TT_Batched_Bias": {
+        "actual": 12,
+        "expected": 12
+      }
     }
   },
   "sparse/gfx94x/spmm_i8bs.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      }
     }
   },
   "sparse/gfx94x/spmm_i8bs_sb.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 6,
+        "expected": 8
+      }
     }
   },
   "sparse/gfx94x/spmm_i8hs.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      }
     }
   },
   "sparse/gfx94x/spmm_i8hs_sb.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 6,
+        "expected": 8
+      }
     }
   },
   "sparse/gfx94x/spmm_i8is.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 6,
+        "expected": 32
+      }
     }
   },
   "sparse/gfx94x/spmm_i8is_sb.yaml": {
     "gfx950": {
-      "problem_0_I8_TN_Batched_Bias": 8
+      "problem_0_I8_TN_Batched_Bias": {
+        "actual": 6,
+        "expected": 8
+      }
     }
   },
   "sparse/gfx94x/spmm_vw_lg_one.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched": 32,
-      "problem_1_H_NT_Batched": 32,
-      "problem_2_H_TN_Batched": 32,
-      "problem_3_H_TT_Batched": 32,
-      "problem_4_i8_NN_Batched": 32,
-      "problem_5_i8_NT_Batched": 32,
-      "problem_6_i8_TN_Batched": 32,
-      "problem_7_i8_TT_Batched": 32
+      "problem_0_H_NN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_1_H_NT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_3_H_TT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_4_i8_NN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_5_i8_NT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_6_i8_TN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_7_i8_TT_Batched": {
+        "actual": 25,
+        "expected": 32
+      }
     }
   },
   "sparse/gfx94x/spmm_vw_lg_one_sb.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched": 32,
-      "problem_1_H_NT_Batched": 32,
-      "problem_2_H_TN_Batched": 32,
-      "problem_3_H_TT_Batched": 32,
-      "problem_4_i8_NN_Batched": 32,
-      "problem_5_i8_NT_Batched": 32,
-      "problem_6_i8_TN_Batched": 32,
-      "problem_7_i8_TT_Batched": 32
+      "problem_0_H_NN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_1_H_NT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_3_H_TT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_4_i8_NN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_5_i8_NT_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_6_i8_TN_Batched": {
+        "actual": 25,
+        "expected": 32
+      },
+      "problem_7_i8_TT_Batched": {
+        "actual": 25,
+        "expected": 32
+      }
     }
   },
   "sparse/gfx94x/use_sgpr_for_gro.yaml": {
     "gfx950": {
-      "problem_0_H_TN_Batched": 720
+      "problem_0_H_TN_Batched": {
+        "actual": 245,
+        "expected": 720
+      }
     }
   },
   "sparse/gfx94x/use_sgpr_for_gro_sb.yaml": {
     "gfx950": {
-      "problem_0_H_TN_Batched": 720
+      "problem_0_H_TN_Batched": {
+        "actual": 325,
+        "expected": 720
+      }
     }
   },
   "sparse/gfx950/bf16_gate_r.yaml": {
@@ -937,10 +2342,22 @@
   },
   "sparse/gfx950/f8_gate_r.yaml": {
     "gfx950": {
-      "problem_0_f8_NN_Batched_Bias": 16,
-      "problem_1_f8_NT_Batched_Bias": 16,
-      "problem_2_f8_NN_Batched_Bias": 16,
-      "problem_3_f8_NT_Batched_Bias": 16
+      "problem_0_f8_NN_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_1_f8_NT_Batched_Bias": {
+        "actual": 16,
+        "expected": 16
+      },
+      "problem_2_f8_NN_Batched_Bias": {
+        "actual": 12,
+        "expected": 16
+      },
+      "problem_3_f8_NT_Batched_Bias": {
+        "actual": 12,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx950/fp16_gate_r.yaml": {
@@ -953,26 +2370,74 @@
   },
   "sparse/gfx950/spmm_b8.yaml": {
     "gfx950": {
-      "problem_0_b8_NN_Batched_Bias": 384,
-      "problem_1_b8_NT_Batched_Bias": 384,
-      "problem_2_b8_TN_Batched_Bias": 384,
-      "problem_3_b8_TT_Batched_Bias": 384,
-      "problem_4_b8_NN_Batched_Bias": 336,
-      "problem_5_b8_NT_Batched_Bias": 336,
-      "problem_6_b8_TN_Batched_Bias": 336,
-      "problem_7_b8_TT_Batched_Bias": 336
+      "problem_0_b8_NN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_1_b8_NT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_2_b8_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_3_b8_TT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_4_b8_NN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_5_b8_NT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_6_b8_TN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_7_b8_TT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_b8_sb.yaml": {
     "gfx950": {
-      "problem_0_b8_NN_Batched_Bias": 384,
-      "problem_1_b8_NT_Batched_Bias": 384,
-      "problem_2_b8_TN_Batched_Bias": 384,
-      "problem_3_b8_TT_Batched_Bias": 384,
-      "problem_4_b8_NN_Batched_Bias": 336,
-      "problem_5_b8_NT_Batched_Bias": 336,
-      "problem_6_b8_TN_Batched_Bias": 336,
-      "problem_7_b8_TT_Batched_Bias": 336
+      "problem_0_b8_NN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_1_b8_NT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_2_b8_TN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_3_b8_TT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_4_b8_NN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_5_b8_NT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_6_b8_TN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_7_b8_TT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_bf16.yaml": {
@@ -1001,86 +2466,254 @@
   },
   "sparse/gfx950/spmm_dtl.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched_Bias": 18,
-      "problem_1_i8_NN_Batched_Bias": 18,
-      "problem_2_i8_NT_Batched_Bias": 18,
-      "problem_3_i8_NT_Batched_Bias": 18,
-      "problem_4_H_NN_Batched_Bias": 72,
-      "problem_5_H_NN_Batched_Bias": 72,
-      "problem_6_H_NT_Batched_Bias": 72,
-      "problem_7_H_NT_Batched_Bias": 72
+      "problem_0_i8_NN_Batched_Bias": {
+        "actual": 7,
+        "expected": 18
+      },
+      "problem_1_i8_NN_Batched_Bias": {
+        "actual": 9,
+        "expected": 18
+      },
+      "problem_2_i8_NT_Batched_Bias": {
+        "actual": 6,
+        "expected": 18
+      },
+      "problem_3_i8_NT_Batched_Bias": {
+        "actual": 6,
+        "expected": 18
+      },
+      "problem_4_H_NN_Batched_Bias": {
+        "actual": 28,
+        "expected": 72
+      },
+      "problem_5_H_NN_Batched_Bias": {
+        "actual": 28,
+        "expected": 72
+      },
+      "problem_6_H_NT_Batched_Bias": {
+        "actual": 26,
+        "expected": 72
+      },
+      "problem_7_H_NT_Batched_Bias": {
+        "actual": 26,
+        "expected": 72
+      }
     }
   },
   "sparse/gfx950/spmm_f16.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 7680,
-      "problem_1_H_NT_Batched_Bias": 864,
-      "problem_2_H_TN_Batched_Bias": 864,
-      "problem_3_H_TT_Batched_Bias": 864,
-      "problem_4_H_NN_Batched_Bias": 504,
-      "problem_5_H_NT_Batched_Bias": 336,
-      "problem_6_H_TN_Batched_Bias": 504,
-      "problem_7_H_TT_Batched_Bias": 756
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 768,
+        "expected": 7680
+      },
+      "problem_1_H_NT_Batched_Bias": {
+        "actual": 90,
+        "expected": 864
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 81,
+        "expected": 864
+      },
+      "problem_3_H_TT_Batched_Bias": {
+        "actual": 90,
+        "expected": 864
+      },
+      "problem_4_H_NN_Batched_Bias": {
+        "actual": 96,
+        "expected": 504
+      },
+      "problem_5_H_NT_Batched_Bias": {
+        "actual": 60,
+        "expected": 336
+      },
+      "problem_6_H_TN_Batched_Bias": {
+        "actual": 96,
+        "expected": 504
+      },
+      "problem_7_H_TT_Batched_Bias": {
+        "actual": 128,
+        "expected": 756
+      }
     }
   },
   "sparse/gfx950/spmm_f16_sb.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 18432,
-      "problem_1_H_NT_Batched_Bias": 432,
-      "problem_2_H_TN_Batched_Bias": 432,
-      "problem_3_H_TT_Batched_Bias": 432,
-      "problem_4_H_NN_Batched_Bias": 252,
-      "problem_5_H_NT_Batched_Bias": 168,
-      "problem_6_H_TN_Batched_Bias": 252,
-      "problem_7_H_TT_Batched_Bias": 378
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 2608,
+        "expected": 18432
+      },
+      "problem_1_H_NT_Batched_Bias": {
+        "actual": 180,
+        "expected": 432
+      },
+      "problem_2_H_TN_Batched_Bias": {
+        "actual": 160,
+        "expected": 432
+      },
+      "problem_3_H_TT_Batched_Bias": {
+        "actual": 180,
+        "expected": 432
+      },
+      "problem_4_H_NN_Batched_Bias": {
+        "actual": 224,
+        "expected": 252
+      },
+      "problem_5_H_NT_Batched_Bias": {
+        "actual": 140,
+        "expected": 168
+      },
+      "problem_6_H_TN_Batched_Bias": {
+        "actual": 252,
+        "expected": 252
+      },
+      "problem_7_H_TT_Batched_Bias": {
+        "actual": 336,
+        "expected": 378
+      }
     }
   },
   "sparse/gfx950/spmm_f8.yaml": {
     "gfx950": {
-      "problem_0_f8_NN_Batched_Bias": 384,
-      "problem_1_f8_NT_Batched_Bias": 384,
-      "problem_2_f8_TN_Batched_Bias": 384,
-      "problem_3_f8_TT_Batched_Bias": 384,
-      "problem_4_f8_NN_Batched_Bias": 336,
-      "problem_5_f8_NT_Batched_Bias": 336,
-      "problem_6_f8_TN_Batched_Bias": 336,
-      "problem_7_f8_TT_Batched_Bias": 336
+      "problem_0_f8_NN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_1_f8_NT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_2_f8_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_3_f8_TT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_4_f8_NN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_5_f8_NT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_6_f8_TN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_7_f8_TT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_f8_sb.yaml": {
     "gfx950": {
-      "problem_0_f8_NN_Batched_Bias": 384,
-      "problem_1_f8_NT_Batched_Bias": 384,
-      "problem_2_f8_TN_Batched_Bias": 384,
-      "problem_3_f8_TT_Batched_Bias": 384,
-      "problem_4_f8_NN_Batched_Bias": 336,
-      "problem_5_f8_NT_Batched_Bias": 336,
-      "problem_6_f8_TN_Batched_Bias": 336,
-      "problem_7_f8_TT_Batched_Bias": 336
+      "problem_0_f8_NN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_1_f8_NT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_2_f8_TN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_3_f8_TT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_4_f8_NN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_5_f8_NT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_6_f8_TN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_7_f8_TT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_i8.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched_Bias": 384,
-      "problem_1_i8_NT_Batched_Bias": 384,
-      "problem_2_i8_TN_Batched_Bias": 384,
-      "problem_3_i8_TT_Batched_Bias": 384,
-      "problem_4_i8_NN_Batched_Bias": 336,
-      "problem_5_i8_NT_Batched_Bias": 336,
-      "problem_6_i8_TN_Batched_Bias": 336,
-      "problem_7_i8_TT_Batched_Bias": 336
+      "problem_0_i8_NN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_1_i8_NT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_2_i8_TN_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_3_i8_TT_Batched_Bias": {
+        "actual": 45,
+        "expected": 384
+      },
+      "problem_4_i8_NN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_5_i8_NT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_6_i8_TN_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      },
+      "problem_7_i8_TT_Batched_Bias": {
+        "actual": 30,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_i8_sb.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched_Bias": 384,
-      "problem_1_i8_NT_Batched_Bias": 384,
-      "problem_2_i8_TN_Batched_Bias": 384,
-      "problem_3_i8_TT_Batched_Bias": 384,
-      "problem_4_i8_NN_Batched_Bias": 336,
-      "problem_5_i8_NT_Batched_Bias": 336,
-      "problem_6_i8_TN_Batched_Bias": 336,
-      "problem_7_i8_TT_Batched_Bias": 336
+      "problem_0_i8_NN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_1_i8_NT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_2_i8_TN_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_3_i8_TT_Batched_Bias": {
+        "actual": 160,
+        "expected": 384
+      },
+      "problem_4_i8_NN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_5_i8_NT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_6_i8_TN_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      },
+      "problem_7_i8_TT_Batched_Bias": {
+        "actual": 140,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_i8bs.yaml": {
@@ -1097,10 +2730,22 @@
   },
   "sparse/gfx950/spmm_ldstr.yaml": {
     "gfx950": {
-      "problem_0_H_NT_Batched_Bias": 768,
-      "problem_1_H_NT_Batched_Bias": 192,
-      "problem_2_f8_NT_Batched_Bias": 168,
-      "problem_3_f8_NT_Batched_Bias": 168
+      "problem_0_H_NT_Batched_Bias": {
+        "actual": 384,
+        "expected": 768
+      },
+      "problem_1_H_NT_Batched_Bias": {
+        "actual": 128,
+        "expected": 192
+      },
+      "problem_2_f8_NT_Batched_Bias": {
+        "actual": 60,
+        "expected": 168
+      },
+      "problem_3_f8_NT_Batched_Bias": {
+        "actual": 140,
+        "expected": 168
+      }
     }
   },
   "sparse/gfx950/spmm_vw_lg_one.yaml": {
@@ -1129,271 +2774,534 @@
   },
   "streamk/data_parallel_static_mx32f4.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_Bias_MX": 1
+      "problem_0_F4_TN_Batched_Bias_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/data_parallel_static_sgemm.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 1
+      "problem_0_s_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/gfx950/data_parallel_static_hgemm_use_e.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 4,
-      "problem_1_h_NN_Batched": 2
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/gfx950/data_parallel_static_sgemm_pap.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 4
+      "problem_0_s_NT_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "streamk/gfx950/sk_bgemm_pap.yaml": {
     "gfx950": {
-      "problem_0_b_NT_Batched": 24
+      "problem_0_b_NT_Batched": {
+        "actual": 8,
+        "expected": 24
+      }
     }
   },
   "streamk/gfx950/sk_hgemm_use_e.yaml": {
     "gfx950": {
-      "problem_0_h_NN_Batched_Bias": 24,
-      "problem_1_h_NN_Batched": 2
+      "problem_0_h_NN_Batched_Bias": {
+        "actual": 24,
+        "expected": 24
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/gfx950/sk_hybrid_xcc_mapping.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 2
+      "problem_0_s_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/gfx950/sk_mxf4gemm_pap.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 256
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 64,
+        "expected": 256
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_activation_basic.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 1
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_activation_batch_combo.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 1
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_activation_full_coverage.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 12
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 12,
+        "expected": 12
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_activation_streamk_combo.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 12
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 6,
+        "expected": 12
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_atomic_variants.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 12
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 6,
+        "expected": 12
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_basic_variants.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 18
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 15,
+        "expected": 18
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_batch_mi_combo.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 4
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 3,
+        "expected": 4
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_batch_sizes.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 2
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 2
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_comprehensive.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 288
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 120,
+        "expected": 288
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_debug_modes.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 8
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 2,
+        "expected": 8
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_full_coverage.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 96
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 30,
+        "expected": 96
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_matrix_instructions.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 19
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 9,
+        "expected": 19
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_problem_sizes.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 1
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_tree_reduction.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 16
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 6,
+        "expected": 16
+      }
     }
   },
   "streamk/gfx950/sk_mxfp4_xcc_mapping.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 8
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 8,
+        "expected": 8
+      }
+    }
+  },
+  "streamk/gfx950/sk_sgemm_debug_modes.yaml": {
+    "gfx950": {
+      "problem_0_s_NT_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "streamk/gfx950/sk_sgemm_dynamic_pap.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 16
+      "problem_0_s_NT_Batched": {
+        "actual": 8,
+        "expected": 16
+      }
     }
   },
   "streamk/gfx950/sk_sgemm_hybrid_pap.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 16
+      "problem_0_s_NT_Batched": {
+        "actual": 8,
+        "expected": 16
+      }
     }
   },
   "streamk/gfx950/sk_sgemm_pap.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 192
+      "problem_0_s_NT_Batched": {
+        "actual": 64,
+        "expected": 192
+      }
     }
   },
   "streamk/sk_I8gemm_quick.yaml": {
     "gfx950": {
-      "problem_0_I8_NN_Batched": 3,
-      "problem_1_I8_NT_Batched_Bias": 3,
-      "problem_2_I8_TN_Batched_Bias": 3,
-      "problem_3_i8_TT_Batched_Bias": 3
+      "problem_0_I8_NN_Batched": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_1_I8_NT_Batched_Bias": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_2_I8_TN_Batched_Bias": {
+        "actual": 3,
+        "expected": 3
+      },
+      "problem_3_i8_TT_Batched_Bias": {
+        "actual": 3,
+        "expected": 3
+      }
     }
   },
   "streamk/sk_bgemm_div.yaml": {
     "gfx950": {
-      "problem_0_b_NT_Batched": 1
+      "problem_0_b_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_bgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_b_NT_Batched": 20,
-      "problem_1_b_NN_Batched": 20,
-      "problem_2_b_TN_Batched": 144,
-      "problem_3_b_TT_Batched": 512
+      "problem_0_b_NT_Batched": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_1_b_NN_Batched": {
+        "actual": 144,
+        "expected": 144
+      },
+      "problem_2_b_TN_Batched": {
+        "actual": 128,
+        "expected": 256
+      },
+      "problem_3_b_TT_Batched": {
+        "actual": 20,
+        "expected": 20
+      }
     }
   },
   "streamk/sk_cgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_C_NN_Batched": 2,
-      "problem_1_C_NT_Batched": 2,
-      "problem_2_C_NT_Batched": 2,
-      "problem_3_C_TT_Batched": 2
+      "problem_0_C_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_C_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_2_C_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_3_C_TT_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/sk_dgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_d_NT_Batched": 20,
-      "problem_1_d_NN_Batched": 20,
-      "problem_2_d_TN_Batched": 288,
-      "problem_3_d_TT_Batched": 512
+      "problem_0_d_NT_Batched": {
+        "actual": 16,
+        "expected": 20
+      },
+      "problem_1_d_NN_Batched": {
+        "actual": 384,
+        "expected": 1944
+      },
+      "problem_2_d_TN_Batched": {
+        "actual": 32,
+        "expected": 32
+      },
+      "problem_3_d_TT_Batched": {
+        "actual": 16,
+        "expected": 20
+      }
     }
   },
   "streamk/sk_dynamic.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 20,
-      "problem_1_b_TN_Batched": 20
+      "problem_0_s_NT_Batched": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 20,
+        "expected": 20
+      }
     }
   },
   "streamk/sk_dynamic_mxfp4.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_MX": 1
+      "problem_0_F4_TN_Batched_MX": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_dynamic_work_stealing.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 2,
-      "problem_1_b_TN_Batched": 2
+      "problem_0_s_NT_Batched": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "streamk/sk_f8gemm_quick.yaml": {
     "gfx950": {
-      "problem_0_F8_NN_Batched": 12,
-      "problem_1_F8_NT_Batched_Bias": 4,
-      "problem_2_F8_TN_Batched_Bias": 4,
-      "problem_3_F8_TT_Batched_Bias": 4,
-      "problem_4_B8_TN_Batched_Bias": 4,
-      "problem_5_F8_NN_Batched": 4,
-      "problem_6_F8_NT_Batched_Bias": 4,
-      "problem_7_B8F8_TN_Batched_Bias": 4
+      "problem_0_F8_NN_Batched": {
+        "actual": 12,
+        "expected": 12
+      },
+      "problem_1_F8_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_2_F8_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_3_F8_TT_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_4_B8_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_5_F8_NN_Batched": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_6_F8_NT_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_7_B8F8_TN_Batched_Bias": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "streamk/sk_hgemm_lsu.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched": 1
+      "problem_0_h_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_hgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched": 23,
-      "problem_1_h_NN_Batched": 23,
-      "problem_2_h_TN_Batched": 144,
-      "problem_3_h_TT_Batched": 512
+      "problem_0_h_NT_Batched": {
+        "actual": 23,
+        "expected": 23
+      },
+      "problem_1_h_NN_Batched": {
+        "actual": 144,
+        "expected": 144
+      },
+      "problem_2_h_TN_Batched": {
+        "actual": 128,
+        "expected": 256
+      },
+      "problem_3_h_TT_Batched": {
+        "actual": 23,
+        "expected": 23
+      }
     }
   },
   "streamk/sk_hgemm_race.yaml": {
     "gfx950": {
-      "problem_0_H_NT_Batched": 2
+      "problem_0_H_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_hybrid.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 2,
-      "problem_1_b_TN_Batched": 2
+      "problem_0_s_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/sk_hybrid_work_stealing.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 2,
-      "problem_1_b_TN_Batched": 2
+      "problem_0_s_NT_Batched": {
+        "actual": 4,
+        "expected": 4
+      },
+      "problem_1_b_TN_Batched": {
+        "actual": 4,
+        "expected": 4
+      }
     }
   },
   "streamk/sk_mx32f4_quick.yaml": {
     "gfx950": {
-      "problem_0_F4_TN_Batched_Bias_MX": 4
+      "problem_0_F4_TN_Batched_Bias_MX": {
+        "actual": 2,
+        "expected": 4
+      }
     }
   },
   "streamk/sk_queue_selfclean.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 2
+      "problem_0_s_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   },
   "streamk/sk_reduction.yaml": {
     "gfx950": {
-      "problem_0_h_NT_Batched": 2,
-      "problem_1_b_TN_Batched_Bias": 1,
-      "problem_2_h_NT_Batched": 2,
-      "problem_3_s_TN_Batched": 1,
-      "problem_4_b_NT_Batched": 1
+      "problem_0_h_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_b_TN_Batched_Bias": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2_h_NT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_3_s_TN_Batched": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_4_b_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_sgemm_alpha0.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 1
+      "problem_0_s_NT_Batched": {
+        "actual": 1,
+        "expected": 1
+      }
     }
   },
   "streamk/sk_sgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_s_NT_Batched": 20,
-      "problem_1_s_NN_Batched": 20,
-      "problem_2_s_TN_Batched": 2592,
-      "problem_3_s_TT_Batched": 512
+      "problem_0_s_NT_Batched": {
+        "actual": 20,
+        "expected": 20
+      },
+      "problem_1_s_NN_Batched": {
+        "actual": 648,
+        "expected": 1944
+      },
+      "problem_2_s_TN_Batched": {
+        "actual": 128,
+        "expected": 256
+      },
+      "problem_3_s_TT_Batched": {
+        "actual": 20,
+        "expected": 20
+      }
     }
   },
   "streamk/sk_zgemm_quick.yaml": {
     "gfx950": {
-      "problem_0_Z_NN_Batched": 2,
-      "problem_1_Z_TN_Batched": 2,
-      "problem_2_Z_TN_Batched": 2,
-      "problem_3_Z_TT_Batched": 2,
-      "problem_4_Z_TT_Batched": 2
+      "problem_0_Z_NN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_1_Z_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_2_Z_TN_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_3_Z_TT_Batched": {
+        "actual": 2,
+        "expected": 2
+      },
+      "problem_4_Z_TT_Batched": {
+        "actual": 2,
+        "expected": 2
+      }
     }
   }
 }
