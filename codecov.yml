@@ -77,6 +77,17 @@ flag_management:
       statuses:
       - type: project
         target: 80%
+    - name: rocSPARSE-unit
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
+        informational: true
+    - name: rocSPARSE-integration
+      carryforward: true
+      statuses:
+      - type: project
+        informational: true
     - name: hipSPARSE
       carryforward: true
       statuses:
