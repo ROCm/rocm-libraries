@@ -16,9 +16,11 @@
 //             StreamK name of the same tile, so the tile token alone cannot tell
 //             them apart. "_SK" immediately precedes "_WGT_" on a StreamK name.
 //   Swizzle   The prefix match stops at "_Float_" and the tile match starts at
-//             "_WGT_", so the scale tokens between them are never inspected
-//             unless something looks for them. A pre-swizzled kernel carries
+//             "_WGT_". The block-size integers in between are compared; the
+//             scale datatype is not. A pre-swizzled kernel carries
 //             PSTA_/PTA_/PSTB_/PTB_ there.
+//   Unroll    "_UR_" without the depth matches every prefetch. "_UR_2" is also
+//             a prefix of "_UR_20", so the number is delimited.
 //   WGM       A StreamK name never carries "_WGM_" even when the ranked tile has
 //             workgroupMapping set, because the generator forces
 //             workgroupMappingDim = -1 for every StreamK kernel.
@@ -61,15 +63,39 @@ namespace
         = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PSTA_32x8x4_PTA_32x8_SB_BE8M0_32_"
           "PSTB_32x8x4_PTB_8x32_WGT_16x16x128_UR_2";
 
-    // {m, n, k, workgroupMapping, streamK, nonTemporalA, nonTemporalB}. The
-    // non-temporal bits are rejected by the caller, ahead of this predicate, so
-    // they stay false throughout.
-    constexpr RocRollerSelectedTile plainTile16x16{16, 16, 128, false, false, false, false};
-    constexpr RocRollerSelectedTile skTile16x16{16, 16, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skTile64x32{64, 32, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile wgmTile256x256{256, 256, 128, true, false, false, false};
-    constexpr RocRollerSelectedTile skTile16x32{16, 32, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skTile256x192{256, 192, 128, true, true, false, false};
+    // MX block-32 on both operands. Unroll defaults to 2, which is what every
+    // checked-in name here carries except the 256x192 FP4 kernel (UR_4).
+    constexpr RocRollerSelectedTile mxTile(int  m,
+                                           int  n,
+                                           int  k,
+                                           bool wgm,
+                                           bool sk,
+                                           int  unroll       = 2,
+                                           int  scaleARow    = 32,
+                                           int  scaleACol    = 1,
+                                           int  scaleBCol    = 32,
+                                           int  scaleBRow    = 1)
+    {
+        RocRollerSelectedTile tile{};
+        tile.m              = m;
+        tile.n              = n;
+        tile.k              = k;
+        tile.workgroupMapping = wgm;
+        tile.streamK        = sk;
+        tile.unroll         = unroll;
+        tile.scaleABlockRow = scaleARow;
+        tile.scaleABlockCol = scaleACol;
+        tile.scaleBBlockCol = scaleBCol;
+        tile.scaleBBlockRow = scaleBRow;
+        return tile;
+    }
+
+    constexpr RocRollerSelectedTile plainTile16x16  = mxTile(16, 16, 128, false, false);
+    constexpr RocRollerSelectedTile skTile16x16     = mxTile(16, 16, 128, true, true);
+    constexpr RocRollerSelectedTile skTile64x32     = mxTile(64, 32, 128, true, true);
+    constexpr RocRollerSelectedTile wgmTile256x256  = mxTile(256, 256, 128, true, false);
+    constexpr RocRollerSelectedTile skTile16x32     = mxTile(16, 32, 128, true, true);
+    constexpr RocRollerSelectedTile skTile256x192   = mxTile(256, 192, 128, true, true, 4);
 
     struct MatchCase
     {
@@ -108,14 +134,29 @@ namespace
             {skFp8_64x32, &fp8Prefix, skTile16x16, false, "a different tile shape must not match"},
             {wgmFp8_256x256,
              &fp8Prefix,
-             {256, 256, 128, false, false, false, false},
+             mxTile(256, 256, 128, false, false),
              false,
              "a non-WGM tile must not take a WGM kernel"},
             {plainFp8_16x16,
              &fp8Prefix,
-             {16, 16, 128, true, false, false, false},
+             mxTile(16, 16, 128, true, false),
              false,
              "a WGM tile must not take a kernel without _WGM_"},
+            {plainFp8_16x16,
+             &fp8Prefix,
+             mxTile(16, 16, 128, false, false, 4),
+             false,
+             "UR_2 must not match a tile whose unroll is 4"},
+            {skFp4_256x192,
+             &fp4Prefix,
+             mxTile(256, 192, 128, true, true, 2),
+             false,
+             "UR_4 must not match a tile whose unroll is 2"},
+            {plainFp8_16x16,
+             &fp8Prefix,
+             mxTile(16, 16, 128, false, false, 2, 64),
+             false,
+             "scale block 32 must not match a tile whose block is 64"},
         };
         return cases;
     }
@@ -166,8 +207,8 @@ TEST(HostUnitRocRollerKernelMatch, smoke_RejectsEveryPreSwizzledScaleToken)
 // did carry _WGM_, which the generator does not emit.
 TEST(HostUnitRocRollerKernelMatch, smoke_StreamKIgnoresWorkgroupMappingOnTheTile)
 {
-    constexpr RocRollerSelectedTile skWithWgm{16, 16, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skNoWgm{16, 16, 128, false, true, false, false};
+    constexpr RocRollerSelectedTile skWithWgm = mxTile(16, 16, 128, true, true);
+    constexpr RocRollerSelectedTile skNoWgm  = mxTile(16, 16, 128, false, true);
     EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skWithWgm));
     EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skNoWgm));
 
@@ -187,4 +228,30 @@ TEST(HostUnitRocRollerKernelMatch, smoke_NearMissExtentsDoNotMatch)
     const char* const widerK
         = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x1280_UR_2";
     EXPECT_FALSE(rocRollerKernelNameMatchesTile(widerK, fp8Prefix, plainTile16x16));
+}
+
+// "_UR_2" is a prefix of "_UR_20". The depth is part of the tile, and it is
+// delimited so the shorter depth does not accept the longer one.
+TEST(HostUnitRocRollerKernelMatch, smoke_UnrollDepthIsDelimited)
+{
+    const char* const ur20
+        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_20";
+    EXPECT_FALSE(rocRollerKernelNameMatchesTile(ur20, fp8Prefix, plainTile16x16));
+    EXPECT_TRUE(rocRollerKernelNameMatchesTile(ur20, fp8Prefix, mxTile(16, 16, 128, false, false, 20)));
+}
+
+// The block-size token is "32" or "32x8". A second extent of 1 is omitted.
+TEST(HostUnitRocRollerKernelMatch, smoke_ScaleBlockExtentIsExact)
+{
+    const char* const ax
+        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32x8_SB_BE8M0_32_WGT_16x16x128_UR_2";
+    EXPECT_FALSE(rocRollerKernelNameMatchesTile(ax, fp8Prefix, plainTile16x16));
+    EXPECT_TRUE(rocRollerKernelNameMatchesTile(
+        ax, fp8Prefix, mxTile(16, 16, 128, false, false, 2, 32, 8)));
+
+    const char* const bOnly
+        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SB_BE8M0_32_WGT_16x16x128_UR_2";
+    EXPECT_FALSE(rocRollerKernelNameMatchesTile(bOnly, fp8Prefix, plainTile16x16));
+    EXPECT_TRUE(rocRollerKernelNameMatchesTile(
+        bOnly, fp8Prefix, mxTile(16, 16, 128, false, false, 2, 0, 1, 32, 1)));
 }
