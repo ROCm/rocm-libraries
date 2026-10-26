@@ -70,6 +70,17 @@ GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON = (
     "warp_tile_k=128 (XOR-swizzled 8-bit async load), so it requires "
     "warp_tile_k >= 128"
 )
+# Non-MX comp_async on gfx1250 with 8-bit A/B does not compile with the 32x32
+# warp tile: its A/B LDS register tile distribution is empty (static_assert
+# "0 < kThreadElementSpaceSize" in static_distributed_tensor.hpp). Only the
+# 16x16 warp tile is supported. Same rule and text as the dispatcher
+# codegen_common.
+GFX1250_COMP_ASYNC_8BIT_MAX_WARP_TILE_MN = 16
+GFX1250_COMP_ASYNC_8BIT_WARP_TILE_MN_REJECT_REASON = (
+    "comp_async on gfx1250 with fp8/bf8 A/B does not compile with a 32x32 "
+    "warp tile (empty LDS register tile distribution), so it requires "
+    "warp_tile_m = warp_tile_n = 16"
+)
 # fp32 A/B on gfx1250. Same rules and text as the dispatcher codegen_common:
 # comp_tdm / comp_tdm_v2 give wrong results for every layout but rcr, and an
 # fp32 C tile of 512 or more accumulators per lane (tile_m*tile_n /
@@ -175,6 +186,23 @@ def gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
     )
     if is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K:
         return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    return ""
+
+
+def gfx1250_comp_async_8bit_warp_tile_mn_reject_reason(
+    pipeline, a_datatype, b_datatype, warp_tile_m, warp_tile_n
+):
+    """Reason string if non-MX comp_async has fp8/bf8 A or B and
+    warp_tile_m or warp_tile_n above 16, else ""."""
+    if pipeline not in GEMM_ASYNC_PIPELINES:
+        return ""
+    is_8bit = (
+        a_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+        or b_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+    )
+    too_wide = max(warp_tile_m, warp_tile_n) > GFX1250_COMP_ASYNC_8BIT_MAX_WARP_TILE_MN
+    if is_8bit and too_wide:
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_MN_REJECT_REASON
     return ""
 
 
@@ -1301,10 +1329,16 @@ def is_tile_config_valid(
         if not gfx1250_valid:
             logging.debug(f"gfx1250 pipeline validation failed: {gfx1250_error}")
             return False
-        dtype_reason = gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
-            pipeline, a_datatype, b_datatype, warp_tile_k
-        ) or gfx1250_tdm_fp32_layout_reject_reason(
-            pipeline, a_datatype, b_datatype, layout
+        dtype_reason = (
+            gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+                pipeline, a_datatype, b_datatype, warp_tile_k
+            )
+            or gfx1250_comp_async_8bit_warp_tile_mn_reject_reason(
+                pipeline, a_datatype, b_datatype, warp_tile_m, warp_tile_n
+            )
+            or gfx1250_tdm_fp32_layout_reject_reason(
+                pipeline, a_datatype, b_datatype, layout
+            )
         )
         if dtype_reason:
             logging.debug(f"gfx1250 pipeline validation failed: {dtype_reason}")

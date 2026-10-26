@@ -250,14 +250,29 @@ class TestValidationRules(unittest.TestCase):
             self.assertFalse(vu.op_warp_tile_allowed("gfx1250", dt, [32, 32, 64]))
             self.assertFalse(vu.op_warp_tile_allowed("gfx1250", dt, [32, 16, 128]))
         tile = (128, 128, 256, 2, 2, 1, 32, 32, 128)
+
+        def valid(dt, pipe):
+            return vu.is_tile_config_valid(
+                *tile, dt, dt, "fp16", pipe, "rcr", "gfx1250", "gemm_universal"
+            )
+
         for dt in ("fp8", "bf8"):
-            for pipe in ("comp_tdm", "comp_tdm_v2", "comp_async", "compv3"):
-                self.assertTrue(
-                    vu.is_tile_config_valid(
-                        *tile, dt, dt, "fp16", pipe, "rcr", "gfx1250", "gemm_universal"
-                    ),
-                    (dt, pipe),
-                )
+            for pipe in ("comp_tdm", "comp_tdm_v2", "compv3", "compv4", "mem"):
+                self.assertTrue(valid(dt, pipe), (dt, pipe))
+            # comp_async does not compile with the 32x32 warp tile.
+            self.assertFalse(valid(dt, "comp_async"), dt)
+
+    def test_comp_async_8bit_warp_tile_mn_reject_reason(self):
+        r = vu.gfx1250_comp_async_8bit_warp_tile_mn_reject_reason
+        reason = vu.GFX1250_COMP_ASYNC_8BIT_WARP_TILE_MN_REJECT_REASON
+        for dt in ("fp8", "bf8"):
+            self.assertEqual(r("comp_async", dt, dt, 32, 32), reason, dt)
+            self.assertEqual(r("comp_async", dt, "fp16", 32, 32), reason, dt)
+            self.assertEqual(r("comp_async", dt, dt, 16, 16), "", dt)
+            for p in ("compv3", "compv4", "mem", "comp_tdm", "comp_tdm_v2"):
+                self.assertEqual(r(p, dt, dt, 32, 32), "", (p, dt))
+        self.assertEqual(r("comp_async", "fp16", "fp16", 32, 32), "")
+        self.assertIn("warp_tile_m = warp_tile_n = 16", reason)
 
     def test_comp_async_pad_trait_gate(self):
         ok = vu.is_trait_combination_valid
