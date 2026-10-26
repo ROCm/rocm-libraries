@@ -19,7 +19,7 @@ from ..core.ir import (
     VectorType,
     dtype_to_ir_type,
 )
-from ..core.storage import FragmentPacking, MatrixFragmentLayout
+from ..core.storage import FragmentPacking, MatrixFragmentLayout, register_packing
 
 
 def storage_ir_type(dtype: str) -> Type:
@@ -30,6 +30,21 @@ def storage_ir_type(dtype: str) -> Type:
     if info.encoded_bits % 8 or info.name in ("e8m0", "e5m3"):
         return I8
     return dtype_to_ir_type(info.name)
+
+
+def mma_operand_ir_type(dtype: str, count: int) -> VectorType:
+    """The vector type ``IRBuilder.mma`` takes for ``count`` A or B elements of ``dtype``.
+
+    A sub-byte dtype has no IR value type, so its elements reach the instruction packed
+    low-bit-first into 32-bit words (``core.storage.register_packing``): ``vec<i32 x words>``.
+    Every other dtype is the logical vector ``vec<dtype x count>``; the backend reinterprets it
+    as the instruction's register type. ``count`` counts logical elements in both cases, so
+    ``fp4e2m1`` x 32 is ``vec<i32x4>`` and ``fp8e4m3`` x 32 is ``vec<fp8e4m3x32>``.
+    """
+    packing = register_packing(dtype, count)
+    if packing is not None:
+        return VectorType(I32, packing.carrier_count)
+    return VectorType(dtype_to_ir_type(dtype), count)
 
 
 def load_matrix_fragment(
