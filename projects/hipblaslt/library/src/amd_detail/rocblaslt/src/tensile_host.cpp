@@ -7414,6 +7414,7 @@ static rocblaslt_status
             continue;
 
         std::shared_ptr<TensileLite::ContractionSolution> found;
+        int                                               nameMatches = 0;
         {
             std::lock_guard<std::mutex> lock(library->solutionsGuard);
             for(auto const& entry : library->solutions)
@@ -7424,12 +7425,13 @@ static rocblaslt_status
                    && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
                     continue;
 
-                // The name carries the tile shape and the operand types, and
-                // nothing else. Every other condition a checked-in rocRoller
-                // kernel was captured under -- scale layout, size multiples and
-                // windows, batch count, buffer-addressing extent -- lives in its
-                // predicates, which a library lookup would have evaluated and
-                // this hand-rolled search otherwise skips. Without them a
+                // The name carries the operand types, the tile, StreamK, WGM, the
+                // unroll and the scale-block size. Every other condition a
+                // checked-in rocRoller kernel was captured under -- scale layout
+                // beyond the block size, size multiples and windows, batch
+                // count, buffer-addressing extent -- lives in its predicates,
+                // which a library lookup would have evaluated and this
+                // hand-rolled search otherwise skips. Without them a
                 // one-sided-MX problem name-matches a two-sided kernel and
                 // faults the GPU. hardware and problem only, as in the grouped
                 // path below: taskPredicate needs a Task, which needs the
@@ -7442,8 +7444,27 @@ static rocblaslt_status
                     continue;
 
                 found = entry.second;
-                break;
+                ++nameMatches;
+                // Map order is not a rank. A second hit means two kernels still
+                // describe this tile; keep scanning only long enough to know.
+                if(nameMatches > 1)
+                    break;
             }
+        }
+        // One kernel per ranked tile. Zero is "not checked in". Two or more
+        // is ambiguous: taking the first would launch whichever solution the
+        // map happened to yield, and capturing more than one kernel per
+        // (type, tile, SK, WGM) is what makes that possible.
+        if(nameMatches != 1)
+        {
+            if(nameMatches > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+            {
+                std::ostringstream msg;
+                msg << "skipping rocRoller tile " << tile.m << "x" << tile.n << "x" << tile.k
+                    << ": more than one kernel matches";
+                log_info(__func__, msg.str());
+            }
+            continue;
         }
         // The rocRoller-on path rejects a ranked tile whose kernel needs more
         // workspace than the caller offers (gemm.cpp:703-706, isSupportedProblem)
@@ -7451,11 +7472,10 @@ static rocblaslt_status
         // same reject here an off build hands back a StreamK kernel that an on
         // build would have skipped. _convertToHeuristicResultArray only reports
         // requiredWorkspaceSize; it never filters on it.
-        if(found && found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
+        if(found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
             continue;
 
-        if(found)
-            chosen.push_back(found);
+        chosen.push_back(found);
     }
 
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
