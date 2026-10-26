@@ -550,9 +550,7 @@ Solutions:
     threads: [256, 1, 1]
   CustomKernelSizePredicate:
   - {tag: SizeGreaterThan, index: 0, value: 63}
-  - {tag: SizeLessThan, index: 0, value: 65}
   - {tag: SizeGreaterThan, index: 3, value: 127}
-  - {tag: SizeLessThan, index: 3, value: 129}
   DepthU: 128
   DirectToLdsA: false
   DirectToLdsB: false
