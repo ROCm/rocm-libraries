@@ -87,6 +87,16 @@ namespace TensileLite
                             auto ctx = static_cast<LibraryIOContext<ContractionSolution>*>(
                                 iot::getContext(io));
 
+                            if(!ctx || (!ctx->blobCache && !ctx->solutions))
+                            {
+                                iot::setError(
+                                    io,
+                                    "table_bin requires LibraryIOContext with "
+                                    "solutions or blobCache.");
+                                return;
+                            }
+
+                            std::unordered_map<int32_t, std::shared_ptr<SSLibrary>> solCache;
                             table.table.resize(count);
 
                             for(int32_t i = 0; i < count; ++i)
@@ -106,42 +116,40 @@ namespace TensileLite
                                                static_cast<int64_t>(k3)};
                                 entry.speed = 0.0;
 
-                                if(ctx && ctx->blobCache)
+                                auto [cacheIt, inserted] = solCache.try_emplace(idx, nullptr);
+                                if(inserted)
                                 {
-                                    if(!ctx->blobCache->contains(idx))
+                                    if(ctx->blobCache)
                                     {
-                                        iot::setError(
-                                            io,
-                                            concatenate(
-                                                "[MatchingLibrary] Invalid solution index: ",
-                                                idx));
-                                        return;
+                                        if(!ctx->blobCache->contains(idx))
+                                        {
+                                            iot::setError(
+                                                io,
+                                                concatenate(
+                                                    "[MatchingLibrary] Invalid solution index: ",
+                                                    idx));
+                                            return;
+                                        }
+                                        cacheIt->second
+                                            = std::make_shared<SSLibrary>(idx, ctx->blobCache);
                                     }
-                                    entry.value
-                                        = std::make_shared<SSLibrary>(idx, ctx->blobCache);
-                                }
-                                else if(ctx && ctx->solutions)
-                                {
-                                    auto iter = ctx->solutions->find(idx);
-                                    if(iter == ctx->solutions->end())
+                                    else
                                     {
-                                        iot::setError(
-                                            io,
-                                            concatenate(
-                                                "[MatchingLibrary] Invalid solution index: ",
-                                                idx));
-                                        return;
+                                        auto iter = ctx->solutions->find(idx);
+                                        if(iter == ctx->solutions->end())
+                                        {
+                                            iot::setError(
+                                                io,
+                                                concatenate(
+                                                    "[MatchingLibrary] Invalid solution index: ",
+                                                    idx));
+                                            return;
+                                        }
+                                        cacheIt->second
+                                            = std::make_shared<SSLibrary>(iter->second);
                                     }
-                                    entry.value = std::make_shared<SSLibrary>(iter->second);
                                 }
-                                else
-                                {
-                                    iot::setError(
-                                        io,
-                                        "table_bin requires LibraryIOContext with "
-                                        "solutions or blobCache.");
-                                    return;
-                                }
+                                entry.value = cacheIt->second;
                             }
                         }
                     }
