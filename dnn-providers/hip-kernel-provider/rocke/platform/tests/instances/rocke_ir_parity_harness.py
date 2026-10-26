@@ -4946,6 +4946,76 @@ def cases():
             build_direct_fwd_wmma_case(_prob, **_over),
         )
 
+    # --- conv_winograd_fwd: Winograd F(m x m, 3x3) forward transforms ---
+    # K2 input transform (register path, fused bf16 prescale). The full matrix
+    # (and the C++ twin) lives in library/tests/parity/conv_winograd_fwd_emit.*.
+    def build_winograd_fwd_case(stage, **spec_kw):
+        def _build():
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+            from kernels.common import conv_winograd_fwd as wf
+
+            p = ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+            spec = wf.WinogradFwdSpec(problem=p, **spec_kw)
+            build = {
+                "K2": wf.build_winograd_input_transform,
+                "K4": wf.build_winograd_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    for _case_id, _stage, _over in (
+        ("f4_k2", "K2", {}),
+        ("f4_bf16_prescale_k2", "K2", dict(io_dtype="bf16", prescale=True)),
+    ):
+        add(
+            "conv_winograd_fwd",
+            f"conv_winograd_fwd/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_fwd_case(_stage, **_over),
+        )
+
+    # --- conv_winograd_gemm_wmma: the Winograd batched GEMM (K3, gfx1250) ---
+    # TDM operand ring + WMMA, TDM or per-lane epilogue, split-K slabs and
+    # their reduce. The full matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_winograd_gemm_wmma_emit.*.
+    def build_winograd_gemm_case(**spec_kw):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmWmmaSpec,
+                build_winograd_gemm_wmma,
+            )
+
+            return build_winograd_gemm_wmma(
+                WinogradGemmWmmaSpec(**spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    def build_winograd_gemm_reduce_case(dtype):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmReduceSpec,
+                build_winograd_gemm_reduce,
+            )
+
+            return build_winograd_gemm_reduce(
+                WinogradGemmReduceSpec(dtype), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _build_fn in (
+        ("fp16_default", build_winograd_gemm_case()),
+        ("reduce_fp16", build_winograd_gemm_reduce_case("fp16")),
+    ):
+        add(
+            "conv_winograd_gemm_wmma",
+            f"conv_winograd_gemm_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            _build_fn,
+        )
+
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
     # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
     # depthwise partial-slot kernels and their fold, and the small-C gather.
