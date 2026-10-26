@@ -106,8 +106,9 @@ TEST(TestCaseOutcome, PassedWithAConfirmedClaimIsPass)
 
 TEST(TestCaseOutcome, PassedWithAnotherGtestFailureIsUnexercised)
 {
-    EXPECT_EQ(classify(passedAt(VerificationDepth::VERIFIED), {}, REQUIRED, /*other=*/true),
-              CaseOutcome::UNEXERCISED);
+    EXPECT_EQ(
+        classify(passedAt(VerificationDepth::VERIFIED), {}, REQUIRED, /*hadOtherFailure=*/true),
+        CaseOutcome::UNEXERCISED);
 }
 
 TEST(TestCaseOutcome, PassedBelowTheRequiredDepthIsUnexercised)
@@ -293,8 +294,8 @@ TEST(TestCaseOutcome, FinishedRecordCarriesEveryField)
         = VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "does not take it")
               .atStage(OutcomeStage::QUERY)
               .asDecline();
-    const auto record
-        = makeCaseOutcomeRecord(identity, outcome, CaseOutcome::DECLINED, /*other=*/false);
+    const auto record = makeCaseOutcomeRecord(
+        identity, outcome, CaseOutcome::DECLINED, /*hadOtherFailure=*/false);
 
     const auto json = nlohmann::json::parse(finishedRecordJson(record));
     EXPECT_EQ(json.at("event"), "finished");
