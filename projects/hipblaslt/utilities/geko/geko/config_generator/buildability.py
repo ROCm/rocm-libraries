@@ -701,6 +701,10 @@ def _classify_in_worker(mi: MI) -> Verdict:
     return v
 
 
+class SubtileOnly(Exception):
+    """The GEMM type is tuned only as subtile kernels, which MI Designer never filters with a list."""
+
+
 def classify_candidates(
     config: Dict[str, Any],
     hipblaslt_path: Path,
@@ -713,16 +717,23 @@ def classify_candidates(
     Returns (verdicts, tuning space, GEMM name).
     """
     global _WORKER
+    from geko.config_generator.config_generator import mi_design_mx_options
+
     with tempfile.TemporaryDirectory(prefix="geko_buildable_") as tmp:
         config_path, cfg = write_probe_config(config, hipblaslt_path, Path(tmp))
+        gemm = cfg["GemmProblems"][0]
+        if mi_design_mx_options({**cfg, "GemmProblem": gemm})[1]:
+            raise SubtileOnly(f"{gemm.name} on {cfg['ARCH']} is tuned as subtile kernels (gfx950 MX), "
+                              "which do not read buildable-MI lists")
         checker = CodegenChecker(config_path, cfg["ARCH"])
-    gemm = cfg["GemmProblems"][0]
     search = SettingSearch(checker.space, cfg)
     mis = enumerate_candidate_mis(cfg["ARCH"], gemm.gemm_type.data_type, LIST_SEARCH_SPACE)
 
     _WORKER = (checker, search)  # inherited by forked workers
     verdicts: Dict[MI, Verdict] = {}
-    with mp.get_context("fork").Pool(workers) as pool:
+    # A fresh worker per MI: code generation for a large kernel leaves several GB in the process, and long-lived
+    # workers accumulate it (gfx1250 FP4 at 352 workers exhausted 3 TB). Verdicts do not depend on the process.
+    with mp.get_context("fork").Pool(workers, maxtasksperchild=1) as pool:
         for v in pool.imap_unordered(_classify_in_worker, mis, chunksize=1):
             verdicts[v.mi] = v
             progress(len(verdicts), len(mis), sum(x.buildable for x in verdicts.values()))

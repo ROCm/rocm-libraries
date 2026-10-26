@@ -111,7 +111,11 @@ def main() -> None:
                         flush=True,
                     )
 
-            verdicts, space, name = B.classify_candidates(config, hipblaslt, args.workers, progress)
+            try:
+                verdicts, space, name = B.classify_candidates(config, hipblaslt, args.workers, progress)
+            except B.SubtileOnly as e:
+                print(f"  skipped: {e}", flush=True)
+                continue
             path = buildable_list_path(args.arch, name)
             B.write_buildable_list(path, verdicts, arch=args.arch, gemm_name=name, source=source)
             stages = {}
