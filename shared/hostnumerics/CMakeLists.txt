@@ -134,7 +134,6 @@ target_sources(hostnumerics-core
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/layout.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/index_order.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/expected.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_conversion_options.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_integer_conversion.hpp"
