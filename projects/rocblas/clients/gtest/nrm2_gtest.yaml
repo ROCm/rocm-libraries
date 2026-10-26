@@ -264,6 +264,22 @@ Tests:
     pointer_mode_device: false
 
 # nightly
+  # AIROCBLAS-1437. Same pass-major / batch-major mixup as asum, on the shared
+  # ILP64 asum/nrm2 launcher. n > INT32_MAX and batch_count >= 2. batch_count 1
+  # is the stress nrm2_ILP64 case and passes. Stride 0 keeps the strided form to
+  # one vector (~8.6 GiB f32). nrm2_ex uses this launcher. Nightly only.
+  - name: nrm2_ILP64_multi_pass_batch
+    category: pre_checkin # stress
+    pointer_mode_host: false
+    initialization: hpl
+    arguments:
+      - { N: 2147483649, incx: 1, stride_x: 0, batch_count: 2 }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - nrm2_batched: *single_precision
+      - nrm2_strided_batched: *single_precision
+
   - name: blas1
     category: nightly
     N: [ 300001 ]
