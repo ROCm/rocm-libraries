@@ -12,8 +12,8 @@ It is the codegen counterpart to two tests that stop short of full emit:
   * ``test_r5_subtile_kern_char.py`` constructs ``TileInfo`` directly with a
     TLU1 geometry and checks the ``contiguousDim == 'M'`` branches.  It never
     reaches an emitter.
-  * ``Tests/common/gemm/gfx950/subtile_bf16_tlu1.yaml`` validates the same
-    geometry numerically, but needs a GPU and the client.
+  * The BF16 NN section of ``Tests/common/gemm/gfx950/subtile_bf16.yaml``
+    validates the same geometry numerically, but needs a GPU and the client.
 
 Here the kernels are emitted on CPU and the assembly text itself is asserted
 on, which is the only one of the three that can say *which arm ran*.
