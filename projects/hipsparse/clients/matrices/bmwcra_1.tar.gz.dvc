@@ -1,0 +1,6 @@
+outs:
+- path: bmwcra_1.tar.gz
+  remote: sparse-matrices
+  md5: 8a3cf5448a4fe73dcbdb5a16b326715f
+  size: 67958791
+  hash: md5

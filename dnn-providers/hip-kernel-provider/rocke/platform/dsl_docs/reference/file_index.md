@@ -55,7 +55,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/schedule.py` | `SchedulePolicy`. `sched_group_barrier`, `s_setprio`, named schedule flavors. |
 | `helpers/pipeline.py` | `SoftwarePipeline.run_ping_pong(...)`. |
 | `helpers/epilogues.py` | `DirectEpilogue`, `CShuffleEpilogue`. |
-| `helpers/attention.py` | `Attention2DConfig`, `Attention3DConfig`, `OnlineSoftmaxState`, `PagedKvDescriptor`, `apply_softcap_log2`, `apply_softcap_scalar`, `binary_search_seq_idx`, `causal_mask`, `sliding_window_mask`, `mfma_16x16x16_for_dtype`, `mfma_16x16x32_for_dtype`, `select_2d_config`, `select_3d_config`, `use_2d_kernel`, `warp_xor_reduce_max`, `warp_xor_reduce_sum`. |
+| `helpers/attention.py` | `Attention2DConfig`, `Attention3DConfig`, `OnlineSoftmaxState`, `PagedKvDescriptor`, `apply_softcap_log2`, `apply_softcap_scalar`, `binary_search_seq_idx`, `binary_search_seq_idx_iters`, `causal_mask`, `sliding_window_mask`, `mfma_16x16x16_for_dtype`, `mfma_16x16x32_for_dtype`, `select_2d_config`, `select_3d_config`, `use_2d_kernel`, `warp_xor_reduce_max`, `warp_xor_reduce_sum`. |
 | `helpers/compile.py` | `compile_kernel`, `KernelArtifact`. |
 | `helpers/manifest.py` | `MANIFEST_SCHEMA = "ck.dsl.example.manifest/v1"`, `attention_args_signature`, `gemm_args_signature`, `make_attention_manifest`, `make_conv_manifest`, `make_gemm_manifest`, `make_simple_op_manifest`, `write_artifact`. |
 | `helpers/tensor_view.py` | `TensorDescriptor`, `TensorView`, `TileWindow`, `TensorCoordinate`, `BufferResource`; constructors `make_global_view`, `make_lds_view`, `make_buffer_resource`, `make_buffer_view`, `make_naive_tensor_descriptor_packed`, `make_naive_tensor_view_packed`, `make_tile_window`, `make_tensor_coordinate`, `move_tensor_coordinate`, `view_from_transforms_descriptor`. |
@@ -160,7 +160,6 @@ prefix for brevity).
 | `instances/common/fmha_mfma.py` | `FmhaMfmaSpec`, `build_fmha_fwd_mfma`, `is_valid_spec`, `fmha_fwd_mfma_grid`, `fmha_fwd_mfma_signature`, `MFMA_ATTN_BLOCK_M/K`. Unified tiled FMHA forward: one body emits MFMA on CDNA (gfx942/gfx950) and WMMA on RDNA wave32 (gfx1151), selected by `arch`. The `_mfma` suffix is historical — the builder is not CDNA-only. |
 | `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
 | `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
-| `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
 | `kernels/gfx1151/wmma_fmha_fwd_v2.py` | `WmmaFmhaFwdV2Spec`, `build_wmma_fmha_fwd_v2`, `is_valid_spec`, `wmma_fmha_fwd_v2_grid`, `wmma_fmha_fwd_v2_signature`. gfx11/gfx12 multi-wave WMMA FMHA prefill (body in `rocke/helpers/rdna_attention.py`). |
 | `kernels/gfx1151/wmma_fmha_decode.py` | `WmmaFmhaDecodeSpec`, `build_wmma_fmha_decode`, `build_wmma_fmha_decode_module`, split/grid/workspace host helpers. gfx11/gfx12 split-KV, GQA-packed WMMA decode plus merge. |
 

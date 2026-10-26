@@ -26,6 +26,7 @@ from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.arch.target import (
     _load_specs,
     _expand_mma_rows,
+    _mma_op_by_id,
     _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
     _op_id_family,
@@ -67,10 +68,18 @@ def test_family_declaration_rejects_unsupported_axes(field, value):
         _expand_mma_rows("gfx1250", [declaration])
 
 
-def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
+def test_family_declaration_is_admitted_by_its_content_on_any_arch():
+    # The declaration is checked against the one supported family, not against
+    # the name of the arch whose row carries it.
     declaration = deepcopy(_GFX1250_SCALED_FAMILY)
-    with pytest.raises(ValueError, match="unsupported MMA family declaration"):
-        _expand_mma_rows("gfx950", [declaration])
+    expected = _expand_mma_rows("gfx1250", [declaration])
+    assert expected
+    for gfx in ("gfx950", "gfx1201"):
+        assert _expand_mma_rows(gfx, [deepcopy(declaration)]) == expected
+
+
+def test_family_declaration_rejects_missing_fields_and_duplicates():
+    declaration = deepcopy(_GFX1250_SCALED_FAMILY)
     for field in declaration:
         if field == "generate":
             with pytest.raises(ValueError, match="invalid MMA declaration"):
@@ -89,6 +98,16 @@ def test_family_declaration_rejects_wrong_arch_missing_fields_and_duplicates():
     ):
         with pytest.raises(ValueError, match="duplicate MMA op_id"):
             _expand_mma_rows("gfx1250", declarations)
+
+
+def test_atom_lookup_by_op_id_needs_no_target():
+    # Every catalogued atom is found from its op_id alone, whichever arch lists it.
+    for gfx in _load_specs():
+        for op in ArchTarget.from_gfx(gfx).mma.ops:
+            found = _mma_op_by_id(op.op_id)
+            assert found is not None
+            assert (found.op_id, found.family) == (op.op_id, op.family)
+    assert _mma_op_by_id("unknown") is None
 
 
 @pytest.mark.parametrize("declarations", [None, {}, [None], [42], [{}]])

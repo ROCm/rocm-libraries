@@ -35,7 +35,6 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import os
 from typing import Optional, Tuple
 
@@ -59,6 +58,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -964,11 +964,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -6014,6 +6012,14 @@ def build_gfx942_4warp_gqa(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    if spec.use_i64_kv_addr:
+        # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
+        # under a spec that claims i64; dispatch keeps the flag off through
+        # kv_addr_width_for_builder.
+        raise NotImplementedError(
+            "4-warp GQA kernel does not support use_i64_kv_addr: its K/V are i32 "
+            "element offsets, correct up to 2^31 elements of the cache dtype"
+        )
     if spec.dtype not in ("bf16", "fp16"):
         raise NotImplementedError("4-warp GQA kernel supports dtype in {bf16, fp16}")
     dtype = spec.dtype_ir

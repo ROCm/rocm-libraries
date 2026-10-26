@@ -22,9 +22,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +43,7 @@ def _caps_for(arch):
     """The real archCaps for ``arch``, as an ``--architecture <arch>`` build
     produces them, or a clean skip where the probe cannot run. Cached per arch."""
     if arch not in _ARCH_CAPS:
-        from Tensile.Toolchain.Validators import validateToolchain
+        from tensilelite.Toolchain.Validators import validateToolchain
 
         try:
             cxx = validateToolchain("amdclang++")

@@ -71,7 +71,7 @@ class CMSKernelInfo:
     Metadata about registered CMS kernels 
     Contains the minimum combination of parameters needed to use the CMS kernel.
     Important Note:
-    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match Tensile names.
+    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match TensileLite names.
     These names will be used by caller/tuning codes to set correct parameter/values.
     """
     name: str
@@ -1884,6 +1884,9 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isTN(kernel) and (not useLDSTr) and TLDS==1:
+        # The partial VMEM waits need B before A in the prefetch as well as
+        # the loop. GRA/GRB name the first/second streams when swapping.
+        kernel["SwapGlobalReadOrder"] = 1
         syncTable = [
             -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (partial) before starting main loop"),
              4, SWaitCnt(dscnt=0+2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (complete) for the remaining main loop"),
@@ -1909,11 +1912,11 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRA0'   : [[13,15,18,21,24,26,28,30],
                         [13,16,19,22,25,27,29,31]],
 
-            # GRB must not start before the SYNC at idx 15 (LRB0 completion).
-            'GRB'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
+            # B loads follow the barrier that completes LRB0.
+            'GRA'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
                         [15,15, 18,18, 21,21, 24,24, 27,27]],
             # Buffer loads.
-            'GRA'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,67],
+            'GRB'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,67],
                         [41,41, 44,44, 47,47, 57,57, 60,60, 63,63, 66,66, 68,68]],
             # Prefetch next iteration.
             # Need 5 local reads for B (MIWaveTileB=5).

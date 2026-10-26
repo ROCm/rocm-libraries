@@ -38,7 +38,7 @@ CPU-only.  No GPU hardware required.
 """
 
 import pytest
-from Tensile.Configuration import CallableParameter
+from tensilelite.Configuration import CallableParameter
 
 pytestmark = pytest.mark.unit
 

@@ -26,8 +26,9 @@ import pytest
 import os
 import tempfile
 import yaml
-from Tensile.BenchmarkSplitter import BenchmarkSplitter
 import copy
+
+from tensilelite.BenchmarkSplitter import BenchmarkSplitter
 
 
 @pytest.fixture
@@ -576,7 +577,6 @@ class TestBenchmarkSplitterEdgeCases:
         # Should have all 2 sizes in one file
         sizes = result[0]["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"][0]["ProblemSizes"]
         assert len(sizes) == 2
-
 
 
 # ==== mutation-kill tests (slice 8 campaign) ====
