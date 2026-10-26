@@ -538,7 +538,9 @@ inline std::set<std::string> launchNamesOf(const std::map<std::string, KernelSou
 // a KernelDescriptor or a KernelDefinition; both carry `source` and `sources`.
 
 /// The one source of a single-launch @p kernel, or nullptr for a multi-launch kernel. For a
-/// reader that needs exactly one code object, which must refuse a multi-launch kernel.
+/// reader that needs exactly one code object, which must refuse a multi-launch kernel. The
+/// pointer refers into @p kernel and is valid only while @p kernel is, so never pass a
+/// temporary.
 template <typename Kernel>
 const KernelSource* singleLaunchSource(const Kernel& kernel)
 {
