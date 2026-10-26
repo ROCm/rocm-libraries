@@ -15,12 +15,12 @@ namespace origami {
 namespace gemm {
 
 /**
- * @brief Per-operand cache hit rates for L1, L2, and MALL.
+ * @brief Per-operand cache hit rates for L2 and MALL.
  *
  * Tuple layout:
- *   (H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B)
+ *   (H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B)
  */
-using cache_hit_rates_t = std::tuple<double, double, double, double, double, double>;
+using cache_hit_rates_t = std::tuple<double, double, double, double>;
 
 /**
  * @brief Context for kernel execution.
@@ -67,15 +67,15 @@ struct ORIGAMI_EXPORT context_t {
   size_t tile_elements     = 0;
   double output_tile_bytes = 0.0;
 
+  /// Waves per workgroup along M and N, and LocalSplitU groups along K.  Each is at
+  /// least 1: non-MFMA kernels report a 0x0 wave group.
+  dim3_t wave_group{1, 1, 1};
+
   /// Per-operand DRAM traffic (cache/mem model input).
   operand_traffic_t traffic{};
 
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
-
-  /// Occupancy-derived decay factor.
-  size_t real_occupancy   = 0;
-  double occupancy_factor = 1.0;
 
   /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
   bool debug = false;
@@ -391,7 +391,7 @@ ORIGAMI_EXPORT double estimate_mall_hit(const problem_t& problem,
                          const context_t& context);
 
 /**
- * @brief Estimate per-operand L1, L2, and MALL hit rates using the analytical model.
+ * @brief Estimate per-operand L2 and MALL hit rates using the analytical model.
  *
  * Computes unique tiles counts for the first two timesteps using WGM,
  * then estimates temporal reuse from T0->T1 overlap. Extrapolates to all timesteps.
@@ -453,6 +453,26 @@ ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const config_t& config,
                                 const context_t& context,
                                 double* scalar_store_fraction = nullptr);
+
+/**
+ * @brief LDS->VGPR read time of one MT_K-deep K-iteration of a tile.
+ *
+ * Mirrors TensileLite's local reads: every wave reads its own M (or N) slice, so
+ * A is read once per wave column and B once per wave row.  An operand whose M/N
+ * axis is contiguous in LDS is read VectorWidth elements per lane, i.e.
+ * LoopIters * MIWaveTile * MIInputPerThread / VW reads per wave.  Unroll-major and
+ * LDS-transpose operands read along K at full width; DirectToVgpr operands skip LDS.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param full_width Charge every read at full bank width (the VectorWidth-independent floor).
+ * @return double LDS cycles per K-iteration, in the units of compute_mt_compute_latency.
+ */
+ORIGAMI_EXPORT double compute_local_read_latency(const problem_t& problem,
+                                                 const hardware_t& hardware,
+                                                 const config_t& config,
+                                                 bool full_width = false);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.

@@ -446,6 +446,37 @@ def build_attention_reduce(
     return _build
 
 
+def build_attention_reduce_own_module(
+    name,
+    arch,
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    num_segments,
+    emit_lse=False,
+):
+    """Split-KV reduce built from ``arch``'s own module (``build_attention_reduce``
+    above always builds the gfx950 module), with or without the LSE output."""
+
+    def _build():
+        import importlib
+
+        mod = importlib.import_module(f"kernels.{arch}.attention_tiled_3d")
+        spec = mod.UnifiedAttentionReduceTiledSpec(
+            head_size=head_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            num_segments=num_segments,
+            emit_lse=emit_lse,
+        )
+        return mod.build_unified_attention_reduce_tiled(spec, arch=arch)
+
+    return _build
+
+
 def build_attention_scalar(name, arch, *, three_d=False, **problem):
     """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
 
@@ -1097,6 +1128,7 @@ def build_direct_depthwise(
     *,
     block_w=16,
     block_waves=2,
+    wave_size=64,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1121,6 +1153,7 @@ def build_direct_depthwise(
             name=name,
             block_w=block_w,
             block_waves=block_waves,
+            wave_size=wave_size,
         )
         return _build_dw(spec, arch=arch)
 
@@ -1391,6 +1424,7 @@ def build_direct_depthwise_col(
     block_w=4,
     block_waves=1,
     dtype="fp16",
+    wave_size=64,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1418,6 +1452,7 @@ def build_direct_depthwise_col(
             block_w=block_w,
             block_waves=block_waves,
             dtype=dtype,
+            wave_size=wave_size,
         )
         return _build_dwcol(spec, arch=arch)
 
@@ -2067,6 +2102,36 @@ def cases():
             group_merge=8,
         ),
     )
+    # gfx1250 WMMA (wave32, 16x16x32): the depthwise problem unmerged
+    # (grid-per-group) and merged on both epilogues, plus a dense-grouped
+    # problem (groups=4, cpg=kpg=16) unmerged.
+    conv_g4 = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 4)
+    for tag, prob, gm, epi, vec_c in (
+        ("n2h14c64k64r3g64/dw_unmerged", conv_dw, 1, "default", None),
+        ("n2h14c64k64r3g64/dw_gm4_direct", conv_dw, 4, "default", 1),
+        ("n2h14c64k64r3g64/dw_gm8_cshuffle", conv_dw, 8, "cshuffle", None),
+        ("n2h14c64k64r3g4/g4_cshuffle", conv_g4, 1, "cshuffle", None),
+    ):
+        add(
+            "conv",
+            f"conv/gfx1250/{tag}",
+            "gfx1250",
+            build_conv(
+                "irhash_conv_1250_" + tag.split("/")[1],
+                "gfx1250",
+                prob,
+                wave_size=32,
+                wtm=16,
+                wtn=16,
+                wtk=32,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                epilogue=epi,
+                vector_size_c=vec_c,
+                group_merge=gm,
+            ),
+        )
 
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
     # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
@@ -3193,6 +3258,21 @@ def cases():
     )
     add(
         "attention",
+        "attention/gfx950/reduce_lse_bf16_d128",
+        "gfx950",
+        build_attention_reduce_own_module(
+            "irhash_attn_950_reduce_lse_bf16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            emit_lse=True,
+        ),
+    )
+    add(
+        "attention",
         "attention/gfx942/2d_fp16_d128_b64",
         "gfx942",
         build_attention_2d(
@@ -3269,6 +3349,35 @@ def cases():
         "gfx942",
         build_attention_reduce(
             "irhash_attn_942_reduce_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_lse_bf16_d128",
+        "gfx942",
+        build_attention_reduce_own_module(
+            "irhash_attn_942_reduce_lse_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            emit_lse=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_bf16_d128_own_module",
+        "gfx942",
+        build_attention_reduce_own_module(
+            "irhash_attn_942_reduce_bf16_own_module",
             "gfx942",
             head_size=128,
             num_query_heads=4,
@@ -4500,6 +4609,61 @@ def cases():
             ),
         )
 
+    # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
+    # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
+    # Every case needs llvm23 (TDM), so the other flavors record them as
+    # expected failures. The C++ twin is gated by
+    # library/tests/parity/conv_direct_dgrad_wmma_emit.*.
+    def build_direct_dgrad_wmma_case(dtype, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _over in (
+        ("bf16_default", "bf16", {}),
+        (
+            "fp16_tn2_st3_pf",
+            "fp16",
+            dict(
+                tiles_c=2,
+                tiles_p=2,
+                tile_w=8,
+                tile_n=2,
+                stages=3,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
     # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
     # depthwise partial-slot kernels and their fold, and the small-C gather.
@@ -4588,6 +4752,64 @@ def cases():
                 f"irhash_direct_dw_tiled_{_case_id}", _arch, **_shape, **_over
             ),
         )
+
+    # Depthwise forward direct kernels on the wave32 gfx1250, built at its wave
+    # size; plus the preloading kernel as a logical wave64 (no cross-lane
+    # operation, so it runs as two hardware waves). Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 114+).
+    for _tag, _wave in (("dw_n4h16_w32", 32), ("dw_n4h16_w64", 64)):
+        add(
+            "conv_direct",
+            f"conv_direct/gfx1250/{_tag}",
+            "gfx1250",
+            build_direct_depthwise(
+                f"irhash_directdw_1250_{_tag}",
+                "gfx1250",
+                N=4,
+                H=16,
+                W=16,
+                groups=64,
+                block_w=16,
+                block_waves=1,
+                wave_size=_wave,
+            ),
+        )
+    add(
+        "conv_direct",
+        "conv_direct/gfx1250/dw_col_s2_fp16_w32",
+        "gfx1250",
+        build_direct_depthwise_col(
+            "irhash_dwcol_1250_s2_fp16",
+            "gfx1250",
+            N=2,
+            H=12,
+            W=12,
+            groups=96,
+            stride=2,
+            block_h=8,
+            block_w=2,
+            wave_size=32,
+        ),
+    )
+    add(
+        "conv_direct_depthwise_tiled",
+        "conv_direct_depthwise_tiled/gfx1250/bf16_k5_bwv2_w32",
+        "gfx1250",
+        build_direct_depthwise_tiled(
+            "irhash_direct_dw_tiled_1250_bf16_k5",
+            "gfx1250",
+            N=2,
+            H=16,
+            W=16,
+            groups=96,
+            KH=5,
+            PAD=2,
+            block_w=8,
+            block_h=2,
+            block_waves=2,
+            wave_size=32,
+        ),
+    )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel

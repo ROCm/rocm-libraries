@@ -115,7 +115,7 @@ The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit t
 change must be made in **both** engines in the same change. Prove it:
 
 ```bash
-python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # build engine fresh + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
@@ -134,10 +134,11 @@ export PYTHONPATH=<rocke/platform>/python                 # then: import rocke
 cmake -S <rocke/platform> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke -j
 
-# relative-path guard + byte-identity gate + pytest; also runs ctest only when
-# --build-root already holds the built C++ test binaries (default temp run skips it)
-python tests/run_all.py                          # guard + gate + pytest
-python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
+# Complete developer pre-merge gate. It configures/builds the default build root,
+# runs host/corpus gates and pytest, then runs all registered CTests, including
+# toolchain integrations. Use --build-root to reuse a chosen out-of-tree build.
+python tests/run_all.py
+python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
