@@ -179,6 +179,7 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
             DataInitSeed=261025,
             OPENBLAS_NUM_THREADS=1,
             MKL_NUM_THREADS=1,
+            TOKIO_WORKER_THREADS=1,
         ),
     )
     command = commands(strategy, root, plan, env, workers, seconds, suite)
@@ -189,6 +190,7 @@ def trial(strategy, parent, env, plan, workers, seconds, suite, label=None):
         OMP_THREAD_LIMIT=str(budget),
         OPENBLAS_NUM_THREADS="1",
         MKL_NUM_THREADS="1",
+        TOKIO_WORKER_THREADS="1",
     )
     (root / "container-memory-before.txt").write_text(
         "\n".join(memory_lines(Path("/sys/fs/cgroup"))) + "\n"

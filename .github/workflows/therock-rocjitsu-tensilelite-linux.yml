@@ -78,6 +78,8 @@ jobs:
       CASE_FILTER: ${{ inputs.case_filter }}
       MAX_WORK: ${{ inputs.max_work }}
       PER_JOB_SECONDS: ${{ inputs.per_job_seconds }}
+      # Mirage otherwise creates a Tokio pool sized to the whole host per job.
+      TOKIO_WORKER_THREADS: "1"
       # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
       # engine wakeup behind the hipMemcpy hangs, and #13538, the aliased TDM
       # operand behind the gsuaad hang). If therock_ref's rocjitsu predates it,
