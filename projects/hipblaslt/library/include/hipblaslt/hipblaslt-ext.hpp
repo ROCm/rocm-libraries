@@ -1150,6 +1150,22 @@ namespace hipblaslt_ext
                                                          hipblasLtMatmulAlgo_t& algo);
 
     /*! \ingroup library_module
+     *  \brief Retrieve the solution UID.
+     *
+     *  @param[in]
+     *  handle  Pointer to the allocated hipBLASLt handle for the
+     * hipBLASLt context. See \ref hipblasLtHandle_t .
+     *  @param[in]
+     *  algo    The algorithm.
+     *
+     *  \retval uint64_t The solution UID loaded with the library, or a
+     * temporary UID assigned when the logic file had none. Returns 0 if the
+     * algo is not a TensileLite solution or has no UID.
+     */
+    HIPBLASLT_EXPORT uint64_t getUidFromAlgo(hipblasLtHandle_t      handle,
+                                             hipblasLtMatmulAlgo_t& algo);
+
+    /*! \ingroup library_module
      *  \brief Retrieve the kernel name
      *
      *  @param[in]

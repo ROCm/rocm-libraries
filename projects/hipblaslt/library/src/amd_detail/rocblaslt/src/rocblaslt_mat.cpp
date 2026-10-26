@@ -1700,3 +1700,9 @@ std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             h
 {
     return getSolutionNameFromAlgoIndex(handle, algo);
 }
+
+uint64_t rocblaslt_get_solution_uid_from_algo(rocblaslt_handle             handle,
+                                              const rocblaslt_matmul_algo& algo)
+{
+    return getSolutionUidFromAlgoIndex(handle, algo);
+}

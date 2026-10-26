@@ -47,6 +47,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <atomic>
+#include <cstdint>
 
 // Return the value category for a value, as a double precision value, such
 // such as whether it's 0, 1, -1 or some other value. Tensile uses a double
@@ -137,6 +138,8 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
+
+uint64_t getSolutionUidFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
 
 /***********************************************************************************
  * Whether Tensile has been initialized for at least one device (used for
