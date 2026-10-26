@@ -4,6 +4,7 @@
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
+#include "solution_ranker.hpp"
 #include "utility.hpp"
 
 #include "origami/origami.hpp"
@@ -11,6 +12,8 @@
 #include <array>
 #include <bit>
 #include <map>
+#include <memory>
+#include <mutex>
 
 #include <sstream>
 
@@ -340,8 +343,42 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     return kernelType;
 }
 
+RankerProblem rankerProblemFrom(const RocblasltContractionProblem& prob)
+{
+    return RankerProblem{prob.m, prob.n, prob.k, prob.batch_count, prob.sm_count_target};
+}
+
+const origami::hardware_t& rankerHardwareForCurrentDevice()
+{
+    // One model per device, built once. get_hardware_for_device queries HIP,
+    // which is far too expensive to repeat per ranked problem.
+    static std::mutex                                    guard;
+    static std::map<int, std::unique_ptr<origami::hardware_t>> cache;
+
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+        device = 0;
+
+    std::lock_guard<std::mutex> lock(guard);
+    auto&                       slot = cache[device];
+    if(!slot)
+        slot = std::make_unique<origami::hardware_t>(
+            origami::hardware_t::get_hardware_for_device(device));
+    return *slot;
+}
+
 std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount)
+{
+    return chooseSolutionIndexParameters(
+        kernelType, rankerProblemFrom(prob), requestedAlgoCount, rankerHardwareForCurrentDevice());
+}
+
+std::vector<SolutionIndexParameters>
+    chooseSolutionIndexParameters(const KernelType&          kernelType,
+                                  const RankerProblem&       prob,
+                                  int                        requestedAlgoCount,
+                                  const origami::hardware_t& analytical_hardware)
 {
     std::vector<SolutionIndexParameters> params;
     std::vector<SolutionIndexParameters> lastParams;
@@ -375,17 +412,13 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     size_t elementSizeA_bits = elementBits(kernelType.typeA);
     size_t elementSizeB_bits = elementBits(kernelType.typeB);
 
-    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
-
     origami::problem_t origami_problem = {
         .size        = {prob.m, prob.n, prob.k},
         .batch       = prob.batch_count,
         // 0 = use all CUs;
         .num_cus     = static_cast<size_t>(prob.sm_count_target),
-        .a_transpose = (prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
-                                                                          : origami::transpose_t::N,
-        .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
-                                                                          : origami::transpose_t::N,
+        .a_transpose = kernelType.transA ? origami::transpose_t::T : origami::transpose_t::N,
+        .b_transpose = kernelType.transB ? origami::transpose_t::T : origami::transpose_t::N,
         .a_dtype     = hipDataType_to_analytical_type(kernelType.typeA),
         .b_dtype     = hipDataType_to_analytical_type(kernelType.typeB),
         .mi_dtype    = hipDataType_to_analytical_type(

@@ -157,12 +157,36 @@ constexpr int preferredUnrolling(hipDataType       typeA,
 }
 
 /**
+ * @brief RankerProblem
+ *
+ * Everything the tile ranker reads off a problem that is not already in the
+ * KernelType. Naming it keeps the ranker's inputs to two small values, which is
+ * what lets the ranker be called with a problem it has not been handed a whole
+ * RocblasltContractionProblem for, and what lets a test rank without one.
+ */
+struct RankerProblem
+{
+    size_t  m               = 0;
+    size_t  n               = 0;
+    size_t  k               = 0;
+    size_t  batch_count     = 1;
+    int32_t sm_count_target = 0;
+
+    auto operator<=>(const RankerProblem& other) const = default;
+};
+
+RankerProblem rankerProblemFrom(const RocblasltContractionProblem& prob);
+
+/**
  * @brief Choose the SolutionIndexParameters to use for a given problem
  *
  * Examine the KernelType and problem size to determine the kernel to use
  * to compute the problem.
  *
  * Return a list of SolutionIndexParameters, in sorted order, based on how many kernels are requested.
+ *
+ * Ranks against the hardware model for the current HIP device. The overload in
+ * solution_ranker.hpp takes that model as an argument instead.
  *
  * @param kernelType
  * @param prob
