@@ -9,7 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <roc/hostnumerics/scalar_integer_conversion.hpp>
+#include <roc/hostnumerics/scalar_traits.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
 

@@ -7,6 +7,7 @@
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
+#include <roc/hostnumerics/integer_conversion.hpp>
 #include <roc/hostnumerics/tensor_operations.hpp>
 
 #include <algorithm>
@@ -164,8 +165,10 @@ namespace TensileLite::Client::hostnumerics
                 const double real = constVariantCast<double>(value);
                 if(!std::isfinite(real))
                     return std::nullopt;
-                const auto converted = roc::hostnumerics::convertScalar<int32_t>(
-                    real, roc::hostnumerics::detail::implicitNativeConversionOptions());
+                const auto converted = roc::hostnumerics::convertToInteger<int32_t>(
+                    real,
+                    roc::hostnumerics::IntegerRounding::TowardZero,
+                    roc::hostnumerics::IntegerOverflow::ModuloWrap);
                 return std::complex<double>{static_cast<double>(converted), 0.0};
             }
             case rocisa::DataType::ComplexFloat:
