@@ -31,7 +31,7 @@ namespace rocsparse
     // GRID_STRIDE must be true when grid.x was clamped below (nnz - 1) / BLOCKSIZE
     // + 1 blocks. Without the clamp the grid holds at most 2^32 - 1 work-items,
     // so the 32-bit block offset of the straight-line path cannot wrap.
-    template <uint32_t BLOCKSIZE, typename I, typename T, bool GRID_STRIDE = true>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void
         gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
@@ -77,7 +77,7 @@ namespace rocsparse
             for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
                 batch_index += hipGridDim_y)
             {
-                gthr_device<BLOCKSIZE, I, T, true>(nnz,
+                gthr_device<BLOCKSIZE, true, I, T>(nnz,
                                                    y + batch_index * y_stride,
                                                    x_val + batch_index * x_val_stride,
                                                    x_ind,
@@ -87,7 +87,7 @@ namespace rocsparse
         else
         {
             uint32_t batch_index = hipBlockIdx_y;
-            gthr_device<BLOCKSIZE, I, T, false>(nnz,
+            gthr_device<BLOCKSIZE, false, I, T>(nnz,
                                                 y + batch_index * y_stride,
                                                 x_val + batch_index * x_val_stride,
                                                 x_ind,
