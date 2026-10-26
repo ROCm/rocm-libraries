@@ -77,7 +77,7 @@ Path(config).write_text(str(client.pid))
         # A killed orphan can await reaping by init/the suite supervisor.
         try:
             state = stat.read_text().split(") ", 1)[1]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             break
         if state.startswith("Z"):
             break
