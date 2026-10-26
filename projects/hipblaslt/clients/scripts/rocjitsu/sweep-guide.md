@@ -102,6 +102,8 @@ native bench process for that batch. That process receives one binary input
 containing the exact per-index YAML records, executes them sequentially, and
 reuses native library and loaded code-object state. There is no solution/shape
 cross product. Each worker uses one physical CPU core and one emulator thread.
+The worker count defaults to four and supports up to 64, subject to available
+physical cores.
 Workers claim batches in shard order, but operating-system scheduling and
 unequal runtimes can change their start and completion order. There is no
 barrier between shards. The TensileLite backend requires batch size 1 because
