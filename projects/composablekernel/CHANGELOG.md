@@ -2,6 +2,12 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## Unreleased
+
+### Fixed
+
+* Fixed CK Tile TF32 compilation for combined gfx942/gfx950 builds that select gfx942 fragments, by lowering their XF32 operations to FP32 MFMA instructions on gfx950 while preserving the fragment layout.
+
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
 ### Added
@@ -12,10 +18,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
-
-### Fixed
-
-* Fixed CK Tile TF32 compilation for combined gfx942/gfx950 builds that select gfx942 fragments, by lowering their XF32 operations to FP32 MFMA instructions on gfx950 while preserving the fragment layout.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
