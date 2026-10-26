@@ -182,6 +182,9 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 - Plugin resource manager.
 - Plugin execution context wrapper.
 
+A descriptor that was created from saved bytes keeps those bytes and returns them on save. A
+built plan serializes through its plugin once, on its first save, and keeps the result.
+
 Execution reads the engine ID and execution context directly from the execution plan descriptor.
 This is what makes a graph-less restored plan executable.
 
@@ -248,6 +251,10 @@ does not hold calculated grid sizes or kernel argument values.
 A loaded plan runs the code it was saved with. Upgrading the provider does not change the kernel
 inside a saved plan, even when the upgrade fixes that kernel. To use the new kernel, build the plan
 again from its graph and save it.
+
+A re-save describes the kernel of the loaded plan, with its original provider version and format
+versions. A newer kernel in an upgraded provider never enters a re-save. `from_binary(bytes)`
+without a handle loads only the graph. Build the plan from that graph, then save it.
 
 ### Versioning
 
@@ -360,16 +367,22 @@ The save hook refuses these plans with `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`. It
 this order:
 
 1. A context without a plan.
-2. A plan that the provider loaded from a payload.
-3. A benchmarking plan that has not selected a kernel.
-4. A plan that no ingestor engine built.
-5. A kernel with a source kind other than kpack.
-6. A plan whose dispatch handler does not support save.
+2. A benchmarking plan that has not selected a kernel.
+3. A plan that no ingestor engine built.
+4. A kernel with a source kind other than kpack.
+5. A plan whose dispatch handler does not support save.
 
-Rule 2 has a result for the frontend: `to_binary()` of a graph that `from_binary()` loaded fails.
-`to_compiled_plan_binary()` of a loaded plan also fails. Keep the original bytes of the payload.
+hipDNN saves a loaded plan from the bytes it was loaded from. `to_binary()` of a graph that
+`from_binary()` loaded with its plan returns the plan bytes unchanged, inside a graph-and-plan
+container with the bytes of the graph. `to_compiled_plan_binary()` of a loaded plan returns the
+plan bytes unchanged. hipDNN does not call the plugin to save a loaded plan.
 
-For rule 3: a benchmarking plan usually selects its kernel at the first execute. A stored benchmark
+The provider also refuses a direct call of the save hook on a restored context. That refusal has
+the status `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` and the message
+`this plan was loaded from a saved payload; hipDNN saves a loaded plan from its original bytes and does not call the provider`.
+hipDNN does not make that call.
+
+For rule 2: a benchmarking plan usually selects its kernel at the first execute. A stored benchmark
 result can cover all candidates. In that case, the build makes a plain plan, and the plan saves before
 the first execute. To save a benchmarking plan, execute the plan one time, then save it. Or, build the
 plan with benchmarking off.
@@ -380,6 +393,20 @@ the code object. If the archive changes after the plan build, the save can fail.
 fails because the archive is not readable, the status is `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`.
 When the save fails because the bytes do not match the SHA-256, the status is
 `HIPDNN_PLUGIN_STATUS_INVALID_VALUE`. Do not change the archive between the plan build and the save.
+
+### Decision: Re-Save From the Loaded Bytes
+
+A re-save of a loaded plan returns the bytes that the plan was loaded from. The alternative was to
+re-encode the plan inside the provider. The saved bytes were chosen for these reasons:
+
+- It works for every plugin and every payload shape.
+- It adds no contract for plugin authors.
+- A re-save is byte-identical and deterministic.
+- It avoids a defect of re-encoding: a re-save of a version 1 envelope wrote version 2 with empty
+  `tensor_alignments`, which the version 2 reader rejects.
+
+The cost is one copy of the bytes for each loaded plan, for the life of the plan. A save of a built
+plan already keeps the same copy.
 
 ### Security
 
