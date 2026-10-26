@@ -565,6 +565,7 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         AComputeDataType,
         BComputeDataType,
         DirectLoad,
+        false, // UseTdmA
         UseTdm,
         UseNamedBarrier>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;

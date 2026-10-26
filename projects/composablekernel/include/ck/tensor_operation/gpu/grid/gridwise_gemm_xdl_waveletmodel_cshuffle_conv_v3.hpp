@@ -81,6 +81,7 @@ template <typename ALayout,
           typename ComputeTypeA = CDataType,
           typename ComputeTypeB = ComputeTypeA,
           bool DirectLoad       = false,
+          bool UseTdmA          = false,
           bool UseTdmB          = false,
           bool UseNamedBarrier  = false,
           bool UseLdsTranspose  = false>
@@ -131,8 +132,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
           ComputeTypeB,
           false, // ForceNaiveLayout
           DirectLoad,
-          false,
-          false,
+          false, // IsMxGemm
+          false, // LargeTensors
+          UseTdmA,
           UseTdmB,
           UseLdsTranspose>
 {
@@ -180,10 +182,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         Sequence<CShuffleBlockTransferScalarPerVector_NPerBlock>,
         ComputeTypeA,
         ComputeTypeB,
-        false,
+        false, // ForceNaiveLdsLayout
         DirectLoad,
-        false,
-        false,
+        false, // IsMxGemm
+        false, // LargeTensors
+        UseTdmA,
         UseTdmB,
         UseLdsTranspose>;
 
@@ -204,6 +207,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     static constexpr index_t MWaves = MPerBlock / (MPerXdl * MXdlPerWave);
     static constexpr index_t NWaves = NPerBlock / (NPerXdl * NXdlPerWave);
 
+    static_assert(!(UseTdmA && ABlockLdsExtraMCustom == 0), "TDM doesn't support LDS swizzling");
     static_assert(!(UseTdmB && BBlockLdsExtraNCustom == 0), "TDM doesn't support LDS swizzling");
 
     static constexpr bool UseLdsTransposeA =
@@ -568,6 +572,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
     __device__ static bool constexpr IsValidCompilationParameter()
     {
+        if constexpr(UseTdmA && !is_tdm_supported(get_device_arch()))
+        {
+            return false;
+        }
         if constexpr(UseTdmB && !is_tdm_supported(get_device_arch()))
         {
             return false;
@@ -689,7 +697,27 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     }
 
     template <typename BlockDesc>
-    __device__ static constexpr auto TransformLdsDescTdm(const BlockDesc&)
+    __device__ static constexpr auto TransformLdsDescATdm(const BlockDesc&)
+    {
+        // We transform LDS tensor descriptor from [AK0, M, AK1] to [M, K] where K = AK0 * AK1
+        // because vector size is handled by the instruction
+        if constexpr(UseTdmA)
+        {
+            return transform_tensor_descriptor(
+                BlockDesc{},
+                make_tuple(make_merge_transform(make_tuple(AK0Number, AK1Number)),
+                           make_pass_through_transform(Number<MPerBlock>{})),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<1>{}, Sequence<0>{}));
+        }
+        else
+        {
+            return BlockDesc{};
+        }
+    }
+
+    template <typename BlockDesc>
+    __device__ static constexpr auto TransformLdsDescBTdm(const BlockDesc&)
     {
         // We transform LDS tensor descriptor from [BK0, N, BK1] to [N, K] where K = BK0 * BK1
         // because vector size is handled by the instruction
@@ -1036,21 +1064,23 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         constexpr auto a_block_desc_ak0_m_ak1 =
             GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(get_device_arch());
 
+        constexpr auto a_block_desc_transfer = TransformLdsDescATdm(a_block_desc_ak0_m_ak1);
+
         // B matrix in LDS memory, dst of blockwise copy
         constexpr auto b_block_desc_bk0_n_bk1 =
             GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1(get_device_arch());
 
-        constexpr auto b_block_desc_transfer = TransformLdsDescTdm(b_block_desc_bk0_n_bk1);
+        constexpr auto b_block_desc_transfer = TransformLdsDescBTdm(b_block_desc_bk0_n_bk1);
 
         // lds max alignment
         constexpr auto max_lds_align = math::lcm(AK1Number, BK1Number);
 
         // LDS allocation for A and B: be careful of alignment
         constexpr auto a_block_space_size_aligned = math::integer_least_multiple(
-            a_block_desc_ak0_m_ak1.GetElementSpaceSize(), max_lds_align);
+            a_block_desc_transfer.GetElementSpaceSize(), max_lds_align);
 
         auto a_block_buf_ping = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-            static_cast<ADataType*>(p_shared_0), a_block_desc_ak0_m_ak1.GetElementSpaceSize());
+            static_cast<ADataType*>(p_shared_0), a_block_desc_transfer.GetElementSpaceSize());
 
         auto b_block_buf_ping = make_dynamic_buffer<AddressSpaceEnum::Lds>(
             static_cast<BDataType*>(p_shared_0) +
@@ -1058,7 +1088,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             b_block_desc_transfer.GetElementSpaceSize());
 
         auto a_block_buf_pong = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-            static_cast<ADataType*>(p_shared_1), a_block_desc_ak0_m_ak1.GetElementSpaceSize());
+            static_cast<ADataType*>(p_shared_1), a_block_desc_transfer.GetElementSpaceSize());
 
         auto b_block_buf_pong = make_dynamic_buffer<AddressSpaceEnum::Lds>(
             static_cast<BDataType*>(p_shared_1) +
@@ -1068,7 +1098,18 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         auto a_block_bufs = make_tuple(a_block_buf_ping, a_block_buf_pong);
         auto b_block_bufs = make_tuple(b_block_buf_ping, b_block_buf_pong);
 
-        constexpr auto a_block_slice_copy_step = make_multi_index(KPerBlock / AK1Number, 0, 0);
+        const auto get_a_slice_copy_step = [&]() {
+            if constexpr(UseTdmA)
+            {
+                return make_multi_index(0, KPerBlock);
+            }
+            else
+            {
+                return make_multi_index(KPerBlock / AK1Number, 0, 0);
+            }
+        };
+
+        constexpr auto a_block_slice_copy_step = get_a_slice_copy_step();
 
         const auto get_b_slice_copy_step = [&]() {
             if constexpr(UseTdmB)
@@ -1082,9 +1123,26 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         };
         constexpr auto b_block_slice_copy_step = get_b_slice_copy_step();
 
-        const index_t num_k_block_main_loop = __builtin_amdgcn_readfirstlane(
-            (a_grid_desc_ak0_m_ak1.GetLength(I0) * a_grid_desc_ak0_m_ak1.GetLength(I2)) /
-            (KPerBlock * problem.KBatch));
+        const auto get_k_block_main_loop = [&]() {
+            if constexpr(UseTdmA && !UseTdmB)
+            {
+                return __builtin_amdgcn_readfirstlane(
+                    (b_grid_desc_bk0_n_bk1.GetLength(I0) * b_grid_desc_bk0_n_bk1.GetLength(I2)) /
+                    (KPerBlock * problem.KBatch));
+            }
+            else if constexpr((!UseTdmA && UseTdmB) || (!UseTdmA && !UseTdmB))
+            {
+                return __builtin_amdgcn_readfirstlane(
+                    (a_grid_desc_ak0_m_ak1.GetLength(I0) * a_grid_desc_ak0_m_ak1.GetLength(I2)) /
+                    (KPerBlock * problem.KBatch));
+            }
+            else
+            {
+                static_assert(false, "Unsupported configuration for K block main loop.");
+            }
+        };
+
+        const index_t num_k_block_main_loop = get_k_block_main_loop();
 
         // =====================================================================
         // Wave specialization
@@ -1096,24 +1154,51 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             using a_thread_cluster_length =
                 decltype(MakeAThreadClusterLength_DirectLoad(get_device_arch()));
 
-            auto a_blockwise_copy =
-                ThreadGroupTensorSliceTransfer_DirectLoad<TileLoadThreadGroup,
-                                                          Sequence<AK0Number, MPerBlock, AK1Number>,
-                                                          a_thread_cluster_length,
-                                                          ABlockTransferThreadClusterArrangeOrder,
-                                                          ADataType,
-                                                          ADataType,
-                                                          decltype(a_grid_desc_ak0_m_ak1),
-                                                          decltype(a_block_desc_ak0_m_ak1),
-                                                          ABlockTransferSrcAccessOrder,
-                                                          ABlockTransferSrcVectorDim,
-                                                          VectorDimA,
-                                                          ABlockTransferSrcScalarPerVector,
-                                                          true>(
-                    a_grid_desc_ak0_m_ak1,
-                    make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
-                    a_block_desc_ak0_m_ak1,
-                    make_multi_index(0, 0, 0));
+            const auto get_a_blockwise_copy = [&]() {
+                if constexpr(!UseTdmA)
+                {
+                    return ThreadGroupTensorSliceTransfer_DirectLoad<
+                        TileLoadThreadGroup,
+                        Sequence<AK0Number, MPerBlock, AK1Number>,
+                        a_thread_cluster_length,
+                        ABlockTransferThreadClusterArrangeOrder,
+                        ADataType,
+                        ADataType,
+                        decltype(a_grid_desc_ak0_m_ak1),
+                        decltype(a_block_desc_transfer),
+                        ABlockTransferSrcAccessOrder,
+                        ABlockTransferSrcVectorDim,
+                        VectorDimA,
+                        ABlockTransferSrcScalarPerVector,
+                        true>(
+                        a_grid_desc_ak0_m_ak1,
+                        make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
+                        a_block_desc_transfer,
+                        make_multi_index(0, 0, 0));
+                }
+                else
+                {
+                    using access_length_seq =
+                        std::conditional_t<UseLdsTransposeA, Sequence<1, 0>, Sequence<0, 1>>;
+                    constexpr index_t padding_interval = UseLdsTransposeA ? MPerBlock : KPerBlock;
+                    return ThreadGroupTensorSliceTransfer_TDM<TileLoadThreadGroup,
+                                                              Sequence<MPerBlock, KPerBlock>,
+                                                              access_length_seq,
+                                                              ADataType,
+                                                              ADataType,
+                                                              decltype(a_grid_desc_ak0_m_ak1),
+                                                              decltype(a_block_desc_transfer),
+                                                              padding_interval * sizeof(ADataType),
+                                                              16>(
+                        a_grid_desc_ak0_m_ak1,
+                        make_multi_index(m_block_data_idx_on_grid,
+                                         SplitKOffsetHack ? 0 : k_id * AK1Value),
+                        a_block_desc_transfer,
+                        make_multi_index(0, 0));
+                }
+            };
+
+            auto a_blockwise_copy = get_a_blockwise_copy();
 
             constexpr index_t VectorDimB = UseLdsTransposeB ? 1 : 2;
 
@@ -1157,7 +1242,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                                               padding_interval * sizeof(BDataType),
                                                               16>(
                         b_grid_desc_bk0_n_bk1,
-                        make_multi_index(n_block_data_idx_on_grid, 0),
+                        make_multi_index(n_block_data_idx_on_grid,
+                                         SplitKOffsetHack ? 0 : k_id * BK1Value),
                         b_block_desc_transfer,
                         make_multi_index(0, 0));
                 }
@@ -1167,7 +1253,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
             auto block_sync_func = [&]() {
                 wait_dscnt();
-                if constexpr(UseTdmB)
+                if constexpr(UseTdmB || UseTdmA)
                 {
                     __builtin_amdgcn_s_wait_tensorcnt(0);
                 }
@@ -1176,7 +1262,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
             GridwiseGemmLoad::template RunLoadWavePipeline<HasMainKBlockLoop, TailNum>(
                 a_grid_desc_ak0_m_ak1,
-                a_block_desc_ak0_m_ak1,
+                a_block_desc_transfer,
                 a_blockwise_copy,
                 a_grid_buf,
                 a_block_bufs,
