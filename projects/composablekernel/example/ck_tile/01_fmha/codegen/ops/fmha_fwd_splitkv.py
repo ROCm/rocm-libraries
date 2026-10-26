@@ -928,13 +928,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
         pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
         if dtype in ["fp16", "bf16"] and hdim == 128:
-            # qr_tdm is generated for no bias / no logits soft cap / no sink
-            # only:
+            # qr_tdm is generated for no bias / no logits soft cap only:
             #   soft cap  the pipeline static_asserts it away
-            #   sink      the pipeline seeds m/l under i_split == 0 but has no
-            #             equivalent of qr_ks_vs's keeps_sink rule for deciding
-            #             which split publishes a sink-bearing lse_acc, so
-            #             SplitKvSinkDoubleCount and SplitKvSinkDroppedSink fail
             #   bias      the BUILD_TESTING instance filter in
             #             example/ck_tile/01_fmha/CMakeLists.txt keeps only
             #             *_nbias* split-kv instances in the dispatch api, so
@@ -952,13 +947,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # the fallback and qr_tdm wins the aligned case by coming first.
             Pipeline = FmhaFwdSplitKVPipeline
             tdm, superseded = [], []
-            for mask, pagedkv in itertools.product(
-                get_mask_map(mask_impl).keys(), ["t", "f"]
+            for mask, pagedkv, sink in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
             ):
                 #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
-                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
-                superseded.append(Pipeline("qr", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, "f", mask))  # fmt: skip
+                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
+                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
+                superseded.append(Pipeline("qr", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
             pipelines = tdm + [p for p in pipelines if p not in superseded]
         return pipelines
 

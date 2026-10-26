@@ -738,9 +738,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
+            // Sink loops are deliberately not counted here, matching qr_ks_vs.
+            // A split with no ordinary KV work contributes exactly the sink, and
+            // the closed form below publishes it; running the main loop over the
+            // sink tiles instead leaves m/l degenerate whenever the query rows
+            // are masked out entirely (SplitKvSinkDroppedSink with a sink
+            // prefix), which reports the final LSE as -inf.
             const index_t logical_num_total_loop =
-                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0) +
-                num_sink_loop;
+                integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
             if(logical_num_total_loop <= 0)
             {
                 if constexpr(kStoreLSE)
@@ -748,7 +753,22 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
+                    // The sink logit must enter the combined softmax denominator
+                    // exactly once. Split 0 owns it only while no split has work
+                    // of its own: any split with work seeds m/l with the sink
+                    // itself, and publishing a sink-bearing lse_acc here as well
+                    // would count exp(sink) twice.
+                    bool keeps_sink = (__builtin_isinf_sign(sink_v) >= 0) && i_split == 0;
+                    if(keeps_sink && 1 < num_splits)
+                    {
+                        // Ask for the ordinary range over the whole key axis. The
+                        // sink-aware overload returns (sink_offset, start, end),
+                        // and sink_offset answers ownership, not occupancy.
+                        auto [full_start, full_end] = mask.GetTileRangeAlongX(
+                            q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                        keeps_sink = (full_end <= full_start);
+                    }
+                    if(keeps_sink)
                     {
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
