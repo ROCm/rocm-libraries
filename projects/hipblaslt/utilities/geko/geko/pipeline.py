@@ -20,6 +20,7 @@ Public entry points:
 from __future__ import annotations
 
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any, List, Mapping, Sequence
 
@@ -468,6 +469,124 @@ def run_configure(
     state.dump(state_path)
 
 
+def _problem_key(size: list) -> tuple[int, int, int, int] | None:
+    """Return [M, N, batch, K] for an ExactLogic row, or None when it is not a size."""
+    if not size or not isinstance(size[0], (list, tuple)) or len(size[0]) < 4:
+        return None
+    return tuple(int(dim) for dim in size[0][:4])
+
+
+def process_duplicates(
+    hipblaslt_path: str | Path,
+    input_dir: str | Path,
+    devices: Sequence[int] | None = None,
+) -> None:
+    """Replace Tensile performance estimates for duplicated problem sizes.
+
+    A completed config is a ``build_<name>`` directory whose ``3_LibraryLogic``
+    directory is non-empty. A problem size is duplicated when the same
+    ``[M, N, batch, K]`` appears more than once across those libraries,
+    including repeated rows inside one file. Each config that contains such a
+    size is built, benchmarked with that library, and the measured
+    ``hipblaslt-Gflops`` is written back onto the matching ExactLogic rows.
+    The solution index is left unchanged so the row still points at the kernel
+    that was tuned. Sizes that are not duplicated are left as they are.
+
+    Args:
+        hipblaslt_path: hipBLASLt checkout root.
+        input_dir: Optimizations directory that contains the tuning YAMLs and
+            ``build_*`` outputs.
+        devices: GPU ids forwarded to hipblaslt-bench.
+    """
+    input_dir = Path(input_dir)
+    completed: list[tuple[Path, list[tuple[Path, library.Library]]]] = []
+    for config_path in optim.utils.list_optimization_configs(input_dir):
+        build_dir = input_dir / f"build_{Path(config_path).stem}"
+        if optim.utils.get_build_state(build_dir) != "completed":
+            continue
+        logic_dir = build_dir / "3_LibraryLogic"
+        loaded = [
+            (path, library.load_library(path))
+            for path in sorted(logic_dir.glob("*.yaml"))
+        ]
+        if loaded:
+            completed.append((build_dir, loaded))
+
+    counts: Counter[tuple[int, int, int, int]] = Counter()
+    for _, loaded in completed:
+        for _, lib in loaded:
+            for size in lib.sizes or []:
+                key = _problem_key(size)
+                if key is not None:
+                    counts[key] += 1
+    duplicated = {key for key, count in counts.items() if count > 1}
+    if not duplicated:
+        logger.info("No duplicate problem sizes among completed configs")
+        return
+
+    logger.info(
+        "Benchmarking %s completed config(s) that share %s problem size(s)",
+        sum(
+            1
+            for _, loaded in completed
+            if any(
+                _problem_key(size) in duplicated
+                for _, lib in loaded
+                for size in lib.sizes or []
+            )
+        ),
+        len(duplicated),
+    )
+
+    for build_dir, loaded in completed:
+        if not any(
+            _problem_key(size) in duplicated
+            for _, lib in loaded
+            for size in lib.sizes or []
+        ):
+            continue
+
+        lib_out = build_dir / "lib"
+        library.create(hipblaslt_path, build_dir / "3_LibraryLogic", lib_out)
+        bench_dir = build_dir / "duplicate_bench"
+        for yaml_path, lib in loaded:
+            if not any(_problem_key(size) in duplicated for size in lib.sizes or []):
+                continue
+            bench_file, _ = lib.create_bench_input(bench_dir)
+            results = bench.run(
+                hipblaslt_path,
+                bench_file,
+                Path(bench_file).with_suffix(".csv"),
+                custom_lib_dir=lib_out,
+                devices=devices,
+            )
+            measured: dict[tuple[int, int, int, int], float] = {}
+            for _, row in results.iterrows():
+                key = (
+                    int(row["m"]),
+                    int(row["n"]),
+                    int(row["batch_count"]),
+                    int(row["k"]),
+                )
+                measured[key] = float(row["hipblaslt-Gflops"])
+
+            updated = False
+            for size in lib.sizes or []:
+                key = _problem_key(size)
+                if key not in duplicated or key not in measured:
+                    continue
+                if not isinstance(size[1], list) or len(size[1]) < 2:
+                    continue
+                size[1][1] = measured[key]
+                updated = True
+            if updated:
+                lib.dump(yaml_path.parent, name=yaml_path.name)
+                logger.info(
+                    "Wrote measured performance for duplicate sizes in '%s'",
+                    yaml_path,
+                )
+
+
 def run_optimize(
     hipblaslt_path: str,
     workdir: str = "workdir",
@@ -523,11 +642,6 @@ def run_optimize(
     if not workdir.is_dir():
         raise FileNotFoundError(f"Working directory not found: {workdir}")
 
-    state_path = workdir / "run_state.json"
-    state = RunState.load(state_path)
-    if not state.configured:
-        raise ValueError("Configuration step was not completed")
-
     input_dir = workdir / "optimizations"
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Optimizations directory not found: {input_dir}")
@@ -575,8 +689,6 @@ def run_optimize(
             logger.debug(f"Removing stale benchmark directory: {benchmarks_dir}")
             shutil.rmtree(benchmarks_dir)
 
-    state.optimized = False
-    state.dump(state_path)
     logger.debug(
         f"Calling optim.run with input_dir={input_dir} devices={devices} "
         f"client_build_dir={client_build_dir} n_slots={n_slots} retry={retry}"
@@ -598,6 +710,8 @@ def run_optimize(
 
     if n_completed == 0:
         raise ValueError(f"No GEMMs completed out of {n_gemms} in {input_dir}")
+
+    process_duplicates(hipblaslt_path, input_dir, devices)
 
     merged_libs = library.merge_solutions(input_dir, epilogues=True)
 
@@ -653,6 +767,3 @@ def run_optimize(
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Optimization workflow completed successfully!")
-
-    state.optimized = True
-    state.dump(state_path)
