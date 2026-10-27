@@ -286,7 +286,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                                  D,
                                                  ldd,
                                                  batch_stride_d,
-                                                 (matD->order == HIPBLASLT_ORDER_ROW));
+                                                 (matD->order == HIPBLASLT_ORDER_ROW),
+                                                 (matD->batch_mode
+                                                  == HIPBLASLT_BATCH_MODE_POINTER_ARRAY),
+                                                 batch_offset_d);
         }
     }
 
