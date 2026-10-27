@@ -289,7 +289,7 @@ def rdna_attention_use_decode(
     num_cus: int,
 ) -> bool:
     """Whether the split-KV decode kernel runs a request rather than the
-    prefill. A pure function, so a hipDNN native matcher can mirror it exactly.
+    prefill. A pure function the hipDNN native mirrors exactly.
 
     ``visible_keys`` is the key range any query row sees (``hi - lo`` of
     ``wmma_fmha_decode_kv_range``: the window's span, else ``seqlen_k``; the
@@ -770,7 +770,7 @@ def _make_tuned_candidate(arch: str, kind: str) -> KernelCandidate:
         request_errors=_wmma_request_errors,
         precheck=precheck,
         signature=signature,
-        build=lambda spec, arch_: spec.build(arch_),
+        build=lambda spec, arch: spec.build(arch),
         bind_torch=bind_torch,
         grid=grid,
     )

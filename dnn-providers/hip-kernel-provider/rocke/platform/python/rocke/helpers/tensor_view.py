@@ -371,6 +371,8 @@ class TensorView:
             return b.global_load_i32(self.base, off)
         if self.dtype.name == "i64":
             return b.global_load_i64(self.base, off)
+        if self.dtype.name == "f64":
+            return b.global_load_f64(self.base, off)
         return b.global_load(self.base, off, dtype=self.dtype)
 
     def store_scalar(
@@ -385,10 +387,12 @@ class TensorView:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
         ``align`` (global address space only) sets the store's byte-alignment
-        hint; the default (``None``) lets the IR builder pick. Pass the element
-        size (2 for f16) to match a hand-rolled ``global_store(..., align=2)``
-        and let the backend coalesce neighbouring f16 stores. ``nontemporal``
-        (global only) streams the store (cache-bypass) for write-once outputs.
+        hint. The default (``None``) is 8 for f64, its element size, so the
+        store does not depend on the target's unaligned-access mode; for every
+        other dtype the IR builder picks. Pass the element size (2 for f16) to
+        match a hand-rolled ``global_store(..., align=2)`` and let the backend
+        coalesce neighbouring f16 stores. ``nontemporal`` (global only) streams
+        the store (cache-bypass) for write-once outputs.
         """
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
@@ -413,6 +417,9 @@ class TensorView:
                 f"buffer scalar store not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
+        if align is None and self.dtype.name == "f64":
+            # Same 8-byte element alignment as the f64 load_scalar.
+            align = 8
         hint = TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
         if align is None:
             b.global_store(self.base, off, value, temporal_hint=hint)

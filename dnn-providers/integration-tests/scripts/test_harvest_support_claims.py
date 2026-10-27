@@ -33,10 +33,13 @@ from harvest_support_claims import (
     harvest,
     main,
     read_log,
+    refresh_overview,
     run_gh,
     run_git,
     split_streams,
 )
+from support_features.feature_matrix import DEFAULT_OVERVIEW_PATH, REGEN_COMMAND
+from support_features.feature_matrix import main as render_main
 from support_sidecar import Claim, load, render
 
 _TS = "2026-09-28T05:47:38.5917461Z "
@@ -816,13 +819,21 @@ class TestWrite(unittest.TestCase):
         self.sweep = self.root / _SWEEP.replace("sweep.json", "support.json")
         self.single = self.root / _SINGLE.replace(".json", ".support.json")
         self.git = FakeGit()
+        self.overviews: List[Path] = []
+        self.overview_code = 0
+
+    def _overview(self, root: Path) -> int:
+        self.overviews.append(root)
+        return self.overview_code
 
     def _main(self, *argv: str, summary: Optional[dict] = None) -> tuple:
         log = self.root / "a.log"
         log.write_text(_single_log(summary or _summary()), encoding="utf-8")
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            code = main([str(log), *argv], FakeGh(), self.root, self.git)
+            code = main(
+                [str(log), *argv], FakeGh(), self.root, self.git, self._overview
+            )
         return code, err.getvalue()
 
     def _claim(self, case: str = "") -> Claim:
@@ -842,6 +853,18 @@ class TestWrite(unittest.TestCase):
         self.assertIn(f"changed {self._rel(self.sweep)} (+2)\n", err)
         self.assertIn(f"changed {self._rel(self.single)} (+1)\n", err)
         self.assertIn("2 sidecars changed, +3 claims", err)
+        self.assertEqual(self.overviews, [self.root])
+
+    def test_overview_that_fails_to_render_keeps_the_sidecars(self) -> None:
+        self.overview_code = 1
+        code, err = self._main(*self._WRITE)
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "error: the sidecars are written but the overview is stale;"
+            f" regenerate it with: {REGEN_COMMAND}\n",
+            err,
+        )
+        self.assertEqual(load(self.single), {self._claim()})
 
     def test_without_write_names_the_changes_and_writes_nothing(self) -> None:
         old = {self._claim("2_8_3_3_fp16_nchw")}
@@ -853,6 +876,7 @@ class TestWrite(unittest.TestCase):
         self.assertIn("2 sidecars would change, +2 claims", err)
         self.assertEqual(load(self.sweep), old)
         self.assertFalse(self.single.exists())
+        self.assertEqual(self.overviews, [])
 
     def test_adds_to_an_existing_sidecar_and_keeps_every_old_claim(self) -> None:
         old = {
@@ -899,6 +923,7 @@ class TestWrite(unittest.TestCase):
                     err,
                 )
                 self.assertFalse(self.sweep.exists() or self.single.exists())
+        self.assertEqual(self.overviews, [])
 
     def test_refused_develop_sidecar_is_named_at_develop(self) -> None:
         rel = self._rel(self.single)
@@ -940,6 +965,7 @@ class TestWrite(unittest.TestCase):
         self.assertNotIn(f"changed {self._rel(second)}", err)
         self.assertIn("disk full; wrote only the sidecars listed above\n", err)
         self.assertFalse(second.exists())
+        self.assertEqual(self.overviews, [])
 
     def test_second_run_changes_nothing(self) -> None:
         self._main(*self._WRITE)
@@ -948,6 +974,7 @@ class TestWrite(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("0 sidecars changed, +0 claims", err)
         self.assertEqual((self.sweep.read_bytes(), self.single.read_bytes()), before)
+        self.assertEqual(self.overviews, [self.root])  # the first run's only
 
     def test_other_arch_platform_writes_nothing_and_fetches_nothing(self) -> None:
         argv = ("--arch", "gfx942", "--platform", "linux", "--write")
@@ -1306,6 +1333,37 @@ class TestFetch(unittest.TestCase):
                 with self.assertRaisesRegex(FetchError, "allow-escape-sequences"):
                     run_gh(["repos/x/logs"])
         self.assertEqual(run.call_count, 2)
+
+
+class TestRefreshOverview(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.overview = self.root / DEFAULT_OVERVIEW_PATH.name
+        self.bundles = self.root / _SINGLE.split("/", 1)[0]
+        self.bundles.mkdir()
+
+    def _refresh(self) -> int:
+        with contextlib.redirect_stderr(io.StringIO()):
+            return refresh_overview(self.root)
+
+    def test_writes_the_overview_a_check_accepts(self) -> None:
+        self.assertEqual(self._refresh(), 0)
+        argv = ["--check", "--bundles-dir", str(self.bundles)]
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(render_main([*argv, "--output", str(self.overview)]), 0)
+
+    def test_bundle_defect_fails_and_writes_nothing(self) -> None:
+        orphan = self.root / _SINGLE.replace(".json", ".support.json")
+        orphan.parent.mkdir(parents=True)
+        orphan.write_bytes(render(orphan, set()).encode("utf-8"))
+        self.assertEqual(self._refresh(), 1)
+        self.assertFalse(self.overview.exists())
+
+    def test_unwritable_overview_fails(self) -> None:
+        self.overview.mkdir()
+        self.assertEqual(self._refresh(), 1)
 
 
 if __name__ == "__main__":

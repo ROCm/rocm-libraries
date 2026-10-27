@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -120,6 +120,28 @@ def _enableLdsTr6Rearrange(kernel, tP, tail):
   return (tP["bpe"] == 0.75 and kernel[f"enableLDSTr{tP['tensorChar']}"]
           and (not tail or hasTdm))
 
+def _tdmSparseMetadataKOffset(writer, kernel):
+  """Advance the TDM metadata descriptor to this work item's first K iteration.
+
+  Metadata has its own descriptor and compressed per-iteration increment, so
+  the A/B K-offset does not move it.
+  """
+  mod = Module("TDM StreamK metadata K-offset")
+  if not kernel.get("enableTDMMetadata"):
+    return mod
+  inc = sgpr("GlobalReadIncsMetadata")
+  with writer.allocTmpSgpr(2, tag="tdmSparseMetadataKOffset") as tmp:
+    lo = tmp.idx
+    mod.add(SMulHIU32(dst=sgpr(lo + 1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                      comment="StreamK metadata K-offset high word"))
+    mod.add(SMulI32(dst=sgpr(lo), src0=sgpr("StreamKLocalStart"), src1=inc,
+                    comment="StreamK metadata K-offset = localStart * metadata increment"))
+    mod.add(SAddU32(dst=sgpr("tdmMetadataGroup0+2"), src0=sgpr("tdmMetadataGroup0+2"),
+                    src1=sgpr(lo), comment="Apply StreamK K-offset to TDM metadata"))
+    mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"),
+                     src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
+  return mod
+
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -128,6 +150,19 @@ from functools import lru_cache
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
 import os
+
+# The states.overflowedResources codes judgeRegisterBudget reaches, and so the
+# only ones register allocation can overturn: too many vgprs, too many sgprs,
+# the occupancy limit, and SIA2's occupancy floor.  Every other code answers a
+# question about the generated code that no colouring changes.
+#
+# Several can hold at once and the judgement reports the last it reaches, so
+# which one names a given kernel is not a statement about the others: on gfx1250
+# a 256-thread workgroup is allowed exactly MaxVgpr registers, which puts codes
+# 1 and 4 at the same threshold and lets 4 speak for both.  The deferral is
+# indifferent to that, treating every member alike; keep this set in step with
+# the verdicts judgeRegisterBudget assigns (a test asserts it).
+REGISTER_BUDGET_OVERFLOW_CODES = frozenset((1, 2, 4, 6))
 
 @dataclass
 class TailOptParams:
@@ -253,10 +288,13 @@ class KernelWriterAssembly(KernelWriter):
 
   ########################################
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
+    # gfx11 (RDNA) shares a 128 KB LDS pool across the WGP (2x the 64 KB per-workgroup cap).
+    ldsPool = 2 * deviceLdsSize if self.states.version[0] == 11 else deviceLdsSize
     ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
-        deviceLdsSize, ldsSize, self.states.archCaps["LdsGranularity"])
+        ldsPool, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -291,7 +329,7 @@ class KernelWriterAssembly(KernelWriter):
 
   @staticmethod
   def getLdsLimitedOccupancy(deviceLdsSize, ldsSize, granularity):
-    """Max. number of workgroups that can run on the same CU due to LDS size
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to LDS size
 
     granularity is the archCaps["LdsGranularity"] allocation granule: a workgroup
     occupies a whole number of granules, so the rounding can cost a workgroup at a
@@ -1096,9 +1134,6 @@ class KernelWriterAssembly(KernelWriter):
       if isPersistent(kernel) and not needPackK16:
         self.states.nonPostLoopSgpr.append("PackKForV2")
         self.states.nonPostLoopSgpr.append("PackKForV3")
-
-    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
-      module.add(self.defineSgpr("RNDSeed", 1))
 
     if kernel["_UseSgprForGRO"]:
       needFirstSgprOffset = kernel["DirectToLdsA"] and kernel["UseInstOffsetForGRO"]
@@ -2332,23 +2367,44 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def checkResources(self, kernel, mkb: KernelBody):
-    # register allocation
-    totalVgprs = self.vgprPool.size()
-    totalAgprs = self.agprPool.size()
-    totalSgprs = self.sgprPool.size()
+    # The LSU verdict is judged first so that it, and anything code generation
+    # already reached, outranks the register budget: judgeRegisterBudget adds a
+    # verdict only when none stands, and only its own verdict may be deferred.
+    if self.states.invalidLSUCode:
+      self.states.overflowedResources = 7
 
+    self.judgeRegisterBudget(kernel, mkb, self.vgprPool.size(), self.agprPool.size(), \
+      self.sgprPool.size())
+
+    self.vgprPool.checkFinalState()
+
+  ##############################################################################
+  # judgeRegisterBudget
+  ##############################################################################
+  def judgeRegisterBudget(self, kernel, mkb: KernelBody, totalVgprs: int, totalAgprs: int, \
+                          totalSgprs: int) -> None:
+    """Record a register count triple and judge the budget it implies.
+
+    Counts, occupancy and the verdicts that follow from them are one function of
+    the triple, so the same judgement serves both the pool estimate
+    checkResources starts from and the counts the emitted descriptor declares.
+
+    A verdict is only raised here, never cleared, and never over one already
+    standing: clearing one is deferRegisterOverflowForAllocation's job.
+    """
     mkb.setGprs(totalVgprs=totalVgprs, totalAgprs=totalAgprs, totalSgprs=totalSgprs)
 
-    if self.vgprPool.size() > self.states.regCaps["MaxVgpr"]:
-      self.states.overflowedResources = 1
-    elif self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
-      self.states.overflowedResources = 2
+    verdict = 0
+    if totalVgprs > self.states.regCaps["MaxVgpr"]:
+      verdict = 1
+    elif totalSgprs > self.states.regCaps["MaxSgpr"]:
+      verdict = 2
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
-      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], totalVgprs, totalSgprs, \
+      self.getLdsSize(kernel), totalAgprs, self.states.doubleVgpr)
     if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
-      self.states.overflowedResources = 6
+      verdict = 6
 
     if self.states.asmCaps["HasWMMA"]:
       # RDNA: workgroup executes on a WGP (2 CUs, 4 SIMDs)
@@ -2358,15 +2414,56 @@ class KernelWriterAssembly(KernelWriter):
       vgprBudgetPerThread = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]
     numWorkGroupsPerExecUnit = vgprBudgetPerThread // mkb.getNextFreeVgpr()
     if numWorkGroupsPerExecUnit < 1:
-      self.states.overflowedResources = 4
+      verdict = 4
 
-    if self.states.invalidLSUCode:
-      self.states.overflowedResources = 7
+    if verdict and not self.states.overflowedResources:
+      self.states.overflowedResources = verdict
 
-    self.vgprPool.checkFinalState()
+  ##############################################################################
+  # deferRegisterOverflowForAllocation
+  ##############################################################################
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Reopen a register budget verdict, so allocation gets to settle it.
 
+    Only under force apply. checkResources has to judge before the kernel is
+    emitted, so an over-budget pool -- of either class, and the occupancy both
+    of them decide -- is really a proposal; resolveDeferredRegisterOverflow
+    re-judges it against the counts the emitted descriptor declares.
+
+    Both classes qualify whichever one the backend colours: emitAssembly()
+    refreshes the declared VGPR count from the final code whether or not the
+    vector class was lifted, so a VGPR verdict is worth reopening even under an
+    SGPR-only colouring.
+
+    Only judgeRegisterBudget's own verdicts qualify. A verdict code generation
+    reached stands in its place and is never deferred, because no colouring of
+    the registers can answer it.
+    """
+    if self.states.overflowedResources not in REGISTER_BUDGET_OVERFLOW_CODES:
+      return
+    if self.stinkyTofuRegisterAllocationMode(kernel) < 3:
+      return
+    self.states.overflowPendingRA = self.states.overflowedResources
+    self.states.overflowedResources = 0
+
+  ##############################################################################
+  # applyOverflowVerdict
+  ##############################################################################
+  def applyOverflowVerdict(self, kernel, mkb: KernelBody, afterAllocation: bool = False) -> None:
+    """Report the recorded overflow and stub the body out.  No-op when it fits.
+
+    The acting half of checkResources, hoisted to the caller so a deferral can
+    happen in between: reporting "too many sgprs" for a kernel that is about to
+    be handed to allocation would be a lie, and stubbing it would defeat the
+    point.
+
+    afterAllocation:
+        Set by the caller that reports a verdict resolveDeferredRegisterOverflow
+        reached.  The pools no longer describe such a kernel, so the counts come
+        from the kernel body instead and the pool estimate is printed beside
+        them -- which is the one number that says how much allocation moved.
+    """
     if self.states.overflowedResources:
-      mkb.body.add(ValueEndif("overflowed resources"))
       if self.states.overflowedResources == 1:
         msg = "too many vgprs"
       elif self.states.overflowedResources == 2:
@@ -2397,12 +2494,34 @@ class KernelWriterAssembly(KernelWriter):
       else:
         msg = "unknown"
 
+      if afterAllocation:
+        counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
+          % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
+          self.vgprPool.size(), self.sgprPool.size())
+      else:
+        counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
+
       if self.debugConfig.printSolutionRejectionReason:
-        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", vgprs=%u, sgprs=%u" \
-          % (self.states.kernelName, self.states.overflowedResources, msg, \
-          self.vgprPool.size(), self.sgprPool.size()))
-      mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
-      mkb.body.add(ValueIf(value="0"), 1)
+        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
+          % (self.states.kernelName, self.states.overflowedResources, msg, counts))
+      self.applyOverflowStub(mkb)
+
+  ##############################################################################
+  # applyOverflowStub
+  ##############################################################################
+  def applyOverflowStub(self, mkb: KernelBody) -> None:
+    """Replace the kernel body with `s_endpgm`, so a rejected kernel is harmless.
+
+    `ForceGenerateKernel` builds a rejected source anyway, and the real body
+    names registers the chip does not have.
+
+    The `.if 0`/`.endif` pair is safe only because a stubbed body never meets a
+    StinkyTofu pass: one erasing the dead block holding the `.endif` is what once
+    left the assembler an unmatched `.if`.
+    """
+    mkb.body.add(ValueEndif("overflowed resources"))
+    mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
+    mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
   # updateOccupancyFromMaxVgpr
@@ -2445,6 +2564,53 @@ class KernelWriterAssembly(KernelWriter):
     kernel["CUOccupancy"] = self.getOccupancy(
       kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
       self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
+
+  ##############################################################################
+  # resolveDeferredRegisterOverflow
+  ##############################################################################
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Judge the register budget again, on the counts the emitted code declares.
+
+    Emitting the kernel rewrites both counts to what the final code uses -- the
+    refresh is part of emitAssembly(), so it happens at every allocation mode and
+    moves a count down or up -- which leaves the pool sizes checkResources judged
+    no longer describing the kernel, and the descriptor the only authority on
+    what the hardware will reserve.  Re-running the one judgement on those counts
+    both settles a deferred verdict and, where nothing was deferred, keeps the
+    recorded counts and CUOccupancy honest.  Returns the standing overflow code,
+    0 to accept.
+
+    A count that rose can therefore reject a kernel the pool estimate admitted.
+    That is the kernel no longer fitting, not a policy of the deferral: nothing
+    useful follows from declaring an occupancy the hardware will not grant.
+
+    Falling back to a pool size is what makes the deferral come out right without
+    a case of its own: a count that could not be read leaves the kernel judged on
+    the same estimate as before, which reinstates exactly the verdict that was
+    deferred.
+
+    declaredVgprs, declaredSgprs:
+        The emitted .amdhsa_next_free_vgpr and .amdhsa_next_free_sgpr, set by
+        emitAssembly() to what the final code uses.
+    """
+    self.states.overflowPendingRA = 0
+
+    totalAgprs = self.agprPool.size()
+    # .amdhsa_next_free_vgpr also covers the AGPRs wherever they share the
+    # register file, and allocation declines to rewrite it there, so with any
+    # AGPR in play the pool is still the only plain VGPR count available.
+    #
+    # No arch reaches this with an AGPR today -- gfx1250 is the only StinkyTofu
+    # backend and its file holds none -- so the test for it drives the method
+    # directly. The guard is here for the first backend on an arch that has
+    # them, where judging the folded count as a plain one would count the AGPRs
+    # twice, in both the cap and the occupancy.
+    totalVgprs = declaredVgprs if declaredVgprs > 0 and not totalAgprs else self.vgprPool.size()
+    totalSgprs = declaredSgprs if declaredSgprs > 0 else self.sgprPool.size()
+
+    self.judgeRegisterBudget(kernel, mkb, totalVgprs, totalAgprs, totalSgprs)
+    return self.states.overflowedResources
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -2535,6 +2701,11 @@ class KernelWriterAssembly(KernelWriter):
         kernelArgs.add(self.argLoader.loadKernArg(self.states.esmRuntimeFlagSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
+
+    if self.states.rndSeedKernArgOffset >= 0:
+        kernelArgs.add(self.argLoader.loadKernArg(
+            "RNDSeed", "KernArgAddress",
+            sgprOffset=hex(self.states.rndSeedKernArgOffset), dword=1))
 
     # Batch offset arguments for general batched mode are loaded on-demand from
     # their kernarg byte offsets. Those offsets are recorded accurately by
@@ -2819,7 +2990,10 @@ class KernelWriterAssembly(KernelWriter):
             self.sgprPool.checkIn(tmpSgpr)
             break
           self.states.preloadGuard.append(tmpSgpr)
-      
+
+      if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+        module.add(self.defineSgpr("RNDSeed", 1))
+
       ### temp sgpr for groupedgemm ###
       # can be start from sgpr_preload_end
       sgprNumsOfGemm = self.sgprPool.checkOut(1, tag="defineAndResources_sgprNumsOfGemm", preventOverflow=False)
@@ -15214,6 +15388,9 @@ class KernelWriterAssembly(KernelWriter):
       coord0 = tmpV0+3
       waveCoord1 = tmpV0+4
 
+      # GSU and StreamK parallel reduction carry a runtime byte size.
+      # Whole-tile persistent DP and GSU=0 use the final output type and do
+      # not allocate GSULog2BpeD.
       gwvw = kernel["StoreRemapVectorWidth"]
       ldsPad = max(kernel["StoreRemapVectorWidth"],kernel["MIOutputVectorWidth"])
 
@@ -15243,7 +15420,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
@@ -15255,7 +15432,7 @@ class KernelWriterAssembly(KernelWriter):
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
           src1=vgpr(coord0), \
-          shiftHex=sgpr("GSULog2BpeD"), \
+          shiftHex=log2(self.states.bpeCexternalGSU1), \
           comment="local write C address"))
 
       module.addSpaceLine()
@@ -15285,7 +15462,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
                 comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
@@ -15297,7 +15474,7 @@ class KernelWriterAssembly(KernelWriter):
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
                   src1=vgpr(coord0), \
-                  shiftHex=sgpr("GSULog2BpeD"), \
+                  shiftHex=log2(self.states.bpeCexternalGSU1), \
                   comment="local read C address"))
       module.addSpaceLine()
 
@@ -16096,6 +16273,12 @@ class KernelWriterAssembly(KernelWriter):
     if not self.do["PostLoop"]: return Module("GlobalWriteElements (Empty)"), Module("DeferredGSU0 (Empty)")
     module = Module("GlobalWriteElements")
     deferredGSU0 = Module("DeferredGSU0")
+    # Sparse, subtile and gradient clusters use only in-kernel fixup.
+    noGSUBranch = noGSUBranch or (
+      isStreamKSpatialCluster(kernel)
+      and (kernel["ProblemType"]["Sparse"] or kernel["ProblemType"]["Gradient"]
+           or kernel.get("UseSubtileImpl", False))
+    )
 
     module.addComment2("Global Write Elements")
     if kernel["ProblemType"]["OutputAmaxD"]:
@@ -19442,8 +19625,24 @@ class KernelWriterAssembly(KernelWriter):
     # the last instruction may use ValuC VGPR (ex. no tailloop case), need 2 snop
     module.add(SNop(waitState=0, comment="1 wait states"))
     module.add(SNop(waitState=0, comment="1 wait states"))
+    numC = kernel["ThreadTile0"] * kernel["ThreadTile1"]
+    # gfx11 has no DPP row_bcast; cross the 16-lane rows with ds_bpermute instead.
+    noRowBcast = kernel["ISA"][0] == 11
     accK = 1
     while accK < kernel["NumWaveSplitK"]:
+      if noRowBcast and accK >= 16:
+        assert accK == 16 and kernel["WavefrontSize"] == 32
+        tmp = self.vgprPool.checkOut(numC + 1, tag="waveSplitKReduction")
+        module.add(VXorB32(dst=vgpr(tmp), src0=16, src1=vgpr("Serial"), comment="lane ^ 16"))
+        module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=2, src=vgpr(tmp), comment="bpermute byte address"))
+        for vgprIdx in range(numC):
+          module.add(DSBPermuteB32(vgpr(tmp + 1 + vgprIdx), vgpr(tmp), vgpr("ValuC+%d"%vgprIdx)))
+        module.add(SWaitCnt(dscnt=0, comment="wait for bpermute"))
+        for vgprIdx in range(numC):
+          module.add(VAddF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=vgpr(tmp + 1 + vgprIdx), comment="Reduce %s elements"%(accK*2)))
+        self.vgprPool.checkIn(tmp)
+        accK *= 2
+        continue
       # if only one VGPR, need to insert one SNOP in between
       if (kernel["ThreadTile1"] == 1 and kernel["ThreadTile0"] == 1) and accK != 1:
         module.add(SNop(waitState=0, comment="1 wait states"))
@@ -20964,6 +21163,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
           mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
                             comment="Apply K-offset high word and address carry"))
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
       return mod
 
     with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
@@ -20978,6 +21178,35 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
                         comment="Apply K-offset high word and address carry"))
 
+    if not (tcA.startswith("MX") or tcB.startswith("MX")):
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
+    return mod
+
+  def tdmApplyTileKOffset(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    """Advance single-wave TDM descriptors to this work item's first K iteration.
+
+    Each tensor owns its descriptor and advances by its own GlobalReadIncs,
+    which may be an assembler constant rather than an SGPR.
+    """
+    mod = Module("TDM StreamK K-offset")
+    # DP-only: StreamKLocalStart == 0 and is not allocated.
+    if isPersistentDataParallel(kernel):
+      return mod
+    with self.allocTmpSgpr(2, tag="tdmApplyTileKOffset_tmpSgprRes") as tmpSgprRes:
+      tmpSgpr = tmpSgprRes.idx
+      for tP in (tPA, tPB):
+        tc = tP["tensorChar"]
+        group0 = f"tdm{tc}Group0"
+        inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+        mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                          comment="StreamK K-offset high word"))
+        mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=inc,
+                        comment=f"StreamK K-offset for {group0} = localStart * increment"))
+        mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
+                        comment=f"Apply StreamK K-offset to TDM {group0}"))
+        mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
+                         comment="Apply K-offset high word and address carry"))
+    mod.add(_tdmSparseMetadataKOffset(self, kernel))
     return mod
 
   def tdmApplyTileTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:

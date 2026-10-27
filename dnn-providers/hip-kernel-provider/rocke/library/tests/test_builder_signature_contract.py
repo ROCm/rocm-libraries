@@ -159,7 +159,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     # Every paged-decode knob, problem shape included, carries a default.
     "kernels.gfx1151.paged_decode_splitk.PagedDecodeCfg": (),
     "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": ("head_size",),
-    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size",),
     "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": (),
     "kernels.gfx1151.wmma_fmha_swapqk.SwapQKCfg": ("head_size", "num_query_heads"),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
@@ -297,6 +296,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
+    "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
     # Convolution specs (migrated from platform to library in AICK-5627).
@@ -336,12 +336,23 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectConvDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseDgradStreamSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradWindowedSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectTransposeWeightsDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectReorganizeWeightsSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectCoalescedWeightsDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
+    "kernels.common.conv_direct_dgrad_wmma.DirectDgradWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad_mfma.DwWgradMfmaSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),
+    # The dW extent per output channel the fold sums partial slots over.
+    "kernels.common.conv_direct_dw_wgrad.DwWgradFoldSpec": ("taps",),
+    "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
+    "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
+    "kernels.common.conv_direct_grouped_wgrad_mfma.GroupedWgradMfmaSpec": ("problem",),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),
