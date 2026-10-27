@@ -40,8 +40,9 @@
  *     A tile.smem_alloc result is named exactly per its recipe bind so the LDS
  *     global symbol (and thus the HSACO) matches the Python reference.
  *
- * <intexpr> := number | {"spec":NAME} | {"var":NAME} | {"spec_str_eq":[n,lit]}
- *            | {"<OP>":[e,e]}  for OP in add sub mul div mod eq ne lt le gt ge
+ * <intexpr> is the integer-expression tree of rocke/intexpr.h, evaluated by the
+ * one shared evaluator (rocke_intexpr_eval) with spec values and loop indices
+ * as its leaves.
  */
 #include "rocke/recipe_vm.h"
 
@@ -55,6 +56,7 @@
 #include "rocke/abi.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
+#include "rocke/intexpr.h"
 #include "rocke/json_dom.h"
 #include "rocke/recipe_guard.h"
 #include "rocke/recipe_launch.h"
@@ -340,120 +342,44 @@ static bool rv_number_to_int64(double n, int64_t* out)
     return true;
 }
 
-static long rv_int(rvm_t* vm, const jd_val_t* e)
+/* Leaf lookup for the shared evaluator: spec ints and loop vars. A recipe has
+ * no kernel-parameter values, so a {"param": ...} leaf is unbound here. The
+ * VM's own integers stay `long`; they widen to int64_t on the way in. */
+static bool rv_lookup_int(void* ctx, rocke_intexpr_leaf_t kind, const char* name, int64_t* out)
+{
+    rvm_t* vm = (rvm_t*)ctx;
+    long v = 0;
+    bool found = false;
+    if(kind == ROCKE_INTEXPR_SPEC)
+        found = rv_spec_int(vm, name, &v);
+    else if(kind == ROCKE_INTEXPR_VAR)
+        found = rv_ivar_get(vm, name, &v);
+    if(found)
+        *out = v;
+    return found;
+}
+
+static const char* rv_lookup_str(void* ctx, const char* name)
+{
+    return rv_spec_str((rvm_t*)ctx, name);
+}
+
+/* Evaluate an intexpr with the one shared evaluator (rocke/intexpr.h). An
+ * absent field reads as 0, as it always has; an evaluation failure makes the VM
+ * sticky-failed with the evaluator's message. */
+static int64_t rv_int(rvm_t* vm, const jd_val_t* e)
 {
     if(vm->failed || !e)
         return 0;
-    double n;
-    if(rocke_jnum(e, &n))
+    const rocke_intexpr_env_t env = {rv_lookup_int, rv_lookup_str, vm};
+    char err[ROCKE_ERR_MSG_CAP];
+    int64_t value = 0;
+    if(!rocke_intexpr_eval(e, &env, &value, err, sizeof err))
     {
-        long value;
-        if(!rv_number_to_long(n, &value))
-        {
-            rv_fail(vm, "intexpr number is not an integer");
-            return 0;
-        }
-        return value;
+        rv_fail(vm, "%s", err);
+        return 0;
     }
-    if(e->kind == JD_OBJ)
-    {
-        const jd_val_t* s = rocke_jget(e, "spec");
-        if(s)
-        {
-            long v = 0; /* left 0 on the failure path; the VM is sticky-failed */
-            if(!rv_spec_int(vm, rocke_jstr(s), &v))
-                rv_fail(vm, "unknown spec int '%s'", rocke_jstr(s) ? rocke_jstr(s) : "?");
-            return v;
-        }
-        const jd_val_t* var = rocke_jget(e, "var");
-        if(var)
-        {
-            long v = 0; /* left 0 on the failure path; the VM is sticky-failed */
-            if(!rv_ivar_get(vm, rocke_jstr(var), &v))
-                rv_fail(vm, "unknown loop var '%s'", rocke_jstr(var) ? rocke_jstr(var) : "?");
-            return v;
-        }
-        /* spec_str_eq: ["specname","literal"] -> 1 if the spec string matches. */
-        const jd_val_t* sse = rocke_jget(e, "spec_str_eq");
-        if(sse && sse->kind == JD_ARR && sse->arr_len == 2)
-        {
-            const char* sv = rv_spec_str(vm, rocke_jstr(sse->arr[0]));
-            const char* lit = rocke_jstr(sse->arr[1]);
-            return (sv && lit && strcmp(sv, lit) == 0) ? 1 : 0;
-        }
-        /* Unary functions of ONE operand: {"<fn>": e} (no array wrapper).
-           These regenerate constants that a code generator derived from a spec
-           value rather than values the kernel computed from it: the operands of
-           a strength-reduced unsigned division, emitted as
-           (umul_hi(n, M) + n) >> s. The shift is logarithmic in the divisor and
-           the multiplier depends on its odd part, so neither is expressible as
-           arithmetic on the axis -- the recipe has to regenerate them.
-           Mirrors recipe_expand.py::magic_division_constants, and upstream of
-           both, helpers/magic_division.py::calculate_magic_numbers. */
-        const jd_val_t* mm = rocke_jget(e, "magic_multiplier");
-        const jd_val_t* ms = rocke_jget(e, "magic_shift");
-        if(mm || ms)
-        {
-            long d = rv_int(vm, mm ? mm : ms);
-            if(d < 1 || d > 0x7fffffffL)
-            {
-                rv_fail(vm, "magic division needs 1 <= divisor < 2^31, got %ld", d);
-                return 0;
-            }
-            int shift = 0;
-            while((1LL << shift) < (long long)d)
-                shift++;
-            if(ms)
-                return shift;
-            long long mult = ((((1LL << shift) - (long long)d) << 32) / (long long)d) + 1;
-            if(mult >= (1LL << 31))
-                mult -= (1LL << 32);
-            return (long)mult;
-        }
-        /* Binary arithmetic + comparisons: {"<op>":[e,e]}. */
-        static const char* ops[]
-            = {"add", "sub", "mul", "div", "mod", "eq", "ne", "lt", "le", "gt", "ge"};
-        for(int k = 0; k < (int)(sizeof ops / sizeof ops[0]); k++)
-        {
-            const jd_val_t* bin = rocke_jget(e, ops[k]);
-            if(!bin)
-                continue;
-            if(bin->kind != JD_ARR || bin->arr_len != 2)
-            {
-                rv_fail(vm, "bad intexpr '%s'", ops[k]);
-                return 0;
-            }
-            long a = rv_int(vm, bin->arr[0]);
-            long b = rv_int(vm, bin->arr[1]);
-            switch(k)
-            {
-            case 0:
-                return a + b;
-            case 1:
-                return a - b;
-            case 2:
-                return a * b;
-            case 3:
-                return b ? a / b : 0;
-            case 4:
-                return b ? a % b : 0;
-            case 5:
-                return a == b;
-            case 6:
-                return a != b;
-            case 7:
-                return a < b;
-            case 8:
-                return a <= b;
-            case 9:
-                return a > b;
-            case 10:
-                return a >= b;
-            }
-        }
-    }
-    rv_fail(vm, "bad intexpr");
-    return 0;
+    return value;
 }
 
 /* ------------------------------------------------------------- wire ABI gate */
@@ -512,17 +438,15 @@ static bool rv_abi_ok(const jd_val_t* node, char* err, size_t err_cap)
  *
  * It reuses rv_int above rather than carrying its own evaluator. That is the
  * point of expressing guards in the recipe language at all: no second grammar to
- * implement, and the CI gate that already pins rv_int against
- * recipe_expand.eval_intexpr covers guards without being extended.
+ * implement, and the CI gate that pins rocke_intexpr_eval against
+ * rocke.core.intexpr.eval_intexpr covers guards without being extended.
  *
  * Rule ORDER is part of the contract, not presentation, and so is stopping at
- * the first failure. This evaluator and the Python one disagree about `mod` and
- * `div` with a negative left operand (Python floors, C truncates), which has
- * never mattered because spec values are sizes -- and a guard is the first thing
- * to be handed a hostile one. Guards stay clear of it two ways: they only ever
- * test whether a remainder is ZERO, which is the same question in either
- * convention, and the generator puts a bounds rule ahead of the divisibility
- * rule on an axis so a negative is rejected before the `mod` is reached. Do not
+ * the first failure. Both evaluators refuse a `mod` or `div` with a negative
+ * operand (Python floors, C truncates), so a rule that reaches one refuses the
+ * binding as "did not evaluate" in both engines. The generator puts a bounds
+ * rule ahead of the divisibility rule on an axis, so a negative is refused by
+ * the bounds rule, with its own reason, before the `mod` is reached. Do not
  * reorder rules, and do not evaluate them all to collect every reason. */
 
 /* Bound by the caller, as either an int or a string? */
@@ -607,7 +531,7 @@ static rocke_guard_verdict_t
             const jd_val_t* pred = rocke_jget(rule, "pred");
             const char* why = rocke_jstr(rocke_jget(rule, "reason"));
             bool saved = vm->failed;
-            long ok = rv_int(vm, pred);
+            int64_t ok = rv_int(vm, pred);
             if(vm->failed && !saved)
             {
                 /* A rule that could not be evaluated decides nothing, so it
@@ -1153,7 +1077,7 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     if(strcmp(op, "static_if") == 0)
     {
         /* Compile-time branch on a spec predicate (truthy intexpr). */
-        long pred = rv_int(vm, rocke_jget(instr, "pred"));
+        int64_t pred = rv_int(vm, rocke_jget(instr, "pred"));
         if(vm->failed)
             return;
         const jd_val_t* arm = rocke_jget(instr, pred ? "then" : "else");

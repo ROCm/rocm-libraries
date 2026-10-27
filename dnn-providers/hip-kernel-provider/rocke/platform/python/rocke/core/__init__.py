@@ -11,6 +11,9 @@ passes in this package.
 Modules:
 
   - ``dtypes``     : target-independent dtype names and alias normalization.
+  - ``intexpr``    : the integer-expression tree, its evaluator
+                     (`eval_intexpr`) and the host-bound constructors
+                     (`sum_of`, `product_of`, `quotient_of`, `difference_of`).
   - ``ir``         : `IRBuilder`, `KernelDef`, `Value`, `Op`, `Region`,
                      plus type system (`F16`, `F32`, `I32`, `I64`,
                      `VectorType`, `PtrType`, `SmemType`).

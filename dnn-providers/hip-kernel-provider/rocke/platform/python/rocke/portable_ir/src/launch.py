@@ -29,12 +29,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from rocke.core.intexpr import eval_intexpr
 from rocke.core.ir import check_cluster_dims
-from rocke.portable_ir.utils.recipe_expand import (
-    ExpandError,
-    eval_intexpr,
-    expand_recipe,
-)
+from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
 # Kernarg representations, mirroring rv_arg_classify in recipe_vm.cpp:
 # (kind, size in bytes). Alignment equals size -- the AMDGPU natural-alignment

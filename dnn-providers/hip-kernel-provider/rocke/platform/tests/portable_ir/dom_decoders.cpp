@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * tests/portable_ir/dom_decoders.cpp -- unit tests for the portable-IR DOM
- * decoders (cpp/portable_ir/json_dom.cpp and cbor_dom.cpp).
+ * decoders (cpp/support/json_dom.cpp and cpp/portable_ir/cbor_dom.cpp).
  *
  * Pure data level, no kernels: builds CBOR blobs by hand, decodes them, and
  * checks the resulting jd_val_t tree. The load-bearing case is
