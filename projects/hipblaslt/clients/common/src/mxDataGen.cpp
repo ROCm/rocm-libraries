@@ -431,6 +431,18 @@ std::vector<float> generateData(T                           dgen,
                         / static_cast<size_t>(elementsPerMXBlock)
                   : 0;
 
+        // When K runs along the columns the generator blocks along the contiguous MN
+        // dimension instead, so a partial trailing K block has no representation: the
+        // scales it emits describe MN blocks, not K blocks. The grid check below only
+        // catches that when the counts fail to factor, which depends on MN. At M = 64,
+        // K = 33 the 66 scales divide by kBlocks = 2 and pass it, leaving the reference
+        // to index a 64 by 2 grid into 66 entries. Reject the shape itself.
+        if(!kIsRows && elementsPerMXBlock > 0
+           && kExtent % static_cast<size_t>(elementsPerMXBlock) != 0)
+            throw std::runtime_error(
+                "GFX950 scales with K along the columns require K to be a multiple of "
+                + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(kExtent));
+
         // Number of scale rows in scaleBytes. The generator emits one scale per
         // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
         // row count divides straight back out.
