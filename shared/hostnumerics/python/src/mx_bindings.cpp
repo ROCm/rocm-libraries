@@ -56,7 +56,8 @@ void registerMxBindings(nb::module_& module) {
         .def_ro("data", &MxTensor::data)
         .def_ro("scales", &MxTensor::scales)
         .def_ro("scale_indices", &MxTensor::scaleIndices)
-        .def_ro("reference", &MxTensor::reference);
+        .def_ro("reference", &MxTensor::reference)
+        .def("refresh_reference", &MxTensor::refreshReference);
 
     module.def(
         "generate_mx",

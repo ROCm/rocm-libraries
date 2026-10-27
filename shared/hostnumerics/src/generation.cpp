@@ -55,6 +55,15 @@ GenerationRecipe::Component GenerationRecipe::Component::withCosineTransform() c
     return result;
 }
 
+GenerationRecipe::Component GenerationRecipe::Component::withExp2Transform() const {
+    if (isRaw())
+        throw std::runtime_error(
+            "Numerical generation modifiers do not apply to raw storage recipes.");
+    Component result = *this;
+    result.unaryTransform_ = UnaryTransform::Exp2;
+    return result;
+}
+
 GenerationRecipe::Component GenerationRecipe::Component::withAffineValueMapping(
     GenerationAffineValueParameters parameters) const {
     if (isRaw())
@@ -128,6 +137,13 @@ GenerationRecipe::Component GenerationRecipe::normal(NormalGenerationParameters 
 
 GenerationRecipe::Component GenerationRecipe::sine() {
     return Component(Component::SinePattern{});
+}
+
+GenerationRecipe::Component GenerationRecipe::binomialHalf(
+    BinomialHalfGenerationParameters parameters) {
+    if (parameters.trials > 64)
+        throw std::runtime_error("Fair-binomial generation supports at most 64 trials.");
+    return Component(Component::BinomialHalfPattern{parameters});
 }
 
 GenerationRecipe::Component GenerationRecipe::cosine() {
@@ -292,6 +308,16 @@ uint64_t GenerationRecipe::seed() const noexcept {
     return settings_.seed;
 }
 
+size_t GenerationRecipe::indexOffset() const noexcept {
+    return settings_.indexOffset;
+}
+
+GenerationRecipe GenerationRecipe::withIndexOffset(size_t offset) const {
+    GenerationRecipe result = *this;
+    result.settings_.indexOffset = offset;
+    return result;
+}
+
 GenerationRecipe GenerationRecipe::realOnlyLastDimensionFastest(Component component,
                                                                 uint64_t seed) {
     return realOnly(std::move(component), {.seed = seed}).withLastDimensionFastestIndexOrder();
@@ -355,5 +381,29 @@ void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe&
     const std::vector<size_t> indices = destination.shape().coordinates(
         logicalIndex, recipe.indexOrder(destination.shape().rank()));
     detail::generateElement(destination, recipe, indices, logicalIndex);
+}
+
+void generate(Tensor destination, const GenerationRecipe& recipe,
+              const ScalarConversionOptions& options) {
+    detail::generateTensor(std::move(destination), recipe, options);
+}
+
+Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options) {
+    Tensor result(type, std::move(layout));
+    generate(result, recipe, options);
+    return result;
+}
+
+Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options) {
+    return generate(type, Layout::contiguousLastDimensionFastest(shape), recipe, options);
+}
+
+void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options) {
+    const auto indices = destination.shape().coordinates(
+        logicalIndex, recipe.indexOrder(destination.shape().rank()));
+    detail::generateElement(destination, recipe, indices, logicalIndex, options);
 }
 }  // namespace roc::hostnumerics
