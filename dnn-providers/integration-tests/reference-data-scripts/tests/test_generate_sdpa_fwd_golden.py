@@ -71,6 +71,30 @@ class TestGenerateSdpaFwdGoldenScale(unittest.TestCase):
         self.assertEqual(attributes["right_bound"], 0)
         self.assertEqual(meta["config"]["window_left"], 2)
 
+    def test_left_bound_is_written_unchanged(self):
+        # --left-bound is the graph's (cuDNN) left_bound: the same window as --window-left 2.
+        graph, meta = self.generate("--causal", "top_left", "--left-bound", "3")
+        self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 3)
+        self.assertEqual(meta["config"]["window_left"], 2)
+        window_graph, _ = self.generate("--causal", "top_left", "--window-left", "2")
+        self.assertEqual(graph["nodes"], window_graph["nodes"])
+
+    def test_left_bound_one_is_diagonal_only(self):
+        graph, meta = self.generate("--left-bound", "1", "--window-right", "0")
+        self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 1)
+        self.assertEqual(meta["config"]["window_left"], 0)
+
+    def test_invalid_left_bound_flags_are_rejected(self):
+        for extra in (
+            ("--left-bound", "0"),
+            ("--left-bound", "-2"),
+            ("--left-bound", "3", "--window-left", "2"),
+        ):
+            with self.subTest(extra=extra), self.assertRaises(
+                subprocess.CalledProcessError
+            ):
+                self.generate(*extra)
+
 
 def cudnn_keep_mask(torch, s_q, s_kv, diag_offset, left_bound, right_bound):
     """cuDNN's sliding-window rule, as cudnn-frontend's own reference states it
@@ -123,6 +147,8 @@ class TestGenerateSdpaFwdGoldenWindowMatchesCudnn(unittest.TestCase):
         keep = cudnn_keep_mask(torch, 6, 6, 0, 2, 0)
         self.assertEqual(keep[5].nonzero().flatten().tolist(), [4, 5])
         self.assertEqual(self.gen.left_bound_from_window_left(1), 2)
+        self.assertEqual(self.gen.window_left_from_left_bound(2), 1)
+        self.assertEqual(self.gen.window_left_from_left_bound(-1), -1)
 
     def test_causal_windows_match_cudnn(self):
         for s_q, s_kv in ((6, 6), (4, 7), (7, 4)):

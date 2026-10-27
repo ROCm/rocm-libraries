@@ -13,7 +13,8 @@ Supported, fully composable operation axes:
   - dtype:        bf16, fp16, fp8 (FP8_E4M3 inputs, BF16 output, per-tensor descale)
   - head dim:     hd128, hd192 (via --q-dims / --v-dims)
   - causal mask:  none, top_left, bottom_right
-  - sliding window: --window-left / --window-right
+  - sliding window: --left-bound (cuDNN / graph convention) or --window-left
+                    (FlashAttention convention), and --window-right
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
@@ -194,6 +195,15 @@ def left_bound_from_window_left(window_left):
     the same window is left_bound = W + 1.
     """
     return window_left + 1
+
+
+def window_left_from_left_bound(left_bound):
+    """Map hipDNN's (cuDNN) left_bound to FlashAttention's window_size_left.
+
+    The inverse of left_bound_from_window_left: L keys including the diagonal is
+    L - 1 keys before it. -1 (unbounded) stays -1.
+    """
+    return -1 if left_bound == -1 else left_bound - 1
 
 
 def build_mask(s_q, s_kv, causal, window_left, window_right):
@@ -1090,13 +1100,25 @@ def main():
         help="Causal mask type. bottom_right maps to AITER mask=2; top_left is "
         "reference-only (no AITER kernel) (default: none)",
     )
-    parser.add_argument(
+    # Two names for the same bound, one per convention, so a value is never read in the
+    # wrong one: --left-bound is the graph's (cuDNN) left_bound, --window-left is
+    # FlashAttention's window_size_left (what --validate passes to AITER).
+    left = parser.add_mutually_exclusive_group()
+    left.add_argument(
+        "--left-bound",
+        type=int,
+        default=None,
+        help="Sliding window left bound in the graph's (cuDNN) convention: L keeps the L "
+        "keys ending at the diagonal, diagonal included. Written to the graph unchanged. "
+        "Positive or -1 (unbounded); 0 is rejected, as in hipDNN and cuDNN",
+    )
+    left.add_argument(
         "--window-left",
         type=int,
         default=-1,
         help="Sliding window left size in FlashAttention's window_size_left convention "
-        "(W keeps W + 1 keys, diagonal included; written to the graph as left_bound = W + 1), "
-        "-1 = unbounded (default: -1)",
+        "(W keeps the W keys before the diagonal plus the diagonal; written to the graph "
+        "as left_bound = W + 1), -1 = unbounded (default: -1)",
     )
     parser.add_argument(
         "--window-right",
@@ -1162,6 +1184,12 @@ def main():
     )
     args = parser.parse_args()
 
+    window_left = args.window_left
+    if args.left_bound is not None:
+        if args.left_bound == 0 or args.left_bound < -1:
+            parser.error("--left-bound must be positive or -1 (unbounded)")
+        window_left = window_left_from_left_bound(args.left_bound)
+
     if args.install_aiter:
         install_aiter()
 
@@ -1171,7 +1199,7 @@ def main():
         v_dims=args.v_dims,
         dtype=args.dtype,
         causal=args.causal,
-        window_left=args.window_left,
+        window_left=window_left,
         window_right=args.window_right,
         seq_lens_q=args.seq_lens_q,
         seq_lens_kv=args.seq_lens_kv,
