@@ -42,4 +42,10 @@ std::optional<std::vector<detail::LoadedBundle>> loadGoldenDataBundles();
 void registerGoldenDataPlan(const GoldenDataPlan& plan,
                             const std::vector<detail::LoadedBundle>& bundles);
 
+/// `--smoke`: registers one BundleReferenceSmokeHarness test per discovered bundle
+/// on `reference`, golden data or not, as `<suite>_<CpuRef|GpuRef>Smoke.<case>`.
+/// --gtest_filter is applied to those names before loading, so a filter such as
+/// `*ConvolutionFwd*` loads only what it runs. Returns the number registered.
+size_t registerReferenceSmokeTests(ReferenceExecutorType reference);
+
 } // namespace hipdnn_integration_tests::bundle

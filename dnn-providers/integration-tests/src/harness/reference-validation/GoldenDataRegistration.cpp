@@ -10,6 +10,7 @@
 
 #include "harness/ReferenceExecutorPool.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/reference-validation/BundleReferenceSmokeHarness.hpp"
 #include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
 #include "harness/reference-validation/GoldenOutputProbe.hpp"
 
@@ -107,6 +108,64 @@ void registerGoldenDataPlan(const GoldenDataPlan& plan,
             throw std::logic_error("registerGoldenDataPlan: unhandled planned test kind");
         }
     }
+}
+
+size_t registerReferenceSmokeTests(ReferenceExecutorType reference)
+{
+    auto discovered = detail::discoverDataDirBundles();
+    if(!discovered.has_value())
+    {
+        return 0;
+    }
+
+    const std::string suffix
+        = std::string("_") + BundleReferenceValidationHarness::referenceLabel(reference) + "Smoke";
+    const std::string filter = GTEST_FLAG_GET(filter);
+    const size_t discoveredCount = discovered->bundles.size();
+    auto& candidates = discovered->bundles;
+    candidates.erase(std::remove_if(candidates.begin(),
+                                    candidates.end(),
+                                    [&](const DiscoveredBundle& disc) {
+                                        return !gtestFilterSelects(
+                                            filter, disc.suiteName + suffix + "." + disc.testName);
+                                    }),
+                     candidates.end());
+    std::cerr << "--smoke: " << candidates.size() << " of " << discoveredCount
+              << " discovered bundle(s) selected by --gtest_filter\n";
+    if(candidates.empty())
+    {
+        return 0;
+    }
+
+    const auto bundles = detail::loadDiscoveredBundles(*discovered,
+                                                       /*countFound=*/false,
+                                                       /*countClaims=*/false);
+    if(!bundles.has_value())
+    {
+        return 0;
+    }
+
+    for(const auto& bundle : *bundles)
+    {
+        std::optional<KnownReferenceGap> gap;
+        if(const auto* entry = findKnownReferenceGap(reference, bundle.fullName()))
+        {
+            gap = *entry;
+        }
+        ::testing::RegisterTest(
+            (bundle.suiteName + suffix).c_str(),
+            bundle.testName.c_str(),
+            nullptr,
+            nullptr,
+            __FILE__,
+            __LINE__,
+            [loaded = bundle.bundle, path = bundle.jsonPath, reference, gap]() -> ::testing::Test* {
+                auto* test = new BundleReferenceSmokeHarness(reference, sharedReferenceExecutors());
+                test->setBundle(loaded, path, gap);
+                return test;
+            });
+    }
+    return bundles->size();
 }
 
 } // namespace hipdnn_integration_tests::bundle

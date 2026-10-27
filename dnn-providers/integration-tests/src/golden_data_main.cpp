@@ -51,6 +51,12 @@ int main(int argc, char** argv) noexcept
             .help("Where outputs are compared: 'auto' (default; the host, where golden "
                   "data is loaded), 'cpu', or 'gpu'. Can also be set via "
                   "HIPDNN_TEST_VALIDATOR env var.");
+        parser.add_argument("--smoke")
+            .help("Run every discovered bundle, golden data or not, through the selected "
+                  "reference with generated inputs, and fail when the reference declines, "
+                  "throws, or writes a NaN or Inf. Nothing is compared. Needs a single "
+                  "--reference (default 'gpu'); narrow it with --gtest_filter.")
+            .flag();
 
         std::vector<std::string> remainingArgs;
         try
@@ -146,6 +152,25 @@ int main(int argc, char** argv) noexcept
         opts.configPath = std::move(configPath);
         opts.validatorDevice = validator;
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        if(parser.get<bool>("--smoke"))
+        {
+            if(!parser.is_used("--reference"))
+            {
+                runCpu = false;
+            }
+            if(runCpu == runGpu)
+            {
+                std::cerr << "Error: --smoke needs --reference cpu or --reference gpu\n";
+                return 1;
+            }
+            const auto reference = runGpu ? hipdnn_integration_tests::ReferenceExecutorType::GPU
+                                          : hipdnn_integration_tests::ReferenceExecutorType::CPU;
+            const auto registered
+                = hipdnn_integration_tests::bundle::registerReferenceSmokeTests(reference);
+            std::cerr << "--smoke: registered " << registered << " reference smoke test(s)\n";
+            return RUN_ALL_TESTS();
+        }
 
         // The CPU lane's cost exclusion is justified by the GPU lane covering the
         // bundles it drops, so the plan has to know whether that lane really runs.
