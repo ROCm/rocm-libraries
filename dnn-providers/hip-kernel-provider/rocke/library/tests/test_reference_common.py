@@ -2969,6 +2969,47 @@ def test_bundle_commands_accept_only_the_selected_declared_variant(
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
+def test_bundle_commands_check_the_cohort_that_the_lock_pins(
+    tmp_path, capsys, operation
+):
+    """Verification and diff reject a lock mixed from two qualifications.
+
+    Such a lock pins the bundle's manifest but another cohort. Staging rejects
+    it too, so a bundle directory and an archive fail the same way.
+    """
+    spec, architecture, bundle, lock = _qualified_cohort(tmp_path, operation)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    for entry in manifest["cases"].values():
+        entry["input_digests"] = {"input": "1" * 64}
+    _relock(bundle, manifest, lock)
+    pinned = dict(
+        json.loads(lock.read_text()), cohort_sha256=manifest_cohort_digest(manifest)
+    )
+    lock.write_text(json.dumps(pinned))
+    selected = {
+        "architecture": architecture,
+        "variant": spec.architectures.resolve_variant(architecture),
+    }
+    archive = tmp_path / "bundle.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    spec.load_bundle(bundle, lock, **selected)
+    for source in (bundle, archive):
+        assert spec.diff_bundle(source, lock, **selected) == []
+    lock.write_text(json.dumps(dict(pinned, cohort_sha256="0" * 64)))
+    expected = "lock pins a cohort that its manifest does not record"
+    for command, source in (("verify", bundle), ("diff", bundle), ("diff", archive)):
+        with pytest.raises(SystemExit) as exit:
+            spec.main(
+                [command, "--arch", architecture, "--bundle", str(source)]
+                + ["--lock", str(lock)]
+            )
+        assert exit.value.code == 2
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert output.err.count(expected) == 1
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
 @pytest.mark.parametrize("command", ["diff", "verify"])
 def test_bundle_commands_say_how_to_provide_the_rocke_platform(
     tmp_path, operation, command

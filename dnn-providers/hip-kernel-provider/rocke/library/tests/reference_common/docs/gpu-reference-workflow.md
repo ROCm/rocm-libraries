@@ -91,10 +91,11 @@ only when no archive, extracted bundle, or installed bundle is present.
 
 Each lock also pins `cohort_sha256`, a digest of every qualified case's
 contract, input digests, and tolerance. Qualification writes it to
-`qualification-lock.json`, and configuration checks it against the manifest
-that the lock pins. The same file compares it with each adapter's `CASES`,
-which needs no bundle data, so a cohort edit fails host tests in every tree,
-including CI jobs that have no bundle for that architecture. `cases` and
+`qualification-lock.json`, and configuration, `verify`, and `diff` check it
+against the manifest that the lock pins. The same file compares it with each
+adapter's `CASES`, which needs no bundle data, so a cohort edit fails host
+tests in every tree, including CI jobs that have no bundle for that
+architecture. `cases` and
 `status` name the variants whose cohort digests are equal. Editing a tuple of
 `CASES` that several adapters take, as the SDPA `wmma` adapters do, fails for
 each of them until every one is requalified; equal digests from separate

@@ -499,10 +499,11 @@ class ReferenceOperation:
         architecture: str,
         variant: str | None = None,
     ) -> dict:
-        """Require the pinned manifest and payload; the cohort is checked separately.
+        """Require the pinned manifest, payload, and cohort digest.
 
         A bundle the lock rejects, such as one extracted from an earlier archive,
-        fails with the commands that replace it.
+        fails with the commands that replace it. The enrolled cohort is checked
+        separately.
         """
         variant = self.architectures.resolve_variant(architecture, variant)
         schema = self.contract.SCHEMA_VERSION
@@ -584,6 +585,20 @@ class ReferenceOperation:
                 f"wrong reference variant: the manifest declares {declared!r}, but "
                 f"the selected {self.label} {architecture} variant is {variant!r}"
             )
+        # As staging does, reject a lock mixed from two qualifications: it pins
+        # this manifest but another cohort, so no fetch can repair it. A
+        # candidate lock from before the digest has none to check.
+        if "cohort_sha256" in lock:
+            cohort = manifest_cohort_digest(manifest)
+            if cohort != lock["cohort_sha256"]:
+                raise ValueError(
+                    f"{self.label} lock pins a cohort that its manifest does not "
+                    f"record: {_shown(manifest_path)} cases digest {cohort[:12]}, "
+                    f"but {_shown(lock_path)} pins cohort_sha256 "
+                    f"{lock['cohort_sha256'][:12]}; every lock field must come "
+                    "from the qualification-lock.json written with this bundle, "
+                    "and a cohort change needs requalification"
+                )
         if manifest.get("input_generation") != self.contract.INPUT_GENERATOR:
             raise ValueError(f"unsupported {self.label} input generator contract")
         if any(p.is_file() and p.suffix in (".npz", ".npy") for p in bundle.rglob("*")):
