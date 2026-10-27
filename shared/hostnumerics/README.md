@@ -21,8 +21,10 @@ stages.
 - [Error handling](docs/error_handling.md).
 - [Scalar metadata and dispatch](include/roc/hostnumerics/scalar_type.hpp).
 - [Core tests and compiled usage example](tests/core_test.cpp).
-- [Logical tensor shapes](include/roc/hostnumerics/shape.hpp) and the Python
-  `Shape` docstrings.
+- [Logical tensor shapes](include/roc/hostnumerics/shape.hpp), including
+  ordered coordinate traversal, and the Python `Shape` docstrings.
+- [Index ranges](include/roc/hostnumerics/index_range.hpp), which select
+  strided or sampled flat indices, and the Python `IndexRange` docstrings.
 - [Tensor layouts](include/roc/hostnumerics/layout.hpp), which map coordinates
   to element offsets, and the Python `Layout` docstrings.
 
