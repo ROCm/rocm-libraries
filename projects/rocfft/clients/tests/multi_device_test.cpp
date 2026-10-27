@@ -25,10 +25,12 @@
 // under --gtest_repeat also exercises cached-communicator reuse across
 // sequential plans.
 //
-// Multi-process: build with ROCFFT_RCCL_ENABLE and ROCFFT_MPI_ENABLE and run
-// with --mp_lib mpi. Plans where every rank's bricks use one device use
-// RCCL for the transpose; bricks on more than one device per rank still
-// use MPI P2P.
+// Multi-process: ROCFFT_MPI_ENABLE is independent of ROCFFT_RCCL_ENABLE.
+// Build with ROCFFT_MPI_ENABLE alone and run with --mp_lib mpi for the MPI
+// paths (all-to-all, or point-to-point when a rank's bricks span more than
+// one device). A build with both ROCFFT_MPI_ENABLE and ROCFFT_RCCL_ENABLE
+// uses RCCL for the transpose only when every rank's bricks use one device;
+// multi-device-per-rank plans still use MPI point-to-point.
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fft_enums.h"
