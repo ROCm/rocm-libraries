@@ -453,9 +453,8 @@ std::vector<float> generateData(T                           dgen,
         // its scale count does not factor into the K blocks the swizzle expects.
         if(mnExtent * kBlocks != scaleBytes.size())
             throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
-                                     + std::to_string(mnExtent) + " x "
-                                     + std::to_string(kBlocks) + " covers "
-                                     + std::to_string(mnExtent * kBlocks) + " of "
+                                     + std::to_string(mnExtent) + " x " + std::to_string(kBlocks)
+                                     + " covers " + std::to_string(mnExtent * kBlocks) + " of "
                                      + std::to_string(scaleBytes.size()) + " scales");
 
         // The swizzle reads its input as [MN][K block]. A K-contiguous operand's
