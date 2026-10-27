@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <string>
@@ -369,42 +370,41 @@ namespace hiptensor
                 return finishStep(step, w, reason);
             }
 
-            // The launches of the generic elementwise kernel over canonical modes `dims` (see
-            // ewStep), appended to `steps`. Modes past the kernel's 8 slots (the outermost ones,
-            // as canonicalize orders them) are iterated on the host: one launch per index of
-            // those modes, each with its operands offset to that slice. `types` gives the data
-            // type of each operand's kernel argument ("a", "b", "c", "d").
-            hiptensorStatus_t ewSteps(Pack const&                                      pack,
-                                      std::vector<std::pair<std::string, int64_t>>     ints,
-                                      std::vector<std::pair<std::string, std::string>> strs,
-                                      std::vector<Dim> const&                          dims,
-                                      std::vector<EwOperand> const&                    operands,
-                                      std::array<int, 2> const&                        binaryOps,
-                                      bool                                             cplx,
-                                      std::vector<LaunchStep>&                         steps,
-                                      std::string&                                     reason)
+            // Most launches one elementwise program (or one reduction) is split into.
+            constexpr int64_t kMaxLaunches = 4096;
+            // Piece length of a mode longer than the kernels' i32 coordinates.
+            constexpr int64_t kLongModePiece = int64_t(1) << 30;
+
+            // The modes `dims` with mode `i` restricted to [first, first + extent), and the
+            // element offset of that restriction in each of `tensors` tensors.
+            std::vector<Dim> restrictMode(std::vector<Dim> const& dims,
+                                          size_t                  i,
+                                          int64_t                 first,
+                                          int64_t                 extent,
+                                          int                     tensors,
+                                          std::vector<int64_t>&   offsets)
             {
-                constexpr int64_t kMaxSlices = 4096;
-                if(dims.size() <= size_t(kMaxRank))
+                offsets.assign(tensors, 0);
+                for(int t = 0; t < tensors; t++)
                 {
-                    LaunchStep step;
-                    auto status = ewStep(pack, ints, strs, dims, operands, binaryOps, step, reason);
-                    if(status == HIPTENSOR_STATUS_SUCCESS)
-                    {
-                        steps.push_back(std::move(step));
-                    }
-                    return status;
+                    offsets[t] = first * dims[i].stride[t];
                 }
-                std::vector<Dim> const inner(dims.begin(), dims.begin() + kMaxRank);
-                std::vector<Dim> const outer(dims.begin() + kMaxRank, dims.end());
-                int64_t const          slices = product(outer, 0, outer.size());
-                if(slices > kMaxSlices)
+                auto out      = dims;
+                out[i].extent = extent;
+                if(extent == 1)
                 {
-                    reason = "more than 8 modes after merging, and more than "
-                             + std::to_string(kMaxSlices)
-                             + " slices of the modes past them for the generic elementwise kernel";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    out.erase(out.begin() + i);
                 }
+                return out;
+            }
+
+            // The element size of each elementwise operand (`strs` keys "a", "b", "c", "d" name
+            // the operands' data types); 0 when unknown.
+            std::vector<uint64_t>
+                operandBytes(std::vector<std::pair<std::string, std::string>> const& strs,
+                             std::vector<EwOperand> const&                           operands,
+                             bool                                                    cplx)
+            {
                 std::vector<uint64_t> bytes(operands.size(), 0);
                 for(size_t t = 0; t < operands.size(); t++)
                 {
@@ -419,42 +419,120 @@ namespace hiptensor
                             bytes[t] = elementBytes(s.second, cplx);
                         }
                     }
-                    for(auto const& d : outer)
+                }
+                return bytes;
+            }
+
+            // See ewSteps. `budget`: launches left.
+            hiptensorStatus_t ewPieces(Pack const&                                             pack,
+                                       std::vector<std::pair<std::string, int64_t>> const&     ints,
+                                       std::vector<std::pair<std::string, std::string>> const& strs,
+                                       std::vector<Dim>                                        dims,
+                                       std::vector<EwOperand> const&  operands,
+                                       std::vector<uint64_t> const&   bytes,
+                                       std::array<int, 2> const&      binaryOps,
+                                       std::vector<LaunchStep>&       steps,
+                                       int64_t&                       budget,
+                                       std::string&                   reason)
+            {
+                int const tensors = static_cast<int>(operands.size());
+                // Host-iterated pieces of mode `i`, `piece` long: one ewPieces each, with the
+                // operands offset to the piece.
+                auto pieces = [&](size_t i, int64_t piece, char const* why) {
+                    for(int t = 0; t < tensors; t++)
                     {
-                        if(bytes[t] == 0 || d.stride[t] < 0)
+                        if(bytes[t] == 0 || dims[i].stride[t] < 0)
                         {
-                            reason = "more than 8 modes after merging, with an operand the slices "
-                                     "of the generic elementwise kernel cannot address";
+                            reason = std::string(why)
+                                     + ", with an operand the pieces of the generic elementwise "
+                                       "kernel cannot address";
                             return HIPTENSOR_STATUS_NOT_SUPPORTED;
                         }
                     }
-                }
-                std::vector<int64_t> index(outer.size(), 0);
-                for(int64_t s = 0; s < slices; s++)
-                {
-                    auto sliced = operands;
-                    for(size_t t = 0; t < sliced.size(); t++)
+                    for(int64_t first = 0; first < dims[i].extent; first += piece)
                     {
-                        int64_t offset = 0;
-                        for(size_t j = 0; j < outer.size(); j++)
+                        std::vector<int64_t> offsets;
+                        auto const           sub = restrictMode(
+                            dims, i, first, std::min(piece, dims[i].extent - first), tensors, offsets);
+                        auto moved = operands;
+                        for(int t = 0; t < tensors; t++)
                         {
-                            offset += index[j] * outer[j].stride[t];
+                            moved[t].bytes += uint64_t(offsets[t]) * bytes[t];
                         }
-                        sliced[t].bytes += uint64_t(offset) * bytes[t];
+                        auto status = ewPieces(
+                            pack, ints, strs, sub, moved, bytes, binaryOps, steps, budget, reason);
+                        if(status != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            if(budget < 0)
+                            {
+                                reason = std::string(why) + ", and more than "
+                                         + std::to_string(kMaxLaunches)
+                                         + " launches of the generic elementwise kernel";
+                            }
+                            return status;
+                        }
                     }
-                    LaunchStep step;
-                    auto status = ewStep(pack, ints, strs, inner, sliced, binaryOps, step, reason);
-                    if(status != HIPTENSOR_STATUS_SUCCESS)
+                    return HIPTENSOR_STATUS_SUCCESS;
+                };
+
+                // a mode past the i32 coordinates: pieces of 2^30
+                for(size_t i = 0; i < dims.size(); i++)
+                {
+                    if(dims[i].extent > kI32Max)
                     {
-                        return status;
-                    }
-                    steps.push_back(std::move(step));
-                    for(size_t j = 0; j < index.size() && ++index[j] == outer[j].extent; j++)
-                    {
-                        index[j] = 0;
+                        return pieces(i, kLongModePiece, "a mode of more than 2^31 elements");
                     }
                 }
-                return HIPTENSOR_STATUS_SUCCESS;
+                // modes past the kernel's 8 slots (the outermost ones, as canonicalize orders
+                // them): one launch per index of the outermost mode
+                if(dims.size() > size_t(kMaxRank))
+                {
+                    return pieces(dims.size() - 1, 1, "more than 8 modes after merging");
+                }
+                std::array<Dim, 8> slots;
+                int64_t            nIn = 0, nOut = 0;
+                if(!dims.empty() && !placeSlots(dims, tensors, slots, nIn, nOut))
+                {
+                    // more than 2^31 rows: halves of the outermost mode
+                    auto const last = dims.size() - 1;
+                    return pieces(last,
+                                  (dims[last].extent + 1) / 2,
+                                  "more than 2^31 rows of the generic elementwise kernel");
+                }
+                if(--budget < 0)
+                {
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                LaunchStep step;
+                auto status = ewStep(pack, ints, strs, dims, operands, binaryOps, step, reason);
+                if(status == HIPTENSOR_STATUS_SUCCESS)
+                {
+                    steps.push_back(std::move(step));
+                }
+                return status;
+            }
+
+            // The launches of the generic elementwise kernel over canonical modes `dims` (see
+            // ewStep), appended to `steps`. What one launch cannot address is split into
+            // host-iterated pieces, each a launch with its operands offset to the piece: modes
+            // past the kernel's 8 slots (one piece per index of the outermost mode), modes of
+            // more than 2^31 elements (pieces of 2^30), and row spaces of more than 2^31 rows
+            // (halves of the outermost mode). At most kMaxLaunches launches. `strs` gives the
+            // data type of each operand's kernel argument ("a", "b", "c", "d").
+            hiptensorStatus_t ewSteps(Pack const&                                      pack,
+                                      std::vector<std::pair<std::string, int64_t>>     ints,
+                                      std::vector<std::pair<std::string, std::string>> strs,
+                                      std::vector<Dim> const&                          dims,
+                                      std::vector<EwOperand> const&                    operands,
+                                      std::array<int, 2> const&                        binaryOps,
+                                      bool                                             cplx,
+                                      std::vector<LaunchStep>&                         steps,
+                                      std::string&                                     reason)
+            {
+                auto const bytes  = operandBytes(strs, operands, cplx);
+                int64_t    budget = kMaxLaunches;
+                return ewPieces(
+                    pack, ints, strs, dims, operands, bytes, binaryOps, steps, budget, reason);
             }
 
             // The extent of `mode` in `tensor`, or 0 when the tensor does not have it.
@@ -1323,10 +1401,12 @@ namespace hiptensor
                 EwOperand out;
                 out.name    = "D";
                 out.role    = BufferRole::Out;
-                auto dt     = dtypeName(D.type);
+                auto dt = dtypeName(D.type);
+                // C may have another data type than D (the scale form reads no C: D's type)
+                auto ct     = C.present ? dtypeName(C.type) : dt;
                 auto status = ewSteps(pack,
                                       {{"arity", 2}, {"cplx", cplx ? 1 : 0}},
-                                      {{"a", tType}, {"c", dt}, {"d", dt}},
+                                      {{"a", tType}, {"c", ct}, {"d", dt}},
                                       dims,
                                       {t, cin, out},
                                       {HIPTENSOR_OP_ADD, 0},
@@ -1575,7 +1655,8 @@ namespace hiptensor
                     return status;
                 }
                 auto const&    D      = p.t[3];
-                uint64_t const esIn   = elementBytes(dtypeName(p.t[0].type), cplx);
+                uint64_t const esA    = elementBytes(dtypeName(p.t[0].type), cplx);
+                uint64_t const esB    = elementBytes(dtypeName(p.t[1].type), cplx);
                 uint64_t const esOut  = elementBytes(dtypeName(D.type), cplx);
                 uint64_t const tBytes = tElems * 4;
                 facts                 = contractionFacts(p, c, cplx);
@@ -1590,7 +1671,7 @@ namespace hiptensor
                 facts.ctas         = ctas;
                 facts.paddedVolume = Mp * Np * Kp * L;
                 facts.main         = kernel;
-                facts.bytes        = uint64_t(M * K * L + N * K * L) * esIn + 2 * (aBytes + bBytes)
+                facts.bytes        = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB + 2 * (aBytes + bBytes)
                               + 2 * tBytes + uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
                 program = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
@@ -1676,9 +1757,11 @@ namespace hiptensor
                 g.csl                 = C.present ? c.L.mergedStride(2) : g.dsl;
                 auto unit
                     = [](int64_t stride, int64_t extent) { return stride == 1 && extent > 1; };
+                // the kernel reads C with D's data type
                 bool direct
                     = realOut && g.dsm >= 0 && g.dsn >= 0 && g.dsl >= 0 && g.csm >= 0 && g.csn >= 0
-                      && g.csl >= 0 && (!C.present || C.unaryOp == HIPTENSOR_OP_IDENTITY)
+                      && g.csl >= 0
+                      && (!C.present || (C.unaryOp == HIPTENSOR_OP_IDENTITY && C.type == D.type))
                       && unit(g.dsm, M) == unit(g.csm, M) && unit(g.dsn, N) == unit(g.csn, N);
                 uint64_t const es0  = cplx ? 16 : 8;
                 auto           span = [&](int64_t sm, int64_t sn) {
@@ -1867,7 +1950,8 @@ namespace hiptensor
                     }
                 }
                 auto const&    D     = p.t[3];
-                uint64_t const esIn  = elementBytes(dtypeName(p.t[0].type), cplx);
+                uint64_t const esA   = elementBytes(dtypeName(p.t[0].type), cplx);
+                uint64_t const esB   = elementBytes(dtypeName(p.t[1].type), cplx);
                 uint64_t const esOut = elementBytes(dtypeName(D.type), cplx);
                 facts                = contractionFacts(p, c, cplx);
                 facts.route          = Route::Gett64;
@@ -1883,7 +1967,7 @@ namespace hiptensor
                 facts.paddedVolume   = M * N * Kp * L;
                 facts.main           = &kernel;
                 uint64_t const outIo = uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
-                facts.bytes = uint64_t(M * K * L + N * K * L) * esIn + 2 * (aBytes + bBytes)
+                facts.bytes = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB + 2 * (aBytes + bBytes)
                               + 2 * tBytes + outIo;
                 program = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
@@ -1964,7 +2048,8 @@ namespace hiptensor
                 auto const& D  = p.t[3];
                 auto        dt = dtypeName(D.type);
                 if((dt != "f16" && dt != "bf16") || p.compute != HIPTENSOR_COMPUTE_DESC_32F
-                   || p.t[0].unaryOp != HIPTENSOR_OP_IDENTITY
+                   || p.t[0].type != D.type || p.t[1].type != D.type
+                   || (C.present && C.type != D.type) || p.t[0].unaryOp != HIPTENSOR_OP_IDENTITY
                    || p.t[1].unaryOp != HIPTENSOR_OP_IDENTITY
                    || (C.present
                        && (C.unaryOp != HIPTENSOR_OP_IDENTITY || C.strides != D.strides
@@ -2092,6 +2177,100 @@ namespace hiptensor
 
         namespace
         {
+            // The routes a contraction's data and compute types admit.
+            struct ContractionRoutes
+            {
+                // a universal GEMM route: h16 (operands rounded to f16 / bf16, `storage` fp16
+                // or bf16), x6 (operands as f32, split into three bf16 parts) or cf32
+                bool        gemm = false;
+                std::string route, storage;
+                // the f64 strided GEMM (operands converted to f64 exactly)
+                bool f64 = false;
+                // why a route is missing
+                std::string why;
+            };
+
+            // The compute type sets the precision of the products: 64F / C64F the f64 route
+            // only; 16F / 16BF every operand rounded once (nearest even) to that type, so the
+            // h16 GEMM route, and the f64 route only when the operands already have that type
+            // (it would skip the rounding); 32F / C32F f32 products: operands of f64 data take
+            // the f64 route (more precise, and the only route that reads them without a first
+            // rounding), f16 x f16 or bf16 x bf16 without an operand operator the h16 route
+            // (exact products), the other real operands the x6 route (their f32 values, every
+            // f16 / bf16 value is one), complex f32 the cf32 route; the f64 route as well.
+            ContractionRoutes contractionRoutes(Problem const& p)
+            {
+                ContractionRoutes r;
+                auto const&       A    = p.t[0];
+                auto const&       B    = p.t[1];
+                bool const        cplx = isComplex(p.t[3].type);
+                auto const        f64Data
+                    = [](hiptensorDataType_t t) { return t == HIPTENSOR_R_64F || t == HIPTENSOR_C_64F; };
+                switch(p.compute)
+                {
+                case HIPTENSOR_COMPUTE_DESC_64F:
+                case HIPTENSOR_COMPUTE_DESC_C64F:
+                    r.f64 = true;
+                    r.why = "the f64 compute type takes the f64 route only";
+                    return r;
+                case HIPTENSOR_COMPUTE_DESC_16F:
+                case HIPTENSOR_COMPUTE_DESC_16BF:
+                {
+                    if(cplx)
+                    {
+                        r.why = "a 16-bit compute type is not supported for complex data";
+                        return r;
+                    }
+                    bool const f16  = p.compute == HIPTENSOR_COMPUTE_DESC_16F;
+                    auto const type = f16 ? HIPTENSOR_R_16F : HIPTENSOR_R_16BF;
+                    r.gemm          = true;
+                    r.route         = "h16";
+                    r.storage       = f16 ? "fp16" : "bf16";
+                    r.f64           = A.type == type && B.type == type;
+                    if(!r.f64)
+                    {
+                        r.why = "the f64 route does not round the operands to the 16-bit compute "
+                                "type";
+                    }
+                    return r;
+                }
+                case HIPTENSOR_COMPUTE_DESC_32F:
+                case HIPTENSOR_COMPUTE_DESC_C32F:
+                {
+                    r.f64 = true;
+                    if(f64Data(A.type) || f64Data(B.type))
+                    {
+                        r.why = "operands of f64 data take the f64 route";
+                        return r;
+                    }
+                    r.gemm = true;
+                    if(cplx)
+                    {
+                        r.route   = "cf32";
+                        r.storage = "bf16";
+                        return r;
+                    }
+                    bool const ops
+                        = A.unaryOp != HIPTENSOR_OP_IDENTITY || B.unaryOp != HIPTENSOR_OP_IDENTITY;
+                    if(A.type == B.type && !ops
+                       && (A.type == HIPTENSOR_R_16F || A.type == HIPTENSOR_R_16BF))
+                    {
+                        r.route   = "h16";
+                        r.storage = A.type == HIPTENSOR_R_16F ? "fp16" : "bf16";
+                        return r;
+                    }
+                    // the operators of 16-bit operands run in f32 and their results stay f32
+                    // (no rounding back to the 16-bit type), as do mixed 16-bit operands
+                    r.route   = "x6";
+                    r.storage = "bf16";
+                    return r;
+                }
+                default:
+                    r.why = "compute type not supported by the rocKE kernels";
+                    return r;
+                }
+            }
+
             // The API's execution checks of a contraction (the same as the other backend's).
             void contractionChecks(Problem const& problem, Program& program)
             {
@@ -2133,16 +2312,40 @@ namespace hiptensor
                     reason = "contraction tensors missing";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                if(A.type != B.type || (C.present && C.type != D.type) || A.type != D.type)
+                // Data types: A, B, C and D each of any real type (f16, bf16, f32, f64), or each
+                // of any complex type (complex f32, complex f64). The compute type decides the
+                // route and the precision of the operands; mixed types are converted when the
+                // operands are packed (contractionRoutes).
+                bool const cplx = isComplex(D.type);
+                for(auto const* t : {&A, &B, &C, &D})
                 {
-                    reason = "mixed data types are not supported by the rocKE kernels";
+                    if(!t->present)
+                    {
+                        continue;
+                    }
+                    if(dtypeName(t->type).empty())
+                    {
+                        reason = "data type not supported by the rocKE kernels";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    if(isComplex(t->type) != cplx)
+                    {
+                        reason = "contractions of real and complex tensors are not supported by "
+                                 "the rocKE kernels";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                if(isComplex(problem.scalarType) != cplx)
+                {
+                    reason = "the compute type of a contraction of "
+                             + std::string(cplx ? "complex" : "real")
+                             + " tensors is not supported by the rocKE kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                bool const cplx = isComplex(A.type);
-                auto       dt   = dtypeName(A.type);
-                if(dt.empty() || isComplex(problem.scalarType) != cplx)
+                auto const routes = contractionRoutes(problem);
+                if(!routes.gemm && !routes.f64)
                 {
-                    reason = "data type not supported by the rocKE kernels";
+                    reason = routes.why;
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 for(auto const* t : {&A, &B})
@@ -2223,42 +2426,12 @@ namespace hiptensor
                     }
                 }
 
-                // the GEMM route of the data type
-                auto const compute = problem.compute;
-                if(!options.f64Only && dt != "f64")
+                // the GEMM route of the data and compute types
+                if(!options.f64Only && routes.gemm)
                 {
-                    std::string route, storage;
-                    bool const  operandOps
-                        = A.unaryOp != HIPTENSOR_OP_IDENTITY || B.unaryOp != HIPTENSOR_OP_IDENTITY;
-                    if(cplx)
-                    {
-                        route   = "cf32";
-                        storage = "bf16";
-                    }
-                    else if((dt == "f16" || dt == "bf16") && compute == HIPTENSOR_COMPUTE_DESC_32F
-                            && operandOps)
-                    {
-                        // the operators run in f32 and their results stay f32 (no rounding back
-                        // to the 16-bit type): the f32 operands of the three-part split GEMM
-                        route   = "x6";
-                        storage = "bf16";
-                    }
-                    else if(dt == "f16" || (dt == "f32" && compute == HIPTENSOR_COMPUTE_DESC_16F))
-                    {
-                        route   = "h16";
-                        storage = "fp16";
-                    }
-                    else if(dt == "bf16" || (dt == "f32" && compute == HIPTENSOR_COMPUTE_DESC_16BF))
-                    {
-                        route   = "h16";
-                        storage = "bf16";
-                    }
-                    else
-                    {
-                        route   = "x6";
-                        storage = "bf16";
-                    }
-                    int64_t const nk  = c.N.size() * (cplx ? 2 : 1);
+                    std::string const& route   = routes.route;
+                    std::string const& storage = routes.storage;
+                    int64_t const      nk      = c.N.size() * (cplx ? 2 : 1);
                     int const     cus = std::max(1, problem.device.cuCount);
                     for(auto const& body : gemmBodies(pack, c.M.size(), nk, cus, cplx))
                     {
@@ -2293,12 +2466,9 @@ namespace hiptensor
 
                 // the f64 strided GEMM: the route of f64 / complex f64 data, and the F64 route of
                 // the other types (operands converted to f64, the result rounded once)
-                if(dt == "f32"
-                   && (compute == HIPTENSOR_COMPUTE_DESC_16F
-                       || compute == HIPTENSOR_COMPUTE_DESC_16BF))
+                if(!routes.f64)
                 {
-                    // f64 operands would skip the rounding to the 16-bit compute type
-                    note("the f64 route does not round f32 operands to a 16-bit compute type");
+                    note(routes.why);
                 }
                 else
                 {
@@ -2355,6 +2525,254 @@ namespace hiptensor
                     reason = firstReason.empty() ? "no rocKE kernel serves this contraction"
                                                  : firstReason;
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // ------------------------------------------------------------- trinary contraction
+
+            // The intermediate T = opA(A) * opB(B) of a trinary contraction as hipTensor defines
+            // it (hiptensor_contraction.cpp: computeTrinaryContractionIntermediateModes,
+            // buildTrinaryContractionIntermediateDescriptor): the modes of A that the first step
+            // does not contract, in A's order, then the modes of B that A does not have; E's
+            // data type; packed column-major strides. A mode of A and B that neither C nor E
+            // has is contracted by the first step.
+            TensorArg intermediateOf(Problem const& p)
+            {
+                auto const& A   = p.t[0];
+                auto const& B   = p.t[1];
+                auto const& C   = p.t[2];
+                auto const& E   = p.t[4];
+                auto        has = [](TensorArg const& t, int32_t m) {
+                    return std::find(t.modes.begin(), t.modes.end(), m) != t.modes.end();
+                };
+                auto contracted
+                    = [&](int32_t m) { return has(A, m) && has(B, m) && !has(C, m) && !has(E, m); };
+                TensorArg T;
+                T.present        = true;
+                T.type           = E.type;
+                T.unaryOp        = HIPTENSOR_OP_IDENTITY;
+                T.alignmentBytes = static_cast<uint32_t>(kWorkspaceAlign);
+                int64_t stride   = 1;
+                auto    add      = [&](int32_t mode, int64_t extent) {
+                    T.modes.push_back(mode);
+                    T.extents.push_back(extent);
+                    T.strides.push_back(stride);
+                    stride = extent > 0 && stride > INT64_MAX / extent ? INT64_MAX : stride * extent;
+                };
+                for(int i = 0; i < A.numModes(); i++)
+                {
+                    if(!contracted(A.modes[i]))
+                    {
+                        add(A.modes[i], A.extents[i]);
+                    }
+                }
+                for(int i = 0; i < B.numModes(); i++)
+                {
+                    if(!has(A, B.modes[i]) && !contracted(B.modes[i]))
+                    {
+                        add(B.modes[i], B.extents[i]);
+                    }
+                }
+                return T;
+            }
+
+            // The program of a trinary contraction from a program of each step: the first writes
+            // T at the start of the workspace (alpha 1, no C), the second reads T as its A, C as
+            // its B and D as its C. Both steps use the workspace after T; each step's zero fills
+            // run right before its launches.
+            Program combineTrinary(Problem const& problem,
+                                   Program const& first,
+                                   Program const& second,
+                                   uint64_t       tBytes)
+            {
+                Program out;
+                out.pack           = second.pack;
+                out.scalarType     = second.scalarType;
+                out.complexScalars = second.complexScalars;
+                out.workspaceBytes = tBytes + std::max(first.workspaceBytes, second.workspaceBytes);
+                out.description = "trinary[" + first.description + "][" + second.description + "]";
+                auto append     = [&](Program const& from, bool isFirst) {
+                    auto const base = static_cast<uint32_t>(out.steps.size());
+                    for(auto m : from.memsets)
+                    {
+                        m.offset += tBytes;
+                        m.beforeStep += base;
+                        out.memsets.push_back(m);
+                    }
+                    for(auto step : from.steps)
+                    {
+                        for(auto& ptr : step.pointers)
+                        {
+                            switch(ptr.role)
+                            {
+                            case BufferRole::Workspace:
+                                ptr.bytes += tBytes;
+                                break;
+                            case BufferRole::Out:
+                                // the first step's output is T, at offset 0
+                                ptr.role = isFirst ? BufferRole::Workspace : BufferRole::Out;
+                                break;
+                            case BufferRole::A:
+                                ptr.role = isFirst ? BufferRole::A : BufferRole::Workspace;
+                                break;
+                            case BufferRole::B:
+                                ptr.role = isFirst ? BufferRole::B : BufferRole::C;
+                                break;
+                            case BufferRole::C:
+                                ptr.role = isFirst ? BufferRole::None : BufferRole::D;
+                                break;
+                            default:
+                                break;
+                            }
+                        }
+                        if(isFirst)
+                        {
+                            for(auto& s : step.scalars)
+                            {
+                                s.role = s.role == ScalarRole::Alpha ? ScalarRole::One
+                                         : s.role == ScalarRole::One ? ScalarRole::One
+                                                                     : ScalarRole::Zero;
+                            }
+                        }
+                        out.steps.push_back(std::move(step));
+                    }
+                };
+                append(first, true);
+                append(second, false);
+                // the API's execution checks (the same as the other backend's)
+                out.nullStatus      = HIPTENSOR_STATUS_INVALID_VALUE;
+                out.requiredScalars = {0};
+                out.requiredBuffers = {{BufferRole::A, -1},
+                                       {BufferRole::B, -1},
+                                       {BufferRole::C, -1},
+                                       {BufferRole::Out, -1}};
+                if(problem.t[3].present)
+                {
+                    out.requiredScalars.push_back(1);
+                    out.requiredBuffers.emplace_back(BufferRole::D, 1);
+                }
+                return out;
+            }
+
+            // The candidates of a trinary contraction: pairs of a candidate of each step, ordered
+            // by the sum of their ranks in their step's selection (options.rankStep). Every
+            // candidate of a step is paired with the best one of the other step; the first three
+            // of each step are paired with each other.
+            hiptensorStatus_t enumerateTrinary(Problem const&          problem,
+                                               Pack const&             pack,
+                                               CandidateOptions const& options,
+                                               uint64_t                workspaceLimit,
+                                               std::vector<Candidate>& out,
+                                               std::string&            reason)
+            {
+                auto const& A = problem.t[0];
+                auto const& B = problem.t[1];
+                auto const& C = problem.t[2];
+                auto const& E = problem.t[4];
+                if(!A.present || !B.present || !C.present || !E.present)
+                {
+                    reason = "trinary contraction tensors missing";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const tType = dtypeName(E.type);
+                if(tType.empty())
+                {
+                    reason = "data type not supported by the rocKE kernels";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const     T  = intermediateOf(problem);
+                uint64_t const es = elementBytes(tType, isComplex(E.type));
+                uint64_t       elements = 1;
+                for(auto e : T.extents)
+                {
+                    if(e > 1 && elements > std::numeric_limits<uint64_t>::max() / 2 / es / e)
+                    {
+                        reason = "the intermediate T = A * B of the trinary contraction is too "
+                                 "large";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    elements *= uint64_t(std::max<int64_t>(e, 0));
+                }
+                uint64_t const tBytes = alignUp(elements * es, kWorkspaceAlign);
+                if(tBytes > workspaceLimit)
+                {
+                    reason = "the intermediate T = A * B of the trinary contraction needs more "
+                             "workspace than the limit";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                uint64_t const subLimit = workspaceLimit - tBytes;
+
+                Problem first  = problem;
+                first.kind     = OpKind::Contraction;
+                first.t        = {A, B, TensorArg{}, T, TensorArg{}};
+                Problem second = problem;
+                second.kind    = OpKind::Contraction;
+                second.t       = {T, C, problem.t[3], E, TensorArg{}};
+
+                std::vector<Candidate> c1, c2;
+                std::string            why;
+                if(auto status = enumerateContraction(first, pack, options, subLimit, c1, why);
+                   status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    reason = "step 1 (T = A * B) of the trinary contraction: " + why;
+                    return status;
+                }
+                if(auto status = enumerateContraction(second, pack, options, subLimit, c2, why);
+                   status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    reason = "step 2 (E = alpha * T * C + beta * D) of the trinary contraction: "
+                             + why;
+                    return status;
+                }
+                auto orderOf = [&options](Problem const& p, std::vector<Candidate> const& c) {
+                    std::vector<int> order;
+                    if(options.rankStep)
+                    {
+                        order = options.rankStep(p, c);
+                    }
+                    if(order.size() != c.size())
+                    {
+                        order.resize(c.size());
+                        std::iota(order.begin(), order.end(), 0);
+                        std::stable_sort(order.begin(), order.end(), [&c](int x, int y) {
+                            return c[x].staticRank < c[y].staticRank;
+                        });
+                    }
+                    return order;
+                };
+                auto const o1 = orderOf(first, c1);
+                auto const o2 = orderOf(second, c2);
+
+                constexpr int                    kCross = 3;
+                std::vector<std::pair<int, int>> pairs;
+                for(int i = 0; i < int(o1.size()); i++)
+                {
+                    for(int j = 0; j < int(o2.size()); j++)
+                    {
+                        if(i == 0 || j == 0 || (i < kCross && j < kCross))
+                        {
+                            pairs.emplace_back(i, j);
+                        }
+                    }
+                }
+                std::stable_sort(pairs.begin(), pairs.end(), [](auto const& x, auto const& y) {
+                    return x.first + x.second != y.first + y.second
+                               ? x.first + x.second < y.first + y.second
+                               : x.first < y.first;
+                });
+                for(auto const& [i, j] : pairs)
+                {
+                    auto const& x = c1[o1[i]];
+                    auto const& y = c2[o2[j]];
+                    Candidate   candidate;
+                    candidate.key     = "tri:" + x.key + "+" + y.key;
+                    candidate.program = combineTrinary(problem, x.program, y.program, tBytes);
+                    candidate.facts   = y.facts;
+                    candidate.facts.bytes += x.facts.bytes + 2 * elements * es;
+                    candidate.facts.flops += x.facts.flops;
+                    candidate.staticRank = static_cast<int>(out.size());
+                    out.push_back(std::move(candidate));
                 }
                 return HIPTENSOR_STATUS_SUCCESS;
             }
@@ -2452,6 +2870,8 @@ namespace hiptensor
             }
             case OpKind::Contraction:
                 return enumerateContraction(problem, pack, options, workspaceLimit, out, reason);
+            case OpKind::ContractionTrinary:
+                return enumerateTrinary(problem, pack, options, workspaceLimit, out, reason);
             default:
                 reason = "the rocKE backend has no kernels for this operation";
                 return HIPTENSOR_STATUS_NOT_SUPPORTED;

@@ -1529,24 +1529,24 @@ TEST(RockeJitLatency, DISABLED_Report)
                                                       nullptr);
         };
         hipEvent_t e0, e1;
-        hipEventCreate(&e0);
-        hipEventCreate(&e1);
+        EXPECT_EQ(hipEventCreate(&e0), hipSuccess);
+        EXPECT_EQ(hipEventCreate(&e1), hipSuccess);
         std::vector<float> ta, tj;
         for(int r = 0; r < 21; r++)
         {
             for(int which = 0; which < 2; which++)
             {
-                hipEventRecord(e0, nullptr);
+                EXPECT_EQ(hipEventRecord(e0, nullptr), hipSuccess);
                 run(which == 0 ? aot : cold);
-                hipEventRecord(e1, nullptr);
-                hipEventSynchronize(e1);
+                EXPECT_EQ(hipEventRecord(e1, nullptr), hipSuccess);
+                EXPECT_EQ(hipEventSynchronize(e1), hipSuccess);
                 float t = 0;
-                hipEventElapsedTime(&t, e0, e1);
+                EXPECT_EQ(hipEventElapsedTime(&t, e0, e1), hipSuccess);
                 (which == 0 ? ta : tj).push_back(t);
             }
         }
-        hipEventDestroy(e0);
-        hipEventDestroy(e1);
+        static_cast<void>(hipEventDestroy(e0));
+        static_cast<void>(hipEventDestroy(e1));
         std::sort(ta.begin(), ta.end());
         std::sort(tj.begin(), tj.end());
         size_t bytes = d.values.size() * bytesOf(c.out);
@@ -1610,17 +1610,17 @@ TEST(RockeJitLatency, DISABLED_Report)
         auto     t2  = now();
         auto     j   = jitOf(log);
         void*    ws  = nullptr;
-        hipMalloc(&ws, std::max<uint64_t>(std::max(wsA, wsJ), 1));
+        EXPECT_EQ(hipMalloc(&ws, std::max<uint64_t>(std::max(wsA, wsJ), 1)), hipSuccess);
         float const one = 1.0f;
         hipEvent_t  e0, e1;
-        hipEventCreate(&e0);
-        hipEventCreate(&e1);
+        EXPECT_EQ(hipEventCreate(&e0), hipSuccess);
+        EXPECT_EQ(hipEventCreate(&e1), hipSuccess);
         std::vector<float> ta, tj;
         for(int r = 0; r < 21; r++)
         {
             for(int which = 0; which < 2; which++)
             {
-                hipEventRecord(e0, nullptr);
+                EXPECT_EQ(hipEventRecord(e0, nullptr), hipSuccess);
                 hiptensorContract(api.handle,
                                   which == 0 ? aot : jit,
                                   &one,
@@ -1632,16 +1632,16 @@ TEST(RockeJitLatency, DISABLED_Report)
                                   ws,
                                   which == 0 ? wsA : wsJ,
                                   nullptr);
-                hipEventRecord(e1, nullptr);
-                hipEventSynchronize(e1);
+                EXPECT_EQ(hipEventRecord(e1, nullptr), hipSuccess);
+                EXPECT_EQ(hipEventSynchronize(e1), hipSuccess);
                 float t = 0;
-                hipEventElapsedTime(&t, e0, e1);
+                EXPECT_EQ(hipEventElapsedTime(&t, e0, e1), hipSuccess);
                 (which == 0 ? ta : tj).push_back(t);
             }
         }
-        hipEventDestroy(e0);
-        hipEventDestroy(e1);
-        hipFree(ws);
+        static_cast<void>(hipEventDestroy(e0));
+        static_cast<void>(hipEventDestroy(e1));
+        static_cast<void>(hipFree(ws));
         std::sort(ta.begin(), ta.end());
         std::sort(tj.begin(), tj.end());
         char const* name = type == Type::F16 ? "f16" : "f32";

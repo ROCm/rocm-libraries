@@ -47,6 +47,22 @@ def test_class_rolls(spec):
     assert recipe["kernel_name_fmt"] == spec.kernel_name()
 
 
+def test_recipe_independent_of_build_history():
+    """A class's recipe depends on the class only: kernels built before it in the same process
+    (the hipTensor pack builder rolls the classes in a process pool, in any order) change
+    nothing, so the recipe file is reproducible across builds."""
+    from kernels.common.hiptensor_aot.ew import build_ew
+    from rocke.portable_ir.src.recipe_bundle import cbor_encode
+
+    classes = jit_classes(ROWS)
+    spec = classes[0]
+    first = cbor_encode(roll_jit_ew(spec, verify=1))
+    for other in classes[1:4]:
+        roll_jit_ew(other, verify=1)
+    build_ew(ROWS[2])
+    assert cbor_encode(roll_jit_ew(spec, verify=1)) == first
+
+
 def test_class_set():
     classes = jit_classes(ROWS)
     keys = [c.key() for c in classes]
@@ -69,7 +85,9 @@ def test_class_rule():
     assert spec.vec == 8 and spec.unit == (True, False)
     assert geom["e0"] == 8 and n == vals["n_in"] // 8
     # an output whose fastest extent is not a multiple of the vector width: vec 1
-    vals2, _, _ = ew_args(canonicalize([(12, [1, 1, 1]), (5, [12, 12, 12])], 2), ["A", "C", "D"])
+    vals2, _, _ = ew_args(
+        canonicalize([(12, [1, 1, 1]), (5, [12, 12, 12])], 2), ["A", "C", "D"]
+    )
     vals2.update(ops)
     assert jit_class_of(base, vals2)[0].vec == 1
 
@@ -181,7 +199,9 @@ def test_jit_exact(arity, a, d, gather, idx64, seed):
     vals["opAB"], vals["opABC"] = bops
     spec, geom, n_in = jit_class_of(base, vals)
     if not gather:
-        assert spec.vec > 1 and all(spec.unit), "packed layouts have an all-vector class"
+        assert spec.vec > 1 and all(
+            spec.unit
+        ), "packed layouts have an all-vector class"
     k = build_ew_jit(spec, geom)
     run = {"D": dd}
     sn = {"A": "alpha", "B": "beta", "C": "gamma"}
@@ -212,7 +232,12 @@ def test_jit_permute_padding_limits():
     rng = random.Random(5)
     shape = [32, 6]
     x, xd = _tensor(shape, "f32", rng, [1, 0])  # mode 0 innermost: strides (1, 32)
-    out = torch.full([48, 6], 99.0, dtype=torch.float32, device="cuda").t().contiguous().t()
+    out = (
+        torch.full([48, 6], 99.0, dtype=torch.float32, device="cuda")
+        .t()
+        .contiguous()
+        .t()
+    )
     dims = [(48, [1, out.stride()[0]]), (6, [32, out.stride()[1]])]
     vals, _, _ = ew_args(dims, ["A", "D"])
     vals["lim0"] = 32

@@ -848,6 +848,8 @@ namespace hiptensor
                     return buffers.B;
                 case BufferRole::C:
                     return buffers.C;
+                case BufferRole::D:
+                    return buffers.D;
                 case BufferRole::Out:
                     return buffers.out;
                 case BufferRole::Workspace:
@@ -897,26 +899,39 @@ namespace hiptensor
                     return program.nullStatus;
                 }
             }
-            for(auto const& m : program.memsets)
-            {
-                auto* base   = static_cast<uint8_t*>(workspace) + m.offset;
-                auto  status = m.height == 1
-                                   ? hipMemsetAsync(base, 0, m.width, stream)
-                                   : hipMemset2DAsync(base, m.pitch, 0, m.width, m.height, stream);
-                if(status != hipSuccess)
+            // the zero fills that precede launch `index`
+            auto memsetsBefore = [&](size_t index) {
+                for(auto const& m : program.memsets)
                 {
-                    return HIPTENSOR_STATUS_HIP_ERROR;
+                    if(m.beforeStep != index)
+                    {
+                        continue;
+                    }
+                    auto* base   = static_cast<uint8_t*>(workspace) + m.offset;
+                    auto  status = m.height == 1 ? hipMemsetAsync(base, 0, m.width, stream)
+                                                 : hipMemset2DAsync(
+                                                    base, m.pitch, 0, m.width, m.height, stream);
+                    if(status != hipSuccess)
+                    {
+                        return HIPTENSOR_STATUS_HIP_ERROR;
+                    }
                 }
-            }
+                return HIPTENSOR_STATUS_SUCCESS;
+            };
 
             int device = 0;
             if(hipGetDevice(&device) != hipSuccess)
             {
                 return HIPTENSOR_STATUS_HIP_ERROR;
             }
-            for(auto const& planned : program.steps)
+            for(size_t index = 0; index < program.steps.size(); index++)
             {
-                LaunchStep const* chosen = &planned;
+                if(auto status = memsetsBefore(index); status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return status;
+                }
+                auto const&       planned = program.steps[index];
+                LaunchStep const* chosen  = &planned;
                 if(planned.fallback != nullptr)
                 {
                     bool use = device != program.device;

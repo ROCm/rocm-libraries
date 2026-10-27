@@ -164,6 +164,33 @@ EW_ROWS_3 = [  # trinary: (A, B, C, D)
 # complex (component types): pack (A, D) and epilogue (A, C, D) rows
 EW_ROWS_C1 = [("f32", "f32"), ("f64", "f64"), ("f32", "f64")]
 EW_ROWS_C2 = [("f32", "f32", "f32"), ("f64", "f64", "f64"), ("f64", "f32", "f32")]
+
+# Contractions of mixed data types (A, B, C, D of different types): the operand conversions of
+# the pack step (to f16 / bf16 for the 16-bit compute types: one rounding to nearest even from
+# any type) and the epilogue rows of every C / D type pair, after an f32 (GEMM routes) or an
+# f64 (F64 route) result. Kernels of the pack only: the JIT keeps their launches on the pack
+# kernel (no recipe classes).
+_REAL = ("f16", "bf16", "f32", "f64")
+EW_ROWS_1_MIXED = [
+    (a, d)
+    for d in ("f16", "bf16")
+    for a in _REAL
+    if (a, d) not in EW_ROWS_1
+]
+EW_ROWS_2_MIXED = [
+    (t, c, d)
+    for t in ("f32", "f64")
+    for c in _REAL
+    for d in _REAL
+    if (t, c, d) not in EW_ROWS_2
+]
+EW_ROWS_C2_MIXED = [
+    (t, c, d)
+    for t in ("f32", "f64")
+    for c in ("f32", "f64")
+    for d in ("f32", "f64")
+    if (t, c, d) not in EW_ROWS_C2
+]
 REDUCE_ROWS = [("f16", "f16"), ("bf16", "bf16"), ("f32", "f32"), ("f64", "f64")]
 
 GEMM_BODIES = {
@@ -234,18 +261,22 @@ def rocke_features():
     return out
 
 
-def ew_params(idx64):
-    """The rows of the generic elementwise kernel (EwSpec arguments)."""
+def ew_params(idx64, mixed=True):
+    """The rows of the generic elementwise kernel (EwSpec arguments); ``mixed`` adds the rows of
+    mixed-type contractions."""
+    rows1 = EW_ROWS_1 + (EW_ROWS_1_MIXED if mixed else [])
+    rows2 = EW_ROWS_2 + (EW_ROWS_2_MIXED if mixed else [])
+    rowsc2 = EW_ROWS_C2 + (EW_ROWS_C2_MIXED if mixed else [])
     out = []
-    for a, d in EW_ROWS_1:
+    for a, d in rows1:
         out.append(dict(arity=1, a=a, d=d, idx64=idx64))
-    for a, c, d in EW_ROWS_2:
+    for a, c, d in rows2:
         out.append(dict(arity=2, a=a, c=c, d=d, idx64=idx64))
     for a, bb, c, d in EW_ROWS_3:
         out.append(dict(arity=3, a=a, b=bb, c=c, d=d, idx64=idx64))
     for a, d in EW_ROWS_C1:
         out.append(dict(arity=1, a=a, d=d, cplx=True, idx64=idx64))
-    for a, c, d in EW_ROWS_C2:
+    for a, c, d in rowsc2:
         out.append(dict(arity=2, a=a, c=c, d=d, cplx=True, idx64=idx64))
     return out
 
@@ -854,7 +885,7 @@ def jit_class_params():
     from kernels.common.hiptensor_aot.ew import EwSpec
     from kernels.common.hiptensor_aot.jit_ew import jit_classes
 
-    bases = [EwSpec(**p) for idx64 in (False, True) for p in ew_params(idx64)]
+    bases = [EwSpec(**p) for idx64 in (False, True) for p in ew_params(idx64, mixed=False)]
     return [(dict(c.base.__dict__), c.vec, tuple(c.unit)) for c in jit_classes(bases)]
 
 

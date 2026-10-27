@@ -170,6 +170,7 @@ namespace hiptensor
             A,
             B,
             C,
+            D, // the additive input of a trinary contraction (Buffers::D)
             Out,
             Workspace,
         };
@@ -218,14 +219,18 @@ namespace hiptensor
             std::shared_ptr<LaunchStep const> fallback;
         };
 
-        // Zero-fills a strided region of the workspace before the launches (padding of packed
-        // contraction operands, stream-K flags): `height` rows of `width` bytes, `pitch` apart.
+        // Zero-fills a strided region of the workspace (padding of packed contraction operands,
+        // stream-K flags): `height` rows of `width` bytes, `pitch` apart, before launch
+        // `beforeStep` of the program (0: before every launch). A program that reuses a region
+        // of the workspace for several steps (the two steps of a trinary contraction, sliced
+        // launches) fills it right before the launches that need it.
         struct MemsetStep
         {
-            uint64_t offset = 0;
-            uint64_t pitch  = 0;
-            uint64_t width  = 0;
-            uint64_t height = 0;
+            uint64_t offset     = 0;
+            uint64_t pitch      = 0;
+            uint64_t width      = 0;
+            uint64_t height     = 0;
+            uint32_t beforeStep = 0;
         };
 
         // The launches of a plan, in order. Built at plan creation; execution only patches

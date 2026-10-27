@@ -122,7 +122,14 @@ namespace hiptensor
                 return end != value->c_str() && v > 0 ? static_cast<int>(v) : fallback;
             }
 
-            CandidateOptions candidateOptions()
+            // HIPTENSOR_ROCKE_SELECT=static: the static order instead of the pack's model.
+            bool useModel()
+            {
+                auto value = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT");
+                return !(value && *value == "static");
+            }
+
+            CandidateOptions candidateOptions(Pack const& pack)
             {
                 CandidateOptions options;
                 // HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64 (debug and test): only the F64 route.
@@ -130,14 +137,13 @@ namespace hiptensor
                 options.f64Only = route && *route == "f64";
                 options.disableTuned
                     = getEnvironmentVariable("HIPTENSOR_ROCKE_DISABLE_TUNED").has_value();
+                // the steps of a trinary contraction: the selection of a contraction
+                bool const model = useModel();
+                options.rankStep = [&pack, model](Problem const&                problem,
+                                                  std::vector<Candidate> const& candidates) {
+                    return rankCandidates(problem, pack, candidates, model).order;
+                };
                 return options;
-            }
-
-            // HIPTENSOR_ROCKE_SELECT=static: the static order instead of the pack's model.
-            bool useModel()
-            {
-                auto value = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT");
-                return !(value && *value == "static");
             }
 
             // The plan-cache identity of a candidate: its key in this pack.
@@ -267,7 +273,7 @@ namespace hiptensor
                     std::vector<Candidate> candidates;
                     if(auto status = enumerateCandidates(problem,
                                                          *pack,
-                                                         candidateOptions(),
+                                                         candidateOptions(*pack),
                                                          context.workspaceSizeLimit,
                                                          candidates,
                                                          reason);
@@ -434,7 +440,7 @@ namespace hiptensor
                     }
                     std::vector<Candidate> candidates;
                     if(auto status = enumerateCandidates(
-                           problem, *pack, candidateOptions(), kUnlimited, candidates, reason);
+                           problem, *pack, candidateOptions(*pack), kUnlimited, candidates, reason);
                        status != HIPTENSOR_STATUS_SUCCESS)
                     {
                         return status;

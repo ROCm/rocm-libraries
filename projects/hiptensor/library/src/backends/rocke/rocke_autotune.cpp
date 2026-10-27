@@ -154,9 +154,9 @@ namespace hiptensor
             }
 
             // The problem's tensors (A, B, C, D slots) and the largest workspace.
-            std::array<uint64_t, 4> bytes{};
+            std::array<uint64_t, 5> bytes{};
             uint64_t                need = 0, workspace = 0;
-            for(int s = 0; s < 4; s++)
+            for(int s = 0; s < 5; s++)
             {
                 auto const& t = problem.t[s];
                 if(t.present)
@@ -178,9 +178,9 @@ namespace hiptensor
                               "free device memory";
                 return HIPTENSOR_STATUS_SUCCESS;
             }
-            std::array<DeviceBuffer, 4> tensors;
+            std::array<DeviceBuffer, 5> tensors;
             DeviceBuffer                ws;
-            for(int s = 0; s < 4; s++)
+            for(int s = 0; s < 5; s++)
             {
                 if(bytes[s] == 0)
                 {

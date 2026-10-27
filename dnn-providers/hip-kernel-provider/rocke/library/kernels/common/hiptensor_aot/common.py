@@ -102,10 +102,11 @@ def as_i32_bits(v: int) -> int:
 class Emit:
     """Small helpers over an :class:`IRBuilder` for the generic kernels."""
 
-    _uid = itertools.count()
-
     def __init__(self, b: IRBuilder, idx64: bool, cdt: str):
         self.b = b
+        # Loop-variable names are numbered per kernel (one Emit per IRBuilder), so a kernel's IR
+        # and its rolled recipe do not depend on what the process built before.
+        self._uid = itertools.count()
         self.idx64 = idx64
         self.cdt = cdt
         self.cty = F64 if cdt == "f64" else F32
@@ -203,11 +204,31 @@ class Emit:
         if self.cdt == "f64":
             if dt == "f64":
                 return v
-            v32 = b.cvt_f64_to_f32(v)
-            return v32 if dt == "f32" else b.cast_f32_to(v32, ty)
+            if dt == "f32":
+                return b.cvt_f64_to_f32(v)
+            return b.cast_f32_to(self.f64_to_f32_odd(v), ty)
         if dt == "f64":
             return b.cvt_f32_to_f64(v)
         return v if dt == "f32" else b.cast_f32_to(v, ty)
+
+    def f64_to_f32_odd(self, v: Value) -> Value:
+        """``v`` rounded to f32 with round-to-odd: the f32 value toward zero, its last bit set
+        when ``v`` is not exactly an f32. Rounding that value to nearest even once more to a
+        format of at most 22 significand bits (f16: 11, bf16: 8) gives ``v`` rounded to nearest
+        even directly, so f64 -> f16 / bf16 rounds once. NaN stays NaN, infinities stay
+        infinite, and a finite value past the f32 range becomes the largest f32 (it still
+        rounds to infinity in the narrower format)."""
+        b = self.b
+        r = b.cvt_f64_to_f32(v)  # nearest even
+        back = b.cvt_f32_to_f64(r)
+        inexact = b.fcmp("une", back, v)
+        away = b.fcmp("ogt", b.fabs(back), b.fabs(v))
+        bits = b.bitcast(r, I32)
+        # one step toward zero when the nearest even rounding went away from zero (the bits
+        # of a nonzero f32 are its magnitude in sign-magnitude order)
+        bits = b.select(b.land(inexact, away), b.sub(bits, self.c32(1)), bits)
+        bits = b.select(inexact, b.lor(bits, self.c32(1)), bits)
+        return b.bitcast(bits, F32)
 
     # ---------------------------------------------------------------- uniform branches
     def when(
@@ -221,7 +242,7 @@ class Emit:
         """
         b = self.b
         trips = b.select(cond, self.c32(1), self.c32(0))
-        k = next(Emit._uid)
+        k = next(self._uid)
         loop = b.scf_for_iter(
             self.c32(0),
             trips,

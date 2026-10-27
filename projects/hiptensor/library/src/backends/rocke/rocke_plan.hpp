@@ -31,6 +31,7 @@
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_PLAN_HPP
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_PLAN_HPP
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -105,12 +106,23 @@ namespace hiptensor
             bool f64Only = false;
             // Contractions: skip rocKE's tuned GETT route table (HIPTENSOR_ROCKE_DISABLE_TUNED).
             bool disableTuned = false;
+            // Trinary contractions: orders the candidates of one of the two steps (indices, best
+            // first; the selection of rocke_select.hpp). Empty: the static order.
+            std::function<std::vector<int>(backend::Problem const&, std::vector<Candidate> const&)>
+                rankStep;
         };
 
         // Every candidate of `problem` the pack admits within `workspaceLimit` bytes of
         // workspace, in the static order. HIPTENSOR_STATUS_SUCCESS with at least one candidate,
         // HIPTENSOR_STATUS_NOT_SUPPORTED with `reason` when there is none, or another status
         // (an API error, a pack defect) that ends the plan creation.
+        //
+        // A trinary contraction E = alpha * opA(A) * opB(B) * opC(C) + beta * opD(D) runs as
+        // hipTensor's two chained contractions: T = opA(A) * opB(B), stored in E's data type in
+        // the first bytes of the workspace (T's modes and packed column-major layout as the
+        // library defines them), then E = alpha * T * opC(C) + beta * opD(D). Its candidates
+        // pair a candidate of each step (see intermediateOf / enumerateTrinary in
+        // rocke_plan.cpp); the steps share the workspace after T.
         hiptensorStatus_t enumerateCandidates(backend::Problem const& problem,
                                               Pack const&             pack,
                                               CandidateOptions const& options,
