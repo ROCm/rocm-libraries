@@ -1301,6 +1301,8 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering on either axis.
+    # StreamK supports linear/tree fixup and requires PrefetchAcrossPersistent=0.
     "ClusterDim": validClusterDimensions,
     # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
     # one operand once and only the other operand is duplicated across GL2s.
