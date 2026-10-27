@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
+#include "BatchnormAlignmentTestUtils.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
@@ -919,6 +920,68 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, TwoNodeVirtualActOutTensorInval
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// isApplicable - declared tensor alignment
+// ============================================================================
+
+// Bug caught: a tensor declaring less than its element size accepted, for the single-node graph and
+// the fused ones, including the running statistics only the fused graph carries.
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableDeclinesBelowElementAlignment)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    for(const auto& graph :
+        {hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true)})
+    {
+        expectDeclinedBelowElementAlignment(graph, 4, 2, isApplicable);
+    }
+}
+
+// Bug caught: the virtual batchnorm output consulted instead of the activation output the kernel
+// actually writes.
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReadsTheFusedOutputNotTheIntermediate)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
+
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"y_bn", 1}}, isApplicable));
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"y", 2}}, isApplicable));
+}
+
+// Bug caught: the fused training kernel's four-element x read (hw >= 4096) accepted on an x tensor
+// declaring less than the 16 bytes it reads when no narrower kernel applies, or declined at exactly
+// 16 bytes.
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableChecksTheWideReadAlignment)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    // hw = 17 * 241 = 4097 selects the single kernel that reads x four elements at a time. One
+    // sample leaves the narrower spatial multiple kernel no room to stash, so nothing narrower
+    // applies.
+    const std::vector<int64_t> strides = {8194, 4097, 241, 1};
+    const std::vector<int64_t> dims = {1, 2, 17, 241};
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, strides, dims);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
+        graph.GetBufferPointer(), graph.GetSize());
+    ASSERT_TRUE(isApplicable(baseline));
+
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"x", 8}}, isApplicable));
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"x", 16}}, isApplicable));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

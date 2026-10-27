@@ -311,6 +311,10 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
             // and operation parameters manually.
             validator.checkFwdTrainingTensorConfigSupported(bnAttr);
 
+            // Decline a graph whose declared tensor alignments no kernel configuration honors
+            checkDeclaredAlignmentSupported(
+                BatchnormFwdTrainingParams(bnAttr, opGraph.getTensorMap()));
+
             HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
                                    "batchnorm training");
             return true;
@@ -321,6 +325,8 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
         validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
+        checkDeclaredAlignmentSupported(
+            BatchnormFwdTrainingParams(bnAttr, activAttr, opGraph.getTensorMap()));
 
         HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTraining plan builder applicable for training + activation fusion");

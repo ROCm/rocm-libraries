@@ -12,6 +12,7 @@
 #include "BatchnormKernelCompileOptions.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormAlignment.hpp"
 
 using namespace hip_kernel_provider::core::utils;
 
@@ -166,6 +167,60 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* BatchnormBwdParams
     return _bias;
 }
 
+SpatialAlignment BatchnormBwdParams::spatialAlignment() const
+{
+    // The kernels read the saved mean and inv_variance only when both are present, and bias only
+    // when an activation is fused.
+    const bool savedStats = hasSavedStats();
+
+    SpatialAlignment alignment;
+    alignment.input = commonDeclaredAlignmentBytes({_x, _dy});
+    alignment.output = commonDeclaredAlignmentBytes({_dx});
+    alignment.channel = commonDeclaredAlignmentBytes({_scale,
+                                                      _dscale,
+                                                      _dbias,
+                                                      _bias,
+                                                      savedStats ? _savedMean : nullptr,
+                                                      savedStats ? _savedInvVariance : nullptr});
+    return alignment;
+}
+
+namespace
+{
+
+// How many per-channel fields the multi-workgroup reduction path stashes into the dx-aliased
+// buffer: 4 when the backward pass must compute stats (mean, variance, dscale, dbias), 2 when
+// they are supplied (dscale, dbias only). See BatchnormBwdPlan::compile.
+unsigned int stashFieldCountBwd(bool usesSavedStats)
+{
+    return !usesSavedStats ? 4U : 2U;
+}
+
+[[noreturn]] void throwNoConfigForAlignment(const SpatialAlignment& alignment)
+{
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "Batchnorm backward has no kernel configuration within the declared tensor alignments "
+        "(x and dy "
+            + std::to_string(alignment.input) + ", dx " + std::to_string(alignment.output)
+            + ", per-channel " + std::to_string(alignment.channel) + " bytes)");
+}
+
+} // namespace
+
+void checkDeclaredAlignmentSupported(const BatchnormBwdParams& params)
+{
+    const auto alignment = params.spatialAlignment();
+    KernelConfig config;
+    if(!selectSpatialConfig(extractProblemDescription(params),
+                            stashFieldCountBwd(params.hasSavedStats()),
+                            alignment,
+                            config))
+    {
+        throwNoConfigForAlignment(alignment);
+    }
+}
+
 BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
     : _params(std::move(params))
     , _usesSavedStats(_params.hasSavedStats())
@@ -196,19 +251,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // dbias only). The applicability gate selects that path only when this many fields
     // fit in dx, so this count must not be too small. This matches the logic captured
     // in MIOpen backward_spatial.cpp.
-    const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
+    const unsigned int stashValuesBwd = stashFieldCountBwd(_usesSavedStats);
+    const auto alignment = _params.spatialAlignment();
     KernelConfig config;
-    if(useMultiple(problem))
+    if(!selectSpatialConfig(problem, stashValuesBwd, alignment, config))
     {
-        defaultConfigSpatialMultiple(problem, stashValuesBwd, config);
-        if(config.variant == -1)
-        {
-            defaultConfigSpatialSingle(problem, config);
-        }
-    }
-    else
-    {
-        defaultConfigSpatialSingle(problem, config);
+        throwNoConfigForAlignment(alignment);
     }
 
     _kernelVariant = config.variant;

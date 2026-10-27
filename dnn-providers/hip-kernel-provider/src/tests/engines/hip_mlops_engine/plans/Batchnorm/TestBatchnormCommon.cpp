@@ -472,3 +472,299 @@ TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
     EXPECT_TRUE(isSpatialMultipleApplicable(problem, 1, 2, 256, 1, 2));
     EXPECT_FALSE(isSpatialMultipleApplicable(problem, 1, 4, 256, 1, 2));
 }
+
+// ====================================================================================================
+// Declared tensor alignment. A declared alignment A guarantees only address % A == 0, so it covers an
+// N-byte access exactly when N divides A.
+// ====================================================================================================
+
+// Bug caught: alignment treated as a minimum (declared >= need) rather than a multiple guarantee,
+// so a 24-byte declaration passes for a 16-byte access.
+TEST(TestAlignmentCovers, IsAMultipleGuarantee)
+{
+    EXPECT_TRUE(alignmentCovers(16, 16));
+    EXPECT_TRUE(alignmentCovers(16, 4));
+    EXPECT_TRUE(alignmentCovers(24, 8));
+    EXPECT_FALSE(alignmentCovers(8, 16));
+    EXPECT_FALSE(alignmentCovers(24, 16));
+    EXPECT_FALSE(alignmentCovers(4, 8));
+}
+
+// Bug caught: a missing declaration (0) or an empty need reported as covered.
+TEST(TestAlignmentCovers, ZeroGuaranteesNothing)
+{
+    EXPECT_FALSE(alignmentCovers(0, 4));
+    EXPECT_FALSE(alignmentCovers(16, 0));
+}
+
+// Bug caught: the declared-alignment default drifting from the 16 bytes every graph declared before
+// plugin API 1.3.0, which would change the choice for graphs that never set an alignment.
+TEST(TestSpatialAlignment, DefaultsToSixteenBytes)
+{
+    const SpatialAlignment alignment;
+    EXPECT_EQ(alignment.input, 16U);
+    EXPECT_EQ(alignment.output, 16U);
+    EXPECT_EQ(alignment.channel, 16U);
+}
+
+// Bug caught: the per-channel vector width or the fp32 stash held in the output buffer left out
+// of the need, so a kernel that loads float4 from a buffer aligned to 4 bytes is accepted.
+TEST(TestSpatialAlignmentNeed, MultipleKernelNeedCoversActivationChannelAndStashWidths)
+{
+    // NHWC single precision at vector size 4: activations, per-channel values and stash are all
+    // 16-byte vectors.
+    auto need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, true, true), 4);
+    EXPECT_EQ(need.input, 16U);
+    EXPECT_EQ(need.output, 16U);
+    EXPECT_EQ(need.channel, 16U);
+
+    need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, true, true), 1);
+    EXPECT_EQ(need.input, 4U);
+    EXPECT_EQ(need.output, 4U);
+    EXPECT_EQ(need.channel, 4U);
+
+    // NHWC mixed precision: 8-byte activations, but the fp32 stash in the output is a 16-byte
+    // vector.
+    need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, true, false), 4);
+    EXPECT_EQ(need.input, 8U);
+    EXPECT_EQ(need.output, 16U);
+    EXPECT_EQ(need.channel, 16U);
+
+    // NCHW: per-channel values are single floats whatever the vector size.
+    need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, false, true), 4);
+    EXPECT_EQ(need.input, 16U);
+    EXPECT_EQ(need.output, 16U);
+    EXPECT_EQ(need.channel, 4U);
+
+    need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, false, false), 4);
+    EXPECT_EQ(need.input, 8U);
+    EXPECT_EQ(need.output, 8U);
+    EXPECT_EQ(need.channel, 4U);
+
+    // The stash stays an fp32 value in a 2-byte-element output even at vector size 1.
+    need = spatialMultipleAlignmentNeed(makeProblem(8, 64, 4, 4, false, false), 1);
+    EXPECT_EQ(need.input, 2U);
+    EXPECT_EQ(need.output, 4U);
+    EXPECT_EQ(need.channel, 4U);
+}
+
+// Bug caught: the fixed-width reads of variant 1 left out of the need, or applied outside their
+// layout, direction or the hw >= 4096 threshold, so the single kernel runs on an alignment that
+// covers only the element.
+TEST(TestSpatialAlignmentNeed, SingleKernelWidensOnlyForNchwVariantOne)
+{
+    // Backward reads x and dy four elements at a time and writes dx two at a time.
+    auto need = spatialSingleAlignmentNeed(
+        makeProblem(2, 3, 8, 8, false, true, 1, Direction::BACKWARD), 1);
+    EXPECT_EQ(need.input, 16U);
+    EXPECT_EQ(need.output, 8U);
+    EXPECT_EQ(need.channel, 4U);
+
+    need = spatialSingleAlignmentNeed(makeProblem(2, 3, 8, 8, false, false, 1, Direction::BACKWARD),
+                                      1);
+    EXPECT_EQ(need.input, 8U);
+    EXPECT_EQ(need.output, 4U);
+
+    // Forward training reads x four elements at a time from hw = 4096 on, and writes one.
+    need = spatialSingleAlignmentNeed(makeProblem(2, 3, 64, 64, false, true), 1);
+    EXPECT_EQ(need.input, 16U);
+    EXPECT_EQ(need.output, 4U);
+    EXPECT_EQ(need.channel, 4U);
+
+    need = spatialSingleAlignmentNeed(makeProblem(2, 3, 63, 65, false, true), 1);
+    EXPECT_EQ(need.input, 4U);
+    EXPECT_EQ(need.output, 4U);
+
+    // Variants 0 and 3, and NHWC, only access one element at a time.
+    for(const int variant : {0, 3})
+    {
+        need = spatialSingleAlignmentNeed(
+            makeProblem(2, 3, 64, 64, false, true, 1, Direction::BACKWARD), variant);
+        EXPECT_EQ(need.input, 4U);
+        EXPECT_EQ(need.output, 4U);
+    }
+    need = spatialSingleAlignmentNeed(makeProblem(2, 3, 64, 64, true, true, 1, Direction::BACKWARD),
+                                      1);
+    EXPECT_EQ(need.input, 4U);
+    EXPECT_EQ(need.output, 4U);
+}
+
+// Bug caught: NHWC keeping vector size 4 although the per-channel tensors declare less than a
+// float4, instead of falling back to the scalar instance.
+TEST(TestDefaultConfigSpatialMultiple, NhwcFallsBackToScalarBelowTheVectorNeed)
+{
+    KernelConfig config;
+
+    defaultConfigSpatialMultiple(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, config, SpatialAlignment{16, 16, 8});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 1);
+    EXPECT_EQ(config.nelements, 128);
+}
+
+// Bug caught: the vector width declined at exactly the declared alignment it needs (off by one on
+// the boundary), or accepted a power of two below it.
+TEST(TestDefaultConfigSpatialMultiple, NhwcKeepsTheVectorSizeAtExactlyItsNeed)
+{
+    KernelConfig config;
+    const auto problem = makeProblem(128, 64, 16, 16, true, true, 80);
+
+    defaultConfigSpatialMultiple(problem, 32, config, SpatialAlignment{16, 16, 16});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 4);
+
+    config = KernelConfig{};
+    defaultConfigSpatialMultiple(problem, 32, config, SpatialAlignment{8, 16, 16});
+    EXPECT_EQ(config.vectorsize, 1);
+}
+
+// Bug caught: mixed-precision vector instances chosen because the 8-byte activations are covered,
+// ignoring that the fp32 stash in the output needs 16 bytes.
+TEST(TestDefaultConfigSpatialMultiple, MixedPrecisionNeedsTheStashWidthInTheOutput)
+{
+    KernelConfig config;
+    const auto problem = makeProblem(128, 64, 16, 16, true, false, 80);
+
+    defaultConfigSpatialMultiple(problem, 32, config, SpatialAlignment{8, 16, 16});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 4);
+
+    config = KernelConfig{};
+    defaultConfigSpatialMultiple(problem, 32, config, SpatialAlignment{8, 8, 16});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 1);
+}
+
+// Bug caught: NCHW assigning a configuration whose accesses the declared alignment does not cover,
+// instead of leaving the variant unset so the caller can pick another kernel.
+TEST(TestDefaultConfigSpatialMultiple, NchwAssignsNothingBelowTheElementAlignment)
+{
+    KernelConfig config;
+
+    defaultConfigSpatialMultiple(
+        makeProblem(128, 64, 16, 16, false, true, 80), 32, config, SpatialAlignment{2, 2, 2});
+    EXPECT_EQ(config.variant, -1);
+
+    defaultConfigSpatialMultiple(
+        makeProblem(128, 64, 16, 16, false, true, 80), 32, config, SpatialAlignment{4, 4, 4});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 1);
+}
+
+// Bug caught: graphs at the default alignment routed differently than before the alignment was
+// considered.
+TEST(TestSelectSpatialConfig, DefaultAlignmentKeepsTheHeuristicChoice)
+{
+    KernelConfig config;
+
+    ASSERT_TRUE(selectSpatialConfig(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, SpatialAlignment{}, config));
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 4);
+
+    // Forward training NCHW at hw = 4096 is a single kernel with wide reads.
+    ASSERT_TRUE(selectSpatialConfig(makeProblem(4, 3, 64, 64, false, true), 2, {}, config));
+    EXPECT_EQ(config.variant, 1);
+
+    ASSERT_TRUE(selectSpatialConfig(
+        makeProblem(2, 3, 17, 241, false, true, 1, Direction::BACKWARD), 2, {}, config));
+    EXPECT_EQ(config.variant, 1);
+
+    // A large backward problem prefers spatial multiple.
+    ASSERT_TRUE(selectSpatialConfig(
+        makeProblem(64, 1, 1024, 1024, false, true, 1, Direction::BACKWARD), 4, {}, config));
+    EXPECT_EQ(config.variant, 2);
+}
+
+// Bug caught: a half-precision output declaring only its element size given the stash kernels, whose
+// fp32 partial sums need 4-byte alignment, instead of the single kernel that stashes nothing.
+TEST(TestSelectSpatialConfig, OutputBelowTheStashWidthSelectsTheSingleKernel)
+{
+    KernelConfig config;
+    const auto problem = makeProblem(128, 64, 16, 16, true, false, 80);
+
+    ASSERT_TRUE(selectSpatialConfig(problem, 32, SpatialAlignment{16, 2, 16}, config));
+    EXPECT_EQ(config.variant, 1);
+    EXPECT_EQ(config.vectorsize, 1);
+
+    // At the 4 bytes the stash needs, the scalar stash kernel is back.
+    ASSERT_TRUE(selectSpatialConfig(problem, 32, SpatialAlignment{16, 4, 16}, config));
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 1);
+}
+
+// Bug caught: the single kernel's fixed four-element x reads run on an alignment that covers only
+// narrower accesses, instead of the spatial multiple kernel at a narrower vector size.
+TEST(TestSelectSpatialConfig, WideReadsFallBackToSpatialMultipleAtANarrowerVectorSize)
+{
+    KernelConfig config;
+    const auto problem = makeProblem(4, 3, 64, 64, false, true);
+
+    // Exactly the 16 bytes of the four-element read keeps the single kernel.
+    ASSERT_TRUE(selectSpatialConfig(problem, 2, SpatialAlignment{16, 4, 4}, config));
+    EXPECT_EQ(config.variant, 1);
+
+    ASSERT_TRUE(selectSpatialConfig(problem, 2, SpatialAlignment{8, 16, 16}, config));
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_LT(config.vectorsize, 4);
+}
+
+// Bug caught: a problem that has no applicable narrower kernel still given the wide-read kernel,
+// or declined at exactly the alignment the wide reads need.
+TEST(TestSelectSpatialConfig, WideReadsAreDeclinedWhenNoNarrowerKernelApplies)
+{
+    KernelConfig config;
+    // hw = 17 * 241 = 4097 reads wide, and a single sample leaves the spatial multiple scalar
+    // instance no room to stash.
+    const auto problem = makeProblem(1, 2, 17, 241, false, true);
+
+    EXPECT_FALSE(selectSpatialConfig(problem, 2, SpatialAlignment{8, 16, 16}, config));
+    EXPECT_EQ(config.variant, -1);
+
+    EXPECT_TRUE(selectSpatialConfig(problem, 2, SpatialAlignment{16, 4, 4}, config));
+    EXPECT_EQ(config.variant, 1);
+}
+
+// Bug caught: the backward single kernel's read width (four elements of x and dy) or write width
+// (two elements of dx) left out, or applied to the wrong tensor group.
+TEST(TestSelectSpatialConfig, BackwardSingleKernelNeedsItsReadAndWriteWidths)
+{
+    KernelConfig config;
+    const auto problem = makeProblem(1, 2, 17, 241, false, true, 1, Direction::BACKWARD);
+
+    EXPECT_TRUE(selectSpatialConfig(problem, 2, SpatialAlignment{16, 8, 4}, config));
+    EXPECT_EQ(config.variant, 1);
+
+    EXPECT_FALSE(selectSpatialConfig(problem, 2, SpatialAlignment{16, 4, 4}, config));
+    EXPECT_FALSE(selectSpatialConfig(problem, 2, SpatialAlignment{8, 8, 4}, config));
+}
+
+// Bug caught: no problem may run when a tensor declares less than its element size, however the
+// kernel is chosen.
+TEST(TestSelectSpatialConfig, BelowTheElementAlignmentNothingRuns)
+{
+    KernelConfig config;
+
+    EXPECT_FALSE(selectSpatialConfig(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, SpatialAlignment{2, 4, 4}, config));
+    EXPECT_FALSE(selectSpatialConfig(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, SpatialAlignment{4, 2, 4}, config));
+    EXPECT_FALSE(selectSpatialConfig(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, SpatialAlignment{4, 4, 2}, config));
+    EXPECT_TRUE(selectSpatialConfig(
+        makeProblem(128, 64, 16, 16, true, true, 80), 32, SpatialAlignment{4, 4, 4}, config));
+}
+
+// Bug caught: the decline depending on the device's workgroup budget, so the applicability check,
+// which cannot know it, and the plan compile could disagree.
+TEST(TestSelectSpatialConfig, NhwcOutcomeDoesNotDependOnMinWorkgroups)
+{
+    for(const size_t minWorkgroups : {size_t{1}, size_t{80}, size_t{1000}})
+    {
+        KernelConfig config;
+        const auto problem = makeProblem(128, 64, 16, 16, true, true, minWorkgroups);
+
+        EXPECT_TRUE(selectSpatialConfig(problem, 32, SpatialAlignment{4, 4, 4}, config));
+        EXPECT_FALSE(selectSpatialConfig(problem, 32, SpatialAlignment{4, 4, 2}, config));
+    }
+}

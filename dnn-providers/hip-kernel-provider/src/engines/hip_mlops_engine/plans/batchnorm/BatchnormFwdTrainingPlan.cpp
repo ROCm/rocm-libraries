@@ -4,6 +4,7 @@
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
 #include "BatchnormKernelCompileOptions.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormAlignment.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
@@ -185,23 +186,44 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _activationOut;
 }
 
-BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
-    : _trainingParams(std::move(trainingParams))
+SpatialAlignment BatchnormFwdTrainingParams::spatialAlignment() const
 {
+    const auto* output
+        = (_optActivation.has_value() && _activationOut != nullptr) ? _activationOut : _y;
+
+    // The kernels write mean and inv_variance only when both are present, and read and update
+    // the running statistics only when all four of them are.
+    const bool saveMeanVariance = hasSaveMeanVariance();
+
+    SpatialAlignment alignment;
+    alignment.input = commonDeclaredAlignmentBytes({_x});
+    alignment.output = commonDeclaredAlignmentBytes({output});
+    alignment.channel
+        = commonDeclaredAlignmentBytes({_scale,
+                                        _bias,
+                                        saveMeanVariance ? _mean : nullptr,
+                                        saveMeanVariance ? _invVariance : nullptr,
+                                        _hasRunningStats ? _prevRunningMean : nullptr,
+                                        _hasRunningStats ? _prevRunningVariance : nullptr,
+                                        _hasRunningStats ? _nextRunningMean : nullptr,
+                                        _hasRunningStats ? _nextRunningVariance : nullptr});
+    return alignment;
 }
 
-size_t BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
+namespace
 {
-    // No workspace needed for batchnorm training
-    return 0;
-}
 
-void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
-                                       const hipDeviceProp_t& deviceProperties)
+// Spatial multiple needs space for 2 fp32 elements
+// per each x thread (including the last workgroup)
+// to stash intermediate mean and variance
+constexpr unsigned int STASH_VALUES_FWD = 2;
+
+ProblemDescription makeProblemDescription(const BatchnormFwdTrainingParams& params,
+                                          size_t minWorkgroups)
 {
     // Determine data type configuration
-    auto xDataType = _trainingParams.x()->data_type();
-    auto scaleDataType = _trainingParams.scale()->data_type();
+    auto xDataType = params.x()->data_type();
+    auto scaleDataType = params.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
@@ -215,7 +237,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
            && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     // Extract dimensions from x tensor
-    const auto* xDims = _trainingParams.x()->dims();
+    const auto* xDims = params.x()->dims();
 
     size_t n = 0;
     size_t c = 0;
@@ -246,18 +268,74 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(h * w);
-    auto inNhw = static_cast<unsigned int>(n * h * w);
-    auto invInNhw = static_cast<float>(1.0 / inNhw);
+    return {n,
+            c,
+            h,
+            w,
+            isChannelLastLayout(params.x()),
+            useFp16Mix,
+            useBfp16Mix,
+            Direction::FORWARD_TRAINING,
+            minWorkgroups};
+}
 
-    // Detect layout
-    const bool isLayoutNHWC = isChannelLastLayout(_trainingParams.x());
+[[noreturn]] void throwNoConfigForAlignment(const SpatialAlignment& alignment)
+{
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "Batchnorm forward training has no kernel configuration within the declared tensor "
+        "alignments (x "
+            + std::to_string(alignment.input) + ", output " + std::to_string(alignment.output)
+            + ", per-channel " + std::to_string(alignment.channel) + " bytes)");
+}
 
+} // namespace
+
+void checkDeclaredAlignmentSupported(const BatchnormFwdTrainingParams& params)
+{
+    // The outcome does not depend on minWorkgroups, see selectSpatialConfig.
+    const auto alignment = params.spatialAlignment();
+    KernelConfig config;
+    if(!selectSpatialConfig(makeProblemDescription(params, 1), STASH_VALUES_FWD, alignment, config))
+    {
+        throwNoConfigForAlignment(alignment);
+    }
+}
+
+BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
+    : _trainingParams(std::move(trainingParams))
+{
+}
+
+size_t BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
+{
+    // No workspace needed for batchnorm training
+    return 0;
+}
+
+void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
+                                       const hipDeviceProp_t& deviceProperties)
+{
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
     // but here we are starting with initial values that worked well in
     // MIOpen. Tuning infrastructure can be added in the future to further
     // optimize these parameters.
+    const size_t minWorkgroups = std::max(
+        size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
+    const ProblemDescription problem = makeProblemDescription(_trainingParams, minWorkgroups);
+
+    const bool useFp16Mix = problem.useFp16Mix();
+    const bool useBfp16Mix = problem.useBfp16Mix();
+    const size_t n = problem.n();
+    const size_t c = problem.c();
+    const auto inCstride = problem.inCstride();
+    const auto inNhw = problem.inNhw();
+    const auto invInNhw = static_cast<float>(1.0 / inNhw);
+
+    // Detect layout
+    const bool isLayoutNHWC = problem.isLayoutNHWC();
+
     int variant = -1;
     size_t vectorsize = 1;
     size_t xlocalsize = 1;
@@ -271,41 +349,16 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     int stashMethod = 0;
     size_t nelements = 1;
 
-    // Spatial multiple needs space for 2 fp32 elements
-    // per each x thread (including the last workgroup)
-    // to stash intermediate mean and variance
-    const unsigned int stashValuesFwd = 2;
+    const unsigned int stashValuesFwd = STASH_VALUES_FWD;
 
-    // Get the kernel launch configuration based on heuristics
-    hip_kernel_provider::batchnorm::KernelConfig config;
-    const size_t minWorkgroups = std::max(
-        size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
-    const hip_kernel_provider::batchnorm::ProblemDescription problem(
-        n,
-        c,
-        h,
-        w,
-        isLayoutNHWC,
-        useFp16Mix,
-        useBfp16Mix,
-        hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
-        minWorkgroups);
-    // Define default configuration based on heuristics and
-    // add all other valid configurations for the given problem
-    if(hip_kernel_provider::batchnorm::useMultiple(problem))
+    // Get the kernel launch configuration based on heuristics: define the default configuration
+    // and add all other valid configurations for the given problem. The vector size and the
+    // variant are folded down to what the declared tensor alignments cover.
+    const auto alignment = _trainingParams.spatialAlignment();
+    KernelConfig config;
+    if(!selectSpatialConfig(problem, stashValuesFwd, alignment, config))
     {
-        hip_kernel_provider::batchnorm::defaultConfigSpatialMultiple(
-            problem, stashValuesFwd, config);
-        if(config.variant == -1)
-        {
-            // If the default spatial multiple function failed to select a valid configuration,
-            // get a default spatial single configuration as fallback
-            hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
-        }
-    }
-    else
-    {
-        hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
+        throwNoConfigForAlignment(alignment);
     }
 
     variant = config.variant;

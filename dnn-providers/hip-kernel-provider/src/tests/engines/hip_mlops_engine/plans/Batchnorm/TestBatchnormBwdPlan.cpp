@@ -6,6 +6,7 @@
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormBwdPlan.hpp"
 
 #include "../TestPlanCommon.hpp"
+#include "BatchnormAlignmentTestUtils.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
@@ -224,6 +225,93 @@ TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// BatchnormBwdPlan - declared tensor alignment
+// ============================================================================
+
+namespace
+{
+
+// Compiles the plan of a backward graph whose named tensors declare the given alignments and
+// returns the compile options.
+std::vector<std::string> bwdCompileOptionsWithAlignments(const std::vector<int64_t>& strides,
+                                                         const std::vector<int64_t>& dims,
+                                                         const test::AlignmentByName& alignments)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(strides, dims);
+    const auto patched = test::withNamedAlignments(builder.GetBufferPointer(), alignments);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(patched.data(),
+                                                                           patched.size());
+    const auto& attr = *graph.getNode(0).attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormBwdPlan plan{BatchnormBwdParams(attr, graph.getTensorMap())};
+    return test::compileAndCaptureOptions(
+        [&](const IKernelCompiler& compiler) { plan.compile(compiler, createTestDeviceProps()); });
+}
+
+} // namespace
+
+// Bug caught: the single kernel's four-element x and dy reads or two-element dx writes left running
+// on tensors declaring less, instead of the spatial multiple kernel at a narrower vector size, or
+// that fallback taken at exactly the alignment the wide accesses need.
+TEST(TestBatchnormBwdPlan, CompileFallsBackToSpatialMultipleWhenWideAccessesAreUncovered)
+{
+    // hw = 50176 selects the single kernel with wide reads and writes.
+    const std::vector<int64_t> strides = {150528, 50176, 224, 1};
+    const std::vector<int64_t> dims = {1, 3, 224, 224};
+
+    const auto exact
+        = bwdCompileOptionsWithAlignments(strides, dims, {{"x", 16}, {"dy", 16}, {"dx", 8}});
+    EXPECT_TRUE(test::hasCompileOption(exact, "-DHIP_PLUGIN_BN_VARIANT=1"));
+
+    for(const test::AlignmentByName& alignments : {test::AlignmentByName{{"x", 8}},
+                                                   test::AlignmentByName{{"dy", 8}},
+                                                   test::AlignmentByName{{"dx", 4}}})
+    {
+        const auto narrowed = bwdCompileOptionsWithAlignments(strides, dims, alignments);
+        EXPECT_TRUE(test::hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VARIANT=2"));
+        EXPECT_TRUE(test::hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+    }
+}
+
+// Bug caught: the NHWC vector size kept at 4 although the per-channel tensors declare less than the
+// float4 loads need, or dropped at exactly the 16 bytes those loads need.
+TEST(TestBatchnormBwdPlan, CompileFoldsTheDeclaredAlignmentIntoTheNhwcVectorSize)
+{
+    const std::vector<int64_t> strides = {16384, 1, 1024, 64};
+    const std::vector<int64_t> dims = {128, 64, 16, 16};
+
+    EXPECT_TRUE(test::hasCompileOption(bwdCompileOptionsWithAlignments(strides, dims, {}),
+                                       "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_TRUE(
+        test::hasCompileOption(bwdCompileOptionsWithAlignments(strides, dims, {{"dscale", 16}}),
+                               "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_TRUE(
+        test::hasCompileOption(bwdCompileOptionsWithAlignments(strides, dims, {{"dscale", 8}}),
+                               "-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+}
+
+// Bug caught: a problem that has no kernel configuration within the declared alignment compiled
+// the wide-access kernel anyway.
+TEST(TestBatchnormBwdPlan, CompileThrowsWhenNoConfigurationFitsTheDeclaredAlignment)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // hw = 17 * 241 = 4097 selects the single kernel, and a single sample leaves the spatial
+    // multiple kernel no room to stash.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({8194, 4097, 241, 1},
+                                                                            {1, 2, 17, 241});
+    const auto patched = test::withNamedAlignments(builder.GetBufferPointer(), {{"dx", 4}});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(patched.data(),
+                                                                           patched.size());
+    const auto& attr = *graph.getNode(0).attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormBwdPlan plan{BatchnormBwdParams(attr, graph.getTensorMap())};
+
+    EXPECT_THROW(plan.compile(mockCompiler, createTestDeviceProps()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace hip_kernel_provider::batchnorm

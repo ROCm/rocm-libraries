@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 #include "hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h"
 #include "hipdnn_plugin_sdk/PluginException.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -64,24 +66,38 @@ namespace batchnorm
 {
 
 /**
- * Calculates the vector size for batchnorm forward inference plans based on the layout and channel information.
+ * Calculates the vector size for batchnorm forward inference plans based on the layout and channel
+ * information, capped at maxVectorSize (1, 2 or 4) so that it stays within the declared tensor
+ * alignment. The default cap is the widest vector, which the default declared alignment of 16 bytes
+ * covers.
  */
-inline size_t computeVectorSize(bool isLayoutNHWC, int channels, unsigned int inCstride)
+inline size_t computeVectorSize(bool isLayoutNHWC,
+                                int channels,
+                                unsigned int inCstride,
+                                size_t maxVectorSize = MAX_VECTOR_SIZE)
 {
+    size_t vectorsize = 1;
     if(isLayoutNHWC)
     {
         if(channels % 4 == 0)
         {
-            return 4;
+            vectorsize = 4;
         }
-        return channels % 2 == 0 ? 2 : 1;
+        else if(channels % 2 == 0)
+        {
+            vectorsize = 2;
+        }
+    }
+    else if(inCstride % 4 == 0)
+    {
+        vectorsize = 4;
+    }
+    else if(inCstride % 2 == 0)
+    {
+        vectorsize = 2;
     }
 
-    if(inCstride % 4 == 0)
-    {
-        return 4;
-    }
-    return inCstride % 2 == 0 ? 2 : 1;
+    return std::min(vectorsize, maxVectorSize);
 }
 
 } // namespace batchnorm

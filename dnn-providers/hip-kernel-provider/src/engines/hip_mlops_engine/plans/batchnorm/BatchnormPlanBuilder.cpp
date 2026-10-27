@@ -378,19 +378,28 @@ bool BatchnormPlanBuilder::isApplicable(
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes:
                 validator.checkFwdTrainingTensorConfigSupported(
                     *node.attributes_as_BatchnormAttributes());
+                checkDeclaredAlignmentSupported(BatchnormFwdTrainingParams(
+                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap()));
                 break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
                 validator.checkInferenceTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributes());
+                checkDeclaredAlignmentSupported(BatchnormFwdInferenceParams(
+                    *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap()));
                 break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
                 validator.checkInferenceVarianceExtTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributesVarianceExt());
+                checkDeclaredAlignmentSupported(BatchnormFwdInferenceWithVarianceParams(
+                    *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
+                    opGraph.getTensorMap()));
                 break;
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
                 validator.checkBwdTensorConfigSupported(
                     *node.attributes_as_BatchnormBackwardAttributes());
+                checkDeclaredAlignmentSupported(BatchnormBwdParams(
+                    *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap()));
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -450,6 +459,8 @@ bool BatchnormPlanBuilder::isApplicable(
             try
             {
                 validator.checkInferenceActivationTensorConfigSupported(bnInfAttr, actAttr);
+                checkDeclaredAlignmentSupported(
+                    BatchnormFwdInferenceParams(bnInfAttr, actAttr, opGraph.getTensorMap()));
             }
             catch(const std::exception& e)
             {
@@ -474,6 +485,8 @@ bool BatchnormPlanBuilder::isApplicable(
             {
                 validator.checkInferenceVarianceExtActivationTensorConfigSupported(bnInfAttr,
                                                                                    actAttr);
+                checkDeclaredAlignmentSupported(BatchnormFwdInferenceWithVarianceParams(
+                    bnInfAttr, actAttr, opGraph.getTensorMap()));
             }
             catch(const std::exception& e)
             {
@@ -515,6 +528,10 @@ bool BatchnormPlanBuilder::isApplicable(
             validator.checkBwdActivationTensorConfigSupported(std::get<0>(nodeAttrs.value()),
                                                               std::get<1>(nodeAttrs.value()),
                                                               std::get<2>(nodeAttrs.value()));
+            checkDeclaredAlignmentSupported(BatchnormBwdParams(std::get<2>(nodeAttrs.value()),
+                                                               std::get<1>(nodeAttrs.value()),
+                                                               std::get<0>(nodeAttrs.value()),
+                                                               opGraph.getTensorMap()));
         }
         catch(const std::exception& e)
         {

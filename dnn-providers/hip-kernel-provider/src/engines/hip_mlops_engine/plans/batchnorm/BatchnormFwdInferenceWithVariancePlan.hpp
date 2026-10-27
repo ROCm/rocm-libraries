@@ -63,6 +63,10 @@ public:
     const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
+    /// The widest vector size the kernel can use under the tensors' declared alignments in the
+    /// given layout, 0 when it cannot run at all.
+    size_t maxVectorSize(bool isLayoutNHWC) const;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
@@ -75,6 +79,10 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
+
+/// Throws HipdnnPluginException(BAD_PARAM) when the declared tensor alignments leave no vector
+/// size (not even scalar) the forward inference with variance kernel can run at.
+void checkDeclaredAlignmentSupported(const BatchnormFwdInferenceWithVarianceParams& params);
 
 class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

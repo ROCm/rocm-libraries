@@ -41,6 +41,26 @@ TEST(TestComputeVectorSize, StrideIsOdd)
     EXPECT_EQ(computeVectorSize(false, 8, 7), 1);
 }
 
+// Bug caught: a vector width chosen from the shape alone, although the declared alignment only
+// covers a narrower access.
+TEST(TestComputeVectorSize, CapNarrowsTheShapeWidth)
+{
+    EXPECT_EQ(computeVectorSize(true, 16, 7, 2), 2);
+    EXPECT_EQ(computeVectorSize(true, 16, 7, 1), 1);
+    EXPECT_EQ(computeVectorSize(false, 3, 8, 2), 2);
+    EXPECT_EQ(computeVectorSize(false, 3, 8, 1), 1);
+}
+
+// Bug caught: the cap applied as a floor or an offset, so a cap equal to the shape width (the
+// boundary) changes it, or a cap above it widens it.
+TEST(TestComputeVectorSize, CapAtOrAboveTheShapeWidthLeavesItUnchanged)
+{
+    EXPECT_EQ(computeVectorSize(true, 6, 8, 2), 2);
+    EXPECT_EQ(computeVectorSize(true, 6, 8, 4), 2);
+    EXPECT_EQ(computeVectorSize(true, 16, 7, 4), 4);
+    EXPECT_EQ(computeVectorSize(false, 8, 7, 4), 1);
+}
+
 TEST(TestCheckedNarrowToInt, PositiveValueInRange)
 {
     EXPECT_EQ(checkedNarrowToInt(42, "test"), 42);

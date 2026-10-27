@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "../TestPlanCommon.hpp"
+#include "BatchnormAlignmentTestUtils.hpp"
 
 namespace hip_kernel_provider::batchnorm::test
 {
@@ -490,6 +491,86 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// BatchnormFwdTrainingPlan - declared tensor alignment
+// ============================================================================
+
+namespace
+{
+
+// Compiles the plan of a training graph whose named tensors declare the given alignments and
+// returns the compile options.
+std::vector<std::string> compileOptionsWithAlignments(const std::vector<int64_t>& strides,
+                                                      const std::vector<int64_t>& dims,
+                                                      const AlignmentByName& alignments)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides, dims);
+    const auto patched = withNamedAlignments(builder.GetBufferPointer(), alignments);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(patched.data(),
+                                                                           patched.size());
+    const auto& attr = *graph.getNode(0).attributes_as_BatchnormAttributes();
+
+    BatchnormFwdTrainingPlan plan{BatchnormFwdTrainingParams(attr, graph.getTensorMap())};
+    return compileAndCaptureOptions(
+        [&](const IKernelCompiler& compiler) { plan.compile(compiler, createTestDeviceProps()); });
+}
+
+} // namespace
+
+// Bug caught: the NHWC vector size kept at 4 although the per-channel tensors declare less than the
+// float4 loads need, or dropped at exactly the 16 bytes those loads need.
+TEST(TestBatchnormFwdTrainingPlan, CompileFoldsTheDeclaredAlignmentIntoTheNhwcVectorSize)
+{
+    const std::vector<int64_t> strides = {16384, 1, 1024, 64};
+    const std::vector<int64_t> dims = {128, 64, 16, 16};
+
+    EXPECT_TRUE(hasCompileOption(compileOptionsWithAlignments(strides, dims, {}),
+                                 "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_TRUE(hasCompileOption(compileOptionsWithAlignments(strides, dims, {{"scale", 16}}),
+                                 "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+
+    const auto narrowed = compileOptionsWithAlignments(strides, dims, {{"scale", 8}});
+    EXPECT_TRUE(hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+    EXPECT_TRUE(hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VARIANT=2"));
+}
+
+// Bug caught: the single kernel's four-element x read left running on an x declaring less than 16
+// bytes, instead of the spatial multiple kernel at a narrower vector size.
+TEST(TestBatchnormFwdTrainingPlan, CompileFallsBackToSpatialMultipleWhenWideReadsAreUncovered)
+{
+    // hw = 4096 selects the single kernel with four-element x reads.
+    const std::vector<int64_t> strides = {12288, 4096, 64, 1};
+    const std::vector<int64_t> dims = {4, 3, 64, 64};
+
+    const auto exact = compileOptionsWithAlignments(strides, dims, {{"x", 16}});
+    EXPECT_TRUE(hasCompileOption(exact, "-DHIP_PLUGIN_BN_VARIANT=1"));
+
+    const auto narrowed = compileOptionsWithAlignments(strides, dims, {{"x", 8}});
+    EXPECT_TRUE(hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VARIANT=2"));
+    EXPECT_TRUE(hasCompileOption(narrowed, "-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+}
+
+// Bug caught: a problem that has no kernel configuration within the declared alignment compiled
+// the wide-read kernel anyway.
+TEST(TestBatchnormFwdTrainingPlan, CompileThrowsWhenNoConfigurationFitsTheDeclaredAlignment)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // hw = 17 * 241 = 4097 reads wide, and a single sample leaves the spatial multiple kernel no
+    // room to stash.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {8194, 4097, 241, 1}, {1, 2, 17, 241});
+    const auto patched = withNamedAlignments(builder.GetBufferPointer(), {{"x", 8}});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(patched.data(),
+                                                                           patched.size());
+    const auto& attr = *graph.getNode(0).attributes_as_BatchnormAttributes();
+
+    BatchnormFwdTrainingPlan plan{BatchnormFwdTrainingParams(attr, graph.getTensorMap())};
+
+    EXPECT_THROW(plan.compile(mockCompiler, createTestDeviceProps()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

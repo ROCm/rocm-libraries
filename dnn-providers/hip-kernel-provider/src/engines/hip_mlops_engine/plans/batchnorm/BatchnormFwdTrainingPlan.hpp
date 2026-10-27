@@ -12,6 +12,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 
 #include <memory>
 
@@ -67,6 +68,10 @@ public:
     const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
+    /// The alignment the graph declares for the tensor groups the kernels access: x, the output
+    /// (the activation output when one is fused, y otherwise) and the per-channel tensors in use.
+    SpatialAlignment spatialAlignment() const;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
@@ -89,6 +94,10 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
+
+/// Throws HipdnnPluginException(BAD_PARAM) when the problem has no kernel configuration that stays
+/// within the declared tensor alignments.
+void checkDeclaredAlignmentSupported(const BatchnormFwdTrainingParams& params);
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

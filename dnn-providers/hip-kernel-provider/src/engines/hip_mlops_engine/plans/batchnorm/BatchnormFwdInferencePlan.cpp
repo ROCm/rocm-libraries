@@ -4,6 +4,7 @@
 #include "BatchnormFwdInferencePlan.hpp"
 #include "BatchnormKernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormAlignment.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
 
@@ -94,6 +95,26 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _activationOut;
 }
 
+size_t BatchnormFwdInferenceParams::maxVectorSize(bool isLayoutNHWC) const
+{
+    // The kernel writes the activation output when one is fused, y otherwise.
+    const auto* output
+        = (_optActivation.has_value() && _activationOut != nullptr) ? _activationOut : _y;
+    return maxInferenceVectorSize(
+        isLayoutNHWC, *_x, *output, {_scale, _bias, _estMean, _invVariance});
+}
+
+void checkDeclaredAlignmentSupported(const BatchnormFwdInferenceParams& params)
+{
+    if(params.maxVectorSize(isChannelLastLayout(params.x())) == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm forward inference needs every tensor aligned to at least its element size, "
+            "but a tensor declares less");
+    }
+}
+
 BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
 {
@@ -168,8 +189,15 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     const bool isLayoutNhwc = isChannelLastLayout(_inferenceParams.x());
 
-    // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride);
+    // Calculate vector size based on layout, within what the declared tensor alignments cover
+    const auto maxVectorSize = _inferenceParams.maxVectorSize(isLayoutNhwc);
+    if(maxVectorSize == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "BatchnormFwdInferencePlan: a tensor declares less alignment than its element size");
+    }
+    auto vectorsize = computeVectorSize(isLayoutNhwc, c, inCstride, maxVectorSize);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;

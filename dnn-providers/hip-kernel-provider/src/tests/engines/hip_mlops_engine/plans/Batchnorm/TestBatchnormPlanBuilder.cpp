@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
+#include "BatchnormAlignmentTestUtils.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
@@ -869,6 +870,137 @@ TEST_F(TestBatchnormPlanBuilder, BwdFusionVirtualActOutTensorInvalid)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// isApplicable - declared tensor alignment
+// ============================================================================
+
+// Bug caught: a tensor declaring less than its element size is accepted, for a graph family whose
+// plan parameters do not read that tensor's alignment.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableDeclinesEveryGraphFamilyBelowElementAlignment)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    for(const auto& graph :
+        {hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph()})
+    {
+        expectDeclinedBelowElementAlignment(graph, 4, 2, isApplicable);
+    }
+}
+
+// Bug caught: an inference graph whose tensors only cover a narrower vector declined, although the
+// plan compiles at that vector size.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableAcceptsInferenceWhereANarrowerVectorSizeFits)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"x", 8}}, isApplicable));
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"y", 8}}, isApplicable));
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"x", 4}, {"y", 4}}, isApplicable));
+
+    // NHWC loads vectors of the per-channel tensors too, and still has the scalar width.
+    const auto nhwcGraph = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
+        {16384, 1, 1024, 64}, {1, 64, 16, 16});
+    EXPECT_TRUE(isApplicableWithAlignments(nhwcGraph, {{"est_mean", 4}}, isApplicable));
+}
+
+// Bug caught: the training single kernel's four-element x read (hw >= 4096) accepted on an x tensor
+// declaring less than the 16 bytes it reads when no narrower kernel applies, or declined at exactly
+// 16 bytes.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableChecksTheWideReadAlignmentOfTraining)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    // hw = 17 * 241 = 4097 selects the single kernel that reads x four elements at a time. One
+    // sample leaves the narrower spatial multiple kernel no room to stash, so nothing narrower
+    // applies.
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {8194, 4097, 241, 1}, {1, 2, 17, 241});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
+        graph.GetBufferPointer(), graph.GetSize());
+    ASSERT_TRUE(isApplicable(baseline));
+
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"x", 8}}, isApplicable));
+    EXPECT_TRUE(isApplicableWithAlignments(graph, {{"x", 16}}, isApplicable));
+
+    // The writes and the per-channel accesses are scalar: their element size is enough.
+    EXPECT_TRUE(isApplicableWithAlignments(
+        graph,
+        {{"y", 4}, {"scale", 4}, {"bias", 4}, {"mean", 4}, {"inv_variance", 4}},
+        isApplicable));
+}
+
+// Bug caught: the backward single kernel's four-element x and dy reads, or two-element dx writes,
+// accepted on tensors declaring less than they access, or declined at exactly that alignment.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableChecksTheReadAndWriteAlignmentOfBackward)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    // hw = 4097 selects the single kernel, and one sample leaves no narrower kernel applicable.
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {8194, 4097, 241, 1}, {1, 2, 17, 241});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
+        graph.GetBufferPointer(), graph.GetSize());
+    ASSERT_TRUE(isApplicable(baseline));
+
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"x", 8}}, isApplicable));
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"dy", 8}}, isApplicable));
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"dx", 4}}, isApplicable));
+
+    EXPECT_TRUE(isApplicableWithAlignments(graph,
+                                           {{"x", 16},
+                                            {"dy", 16},
+                                            {"dx", 8},
+                                            {"scale", 4},
+                                            {"dscale", 4},
+                                            {"dbias", 4},
+                                            {"mean", 4},
+                                            {"inv_variance", 4}},
+                                           isApplicable));
+}
+
+// Bug caught: an NHWC training graph declined, or accepted below its element size, because the
+// vector size and the per-channel accesses were checked as in NCHW.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableChecksTheScalarAlignmentOfNhwcTraining)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+    const auto graph = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {16384, 1, 1024, 64}, {128, 64, 16, 16});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
+        graph.GetBufferPointer(), graph.GetSize());
+    ASSERT_TRUE(isApplicable(baseline));
+
+    EXPECT_TRUE(isApplicableWithAlignments(
+        graph,
+        {{"x", 4}, {"y", 4}, {"scale", 4}, {"bias", 4}, {"mean", 4}, {"inv_variance", 4}},
+        isApplicable));
+    EXPECT_FALSE(isApplicableWithAlignments(graph, {{"mean", 2}}, isApplicable));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test
