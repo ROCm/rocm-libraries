@@ -8,17 +8,29 @@ on:
       - reopened
     paths:
       - "projects/hipblaslt/**"
+      - "projects/hipsparselt/**"
       - "test/therock/test_hipblaslt.py"
+      - "test/therock/test_hipsparselt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
       - ".github/actions/ci-env/**"
   workflow_dispatch:
+    inputs:
+      test_type:
+        description: "Test type passed to the test runners"
+        type: string
+        required: true
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+
+env:
+  TEST_TYPE: ${{ inputs.test_type || (github.event_name == 'pull_request' && 'quick') || 'standard' }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.number || (github.event_name == 'schedule' && 'nightly') || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -27,12 +39,14 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
-      # this focused gfx90a lane exercises its actual math-libs build system.
+      # these jobs exercise its actual math-libs build system.
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+      test_type: ${{ env.TEST_TYPE }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       test_matrix: ${{ steps.matrix.outputs.test_matrix }}
+      timeouts: ${{ steps.matrix.outputs.timeouts }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -45,16 +59,119 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
-      - name: Compute arch matrix
+      - name: Compute matrices and select timeouts
         id: matrix
         run: |
-          build='[{"family":"gfx90a"}]'
-          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
-          echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
-          echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
+          architectures='{
+            "gfx90a": {
+              "runs_on": "linux-gfx90a-gpu-rocm",
+              "components": [
+                "hipBLASLt"
+              ]
+            },
+            "gfx942": {
+              "runs_on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+              "components": [
+                "hipBLASLt",
+                "hipSPARSELt"
+              ]
+            },
+            "gfx950": {
+              "runs_on": "linux-gfx950-1gpu-ccs-ossci-rocm",
+              "components": [
+                "hipBLASLt",
+                "hipSPARSELt"
+              ]
+            }
+          }'
+          # TODO: Run gfx90a standard and gfx942/gfx950 quick to measure their
+          # runtimes, then shorten the initial limits with at least 1.5x margin.
+          # TODO: Measure other manual test types and add per-test-type
+          # limits; until then, use the default limits.
+          timeouts='{
+            "gfx90a": {
+              "hipblaslt": {
+                "quick": {
+                  "command_timeout": "20m",
+                  "step_timeout_minutes": 30,
+                  "job_timeout_minutes": 90
+                },
+                "default": {
+                  "command_timeout": "300m",
+                  "step_timeout_minutes": 310,
+                  "job_timeout_minutes": 360
+                }
+              }
+            },
+            "gfx942": {
+              "hipblaslt": {
+                "quick": {
+                  "command_timeout": "200m",
+                  "step_timeout_minutes": 210,
+                  "job_timeout_minutes": 240
+                },
+                "default": {
+                  "command_timeout": "200m",
+                  "step_timeout_minutes": 210,
+                  "job_timeout_minutes": 240
+                }
+              },
+              "hipsparselt": {
+                "quick": {
+                  "command_timeout": "230m",
+                  "step_timeout_minutes": 240,
+                  "job_timeout_minutes": 270
+                },
+                "default": {
+                  "command_timeout": "230m",
+                  "step_timeout_minutes": 240,
+                  "job_timeout_minutes": 270
+                }
+              }
+            },
+            "gfx950": {
+              "hipblaslt": {
+                "quick": {
+                  "command_timeout": "200m",
+                  "step_timeout_minutes": 210,
+                  "job_timeout_minutes": 240
+                },
+                "default": {
+                  "command_timeout": "200m",
+                  "step_timeout_minutes": 210,
+                  "job_timeout_minutes": 240
+                }
+              },
+              "hipsparselt": {
+                "quick": {
+                  "command_timeout": "210m",
+                  "step_timeout_minutes": 220,
+                  "job_timeout_minutes": 250
+                },
+                "default": {
+                  "command_timeout": "210m",
+                  "step_timeout_minutes": 220,
+                  "job_timeout_minutes": 250
+                }
+              }
+            }
+          }'
+          build=$(echo "$architectures" | jq -c \
+            '{include: [to_entries[] | {family: .key, components: .value.components}]}')
+          test=$(echo "$architectures" | jq -c \
+            '{include: [to_entries[]
+                       | .key as $family
+                       | .value as $arch
+                       | $arch.components[]
+                       | {family: $family, component: ascii_downcase, runs_on: $arch.runs_on}]}')
+          timeouts=$(echo "$timeouts" | jq -c --arg test_type "$TEST_TYPE" \
+            'map_values(map_values(.[$test_type] // .default))')
+          echo "build_matrix=${build}" >> "$GITHUB_OUTPUT"
+          echo "test_matrix=${test}" >> "$GITHUB_OUTPUT"
+          echo "timeouts=${timeouts}" >> "$GITHUB_OUTPUT"
 
   build:
-    name: "Build (hipBLASLt | ${{ matrix.family }} | ASAN)"
+    name: "Build (hipBLASLt / hipSPARSELt | ${{ matrix.family }} | HOST_ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
@@ -88,14 +205,14 @@ jobs:
 
       - name: Adjust git config
         run: |
-          git config --global --add safe.directory $PWD
+          git config --global --add safe.directory "$PWD"
           git config fetch.parallel 10
 
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
             --config-preset "github-oss-dev" \
-            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --dir "$(dirname "$CCACHE_CONFIGPATH")" \
             --local-path "$CACHE_DIR/ccache"
 
       - name: Runner health status
@@ -116,7 +233,7 @@ jobs:
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --progress --no-include-rocm-libraries --no-include-ml-frameworks
 
-      - name: Configure gfx90a TheRock host-ASAN math-libs
+      - name: Configure TheRock host-ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
@@ -124,7 +241,7 @@ jobs:
           # this workflow's focused single-family build.
           extra_cmake_options: >-
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
-            -DTHEROCK_DIST_AMDGPU_FAMILIES=gfx90a
+            -DTHEROCK_DIST_AMDGPU_FAMILIES=${{ matrix.family }}
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
@@ -162,23 +279,30 @@ jobs:
           echo "-------------"
           ccache -s -v || true
 
-      - name: Package hipBLASLt trees
+      - name: Package ASAN trees
         if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          COMPONENTS: ${{ join(matrix.components, ' ') }}
         run: |
           set -uo pipefail
-          mkdir -p upload/hipblaslt
-          found=0
-          for kind in stage dist; do
-            d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null | head -1)
-            if [ -n "$d" ] && [ -d "$d" ]; then
-              echo "Packaging hipBLASLt/${kind}: $d"
-              if tar -C "$d" -czf "upload/hipblaslt/hipblaslt-${kind}.tar.gz" . ; then found=1; fi
-            else
-              echo "::warning::no hipBLASLt/${kind} tree found"
-            fi
+          read -r -a components <<< "$COMPONENTS"
+          for component in "${components[@]}"; do
+            name="${component,,}"
+            mkdir -p "upload/${name}"
+            found=0
+            for kind in stage dist; do
+              d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/${component}/${kind}" 2>/dev/null | head -1)
+              if [ -n "$d" ] && [ -d "$d" ]; then
+                echo "Packaging ${component}/${kind}: $d"
+                if tar -C "$d" -czf "upload/${name}/${name}-${kind}.tar.gz" . ; then found=1; fi
+              else
+                echo "::warning::no ${component}/${kind} tree found"
+              fi
+            done
+            [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for ${component}"
+            ls -lh "upload/${name}" || true
           done
-          [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for hipBLASLt"
-          ls -lh upload/hipblaslt || true
 
       - name: Upload hipBLASLt trees
         if: ${{ !cancelled() }}
@@ -189,11 +313,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Upload hipSPARSELt trees
+        if: ${{ !cancelled() && contains(matrix.components, 'hipSPARSELt') }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-hipsparselt-${{ matrix.family }}
+          path: upload/hipsparselt/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
-    name: "Test hipBLASLt ASAN | ${{ matrix.family }} (quick)"
+    name: "Test ${{ matrix.component }} HOST_ASAN | ${{ matrix.family }} (${{ needs.setup.outputs.test_type }})"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].job_timeout_minutes }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
@@ -219,7 +352,7 @@ jobs:
       AMDGPU_FAMILIES: ${{ matrix.family }}
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
       HSA_XNACK: "0"
-      TEST_COMPONENT: hipblaslt
+      TEST_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -237,22 +370,22 @@ jobs:
             test/therock
           sparse-checkout-cone-mode: true
 
-      - name: Download hipBLASLt ASAN trees
+      - name: Download ASAN trees
         timeout-minutes: 30
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: asan-trees-hipblaslt-${{ matrix.family }}
+          name: asan-trees-${{ matrix.component }}-${{ matrix.family }}
           path: asan-trees
 
       - name: Assemble runnable tree from dist (+ stage overlay)
         run: |
           set -euo pipefail
           mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
-          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/hipblaslt-dist.tar.gz"
-          if [ -f "asan-trees/hipblaslt-stage.tar.gz" ]; then
-            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/hipblaslt-stage.tar.gz"
+          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-dist.tar.gz"
+          if [ -f "asan-trees/${TEST_COMPONENT}-stage.tar.gz" ]; then
+            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-stage.tar.gz"
           fi
-          test -x "${THEROCK_BIN_DIR}/hipblaslt-test"
+          test -x "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
           echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
 
       - name: Driver / GPU sanity check
@@ -279,25 +412,36 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
-      - name: Test hipBLASLt (quick)
-        # A passing smoke run takes 2-3 minutes; hangs used to run to the
-        # 180-minute step limit. Cap the test well below that and name the
-        # runner, since hangs have clustered on specific hosts.
-        timeout-minutes: 30
+      - name: Test ${{ matrix.component }} (${{ needs.setup.outputs.test_type }})
+        # Hangs used to run to the 180-minute step limit and clustered on
+        # specific hosts. Cap tests using the resolved command timeout and
+        # name the runner.
+        # The step timeout leaves time to record logs after killing the test.
+        timeout-minutes: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].step_timeout_minutes }}
         env:
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
-          TEST_TYPE: quick
+          TEST_TYPE: ${{ needs.setup.outputs.test_type }}
+          TEST_COMMAND_TIMEOUT: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].command_timeout }}
           RUNNER_NAME: ${{ runner.name }}
         run: |
           mkdir -p ./test_logs
           status=0
-          timeout -k 60 20m python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 \
-            | tee ./test_logs/hipblaslt-test_output.log || status=$?
+          timeout -k 60 "${TEST_COMMAND_TIMEOUT}" python3 "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py" 2>&1 \
+            | tee "./test_logs/${TEST_COMPONENT}-test_output.log" || status=$?
           if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
-            echo "::error::hipBLASLt ASAN test hung and was killed after 20 minutes on runner ${RUNNER_NAME}"
+            echo "::error::${TEST_COMPONENT} HOST_ASAN test timed out after ${TEST_COMMAND_TIMEOUT} on runner ${RUNNER_NAME}"
           fi
           exit "${status}"
+
+      - name: Upload failed test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-logs-${{ matrix.component }}-${{ matrix.family }}
+          path: test_logs
+          if-no-files-found: ignore
+          retention-days: 7
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
@@ -315,8 +459,8 @@ jobs:
           BUILD: ${{ needs.build.result }}
           TEST: ${{ needs.test.result }}
         run: |
-          echo "Build (hipBLASLt ASAN, gfx90a-gating): ${BUILD}"
-          echo "Test  (hipBLASLt ASAN, gfx90a-gating): ${TEST}"
+          echo "Build (hipBLASLt / hipSPARSELt HOST_ASAN): ${BUILD}"
+          echo "Test  (hipBLASLt / hipSPARSELt HOST_ASAN): ${TEST}"
           if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
             echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
             exit 1
