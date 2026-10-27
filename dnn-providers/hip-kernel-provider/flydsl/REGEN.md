@@ -126,10 +126,22 @@ ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
 # generator writes files rather than clearing the directory, so an object left
 # by an earlier run with a different instance list would survive and be compared.
 for op in $OPS; do
+  case $op in
+    sdpa_bwd_prep|sdpa_bwd_dkdv|sdpa_bwd_dq|sdpa_bwd_merged) pins=(--reference-dir "$REFERENCE_DIR") ;;
+    *) pins=() ;;
+  esac
   PYTHONDONTWRITEBYTECODE=1 \
-    $PY -m generators.gen_$op --arch $ARCH --out-dir "$REGEN_OUT"
+    $PY -m generators.gen_$op --arch $ARCH --out-dir "$REGEN_OUT" "${pins[@]}"
 done
 ```
+
+The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`: their
+pinned objects are the `<hash>.hsaco` files of a reference directory, and the rebuild is
+checked against them. `REFERENCE_DIR` is the directory the SDPA backward S1 snapshot
+produces: `python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref>
+--selection selection.toml --out <S1 dir> --reference-dir "$REFERENCE_DIR"` (it fails while
+any member lacks a binary; see that tool's docstring). `sdpa_bwd_dbias_reduce`, `sdpa_bwd_dsink_reduce` and every other `OPS` entry take none, so
+`REFERENCE_DIR` is needed only for `gfx950`.
 
 Then compare every object against the manifests the tree ships:
 
@@ -341,10 +353,12 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of twenty kernel modules from three upstreams.
-Thirteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+`kernels_src/` is a vendored copy of 23 kernel modules from three upstreams.
+Fourteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
 FlyDSL kernels upstream FlyDSL does not; and the RDNA4 attention package
-(`attention_rdna4/`, six modules) comes from AOTriton. Deliberate modifications are
+(`attention_rdna4/`, six modules) and two SDPA backward modules
+(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py`) come from AOTriton. The other files of
+`attention_bwd_cdna/` are written for this provider and say `Not vendored` in their headers. Deliberate modifications are
 recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four),
 `kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two) and
 `kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
@@ -354,7 +368,8 @@ CDNA attention files' in `kernels_src/kernels/attention_cdna/README.md`.
 A modified file's header also names the upstream and path it came from -- the renamed
 `attention_rdna/` and `attention_cdna/` packages both map back to upstream's
 `kernels/attention/`; the modules of `attention_rdna4/` carry none and inherit their
-package's, which names AOTriton's flat `modules/flash/flyc/` directory -- and the tool
+package's, which names AOTriton's flat `modules/flash/flyc/` directory, while the two
+`attention_bwd_cdna/` modules carry their own block naming that directory's file -- and the tool
 reads that header to decide what to diff it against. A file with no provenance header
 (the unmodified FlyDSL modules carry only FlyDSL's SPDX and copyright lines) is diffed
 against the same relative path in the FlyDSL checkout. The FlyDSL and AITER commits are
@@ -371,6 +386,10 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
 AITER at the pinned commit 8253efc40595
 AOTriton at the pinned commit b5e8cfb909e5
+=== kernels/attention_bwd_cdna/fmha_abi_gfx1201.py
+  …
+=== kernels/attention_bwd_cdna/fmha_common_gfx1201.py
+  …
 === kernels/attention_cdna/__init__.py
   …
 === kernels/attention_cdna/flash_attn_generic.py
@@ -397,7 +416,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-7/20 vendored files identical to upstream after normalization; 13 differ, 0 absent upstream, 0 not compared
+8/23 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
