@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -20,7 +21,9 @@ double bestSeconds(Function&& function) {
     double best = std::numeric_limits<double>::infinity();
     for (int iteration = 0; iteration < 4; ++iteration) {
         const auto start = Clock::now();
+        std::atomic_signal_fence(std::memory_order_seq_cst);
         function();
+        std::atomic_signal_fence(std::memory_order_seq_cst);
         const auto end = Clock::now();
         best = std::min(best, std::chrono::duration<double>(end - start).count());
     }
@@ -43,7 +46,8 @@ int main(int argc, char** argv) {
             const size_t logicalIndex = row + column * rows;
             const size_t storageIndex = row + column * leadingDimension;
             expected[storageIndex] = static_cast<float>(static_cast<int>(logicalIndex % 101) - 50);
-            observed[storageIndex] = expected[storageIndex];
+            // Exercise tolerance arithmetic instead of the encoded-equality shortcut.
+            observed[storageIndex] = expected[storageIndex] + 0.0001f;
         }
     }
 
@@ -66,7 +70,7 @@ int main(int argc, char** argv) {
     if (!report.passed() || report.compared != elements) return 1;
 
     ComparisonOptions statisticsOptions = options;
-    statisticsOptions.computeFrobenius = false;
+    statisticsOptions.computeElementwiseStatistics = true;
 
     ComparisonReport statisticsReport;
     const double statisticsComponentSeconds = bestSeconds([&] {
@@ -74,9 +78,12 @@ int main(int argc, char** argv) {
             compare(observedView, expectedView, statisticsOptions,
                     IndexRange::all(observedView.elementCount()), std::vector<size_t>{1, 0});
     });
-    if (!statisticsReport.passed() || statisticsReport.compared != elements) return 1;
+    if (!statisticsReport.passed() || statisticsReport.compared != elements ||
+        (elements != 0 && statisticsReport.maxAbsoluteDifference == 0.0))
+        return 1;
 
-    ComparisonOptions detailedOptions = options;
+    ComparisonOptions detailedOptions = statisticsOptions;
+    detailedOptions.computeFrobenius = true;
 
     ComparisonReport detailedReport;
     const double detailedComponentSeconds = bestSeconds([&] {
@@ -84,9 +91,12 @@ int main(int argc, char** argv) {
             compare(observedView, expectedView, detailedOptions,
                     IndexRange::all(observedView.elementCount()), std::vector<size_t>{1, 0});
     });
-    if (!detailedReport.passed() || detailedReport.compared != elements) return 1;
+    if (!detailedReport.passed() || detailedReport.compared != elements ||
+        (elements != 0 && detailedReport.frobeniusDifference == 0.0))
+        return 1;
 
-    size_t baselineMismatches = 0;
+    // Consume every repetition so the optimizer cannot discard all but the last scan.
+    volatile size_t baselineMismatches = 0;
     constexpr double absoluteTolerance = 0.0002;
     constexpr double relativeTolerance = 0.0004;
     const double baselineSeconds = bestSeconds([&] {
