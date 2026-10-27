@@ -36,7 +36,4 @@
 
 /* Build-time feature flags baked in at compile time. */
 
-/* hipSPARSE 5.1 */
-#cmakedefine HIPSPARSE_WITH_SPGEAM
-
 #endif /* HIPSPARSE_CONFIG_H */

@@ -2,12 +2,17 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx942_attention_tiled_3d_emit.c -- C-side emitter for the
- * gfx942 narrow-atom tiled split-KV 3D *segment* attention parity harness.
+ * gfx942 narrow-atom tiled split-KV 3D attention parity harness.
  * Selects one of the sampled configs by argv[1], fills a
  * rocke_unified_attention_3d_tiled_spec_t identically to the Python emitter
- * gfx942_attention_tiled_3d_emit.py, builds + lowers the segment kernel via
- * rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (arch gfx942,
- * flavor AUTO) and prints the .ll to stdout for byte comparison.
+ * gfx942_attention_tiled_3d_emit.py, and emits BOTH kernels, segment first:
+ *   1. the segment kernel via
+ *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm, then
+ *   2. the reduce kernel via
+ *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
+ *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
+ *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments)
+ * (arch gfx942, flavor AUTO), printing the .ll to stdout for byte comparison.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -302,6 +307,85 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
     return 0;
 }
 
+/* Derive the reduce spec from the segment spec, exactly as the Python emitter
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
+static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+                             rocke_unified_attention_reduce_tiled_spec_t* r)
+{
+    *r = rocke_unified_attention_reduce_tiled_spec_default();
+    r->head_size = s->head_size;
+    r->num_query_heads = s->num_query_heads;
+    r->num_kv_heads = s->num_kv_heads;
+    r->dtype = s->dtype;
+    r->num_segments = s->num_segments;
+}
+
+/* Emit the reduce kernel in `mode` (ll / ir / verify) after the segment.
+ * Returns 0 on success, 1 on failure. */
+static int emit_reduce(const rocke_unified_attention_reduce_tiled_spec_t* r, const char* mode)
+{
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = 0;
+        rocke_status_t st = rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm(
+            r, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+        if(st != ROCKE_OK || !llvm_text)
+        {
+            fprintf(stderr, "reduce build/lower failed: status=%d err=%s\n", (int)st, err);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+        return 0;
+    }
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "attention_tiled_3d_reduce") != ROCKE_OK)
+    {
+        fprintf(stderr, "reduce builder init failed\n");
+        return 1;
+    }
+    rocke_kernel_def_t* red_k = rocke_build_unified_attention_reduce_tiled_gfx942(&b, r, "gfx942");
+    if(!red_k)
+    {
+        fprintf(stderr, "reduce build failed: err=%s\n", rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
+        return 1;
+    }
+    if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
+        rocke_status_t st = rocke_ir_serialize(red_k, &t);
+        if(st != ROCKE_OK || !t)
+        {
+            fprintf(stderr, "reduce serialize failed: status=%d\n", (int)st);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    }
+    else
+    {
+        rocke_diag_t* d = NULL;
+        size_t n = 0;
+        rocke_verify(red_k, &d, &n);
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s2 = rocke_diag_to_string(&d[i]);
+            if(s2)
+            {
+                puts(s2);
+                free(s2);
+            }
+        }
+        rocke_diags_free(d, n);
+    }
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -318,6 +402,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
+    rocke_unified_attention_reduce_tiled_spec_t r;
+    make_reduce_spec(&s, &r);
 
     if(strcmp(mode, "ll") == 0)
     {
@@ -402,5 +488,5 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    return 0;
+    return emit_reduce(&r, mode);
 }

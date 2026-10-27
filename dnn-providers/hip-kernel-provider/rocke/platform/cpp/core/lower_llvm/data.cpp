@@ -158,9 +158,14 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"minnum.f32", "declare float @llvm.minnum.f32(float, float)"},
     {"minnum.f16", "declare half @llvm.minnum.f16(half, half)"},
     {"minnum.bf16", "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)"},
+    {"fabs.f64", "declare double @llvm.fabs.f64(double)"},
     {"fabs.f32", "declare float @llvm.fabs.f32(float)"},
     {"fabs.f16", "declare half @llvm.fabs.f16(half)"},
     {"fabs.bf16", "declare bfloat @llvm.fabs.bf16(bfloat)"},
+    {"amdgcn.fdot2.f16",
+     "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"},
+    {"amdgcn.fdot2.bf16",
+     "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"},
     {"fmuladd.f32", "declare float @llvm.fmuladd.f32(float, float, float)"},
     {"fmuladd.f16", "declare half @llvm.fmuladd.f16(half, half, half)"},
     {"fmuladd.bf16", "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)"},
@@ -252,6 +257,12 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.32x32x4.xf32",
      "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f64.16x16x4f64",
+     "declare <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64(double, double, <4 x double>, i32 "
+     "immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f64.4x4x4f64",
+     "declare double @llvm.amdgcn.mfma.f64.4x4x4f64(double, double, double, i32 immarg, i32 "
+     "immarg, i32 immarg)"},
     {"mfma.f32.16x16x4f32",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float, float, <4 x float>, i32 immarg, "
      "i32 immarg, i32 immarg)"},
@@ -261,6 +272,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.4x4x4f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16(<4 x half>, <4 x half>, <4 x float>, i32 "
      "immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.4x4x4bf16.1k",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>, <4 x i16>, <4 x float>, "
+     "i32 immarg, i32 immarg, i32 immarg)"},
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(<2 x i32>, <2 x i32>, <4 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
@@ -286,7 +300,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
-    {"ds.read.tr16.b128", "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"},
     {"ds.load.tr16.b128.v8bf16",
      "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"},
     {"ds.load.tr16.b128.v8f16",
@@ -361,18 +374,11 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.32x32x16.bf16",
      "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16(<8 x bfloat>, <8 x bfloat>, <16 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.scale.f32.16x16x128.f8f6f4",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32, i32 immarg)"},
-    {"mfma.f32.16x16x128.fp4",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x128.fp4(i64, i64, <4 x float>, i32 immarg, "
-     "i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x96.fp6",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32>, <3 x i32>, <4 x float>, "
-     "i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x128.fp8.hero",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
+    /* K=128 f8f6f4 MFMA, shared by the MX op and the hero atom. One mangled,
+     * flavor-independent entry: LLVM 20, 22, 23 and 24 all take this form. */
+    {"mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
     {"asyncmark", "declare void @llvm.amdgcn.asyncmark()"},
     {"wait.asyncmark", "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)"},
     {"raw.ptr.buffer.load.async.lds",
@@ -556,9 +562,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
-    {"mfma.scale.f32.16x16x128.f8f6f4",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT

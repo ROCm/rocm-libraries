@@ -28,7 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -882,15 +882,23 @@ std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
         return {};
     }
 
-    hipdnn_plugin_sdk::ingestor::Catalog catalog;
-    catalog.bound = *bound;
+    // The catalog references its entries, so the admitted kernels are owned here and
+    // pointed at only once the vector stops growing.
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> admitted;
     for(const auto& spec : candidates)
     {
         auto kernel = makeKernel(spec);
         if(kernelMatcher(context, *bound, kernel))
         {
-            catalog.entries.push_back(std::move(kernel));
+            admitted.push_back(std::move(kernel));
         }
+    }
+
+    hipdnn_plugin_sdk::ingestor::Catalog catalog;
+    catalog.bound = *bound;
+    for(const auto& kernel : admitted)
+    {
+        catalog.entries.push_back(&kernel);
     }
 
     if(rank)
@@ -902,9 +910,9 @@ std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
 
     std::vector<Tile> tiles;
     tiles.reserve(catalog.entries.size());
-    for(const auto& entry : catalog.entries)
+    for(const auto* entry : catalog.entries)
     {
-        tiles.emplace_back(entry.getIntMetadata("block_m"), entry.getIntMetadata("block_n"));
+        tiles.emplace_back(entry->getIntMetadata("block_m"), entry->getIntMetadata("block_n"));
     }
     return tiles;
 }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -77,10 +77,21 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     auto           check_numerics = handle->check_numerics;
     rocblas_status status         = rocblas_status_success;
 
-    // check alignment of pointers before casting
-    if(!isAligned(a, sizeof(Ta)) || !isAligned(b, sizeof(Tb)) || !isAligned(c, sizeof(Tc))
-       || !isAligned(d, sizeof(Td)))
-        return rocblas_status_invalid_size;
+    // check alignment before casting
+    if(BATCHED)
+    {
+        // batched arrays hold pointers; require pointer-sized alignment
+        if(!isAligned(a, sizeof(void*)) || !isAligned(b, sizeof(void*))
+           || !isAligned(c, sizeof(void*)) || !isAligned(d, sizeof(void*)))
+            return rocblas_status_invalid_size;
+    }
+    else
+    {
+        // non-batched buffers hold elements; require only element alignment
+        if(!isAligned(a, sizeof(Ti)) || !isAligned(b, sizeof(Ti)) || !isAligned(c, sizeof(To))
+           || !isAligned(d, sizeof(To)))
+            return rocblas_status_invalid_size;
+    }
 
     auto rocblas_gemm_ex_name
         = BATCHED ? "rocblas_gemm_batched_ex_64"

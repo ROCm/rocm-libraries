@@ -4,7 +4,3 @@
 add_always_built_test_sources(
     IntegrationGpuResampleBackward.cpp
 )
-
-add_cpp_graph_test_sources(
-    IntegrationGpuResampleForward.cpp
-)

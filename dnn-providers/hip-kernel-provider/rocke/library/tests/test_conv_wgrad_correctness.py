@@ -257,22 +257,23 @@ def _make_spec(
         dW=shape.dW,
         groups=shape.groups,
     )
-    # split_k == -1 means "auto": resolve to a concrete degree (CK formula) up
-    # front, exactly as the benchmark does, so the spec and the launch grid's
-    # z-dim agree (a grid with z=-1 is an invalid launch).
+    # split_k == -1 means "auto": resolve to a concrete degree up front with the
+    # resolver dispatch and the benchmark use, so the spec and the launch grid's
+    # z-dim agree (a grid with z=-1 is an invalid launch). This helper builds
+    # the packed-atomic kernel, so that is the reduction the degree is sized for.
     if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
+        from kernels.common.conv_split_k import resolve_conv_split_k
 
-        split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+        split_k = resolve_conv_split_k(
+            "wgrad",
+            problem,
+            arch=arch,
+            dtype=dtype,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
-            arch=arch,
-            groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
+            reduction="atomic",
         ).split_k
     spec = WgradConvSpec(
         problem=problem,

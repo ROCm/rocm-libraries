@@ -31,7 +31,7 @@ from shlex import split
 from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional
 
-from Tensile.Common import SemanticVersion, print2
+from ..Common import SemanticVersion, print2
 from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf, targetIdOf
 from .Validators import validateToolchain
 

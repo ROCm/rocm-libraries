@@ -83,7 +83,14 @@ boundary. `lower_bound` controls the fused KDA sigmoid gate.
 The remaining spec fields carry head geometry, `dtype`, `state_dtype`,
 `use_qk_l2norm`, the two fusion flags `fuse_conv` and `fuse_out_norm`, and
 three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects the one-thread-per-state-row reference body.
+`simple=True` selects the one-thread-per-state-row reference body. Ten
+performance knobs (`state_load_hint`, `state_store_hint`, `dpp_reduce`,
+`xcd_remap`, `stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`,
+`out_lds`, `waves_per_eu`) change how the warp-tiled body computes (the two
+state hints and `waves_per_eu` also apply to the reference body); each
+defaults to the code emitted before it existed, and dispatch does not set them
+yet. Their rules live in
+[`ALGORITHM.md` §4.10](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
 construction and is the final authority for dispatch. It also rejects a flag
@@ -102,15 +109,15 @@ Every kernel tensor must share the device of `query` (`mixed_qkv` under
 `fuse_conv`). The full validator rules and reasons live once in
 [`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
-Dispatch does not see `state_dtype="f32"` or the fusion flags. The request and
-dispatch fields for them are not in the PR that added these spec fields; they
-come in a follow-up PR. Until then a request with an f32 state is rejected
-(`unsupported state_dtype`), the request has no fusion fields, and no
-dispatched spec sets them. Specs that use them are built directly.
+The request carries `state_dtype` (including `f32`) and both fusion flags to
+the spec; see [Dispatch](#dispatch). The performance knobs are not request
+fields: specs that use them are built directly.
 
 `kernel_name()` encodes every field that changes emitted code. Default GDN
 fields add no suffix, so its existing names remain stable while KDA gets a
-distinct compile/launcher cache key.
+distinct compile/launcher cache key. A knob adds its suffix only on a tile
+where it changes code (its `*_applies` predicate), so an inert knob keeps the
+knob-off name of the identical kernel.
 
 ## Thread mapping
 
@@ -119,13 +126,19 @@ One workgroup per `(sequence, value head, v-sub-block)`; the grid is
 
 Within a workgroup, each warp's lanes are split `warp_threads_k` ways across the
 key dimension and `wave_size / warp_threads_k` ways across value rows. A lane
-holds a contiguous run of K elements, so the dot products against `k_hat` and
-`q_hat` become lane-local products followed by a cross-lane sum.
+holds a contiguous run of K elements (with `interleave_cols` and an `f32`
+state, two 16 B runs per K chunk, interleaved across the group), so the dot
+products against `k_hat` and `q_hat` become lane-local products followed by a
+cross-lane sum.
 
 That sum is an xor butterfly. Offsets inside a four-lane quad use `quad_perm` on
 the VALU, avoiding the LDS crossbar and its wait; wider offsets fall back to
-`ds_swizzle`. Every lane ends holding the total, so no broadcast is needed, and
-only the first lane of each group stores the output scalar.
+`ds_swizzle`, except that with `dpp_reduce` offsets 4 and 8 use `tile.dpp_xor`
+(masks 7 and 15: the DPP, data-parallel primitives, `row_half_mirror` /
+`row_mirror` modifiers on gfx9 CDNA) instead. Every lane ends holding the total,
+so no broadcast is needed, and only the first lane of each group stores the
+output scalar (with `out_lds`, the first few lanes each store a packed group of
+consecutive rows instead; ALGORITHM.md §4.10).
 
 ## Registry and tile selection
 
@@ -145,6 +158,11 @@ key as an equivalent amount of batch work. Re-measure KDA with
 `library/builders/gfx950/gdn/tune.py`; exact measurements live outside the
 public source tree.
 
+Fused requests (`fuse_conv` and/or `fuse_out_norm`) need `blocks_per_v_dim ==
+1`, so `auto` prefers an interim static fused tile for both gate kinds; its
+choice, provenance and fallback live once in
+[`ALGORITHM.md` §4.6](../../../library/builders/gfx950/gdn/ALGORITHM.md#46-registry-and-tile-selection).
+
 ## Dispatch
 
 `dispatch_gdn_decode(GdnDecodeRequest(...))` returns the selected candidate,
@@ -159,11 +177,14 @@ An explicit `spec_id` selects one legal candidate of the requested gate kind.
 Candidate admission ends in `is_valid_spec()`, so dispatch cannot offer a tile
 that the kernel rejects.
 
-gfx950 only. Through dispatch, `bf16` and `f16` activation/state dtypes are
-supported and need not match; the kernel also accepts an `f32` state, which
-dispatch does not route yet. Head geometry is constrained by the validator.
-KDA's production fused mode and benchmark-only precomputed-log-decay mode are
-both numerically covered.
+gfx950 only. Through dispatch, `bf16` and `f16` activation dtypes and `bf16`,
+`f16` and `f32` state dtypes are supported and need not match, for both gate
+kinds; an `f32` state does not change the tile `auto` picks. `fuse_conv` and
+`fuse_out_norm` are request fields (real bools; `fuse_conv` also needs
+`num_k_heads == num_v_heads`), and the result's signature is the fused ABI, so
+the launch packs the fused tensors from `prepare()`. Head geometry is
+constrained by the validator. KDA's production fused-gate mode and
+benchmark-only precomputed-log-decay mode are both numerically covered.
 
 Run from `dnn-providers/hip-kernel-provider/rocke`:
 
@@ -174,6 +195,7 @@ PYTHONPATH=library:platform/python python3 -m pytest \
   library/tests/test_gdn_decode_ir_cpp_parity.py \
   library/tests/test_gdn_decode_prepare.py \
   library/tests/test_gdn_decode_fused.py \
+  library/tests/test_gdn_decode_knobs.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py
 ```
@@ -181,7 +203,8 @@ PYTHONPATH=library:platform/python python3 -m pytest \
 The on-device output and recurrent-state checks are in
 `library/tests/test_gdn_decode_gfx950_numeric.py` and
 `library/tests/test_kda_decode_gfx950_numeric.py`; the fused modes' in
-`library/tests/test_gdn_decode_fused_gfx950_numeric.py`.
+`library/tests/test_gdn_decode_fused_gfx950_numeric.py`; the performance
+knobs' in `library/tests/test_gdn_decode_knobs_gfx950_numeric.py`.
 
 - **Spec rejected at dispatch.** The message names the failing rule; most often
   a head dim or `blocks_per_v_dim` that does not divide.

@@ -308,6 +308,21 @@ def test_lowerings_refuse_a_signed_op_on_u8(op_name):
         assert_both_engines_reject_hip(kernel, "gfx90a", TypeError, message)
 
 
+def test_lowerings_refuse_uitofp_of_a_non_u8_source():
+    # The builder refuses uitofp_f32 on anything but u8, so the kernel is built
+    # on u8 and its serialized text retyped to i8: IR that did not come through
+    # the builder. The two lowerings would read it differently (LLVM's uitofp
+    # takes an i8 0xff as 255.0, HIP's int8_t cast as -1.0), so every lowering
+    # of each engine refuses it with one message.
+    b = IRBuilder("uitofp_source")
+    b.uitofp_f32(b.param("X", U8))
+    b.ret()
+    kernel = parse(serialize(b.kernel).replace("u8", "i8"))
+    message = "arith.uitofp_f32 expects a u8 source, got i8"
+    assert_both_engines_reject(kernel, "gfx90a", TypeError, message)
+    assert_both_engines_reject_hip(kernel, "gfx90a", TypeError, message)
+
+
 # ---- on GPU (gfx90a) ---------------------------------------------------------
 
 _LANES = 64

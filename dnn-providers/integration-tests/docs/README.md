@@ -8,16 +8,17 @@ developer who must run the suite, read its output, or add to it.
 | Document | Read it to… |
 |---|---|
 | [File Formats](file-formats.md) | Understand every file in the bundle tree and the provider configs: graphs, template sweeps, metadata, golden data and DVC pointers, support-claim sidecars, per-engine TOML, tier YAML. Also learn how test names are derived. |
-| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
+| [Running the Tests](running-tests.md) | Run the suite (CTest, check targets, the binary directly), time the engine with `--benchmark`, learn what the tiers and filters select, and read the output: coverage summary, support-claim summary, hard stops, and runs that look green but are not. |
 | [Adding Tests and Updating Claims](adding-tests.md) | Add a bundle (end to end, including a new op), add golden data, update support claims when a run reports `unclaimed_support`, record an engine limitation, add an engine lane, or add a C++ test when a bundle cannot express it. |
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
+| [Support Matrix and Feature Coverage](support-matrix.md) | Render the human-readable matrix of which engine supports which graph on which GPU and OS, validate the sidecars it is built from, see the pre-commit and CI checks around it, and measure per-op feature coverage. |
 
 Tool references are next to the tools:
 [`migration-scripts/README.md`](../migration-scripts/README.md) (the bulk
 C++-to-bundle pipeline, `find_case.py`) and
 [`reference-data-scripts/README.md`](../reference-data-scripts/README.md)
 (golden-data generators and the bundle verifier). Design rationale is in RFC
-0006 (plugin-agnostic tests), RFC 0011 (golden reference validation) and RFC
+0006 (plugin-agnostic tests), RFC 0011 (bundle test framework) and RFC
 0015 (engine support claims) under `projects/hipdnn/docs/rfcs/`.
 
 ## Terms
@@ -50,6 +51,7 @@ other rows do not, so they are easy to miss.
 | `UNVERIFIABLE BUNDLES` / `Unverifiable: … tried: …` | **yes** (those tests failed) | The engine ran the bundle, but no oracle could check its output: no golden data and no reference executor for the op. Nothing was tested. | [Unverifiable bundles](running-tests.md#unverifiable-bundles); fix: [When no reference executor supports the op](adding-tests.md#when-no-reference-executor-supports-the-op) |
 | `Error: zero tests ran.` | **yes** | A discovery or filter misconfiguration, or, with GTest sharding, an empty shard. | [Hard stops](running-tests.md#hard-stops) |
 | `FATAL: --enforce-support-claims is active and …` | **yes** | Enforcement verified nothing. | [Hard stops](running-tests.md#hard-stops) |
+| `benchmark failed: …` | **yes** (that test failed) | Under `--benchmark`, the verified graph failed when it ran again, or the timer returned too few measurements. | [Time the engine](running-tests.md#4-time-the-engine---benchmark) |
 | `unclaimed_support` in the `SUPPORT CLAIM SUMMARY` | no | The engine accepts graphs that no sidecar claims. Record them. | [Updating support claims](adding-tests.md#updating-support-claims) |
 | `Skipped:` equal to (or close to) the total | no | Green, but little or nothing was tested. Read the skip reasons. | [Test coverage summary](running-tests.md#test-coverage-summary) |
 | `WARNING: Bundle tests are enabled but …` / `WARNING: No bundles could be loaded from …` | no | No bundles registered. Only compiled-in C++ tests ran. | [Troubleshooting](running-tests.md#troubleshooting) |

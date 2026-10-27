@@ -39,7 +39,7 @@ def test_s01_calculateloopnumiter_halfplr_tdm_is_rejected():
 
 def test_s01_calculateloopnumiter_halfplr_tdm_reports_reason(capsys, monkeypatch):
     """The rejection names TDMSplit instead of silently dropping the config."""
-    import Tensile.BenchmarkProblems as benchmark_problems
+    import tensilelite.BenchmarkProblems as benchmark_problems
 
     def serial_map(function, objects, *_args, **_kwargs):
         return [function(*args) for args in objects]

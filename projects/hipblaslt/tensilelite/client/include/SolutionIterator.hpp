@@ -73,13 +73,12 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
             }
 
@@ -96,15 +95,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 

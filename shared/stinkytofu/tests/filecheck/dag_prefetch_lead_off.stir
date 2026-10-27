@@ -1,14 +1,14 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=0 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wait-alu-scoreboard --prefetch-lead-wmmas=0 --print-output
 #
-# Lead off (dag_prefetch_lead.stir has it on): the prefetch issues once the 32-cycle
-# ValuVgprToVmemAddr gap after its address VALUs has passed, after 5 WMMAs.
+# Lead off (dag_prefetch_lead.stir has it on): the prefetch group is still pinned, in its
+# tensor_load's window as in a single-stage loop, and issued there by the Prefetch level.
 
 # CHECK-LABEL: @prefetch_lead
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
-# CHECK: v_wmma_scale
+# CHECK: v300 = "st.v_add_f32"
+# CHECK-NEXT: v301 = "st.v_add_f32"
+# CHECK: "st.s_barrier_signal"
+# CHECK-NEXT: "st.s_barrier_wait"
+# CHECK-NEXT: "st.tensor_load_to_lds"
 # CHECK-NEXT: "st.global_prefetch_b8"(v[300:301]
 st.func @prefetch_lead() {
 ^entry:

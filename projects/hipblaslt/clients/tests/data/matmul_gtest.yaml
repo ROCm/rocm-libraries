@@ -1335,7 +1335,7 @@ Tests:
   unit_check: 0
   iters: 1
   cold_iters: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 # Stream-K custom TF32 kernel with a large batch: sk.grid already includes the batch, so a
 # StreamKWithBatch launch overflowed the 32-bit global work size (17.8M work groups).
@@ -1355,6 +1355,7 @@ Tests:
   unit_check: 0
   iters: 1
   cold_iters: 1
+  # Not on gfx1250: exercises a gfx950 custom kernel.
   gpu_arch: '950'
 
 - name: matmul_swizzleA
@@ -1820,6 +1821,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
+  # Not on gfx1250: no grouped-GEMM kernels for bf16.
   gpu_arch: '942'
 
 - name: matmul_groupedgemm_xf32
@@ -1835,6 +1837,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
+  # Not on gfx1250: no grouped-GEMM kernels for xf32.
   gpu_arch: '942'
 
 - name: matmul_groupedgemm_zero_n
@@ -1850,7 +1853,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1866,7 +1869,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1883,7 +1886,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_bias_gelu_aux_fp16
   category: pre_checkin
@@ -2321,6 +2324,7 @@ Tests:
   bias_vector: [0, 1]
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: no fp32 aux-output (E) kernels.
   gpu_arch: '942'
 
 - name: matmul_dgelu_fp32
@@ -2338,6 +2342,7 @@ Tests:
   activation_type: gelu
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: no fp32 aux-output (E) kernels.
   gpu_arch: '942'
 
 - name: matmul_drelu_fp32
@@ -2355,6 +2360,7 @@ Tests:
   activation_type: relu
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: no fp32 aux-output (E) kernels.
   gpu_arch: '942'
 
 - name: matmul_bgradb_fp32
@@ -2372,6 +2378,7 @@ Tests:
   bias_type: f32_r
   bias_source: b
   unit_check: 1
+  # Not on gfx1250: no fp32 bias-gradient kernels.
   gpu_arch: '942'
 
 - name: matmul_bias_gelu_aux_bf16_TN
@@ -2391,6 +2398,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: no bf16 aux-output (E) kernels.
   gpu_arch: '9(42|50)'
 
 - name: matmul_dgelu_bf16_NN
@@ -2409,6 +2417,7 @@ Tests:
   activation_type: gelu
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: no bf16 aux-output (E) kernels.
   gpu_arch: '942'
 
 - name: matmul_bgradb_bf16_NT
@@ -2427,7 +2436,7 @@ Tests:
   bias_type: bf16_r
   bias_source: b
   unit_check: 1
-  gpu_arch: '942'
+  gpu_arch: '942|1250'
 
 - name: matmul_bgradb_bf16_NT
   category: pre_checkin
@@ -2482,6 +2491,7 @@ Tests:
   bias_type: f32_r
   bias_source: b
   unit_check: 1
+  # Not on gfx1250: no f32-output bias-gradient kernels.
   gpu_arch: '942'
 
 - name: matmul_extapi_algo_method_gemm
@@ -2541,6 +2551,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   norm_check: 1
   unit_check: 0
+  # Not on gfx1250: no TT kernel for f32 with fast bf16 compute.
   gpu_arch: '950'
 
 - name: matmul_one_double
@@ -2565,7 +2576,7 @@ Tests:
   alpha: [1.0, 2.0]
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '9(0a|4[0-2])'
+  gpu_arch: '9(0a|4[0-2])|1250'
 
 # Regression: int32 alpha 1065353216 (== float 1.0 bits) once crashed kernel selection.
 # unit_check off: alpha overflows int32 math; the guard is API success, not numerics.
@@ -2579,7 +2590,7 @@ Tests:
   alpha: 1065353216
   beta: 0
   unit_check: 0
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_gemm_i8_dst_i32
   category: pre_checkin
@@ -2596,7 +2607,7 @@ Tests:
   alpha: 1
   beta: [ 0, 2 ]
   unit_check: 1
-  gpu_arch: '9(0a|50)'
+  gpu_arch: '9(0a|50)|1250'
 
 - name: matmul_gemm_i8_dst_i32_94x
   category: pre_checkin
@@ -2630,7 +2641,7 @@ Tests:
   alpha: 1
   beta: [ 0, 2 ]
   unit_check: 1
-  gpu_arch: '9(0a|50)'
+  gpu_arch: '9(0a|50)|1250'
 
 - name: matmul_gemm_i8_dst_i8_94x
   category: pre_checkin
@@ -2794,7 +2805,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 - name: matmul_extapi_algo_method_tuning_gsu_gemm_only_1250
   category: pre_checkin
@@ -2845,7 +2856,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
-  gpu_arch_exclude: '1[1-2]\d{2}'
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 - name: matmul_heuristic_all_solutions_no_workspace
   category: nightly
@@ -2942,6 +2953,7 @@ Tests:
   initialization: hpl
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: includes FP6 MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
 - name: matmul_mx_large
@@ -2962,6 +2974,7 @@ Tests:
   initialization: trig_float
   unit_check: 0
   norm_check: 1
+  # Not on gfx1250: uses FP6 and fp16-output MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
 # gfx1151 W4A16: TN, complete quantization groups, K divisible by 64.
@@ -3066,6 +3079,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   requested_solution_num: 10
+  # Not on gfx1250: uses FP6 and fp16-output MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
 - name: matmul_mx_solution_index
@@ -3087,6 +3101,7 @@ Tests:
   norm_check: 1
   algo_method: [2]
   solution_index: 0x82040404  # Workgroup tile size = 128x128x128
+  # Not on gfx1250: uses FP6 and fp16-output MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
 - name: matmul_mx_multiple_kernels
@@ -3107,6 +3122,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   requested_solution_num: 3
+  # Not on gfx1250: uses FP6 and fp16-output MX types; gfx1250 MX coverage is matmul_fast_check_mx_*.
   gpu_arch: '950'
 
 - name: matmul_relu_clamp_useE
@@ -3133,6 +3149,7 @@ Tests:
   scaleAlpha_vector: 1
   norm_check: 1
   unit_check: 0
+  # Not on gfx1250: aux-output (E) kernels exist there for f16 only.
   gpu_arch: '942'
 
 # 1x32x512x512x256 [NCDHW], OC = 1
@@ -3178,7 +3195,7 @@ Tests:
   beta: 4.0
   initialization: integer_exact
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # Same sweep in f16 and bf16 (bf16 is the precision of the ROCM-26455 defect). This sweep
 # stays on rand_int rather than integer_exact: an input-side leading-dimension
@@ -3199,7 +3216,7 @@ Tests:
   beta: 4.0
   initialization: rand_int
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # Concrete ROCM-26455 reproducer: bf16, transA=N / transB=T, with bias and
 # a scaleAlpha vector (the Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV kernel family),
@@ -3227,7 +3244,7 @@ Tests:
   scaleAlpha_vector: 1
   initialization: integer_exact
   unit_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # Strided-batched output: inflate stride_c/stride_d so stride * bpe crosses 2^31
 # for the per-batch base offset, while the per-batch compute stays at 64x64x64.
@@ -3246,7 +3263,7 @@ Tests:
   beta: 0.0
   initialization: integer_exact
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # ROCM-31258: hand-written custom kernels bound D and C stores with a buffer
 # descriptor length (num_records) of BufferOOB. While BufferOOB was 0x80000000,
@@ -3276,7 +3293,7 @@ Tests:
   c_equal_d: true
   initialization: integer_exact
   unit_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 # Concrete ROCM-31230 reproducer: fp32 NN with an oversized A leading dimension, so
 # lda * DepthU * bpe reaches 2^31 and the signed widen of the StaggerU global-read
@@ -3315,6 +3332,8 @@ Tests:
   requested_solution_num: -1
   initialization: integer_exact
   unit_check: 1
+  # Not on gfx1250: the all-solutions find returns "NO solution found!" for this fp32 NN
+  # shape on gfx1250-strict (hardware run on PR #13504).
   gpu_arch: '1201'
 
 ###############################################################################
@@ -3455,7 +3474,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # The ROCM-26455 shape and epilogue with fast_check alone.
 # Runtime on gfx942: 8 cases, about 2 s.
@@ -3476,7 +3495,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # Output element offsets above 2^32 (32-bit unsigned wrap), and a batch base
 # offset above 2^32: 3 batches with stride 2^31 + 2 put batch 2 at element
@@ -3494,7 +3513,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # Runtime on gfx942: 4 cases, about 2 s.
 - name: matmul_fast_check_batch_offset_above_2_32
@@ -3512,7 +3531,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # Large shapes with partial tiles in every dimension.
 # Runtime on gfx942: 8 cases, about 10 s.
@@ -3566,7 +3585,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # Every supported solution, not only the heuristic's first choice, on the
 # ldc = ldd = 1049100 output-overflow shape. An indexing defect is usually specific
@@ -3589,7 +3608,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 
 ###############################################################################
@@ -3815,7 +3834,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 # Stream-K solutions (the ROCM-31290 and GitHub PR 11962 families). TensileLite
 # offers them only when the process starts with TENSILE_SOLUTION_SELECTION_METHOD=2,
@@ -4009,7 +4028,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 ###############################################################################
 # fast_check side operands (AIHPBLAS-5017).
@@ -4118,7 +4137,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 - name: matmul_fast_check_matches_unit_check_scales_fp8_vec
   category: pre_checkin
@@ -4135,7 +4154,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 - name: matmul_fast_check_scales_fp8_vec_lda_ROCM32062
   category: pre_checkin
@@ -4152,7 +4171,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 - name: matmul_fast_check_matches_unit_check_scales_fp8_f32
   category: pre_checkin
@@ -4171,7 +4190,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 # E output with relu and clamp, with bias. ldd equals lde here; see the
 # ROCM-32139 case below. gfx90a has aux kernels for f16 only.
@@ -4217,6 +4236,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
+  # Not on gfx1250: no fp32 or bf16 aux-output (E) kernels.
   gpu_arch: '9(42|50)'
 
 # E and D laid out differently (lde = M, and a padded lde), one batch and two, where
@@ -4270,7 +4290,7 @@ Tests:
   gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 # gfx942 and gfx950 offer a bf16 bias gradient only from B with B transposed, and
-# none in f32.
+# none in f32. gfx1250 offers the bf16 one in every layout, also none in f32.
 - name: matmul_fast_check_matches_unit_check_bias_grad_bf16
   category: pre_checkin
   function:
@@ -4288,7 +4308,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # A per-batch bias with a gap before the next batch's vector, which holds poison.
 # Runtime on gfx90a: 2 cases, under 1 s.
@@ -4541,7 +4561,7 @@ Tests:
   allow_no_solution: 1
   unit_check: 0
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
 # where C and D are exactly 4 GiB. One column fewer, exactly 4 GiB, and one more.
@@ -4799,7 +4819,7 @@ Tests:
   initialization: integer_exact
   unit_check: 0
   fast_check: 1
-  gpu_arch: '950'
+  gpu_arch: '950|1250'
 
 ###############################################################################
 # fast_check SDC hunt (AIHPBLAS-5021): on demand, in no tier.
@@ -5034,7 +5054,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   threads_streams: *common_threads_streams
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # Subtile MXFP4 tests (gfx950)
 # All use preswizzled scales (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
@@ -5423,7 +5443,7 @@ Tests:
   beta: 1.0
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)|1250'
 
 # Test all solutions with batch offsets and all transpose combinations
 - name: matmul_batch_offset_all_solutions

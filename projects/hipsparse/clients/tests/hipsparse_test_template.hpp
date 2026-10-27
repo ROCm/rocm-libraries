@@ -31,6 +31,7 @@
 
 #include <exception>
 #include <hip/hip_runtime_api.h>
+#include <hipsparse/hipsparse.h>
 
 namespace
 {
@@ -86,6 +87,19 @@ namespace
                     FAIL() << "Test '" << name_ROUTINE << "' threw std::exception: " << e.what()
                            << " | last HIP error: " << hipGetErrorString(hip_err) << " ("
                            << static_cast<int>(hip_err) << ").";
+                }
+                catch(const hipsparseStatus_t& status)
+                {
+                    hipError_t hip_err = hipGetLastError();
+                    FAIL() << "Test '" << name_ROUTINE << "' threw "
+                           << hipsparseGetErrorName(status) << " (" << static_cast<int>(status)
+                           << ") | last HIP error: " << hipGetErrorString(hip_err) << " ("
+                           << static_cast<int>(hip_err) << ").";
+                }
+                catch(const hipError_t& status)
+                {
+                    FAIL() << "Test '" << name_ROUTINE << "' threw " << hipGetErrorString(status)
+                           << " (" << static_cast<int>(status) << ").";
                 }
                 catch(...)
                 {

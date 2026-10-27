@@ -286,11 +286,14 @@ def _lower_via_cpp_engine(
 
     if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
+    refused = getattr(engine, "ArchDomainError", None)
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
     except (
         Exception
     ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+        if refused is not None and isinstance(e, refused):
+            raise _arch_domain_refusal(str(e)) from None
         msg = str(e)
         if "unknown opcode" in msg:
             so = getattr(engine, "__file__", "<unknown>")
@@ -300,6 +303,36 @@ def _lower_via_cpp_engine(
                 f"it (the .so predates the opcode). Loaded from: {so}"
             ) from e
         raise
+
+
+def _arch_domain_refusal(message: str) -> Exception:
+    """The C++ engine's arch-domain refusal, as the Python lowerer raises it.
+
+    The engine passes only its message, which ``domain.message`` formats and
+    ``domain.parse_message`` reads back. The cell is then looked up again in
+    this checkout's table, so a refusal the Python side would not make -- an
+    extension built from other columns or waivers -- is reported as the
+    engines disagreeing rather than passed off as a verdict.
+    """
+    from .arch import domain as arch_domain
+    from .lower_llvm import ArchDomainError
+
+    parsed = arch_domain.parse_message(message)
+    table = arch_domain.load(parsed[2]) if parsed is not None else None
+    cell = table.lookup(parsed[0], parsed[1]) if table is not None else None
+    if (
+        parsed is None
+        or cell is None
+        or not arch_domain.is_negative(cell.status)
+        or arch_domain.is_waived(*parsed[:3])
+    ):
+        return BackendMismatch(
+            "the C++ engine refused a lowering that this checkout's arch-domain "
+            f"table does not refuse ({message!r}); the rocke_engine extension "
+            "was built from other columns or waivers -- rebuild it"
+        )
+    key, arch, flavor, _ = parsed
+    return ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
 
 
 def _effective_flavor(llvm_flavor: Optional[str]) -> str:
@@ -357,9 +390,9 @@ def lower_kernel_via_backend(
     # The Python lowerer reads the mode only for a kernel that demands an
     # intrinsic and the C++ path only in its post-pass, so one bad value used to
     # raise for some kernels and some backends and be ignored by the rest.
-    from .lower_llvm import _arch_domain_mode
+    from .arch import domain as arch_domain
 
-    _arch_domain_mode()
+    arch_domain.mode()
 
     chosen = resolve_backend()
 
@@ -376,12 +409,18 @@ def lower_kernel_via_backend(
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
     from .ir_serialize import serialize
+    from .lower_llvm import ArchDomainError
 
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
             flavor = _effective_flavor(llvm_flavor)
             out = _lower_via_cpp_engine(ir_text, _arch, flavor)
+        except ArchDomainError:
+            # A verdict about the kernel, not an engine failure. The Python
+            # lowerer reads the same table and would refuse the same kernel, so
+            # falling back would only print a misleading "fell back" line first.
+            raise
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
@@ -408,10 +447,39 @@ def lower_kernel_via_backend(
     # One flavor for both engines: each resolving for itself could compare IR
     # lowered at two different flavors and report the gap as a parity failure.
     flavor = _effective_flavor(llvm_flavor)
-    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    #
+    # An arch-domain refusal is compared like the IR is: both engines must
+    # refuse, over the same intrinsic, or this is a mismatch. The refusal is
+    # what `both` returns then, as the other modes do.
+    try:
+        py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    except ArchDomainError as py_refusal:
+        try:
+            _lower_via_cpp_engine(serialize(kernel), _arch, flavor)
+        except ArchDomainError as cpp_refusal:
+            if (cpp_refusal.key, cpp_refusal.arch, cpp_refusal.flavor) == (
+                py_refusal.key,
+                py_refusal.arch,
+                py_refusal.flavor,
+            ):
+                raise py_refusal from None
+            raise BackendMismatch(
+                f"python vs cpp engine refused kernel '{name}' on {_arch} over "
+                f"different intrinsics: python {py_refusal.key!r}, cpp "
+                f"{cpp_refusal.key!r}"
+            ) from py_refusal
+        raise BackendMismatch(
+            f"the python lowerer refused kernel '{name}' on {_arch} and the cpp "
+            f"engine lowered it: {py_refusal}"
+        ) from py_refusal
     ir_text = serialize(kernel)
     try:
         cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
+    except ArchDomainError as cpp_refusal:
+        raise BackendMismatch(
+            f"the cpp engine refused kernel '{name}' on {_arch} and the python "
+            f"lowerer lowered it: {cpp_refusal}"
+        ) from cpp_refusal
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError
@@ -938,9 +1006,14 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 
 def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
-    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` -> flat dict.
-    ``kind`` ("16c"|"4c") selects the binding's spec path. The 16c-only
-    ``double_buffer``/``fold_k32`` fields are forwarded when present."""
+    """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec` -> flat dict. ``kind`` ("16c"|"4c"|"generic")
+    selects the binding's spec path. The problem's ``dtype`` is always
+    forwarded; every other kernel field the spec has is forwarded when
+    present: the 16c ``double_buffer``/``fold_k32``, the 4c dgrad knobs
+    (``dgrad_fused_weights``, ``dgrad_weights_lds``, ``stage_rows``,
+    ``waves_q``) and the generic kernel's tiling, persistent-grid,
+    runtime-channel, weight-path and row-stream fields."""
     p = spec.problem
     d = dict(
         kind=kind,
@@ -957,17 +1030,79 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
             stride=p.stride,
             dil_h=p.dil_h,
             dil_w=p.dil_w,
+            dtype=p.dtype,
         ),
         name=spec.name,
         block_q=spec.block_q,
         block_groups=spec.block_groups,
         wave_size=spec.wave_size,
     )
-    for f in ("double_buffer", "fold_k32"):
+    for f in (
+        "double_buffer",
+        "fold_k32",
+        "dgrad_fused_weights",
+        "dgrad_weights_lds",
+        "stage_rows",
+        "waves_q",
+        # DirectConvSpec (kind "generic").
+        "block_h",
+        "waves_k",
+        "runtime_k_loop",
+        "persistent_grid",
+        "persistent_rounds",
+        "runtime_channels",
+        "k_atoms",
+        "m_tiles",
+        "preload_weights",
+        "waves_per_eu",
+        "row_guard",
+        "prefetch_rows",
+        "lds_only_sync",
+        "waves_m",
+        "xcd_tiles",
+        "lds_pad",
+        "stage_out",
+        "row_exit",
+    ):
         v = getattr(spec, f, None)
         if v is not None:
             d[f] = v
     return d
+
+
+def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectDgradWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        tile_n=spec.tile_n,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
 
 
 def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
@@ -1553,17 +1688,22 @@ def lower_conv_direct_grouped(
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
-    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec`.
-    ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
+    """Lower a :class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` /
+    :class:`DirectConvSpec`. ``kind`` ("16c"|"4c"|"generic") selects the
+    kernel variant."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from kernels.common.conv_direct_grouped import (
+            build_direct_conv,
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
         from .lower_llvm import lower_kernel_to_llvm
 
-        build = build_direct_conv_4c if kind == "4c" else build_direct_conv_16c
+        build = {
+            "4c": build_direct_conv_4c,
+            "generic": build_direct_conv,
+        }.get(kind, build_direct_conv_16c)
         k = build(spec, arch=arch)
         ll = lower_kernel_to_llvm(k, arch=arch)
         ir = ""
@@ -1621,6 +1761,43 @@ def lower_conv_direct_nongrouped(
         py_fn,
         lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectDgradWmmaSpec` (the gfx1250 WMMA direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_wmma import build_direct_dgrad_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_dgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_dgrad_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 

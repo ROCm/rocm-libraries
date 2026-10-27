@@ -3,12 +3,15 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <sstream>
 #include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -36,6 +39,7 @@ namespace
         solution.sizeMapping.macroTile = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU = 64;
         solution.sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 1);
+        solution.sizeMapping.waveNum = 4;
         solution.sizeMapping.matrixInstruction = {16, 16, 4, 1};
         solution.sizeMapping.globalSplitU = 0;
         solution.sizeMapping.globalAccumulation = 0;
@@ -391,6 +395,8 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         auto launch = solution.resolvePersistentSettings(problem, device);
         solution.customKernel.generated = true;
         auto normal = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+        // DP keeps the launch-header count in X workgroups, not physical peers.
+        EXPECT_EQ(value<uint32_t>(normal.args, "numWorkGroups"), launch.grid / cluster.y);
         solution.customKernel.generated = false;
         auto custom = solution.generateCustomCall<true>(problem, inputs, device, launch);
         ASSERT_EQ(custom.args.size(), normal.args.size());
@@ -407,5 +413,537 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
                   pointerArray ? static_cast<void const*>(batchBias) : inputs.bias);
         EXPECT_EQ(value<uint32_t>(custom.args, "StrideA0"), initialStrides ? 1u : problem.a().strides()[1]);
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
+    }
+}
+
+namespace
+{
+    ContractionProblemGemm clusterProblem(size_t m = 257, size_t n = 385,
+                                          size_t k = 129, size_t batches = 3)
+    {
+        auto problem = persistentProblem(m, n, k, batches);
+        // A problem built by GEMM starts with a zero workspace budget. Resolve
+        // the ideal split first; fallback tests then supply an explicit budget.
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        return problem;
+    }
+
+    void configureClusterStreamK(ContractionSolution& solution, uint32_t cs, uint32_t cn)
+    {
+        configurePersistentSolution(solution, 3, 2);
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution.sizeMapping.clusterDim = {cs, cn, 1};
+        solution.sizeMapping.workspaceSizePerElemC = 4;
+    }
+
+    ContractionInputs clusterInputs(float alpha = 2.5f)
+    {
+        auto inputs = persistentInputs(alpha);
+        // Host argument packing never dereferences the addresses.
+        inputs.ws = reinterpret_cast<void*>(uintptr_t{0x10000});
+        inputs.Synchronizer = reinterpret_cast<void*>(uintptr_t{0x20000});
+        return inputs;
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKPacksRaggedBatchedSchedule)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    // Two batches of 2x3 real tiles occupy two eight-peer blocks. The physical
+    // budget rounds from 35 to 32: four clusters split 2 * 65 K iterations.
+    auto problem = clusterProblem(129, 257, 4097, 2);
+    auto device = persistentDevice(35);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    const auto& cluster = launch.clusterSchedule;
+    EXPECT_EQ(launch.argsVersion, 2);
+    EXPECT_EQ(launch.selectedGrid, 35u);
+    EXPECT_EQ(launch.totalTiles, 12u);
+    EXPECT_EQ(cluster.blocksM, 1u);
+    EXPECT_EQ(cluster.blocksN, 1u);
+    EXPECT_EQ(cluster.blocks, 2u);
+    EXPECT_EQ(launch.grid, 4u);
+    EXPECT_EQ(cluster.physicalGrid, 32u);
+    EXPECT_EQ(cluster.flagEntries, 32u);
+    EXPECT_EQ(cluster.partialSlots, 32u);
+    EXPECT_EQ(cluster.split.extraIters, 2u);
+    EXPECT_EQ(launch.workspaceBytes, 32u * 128 * 128 * sizeof(float));
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::tree);
+    const auto inputs = clusterInputs();
+    const auto call = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+    EXPECT_EQ(call.numWorkGroups.x, 8u);
+    EXPECT_EQ(call.numWorkGroups.y, 4u);
+    EXPECT_EQ(call.numWorkGroups.z, 1u);
+    EXPECT_EQ(value<uint32_t>(call.args, "numWorkGroups"), 32u);
+    EXPECT_EQ(value<uint32_t>(call.args, "itersPerTile"), 65u);
+    EXPECT_EQ(value<uint32_t>(call.args, "skGrid"), 4u);
+    EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), 2u);
+    EXPECT_EQ(value<uint32_t>(call.args, "SKItersPerWG"), 32u);
+    EXPECT_EQ(value<void*>(call.args, "Flags"), inputs.Synchronizer);
+    EXPECT_FLOAT_EQ(value<float>(call.args, "alpha"), 2.5f);
+    const auto decisions = solution.computeStreamKDecisions(problem, device);
+    EXPECT_EQ(decisions.skGrid, 4u);
+    EXPECT_EQ(decisions.skTiles, 2u);
+    EXPECT_TRUE(decisions.partialsPresent);
+    EXPECT_EQ(decisions.requiredWorkspaceBytes, launch.workspaceBytes);
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKRoundsBudgetToCompleteClusters)
+{
+    for(auto [cs, cn] : {std::pair<uint32_t, uint32_t>{2, 4}, {1, 8}})
+    {
+        SCOPED_TRACE(::testing::Message() << cs << "," << cn);
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        const auto problem = clusterProblem(cs == 1 ? 128 : 129, 257, 4097, 1);
+        // One block has 65 iterations. A sub-cluster budget still launches every
+        // peer; larger budgets split it into 2 or 4 workers with one extra iteration.
+        for(auto [budget, grid, iters, extra] :
+            std::vector<std::tuple<size_t, size_t, uint32_t, uint32_t>>{
+                {1, 1, 0, 0}, {15, 1, 0, 0}, {16, 2, 32, 1}, {35, 4, 16, 1}})
+        {
+            SCOPED_TRACE(budget);
+            const auto launch = solution.resolvePersistentSettings(problem, persistentDevice(budget));
+            EXPECT_EQ(launch.selectedGrid, budget);
+            EXPECT_EQ(launch.grid, grid);
+            EXPECT_EQ(launch.clusterSchedule.physicalGrid, grid * 8);
+            EXPECT_EQ(launch.clusterSchedule.split.skItersPerWG, iters);
+            EXPECT_EQ(launch.clusterSchedule.split.extraIters, extra);
+            EXPECT_EQ(launch.workspaceBytes, grid == 1 ? 0 : grid * 8 * 128 * 128 * sizeof(float));
+        }
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKWorkspaceFallbackPreservesWholeClusterGeometry)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    auto problem = clusterProblem(513, 769, 4097, 3);
+    auto device = persistentDevice(256);
+    auto ideal = solution.resolvePersistentSettings(problem, device);
+    ASSERT_GT(ideal.workspaceBytes, 0u);
+    problem.setWorkspaceSize(ideal.workspaceBytes);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), ideal.workspaceBytes);
+    EXPECT_EQ(solution.resolvePersistentSettings(problem, device).grid, ideal.grid);
+    problem.setWorkspaceSize(ideal.workspaceBytes - 1);
+    auto fallback = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+    EXPECT_EQ(fallback.workspaceBytes, 0u);
+    EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
+    EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
+    EXPECT_EQ(fallback.clusterSchedule.split.skTiles, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.split.skItersPerWG, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.physicalGrid, fallback.grid * 8);
+    EXPECT_LE(fallback.grid, fallback.clusterSchedule.blocks);
+    EXPECT_EQ(fallback.reduction, origami::reduction_t::tree);
+    auto inputs = clusterInputs();
+    inputs.ws = nullptr;
+    EXPECT_NO_THROW(solution.generateSingleCall<true>(problem, inputs, device, fallback, GSUSettings{}));
+    inputs.Synchronizer = nullptr;
+    EXPECT_THROW(solution.generateSingleCall<true>(problem, inputs, device, fallback, GSUSettings{}), std::runtime_error);
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKRejectsOverflowAndBoundsTreeArithmetic)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 1);
+    auto device = persistentDevice(64);
+    auto problem = clusterProblem(1, 1, 64 * 65536, 1);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_TRUE(launch.clusterSchedule.treeBoundsFallback);
+    EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+    solution.sizeMapping.depthU = 1;
+    problem = clusterProblem(1, 1, 1 << 24, 1);
+    EXPECT_TRUE(solution.resolvePersistentSettings(problem, device).clusterSchedule.treeBoundsFallback);
+    problem = clusterProblem(size_t{128} << 16, size_t{128} << 16, 1, 1);
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::overflow_error);
+    problem = clusterProblem(1, 1, 65, 1);
+    solution.sizeMapping.workspaceSizePerElemC = std::numeric_limits<size_t>::max();
+    EXPECT_THROW(solution.requiredWorkspaceSize(problem, device), std::overflow_error);
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKVersionZeroKeepsPrebuiltScheduling)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 1);
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    EXPECT_FALSE(solution.usesStreamKSpatialCluster());
+    EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+
+    auto problem = clusterProblem();
+    auto device = persistentDevice(8);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.argsVersion, 0);
+    EXPECT_FALSE(launch.clusterSchedule.enabled);
+    EXPECT_EQ(launch.totalTiles, 36u);
+    EXPECT_EQ(launch.grid, 8u);
+    auto invocation = solution.generateSingleCall<true>(
+        problem, clusterInputs(), device, launch, GSUSettings{});
+    EXPECT_EQ(invocation.numWorkGroups.x, 8u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(invocation.clusterDim.x, 2u);
+    EXPECT_EQ(invocation.clusterDim.y, 1u);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "skGrid"), 8u);
+    const auto expected = streamKStaticSplit(36, 3, 8, device.skFullTiles, false);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "skTiles"), expected.skTiles);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "SKItersPerWG"), expected.skItersPerWG);
+
+    solution.internalArgsSupport.persistentLoopArgsVersion = 2;
+    EXPECT_TRUE(solution.usesStreamKSpatialCluster());
+    auto spatial = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(spatial.argsVersion, 2);
+    EXPECT_TRUE(spatial.clusterSchedule.enabled);
+    EXPECT_EQ(spatial.clusterSchedule.blocks, 24u);
+    EXPECT_EQ(spatial.grid, 4u);
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabilities)
+{
+    auto problem = clusterProblem();
+    auto device = persistentDevice();
+    for(int version : {-1, 1, 3})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, 2, 1);
+        solution.internalArgsSupport.persistentLoopArgsVersion = version;
+        EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    }
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 1);
+    solution.sizeMapping.prefetchAcrossPersistent = 1;
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    solution.sizeMapping.prefetchAcrossPersistent = 0;
+    solution.sizeMapping.streamKAtomic = 1;
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    solution.sizeMapping.streamKAtomic = 0;
+    solution.customKernel.name = "external_abi2";
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    solution.customKernel.name.clear();
+    solution.problemType.outputAmaxD = true;
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    solution.problemType.outputAmaxD = false;
+    solution.problemType.useBias = 1;
+    EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
+    solution.problemType.useGradient = true;
+    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    solution.problemType.useBias = 0;
+    EXPECT_NO_THROW(solution.resolvePersistentSettings(problem, device));
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKFlagCapacityAndLargeWorkspace)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    solution.sizeMapping.macroTile = TensileLite::dim3(1024, 1024, 1);
+    auto problem = clusterProblem(2048, 4096, 2049 * 64, 1);
+    const size_t tileBytes = size_t{1024} * 1024 * sizeof(float);
+    for(size_t budget : {size_t{StreamKFlagElements - 1}, size_t{StreamKFlagElements},
+                         size_t{StreamKFlagElements + 1}, size_t{2 * StreamKFlagElements}})
+    {
+        auto device = persistentDevice(budget);
+        // Keep residency above the flag cap so this independently exercises
+        // physical-slot capacity and rounding the selected budget to clusters.
+        device.computeUnitCount = 2 * StreamKFlagElements;
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const size_t slots = std::min(budget, size_t{StreamKFlagElements}) / 8 * 8;
+        ASSERT_EQ(launch.clusterSchedule.flagEntries, slots);
+        EXPECT_EQ(launch.clusterSchedule.partialSlots, slots);
+        EXPECT_EQ(launch.clusterSchedule.physicalGrid, slots);
+        EXPECT_EQ(launch.selectedGrid, budget);
+        EXPECT_EQ(launch.grid, slots / 8);
+        ASSERT_GT(launch.workspaceBytes, size_t{1} << 32);
+        EXPECT_EQ(launch.workspaceBytes, slots * tileBytes);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), slots * tileBytes);
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKGeometryFollowsOutputIndexOrder)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    solution.sizeMapping.macroTile = TensileLite::dim3(64, 128, 1);
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ajlk_Blik_Cijk_Dijk", {129, 513, 3, 4097},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
+    ASSERT_TRUE(problem.transposeC01());
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    const auto launch = solution.resolvePersistentSettings(problem, persistentDevice(64));
+    // Output indices i,j map to macroTile.x,y before spatial blocking.
+    EXPECT_EQ(launch.totalTiles, 3u * 5u * 3u);
+    EXPECT_EQ(launch.clusterSchedule.blocksM, 2u);
+    EXPECT_EQ(launch.clusterSchedule.blocksN, 2u);
+    EXPECT_EQ(launch.clusterSchedule.blocks, 12u);
+}
+
+TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
+{
+    for(auto shape : {TensileLite::dim3(2, 1, 1), TensileLite::dim3(4, 2, 1),
+                      TensileLite::dim3(2, 8, 1)})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, shape.x, shape.y);
+        // Ragged spatial blocks and two batches still have identical K folds.
+        auto problem = clusterProblem(129, 129, 65 * 64, 2);
+        auto device = persistentDevice(256);
+        device.computeUnitCount = 256;
+        problem.setParams().setUniformSummationOrder(true);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        const auto& cluster = launch.clusterSchedule;
+        ASSERT_GT(cluster.partialSlots, 0u);
+        ASSERT_GT(launch.grid, cluster.blocks);
+        EXPECT_EQ(cluster.split.extraIters, 0u);
+        EXPECT_EQ(cluster.split.skTiles, cluster.blocks);
+        EXPECT_TRUE(streamKStaticSplitRowUniform(cluster.split, cluster.blocks,
+            cluster.itersPerTile, launch.grid, false, true));
+        EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        EXPECT_EQ(value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u, 0u);
+        // Capability checks still refuse coordinate-dependent partial storage.
+        solution.problemType.useInitialStridesCD = true;
+        EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
+    }
+    const auto irregular = streamKStaticSplit(3, 65, 7, 1, false);
+    EXPECT_FALSE(streamKStaticSplitRowUniform(irregular, 3, 65, 7, false, true));
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKWholeTileGridDoesNotCreateResidentTreeSplits)
+{
+    // Reproduce the 4096-square regression: 4096 whole tiles were clamped to
+    // 1536 resident WGs, creating 24 MiB of tree partials in the 2x1 case.
+    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{{2, 1}, {2, 2}, {4, 2}})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        auto device = persistentDevice(4096);
+        device.computeUnitCount = 256;
+        auto problem = clusterProblem(4096, 4096, 1024, 1);
+        problem.setWorkspaceSize(0);
+
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.selectedGrid, 4096u);
+        EXPECT_EQ(launch.clusterSchedule.physicalGrid, 4096u);
+        EXPECT_EQ(launch.grid, 4096u / (cs * cn));
+        EXPECT_TRUE(launch.clusterSchedule.wholeBlocksOnly);
+        EXPECT_FALSE(launch.clusterSchedule.workspaceFallback);
+        EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+        EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
+        EXPECT_EQ(launch.workspaceBytes, 0u);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+
+        auto inputs = clusterInputs();
+        inputs.ws = nullptr;
+        const auto call = solution.generateSingleCall<true>(
+            problem, inputs, device, launch, GSUSettings{});
+        EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, 4096u);
+
+        // A genuine K-split request must still respect the cooperative limit.
+        problem = clusterProblem(128, 128, 8192, 1);
+        const auto split = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(split.clusterSchedule.physicalGrid, 1536u);
+        EXPECT_GT(split.clusterSchedule.partialSlots, 0u);
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterTreeDoesNotSerializeIndependentBlocks)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 8, 1);
+    solution.sizeMapping.macroTile = {64, 64, 1};
+    solution.sizeMapping.workGroupSize = {128, 1, 1};
+    solution.sizeMapping.CUOccupancy = 6;
+    auto device = persistentDevice(0);
+    device.computeUnitCount = 8;
+    auto problem = clusterProblem(128, 128, 1024, 1);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.selectedGrid, 8u);
+    ASSERT_EQ(launch.totalTiles, 4u);
+    ASSERT_EQ(launch.clusterSchedule.blocks, 2u);
+    EXPECT_EQ(launch.grid, 2u);
+    EXPECT_EQ(launch.clusterSchedule.physicalGrid, 16u);
+    EXPECT_TRUE(launch.clusterSchedule.wholeBlocksOnly);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+
+    device.persistentFixedGrid = 8;
+    const auto fixed = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(fixed.grid, 1u);
+    EXPECT_EQ(fixed.clusterSchedule.physicalGrid, 8u);
+}
+
+TEST(PersistentArgumentLayout, ClusterCostAvoidsTreeFixupWithoutRemovingUsefulSplits)
+{
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx1250;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 0;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
+        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
+    for(auto [m, n, batch, k, cs, cn, whole] :
+        std::vector<std::tuple<size_t, size_t, size_t, size_t, uint32_t, uint32_t, bool>>{
+            {257, 129, 8, 4096, 4, 1, true}, {128, 128, 1, 8192, 4, 1, false},
+            // At this ragged two-axis boundary, whole blocks measured slower:
+            // 66 whole-block iterations versus 41 + 24 estimated split cost.
+            {512, 832, 1, 4161, 2, 4, false}})
+    {
+        SCOPED_TRACE(::testing::Message() << m << ',' << n << ',' << batch << ',' << k << ',' << cs << ',' << cn);
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        solution.internalArgsSupport.perTileExtraIters = true;
+        auto problem = clusterProblem(m, n, k, batch);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.clusterSchedule.wholeBlocksOnly, whole);
+        EXPECT_EQ(launch.workspaceBytes == 0, whole);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+        if(whole)
+        {
+            EXPECT_EQ(launch.clusterSchedule.fallbackReason, "whole-block-cost");
+            EXPECT_EQ(launch.grid, launch.clusterSchedule.blocks);
+            EXPECT_EQ(launch.clusterSchedule.flagEntries, 0u);
+            EXPECT_EQ(launch.clusterSchedule.split.skTiles, 0u);
+        }
+        // Explicit fixed grids bypass the performance policy.
+        device.persistentFixedGrid = launch.selectedGrid;
+        const auto fixed = solution.resolvePersistentSettings(problem, device);
+        EXPECT_TRUE(fixed.clusterSchedule.fixedGridUsed);
+        EXPECT_NE(fixed.clusterSchedule.fallbackReason, "whole-block-cost");
+        device.persistentFixedGrid = 0;
+        // A CU cap bounds the new whole-block candidate as well as splits.
+        problem.setParams().setSmCountTarget(32);
+        const auto capped = solution.resolvePersistentSettings(problem, device);
+        EXPECT_LE(capped.clusterSchedule.physicalGrid, 32u * 6u);
+    }
+}
+
+TEST(PersistentArgumentLayout, ClusterFitCountsRealPeersInOutputOrder)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 4, 2);
+    auto problem = clusterProblem(129, 257, 1024, 3);
+    // 2x3 tiles occupy one 4x2 block in M and two in N, per batch.
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 16.0);
+    problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ajlk_Blik_Cijk_Dijk", {257, 129, 3, 1024},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {},
+        rocisa::DataType::Float, {}, rocisa::DataType::Float, {}, 1.0);
+    ASSERT_TRUE(problem.transposeC01());
+    // Transposing output gives 3x2 tiles and a single complete spatial block.
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 6.0 / 8.0);
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    EXPECT_DOUBLE_EQ(solution.streamKClusterUtilization(problem), 1.0);
+}
+
+TEST(PersistentArgumentLayout, ClusterParallelEligibilityAndPackedOutputContract)
+{
+    using arch_t = origami::hardware_t::architecture_t;
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 128;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        arch_t::gfx950, 256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    auto problem = clusterProblem(257, 385, 65537, 2);
+    ASSERT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::parallel);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+    auto const& cluster = launch.clusterSchedule;
+    ASSERT_EQ(cluster.blocks, 4u);
+    EXPECT_EQ(launch.grid, 16u);
+    EXPECT_EQ(cluster.physicalGrid, 128u);
+    EXPECT_EQ(cluster.parallelSplits, 4u);
+    EXPECT_EQ(cluster.flagEntries, 0u);
+    EXPECT_EQ(launch.workspaceBytes, 257u * 385 * 2 * sizeof(float) * 4);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+    auto inputs = clusterInputs();
+    inputs.Synchronizer = nullptr;
+    const auto gemm = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+    EXPECT_EQ(value<void*>(gemm.args, "Flags"), nullptr);
+    EXPECT_EQ(value<void*>(gemm.args, "ws_d"), inputs.ws);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "skTiles"), 4u);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "SKItersPerWG"), 1025u / 4);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "skGrid"), 16u);
+    const auto conversion = solution.generateOutputConversionCall<true>(problem, inputs, launch, 1, 0);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "gsu"), 4u);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "strideW1"), 257u);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "strideW2"), 257u * 385);
+    EXPECT_FLOAT_EQ(value<float>(conversion.args, "alpha"), 2.5f);
+    EXPECT_FLOAT_EQ(value<float>(conversion.args, "beta"), -1.25f);
+    const auto decisions = solution.computeStreamKDecisions(problem, device);
+    EXPECT_EQ(decisions.skSplit, 4u);
+    EXPECT_EQ(decisions.requiredWorkspaceBytes, launch.workspaceBytes);
+
+    problem.setWorkspaceSize(launch.workspaceBytes - 1);
+    const auto fallback = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(fallback.reduction, origami::reduction_t::tree);
+    EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
+    EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
+    EXPECT_EQ(fallback.workspaceBytes, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.parallelSplits, 1u);
+    EXPECT_EQ(fallback.clusterSchedule.physicalGrid, 32u);
+    solution.problemType.useGradient = true;
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    solution.problemType.useGradient = false;
+    solution.problemType.sparse = 1;
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    solution.problemType.sparse = 0;
+    solution.sizeMapping.useSubtileImpl = true;
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    solution.sizeMapping.useSubtileImpl = false;
+    solution.customKernel.name = "handwritten";
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+}
+
+TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdges)
+{
+    using arch_t = origami::hardware_t::architecture_t;
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 0;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        arch_t::gfx950, 256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+    // Two real tiles per axis: no padding, M padding, N padding, then both axes.
+    // Padded peers must preserve the predictor's useful K splits.
+    for(auto [cs, cn] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {2, 1}, {4, 1}, {2, 4}, {4, 4}, {1, 2}, {1, 4}, {1, 8}})
+    {
+        SCOPED_TRACE(::testing::Message() << cs << ',' << cn);
+        ContractionSolution solution;
+        configureClusterStreamK(solution, cs, cn);
+        solution.sizeMapping.macroTile = {64, 64, 1};
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.workGroupSize = {128, 1, 1};
+        solution.sizeMapping.CUOccupancy = 6;
+        auto problem = clusterProblem(128, 128, 8192, 1);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+        ASSERT_GT(launch.selectedGrid, launch.totalTiles);
+        const auto expectedSplits = launch.selectedGrid / launch.totalTiles;
+        const auto& cluster = launch.clusterSchedule;
+        EXPECT_EQ(cluster.parallelSplits, expectedSplits);
+        EXPECT_EQ(cluster.physicalGrid, cluster.blocks * cs * cn * expectedSplits);
+        EXPECT_EQ(cluster.partialSlots, launch.totalTiles * expectedSplits);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+        const auto call = solution.generateSingleCall<true>(
+            problem, clusterInputs(), device, launch, GSUSettings{});
+        EXPECT_EQ(value<uint32_t>(call.args, "skTiles"), expectedSplits);
+        EXPECT_EQ(call.numWorkGroups.x * call.numWorkGroups.y, cluster.physicalGrid);
     }
 }

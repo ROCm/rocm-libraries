@@ -2,10 +2,31 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## (Unreleased) Composable Kernel
+
+### Fixed
+* Fixed CK Tile TF32 compilation for combined gfx942/gfx950 builds that select gfx942 fragments, by lowering their XF32 operations to FP32 MFMA instructions on gfx950 while preserving the fragment layout.
+
+### Added
+
+### Changed
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Known issues
+
+### Upcoming changes
+
+
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
 
 ### Added
 
+* Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
 * Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
 
