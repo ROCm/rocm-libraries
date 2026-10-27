@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <roc/hostnumerics/scalar_conversion_options.hpp>
 #include <roc/hostnumerics/scalar_traits.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
@@ -322,5 +323,103 @@ inline uint8_t encodeE8M0(float value) {
 inline uint8_t encodeE8M0Zero(float value) {
     const uint32_t bits = std::bit_cast<uint32_t>(value);
     return static_cast<uint8_t>((bits & 0x7fffffffU) >> 23U);
+}
+
+inline uint64_t roundRightShiftToNearestEven(uint64_t value, uint32_t shift) {
+    if (shift == 0) return value;
+    if (shift >= 64) return 0;
+    const uint64_t rounded = value >> shift;
+    const uint64_t remainder = value & ((uint64_t{1} << shift) - 1U);
+    const uint64_t halfway = uint64_t{1} << (shift - 1U);
+    return rounded + static_cast<uint64_t>(remainder > halfway ||
+                                           (remainder == halfway && (rounded & 1U) != 0));
+}
+
+// Keep the double significand until the destination rounding step.
+inline uint32_t encodeBinaryFloatDirect(double value, const BinaryFloatFormat& format,
+                                        bool saturate, bool truncate = false) {
+    const uint64_t bits = std::bit_cast<uint64_t>(value);
+    const uint32_t sourceExponent = static_cast<uint32_t>((bits >> 52) & 0x7ffU);
+    const uint64_t sourceMantissa = bits & 0xfffffffffffffULL;
+    const bool negative = (bits >> 63) != 0;
+    const uint32_t sign = format.hasSign && negative ? 1U << (format.totalBits - 1U) : 0U;
+    if (!format.hasSign && negative && value < 0.0)
+        throw std::runtime_error("Unsigned scale formats cannot encode negative values.");
+    if (sourceExponent == 0x7ffU) {
+        if (sourceMantissa != 0) {
+            if (format.canonicalNaNRaw == 0) return sign | format.maximumPositiveFiniteRaw;
+            return format.canonicalNaNRaw == 0x80U ? 0x80U : sign | format.canonicalNaNRaw;
+        }
+        return sign | (format.hasInfinity && !saturate ? format.positiveInfinityRaw
+                                                       : format.maximumPositiveFiniteRaw);
+    }
+    if (sourceExponent == 0) return format.hasSignedZero ? sign : 0U;
+    int exponent = static_cast<int>(sourceExponent) - 1023;
+    const int minimumExponent = 1 - format.exponentBias;
+    const uint64_t significand = (uint64_t{1} << 52) | sourceMantissa;
+    const int shift = 52 - format.mantissaBits + std::max(0, minimumExponent - exponent);
+    uint64_t rounded =
+        truncate ? (shift >= 64 ? 0 : significand >> shift)
+                 : roundRightShiftToNearestEven(significand, static_cast<uint32_t>(shift));
+    uint32_t magnitude;
+    if (exponent < minimumExponent) {
+        magnitude = static_cast<uint32_t>(rounded);
+    } else {
+        if (rounded == (uint64_t{1} << (format.mantissaBits + 1U))) {
+            rounded >>= 1;
+            ++exponent;
+        }
+        magnitude = (static_cast<uint32_t>(exponent + format.exponentBias) << format.mantissaBits) |
+                    static_cast<uint32_t>(rounded & ((1U << format.mantissaBits) - 1U));
+    }
+    if (magnitude > format.maximumPositiveFiniteRaw)
+        magnitude = format.hasInfinity && !saturate ? format.positiveInfinityRaw
+                                                    : format.maximumPositiveFiniteRaw;
+    if (magnitude == 0 && !format.hasSignedZero) return 0;
+    return sign | magnitude;
+}
+
+inline uint16_t encodeFloat16(double value, FloatingOverflow overflow) {
+    constexpr BinaryFloatFormat format{5, 10, 15, 16, true, true, true, 0x7bff, 0x7c00, 0x7e00};
+    return static_cast<uint16_t>(
+        encodeBinaryFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite));
+}
+
+inline uint16_t encodeBFloat16(double value, BFloat16Rounding rounding, FloatingOverflow overflow) {
+    if (rounding == BFloat16Rounding::Truncate && std::isnan(value)) return 0xffc1U;
+    constexpr BinaryFloatFormat format{8, 7, 127, 16, true, true, true, 0x7f7f, 0x7f80, 0x7fc0};
+    return static_cast<uint16_t>(
+        encodeBinaryFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite,
+                                rounding == BFloat16Rounding::Truncate));
+}
+
+template <ScalarType Type>
+inline uint32_t encodeBinaryFloatKnown(double value, FloatingOverflow overflow) {
+    // Narrow formats saturate finite overflow even when they encode infinity.
+    return encodeBinaryFloatDirect(
+        value, binaryFloatFormatKnown<Type>(),
+        std::isfinite(value) || overflow == FloatingOverflow::SaturateFinite);
+}
+
+inline uint8_t encodeE8M0(double value, E8M0Underflow underflow) {
+    if (std::isnan(value)) return 0xffU;
+    if (value < 0.0) throw std::runtime_error("E8M0 cannot encode negative values.");
+    if (std::isinf(value)) return 0xfeU;
+    if (value < std::ldexp(1.0, underflow == E8M0Underflow::FlushBelowFloat32Normal ? -126 : -127))
+        return 0;
+    int exponent;
+    const double significand = 2.0 * std::frexp(value, &exponent);
+    int biased = exponent - 1 + 127;
+    if (significand > 1.5 || (significand == 1.5 && (biased & 1) != 0)) ++biased;
+    return static_cast<uint8_t>(std::clamp(biased, 0, 254));
+}
+
+inline uint8_t encodeE8M0Zero(double value) {
+    const double magnitude = std::abs(value);
+    if (!std::isfinite(magnitude)) return 0xffU;
+    if (magnitude < std::ldexp(1.0, -126)) return 0;
+    int exponent;
+    (void)std::frexp(magnitude, &exponent);
+    return static_cast<uint8_t>(std::clamp(exponent - 1 + 127, 0, 255));
 }
 }  // namespace roc::hostnumerics::detail
