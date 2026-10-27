@@ -62,13 +62,16 @@
     "dom_fraction":  "1e-12",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
     "dy_kind":       "'special' if domain in ['nan', 'inf'] else dom_kind",
+    "bwd_terms":     "n * sc * sd * sh",
+    "bwd_term_max":  "24 if domain == 'positive' else (0.5 if domain == 'constant' else 0)",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes: scale dim 0 must be 1 and the normalized suffix must start after it (detail/Utilities.hpp:323 validateScaleNormalizedShape, called from RMSNormBackwardNode.hpp:87)"},
     {"rule": "(x_dtype == 'float' and p_dtype == 'float') or (x_dtype != 'float' and ((dy_dtype == x_dtype and p_dtype in ['float', x_dtype]) or (dy_dtype == 'float' and p_dtype == 'float')))", "reason": "x and dx share one dtype, scale, dscale and dbias share one dtype (RMSnormApplicabilityChecks.cpp:41 checkTensorDataTypesSupported, called from checkBwdTensorConfigSupported at :221), and the CPU and GPU references register only these (dy, x, scale, dx) combinations with fp32 compute: float everywhere; half or bfloat16 dy with float x, scale and dx; half or bfloat16 x and dx with dy equal to x and scale float or equal to x; half or bfloat16 x and dx with float dy and float scale (RMSNormBwdSignatureKey.hpp:99 getPlanBuilders, GpuRMSNormSignatureKey.hpp:254 getPlanBuilders)"},
     {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling (RFC 0023 section 14); it also keeps outerSize * stride far below UINT32_MAX, the work-group limit in RMSnormBwdPlan.cpp:132"},
-    {"rule": "domain not in ['nan', 'inf'] or (n * sc * sd * sh >= 2 and pc * pd * ph * pw >= 2)", "reason": "the special fill plants at least one non-finite element in dy (FillInputs.cpp:494-498): with a single normalization group the whole dx is that group's row, and with a single normalized element the whole dscale and dbias are that column, so a reference with no finite element in an output fails (NonFiniteMask.hpp:31)"}
+    {"rule": "domain not in ['nan', 'inf'] or (n * sc * sd * sh >= 2 and pc * pd * ph * pw >= 2)", "reason": "the special fill plants at least one non-finite element in dy (FillInputs.cpp:494-498): with a single normalization group the whole dx is that group's row, and with a single normalized element the whole dscale and dbias are that column, so a reference with no finite element in an output fails (NonFiniteMask.hpp:31)"},
+    {"rule": "p_dtype == 'float' or bwd_terms * bwd_term_max <= 60000", "reason": "dscale and dbias are written in p_dtype and each element sums bwd_terms = n * sc * sd * sh terms (the product of the dims_s the saved inverse RMS covers) of dy and of dy * x * inv_rms; a sign-definite dy and x (positive: at most 4 each, inv_rms at most 1.5, so a dscale term of at most 24; constant: 0.5) makes that sum grow linearly with the term count, and past half's largest value 65504 the output is inf, which the default validator fails (probed on gfx950: 421848 terms of positive dy in half, RMSNormBackward s5068); bfloat16 does not overflow but its 8-bit mantissa rounds a sum that large to a few units, so the same bound applies; the zero-mean domains grow with the square root of the term count and stay far below it, and a float p_dtype is not bounded"}
   ],
   "case": {
     "values": {

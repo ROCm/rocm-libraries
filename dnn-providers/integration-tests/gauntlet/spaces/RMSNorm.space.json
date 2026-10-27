@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "RMSNorm",
-  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4. The domain axis fills x (uid 4); the nan and inf domains put the special fill on scale and bias (uids 3 and 1), which a normalized element meets only elementwise, and leave x at free(-1,1), because a non-finite x element would spread over its whole normalized row through the mean of squares; every other domain fills scale and bias free(-1,1), the harness default. The alignment axis declares that alignment on the device tensors y, bias, scale and x (uids 0, 1, 3, 4; epsilon is a host scalar and keeps 16) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns x (placement_uid 4) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
+  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4. The domain axis fills x (uid 4); the nan and inf domains put the special fill on scale and bias (uids 3 and 1), which a normalized element meets only elementwise, and leave x at free(-1,1), because a non-finite x element would spread over its whole normalized row through the mean of squares; every other domain fills scale and bias free(-1,1), the harness default. A scale and bias of fewer than 4 elements (a normalized extent under 4) would be covered whole by the one element the special fill always plants, so y would have no finite element and the non-finite mask fails a reference like that by design; those shapes put the special fill on x instead (a normalized extent under 4 leaves many rows, and a non-finite x element reaches only its own row) and scale and bias stay free(-1,1). The alignment axis declares that alignment on the device tensors y, bias, scale and x (uids 0, 1, 3, 4; epsilon is a host scalar and keeps 16) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns x (placement_uid 4) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/RMSNorm/Variant4/graph.template.json",
   "axes": {
@@ -40,6 +40,7 @@
     "ps_n":    "pc * pd * ph * pw",
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
+    "poi_m":   "pc * pd * ph * pw",
     "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
     "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
@@ -48,8 +49,8 @@
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction": "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "dom_x_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
-    "dom_p_kind": "'special' if domain in ['nan', 'inf'] else 'free'",
+    "dom_x_kind": "'special' if domain in ['nan', 'inf'] and poi_m < 4 else ('free' if domain in ['nan', 'inf'] else dom_kind)",
+    "dom_p_kind": "'special' if domain in ['nan', 'inf'] and poi_m >= 4 else 'free'",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [

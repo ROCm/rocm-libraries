@@ -859,10 +859,13 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     assert all(set(primary + poisoned) <= set(m["inputs"]) for m in metas.values())
 
 
-def test_layernorm_poisons_x_when_scale_and_bias_are_too_small_to_leave_a_finite_column():
+@pytest.mark.parametrize("space_id", ["Layernorm/Default", "RMSNorm/Default"])
+def test_norm_poisons_x_when_scale_and_bias_are_too_small_to_leave_a_finite_column(
+    space_id,
+):
     # bug caught: the one element a special fill always plants covers a scale and bias of a single
     # element whole, y has no finite element and the non-finite mask fails the reference by design
-    sp = space_by_id("Layernorm/Default")
+    sp = space_by_id(space_id)
     template = json.loads(sp.template_path.read_text())
     uid = {t["name"]: str(t["uid"]) for t in template["tensors"]}
     seen = set()
