@@ -94,8 +94,8 @@ BenchmarkProblems:
 
         - ClusterDim: [[4,4]]
         - PrefetchGL2: [2]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
+        # - InitCIterWmma: [0]
+        # - SwInstructionPrefetch: [0]
         - StinkyTofuParameters:
           - {DsReadDrainLatency: 128, DsReadPerCap: 2, DsReadThrottleLatency: 96}
 

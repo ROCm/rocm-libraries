@@ -90,8 +90,8 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
+        # - InitCIterWmma: [0]
+        # - SwInstructionPrefetch: [0]
         - ClusterDim: [[4,4]]
         - ClusterAIDMapping: [-2]
         - StinkyTofuParameters:
