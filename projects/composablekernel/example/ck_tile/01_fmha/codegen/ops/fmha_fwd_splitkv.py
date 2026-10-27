@@ -912,6 +912,12 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
             return None
 
 
+# Head dims qr_tdm takes over on gfx125 split-kv. Every one of them measures
+# faster than qr, by 1.3x to 4.9x depending on grid and seqlen_k -- qr
+# saturates as seqlen_k grows while this path keeps scaling.
+QR_TDM_SPLITKV_HDIMS = [32, 64, 128, 256]
+
+
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
@@ -930,7 +936,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # BUILD_TESTING filter keeps split-kv to *_nbias* in the dispatch
             # api while still building them. Like fmha_fwd.py it pads both
             # sequence lengths together and both head dims together.
-            if hdim == 128:
+            if hdim in QR_TDM_SPLITKV_HDIMS:
                 for mask, pagedkv, sink in itertools.product(
                     get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
                 ):
@@ -950,7 +956,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                if not (hdim == 128 and logits == "f" and bias == "no"):
+                if not (hdim in QR_TDM_SPLITKV_HDIMS and logits == "f" and bias == "no"):
                     pipelines.append(Pipeline("qr", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
