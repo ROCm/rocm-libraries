@@ -261,7 +261,7 @@ HIPCUB_FORCEINLINE T ThreadScanInclusive(
 
 #endif
 
-//@}  end member group
+//@}
 
 /** @} */ // end group UtilModule
 
