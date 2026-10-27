@@ -123,6 +123,29 @@ Arithmetic elementwiseTolerance(Arithmetic observedMagnitude, Arithmetic expecte
     return absolute + relative * expectedMagnitude;
 }
 
+template <typename Observed, typename Expected>
+bool valuesCloseExpectedDouble(Observed observed, Expected expected,
+                               const ComparisonOptions& options) {
+    if (observed == expected) return true;
+    if constexpr (std::is_integral_v<Observed> && std::is_integral_v<Expected>) {
+        const long double expectedMagnitude = integralMagnitude(expected);
+        const long double difference = integralDifference(observed, expected);
+        const long double tolerance =
+            options.absoluteTolerance + options.relativeTolerance * expectedMagnitude;
+        return difference <= tolerance;
+    } else {
+        if (std::isnan(observed) || std::isnan(expected))
+            return options.equalNaNs && std::isnan(observed) && std::isnan(expected);
+        if (std::isinf(observed) || std::isinf(expected)) return false;
+
+        const double difference =
+            std::abs(static_cast<double>(observed) - static_cast<double>(expected));
+        const double tolerance =
+            options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
+        return difference <= tolerance;
+    }
+}
+
 template <typename Arithmetic, ElementwiseToleranceModel Model, bool Strict, typename Observed,
           typename Expected>
 bool valuesCloseFixed(Observed observed, Expected expected, const ComparisonOptions& options) {
@@ -157,6 +180,10 @@ bool valuesCloseFixed(Observed observed, Expected expected, const ComparisonOpti
 
 template <typename Observed, typename Expected>
 bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptions& options) {
+    if (options.elementwiseToleranceModel == ElementwiseToleranceModel::ExpectedScaled &&
+        options.arithmeticPrecision == ComparisonArithmeticPrecision::Float64 &&
+        !options.strictElementwiseTolerance)
+        return valuesCloseExpectedDouble(observed, expected, options);
     if (options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled) {
         if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32)
             return options.strictElementwiseTolerance
