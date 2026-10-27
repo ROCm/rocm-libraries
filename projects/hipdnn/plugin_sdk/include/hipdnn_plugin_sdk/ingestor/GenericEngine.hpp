@@ -29,6 +29,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -58,7 +59,8 @@ inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
 /// One hipDNN engine, defined entirely by a UED and the packs naming it. The
 /// engine's id is its UED name hashed into hipDNN's engine-id space.
 template <typename THandle, typename TSettings, typename TContext>
-class GenericEngine : public IEngine<THandle, TSettings, TContext>
+class GenericEngine : public IEngine<THandle, TSettings, TContext>,
+                      public IStagedApplicability<THandle>
 {
 public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
@@ -155,6 +157,18 @@ public:
     bool isApplicable(THandle& handle, const IGraph& opGraph) const override
     {
         return _planBuilder.isApplicable(handle, opGraph);
+    }
+
+    StagedApplicability beginApplicability(THandle& handle,
+                                           const IGraph& opGraph,
+                                           ApplicabilityScope& scope) const override
+    {
+        return _planBuilder.beginApplicability(handle, opGraph, scope);
+    }
+
+    bool finishApplicability(PendingApplicability&& pending) const override
+    {
+        return _planBuilder.finishApplicability(std::move(pending));
     }
 
     void getDetails(THandle& handle,

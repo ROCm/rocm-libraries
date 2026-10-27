@@ -70,6 +70,7 @@ from ..Common.ValidParameters import validParameters, \
                                             _expectedParamTypes, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
+                                            parseStinkyTofuRegisterAllocation, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
@@ -401,7 +402,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 
 
 # _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
-# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# tensilelite/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
 # They are re-imported above and re-exported here for the existing test
 # module (tensilelite/Tests/unit/test_validateParameterTypes.py) that imports
@@ -755,7 +756,7 @@ class Solution(collections.abc.Mapping):
         assert self.isaInfoMap[isa].asmCaps["SupportedISA"]
         self._state['ISA'] = IsaVersion(isa[0], isa[1], isa[2])
       else:
-        # When calling from Tensile, the ISA is typically not defined.
+        # When calling from TensileLite, the ISA is typically not defined.
         printWarning(f"ISA not set on config using {targetIsas[0]}.")
         self._state['ISA'] = targetIsas[0]
 
@@ -768,6 +769,12 @@ class Solution(collections.abc.Mapping):
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
+    # StinkyTofuRegisterAllocation is a mode or a StinkyTofu config string. Keep its
+    # shortest spelling, so two spellings of one configuration compare equal and the
+    # logic files record one; a configuration that is only a mode stays an int.
+    if "StinkyTofuRegisterAllocation" in self._state:
+      self._state["StinkyTofuRegisterAllocation"] = parseStinkyTofuRegisterAllocation(
+          self._state["StinkyTofuRegisterAllocation"])[0]
     # User-facing StinkyTofuParameters -> internal _StinkyTofuParameters. The public key is
     # removed; the internal copy tags the kernel name when set and is dropped before the logic yaml.
     self._state.pop("StinkyTofuParameters", None)

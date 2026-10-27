@@ -165,13 +165,15 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
             build_moe_fused_mega_wmma,
         )
 
-        # Both GEMM sub-specs fit on their own; doubling all three operand tiles
-        # at the wide inter slice only overruns once Hidden_smem is counted too.
+        # Both GEMM sub-specs fit on their own; with double-buffered operand
+        # tiles, a wide down slice and a tall M tile the pool only overruns the
+        # 320 KB gfx1250 budget once the 64 KB Hidden_smem is counted too.
         spec = FusedMegaWmmaSpec(
             name="mega_over",
             dtype="bf16",
+            tile_m=64,
             tile_n_inter=512,
-            tile_n_down=512,
+            tile_n_down=1024,
             double_buffer=True,
         )
         with self.assertRaises(ValueError) as cm:

@@ -31,13 +31,20 @@ cmake -DBUILD_DOCS=ON ...
 ## Requirements
 
 * Git
-* CMake (3.5 or later)
+* CMake (3.19 or later)
+* [ROCm CMake](https://github.com/ROCm/rocm-cmake) (0.11.0 or later)
 * AMD [ROCm] 3.5 platform or later
 
 Optional:
 * [GoogleTest](https://github.com/google/googletest) (required only for tests)
   * Use `GTEST_ROOT` to specify a location
-  * If you don't have GoogleTest installed, CMake automatically downloads and builds it
+  * Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree
+* The SuiteSparse test matrices (required only for tests), stored with [DVC](https://dvc.org/):
+  run `dvc pull -R projects/rocsparse/clients/matrices` from the root of the rocm-libraries repository.
+  DVC needs S3 support, for example `pip install 'dvc[s3]'`
+
+By default, CMake doesn't download any of these. Configure with `-DALLOW_FETCH_DEPS=ON` to download
+ROCm CMake, GoogleTest and the test matrices when they're missing.
 
 ## Build and install
 
@@ -52,7 +59,7 @@ Optional:
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
     cd rocm-libraries
     git sparse-checkout init --cone
-    git sparse-checkout set projects/rocsparse # add projects/rocprim and projects/rocblas to include dependencies
+    git sparse-checkout set projects/rocsparse .dvc # add projects/rocprim and projects/rocblas to include dependencies
     git checkout develop # or use the branch you want to work with
     ```
 
@@ -76,11 +83,18 @@ Optional:
     # Command line options:
     #   -h|--help         - prints help message
     #   -i|--install      - install after build
-    #   -d|--dependencies - install build dependencies
+    #   -d|--dependencies - install distro build dependencies (not GoogleTest)
     #   -c|--clients      - build library clients too (combines with -i & -d)
     #   -g|--debug        - build with debug flag
     ./install.sh -dci
     ```
+
+    > [!NOTE]
+    > Building the tests (`install.sh -c`, or `-DBUILD_CLIENTS_TESTS=ON`) needs GoogleTest and the
+    > SuiteSparse test matrices. Install GoogleTest, for example the `libgtest-dev` package, and run
+    > `dvc pull -R clients/matrices` from this directory first (in a sparse checkout, run
+    > `git sparse-checkout add .dvc` before that). When you configure with CMake directly,
+    > `-DALLOW_FETCH_DEPS=ON` downloads both instead.
 
 3. Compile rocSPARSE (all compiler specifications are automatically determined).
 
@@ -89,8 +103,14 @@ Optional:
     # Clone rocm-libraries, including rocSPARSE, using Git
     git clone https://github.com/ROCm/rocm-libraries.git
 
-    # Go to rocSPARSE directory, create and go to the build directory
-    cd rocm-libraries/projects/rocsparse; mkdir -p build/release; cd build/release
+    # Go to rocSPARSE directory
+    cd rocm-libraries/projects/rocsparse
+
+    # Pull the test matrices
+    dvc pull -R clients/matrices
+
+    # Create and go to the build directory
+    mkdir -p build/release; cd build/release
 
     # Configure rocSPARSE
     # Build options:

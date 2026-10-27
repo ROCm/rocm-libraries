@@ -51,6 +51,7 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op);
+static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_register_p_from_qk_c(rocke_lower_t* L, const rocke_op_t* op);
 
 /* Table-driven dense MFMA dispatch (definition below the spec table). Resolves
@@ -513,15 +514,20 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
-    /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
-     * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
+    /* f16 / bf16 / f32 / f64 dense atoms resolve from the table; the scaled /
+     * fp4 / fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
     if(_try_emit_mfma_table(L, op, op_id))
     {
         return;
     }
 
+    /* f64 4x4x4: scalar intrinsic around the <1 x double> accumulator */
+    if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
+    {
+        _op_tile_mfma_f64_4x4x4_f64(L, op);
+    }
     /* fp8 / bf8 */
-    if(strcmp(op_id, "mfma_f32_16x16x32_fp8") == 0)
+    else if(strcmp(op_id, "mfma_f32_16x16x32_fp8") == 0)
     {
         _op_tile_mfma_f32_16x16x32_fp8(L, op);
     }
@@ -1041,7 +1047,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
 }
 
 /* ====================================================================== */
-/* f16 / bf16 / f32 dense MFMA atoms (table-driven)                       */
+/* f16 / bf16 / f32 / f64 dense MFMA atoms (table-driven)                 */
 /* ====================================================================== */
 
 /* The plain / scalar / bf16-bitcast MFMA atoms are structural twins: each one
@@ -1061,7 +1067,7 @@ typedef struct _mfma_spec
     const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
     /* The A/B register type when A and B pass through mma_operand (a value of
      * another shape is reinterpreted); NULL prints them as is, as Python does
-     * for every atom but the two f32 ones. */
+     * for every atom but the f32 and f64 scalar ones. */
     const rocke_type_t* (*ab_register)(void);
 } _mfma_spec_t;
 
@@ -1116,6 +1122,14 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<4 x bfloat>",
      "<16 x float>",
      "<4 x i16>"},
+    /* fp64 scalar atom: A/B are single doubles per lane. */
+    {"mfma_f64_16x16x4_f64",
+     "mfma.f64.16x16x4f64",
+     "llvm.amdgcn.mfma.f64.16x16x4f64",
+     "double",
+     "<4 x double>",
+     NULL,
+     rocke_f64},
     /* fp32 (TF32-class) scalar atoms: A/B are single floats per lane. */
     {"mfma_f32_16x16x4_f32",
      "mfma.f32.16x16x4f32",
@@ -1149,6 +1163,13 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<4 x half>",
      "<4 x float>",
      NULL},
+    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
+    {"mfma_f32_4x4x4_bf16",
+     "mfma.f32.4x4x4bf16.1k",
+     "llvm.amdgcn.mfma.f32.4x4x4bf16.1k",
+     "<4 x bfloat>",
+     "<4 x float>",
+     "<4 x i16>"},
 };
 static const int MFMA_SPECS_N = (int)(sizeof(MFMA_SPECS) / sizeof(MFMA_SPECS[0]));
 
@@ -1294,6 +1315,39 @@ void rocke_ll_lower_mfma_fp8_bf8(
                    b_cast,
                    out_vec,
                    rocke_ll_operand(L, c));
+}
+
+static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char *a_arg, *b_arg, *c_elem, *d_elem;
+    if(!rocke_ll_live(L) || op->num_operands != 3)
+    {
+        if(rocke_ll_live(L))
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
+        }
+        return;
+    }
+    rocke_ll_need(L, "mfma.f64.4x4x4f64");
+    a_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_A, rocke_f64());
+    b_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_B, rocke_f64());
+    c_elem = rocke_ll_fresh(L, "mfma_c");
+    d_elem = rocke_ll_fresh(L, "mfma_d");
+    rocke_ll_emitf(L,
+                   "  %s = extractelement <1 x double> %s, i32 0",
+                   c_elem,
+                   rocke_ll_operand(L, op->operands[2]));
+    rocke_ll_emitf(L,
+                   "  %s = call double @llvm.amdgcn.mfma.f64.4x4x4f64("
+                   "double %s, double %s, double %s, i32 0, i32 0, i32 0)",
+                   d_elem,
+                   a_arg,
+                   b_arg,
+                   c_elem);
+    rocke_ll_emitf(L,
+                   "  %s = insertelement <1 x double> undef, double %s, i32 0",
+                   mma_result_name(L, op),
+                   d_elem);
 }
 
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op)

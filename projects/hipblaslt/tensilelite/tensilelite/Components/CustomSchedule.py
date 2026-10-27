@@ -71,7 +71,7 @@ class CMSKernelInfo:
     Metadata about registered CMS kernels 
     Contains the minimum combination of parameters needed to use the CMS kernel.
     Important Note:
-    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match Tensile names.
+    If you are adding new parameters to this list (of params use in CMS kernels), please make sure those names match TensileLite names.
     These names will be used by caller/tuning codes to set correct parameter/values.
     """
     name: str

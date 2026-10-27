@@ -41,7 +41,7 @@ def minimum_version_rejected(
 ) -> bool:
     """Pure model of: not versionIsCompatible(MinimumRequiredVersion).
 
-    True == config version INCOMPATIBLE with Tensile __version__ (branch fires,
+    True == config version INCOMPATIBLE with TensileLite __version__ (branch fires,
     printExit is reached).
 
     pre: 0 <= qMajor <= 9 and 0 <= qMinor <= 9 and 0 <= qStep <= 9
@@ -122,5 +122,5 @@ def test_real_version_incompatible_step_exceeds():
 
 
 def test_real_version_compatible_older_step():
-    # Tensile 5.0.0; YAML requires 5.0.0: exact match -> True
+    # TensileLite 5.0.0; YAML requires 5.0.0: exact match -> True
     assert versionIsCompatible("5.0.0") is True

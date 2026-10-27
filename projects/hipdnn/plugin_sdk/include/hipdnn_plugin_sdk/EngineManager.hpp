@@ -183,6 +183,12 @@ protected:
         return *it->second;
     }
 
+    /// Registered engines, in the order getApplicableEngineIds visits them.
+    const std::unordered_map<int64_t, std::unique_ptr<Engine>>& engines() const noexcept
+    {
+        return _engines;
+    }
+
 private:
     /// Renders an engine as its id, suffixed with a name when one can be had. The id is never
     /// dropped: it is what correlates the line with the admission and resolution logs.

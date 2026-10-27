@@ -5,17 +5,23 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
@@ -143,18 +149,39 @@ private:
         _tensors;
 };
 
-inline GraphId makeNonV4GraphId(uint8_t seed)
+/// A TestGraph that supplies no `bytes()`, so it has no content key and its catalog is
+/// never memoized.
+class BytelessTestGraph : public TestGraph
 {
-    GraphId id{};
-    id.fill(seed);
-    id[6] = static_cast<uint8_t>(id[6] & 0x0fU);
-    return id;
-}
+public:
+    using TestGraph::TestGraph;
 
-inline GraphId makeNilGraphId()
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {};
+    }
+};
+
+/// A content-carrying graph that counts its bytes() reads. Building a catalog key reads
+/// the graph's bytes, so a test can compare reads against one key build.
+class CountingBytesGraph final
+    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
 {
-    return GraphId{};
-}
+public:
+    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
+        : _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        ++*_bytesCalls;
+        return ContentCarryingTestGraph::bytes();
+    }
+
+private:
+    std::shared_ptr<std::atomic_uint> _bytesCalls;
+};
 
 /// A serialized single-node matmul C[m, n] = A[m, k] x B[k, n], so `graph.flops` = 2mnk;
 /// TestGraph has no node and so no work. @p graphId, when given, makes the catalog cacheable.
@@ -990,6 +1017,58 @@ inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper makeStr
 
     return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
         builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// Ceiling on every wait in the concurrency tests: bounds a hang to a named assertion
+/// instead of a killed binary with no diagnosis. Named MAX_WAIT because winerror.h makes
+/// WAIT_TIMEOUT a macro.
+constexpr auto MAX_WAIT = std::chrono::seconds(30);
+
+class Gate
+{
+public:
+    bool wait()
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, MAX_WAIT, [this] { return _open; });
+    }
+
+    void open()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            _open = true;
+        }
+        _cv.notify_all();
+    }
+
+private:
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _open = false;
+};
+
+/// Runs @p body(i) on @p threadCount threads released together, then joins them all.
+template <typename Body>
+void runConcurrently(int threadCount, Body body)
+{
+    Gate start;
+    std::vector<std::thread> threads;
+    threads.reserve(static_cast<size_t>(threadCount));
+
+    for(int i = 0; i < threadCount; ++i)
+    {
+        threads.emplace_back([&start, &body, i]() {
+            EXPECT_TRUE(start.wait()) << "thread " << i << " timed out waiting to start";
+            body(i);
+        });
+    }
+
+    start.open();
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor::testing

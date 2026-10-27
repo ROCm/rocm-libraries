@@ -167,6 +167,7 @@ static void _op_arith_sitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_arith_uitofp_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
+    rocke_i_refuse_non_u8_source(op);
     const rocke_value_t* v = op->operands[0];
     rocke_ll_emitf(L,
                    "  %s = uitofp %s %s to float",
@@ -259,8 +260,32 @@ static void _op_arith_cvt_pk_f32_bf8x4(rocke_lower_t* L, const rocke_op_t* op)
  * fused scale + dequant: <4 x fp8/bf8> + f32 scale -> <4 x f32>
  * ------------------------------------------------------------------------- */
 
+/* Python _Lowerer._require_fp8_scale_conversion. LLVM does not always refuse
+ * the intrinsic on a target without the instruction: it can select it and write
+ * an encoding the GPU does not have. So the check is made here, from the
+ * backend's capability, before anything is emitted. */
+static void ll_require_fp8_scale_conversion(rocke_lower_t* L,
+                                            const rocke_op_t* op,
+                                            const char* instruction,
+                                            const char* fallback)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)";
+    if(!L->backend || !L->backend->has_fp8_scale_conversion)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s needs %s, which %s does not have (gfx950 does); convert with %s and "
+                      "multiply by the scale instead",
+                      rocke_opcode_name(op->opcode),
+                      instruction,
+                      gfx,
+                      fallback);
+    }
+}
+
 static void _op_arith_cvt_scalef32_pk_f32_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    ll_require_fp8_scale_conversion(L, op, "v_cvt_scalef32_pk_f32_fp8", "cvt_pk_f32_fp8x4");
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* scale = op->operands[1];
     const char* res = rocke_ll_result_name(op);
@@ -294,6 +319,7 @@ static void _op_arith_cvt_scalef32_pk_f32_fp8(rocke_lower_t* L, const rocke_op_t
 
 static void _op_arith_cvt_scalef32_pk_f32_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    ll_require_fp8_scale_conversion(L, op, "v_cvt_scalef32_pk_f32_bf8", "cvt_pk_f32_bf8x4");
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* scale = op->operands[1];
     const char* res = rocke_ll_result_name(op);

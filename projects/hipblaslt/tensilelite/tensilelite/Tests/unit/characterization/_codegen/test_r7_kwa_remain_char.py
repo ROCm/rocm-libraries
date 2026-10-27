@@ -34,7 +34,7 @@ pytestmark = pytest.mark.unit
 def _rocisa_gfx942():
     _init_rocisa()
 
-# Force full Tensile package init before component imports.
+# Force full TensileLite package init before component imports.
 import rocisa  # noqa: F401
 import tensilelite.KernelWriter  # noqa: F401
 

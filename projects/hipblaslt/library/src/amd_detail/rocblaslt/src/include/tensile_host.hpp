@@ -239,9 +239,24 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+/**
+ * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
+ * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries
+ * return fewer: in their order, skipping indexes the array already holds and
+ * algorithms prob does not support. Returns whether those libraries could be read.
+ */
+bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
+                                       RocblasltContractionProblem&      prob,
+                                       std::shared_ptr<void>             gemmData,
+                                       rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                       int*                              returnAlgoCount,
+                                       int                               requestedAlgoCount,
+                                       size_t                            maxWorkSpaceBytes);
+
 namespace TensileLite
 {
     class ProblemOverride;
+    struct TunedEntry;
 }
 
 TensileLite::ProblemOverride
@@ -250,26 +265,94 @@ TensileLite::ProblemOverride
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
 
 /**
- * Cache replay for a matmul that passed no algo: the solution index of the first
- * entry for this key that still resolves to its recorded kernel and supports
- * this problem within its workspace, or -1 when there is none. Fills *algo to
- * launch that entry, and counts the lookup.
+ * Whether one row still names the kernel its index resolves to and supports
+ * this problem within the workspace, the checks replay makes. Leaves gemmData's
+ * problem as updateTensileProblem makes it from problem.
+ */
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
+
+/**
+ * The solution index of the first entry for this key that still resolves to its
+ * recorded kernel and supports this problem, or -1 when there is none.
  *
  * Which entries still resolve to their recorded kernels is worked out once per
  * key and kept until the loaded entries change; support depends on the call and
- * is checked every time.
+ * is checked every time, leaving gemmData's problem as updateTensileProblem
+ * makes it from problem.
+ *
+ * A pure probe: the caller counts the lookup, because only it knows whether the
+ * probe decided which kernel the call launches.
+ */
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
+
+/**
+ * Cache replay for a matmul that passed no algo: tuning_cache_find_valid_entry
+ * within the problem's workspace, filling *algo to launch the entry it finds.
+ * Counts the lookup, except a miss when countMiss is false: a call that can go
+ * on to tune is counted by what it finds once it can.
  */
 int tuning_cache_replay(rocblaslt_handle                    handle,
                         const TensileLite::ProblemOverride& key,
                         const RocblasltContractionProblem&  problem,
                         std::shared_ptr<void>               gemmData,
-                        rocblaslt_matmul_algo*              algo);
+                        rocblaslt_matmul_algo*              algo,
+                        bool                                countMiss);
 
 /**
  * The solution index this thread last launched through runContractionProblem,
  * or -1, clearing it.
  */
 int tuningLastLaunchedIndexForTest();
+
+/**
+ * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
+ * enumeration, 3 throws after the first measured candidate, 4 stops the search
+ * after the first measured candidate the way an expiring budget does, 5 makes
+ * a configured budget read as already spent; 0 restores normal behaviour.
+ */
+void tuningInjectFailureForTest(int stage);
+
+/** The span tuning gives a tensor it copies or writes, as its scratch plan sizes it. */
+size_t tuningTensorSpanForTest(size_t elementSize,
+                               size_t rows,
+                               size_t cols,
+                               size_t colStride,
+                               size_t batchCount,
+                               size_t batchStride,
+                               bool*  expanded);
+
+/**
+ * The scratch tuning would lay out for prob, given the rotating budget and cap,
+ * as values in the order hipblaslt_tuning_scratch_plan_for_test documents.
+ * Returns how many there are.
+ */
+size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
+                                size_t                             rotatingBytes,
+                                size_t                             cap,
+                                int32_t                            coldIters,
+                                int32_t                            hotIters,
+                                uint64_t*                          values,
+                                size_t                             count);
+
+/**
+ * The indexes tune mode would measure for prob, in order and before the
+ * baseline is moved to the front; the first count go to indexes. Returns how
+ * many there are, 0 when they cannot be enumerated.
+ */
+size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
+                               rocblaslt_handle                   handle,
+                               std::shared_ptr<void>              gemmData,
+                               int*                               indexes,
+                               size_t                             count);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

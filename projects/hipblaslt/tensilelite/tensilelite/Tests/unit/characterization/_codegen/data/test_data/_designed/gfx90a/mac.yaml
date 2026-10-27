@@ -4,7 +4,7 @@
 ################################################################################
 # P2 designed MAC config for gfx90a / gfx942: non-MFMA fp16 HPA (DOT2) path.
 #
-# Target: Tensile/Components/MAC_F16_HPA.py  FMA_F16_HPA_DOT2.__call__
+# Target: tensilelite/Components/MAC_F16_HPA.py  FMA_F16_HPA_DOT2.__call__
 #         (lines 44-88; 78 lines currently uncovered)
 #
 # Design rationale:

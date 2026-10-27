@@ -35,15 +35,14 @@ static int g_failures = 0;
     } while(0)
 
 /* Emit rocke_b_mma(op_id) on the given operands and assert the result is a
- * vec<expect_elem x expect_frag>. expect_int selects i32 vs f32 for the
- * accumulator element. */
+ * vec<expect_elem x expect_frag>. */
 static void check_atom_on(rocke_ir_builder_t* b,
                           const char* op_id,
                           rocke_value_t* a,
                           rocke_value_t* bb,
                           rocke_value_t* c,
                           int expect_frag,
-                          bool expect_int)
+                          rocke_scalar_kind_t expect_elem)
 {
     rocke_value_t* r = rocke_b_mma(b, op_id, a, bb, c, NULL, 0);
 
@@ -61,19 +60,21 @@ static void check_atom_on(rocke_ir_builder_t* b,
     CHECK(r->type->elem != NULL, op_id);
     if(r->type->elem)
     {
-        rocke_scalar_kind_t want = expect_int ? ROCKE_SCALAR_I32 : ROCKE_SCALAR_F32;
-        CHECK(r->type->elem->scalar == want, op_id);
+        CHECK(r->type->elem->scalar == expect_elem, op_id);
     }
 }
 
 /* Placeholder scalar operands: this check is about the result's fragment, not the
  * operands, which an ordinary atom's builder does not inspect. */
-static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+static void check_atom(rocke_ir_builder_t* b,
+                       const char* op_id,
+                       int expect_frag,
+                       rocke_scalar_kind_t expect_elem)
 {
     rocke_value_t* a = rocke_b_const_i32(b, 0);
     rocke_value_t* bb = rocke_b_const_i32(b, 0);
     rocke_value_t* c = rocke_b_const_i32(b, 0);
-    check_atom_on(b, op_id, a, bb, c, expect_frag, expect_int);
+    check_atom_on(b, op_id, a, bb, c, expect_frag, expect_elem);
 }
 
 /* An emulated TF32 atom is verified on the way in: its operands are vec<tf32xN>
@@ -86,7 +87,7 @@ static void check_emulated_atom(rocke_ir_builder_t* b, const char* op_id, int ab
     rocke_value_t* a = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
     rocke_value_t* bb = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
     rocke_value_t* c = rocke_b_vector_splat(b, zero, c_len);
-    check_atom_on(b, op_id, a, bb, c, c_len, false);
+    check_atom_on(b, op_id, a, bb, c, c_len, ROCKE_SCALAR_F32);
 }
 
 static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const char* op_id)
@@ -112,14 +113,17 @@ int main(void)
     }
 
     /* MFMA float accumulators: 16x16 -> 4, 32x32 -> 16 (f32). */
-    check_atom(&b, "mfma_f32_16x16x16_f16", 4, false);
-    check_atom(&b, "mfma_f32_32x32x8_f16", 16, false);
-    check_atom(&b, "mfma_f32_16x16x32_bf16", 4, false);
+    check_atom(&b, "mfma_f32_16x16x16_f16", 4, ROCKE_SCALAR_F32);
+    check_atom(&b, "mfma_f32_32x32x8_f16", 16, ROCKE_SCALAR_F32);
+    check_atom(&b, "mfma_f32_16x16x32_bf16", 4, ROCKE_SCALAR_F32);
+    /* MFMA f64 accumulators: 16x16x4 -> 4, 4x4x4 -> 1 (f64). */
+    check_atom(&b, "mfma_f64_16x16x4_f64", 4, ROCKE_SCALAR_F64);
+    check_atom(&b, "mfma_f64_4x4x4_f64", 1, ROCKE_SCALAR_F64);
     /* WMMA float accumulator: 8 (f32). */
-    check_atom(&b, "wmma_f32_16x16x16_f16", 8, false);
+    check_atom(&b, "wmma_f32_16x16x16_f16", 8, ROCKE_SCALAR_F32);
     /* Integer WMMA: 8-wide i32 accumulator. */
-    check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
-    check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+    check_atom(&b, "wmma_i32_16x16x16_iu8", 8, ROCKE_SCALAR_I32);
+    check_atom(&b, "wmma_i32_16x16x16_iu4", 8, ROCKE_SCALAR_I32);
     /* Emulated TF32 atoms have no frag-table row of their own; the logical op_id
      * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
     check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
@@ -128,7 +132,7 @@ int main(void)
     /* No catalog row (fragment information only): accumulates in fp32. */
     CHECK(rocke_arch_mma_op_id_c_dtype("mfma_f32_4x4x4_f16") == NULL,
           "mfma_f32_4x4x4_f16 has no catalog row");
-    check_atom(&b, "mfma_f32_4x4x4_f16", 4, false);
+    check_atom(&b, "mfma_f32_4x4x4_f16", 4, ROCKE_SCALAR_F32);
 
     /* Every catalog accumulator has an IR type, and the op_id lookup rocke_b_mma
      * uses returns the row's accumulator dtype. */
@@ -160,7 +164,7 @@ int main(void)
             if(strcmp(op.family, "wmma_scaled") != 0)
                 continue;
             check_catalog_fragments(&gfx1250->mma, op.op_id);
-            check_atom(&b, op.op_id, 8, false);
+            check_atom(&b, op.op_id, 8, ROCKE_SCALAR_F32);
             ++scaled;
         }
         CHECK(scaled == 86, "all scaled atoms must have accumulator metadata");

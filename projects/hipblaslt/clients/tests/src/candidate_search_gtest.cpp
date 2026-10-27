@@ -59,6 +59,9 @@ namespace
         std::function<bool()>                should_abort;
         std::function<void(size_t)>          on_prepare;
         std::function<void(size_t, int32_t)> on_cold;
+        std::vector<bool>                    runnable; // prepare's answers, empty for all yes
+        std::vector<bool>                    eligible; // measured's answers, empty for all yes
+        std::function<bool()>                should_stop;
         std::function<void(size_t, int64_t)> on_launch;
 
         // The candidate whose cold or timed launches the clock cannot time: the first
@@ -88,6 +91,7 @@ namespace
                         log.push_back(entry("prepare", sol));
                         if(on_prepare)
                             on_prepare(sol);
+                        return runnable.empty() || runnable[sol];
                     })
                     .cold([&](size_t sol, int32_t i) {
                         log.push_back(entry("cold", sol, i));
@@ -108,7 +112,9 @@ namespace
                     .measuring([&](size_t sol) { log.push_back(entry("measuring", sol)); })
                     .measured([&](size_t sol, hipblaslt_bench::TimingResult&) {
                         log.push_back(entry("measured", sol));
-                    }),
+                        return eligible.empty() || eligible[sol];
+                    })
+                    .should_stop([&] { return should_stop && should_stop(); }),
                 should_abort);
         }
 
@@ -363,4 +369,80 @@ TEST(CandidateSearch_pre_checkin, DefaultHooksFailOnAHipError)
     ASSERT_TRUE(hipblaslt_bench::DefaultHooks::time_us_sync(nullptr, first));
     ASSERT_TRUE(hipblaslt_bench::DefaultHooks::time_us_sync(nullptr, second));
     EXPECT_GE(second, first);
+}
+
+// A candidate whose preparation says it cannot run is neither launched nor timed.
+TEST(CandidateSearch_pre_checkin, PrepareCanSkipACandidate)
+{
+    HostSearch host;
+    host.launch_us = {300, 50, 200};
+    host.runnable  = {true, false, true};
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 0);
+}
+
+// A candidate measured but ruled out afterwards cannot win, however fast it was.
+TEST(CandidateSearch_pre_checkin, MeasuredCanRuleOutACandidate)
+{
+    HostSearch host;
+    host.launch_us = {300, 50, 200};
+    host.eligible  = {true, false, true};
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 1);
+}
+
+// Validation after measurement can fail the test. Stop before selecting that
+// candidate or running another one, even if the callback also returns false.
+TEST(CandidateSearch_pre_checkin, AFailureAfterMeasurementEndsTheSearch)
+{
+    for(bool eligible : {false, true})
+    {
+        SCOPED_TRACE(eligible);
+        bool   failed             = false;
+        size_t prepared           = 0;
+        size_t measured           = 0;
+        FakeClock::now_us         = 0.0;
+        FakeClock::fail_next_read = false;
+
+        const auto result = hipblaslt_bench::search_candidates<FakeClock>(
+            2,
+            {},
+            cpu_timing(1),
+            nullptr,
+            nullptr,
+            nullptr,
+            hipblaslt_bench::search_callbacks()
+                .prepare([&](size_t) { ++prepared; })
+                .launch([&](size_t, int64_t) { FakeClock::now_us += 10.0; })
+                .measured([&](size_t, hipblaslt_bench::TimingResult&) {
+                    ++measured;
+                    failed = true;
+                    return eligible;
+                }),
+            [&] { return failed; });
+
+        EXPECT_TRUE(result.aborted);
+        EXPECT_EQ(prepared, 1u);
+        EXPECT_EQ(measured, 1u);
+        EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
+    }
+}
+
+// should_stop is asked before each candidate; the search ends at the first yes and
+// reports so, keeping the best of the candidates it reached.
+TEST(CandidateSearch_pre_checkin, ShouldStopEndsTheSearchBetweenCandidates)
+{
+    HostSearch host;
+    host.launch_us   = {300, 200, 50};
+    size_t asked     = 0;
+    host.should_stop = [&] { return asked++ == 2; };
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
+    EXPECT_TRUE(result.stopped);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(host.count(entry("prepare", 2)), 0);
 }

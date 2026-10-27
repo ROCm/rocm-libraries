@@ -52,7 +52,11 @@ def _cases():
     tile, so a change to any selectable configuration is visible.
     """
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
-    from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
+    from dispatch.gdn.gfx950 import (
+        _TUNED_TILES_KDA,
+        FUSED_DEFAULT_TILE,
+        KDA_FUSED_SPEC_ID,
+    )
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -192,7 +196,11 @@ def _cases():
         cases[f"registered_{result.candidate.spec_id}"] = (
             lambda spec=result.spec: build_gdn_decode(spec, arch=_ARCH)
         )
-    for _, tile, spec_id in _TUNED_TILES_KDA:
+    # Every KDA candidate: the work table's bands plus the fused default, which
+    # an unfused KDA request can also pin.
+    kda_candidates = [(tile, spec_id) for _, tile, spec_id in _TUNED_TILES_KDA]
+    kda_candidates.append((FUSED_DEFAULT_TILE, KDA_FUSED_SPEC_ID))
+    for tile, spec_id in kda_candidates:
         cases[f"tuned_{spec_id}"] = build(
             gate_kind="kda",
             num_warps=tile[0],

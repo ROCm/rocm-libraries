@@ -10,7 +10,7 @@ ISA map must not be consulted.
 
 import pytest
 
-from Tensile.SolutionStructs.Validators.MatrixInstruction import validateMIParameters
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import validateMIParameters
 
 pytestmark = pytest.mark.unit
 
