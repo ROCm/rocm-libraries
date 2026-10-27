@@ -58,8 +58,14 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
+from kernels.common.conv_fwd_wmma_gate import (
+    WMMA_K,
+    WMMA_M,
+    WMMA_N,
+    wmma_ab_dtype,
+    wmma_fwd_gate,
+)
 
-WMMA_K = 32
 CH_PAD = 8
 SMALL_WMMA_VGPR_BUDGET = 448
 SMALLC_MAX_C = 4
@@ -124,28 +130,31 @@ def _tdm_descriptor_3d(
 
 
 def _wmma_op(p: DirectConvProblem, arch: str):
-    ab = "bf16" if p.dtype == "bf16" else "f16"
+    ab = wmma_ab_dtype(p.dtype)
     return ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
     )
 
 
-def _common_reason(p: DirectConvProblem, arch: str, name: str) -> str | None:
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except KeyError as e:
-        return str(e)
-    if target.wave_size != 32:
-        return f"{name} is a wave32 kernel"
-    if not target.memory.has_tdm:
-        return f"no TDM on {arch}"
-    if p.dtype not in ("fp16", "bf16"):
-        return f"unsupported dtype {p.dtype!r}"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing wmma_f32_16x16x32_{ab} on {arch}"
+def _common_reason(
+    p: DirectConvProblem, arch: str, name: str, wave_size: int
+) -> tuple[str | None, ArchTarget | None]:
+    """The rules small C and small K share: the WMMA forward gate, then the
+    problem shapes both serve. Returns ``(why, target)`` like
+    :func:`wmma_fwd_gate`."""
+    why, target = wmma_fwd_gate(p, arch, name, wave_size)
+    if why:
+        return why, target
+    return _common_shape_reason(p), target
+
+
+def _common_shape_reason(p: DirectConvProblem) -> str | None:
     if p.groups != 1 or p.is_dilated:
         return "ungrouped, undilated convolutions only"
     if p.KH != p.KW:
@@ -288,12 +297,9 @@ def fwd_smallc_tile_efficiency(spec: FwdSmallcWmmaSpec) -> float:
 
 def fwd_smallc_reason(spec: FwdSmallcWmmaSpec, arch: str = "gfx1250") -> str | None:
     p = spec.problem
-    why = _common_reason(p, arch, "fwd_smallc_wmma")
+    why, target = _common_reason(p, arch, "fwd_smallc_wmma", spec.wave_size)
     if why:
         return why
-    target = ArchTarget.from_gfx(arch)
-    if spec.wave_size != 32:
-        return "fwd_smallc_wmma is a wave32 kernel"
     if p.cpg > SMALLC_MAX_C:
         return f"C {p.cpg} > {SMALLC_MAX_C}"
     if p.kpg % 8:
@@ -771,12 +777,9 @@ def fwd_smallk_tile_efficiency(spec: FwdSmallkWmmaSpec) -> float:
 
 def fwd_smallk_reason(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> str | None:
     p = spec.problem
-    why = _common_reason(p, arch, "fwd_smallk_wmma")
+    why, target = _common_reason(p, arch, "fwd_smallk_wmma", spec.wave_size)
     if why:
         return why
-    target = ArchTarget.from_gfx(arch)
-    if spec.wave_size != 32:
-        return "fwd_smallk_wmma is a wave32 kernel"
     if p.kpg > SMALLK_MAX_K:
         return f"K {p.kpg} > {SMALLK_MAX_K}"
     if p.kpg not in (1, 2, 4, 8):

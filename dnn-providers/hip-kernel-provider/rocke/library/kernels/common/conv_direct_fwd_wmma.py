@@ -91,8 +91,14 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
+from kernels.common.conv_fwd_wmma_gate import (
+    WMMA_K,
+    WMMA_M,
+    WMMA_N,
+    wmma_ab_dtype,
+    wmma_fwd_gate,
+)
 
-WMMA_K = 32  # K of the 16x16x32 atom
 CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 FWD_WMMA_VGPR_BUDGET = 512
 _I32_MAX = (1 << 31) - 1
@@ -356,22 +362,10 @@ def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
 
 def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | None:
     """Why ``spec`` cannot run on ``arch`` (None when it can)."""
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except KeyError as e:
-        return str(e)
     p = spec.problem
-    if target.wave_size != 32 or spec.wave_size != 32:
-        return "direct_fwd_wmma is a wave32 kernel"
-    if not target.memory.has_tdm:
-        return f"no TDM on {arch}"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if p.dtype not in ("fp16", "bf16"):
-        return f"unsupported dtype {p.dtype!r}"
-    if not target.mma.has_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing wmma_f32_16x16x32_{ab} on {arch}"
+    why, target = wmma_fwd_gate(p, arch, "direct_fwd_wmma", spec.wave_size)
+    if why:
+        return why
     if p.stride not in (1, 2):
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
@@ -554,9 +548,15 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     PAD = p.PAD
     G = spec.pack_groups
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
+    ab = wmma_ab_dtype(p.dtype)
     wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
+        family="wmma",
+        a_dtype=ab,
+        b_dtype=ab,
+        c_dtype="fp32",
+        m=WMMA_M,
+        n=WMMA_N,
+        k=WMMA_K,
     )
 
     WAVE = spec.wave_size

@@ -30,11 +30,13 @@
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-/* conv_direct_fwd_wmma.WMMA_K / CH_PAD / FWD_WMMA_VGPR_BUDGET. */
-#define FWW_WMMA_K 32
+/* conv_direct_fwd_wmma.WMMA_K (conv_fwd_wmma_gate's) / CH_PAD /
+ * FWD_WMMA_VGPR_BUDGET. */
+#define FWW_WMMA_K ROCKE_FWD_WMMA_K
 #define FWW_CH_PAD 8
 #define FWW_VGPR_BUDGET 512
 
@@ -349,7 +351,6 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     char msg[512];
     const rocke_archtarget_t* target;
     const rocke_direct_conv_problem_t* p;
-    const char* ab;
 
     if(spec == NULL)
     {
@@ -358,23 +359,10 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     }
     if(arch == NULL)
         arch = "gfx1250";
-    target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
-        return false;
-    }
     p = &spec->problem;
-    if(target->wave_size != 32 || spec->wave_size != 32)
-        FWW_FAIL("direct_fwd_wmma is a wave32 kernel");
-    if(!target->memory.has_tdm)
-        FWW_FAIL("no TDM on %s", arch);
-    ab = fww_is_bf16(spec) ? "bf16" : "f16";
-    if(strcmp(fww_dtype(spec), "fp16") != 0 && strcmp(fww_dtype(spec), "bf16") != 0)
-        FWW_FAIL("unsupported dtype '%s'", fww_dtype(spec));
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, FWW_WMMA_K))
-        FWW_FAIL("missing wmma_f32_16x16x32_%s on %s", ab, arch);
+    if(!rocke_wmma_fwd_gate(
+           p, arch, "direct_fwd_wmma", spec->wave_size, &target, reason, reason_cap))
+        return false;
     if(p->stride != 1 && p->stride != 2)
         FWW_FAIL("stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
@@ -1444,10 +1432,10 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     if(c.io_type == NULL)
         return NULL;
     {
-        const char* ab = fww_is_bf16(spec) ? "bf16" : "f16";
+        const char* ab = rocke_wmma_ab_dtype(fww_dtype(spec));
         const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
         const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
-            target, "wmma", ab, ab, "fp32", 16, 16, FWW_WMMA_K, NULL);
+            target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, FWW_WMMA_K, NULL);
         if(op == NULL || op->op_id == NULL)
         {
             rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, "build_direct_fwd_wmma: no WMMA atom");

@@ -26,12 +26,13 @@
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_gate */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
 
-/* conv_fwd_small_wmma.WMMA_K / CH_PAD / SMALL_WMMA_VGPR_BUDGET /
- * SMALLC_MAX_C / SMALLK_MAX_K. */
-#define FSW_WMMA_K 32
+/* conv_fwd_small_wmma.WMMA_K (conv_fwd_wmma_gate's) / CH_PAD /
+ * SMALL_WMMA_VGPR_BUDGET / SMALLC_MAX_C / SMALLK_MAX_K. */
+#define FSW_WMMA_K ROCKE_FWD_WMMA_K
 #define FSW_CH_PAD 8
 #define FSW_VGPR_BUDGET 448
 #define FSW_SMALLC_MAX_C 4
@@ -91,46 +92,11 @@ long long fsw_wo(const rocke_direct_conv_problem_t* p)
            + 1;
 }
 
-/* _common_reason(p, arch, name). On failure writes reason and returns false. */
-bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
-                       const char* arch,
-                       const char* name,
-                       char* reason,
-                       size_t reason_cap)
+/* _common_shape_reason(p): the problem shapes small C and small K both
+ * serve. On failure writes reason and returns false. */
+bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p, char* reason, size_t reason_cap)
 {
     char msg[512];
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
-        return false;
-    }
-    if(target->wave_size != 32)
-    {
-        snprintf(msg, sizeof msg, "%s is a wave32 kernel", name);
-        fsw_set_reason(reason, reason_cap, msg);
-        return false;
-    }
-    if(!target->memory.has_tdm)
-    {
-        snprintf(msg, sizeof msg, "no TDM on %s", arch);
-        fsw_set_reason(reason, reason_cap, msg);
-        return false;
-    }
-    if(strcmp(fsw_dtype(p), "fp16") != 0 && strcmp(fsw_dtype(p), "bf16") != 0)
-    {
-        snprintf(msg, sizeof msg, "unsupported dtype '%s'", fsw_dtype(p));
-        fsw_set_reason(reason, reason_cap, msg);
-        return false;
-    }
-    const char* ab = fsw_is_bf16(p) ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, FSW_WMMA_K))
-    {
-        snprintf(msg, sizeof msg, "missing wmma_f32_16x16x32_%s on %s", ab, arch);
-        fsw_set_reason(reason, reason_cap, msg);
-        return false;
-    }
     if(p->groups != 1 || p->dil_h != 1 || p->dil_w != 1)
     {
         fsw_set_reason(reason, reason_cap, "ungrouped, undilated convolutions only");
@@ -172,6 +138,22 @@ bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
         }
     }
     return true;
+}
+
+/* _common_reason(p, arch, name, wave_size): the WMMA forward gate, then the
+ * shared problem shapes. On success stores the resolved target in
+ * `*target_out` and returns true; otherwise writes reason and returns false. */
+bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
+                       const char* arch,
+                       const char* name,
+                       int wave_size,
+                       const rocke_archtarget_t** target_out,
+                       char* reason,
+                       size_t reason_cap)
+{
+    if(!rocke_wmma_fwd_gate(p, arch, name, wave_size, target_out, reason, reason_cap))
+        return false;
+    return fsw_common_shape_reason(p, reason, reason_cap);
 }
 
 /* ---- FwdSmallcWmmaSpec @property helpers the builder shares. */
@@ -355,14 +337,8 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
     if(arch == NULL)
         arch = "gfx1250";
     p = &spec->problem;
-    if(!fsw_common_reason(p, arch, "fwd_smallc_wmma", reason, reason_cap))
+    if(!fsw_common_reason(p, arch, "fwd_smallc_wmma", spec->wave_size, &target, reason, reason_cap))
         return false;
-    target = rocke_archtarget_from_gfx(arch);
-    if(spec->wave_size != 32)
-    {
-        fsw_set_reason(reason, reason_cap, "fwd_smallc_wmma is a wave32 kernel");
-        return false;
-    }
     if(p->cpg > FSW_SMALLC_MAX_C)
     {
         snprintf(msg, sizeof msg, "C %d > %d", p->cpg, FSW_SMALLC_MAX_C);
@@ -550,14 +526,8 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     if(arch == NULL)
         arch = "gfx1250";
     p = &spec->problem;
-    if(!fsw_common_reason(p, arch, "fwd_smallk_wmma", reason, reason_cap))
+    if(!fsw_common_reason(p, arch, "fwd_smallk_wmma", spec->wave_size, &target, reason, reason_cap))
         return false;
-    target = rocke_archtarget_from_gfx(arch);
-    if(spec->wave_size != 32)
-    {
-        fsw_set_reason(reason, reason_cap, "fwd_smallk_wmma is a wave32 kernel");
-        return false;
-    }
     if(p->kpg > FSW_SMALLK_MAX_K)
     {
         snprintf(msg, sizeof msg, "K %d > %d", p->kpg, FSW_SMALLK_MAX_K);
@@ -789,10 +759,10 @@ const char* wmma_op_id(rocke_ir_builder_t* b,
                        const char* arch,
                        const char* who)
 {
-    const char* ab = fsw_is_bf16(p) ? "bf16" : "f16";
+    const char* ab = rocke_wmma_ab_dtype(fsw_dtype(p));
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    const rocke_mmaop_t* op
-        = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, FSW_WMMA_K, NULL);
+    const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
+        target, "wmma", ab, ab, "fp32", ROCKE_FWD_WMMA_M, ROCKE_FWD_WMMA_N, FSW_WMMA_K, NULL);
     if(op == NULL || op->op_id == NULL)
     {
         std::string msg = std::string(who) + ": no WMMA atom";
