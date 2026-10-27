@@ -11,7 +11,7 @@ Or with pytest if available:
     pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_functions.py
 
 Section A — ``ArgumentLoader`` (real): offset-bookkeeping contract that
-Tensile's KernelWriterAssembly relies on (``self.argLoader.getOffset()``
+TensileLite's KernelWriterAssembly relies on (``self.argLoader.getOffset()``
 is read directly to compute ``s_load_b*`` immediates). Instruction
 emission is stubbed; only byte advancement is checked here.
 
@@ -68,7 +68,7 @@ class TestArgumentLoaderConstruction(unittest.TestCase):
 
     def test_returns_int_not_dummy(self):
         # The whole point of this workaround: ``getOffset()`` must be a real
-        # ``int`` because Tensile does ``getOffset() - numSgprPreload * 4``.
+        # ``int`` because TensileLite does ``getOffset() - numSgprPreload * 4``.
         loader = ArgumentLoader()
         self.assertIsInstance(loader.getOffset(), int)
 

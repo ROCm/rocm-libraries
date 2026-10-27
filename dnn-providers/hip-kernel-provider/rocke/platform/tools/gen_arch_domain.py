@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import contextlib
 import json
 import re
 import subprocess
@@ -88,8 +89,9 @@ import sys
 import tempfile
 from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Callable, Iterator, NamedTuple
 
+from _bounded_run import run_bounded, stop_all
 from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
@@ -598,13 +600,10 @@ def _name_exists_many(
         "\n".join(decl.strip() for _key, decl in items) + "\n", encoding="utf-8"
     )
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             [opt, "-S", "-o", "-", str(src)],
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=PROBE_TIMEOUT_S,
-            cwd=str(scratch),
+            cwd=scratch,
         )
     except subprocess.TimeoutExpired:
         proc = None
@@ -659,13 +658,10 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
     proc = None
     for attempt in (1, 2):
         try:
-            proc = subprocess.run(
+            proc = run_bounded(
                 [opt, "-S", "-o", "-", str(src)],
-                capture_output=True,
-                text=True,
-                check=False,
                 timeout=PROBE_TIMEOUT_S,
-                cwd=str(scratch),
+                cwd=scratch,
             )
         except subprocess.TimeoutExpired:
             if attempt == 1:
@@ -883,18 +879,15 @@ def _probe(
         str(path),
     ]
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             argv,
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
             # Run from the scratch directory, not from wherever the sweep was
             # invoked. Probing is *expected* to crash clang -- that is what
             # `toolchain_crash` records -- and a crash on a host with core dumps
             # enabled drops a multi-megabyte `core` next to the caller. Run the
             # sweep from a checkout and those land in the worktree.
-            cwd=str(out.parent),
+            cwd=out.parent,
         )
     except subprocess.TimeoutExpired:
         return (
@@ -963,14 +956,7 @@ def _assemble(
     ]
     for step in (argv, mc):
         try:
-            proc = subprocess.run(
-                step,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-                cwd=str(out.parent),
-            )
+            proc = run_bounded(step, timeout=timeout, cwd=out.parent)
         except subprocess.TimeoutExpired:
             return (
                 STATUS_TOOLCHAIN_TIMEOUT,
@@ -1109,6 +1095,25 @@ def _nonnegative_jobs(raw: str) -> int:
 def _probe_jobs(requested: int) -> int:
     """Resolve the quota-aware default while preserving an explicit override."""
     return requested or min(MAX_PROBE_JOBS, available_cpus())
+
+
+@contextlib.contextmanager
+def _probe_pool(max_workers: int) -> Iterator[cf.ThreadPoolExecutor]:
+    """A thread pool for probes that stops promptly on Ctrl-C.
+
+    Ctrl-C reaches only the main thread, and every probe runs in its own
+    session, so the terminal's interrupt reaches neither the workers nor their
+    compilers. Leaving a plain pool would then wait out each running probe's
+    timeout. On `KeyboardInterrupt` this cancels the queued probes and ends the
+    running ones before the pool waits for its workers.
+    """
+    with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        try:
+            yield ex
+        except KeyboardInterrupt:
+            ex.shutdown(wait=False, cancel_futures=True)
+            stop_all()
+            raise
 
 
 def _schedule_probes(
@@ -1474,7 +1479,7 @@ def main() -> int:
         )
 
     preflight: dict[str, tuple[str, str]] = {}
-    with cf.ThreadPoolExecutor(max_workers=min(jobs, len(arches))) as ex:
+    with _probe_pool(min(jobs, len(arches))) as ex:
         for arch, answer in ex.map(preflight_one, arches):
             preflight[arch] = answer
     preflight_retry = _retry_target_preflights(
@@ -1679,7 +1684,7 @@ def main() -> int:
                 status, evidence = terminal
                 record(key, arch, status, evidence)
 
-    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
+    with _probe_pool(jobs) as ex:
         futures: dict[cf.Future, str] = {}
         for arch, batch in positive_batches.items():
             if batch:

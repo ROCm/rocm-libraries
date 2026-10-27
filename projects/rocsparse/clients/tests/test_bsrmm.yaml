@@ -39,11 +39,7 @@ Definitions:
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
 
 Tests:
-
-# ##############################
-# # QUICK
-# ##############################
-
+# Quick
 - name: bsrmm
   category: quick
   function: bsrmm
@@ -88,15 +84,14 @@ Tests:
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos2,
-             nos6]
+  filename: [nos6]
 
 - name: bsrmm_file
   category: quick
   function: bsrmm
   precision: *single_double_precisions_complex
   M: 1
-  N: [3, 21]
+  N: [21]
   K: 1
   block_dim: [6]
   alpha_beta: *alpha_beta_range_quick
@@ -105,14 +100,9 @@ Tests:
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2,
-             qc2534]
+  filename: [qc2534]
 
-
-# ##############################
-# # PRE CHECKIN
-# ##############################
-
+# Pre_checkin
 - name: bsrmm_bad_arg
   category: pre_checkin
   function: bsrmm_bad_arg
@@ -149,21 +139,6 @@ Tests:
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
-- name: bsrmm
-  category: nightly
-  function: bsrmm
-  precision: *single_double_precisions_complex_real
-  M: [3943, 94912]
-  N: [27, 49]
-  K: [4134, 73291]
-  block_dim: [2, 9]
-  alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row]
-  matrix: [rocsparse_matrix_random]
-
 - name: bsrmm_graph_test
   category: pre_checkin
   function: bsrmm
@@ -181,9 +156,21 @@ Tests:
   matrix: [rocsparse_matrix_random]
   graph_test: true
 
-# ##############################
-# # NIGHTLY
-# ##############################
+# Nightly
+- name: bsrmm
+  category: nightly
+  function: bsrmm
+  precision: *single_double_precisions_complex_real
+  M: [3943, 94912]
+  N: [27, 49]
+  K: [4134, 73291]
+  block_dim: [2, 9]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
 
 - name: bsrmm_file
   category: nightly

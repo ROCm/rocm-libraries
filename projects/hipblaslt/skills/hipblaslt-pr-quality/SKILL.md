@@ -33,7 +33,7 @@ On any conflict, the base MUST-rule wins.
 ### Scoping of base rules (adds)
 Bind the base change-classes and scope buckets to hipBLASLt paths:
 - Frontend / API: `projects/hipblaslt/library/include/hipblaslt/**` (public headers), `projects/hipblaslt/library/src/**`.
-- Tensile / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
+- TensileLite / kernel generation: `projects/hipblaslt/tensilelite/**`, especially `KernelWriter*.py`.
 - Tests/clients: `projects/hipblaslt/clients/**`.
 
 ### Tightens M1 (defect-fix regression test)
@@ -46,8 +46,13 @@ Known-bug entries live in `projects/hipblaslt/clients/tests/data/known_bugs.yaml
 id and a time-box. This is the concrete implementation of the base "track and time-box
 quarantines" requirement. Waiver code **`W-KNOWN-BUG`** declares a tracked two-PR plan.
 
-### Adds — Tensile test levels (maps the base test-level SHOULD to real lanes)
-C++ unit → Tensile pytest → client/API → integration → perf. Pick the lowest level that fails on
+
+### Adds — TensileLite test levels (maps the base test-level SHOULD to real lanes)
+C++ unit → TensileLite pytest → client/API → integration → perf. Pick the lowest level that fails on
+the regression. Map the base test-level table onto these lanes when advising or reviewing.
+
+### Adds — TensileLite test levels (maps the base test-level SHOULD to real lanes)
+C++ unit → TensileLite pytest → client/API → integration → perf. Pick the lowest level that fails on
 the regression. Map the base test-level table onto these lanes when advising or reviewing.
 
 ### Adds — characterization snapshot (`.ambr` golden) discipline
