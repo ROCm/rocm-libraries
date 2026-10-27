@@ -4,10 +4,12 @@
 """Plan gated, independent shape jobs after pytest selects the original YAMLs."""
 
 import copy
+from collections import defaultdict
 import hashlib
 import json
 import math
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -31,6 +33,77 @@ def problem_signature(problem):
         )
         if (value := getattr(problem, field, None)) is not None
     }
+
+
+def benchmark_group_plan(plan, directory):
+    """Bundle already admitted ordinary shapes from the same benchmark group."""
+    from tensilelite.SolutionStructs import ProblemSizes, ProblemType
+
+    directory.mkdir(parents=True, exist_ok=True)
+    grouped = defaultdict(list)
+    atomic = []
+    for job in plan["jobs"]:
+        if job["grouped"] or job.get("atomic_reason"):
+            atomic.append(job)
+        else:
+            grouped[
+                (job["source"], job["problem_type_index"], job["group_index"])
+            ].append(job)
+    bundled = []
+    for originals in grouped.values():
+        originals.sort(key=lambda job: int(re.search(r"_s(\d+)$", job["nodeid"])[1]))
+        template, selected = None, []
+        signatures = []
+        for job in originals:
+            if digest(Path(job["yaml"])) != job["yaml_sha256"]:
+                raise ValueError("admitted shape YAML changed before bundling")
+            document = yaml.safe_load(Path(job["yaml"]).read_text())
+            finals = document["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"]
+            sizes = next(
+                final["ProblemSizes"] for final in finals if "ProblemSizes" in final
+            )
+            selected.extend(entry for entry in sizes if "MinStride" not in entry)
+            minimums = [entry for entry in sizes if "MinStride" in entry]
+            sizes[:] = minimums
+            if template is None:
+                template = document
+            if (
+                document != template
+                or job["markers"] != originals[0]["markers"]
+                or job["source_sha256"] != originals[0]["source_sha256"]
+            ):
+                raise ValueError("benchmark-group shapes have different controls")
+            signatures.extend(job["problems"])
+        record = copy.deepcopy(originals[0])
+        record["nodeid"] = re.sub(r"_s\d+$", "_benchmark_group", record["nodeid"])
+        record["id"] = hashlib.sha256(record["nodeid"].encode()).hexdigest()[:20]
+        # The ceiling admitted each source case before their work was summed.
+        record["work"] = sum(job["work"] for job in originals)
+        record["problems"] = signatures
+        record["admitted_case_ids"] = [job["id"] for job in originals]
+        finals = template["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"]
+        sizes = next(
+            final["ProblemSizes"] for final in finals if "ProblemSizes" in final
+        )
+        sizes[:0] = selected
+        problem_type = ProblemType(
+            copy.deepcopy(template["BenchmarkProblems"][0][0]), False
+        )
+        parsed = ProblemSizes(problem_type, copy.deepcopy(sizes))
+        if [problem_signature(problem) for problem in parsed.problems] != signatures:
+            raise ValueError("benchmark-group bundling changed normalized descriptors")
+        destination = directory / f"{Path(record['source']).stem}__{record['id']}.yaml"
+        destination.write_text(yaml.safe_dump(template, sort_keys=False))
+        if yaml.safe_load(destination.read_text()) != template:
+            raise ValueError("benchmark-group YAML round trip changed controls")
+        record.update(yaml=str(destination), yaml_sha256=digest(destination))
+        bundled.append(record)
+    result = copy.deepcopy(plan)
+    result["partition"] = "benchmark-group"
+    result["jobs"] = sorted(
+        atomic + bundled, key=lambda job: (-job["work"], job["nodeid"])
+    )
+    return result
 
 
 def split_yaml(source, nodeid, directory, ceiling):

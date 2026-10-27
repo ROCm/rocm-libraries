@@ -503,9 +503,14 @@ def audit(root):
             source=source_name(Path(j["source"])),
             source_sha256=j["source_sha256"],
             group=[j.get("problem_type_index"), j.get("group_index")],
-            problems=j["problems"],
+            problems=problems,
         )
         for j in admitted
+        for problems in (
+            [j["problems"]]
+            if j.get("grouped") or j.get("atomic_reason")
+            else [[problem] for problem in j["problems"]]
+        )
     ]
     test_code = sorted(
         {
@@ -763,7 +768,15 @@ def compare(left, right):
         model_configs.append(config)
     if model_configs[0] != model_configs[1]:
         errors.append("emulator model/configuration differs beyond thread allocation")
-    if left.get("coverage") != right.get("coverage"):
+    coverage = [
+        {
+            k: v
+            for k, v in report.get("coverage", {}).items()
+            if k != "admitted_queue_jobs"
+        }
+        for report in (left, right)
+    ]
+    if coverage[0] != coverage[1]:
         errors.append("threshold policy or workload accounting differs")
     differences = {}
     if left["test_code"] != right["test_code"]:

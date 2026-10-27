@@ -147,7 +147,7 @@ class CompareTest(unittest.TestCase):
         write_json(directory / "item.json", document)
         return directory, document
 
-    def report(self, name, candidate):
+    def report(self, name, candidate, bundle=False):
         root = self.root / name
         root.mkdir()
         source = dict(
@@ -175,9 +175,23 @@ class CompareTest(unittest.TestCase):
                     problems=[dict(sizes=[n, 8, 1, 16])],
                 )
             )
+        if bundle:
+            generated = root / "shape-yamls/bundle.yaml"
+            generated.write_text("4,12")
+            jobs = [
+                dict(
+                    jobs[0],
+                    id="bundle",
+                    nodeid="bundle",
+                    work=sum(job["work"] for job in jobs),
+                    problems=[problem for job in jobs for problem in job["problems"]],
+                    yaml=str(generated),
+                    yaml_sha256=digest(generated),
+                )
+            ]
         tests = {}
         for nodeid, sizes in (
-            [(j["nodeid"], [j["problems"][0]["sizes"][0]]) for j in jobs]
+            [(j["nodeid"], [p["sizes"][0] for p in j["problems"]]) for j in jobs]
             if candidate
             else [("whole", [4, 12])]
         ):
@@ -294,6 +308,22 @@ class CompareTest(unittest.TestCase):
                 else:
                     changed["runtime"]["available_cpus"] = 48
                 result = compare(reference, changed)
+                self.assertFalse(result["coverage_equal"])
+                self.assertIsNone(result["reference_over_candidate_ratio"])
+
+    def test_bundled_jobs_require_the_same_actual_work_and_verdicts(self):
+        _, points = self.report("points", True)
+        _, bundled = self.report("bundled", True, bundle=True)
+        self.assertEqual(points["coverage"]["admitted_queue_jobs"], 2)
+        self.assertEqual(bundled["coverage"]["admitted_queue_jobs"], 1)
+        result = compare(points, bundled)
+        self.assertTrue(result["coverage_equal"], result["audit_errors"])
+        self.assertEqual(result["reference_over_candidate_ratio"], 1)
+        for field in ("requested", "inventory", "ledger"):
+            with self.subTest(field=field):
+                missing = copy.deepcopy(bundled)
+                missing[field].pop()
+                result = compare(points, missing)
                 self.assertFalse(result["coverage_equal"])
                 self.assertIsNone(result["reference_over_candidate_ratio"])
 
@@ -470,6 +500,78 @@ class CompareTest(unittest.TestCase):
                 rocjitsu_experiment.trial_specifications(
                     "allocation", 4, 2, allocations=invalid
                 )
+
+    def test_partition_comparison_holds_shape_allocation_and_reports_job_counts(self):
+        seed, _ = self.report("partition-seed", True)
+        write_json(
+            self.root / "shape-plan.json",
+            json.loads((seed / "shape-plan.json").read_text()),
+        )
+        calls = []
+
+        def trial(
+            strategy,
+            parent,
+            env,
+            plan,
+            workers,
+            seconds,
+            suite,
+            label,
+            dispatch_threads,
+        ):
+            calls.append((label, strategy, workers, dispatch_threads))
+            _, report = self.report(
+                label, strategy == "shape", bundle=label == "benchmark-groups"
+            )
+            report["runtime"].update(
+                workers=workers,
+                cpu_thread_budget=dispatch_threads,
+                reference_threads=1,
+                config=dict(num_threads=1, cpu_dispatch_threads=dispatch_threads),
+            )
+            return report
+
+        command = [
+            "rocjitsu_experiment",
+            "--report-dir",
+            str(self.root),
+            "--strategy",
+            "partition",
+            "--workers",
+            "4",
+            "--reference-workers",
+            "4",
+            "--dispatch-threads",
+            "2",
+            "--per-job-seconds",
+            "300",
+            "--suite-seconds",
+            "500",
+        ]
+        with (
+            patch.object(sys, "argv", command),
+            patch.object(os, "sched_getaffinity", return_value=set(range(8))),
+            patch.dict(os.environ, COHORT_MANIFEST="", GITHUB_STEP_SUMMARY=""),
+            patch.object(rocjitsu_experiment, "trial", side_effect=trial),
+        ):
+            self.assertEqual(rocjitsu_experiment.main(), 0)
+        self.assertEqual(
+            set(calls),
+            {
+                ("reference", "reference", 4, 2),
+                ("shape", "shape", 4, 2),
+                ("benchmark-groups", "shape", 4, 2),
+            },
+        )
+        result = json.loads((self.root / "benchmark.json").read_text())
+        self.assertEqual(result["coverage"]["admitted_queue_jobs"], 2)
+        self.assertEqual(
+            {row["strategy"]: row["queue_jobs"] for row in result["strategies"]},
+            {"reference": 1, "shape": 2, "benchmark-groups": 1},
+        )
+        self.assertTrue(all(row["coverage_equal"] for row in result["comparisons"]))
+        self.assertFalse(result["statistical_claim"])
 
     def test_wider_shape_dispatch_keeps_generation_and_references_serial(self):
         _, report = self.report("seed", True)

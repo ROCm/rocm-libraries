@@ -21,8 +21,8 @@ on:
         default: "16"
       strategy:
         type: choice
-        description: "Matrix compares whole-YAML and shape scheduling; allocation compares workers and dispatch widths"
-        options: [shape, reference, paired, safety, matrix, allocation]
+        description: "Matrix compares worker counts; allocation compares dispatch widths; partition compares shape and benchmark-group jobs"
+        options: [shape, reference, paired, safety, matrix, allocation, partition]
         default: shape
       dispatch_threads:
         type: string

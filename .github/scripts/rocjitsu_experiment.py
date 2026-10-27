@@ -16,10 +16,11 @@ import subprocess
 import sys
 import time
 
-from rocjitsu_compare import audit, compare
+from rocjitsu_compare import audit, compare, workload_coverage
 from rocjitsu_check_suite import memory_lines
 from rocjitsu_evidence import digest, source_name
 from rocjitsu_pytest import write_json
+from rocjitsu_shape_plan import benchmark_group_plan
 
 
 def commands(strategy, root, plan, env, workers, seconds, suite):
@@ -152,6 +153,8 @@ def trial(
     root = parent / (label or strategy)
     root.mkdir()
     shutil.copytree(parent / "shape-yamls", root / "shape-yamls")
+    if label == "benchmark-groups":
+        plan = benchmark_group_plan(plan, root / "shape-yamls")
     # Paths inside the plan are immutable original inputs. Retained copies in
     # each report allow later offline hash verification without the runner.
     write_json(root / "shape-plan.json", plan)
@@ -168,6 +171,9 @@ def trial(
     write_json(root / "rocjitsu-config.json", config)
     runtime = dict(
         strategy=strategy,
+        partition=(
+            plan.get("partition", "shape") if strategy == "shape" else "whole-YAML"
+        ),
         workers=workers,
         available_cpus=len(os.sched_getaffinity(0)),
         runner_name=env.get("RUNNER_NAME"),
@@ -255,6 +261,12 @@ def trial_specifications(
     dispatch_threads=1,
     allocations="48:1,32:2,16:4",
 ):
+    if strategy == "partition":
+        return [
+            ("reference", "reference", reference_workers, dispatch_threads),
+            ("shape", "shape", workers, dispatch_threads),
+            ("benchmark-groups", "shape", workers, dispatch_threads),
+        ]
     if strategy == "allocation":
         result = []
         for entry in allocations.split(","):
@@ -309,6 +321,14 @@ def benchmark_report(parent, reports, comparisons):
         rows.append(
             dict(
                 strategy=name,
+                partition=report["runtime"].get("partition"),
+                queue_jobs=report["coverage"][
+                    (
+                        "selected_yaml_files"
+                        if report["runtime"]["strategy"] == "reference"
+                        else "admitted_queue_jobs"
+                    )
+                ],
                 workers=report["runtime"]["workers"],
                 cpu_thread_budget=report["runtime"]["cpu_thread_budget"],
                 dispatch_threads=report["runtime"]
@@ -339,7 +359,7 @@ def benchmark_report(parent, reports, comparisons):
                 verdicts=json.dumps(report["client_verdicts"], sort_keys=True),
             )
         )
-    coverage = next(iter(reports.values()))["coverage"]
+    coverage = workload_coverage(json.loads((parent / "shape-plan.json").read_text()))
     excluded_fraction = coverage["excluded_declared_work_fraction"]
     excluded_share = (
         f" ({100 * excluded_fraction:.3f}% of declared work)"
@@ -372,13 +392,14 @@ def benchmark_report(parent, reports, comparisons):
         "",
         "Workload elapsed time includes job startup, compilation, validation and cleanup. Shared artifact/environment setup and initial workload planning are outside each trial. Average CPU use includes child processes and may include host waiters; it is not a measure of useful emulator arithmetic. Container memory peaks span the shared job and are not per-strategy peaks.",
         "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation and references with the reported dispatch width. These are comparisons of complete strategies in a common harness; shape arms with the same dispatch width isolate outer concurrency. Allocation comparisons vary workers and dispatch together. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
+        "Partition mode compares single-shape jobs with admitted shapes bundled by original benchmark group, at the same worker/dispatch allocation. Grouped GEMM and search-dependent configurations remain indivisible. The gate applies before bundling; a bundle's summed work may exceed the per-case ceiling. Queue-job counts describe granularity; requested descriptors, accepted solutions and numerical verdicts must still match.",
         "",
-        "| Strategy | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Strategy | Queue jobs | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         text.append(
-            f"| {row['strategy']} | {row['workers']} | {row['dispatch_threads'] or 'auto'} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
+            f"| {row['strategy']} | {row['queue_jobs']} | {row['workers']} | {row['dispatch_threads'] or 'auto'} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
         )
     text += [
         "",
@@ -393,7 +414,15 @@ def main():
     parser.add_argument("--report-dir", type=Path, required=True)
     parser.add_argument(
         "--strategy",
-        choices=("shape", "reference", "paired", "safety", "matrix", "allocation"),
+        choices=(
+            "shape",
+            "reference",
+            "paired",
+            "safety",
+            "matrix",
+            "allocation",
+            "partition",
+        ),
         default="shape",
     )
     parser.add_argument("--workers", type=int, default=96)
