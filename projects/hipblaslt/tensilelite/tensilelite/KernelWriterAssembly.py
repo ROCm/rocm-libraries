@@ -9712,6 +9712,15 @@ class KernelWriterAssembly(KernelWriter):
     return mappedIdx, scaleSel
 
   ##############################################################################
+  # Tail-loop lane masks on gfx1200/gfx1201: a VALU that reads an SGPR another VALU
+  # has just written can see a stale value unless s_wait_alu depctr_va_sdst(0) is
+  # between them (the hazard LLVM's AMDGPUWaitSGPRHazards guards against).
+  ##############################################################################
+  def addTailMaskSgprWait(self, module):
+    if self.states.version[:2] == (12, 0):
+      module.add(SWaitAlu(va_sdst=0, comment="wait for the lane-mask SGPR write"))
+
+  ##############################################################################
   # MAC Iteration
   ##############################################################################
   def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False):
@@ -9756,6 +9765,7 @@ class KernelWriterAssembly(KernelWriter):
         # replace 0 for differnet thread
         shiftK.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), numInput, tmpSgprInfo))
         shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+        self.addTailMaskSgprWait(shiftK)
         for a in range(0, kernel["ThreadTileA"]):
           for iui in range(0, iuiCount):
             aStr = vgpr("ValuA_X%u_I%u+%u" % (bufferIdx, iui, a*vgprPerInput), 1)
@@ -9771,6 +9781,7 @@ class KernelWriterAssembly(KernelWriter):
           abReg   = self.vgprPool.checkOutAligned(vgprPerInput, vgprPerInput, tag="macIter_abReg")
           shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg), comment="get distance between size and k index"))
           shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numInput, comment="set partial 0 if distance less than numInput"))
+          self.addTailMaskSgprWait(shiftK)
           shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numInput-1, comment="get inputs for edge thread"))
           shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
           shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
@@ -10006,6 +10017,7 @@ class KernelWriterAssembly(KernelWriter):
             if kernel["LocalSplitU"] > 1:
               shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
             shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg_first), src1=sgpr(loopCntSgpr), comment="check K index >= Size L")) #ToDo: check value of laneSGPRCount
+            self.addTailMaskSgprWait(shiftK)
             vgprPerSet0Group = vgprPerInUnrollA
           elif is_wmma_v2 and vgprPerInUnrollA > 2:
             vgprPerSet0Group = 4
@@ -10079,6 +10091,7 @@ class KernelWriterAssembly(KernelWriter):
               if kernel["LocalSplitU"] > 1:
                 shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
               shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+              self.addTailMaskSgprWait(shiftK)
 
             if not tPA["isSwizzled"]:
               for se in range(0, vgprPerSet0Group):
@@ -10177,6 +10190,7 @@ class KernelWriterAssembly(KernelWriter):
               if kernel["LocalSplitU"] > 1:
                 shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
               shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+              self.addTailMaskSgprWait(shiftK)
             for se in range(0, vgprPerSet0Group):
               for b in range(0, kernel["MIWaveTileB"]):
                 for ti in range(0, numTileInInstB):
@@ -10203,6 +10217,7 @@ class KernelWriterAssembly(KernelWriter):
             if (vgprPerInUnroll < 4 and is_mfma) or is_wmma_v2:
               shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg_first), comment="get distance between size and k index"))
               shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numMIInUnroll, comment="set partial 0 if distance less than input per thread"))
+              self.addTailMaskSgprWait(shiftK)
             TailLoop_SkipZeroOutMask = Label((self.labels.getUniqueNamePrefix("TailLoop_SkipZeroOutMask")), comment="")
             if is_wmma_v3:
               shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=int((64 // (numRegistersIn * 32))-1), comment="get inputs for edge thread"))
