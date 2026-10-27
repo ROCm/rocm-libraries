@@ -1,12 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Windows host clang does not provide the BSD `uint` typedef that rocRoller
-// data-type headers use. Define it before those headers are included.
-#if defined(_WIN32)
-using uint = unsigned int;
-#endif
-
 #include "solution_selection.hpp"
 #include "analytical_utils.hpp"
 #include "kernel_type.hpp"
@@ -102,6 +96,10 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
             .occupancy     = 1,
             .cache_hints_a = 0,
             .cache_hints_b = 0,
+            // Every tile is emitted with both NT variants, so availability is
+            // known here. rank_configs reads the flags and does not rescan.
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_both_off);
 
@@ -111,9 +109,11 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
                    static_cast<size_t>(wgt.n),
                    static_cast<size_t>(wgtk * unroll)},
             .mi = {static_cast<size_t>(MI.m), static_cast<size_t>(MI.n), static_cast<size_t>(MI.k)},
-            .occupancy     = 1,
-            .cache_hints_a = 4,
-            .cache_hints_b = 0,
+            .occupancy                = 1,
+            .cache_hints_a            = 4,
+            .cache_hints_b            = 0,
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_a_on);
 
@@ -123,9 +123,11 @@ std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool has
                    static_cast<size_t>(wgt.n),
                    static_cast<size_t>(wgtk * unroll)},
             .mi = {static_cast<size_t>(MI.m), static_cast<size_t>(MI.n), static_cast<size_t>(MI.k)},
-            .occupancy     = 1,
-            .cache_hints_a = 0,
-            .cache_hints_b = 4,
+            .occupancy                = 1,
+            .cache_hints_a            = 0,
+            .cache_hints_b            = 4,
+            .non_temporal_a_available = true,
+            .non_temporal_b_available = true,
         };
         tileList.push_back(config_b_on);
     }

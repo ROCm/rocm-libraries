@@ -254,7 +254,9 @@ static void _op_arith_fneg(rocke_lower_t* L, const rocke_op_t* op)
         L, "  %s = fneg %s %s", res->name, rocke_ll_llvm_type(L, v->type), rocke_ll_operand(L, v));
 }
 
-/* Python _op_arith_fabs -> llvm.fabs.<ty>. */
+/* Python _op_arith_fabs -> llvm.fabs.<ty>. Unlike fma / fmax3, fabs also
+ * accepts f64 (a sign-bit clear), so f64 is admitted here rather than in
+ * the shared ll_fp_llvm_ty table. */
 static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -264,7 +266,8 @@ static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
     }
     const rocke_value_t* v = op->operands[0];
     const char* ty_name = v->type ? v->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(
@@ -365,6 +368,53 @@ static void ll_fminmax3(rocke_lower_t* L,
                    rocke_ll_operand(L, a),
                    llvm_ty,
                    inner);
+}
+
+/* Python _op_arith_fdot2 -> llvm.amdgcn.fdot2[.f32.bf16](a, b, c, i1 false). */
+static void _op_arith_fdot2(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* c = op->operands[2];
+    const rocke_type_t* elem = (a->type && a->type->elem) ? a->type->elem : NULL;
+    const char* elem_name = elem ? elem->name : NULL;
+    const char* vty = NULL;
+    const char* fn = NULL;
+    if(elem_name && strcmp(elem_name, "bf16") == 0)
+    {
+        vty = "<2 x bfloat>";
+        fn = "llvm.amdgcn.fdot2.f32.bf16";
+    }
+    else if(elem_name && strcmp(elem_name, "f16") == 0)
+    {
+        vty = "<2 x half>";
+        fn = "llvm.amdgcn.fdot2";
+    }
+    else
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "fdot2: unsupported element type %s",
+                      elem_name ? elem_name : "(null)");
+        return;
+    }
+    char key[32];
+    snprintf(key, sizeof key, "amdgcn.fdot2.%s", elem_name);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call float @%s(%s %s, %s %s, float %s, i1 false)",
+                   res->name,
+                   fn,
+                   vty,
+                   rocke_ll_operand(L, a),
+                   vty,
+                   rocke_ll_operand(L, b),
+                   rocke_ll_operand(L, c));
 }
 
 /* Python _op_arith_fmax3 -> maxnum(a, maxnum(b, c)). */
@@ -925,6 +975,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_FNEG, _op_arith_fneg);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FABS, _op_arith_fabs);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMA, _op_arith_fma);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_FDOT2, _op_arith_fdot2);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMAX3, _op_arith_fmax3);
     rocke_ll_set_handler(ROCKE_OP_ARITH_FMIN3, _op_arith_fmin3);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CMP, _op_arith_cmp);

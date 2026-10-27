@@ -22,27 +22,30 @@ from rocisa.code import Label, Module
 from rocisa.container import sgpr, vgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
+    SAddCU32,
+    SAddU32,
     SAndB32,
     SBranch,
     SCmpEQU32,
     SCmpEQU64,
     SCmpGeU32,
     SMovB32,
+    SMulHIU32,
     SMulI32,
     SSubU32,
     VMovB32,
 )
 from rocisa.register import RegisterPool
 
-import Tensile.KernelWriter as kw_module
-import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Common.DataType import DataType
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-from Tensile.Components.TileProcessingStrategy import DataParallel
-from Tensile.Components.PersistentLoop import PersistentLoopOn
-from Tensile.Components.WorkAssignment import StaticGrid
-from Tensile.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
-from Tensile.Contractions import SizeMapping
+import tensilelite.KernelWriter as kw_module
+import tensilelite.KernelWriterAssembly as kwa_module
+from tensilelite.Common.DataType import DataType
+from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+from tensilelite.Components.TileProcessingStrategy import DataParallel
+from tensilelite.Components.PersistentLoop import PersistentLoopOn
+from tensilelite.Components.WorkAssignment import StaticGrid
+from tensilelite.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
+from tensilelite.Contractions import SizeMapping
 
 # Reuse the established component-level harness helpers rather than reinventing
 # them (see test_segment_interleave_state / cms_validation_base for the in-repo
@@ -126,6 +129,9 @@ class _SKWriter:
     def isPersistentConstantsToVgprEnabled(self, kernel):
         return False
 
+    def readbackStreamKConst(self, kernel, dst, name):
+        return Module("readback %s" % name)
+
     def cmpNamedArgTypeEq(self, module, value, comment=""):
         kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
 
@@ -135,6 +141,9 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+
+    globalReadIncsOperand = kwa_module.KernelWriterAssembly.globalReadIncsOperand
+    useConstSgprGlobalReadIncsForTc = kwa_module.KernelWriterAssembly.useConstSgprGlobalReadIncsForTc
 
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
@@ -331,15 +340,47 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
     writer = _SKWriter()
     tpa, tpb = _tensor_parameters()
 
-    dp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
-        writer, {"TileProcessingStrategy": "DataParallel"}, tpa, tpb
-    )
+    for method in (kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated,
+                   kwa_module.KernelWriterAssembly.tdmApplyTileKOffset):
+        dp_mod = method(writer, {"TileProcessingStrategy": "DataParallel"}, tpa, tpb)
+        assert dp_mod.itemsSize() == 0
     nodp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
         writer, {"TileProcessingStrategy": "StreamK"}, tpa, tpb
     )
 
-    assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
+
+
+@pytest.mark.parametrize("waves,constant_increments,metadata", [
+    (1, False, False), (1, False, True), (1, True, True),
+    (4, False, False), (4, False, True),
+])
+def test_tdm_k_offsets_use_each_descriptor_increment_and_full_width_add(waves, constant_increments, metadata):
+    writer = _SKWriter()
+    writer.states.a.useConstSgprGlobalReadIncs = constant_increments
+    writer.states.b.useConstSgprGlobalReadIncs = constant_increments
+    kernel = {"TileProcessingStrategy": "StreamK", "TDMFuse": 0,
+              "NumWaves": waves, "enableTDMMetadata": metadata}
+    tpa, tpb = _tensor_parameters()
+    if waves == 1:
+        method = kwa_module.KernelWriterAssembly.tdmApplyTileKOffset
+        descriptors = [(tc, "GlobalReadIncs" + tc if constant_increments
+                        else sgpr("GlobalReadIncs" + tc + "+0")) for tc in ("A", "B")]
+    else:
+        method = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated
+        descriptors = [("A", sgpr("tdmABIncs"))]
+    if metadata:
+        descriptors.append(("Metadata", sgpr("GlobalReadIncsMetadata")))
+    instructions = list(method(writer, kernel, tpa, tpb).flatitems())
+    assert len(instructions) == 4 * len(descriptors)
+    for index, (tensor, increment) in enumerate(descriptors):
+        high, low, add, carry = instructions[4 * index:4 * index + 4]
+        assert [type(i) for i in (high, low, add, carry)] == [SMulHIU32, SMulI32, SAddU32, SAddCU32]
+        assert list(high.getParams())[1:] == list(low.getParams())[1:] == [
+            sgpr("StreamKLocalStart"), increment]
+        address = "tdm" + tensor + "Group0"
+        assert list(add.getParams()) == [sgpr(address + "+2"), sgpr(address + "+2"), low.getParams()[0]]
+        assert list(carry.getParams()) == [sgpr(address + "+3"), sgpr(address + "+3"), high.getParams()[0]]
 
 
 def _tdm_setup_increment_items(dp_only):
@@ -465,8 +506,8 @@ def _static_gfx1250_params(gfx1250_iim, dp_only):
     AddressWS/AddressFlags/SrdWS/StreamKLocalStart/StreamKLocalEnd, fits under the
     gfx1250 SGPR budget and emits cleanly -- otherwise the non-DP baseline
     overflows (which is exactly the pressure the DP-only reduction relieves)."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -537,11 +578,11 @@ def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     import shutil
 
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )

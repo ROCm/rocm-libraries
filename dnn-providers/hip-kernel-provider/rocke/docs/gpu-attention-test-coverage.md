@@ -23,7 +23,7 @@ A source-declared shape is not necessarily selected, executed, or passed in CI.
 
 ## Reading this map
 
-- [Coverage at a glance](#coverage-at-a-glance) and [the eight required cases](#the-eight-required-cases)
+- [Coverage at a glance](#coverage-at-a-glance) and [the gfx942 required cases](#the-gfx942-required-cases)
 - [GPU test files](#gpu-test-files)
 - [Full attention shape matrix](#full-attention-shape-matrix)
 - [Full recurrent shape matrix](#full-recurrent-shape-matrix)
@@ -32,11 +32,11 @@ The matrices contain 111 attention and 109 recurrent configuration/shape rows.
 They describe source declarations, including cases that skip in the observed CI.
 
 Rows are not unique shapes or pytest pass counts. Binary-reuse tests have two
-shape rows; the eight new references intentionally duplicate existing cohort
+shape rows; the gfx942 references intentionally duplicate existing cohort
 configurations. The recurrent table includes a separately identified GPU oracle
 negative control (`test_the_tolerance_gate_can_actually_fail`); it is not a
 rocKE kernel numerical execution. The SDPA harness's three negative tests are
-listed separately in the inventory, not added to the eight workload rows.
+listed separately in the inventory, not added to the workload rows.
 
 ## Coverage at a glance
 
@@ -49,19 +49,23 @@ listed separately in the inventory, not added to the eight workload rows.
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
-| gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
-| gfx1151 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; local artifact routing checked |
-| gfx1200 standalone WMMA attention compiled for gfx12-generic | 8 adapter configurations | Pending GPU qualification; host selection, ABI, and contract tests only | No installed pinned CTest |
-| gfx1201 standalone WMMA attention compiled for gfx12-generic | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; local artifact routing checked |
+| gfx942 paged decode with i64 K/V addressing | 4 | No: different path | Skipped |
+| gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
+| gfx1151 standalone WMMA attention | Pinned cohort | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed validation passed | Device-gated on gfx942; local artifact routing checked |
+| gfx1200 standalone WMMA attention compiled for gfx12-generic | Adapter cohort | Pending GPU qualification; host selection, ABI, and contract tests only | No installed pinned CTest |
+| gfx1201 standalone WMMA attention compiled for gfx12-generic | Pinned cohort | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed validation passed | Device-gated on gfx942; local artifact routing checked |
 | gfx1250 WMMA attention | 2 | No | Device-gated; verifier uses NumPy/HIP |
 | Extended FMHA/Sage/sparse harness | 15 named cases | No | Outer test skips; per-case hardware guards also apply |
 | KDA/GDN prefill and decode | See separate matrix | No: recurrent operators | Torch/device-gated |
 
-## The eight required cases
+## The gfx942 required cases
 
 All use gfx942, B=1, Sq=Sk=512, Hq=16, one fixed NumPy input recipe, and
 current Python-emitted kernels compared to qualified precompiled kernels.
-Q/output are `[B,Sq,Hq,D]`; K/V are `[B,Sk,Hkv,D]`.
+Q/output are `[B,Sq,Hq,D]`; K/V are `[B,Sk,Hkv,D]`. The table records the
+cohort reviewed for this map; from the rocKE root,
+`python library/tests/run_sdpa_reference.py cases --arch gfx942` lists the
+enrolled cases.
 
 | # | Dtype | D | Hkv | Mask | Implementation |
 |---|---|---:|---:|---|---|
@@ -74,48 +78,51 @@ Q/output are `[B,Sq,Hq,D]`; K/V are `[B,Sk,Hkv,D]`.
 | 7 | FP16 | 128 | 16 | Causal | Default |
 | 8 | FP16 | 128 | 4 | Full | Default |
 
-There are four distinct Q/K/V shape combinations, not eight unique shapes.
+The rows use only four distinct Q/K/V shape combinations.
 The additional three GPU tests are harness rejection checks (perturbed current
 output, perturbed baseline output, missing launch), not more workload coverage.
-The 54 host tests similarly validate the harness, not 54 GPU shapes.
+The host tests similarly validate the harness; their count is not a number of
+GPU shapes.
 
 ## gfx950 required base coverage
 
-Seven configurations now have a separate gfx950 reference bundle: FP16 and BF16
+A separate gfx950 reference bundle covers these configurations: FP16 and BF16
 D128 Hq16/Hkv4 with default and persistent grids; FP16 D64 Hq16/Hkv16 default;
 FP16 D128 Hq16/Hkv16 persistent; and BF16 D64 Hq16/Hkv4 persistent. All use
 B1/Sq512/Sk512 and causal masking. The adapter selects wide DMA for persistent,
 causal D128 cases.
-See the [SDPA guide](sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
+See the [SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
 candidates, qualification evidence, and publication status.
 
 These are equivalent configurations with different inputs from the Torch tests.
-The seven GPU comparisons and three harness failure controls passed both source
-and installed verification without Torch. They do not establish coverage for
-non-default scales, windows, sinks, ragged/unequal lengths, paging, binary reuse,
-or narrow-store equality. The detailed historical inventory below retains those
-gaps; it is not a count of the current source's complete test matrix.
+When the bundle was published, its seven GPU comparisons and three harness
+failure controls passed both source and installed verification without Torch.
+They do not establish coverage for non-default scales, windows, sinks,
+ragged/unequal lengths, paging, binary reuse, or narrow-store equality. The
+detailed historical inventory below retains those gaps; it is not a count of
+the current source's complete test matrix.
 
 ## Standalone WMMA reference coverage
 
-Each of gfx1151 and gfx1201 has eight qualified FP16 cases: D64/D128 ×
-Hq4/Hkv4 or Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent
-`(4,4,2)` grid. All eight comparisons and three failure controls passed in source
-and installed Torch-free runs on each target, with no selected GPU skips.
+Each of gfx1151 and gfx1201 has qualified FP16 cases: D64/D128 × Hq4/Hkv4 or
+Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent `(4,4,2)` grid.
+When each bundle was published, all eight of its comparisons and three failure
+controls passed in source and installed Torch-free runs, with no selected GPU
+skips.
 These use the standalone WMMA builders, not automatic unified attention dispatch.
 The gfx1201 replacement compiles for `gfx12-generic` and is published in DVC.
 The gfx1200 adapter uses the same compile target but has no qualified
 archive or installed pinned suite yet. On gfx1200, a gfx120X family job skips
 the gfx1201 pinned suite with code 77. That skip does not count as gfx1200
-numerical coverage; see [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
-See the [SDPA guide](sdpa-test-reference.md#standalone-wmma-coverage) for
+numerical coverage; see [family CI selection](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection).
+See the [SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md#standalone-wmma-coverage) for
 qualification provenance, runtime requirements, and publication status.
 
 The historical source inventory below is unchanged by this new cohort.
 
 ## Concrete missing gfx942 coverage
 
-| Gap | Existing shape domain | Why the eight references do not cover it |
+| Gap | Existing shape domain | Why the gfx942 references do not cover it |
 |---|---|---|
 | Sliding windows | B1, S512, Hq16/Hkv4: BF16 D128 default/persistent W128; FP16 D128 default/persistent W256; BF16 D64 default/persistent W128 | No reference case enables a sliding window |
 | Runtime shape/binary reuse | FP16 D128 Hq16/Hkv4: `(B,S)=(1,512),(4,1024)` | The reference has only the first shape and no same-binary assertion |
@@ -123,8 +130,9 @@ The historical source inventory below is unchanged by this new cohort.
 | Forced exp2 variants | BF16 D128 Hq16/Hkv4 B1/S512, default/persistent | The reference does not force fast and plain paths and compare them bitwise |
 | Paged D128 ring regression | FP16/BF16 × Hq/Hkv=(32,8)/(16,16) × S=512/1024/4096, B1 | Unified/paged builder and cache layout differ from dense SDPA |
 | Paged head-fold | BF16 D128, Hq32/Hkv8, `(S,W)=(2048,512),(8192,4096)` × page size16/32, B1 | No head-fold kernel, paging, long sequence, or clipped window in reference cohort |
+| Paged i64 K/V addressing | BF16 D128 decode, page size 16: B8 Sk1024 Hq/Hkv=(32,8),(64,4) and B8 ragged Sk≤1000 with a block-table tail (`num_kv_blocks` overstated to force i64); B4 Sk1024 Hq/Hkv=(32,8) on a cache just over 2 GiB with pages straddling 2^31 bytes | No reference case pages the cache or uses i64 K/V addressing |
 | Seeds/distributions | One fixed normally distributed recipe per configuration in required suite | Multiple runs test repeatability, not additional input coverage |
-| Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | Eight selected rows are not a Cartesian-product sweep |
+| Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | The selected rows are not a Cartesian-product sweep |
 | Unequal query/KV lengths, bottom-right masks | Existing detailed numeric cohort is gfx950: see 11 rows in shape table | All required Sq=Sk=512; no bottom-right or ragged reference |
 | Decode / varlen / append / sparse / quantized / backward | Exact 15 extended-harness rows in shape table | Different operations, ABI layouts, and sometimes architectures |
 
@@ -162,7 +170,7 @@ listed as tile shapes rather than inventing an equivalent batch/sequence shape.
 
 **Main gaps:** sliding windows; long and runtime-varying shapes; separate
 paged/ring/head-fold paths; additional architectures; and recurrent operators.
-The eight references are required base-cohort coverage, not a drop-in replacement for
+The pinned references are required base-cohort coverage, not a drop-in replacement for
 all these GPU tests.
 
 ## Input equivalence and limitations
@@ -173,7 +181,7 @@ The reference suite uses NumPy PCG64 seed 0, standard-normal float32 samples,
 then fp16/bf16 rounding and exact digest checks. Original Torch tests generate
 random samples on the GPU through Torch. The samples differ even when the seed
 number is equal. There is one qualified input recipe per row, not a seed sweep.
-See [the SDPA guide](sdpa-test-reference.md) for the oracle and accuracy budget.
+See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md) for the oracle and accuracy budget.
 
 ## GPU test files
 
@@ -186,6 +194,7 @@ See [the SDPA guide](sdpa-test-reference.md) for the oracle and accuracy budget.
 | [test_gdn_decode_gfx950_numeric.py](../library/tests/test_gdn_decode_gfx950_numeric.py) | 13 | Selected by library CTest file list |
 | [test_gfx1250_attention.py](../library/tests/test_gfx1250_attention.py) | 2 | Selected by library CTest file list |
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) | 1 | Selected by library CTest file list |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) | 3 | Selected by library CTest file list |
 | [test_kda_chunkwise_gfx942_numeric.py](../library/tests/test_kda_chunkwise_gfx942_numeric.py) | 6 | Selected by library CTest file list |
 | [test_kda_chunkwise_gfx950_numeric.py](../library/tests/test_kda_chunkwise_gfx950_numeric.py) | 14 | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) | 8 | Selected by library CTest file list |
@@ -287,6 +296,10 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) :: test_fold_numeric_vs_fp32_windowed_oracle | gfx942 | bf16 | 1 | 8192 | 8192 | 32 | 8 | 128 | paged head-fold; window=4096; page size=16 | Missing |
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) :: test_fold_numeric_vs_fp32_windowed_oracle | gfx942 | bf16 | 1 | 2048 | 2048 | 32 | 8 | 128 | paged head-fold; window=512; page size=32 | Missing |
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) :: test_fold_numeric_vs_fp32_windowed_oracle | gfx942 | bf16 | 1 | 8192 | 8192 | 32 | 8 | 128 | paged head-fold; window=4096; page size=32 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_matches_reference | gfx942 | bf16 | 8 | 1 | 1024 | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); page size=16 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_matches_reference | gfx942 | bf16 | 8 | 1 | 1024 | 64 | 4 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); page size=16 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_ragged_lengths_and_block_table_tail | gfx942 | bf16 | 8 | 1 | 17-1000 (ragged) | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); last tile past the block table; page size=16 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_reads_past_2gib | gfx942 | bf16 | 4 | 1 | 1024 | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing; cache just over 2 GiB, pages straddle 2^31 bytes; skips under ~5 GiB free; page size=16 | Missing |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Required GPU |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Required GPU |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Required GPU |
@@ -446,4 +459,4 @@ and provider C++ integration outside this GPU attention map.
 
 This map does not inventory convolution tests. A convolution reference cohort
 needs its own operation-specific coverage map, as described in the
-[strategy and extension guide](gpu-ci-pinned-rocke-test-reference-plan.md#add-convolution-or-another-operation).
+[strategy and extension guide](../library/tests/reference_common/docs/gpu-ci-pinned-rocke-test-reference-plan.md#add-convolution-or-another-operation).
