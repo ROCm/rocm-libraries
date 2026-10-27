@@ -15,6 +15,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
+from .json_output import dump_descriptor
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -87,7 +88,7 @@ def mint_ids(config: IngestorConfig) -> dict:
 
 
 def _dump(obj: dict) -> str:
-    return json.dumps(obj, indent=2, sort_keys=False) + "\n"
+    return dump_descriptor(obj)
 
 
 def build_kmd(config: IngestorConfig, ids: dict) -> dict:

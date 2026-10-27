@@ -489,6 +489,7 @@ def test_existing_implicit_gemm_symbols_are_unchanged(overrides, tile_k, symbol)
 _KDP_PATH = (
     Path(__file__).resolve().parents[3]
     / "src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd"
+    / "artifacts"
     / "gfx950_conv_fwd.kdp.json"
 )
 _FAMILY_FIELDS = ("kernel_family", "direct_variant", "block_w", "block_waves")
@@ -695,7 +696,10 @@ _FIRST_SHIPPED_SYMBOLS = (
 
 def _committed_kernel_descriptors() -> list:
     if not _KDP_PATH.is_file():
-        pytest.skip("the hip-kernel-provider descriptor tree is not beside rocKE")
+        pytest.skip(
+            "the hip-kernel-provider descriptor tree is not beside rocKE, or its KDP "
+            "is not fetched (dvc pull -r ingestor <bundle>/artifacts.dvc)"
+        )
     return json.loads(_KDP_PATH.read_text())["kernelDescriptors"]
 
 
@@ -1159,7 +1163,7 @@ def test_direct_spec_has_no_implicit_gemm_instance_and_vice_versa():
 
 
 def _shipped_specs():
-    kernels = json.loads(_KDP_PATH.read_text())["kernelDescriptors"]
+    kernels = _committed_kernel_descriptors()
     return [Gfx950ConvFwdSpec(**k["kernel_source"]["spec"]) for k in kernels]
 
 

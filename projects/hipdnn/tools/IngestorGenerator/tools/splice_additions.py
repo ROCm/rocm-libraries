@@ -39,8 +39,11 @@ import json
 import sys
 from pathlib import Path
 
-#: The KDP key holding the kernel entries.
-KERNELS = "kernelDescriptors"
+_GENERATOR_ROOT = Path(__file__).resolve().parents[1]
+if str(_GENERATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(_GENERATOR_ROOT))
+
+from codegen.json_output import KERNELS, dump_descriptor  # noqa: E402
 
 
 class SpliceRefused(Exception):
@@ -48,8 +51,8 @@ class SpliceRefused(Exception):
 
 
 def dump(obj: dict) -> str:
-    """The generator's own serializer (codegen/generator.py `_dump`)."""
-    return json.dumps(obj, indent=2, sort_keys=False) + "\n"
+    """The generator's own serializer (codegen/json_output.py)."""
+    return dump_descriptor(obj)
 
 
 def _read(path: Path) -> tuple[str, str]:
@@ -221,7 +224,7 @@ def plan(live_dir: Path, scratch_dir: Path) -> dict:
             raise SpliceRefused(
                 f"{name}: re-serialising the live file does not reproduce its text, so "
                 "a rewrite would change retained bytes. Format it with the generator's "
-                "serializer (json.dumps indent=2) in a separate commit first."
+                "serializer (codegen/json_output.py) in a separate commit first."
             )
         writes.append((path, dump(doc).replace("\n", newline).encode("utf-8")))
     for name, doc in new_files.items():

@@ -109,7 +109,8 @@ producer-specific packaging flag is needed.
 
 The authored descriptors live in the provider's shipped descriptor root, under
 `src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd`, beside
-`rocKE/gfx950_attention_dense`. Production packaging is on by default for any
+`rocKE/gfx950_attention_dense`. Its KDP is in DVC: `artifacts/gfx950_conv_fwd.kdp.json`,
+tracked by `artifacts.dvc` (fetch it with `dvc pull -r ingestor artifacts.dvc`). Production packaging is on by default for any
 ingestor build whose GPU targets include gfx950. `hkp_pack` compiles their
 rocKE builders into GPU code objects, archives those in kpack, and rewrites the
 shipped descriptors to `kind: kpack`. The installed engine
@@ -257,7 +258,8 @@ the source tree, out of commits and out of pull requests. To serve them:
 4. Copy the shipped descriptor root
    (`src/engines/kernel_ingestor_engine/descriptors`) to a private directory and
    replace its `rocKE/gfx950_conv_fwd` bundle with the generated one, so the
-   other shipped bundles keep packaging.
+   other shipped bundles keep packaging. Put the generated KDP in the bundle's
+   `artifacts/` folder, as the shipped one is.
 5. Configure with `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT=<private root>`,
    then build and install as above. The private catalog is compiled, packed
    and installed exactly like the shipped one, and only exists in that install.

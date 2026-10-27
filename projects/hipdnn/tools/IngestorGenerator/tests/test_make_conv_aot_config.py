@@ -97,6 +97,19 @@ def catalogs():
     return {name: _specs(_listed(_BUNDLES[name][2])) for name in sorted(_BUNDLES)}
 
 
+def _kdp_dir(folder: Path) -> Path:
+    """Where ``folder``'s KDPs are: its DVC ``artifacts/`` when it has one."""
+    return folder / "artifacts" if (folder / "artifacts.dvc").is_file() else folder
+
+
+def _kdps(folder: Path) -> list[Path]:
+    """``folder``'s KDPs; the test is skipped when DVC has not fetched them."""
+    paths = sorted(_kdp_dir(folder).glob("*.kdp.json"))
+    if not paths:
+        pytest.skip(f"KDPs not fetched: dvc pull -r ingestor {folder}/artifacts.dvc")
+    return paths
+
+
 @pytest.fixture(scope="module", params=sorted(_BUNDLES))
 def bundle(request, catalogs):
     """``(engine, descriptor folder, specs, sharding)`` of each emitted bundle."""
@@ -114,7 +127,7 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
     shipped = {}
-    for kdp in sorted(folder.glob("*.kdp.json")):
+    for kdp in _kdps(folder):
         document = json.loads(kdp.read_text())
         shard = kdp.name[: -len(".kdp.json")][len(slug) + 1 :]
         assert document["name"] == f"hipkernel:{slug}_{shard}"
@@ -145,12 +158,16 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    # heuristics/ holds the UHD pipeline's trained ranking models, not descriptors.
-    names = sorted(
-        path.name
+    # heuristics/ holds the UHD pipeline's trained ranking models, not descriptors;
+    # the DVC pointers and their .gitignore are not descriptors either.
+    kdps = _kdps(folder)
+    files = [
+        path
         for path in folder.iterdir()
-        if not (path.is_dir() and path.name == "heuristics")
-    )
+        if path.is_file() and path.suffix != ".dvc" and path.name != ".gitignore"
+    ]
+    files += [path for path in kdps if path.parent != folder]
+    names = sorted(path.name for path in files)
     shards = {tool.shard_name(spec, sharding) for spec in specs}
     # The split-C packs launch through a dispatch of their own, with its own UDD.
     dispatches = (
@@ -165,10 +182,10 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
         + dispatches
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
-    for path in folder.iterdir():
+    for path in files:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
     # No operation-scoped matcher: every shard names the shared kernel matcher only.
-    for kdp in folder.glob("*.kdp.json"):
+    for kdp in kdps:
         assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
 
 
@@ -202,7 +219,8 @@ def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
     # may repeat across their bundles.
     ids = {}
     for _, folder, _, _ in _BUNDLES.values():
-        for path in folder.glob("*.json"):
+        paths = set(folder.glob("*.json")) | set(_kdp_dir(folder).glob("*.json"))
+        for path in sorted(paths):
             document = json.loads(path.read_text())
             found = [document["id"]] + [
                 kernel["id"] for kernel in document.get("kernelDescriptors", [])

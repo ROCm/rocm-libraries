@@ -11,8 +11,8 @@ production packaging is dormant, unless the cache variable below is pointed else
 | Bundle | Engine | Native pack |
 |---|---|---|
 | `rocKE/gfx950_attention_dense/` (KDP in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
-| `rocKE/gfx950_conv_fwd/` | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
-| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd/` (KDP in DVC) | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` (KDPs and heuristic model in DVC) | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
 
 `rocKE/gfx950_conv_fwd/` is generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd.yaml`; see
@@ -102,8 +102,8 @@ rocKE/<bundle>/
 ```
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
-updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`
-uses this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
+updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`,
+`gfx950_conv_fwd` and `gfx950_conv_fwd_aot` (with `heuristics.dvc`) use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
 
 **Heuristic models.** A heuristic model file is binary and does not belong in git. Track it

@@ -387,6 +387,12 @@ of their own (`make_conv_aot_config.py --sharding k-loop`, the default):
 | `gfx950_conv_fwd_aot_<dtype>_direct` | 219 |
 | `gfx950_conv_fwd_aot_<dtype>_direct_split` | 91 |
 
+The KDPs are in DVC, not git: they live in the bundle's `artifacts/` folder, tracked by
+`artifacts.dvc`, and the trained model under `heuristics/` by `heuristics.dvc`. Fetch
+both with `dvc pull -r ingestor artifacts.dvc heuristics.dvc` from the bundle folder;
+see the descriptors README, "Large rocKE files live in DVC". The generator writes each
+KDP with one kernel per line.
+
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
 operation-scoped matcher (the IngestorGenerator README, "UMD policy"). The census
@@ -407,13 +413,19 @@ python tools/make_conv_aot_config.py --rocke-root "$ROCKE" \
     --output "$WORK"/aot.yaml
 python generate.py --config "$WORK"/aot.yaml --output-dir "$GEN" --force
 DEST=../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot
-rm "$DEST"/*.json && cp "$GEN"/descriptors/rocKE/gfx950_conv_fwd_aot/*.json "$DEST"/
+rm "$DEST"/*.json "$DEST"/artifacts/*.kdp.json
+for f in "$GEN"/descriptors/rocKE/gfx950_conv_fwd_aot/*.json; do
+  case "$f" in *.kdp.json) cp "$f" "$DEST"/artifacts/ ;; *) cp "$f" "$DEST"/ ;; esac
+done
 cp "$GEN"/tests/TestGfx950ConvFwdAotPacks.cpp \
    ../../../../dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/
-python tools/make_conv_aot_config.py --stabilize-ids "$DEST"/*.kdp.json
+python tools/make_conv_aot_config.py --stabilize-ids "$DEST"/artifacts/*.kdp.json
+(cd "$DEST" && dvc add artifacts)
 ```
 
-Then run `clang-format` on the census. Keep the document ids of the KMD, UED, UDDs, UHD,
+Then push the new `artifacts/` with `dvc push -r ingestor` and commit `artifacts.dvc`
+with the rest (the descriptors README, "Adding or changing a large file"), and run
+`clang-format` on the census. Keep the document ids of the KMD, UED, UDDs, UHD,
 UMD and KDP files from the previous bundle, so that the diff shows only the kernels.
 The generator mints new ones on every run. Keep the shipped UED itself too: it names the
 trained `sort_kernel_catalog` model under `heuristics/`; take only its `knobs` from the

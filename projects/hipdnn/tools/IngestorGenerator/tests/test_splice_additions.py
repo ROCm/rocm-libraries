@@ -87,6 +87,19 @@ def _kernels(root: Path) -> list[dict]:
     return json.loads((root / _KDP).read_text(encoding="utf-8"))["kernelDescriptors"]
 
 
+def _assert_appended(before: list, after: list, comma) -> None:
+    """``after`` is ``before`` with lines inserted, and at most the one line each
+    insertion follows rewritten -- by appending ``comma`` only. A KDP holds a
+    kernel per line, so the formerly last kernel takes the separating comma."""
+    ops = difflib.SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes()
+    for op, i1, i2, j1, j2 in ops:
+        if op == "replace":
+            assert i2 - i1 == 1 and j2 - j1 >= 2, (op, i1, i2, j1, j2)
+            assert after[j1] == before[i1] + comma, after[j1]
+        else:
+            assert op in ("equal", "insert"), (op, i1, i2, j1, j2)
+
+
 @pytest.fixture
 def live(tmp_path) -> Path:
     return _render(_BASE, tmp_path, "live")
@@ -105,11 +118,11 @@ def test_appends_only_the_new_kernel(tmp_path, live):
     assert {n: b for n, b in after.items() if n != _KDP} == {
         n: b for n, b in before.items() if n != _KDP
     }
-    # The KDP change is a pure insertion: no live line is removed or rewritten.
-    ops = difflib.SequenceMatcher(
-        a=before[_KDP].decode().splitlines(), b=after[_KDP].decode().splitlines()
-    ).get_opcodes()
-    assert {op for op, *_ in ops} == {"equal", "insert"}
+    # The KDP change is an insertion: no live line is removed or rewritten, but
+    # the comma that now separates the formerly last kernel from the new one.
+    _assert_appended(
+        before[_KDP].decode().splitlines(), after[_KDP].decode().splitlines(), ","
+    )
     # Retained kernels keep their live ids and order; the new one keeps its scratch id.
     live_kernels = json.loads(before[_KDP])["kernelDescriptors"]
     spliced = _kernels(live)
@@ -233,10 +246,7 @@ def test_keeps_crlf_line_endings_of_a_windows_checkout(tmp_path, live):
     assert result.returncode == 0, result.stderr
     after = kdp.read_bytes()
     assert after.count(b"\n") == after.count(b"\r\n")
-    ops = difflib.SequenceMatcher(
-        a=before.split(b"\r\n"), b=after.split(b"\r\n")
-    ).get_opcodes()
-    assert {op for op, *_ in ops} == {"equal", "insert"}
+    _assert_appended(before.split(b"\r\n"), after.split(b"\r\n"), b",")
 
 
 def test_refuses_a_live_file_with_mixed_line_endings(tmp_path, live):
