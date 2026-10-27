@@ -97,6 +97,14 @@ def _variants():
 GFX942_TUNING_VARIANTS = tuple(_variants())
 
 
+def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
+    """Additive bias is emitted on the narrow 16x16 and split-KV score paths;
+    the 32x32x8 specs and the 4-warp GQA builder reject it."""
+    if variant.codepath in ("narrow", "splitkv"):
+        return frozenset({"attn_bias"})
+    return frozenset()
+
+
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     """Fast gfx942 fp16 prefill kernel — transposed-x8 flash with ring-sliced K.
 
@@ -186,6 +194,6 @@ def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     """The dense_pipe path routes only; each tuning geometry goes on both."""
     route.register(_make_gfx942_dense_pipe_candidate())
     for variant in GFX942_TUNING_VARIANTS:
-        candidate = make_tuning_candidate(variant)
+        candidate = make_tuning_candidate(variant, _variant_features(variant))
         route.register(candidate)
         execution.register(candidate)

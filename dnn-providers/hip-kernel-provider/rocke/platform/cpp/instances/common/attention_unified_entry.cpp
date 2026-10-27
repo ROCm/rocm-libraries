@@ -180,7 +180,8 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
     if(p->use_additive_bias)
     {
         if(out_reason != NULL)
-            *out_reason = "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only";
+            *out_reason = "scalar 2D kernel: additive bias runs on the gfx942/gfx950 tiled "
+                          "kernels only";
         return false;
     }
     if(out_reason != NULL)

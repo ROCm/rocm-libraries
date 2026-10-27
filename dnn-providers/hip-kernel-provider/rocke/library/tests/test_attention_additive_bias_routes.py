@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Where a biased gfx950 problem routes, pinned without a GPU.
+"""Where a biased gfx942 / gfx950 problem routes, pinned without a GPU.
 
-The numeric lane (``test_attention_additive_bias_gfx950_numeric.py``) is GPU
-only, so a selector change that moved one of its cases onto another score path
-or compile backend would go unnoticed in CI. The route is a pure function of
-the problem, so this file pins it for every 2D case of that lane, and the knobs
-the bias must set on the two transposed 32x32 cohorts. It also pins that the
+The numeric lane (``test_attention_additive_bias_numeric.py``) is GPU only, so
+a selector change that moved one of its cases onto another score path or
+compile backend would go unnoticed in CI. The route is a pure function of the
+problem, so this file pins it for every 2D case of that lane on both arches,
+and the knobs the bias must set on the two gfx950 transposed 32x32 cohorts. It also pins that the
 builders with no bias score site (fastKV register-P, the C++ scalar 2D kernel)
 refuse a biased spec, since nothing routes a biased problem to them.
 """
@@ -22,7 +22,7 @@ from kernels.common.attention_unified import (
     _tiled_spec_from_problem,
 )
 
-from .test_attention_additive_bias_gfx950_numeric import (
+from .test_attention_additive_bias_numeric import (
     _BLOCK_SIZE,
     _CASES,
     _COMBO_HEADS,
@@ -32,8 +32,8 @@ from .test_attention_additive_bias_gfx950_numeric import (
     _HEADS,
 )
 
-# case -> {dtype: (score path, compile backend)}.
-_ROUTES = {
+# arch -> case -> {dtype: (score path, compile backend)}.
+_GFX950_ROUTES = {
     "tiled": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_long": {"fp16": ("transposed32", "llvm"), "bf16": ("transposed32", "llvm")},
     "tiled_long_1seq": {
@@ -49,6 +49,14 @@ _ROUTES = {
     "tiled_window_1seq": {
         "fp16": ("transposed32", "llvm"),
         "bf16": ("transposed32", "llvm"),
+    },
+}
+_ROUTES = {
+    "gfx950": _GFX950_ROUTES,
+    # gfx942 serves every bias problem on its narrow 16x16 path, LLVM-direct.
+    "gfx942": {
+        case: {dtype: ("16x16", "llvm") for dtype in ("fp16", "bf16")}
+        for case in _GFX950_ROUTES
     },
 }
 
@@ -76,8 +84,8 @@ def _problem(seq_lens, hq, hkv, dtype, *, head_size, block_size, **fields):
     )
 
 
-def _route(problem):
-    spec = _tiled_spec_from_problem(problem, "gfx950")
+def _route(problem, arch="gfx950"):
+    spec = _tiled_spec_from_problem(problem, arch)
     assert spec.use_additive_bias
     if spec.use_mfma_32x32 and spec.use_transposed_qk_32x32:
         assert spec.block_m_per_warp == 32
@@ -86,7 +94,7 @@ def _route(problem):
         path = "32x32"
     else:
         path = "16x16"
-    return (path, _select_2d_compile_backend(problem, "gfx950")), spec
+    return (path, _select_2d_compile_backend(problem, arch)), spec
 
 
 def _seq_lens_and_features(case):
@@ -95,15 +103,18 @@ def _seq_lens_and_features(case):
     return _EXTRA_CASES[case][1], _EXTRA_CASES[case][2]
 
 
-def test_every_2d_numeric_case_has_a_pinned_route():
+@pytest.mark.parametrize("arch", sorted(_ROUTES))
+def test_every_2d_numeric_case_has_a_pinned_route(arch):
     cases = {**_CASES, **_EXTRA_CASES}
-    assert {c for c, spec in cases.items() if spec[0] == "tiled"} == set(_ROUTES)
+    tiled = {c for c, spec in cases.items() if spec[0] == "tiled"}
+    assert tiled == set(_ROUTES[arch])
 
 
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("case", sorted(_ROUTES))
-def test_numeric_case_route(case, dtype, heads):
+@pytest.mark.parametrize("case", sorted(_GFX950_ROUTES))
+@pytest.mark.parametrize("arch", sorted(_ROUTES))
+def test_numeric_case_route(arch, case, dtype, heads):
     seq_lens, features = _seq_lens_and_features(case)
     hq, hkv = _HEADS[heads]
     problem = _problem(
@@ -116,8 +127,8 @@ def test_numeric_case_route(case, dtype, heads):
         softcap=float(features.get("softcap", 0.0)),
         sliding_window=int(features.get("sliding_window", 0)),
     )
-    route, _ = _route(problem)
-    assert route == _ROUTES[case][dtype]
+    route, _ = _route(problem, arch)
+    assert route == _ROUTES[arch][case][dtype]
 
 
 @pytest.mark.parametrize("heads", sorted(_COMBO_HEADS))
@@ -206,7 +217,10 @@ def test_fastkv_register_p_rejects_additive_bias():
                 "num_seqs": 1,
                 "dtype": "bf16",
             },
-            "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
+            (
+                "scalar 2D kernel: additive bias runs on the gfx942/gfx950 tiled "
+                "kernels only"
+            ),
         ),
     ],
 )

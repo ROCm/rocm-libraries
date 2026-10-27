@@ -14,6 +14,7 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
+    _ADDITIVE_BIAS_ARCHES,
     _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
     _kv_block_bytes,
@@ -135,12 +136,12 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
 
 
 def _bias_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
-    """Additive-bias spec field; only the gfx950 tiled specs declare it, and
-    bias-off passes nothing so those specs are unchanged."""
+    """Additive-bias spec field; only the gfx942/gfx950 tiled specs declare it,
+    and bias-off passes nothing so those specs are unchanged."""
     if not problem.use_additive_bias:
         return {}
-    if arch != "gfx950":
-        raise ValueError(f"additive bias is gfx950-only, got {arch}")
+    if arch not in _ADDITIVE_BIAS_ARCHES:
+        raise ValueError(f"additive bias is gfx942/gfx950-only, got {arch}")
     return {"use_additive_bias": True}
 
 
@@ -278,9 +279,9 @@ def make_explicit_attention_2d_spec(
             ring_depth=int(getattr(spec, "ring_depth", 3)),
             k_slice_hd=int(getattr(spec, "k_slice_hd", 32)),
         )
-    # Not passed on gfx950 either: supports_tiled_2d declares use_additive_bias
-    # but never reads it (_bias_fields already raises for non-gfx950, so this
-    # kwarg would only be a second, redundant copy of that rule).
+    # Not passed: supports_tiled_2d declares use_additive_bias but never reads
+    # it (_bias_fields already raises outside gfx942/gfx950, so this kwarg would
+    # only be a second, redundant copy of that rule).
     ok, why = supports(**support_kwargs)
     if not ok:
         raise ValueError(f"unsupported explicit 2D attention config: {why}")
@@ -360,8 +361,8 @@ def make_explicit_attention_3d_specs(
         kv_storage_dtype=segment.kv_storage_dtype,
         arch=arch,
         # Not passed: supports_tiled_3d declares use_additive_bias but never
-        # reads it (_bias_fields already raises for non-gfx950, so this kwarg
-        # would only be a second, redundant copy of that rule).
+        # reads it (_bias_fields already raises outside gfx942/gfx950, so this
+        # kwarg would only be a second, redundant copy of that rule).
     )
     if not ok:
         raise ValueError(f"unsupported explicit 3D attention config: {why}")

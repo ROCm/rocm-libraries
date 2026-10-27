@@ -402,14 +402,18 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Every unified geometry writes LSE except the gfx942 4-warp GQA one,
-            # and every gfx950 geometry but the non-transposed 32x32 one takes
-            # an additive bias.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
+            # An additive bias is taken by every gfx950 geometry but the
+            # non-transposed 32x32 one, and by the gfx942 narrow and split-KV
+            # ones.
             expected = set(ATTENTION_FEATURES) | (
                 set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
-            if candidate.name.startswith("attention_gfx950_") and (
-                "_wide32_" not in candidate.name
+            name = candidate.name
+            if (name.startswith("attention_gfx950_") and "_wide32_" not in name) or (
+                name.startswith(
+                    ("attention_gfx942_u2d_narrow_", "attention_gfx942_u3d_")
+                )
             ):
                 expected.add("attn_bias")
             with self.subTest(candidate=candidate.name):

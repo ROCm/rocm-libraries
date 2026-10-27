@@ -3,12 +3,12 @@
 
 """Additive attention bias on gfx950, one case per path, without torch.
 
-``test_attention_additive_bias_gfx950_numeric.py`` is the full numeric lane, but
+``test_attention_additive_bias_numeric.py`` is the full numeric lane, but
 it needs ROCm torch, which the installed CTest tree does not have, so it skips
 there. This file runs one bf16 case on each path without torch: the 2D 16x16 and
 transposed 32x32 score paths, the 3D split-KV path, and 3D with the LSE output.
-Both run in ``rocke_library_attention_bias_gpu_pytest``, which needs a gfx950
-device; on any other device every case skips and the entry reports skipped.
+Both run in ``rocke_library_attention_bias_gpu_pytest``. This one needs a
+gfx950 device and skips every case on any other.
 
 The 2D cases go through ``run_unified_attention_torch`` on ``rocke.runtime``
 device buffers (``DeviceArray``). The 3D path allocates its workspace with
