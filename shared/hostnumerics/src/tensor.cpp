@@ -142,7 +142,6 @@ void Tensor::copyLogicalElementsToEncodedStorage(std::span<std::byte> destinatio
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const IndexRange& indices,
                                                   std::span<const size_t> order) const {
-    (void)shape().selectedCount(indices);
     const size_t required = storageBytesForLayout(m_type, m_layout);
     if (destination.size() < required)
         throw std::runtime_error("Tensor copy destination storage is too small.");
@@ -163,7 +162,6 @@ void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destinati
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const std::set<size_t>& indices,
                                                   std::span<const size_t> order) const {
-    (void)shape().selectedCount(indices);
     const size_t required = storageBytesForLayout(m_type, m_layout);
     if (destination.size() < required)
         throw std::runtime_error("Tensor copy destination storage is too small.");

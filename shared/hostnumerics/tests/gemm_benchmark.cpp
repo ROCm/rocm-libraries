@@ -290,7 +290,7 @@ int main(int argc, char** argv) {
         }
 
         const IndexRange validationSelection =
-            Shape{outputElements}.selectsAll(selection) && outputElements > 128
+            selection.count(outputElements) == outputElements && outputElements > 128
                 ? primeIndexRange(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
@@ -301,8 +301,7 @@ int main(int argc, char** argv) {
                                                validationSelection, LastDimensionFastest{});
         runScalarOracle(expectedRequest, expected);
 
-        const std::vector<size_t> validationIndices =
-            Shape{outputElements}.selectedIndices(validationSelection);
+        const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
         const double tolerance = comparisonTolerance(profile.outputType);
         ComparisonOptions comparisonOptions =
             allCloseComparisonOptions(tolerance, 2.0 * tolerance, false);

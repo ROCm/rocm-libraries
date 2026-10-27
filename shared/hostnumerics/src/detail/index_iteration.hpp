@@ -54,11 +54,23 @@ inline std::optional<size_t> contiguousFirst(const std::set<size_t>& indices) {
                : std::nullopt;
 }
 
-template <typename Invocation, typename Indices>
-void bindIndices(Invocation& invocation, const Shape& shape, const Indices& indices,
+template <typename Invocation>
+void bindIndices(Invocation& invocation, const Shape& shape, const IndexRange& indices,
                  std::span<const size_t> order) {
     invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
-    invocation.indicesCount = shape.selectedCount(indices);
+    invocation.indicesCount = indices.count(shape.elementCount());
+    invocation.indexAt = indexFunction(indices);
+    if constexpr (requires { invocation.firstContiguousIndex; })
+        invocation.firstContiguousIndex = contiguousFirst(indices);
+}
+
+template <typename Invocation>
+void bindIndices(Invocation& invocation, const Shape& shape, const std::set<size_t>& indices,
+                 std::span<const size_t> order) {
+    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
+    if (!indices.empty() && *indices.rbegin() >= shape.elementCount())
+        throw std::runtime_error("Explicit index exceeds logical element count.");
+    invocation.indicesCount = indices.size();
     invocation.indexAt = indexFunction(indices);
     if constexpr (requires { invocation.firstContiguousIndex; })
         invocation.firstContiguousIndex = contiguousFirst(indices);
