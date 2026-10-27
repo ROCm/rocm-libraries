@@ -496,12 +496,12 @@ def access_width(tile_desc, tensor, lds_swizzle):
     granularity exactly as :func:`~rocke.helpers.tiling.emit.load_fragment` and
     :func:`~rocke.helpers.tiling.emit.store_fragment` cap it."""
     from rocke.helpers.tiling.descriptors import make_window
-    from rocke.helpers.tiling.emit import _align_of, _contiguous_run, _swizzle_vw
+    from rocke.helpers.tiling.emit import _contiguous_run, _swizzle_vw, _unit_bits
 
     window = make_window(tensor, (0,) * tensor.rank)
     vw = _contiguous_run(tile_desc, window, tensor.dtype, is_lds=True)
     if lds_swizzle:
-        vw = _swizzle_vw(lds_swizzle, vw, _align_of(tensor.dtype))
+        vw = _swizzle_vw(lds_swizzle, vw, _unit_bits(tensor.dtype) // 8)
     return vw
 
 
@@ -519,6 +519,7 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
     The positions are carried rather than decoded from the index, which is only possible for one
     stride order.
     """
+    from rocke.helpers.tiling.analysis.geometry import _elem_bytes
     from rocke.helpers.tiling.descriptors import make_window
     from rocke.helpers.tiling.emit import (
         _check_builtin_swizzle,
@@ -528,6 +529,8 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
         _swizzle_lds_positions,
     )
 
+    # The map is byte-addressed (the bank model), so a packed sub-byte dtype is refused.
+    _elem_bytes(tensor.dtype.name)
     if lds_swizzle is True:
         _check_builtin_swizzle(tensor)
     window = make_window(tensor, tuple(origin))
@@ -555,6 +558,7 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
                 reg0,
                 lds_swizzle,
                 None if lds_swizzle else base_index,
+                tensor.dtype,
             )
             accesses.append(
                 {
