@@ -589,14 +589,15 @@ def _logic_payload(sizes: list) -> dict:
     }
 
 
-def _write_completed_config(optim_dir: Path, name: str, sizes: list) -> Path:
+def _write_completed_config(optim_dir: Path, name: str, sizes: list, library_name: str | None = None) -> Path:
     (optim_dir / f"{name}.yaml").write_text("MatrixInstruction: [16, 16, 16, 1]\n")
     logic = optim_dir / f"build_{name}" / "3_LibraryLogic"
     logic.mkdir(parents=True)
-    path = logic / f"{name}.yaml"
+    filename = library_name or f"{name}.yaml"
+    path = logic / filename
     from geko.library import Library
 
-    Library(_logic_payload(sizes), path.name).dump(logic, name=path.name)
+    Library(_logic_payload(sizes), filename).dump(logic, name=filename)
     return path
 
 
@@ -605,14 +606,16 @@ def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.
     optim_dir.mkdir()
     shared = [1024, 1024, 1, 1024]
     unique = [8, 8, 1, 8]
-    only_a = [16, 16, 1, 16]
+    bbs = "gfx950_Cijk_Alik_Bljk_BBS_BH.yaml"
+    hhs = "gfx950_Cijk_Alik_Bljk_HHS_BH.yaml"
     path_a = _write_completed_config(
         optim_dir,
         "BBS_TN_0",
         [[shared, [3, 100.0]], [unique, [3, 10.0]]],
+        bbs,
     )
-    path_b = _write_completed_config(optim_dir, "BBS_TN_1", [[shared, [5, 200.0]]])
-    path_c = _write_completed_config(optim_dir, "BBS_TN_2", [[only_a, [1, 50.0]]])
+    path_b = _write_completed_config(optim_dir, "BBS_TN_1", [[shared, [5, 200.0]]], bbs)
+    path_c = _write_completed_config(optim_dir, "HHS_TN_0", [[shared, [1, 50.0]]], hhs)
 
     created = []
 
@@ -644,7 +647,7 @@ def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.
     assert lib_a.sizes[0] == [shared, [3, 999.0]]
     assert lib_a.sizes[1] == [unique, [3, 10.0]]
     assert lib_b.sizes[0] == [shared, [5, 999.0]]
-    assert lib_c.sizes[0] == [only_a, [1, 50.0]]
+    assert lib_c.sizes[0] == [shared, [1, 50.0]]
 
 
 def test_run_optimize_requires_existing_workdir(tmp_path: Path) -> None:

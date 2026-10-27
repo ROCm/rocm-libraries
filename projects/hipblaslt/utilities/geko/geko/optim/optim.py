@@ -23,7 +23,6 @@ import subprocess
 import re
 import shutil
 import time
-from collections import Counter
 import pandas as pd
 import yaml
 
@@ -564,11 +563,15 @@ def analyze(
     return final_df.drop("valid", axis=1, errors="ignore"), df
 
 
-def _problem_key(size: list) -> tuple[int, int, int, int] | None:
-    """Return [M, N, batch, K] for an ExactLogic row, or None when it is not a size."""
+def _size_key(lib_name: str, size: list) -> tuple | None:
+    """Return a duplicate key of library name plus [M, N, batch, K].
+
+    The library name encodes datatype and transpose, so sizes from different
+    layouts are not treated as the same problem.
+    """
     if not size or not isinstance(size[0], (list, tuple)) or len(size[0]) < 4:
         return None
-    return tuple(int(dim) for dim in size[0][:4])
+    return (lib_name, *(int(dim) for dim in size[0][:4]))
 
 
 def process_duplicates(
@@ -579,11 +582,12 @@ def process_duplicates(
     """Replace Tensile performance estimates for duplicated problem sizes.
 
     A completed config is a ``build_<name>`` directory whose ``3_LibraryLogic``
-    directory is non-empty. A problem size is duplicated when the same
-    ``[M, N, batch, K]`` appears more than once across those libraries,
-    including repeated rows inside one file. Each config that contains such a
-    size is built, benchmarked with that library, and the measured
-    ``hipblaslt-Gflops`` is written back onto the matching ExactLogic rows.
+    directory is non-empty. A problem size is duplicated when the same library
+    name and ``[M, N, batch, K]`` appear more than once, including repeated rows
+    inside one file. The library name keeps different datatypes and layouts
+    apart. Each config that contains such a size is built, benchmarked with
+    that library, and the measured ``hipblaslt-Gflops`` is written back onto
+    the matching ExactLogic rows.
     The solution index is left unchanged so the row still points at the kernel
     that was tuned. Sizes that are not duplicated are left as they are.
 
@@ -607,45 +611,37 @@ def process_duplicates(
         if loaded:
             completed.append((build_dir, loaded))
 
-    counts: Counter[tuple[int, int, int, int]] = Counter()
-    for _, loaded in completed:
-        for _, lib in loaded:
-            for size in lib.sizes or []:
-                key = _problem_key(size)
-                if key is not None:
-                    counts[key] += 1
-    duplicated = {key for key, count in counts.items() if count > 1}
+    occurrences: dict[tuple, list[Path]] = {}
+    keyed = [
+        (key, build_dir)
+        for build_dir, loaded in completed
+        for _, lib in loaded
+        for size in lib.sizes or []
+        if (key := _size_key(lib.name, size)) is not None
+    ]
+    for key, build_dir in keyed:
+        occurrences.setdefault(key, []).append(build_dir)
+    duplicated = {key for key, builds in occurrences.items() if len(builds) > 1}
+    selected = {build for key in duplicated for build in occurrences[key]}
     if not duplicated:
         logger.info("No duplicate problem sizes among completed configs")
         return
 
     logger.info(
         "Benchmarking %s completed config(s) that share %s problem size(s)",
-        sum(
-            1
-            for _, loaded in completed
-            if any(
-                _problem_key(size) in duplicated
-                for _, lib in loaded
-                for size in lib.sizes or []
-            )
-        ),
+        len(selected),
         len(duplicated),
     )
 
     for build_dir, loaded in completed:
-        if not any(
-            _problem_key(size) in duplicated
-            for _, lib in loaded
-            for size in lib.sizes or []
-        ):
+        if build_dir not in selected:
             continue
 
         lib_out = build_dir / "lib"
         library.create(hipblaslt_path, build_dir / "3_LibraryLogic", lib_out)
         bench_dir = build_dir / "duplicate_bench"
         for yaml_path, lib in loaded:
-            if not any(_problem_key(size) in duplicated for size in lib.sizes or []):
+            if not any(_size_key(lib.name, size) in duplicated for size in lib.sizes or []):
                 continue
             bench_file, _ = lib.create_bench_input(bench_dir)
             results = bench.run(
@@ -655,26 +651,22 @@ def process_duplicates(
                 custom_lib_dir=lib_out,
                 devices=devices,
             )
-            measured: dict[tuple[int, int, int, int], float] = {}
-            for _, row in results.iterrows():
-                key = (
-                    int(row["m"]),
-                    int(row["n"]),
-                    int(row["batch_count"]),
-                    int(row["k"]),
-                )
-                measured[key] = float(row["hipblaslt-Gflops"])
-
-            updated = False
-            for size in lib.sizes or []:
-                key = _problem_key(size)
-                if key not in duplicated or key not in measured:
-                    continue
-                if not isinstance(size[1], list) or len(size[1]) < 2:
-                    continue
-                size[1][1] = measured[key]
-                updated = True
-            if updated:
+            measured = {
+                (int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])): float(row["hipblaslt-Gflops"])
+                for _, row in results.iterrows()
+            }
+            updates = [
+                (size, key[1:])
+                for size in lib.sizes or []
+                if (key := _size_key(lib.name, size)) is not None
+                and key in duplicated
+                and key[1:] in measured
+                and isinstance(size[1], list)
+                and len(size[1]) >= 2
+            ]
+            for size, problem in updates:
+                size[1][1] = measured[problem]
+            if updates:
                 lib.dump(yaml_path.parent, name=yaml_path.name)
                 logger.info(
                     "Wrote measured performance for duplicate sizes in '%s'",
