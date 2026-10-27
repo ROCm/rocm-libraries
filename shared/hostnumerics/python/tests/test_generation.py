@@ -507,9 +507,12 @@ class PermutationGenerationTests(unittest.TestCase):
             options = hv.ComparisonOptions()
             report = hv.compare(source, converted, options, selection, order)
             self.assertTrue(report.passed)
-            self.assertEqual(
-                report.compared, hv.Shape([2, 3, 4]).selected_count(selection)
+            expected_count = (
+                selection.count(24)
+                if isinstance(selection, hv.IndexRange)
+                else len(selection)
             )
+            self.assertEqual(report.compared, expected_count)
 
     def test_invalid_order_is_rejected_for_empty_or_identical_comparisons(self):
         for dimensions in ((2, 3, 4), (2, 0, 4), ()):
