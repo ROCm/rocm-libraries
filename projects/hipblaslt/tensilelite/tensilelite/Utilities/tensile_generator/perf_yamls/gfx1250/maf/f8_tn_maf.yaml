@@ -95,8 +95,8 @@ BenchmarkProblems:
 
         - ClusterDim: [[4,4]]
         - PrefetchGL2: [2]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
+        # - InitCIterWmma: [0]
+        # - SwInstructionPrefetch: [0]
         - ClusterAIDMapping: [-2]
         - LDSSegmentBRotate: [1]
       BenchmarkForkParameters:

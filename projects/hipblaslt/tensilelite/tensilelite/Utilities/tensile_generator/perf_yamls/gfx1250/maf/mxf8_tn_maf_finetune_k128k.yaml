@@ -99,8 +99,8 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
 
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
+        # - InitCIterWmma: [0]
+        # - SwInstructionPrefetch: [0]
         # - PrefetchGL2SAddr: [True]
         - PrefetchGL2: [2]
         - ClusterDim: [[4,4]]
