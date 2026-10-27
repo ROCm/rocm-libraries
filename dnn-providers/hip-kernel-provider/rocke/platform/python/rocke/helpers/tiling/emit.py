@@ -41,7 +41,7 @@ from .clipping import (
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding, lane_terms, register_coord_offsets
 from .fragments import Fragment, TileDesc
-from .safe_access import load_accesses, store_accesses
+from .safe_access import access_alignment, load_accesses, store_accesses
 from .tensor_transforms.ranges import AffineCoord, Congruence, Interval
 
 __all__ = [
@@ -574,11 +574,14 @@ def load_fragment(
     _refuse_coherency("load_fragment", coherency)
     check_tile_rank("load_fragment", window, tile_desc)
     dtype = window.tensor.dtype
-    align = element_bytes(dtype.name)
     if is_lds(ptr):
         # A custom swizzle relocates whole units of its granularity (vw_elems), capped + range-
         # checked to [1, natural run]. The built-in bool swizzle preserves its run.
-        vw = _swizzle_vw(lds_swizzle, contiguous_run(tile_desc, window, dtype), align)
+        vw = _swizzle_vw(
+            lds_swizzle,
+            contiguous_run(tile_desc, window, dtype),
+            element_bytes(dtype.name),
+        )
         value = b.zero_vec(dtype, tile_desc.register_count)
         # LDS source: one flat element index per run (wide when contiguous), lane base once.
         base_index = _checked_lds_base_index(
@@ -594,6 +597,7 @@ def load_fragment(
         return Fragment(tile_desc, dtype, value)
     plan, origins = plan_window("load_fragment", b, ptr, window, tile_desc)
     vw = plan.vector_width
+    claim = access_alignment(b, ptr, window.tensor, origins, tile_desc, vw)
     value = b.zero_vec(dtype, tile_desc.register_count)
     if plan.form is GlobalForm.INDEX32:
         # Every side proven and every offset inside i32: one i32 element index from the pointer.
@@ -601,16 +605,16 @@ def load_fragment(
             coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
             address = _address(b, window, _positions(b, window, coords))
             if vw > 1:
-                loaded = b.global_load_vN(ptr, address, dtype, vw, align=vw * align)
+                loaded = b.global_load_vN(ptr, address, dtype, vw, align=claim)
                 for i in range(vw):
                     value = b.vec_insert(value, b.vec_extract(loaded, i), register + i)
             else:
                 value = b.vec_insert(
-                    value, b.global_load(ptr, address, dtype, align=align), register
+                    value, b.global_load(ptr, address, dtype, align=claim), register
                 )
         return Fragment(tile_desc, dtype, value)
     accesses = _access_coordinates(b, window, tile_desc, thread, origins, vw)
-    loads = load_accesses(b, ptr, window.tensor, accesses, plan)
+    loads = load_accesses(b, ptr, window.tensor, accesses, plan, claim)
     for register, loaded in zip(range(0, tile_desc.register_count, vw), loads):
         if vw == 1:
             value = b.vec_insert(value, loaded, register)
@@ -647,7 +651,6 @@ def store_fragment(
     tile_desc = fragment.tile_desc
     check_tile_rank("store_fragment", window, tile_desc)
     out_dtype = window.tensor.dtype
-    align = element_bytes(out_dtype.name)
 
     def element(register: int) -> Any:
         return _cast_element(
@@ -659,7 +662,9 @@ def store_fragment(
         # custom swizzle relocates whole units of its granularity (vw_elems) -> the access is
         # capped and range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
         vw = _swizzle_vw(
-            lds_swizzle, contiguous_run(tile_desc, window, out_dtype), align
+            lds_swizzle,
+            contiguous_run(tile_desc, window, out_dtype),
+            element_bytes(out_dtype.name),
         )
         lds_base_index = _checked_lds_base_index(
             "store_fragment", b, ptr, window, tile_desc, thread, lds_swizzle
@@ -678,6 +683,7 @@ def store_fragment(
         return
     plan, origins = plan_window("store_fragment", b, ptr, window, tile_desc)
     vw = global_store_width(plan)
+    claim = access_alignment(b, ptr, window.tensor, origins, tile_desc, vw)
     if plan.form is GlobalForm.INDEX32:
         # Every side proven and every offset inside i32: compute the LANE base index ONCE (register
         # 0 = the thread-only index), then emit each store as base + <compile-time constant> -- the
@@ -689,7 +695,7 @@ def store_fragment(
         _, base_index = _lane_base_index(b, window, tile_desc, thread)
         for register in range(tile_desc.register_count):
             address = _register_index(b, window, tile_desc, base_index, register)
-            b.global_store(ptr, address, element(register), align=align)
+            b.global_store(ptr, address, element(register), align=claim)
         return
     accesses = _access_coordinates(b, window, tile_desc, thread, origins, vw)
     values = []
@@ -701,4 +707,4 @@ def store_fragment(
         for i in range(vw):
             vec = b.vec_insert(vec, element(register + i), i)
         values.append(vec)
-    store_accesses(b, ptr, window.tensor, accesses, values, plan)
+    store_accesses(b, ptr, window.tensor, accesses, values, plan, claim)

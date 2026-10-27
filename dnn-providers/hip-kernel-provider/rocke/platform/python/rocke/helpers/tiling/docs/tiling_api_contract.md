@@ -168,6 +168,10 @@ Clipping is BUILT and bit-exact on the masked path (`tiling_api_surface.md` 5b).
   element when it may cross a bound). No access touches an element outside the tensor, and no
   address an invalid lane computes carries an in-bounds promise. `explain_bounds_checks` reports the
   decision the verbs apply.
+- **Pointer alignment is read from the pointer, never assumed.** An access claims the largest power of
+  two dividing the pointer parameter's `align=` (else the element's size) and every element offset the
+  origins, a slice's begin and the strides allow, at most its own width; the claim never changes the
+  width.
 
 ---
 

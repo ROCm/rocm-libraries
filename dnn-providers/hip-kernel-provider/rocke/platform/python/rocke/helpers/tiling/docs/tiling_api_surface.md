@@ -170,6 +170,23 @@ a_td = make_tensor_desc((M, K), (K, 1), F16)   # one K Value: the length and the
 - **`check_gemm_shapes`** agrees two runtime extents only when they are one and the same Value; two
   `gpu_checked_value` calls give two different Values, even on one loaded value.
 
+### Pointer alignment: what a global access claims
+
+A wide global access tells the compiler how aligned its address is, and that claim must be true: a
+uniform address claimed 4-byte aligned or more may be read by a scalar load, which ignores the low
+address bits. The verbs claim only what the facts prove -- the largest power of two dividing the
+pointer's alignment and every access's element offset, at most the access's own width:
+- **The pointer:** the `align=` of its kernel parameter (`b.param("A", PtrType(F16, "global"),
+  align=16)`); a parameter without one, or a pointer computed from one, claims the element's size.
+  Declare `align=` on every pointer parameter the host allocates aligned.
+- **The offset:** every axis's position (an int origin by its value, a value origin by the multiple-of
+  fact the IR range walk proves, e.g. `block_id * 32`), a slice's begin, and every stride (a runtime
+  stride by its stated `multiple_of`).
+
+So an f16 tile at an odd column, an odd begin or an odd stride claims 2 bytes whatever its width, and
+`lda` stated `multiple_of=8` with `align=16` claims 16. The claim never narrows the access: the width
+follows the layout and the strides (sec 3, LDS buffers, "Vector width").
+
 ### Block origins: `exit_if_tile_outside`
 
 A block origin such as `block_id_y * TM` is a plain i32 value; nothing in the IR says the tile starts
@@ -268,9 +285,10 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
 - **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
   `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
-- **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
-  divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
-  or batch stride that is not a multiple of the natural vector narrows the access.
+- **Vector width.** The verbs pick a width that divides every stride except the stride-1 axis's,
+  leading axes included (in global memory too; a runtime stride by its stated `multiple_of`): a pad or
+  batch stride that is not a multiple of the natural vector narrows the access. In global memory the
+  alignment the access claims is a separate fact ("Pointer alignment" above).
 - **Stages** are a leading axis positioned by the window origin: a `[stage][K][F]` buffer is the
   rank-3 `make_tensor_desc((stages, F, K), (K * F, 1, F), dtype)`, written and read with an unswapped
   rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
@@ -663,7 +681,7 @@ Everything the author does not state is resolved from the one `TileMma` call. Th
 | number of atoms in the tile | wave shape / atom shape | `mma.subtiles` |
 | accumulator dtype/width | the `c=` dtype | `Fragment(c_desc, <c dtype>)` |
 | the subtile iteration | `Tiling.order` | `mma(b, ...)` (internal) |
-| load/store alignment | the view dtype's byte width | (internal) |
+| load/store alignment | the pointer's `align=`, the origins, a slice's begin and the strides (what they prove) | (internal) |
 
 Override any single one without touching the others -- see the composability matrix.
 

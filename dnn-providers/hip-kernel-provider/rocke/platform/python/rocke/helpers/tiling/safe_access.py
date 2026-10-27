@@ -39,11 +39,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from functools import partial
+from math import gcd
 from typing import TYPE_CHECKING
 
+from rocke.core.facts import stated_facts_of
 from rocke.core.ir import I64, Type, Value, VectorType
 
 from .clipping import BoundsCheckPlan, GlobalForm, element_bytes
+from .encoding import lane_terms, register_coord_offsets
 from .tensor_transforms.emit import (
     Access,
     ElementAddress,
@@ -51,12 +54,14 @@ from .tensor_transforms.emit import (
     emit_accesses_except_buffer_checked,
 )
 from .tensor_transforms.graph import identity_graph
-from .tensor_transforms.ranges import AffineCoord, Interval
+from .tensor_transforms.ranges import AffineCoord, Congruence, Interval
+from .tensor_transforms.walk import split_coordinate
 
 if TYPE_CHECKING:
     from rocke.core.ir import IRBuilder
 
     from .descriptors import TensorDesc
+    from .fragments import TileDesc
 
 __all__: list[str] = []
 
@@ -70,16 +75,18 @@ def load_accesses(
     tensor: TensorDesc,
     accesses: Sequence[tuple[AffineCoord, ...]],
     plan: BoundsCheckPlan,
+    align: int,
 ) -> list[Value]:
     """Load every access: one value per access (a ``vector_width`` vector, or a scalar for one
-    element), 0 in every element outside the tensor."""
+    element), 0 in every element outside the tensor. ``align`` is the alignment every access may
+    claim (:func:`access_alignment`)."""
     width = plan.vector_width
     dtype = tensor.dtype
     placer = _Placer(b, ptr, width, masked=_masked(plan))
     loaded = []
     for access in _emit(b, tensor, accesses, plan):
         pointer, index = placer.place(access.address)
-        wide = partial(_load, b, pointer, index, dtype, width)
+        wide = partial(_load, b, pointer, index, dtype, width, align)
         if access.valid is None:
             loaded.append(wide())
         elif access.valid_span is None:
@@ -94,7 +101,7 @@ def load_accesses(
             )
         else:
             loaded.append(
-                _load_straddling(b, access, pointer, index, dtype, width, wide)
+                _load_straddling(b, access, pointer, index, dtype, width, align, wide)
             )
     return loaded
 
@@ -106,22 +113,25 @@ def store_accesses(
     accesses: Sequence[tuple[AffineCoord, ...]],
     values: Sequence[Value],
     plan: BoundsCheckPlan,
+    align: int,
 ) -> None:
     """Store ``values[i]`` (a ``vector_width`` vector, or a scalar) at access ``i``; no element
-    outside the tensor is written."""
+    outside the tensor is written. ``align`` is the alignment every access may claim
+    (:func:`access_alignment`)."""
     width = plan.vector_width
     placer = _Placer(b, ptr, width, masked=_masked(plan))
+    element_align = _element_claim(align, tensor.dtype)
     for access, value in zip(_emit(b, tensor, accesses, plan), values, strict=True):
         pointer, index = placer.place(access.address)
         if access.valid is None:
-            _store(b, pointer, index, value, width)
+            _store(b, pointer, index, value, width, align)
         elif access.valid_span is None:
             with b.scf_if(access.valid):
-                _store(b, pointer, index, value, width)
+                _store(b, pointer, index, value, width, align)
         else:
             whole, straddle, in_span = _span_tests(b, access, width)
             with b.scf_if(whole):
-                _store(b, pointer, index, value, width)
+                _store(b, pointer, index, value, width, align)
             with b.scf_if(straddle):
                 for element in range(width):
                     with b.scf_if(in_span[element]):
@@ -131,7 +141,130 @@ def store_accesses(
                             index + element,
                             b.vec_extract(value, element),
                             1,
+                            element_align,
                         )
+
+
+# --- the alignment an access claims ---------------------------------------------------------------
+
+# The largest alignment any access claims: one 16-byte vector. Every residue below is kept modulo
+# this many elements, which decides divisibility by every power of two up to it.
+_MOST_ALIGN = 16
+
+
+def access_alignment(
+    b: IRBuilder,
+    ptr: Value,
+    tensor: TensorDesc,
+    origins: Sequence[AffineCoord],
+    tile_desc: TileDesc,
+    width: int,
+) -> int:
+    """The alignment, in bytes, every access of a ``width``-element run of ``tile_desc`` through
+    ``tensor`` at ``origins`` may claim: the largest power of two the facts prove divides the
+    address of every access's first element, never more than the pointer's alignment nor the
+    access's own byte width.
+
+    - The pointer's alignment is the ``align=`` its kernel parameter declares, else (a parameter
+      without one, or a pointer that is not a parameter) the element's byte size.
+    - The element offset is ``sum((position + begin) * stride)`` over the tensor's axes, its
+      residue combined exactly from the residue of each part: an int by its value, a value by the
+      multiple-of fact the IR range walk proves for it, a runtime stride by its stated
+      ``multiple_of``. A position is the origin plus any lane's and any run's offset in the
+      tile: its residue is the origin's, known only modulo the gcd of those offsets.
+
+    A claim above the truth is a wrong answer, not a slow one: a uniform address claiming 4 bytes
+    or more may be read by a scalar load, which ignores the low address bits. So an f16 access at
+    an odd offset claims 2 bytes, whatever its width::
+
+        A (M, K) f16, strides (lda, 1), pointer align=16, 8-wide K runs
+        origin K = block_id * 32, lda = 64           -> 16 bytes
+        origin K = a kernel parameter (no fact)       -> 2 bytes
+        origin K = 1, begin K = 1                     -> 4 bytes (the offset is 2 elements)
+        lda stated multiple_of=8, pointer align=4     -> 4 bytes
+    """
+    elem = element_bytes(tensor.dtype.name)
+    layout = tile_desc.layout
+    lead = tensor.rank - len(tile_desc.shape)
+    lanes = lane_terms(layout)
+    run_offsets = [
+        register_coord_offsets(layout, register)
+        for register in range(0, tile_desc.register_count, width)
+    ]
+    offset = _exact(0)
+    for axis, (origin, begin, stride) in enumerate(
+        zip(origins, tensor.begin, tensor.strides)
+    ):
+        position = _coordinate_residue(origin).plus(
+            _coordinate_residue(split_coordinate(b, begin))
+        )
+        if axis >= lead:
+            tile_axis = axis - lead
+            spread = 0
+            if lanes[tile_axis].extent > 1:
+                spread = lanes[tile_axis].step
+            for offsets in run_offsets:
+                spread = gcd(spread, offsets[tile_axis])
+            position = position.plus(_kept(Congruence(spread or _MOST_ALIGN, 0)))
+        offset = offset.plus(_product(position, _stride_residue(stride)))
+    divides = gcd(offset.modulus, offset.residue) * elem
+    return min(
+        _pointer_alignment(b, ptr, elem),
+        width * elem,
+        divides & -divides,
+        _MOST_ALIGN,
+    )
+
+
+def _pointer_alignment(b: IRBuilder, ptr: Value, elem: int) -> int:
+    """The ``align=`` declared on the kernel parameter ``ptr`` is; the element's byte size for a
+    parameter without one and for a pointer that is not a parameter."""
+    for param in b.kernel.params:
+        if b.get_param(param.name) is ptr:
+            declared = param.attrs.get("align")
+            if not declared:
+                return elem
+            declared = int(declared)
+            return declared & -declared
+    return elem
+
+
+def _kept(congruence: Congruence) -> Congruence:
+    """The residue modulo ``_MOST_ALIGN`` elements (the power-of-two part of the modulus)."""
+    return Congruence(gcd(congruence.modulus, _MOST_ALIGN), congruence.residue)
+
+
+def _exact(n: int) -> Congruence:
+    return Congruence(_MOST_ALIGN, n)
+
+
+def _product(x: Congruence, y: Congruence) -> Congruence:
+    """The residue of ``x * y``: with ``x = r + m * i`` and ``y = s + n * j`` the product is
+    ``r * s`` plus a multiple of ``gcd(r * n, s * m, m * n)``."""
+    m, r, n, s = x.modulus, x.residue, y.modulus, y.residue
+    return _kept(Congruence(gcd(r * n, s * m, m * n), r * s))
+
+
+def _coordinate_residue(coord: AffineCoord) -> Congruence:
+    """A split coordinate's residue: an exact constant by its value, else the walk's fact."""
+    if not coord.uniform and coord.lane is None:
+        return _exact(coord.const)
+    return _kept(coord.congruence)
+
+
+def _stride_residue(stride: int | Value) -> Congruence:
+    """A stride's residue: an int by its value, a runtime stride by its stated multiple-of
+    fact."""
+    if isinstance(stride, Value):
+        facts = stated_facts_of(stride)
+        return _kept(Congruence(facts.multiple_of, facts.residue))
+    return _exact(stride)
+
+
+def _element_claim(align: int, dtype: Type) -> int:
+    """The claim of one element of an access that claims ``align``: never above the element's
+    own byte size."""
+    return min(align, element_bytes(dtype.name))
 
 
 # --- the accesses -------------------------------------------------------------------------------
@@ -258,22 +391,17 @@ def _zero(b: IRBuilder, dtype: Type, width: int) -> Callable[[], Value]:
     return lambda: b.vec_extract(b.zero_vec(dtype, 1), 0)
 
 
-def _element_align(dtype: Type) -> int:
-    return element_bytes(dtype.name)
-
-
-def _load(b: IRBuilder, pointer: Value, index: int, dtype: Type, width: int) -> Value:
-    """The access's load. Its alignment claim is the element's: the claimable alignment of a wide
-    access depends on facts this module does not read."""
-    align = _element_align(dtype)
+def _load(
+    b: IRBuilder, pointer: Value, index: int, dtype: Type, width: int, align: int
+) -> Value:
     if width > 1:
         return b.global_load_vN(pointer, b.const_i32(index), dtype, width, align=align)
     return b.global_load(pointer, b.const_i32(index), dtype, align=align)
 
 
-def _store(b: IRBuilder, pointer: Value, index: int, value: Value, width: int) -> None:
-    dtype = value.type.elem if width > 1 else value.type
-    align = _element_align(dtype)
+def _store(
+    b: IRBuilder, pointer: Value, index: int, value: Value, width: int, align: int
+) -> None:
     if width > 1:
         b.global_store_vN(pointer, b.const_i32(index), value, width, align=align)
     else:
@@ -325,6 +453,7 @@ def _load_straddling(
     index: int,
     dtype: Type,
     width: int,
+    align: int,
     wide: Callable[[], Value],
 ) -> Value:
     """A vector that may cross a bound: the wide load where it is valid whole; where it straddles,
@@ -340,7 +469,15 @@ def _load_straddling(
                 b,
                 in_span[element],
                 dtype,
-                partial(_load, b, pointer, index + element, dtype, 1),
+                partial(
+                    _load,
+                    b,
+                    pointer,
+                    index + element,
+                    dtype,
+                    1,
+                    _element_claim(align, dtype),
+                ),
                 _zero(b, dtype, 1),
             )
             vector = b.vec_insert(vector, loaded, element)

@@ -78,7 +78,7 @@ from .tensor_transforms.ranges import (
     VectorRun,
     required_checks_within,
 )
-from .tensor_transforms.runs import validity_uniform_over_run
+from .tensor_transforms.runs import end_residue, validity_uniform_over_run
 from .tensor_transforms.walk import split_coordinate
 
 if TYPE_CHECKING:
@@ -606,10 +606,12 @@ def contiguous_run(tile_desc: TileDesc, window: TensorWindow, dtype: Any) -> int
     question, answered by the access's :class:`BoundsCheckPlan` (a checked vector is masked by its
     validity, never narrowed).
 
-    The width must also divide every OTHER stride, leading axes included: a run then starts at a
-    multiple of the width whatever the positions on the other axes, so the ``align`` the access
-    claims holds (an odd batch stride would otherwise start a wide run mid-vector). A runtime stride
-    on another axis has no compile-time residue here, so the access stays scalar."""
+    The width must also divide every OTHER stride, leading axes included, so the positions on the
+    other axes never start a run mid-vector (an odd batch stride would). A runtime stride divides
+    by its stated multiple-of fact: ``lda`` stated ``multiple_of=8`` keeps an 8-wide f16 run, one
+    stated without it keeps the access scalar. The alignment the access then claims is decided
+    separately, from facts only (:func:`~rocke.helpers.tiling.safe_access.access_alignment`).
+    """
     layout = tile_desc.layout
     if dtype.name not in _WIDE_OK:
         return 1
@@ -626,8 +628,6 @@ def contiguous_run(tile_desc: TileDesc, window: TensorWindow, dtype: Any) -> int
     if math.prod(inner_levels) != 1:
         return 1  # an outer level of its axis: consecutive registers are not consecutive positions
     other_strides = [stride for axis, stride in enumerate(strides) if axis != run_axis]
-    if any(isinstance(stride, Value) for stride in other_strides):
-        return 1
     length = layout.bucket_length(majors[-1], minors[-1])
     # One access is at most a dwordx4 (16 bytes); a longer run takes several.
     max_vw = 16 // element_bytes(dtype.name)
@@ -635,7 +635,15 @@ def contiguous_run(tile_desc: TileDesc, window: TensorWindow, dtype: Any) -> int
         if (
             vw <= max_vw
             and length % vw == 0
-            and all(stride % vw == 0 for stride in other_strides)
+            and all(_stride_divisible(stride, vw) for stride in other_strides)
         ):
             return vw
     return 1
+
+
+def _stride_divisible(stride: int | Value, width: int) -> bool:
+    """Whether ``stride`` is known to be a multiple of ``width``: an int by itself, a runtime
+    stride by its stated multiple-of fact."""
+    if isinstance(stride, Value):
+        return end_residue(stride, width) == 0
+    return stride % width == 0
