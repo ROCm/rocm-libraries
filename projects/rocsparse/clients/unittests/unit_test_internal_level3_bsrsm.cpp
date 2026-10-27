@@ -377,8 +377,7 @@ TEST(internal_level3_bsrsm, solve_grid_size_is_a_multiple_of_mb_or_the_limit)
 }
 
 // The host picks the narrow instantiation only when the grid covers every
-// (RHS panel, block row) pair and every block id, done_array offset, column
-// index and X offset fits in rocsparse_int.
+// (RHS panel, block row) pair and every X offset fits in rocsparse_int.
 TEST(internal_level3_bsrsm, solve_needs_wide_only_past_32_bit_or_clamped)
 {
     constexpr int64_t int_max = std::numeric_limits<rocsparse_int>::max();
@@ -399,11 +398,12 @@ TEST(internal_level3_bsrsm, solve_needs_wide_only_past_32_bit_or_clamped)
     // A large ldx with a small nrhs (trans_X == transpose, caller's ldx).
     EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(262144, 8, 1, 16, 1024, 262144));
 
-    // Padded column count past rocsparse_int.
-    EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(1, 1, int_max, 16, int_max, 134217728));
+    // nrhs = INT32_MAX pads to 2^31 columns, but the largest col_X,
+    // (134217728 - 1) * 16 + 15, is still 2^31 - 1, so the narrow kernels are fine.
+    EXPECT_FALSE(rocsparse::bsrsm_solve_needs_wide(1, 1, int_max, 16, int_max, 134217728));
 
-    // The AISPARSE-670 configuration: the pair count does not fit, and the grid
-    // is clamped anyway.
+    // The overflowing configuration: the X extent does not fit, and the grid is
+    // clamped anyway.
     EXPECT_TRUE(rocsparse::bsrsm_solve_needs_wide(
         50000,
         1,

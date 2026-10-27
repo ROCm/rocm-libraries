@@ -112,8 +112,8 @@ namespace rocsparse
 //
 // The kernels take the WIDE (grid-stride, 64 bit offsets) instantiation only
 // when bsrsm_solve_needs_wide says the narrow one, one block per pair with 32
-// bit arithmetic, would be wrong: a clamped grid, or a pair count, column count
-// or X extent past rocsparse_int.
+// bit arithmetic, would be wrong: a clamped grid, or an X extent past
+// rocsparse_int.
 #define LAUNCH_LARGE_KERNEL_W(K_, M_, S_, W_)                                                  \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_, W_>),                          \
                                        bsrsm_blocks,                                           \

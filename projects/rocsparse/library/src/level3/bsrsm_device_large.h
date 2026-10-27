@@ -89,13 +89,15 @@ namespace rocsparse
     // the kernels did before AISPARSE-670; the 64 bit division by mb at the start
     // of every block and the 64 bit multiply on every X access in the inner loop
     // are measurable on the common small-nrhs solves. It is only correct when
-    //   - grid_x covers every pair (no clamp, so no stride),
-    //   - the flattened pair count, which bounds blockIdx.x and every done_array
-    //     offset, fits in rocsparse_int,
-    //   - the padded RHS column count, which bounds col_X, fits in rocsparse_int,
+    //   - grid_x covers every pair (no clamp, so no stride). grid_x is at most
+    //     the get_grid_size_x clamp, so this also keeps the flattened pair count,
+    //     which bounds blockIdx.x and every done_array offset, in rocsparse_int,
     //   - every X offset fits in rocsparse_int. The largest one is below
     //     mb * block_dim * ldx, ldx >= nrhs being the leading dimension of the
     //     row major X the kernels address.
+    // col_X is at most 2^31 - 1 for any rocsparse_int nrhs, so it needs no term.
+    // bsr_val is indexed through BSR_IND, which forms the block offset in 64 bit
+    // in both instantiations, so nnzb does not enter this decision.
     // grid_x is the bsrsm_solve_grid_size result, before it is narrowed to dim3.
     __host__ __forceinline__ bool bsrsm_solve_needs_wide(
         int64_t mb, int64_t block_dim, int64_t nrhs, int64_t ncols, int64_t ldx, int64_t grid_x)
@@ -108,10 +110,9 @@ namespace rocsparse
         }
 
         const int64_t num_blocks = rocsparse::bsrsm_num_blocks(mb, nrhs, ncols);
-        const int64_t num_cols   = ((nrhs - 1) / ncols + 1) * ncols;
 
-        return grid_x < num_blocks || num_blocks > narrow_max || num_cols > narrow_max
-               || block_dim > narrow_max / mb || ldx > narrow_max / (mb * block_dim);
+        return grid_x < num_blocks || block_dim > narrow_max / mb
+               || ldx > narrow_max / (mb * block_dim);
     }
 
     // Flattened block id and X / done_array offset types of the two solve
