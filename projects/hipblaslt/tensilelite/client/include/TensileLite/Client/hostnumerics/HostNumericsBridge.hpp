@@ -46,7 +46,6 @@ namespace TensileLite::Client
             OffsetOverflow,
             NullStorage,
             ElementCountOverflow,
-            PrimeStrideOverflow,
         };
         struct DescriptorFailure
         {
@@ -89,8 +88,6 @@ namespace TensileLite::Client
                 return "Nonempty tensor storage is null.";
             case DescriptorError::ElementCountOverflow:
                 return "Tensor shape element count exceeds size_t.";
-            case DescriptorError::PrimeStrideOverflow:
-                return "Prime-stride output selection overflow.";
             }
             return "Unknown descriptor failure.";
         }
@@ -365,7 +362,6 @@ namespace TensileLite::Client
                                           hostnumerics::detail::DescriptorFailure>
         getReferenceIndexRange(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
-        using roc::hostnumerics::IndexRange;
         const auto logicalCount
             = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
         if(!logicalCount)
@@ -373,17 +369,8 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
-        if(elementsToValidate == 0 || elementsToValidate >= *logicalCount)
-            return IndexRange::all(*logicalCount);
-        const size_t candidate
-            = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
-        const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
-        if(!stride)
-        {
-            return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
-                hostnumerics::detail::DescriptorError::PrimeStrideOverflow));
-        }
-        return IndexRange(0, *logicalCount, *stride);
+        return roc::hostnumerics::primeIndexRange(
+            *logicalCount, descriptor.totalAllocatedElements(), elementsToValidate);
     }
 
     inline roc::hostnumerics::IndexRange referenceIndexRange(TensorDescriptor const& descriptor,
