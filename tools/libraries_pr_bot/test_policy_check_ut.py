@@ -586,7 +586,8 @@ class LoadPolicyTests(unittest.TestCase):
         policy = pc.load_policy(policy_path)
 
         # Per team lead request, 'unit/**' was removed from unit_test_patterns.
-        # Test files are now recognized ONLY by basename (test_*, *_test.*, Test*).
+        # A broad unit/ glob stays out. rocSPARSE is recognized by name
+        # (unit_test_*) and by its unit-test directory.
         self.assertNotIn("unit/**", policy.unit_test_patterns)
         # Verify the allowed patterns ARE present.
         self.assertIn("test_*", policy.unit_test_patterns)
@@ -594,7 +595,30 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("*_tests.*", policy.unit_test_patterns)
         self.assertIn("*_gtest.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
+        self.assertIn("unit_test_*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
+        self.assertIn("projects/rocsparse/clients/unittests/**", policy.unit_test_patterns)
+
+    def test_rocsparse_unit_test_file_satisfies_requirement(self) -> None:
+        policy_path = THIS_DIR / "policy.yml"
+        if not policy_path.exists():
+            self.skipTest("policy.yml not present next to tests")
+        policy = pc.load_policy(policy_path)
+        library = "projects/rocsparse/library/src/conversion/rocsparse_csxsldu_preprocess.cpp"
+        cases = [
+            "projects/rocsparse/clients/unittests/unit_test_host_internal_branches.cpp",
+            "projects/rocsparse/clients/unittests/rocsparse_unit_test_main.cpp",
+        ]
+        for test_path in cases:
+            with self.subTest(test_path=test_path):
+                errs: List[str] = []
+                pc.ensure_unit_tests(
+                    policy, [make_file(library), make_file(test_path)], errs
+                )
+                self.assertEqual(errs, [])
+        errs = []
+        pc.ensure_unit_tests(policy, [make_file(library)], errs)
+        self.assertTrue(errs)
 
 
 if __name__ == "__main__":
