@@ -22,13 +22,17 @@ struct FmhaTdmSchedFp8EvenlyInterleavedReadSchedule
     // PV next-K reads: second half packed into the last rows, a few WMMAs after its V reuse.
     struct PvKRows
     {
-        static constexpr index_t kLoads          = Geometry::kKSuLoadCount;
-        static constexpr index_t kHalf           = kLoads / 2;
-        static constexpr index_t kMaxLoadsPerRow = 2;
-        // Tail: the last five rows; at D64 it starts after the first half instead.
+        static constexpr index_t kLoads = Geometry::kKSuLoadCount;
+        static constexpr index_t kHalf  = kLoads / 2;
+        // Tail: the last five rows; at D64/D192 it starts after the first half instead.
         static constexpr index_t kTailRows = 5;
         static constexpr index_t kTailFirstRow =
             kHalf <= kPvWmmasPerStage - kTailRows ? kPvWmmasPerStage - kTailRows : kHalf;
+        // Two reads per tail row, or as many as D192's twelve-read half needs over four rows.
+        static constexpr index_t kMaxLoadsPerRow =
+            max(index_t{2},
+                (kLoads - kHalf + kPvWmmasPerStage - kTailFirstRow - 1) /
+                    (kPvWmmasPerStage - kTailFirstRow));
         struct Row
         {
             index_t accesses[kMaxLoadsPerRow]{};

@@ -491,7 +491,11 @@ class FmhaFwdApiTrait:
             "qr_tdm_fp8_sched_mgqa",
             "qr_tdm_fp8_sched_d1",
         ]:
-            bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
+            # FP8 sched tiles may have hdim_v below hdim_q (D192/V128), so check V's own width.
+            v_width = (
+                self.bn1 if self.pipeline_tag in QR_TDM_SCHED_FP8_TAGS else self.bk0max
+            )
+            bk0submax = K0_MAX_SUBMAX_MAP[v_width]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -1050,10 +1054,14 @@ class CompatibilityRuleFactory:
         def check_hdim(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
             # NOTE: this is used to speedup deepseek prefill case, we don't gen training
             if (problem_ctx.hdim, problem_ctx.hdim_v) == (192, 128):
+                # The gfx125 FP8 scheduled pipeline also serves elementwise bias.
+                fp8_sched_bias = (
+                    kernel_ctx.pipeline.tag == "qr_tdm_fp8_sched"
+                    and kernel_ctx.pipeline.F_bias == "bias"
+                )
                 if (
-                    kernel_ctx.pipeline.F_bias != "no"
-                    or kernel_ctx.pipeline.F_dropout == "t"
-                ):
+                    kernel_ctx.pipeline.F_bias != "no" and not fp8_sched_bias
+                ) or kernel_ctx.pipeline.F_dropout == "t":
                     return False
             return True
 
@@ -1628,7 +1636,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ),
     }  # fmt: skip
 
-    # FP8 scheduled tiles (QK WMMA K = min(head dim, 128), K128 PV): FP8/BF16/FP32 O, MXFP8.
+    # FP8 scheduled tiles (QK WMMA K64 at D64/D192, else K128; K128 PV): FP8/BF16/FP32 O, MXFP8.
     _DT_QR_TDM_SCHED_FP8 = ("fp8", "fp8bf16", "fp8fp32") + _DT_MXFP8
     _QR_TDM_SCHED_FP8_TILES = {
         (64, 64): (
@@ -1638,6 +1646,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         (128, 128): (
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
+        ),
+        # D192 runs MX, bias and some merged-GQA decode one workgroup per CU; that tile is
+        # dispatched first so merged-GQA there is not shadowed by plain sched at two per CU.
+        (192, 128): (
+            FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 1),
+            FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
         ),
         # D256 runs one workgroup per CU, with or without bias.
         (256, 256): (
@@ -1652,14 +1666,19 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         (128, 128): (
             FmhaFwdTileSize(32, 128, 128, 128, 128, 128, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 2),
         ),
+        (192, 128): (
+            FmhaFwdTileSize(32, 128, 192, 128, 128, 192, 1, 1, 1, 1, 1, 1, 16, 16, 64, 16, 16, 128, 2),
+        ),
         (256, 256): (
             FmhaFwdTileSize(32, 128, 256, 256, 128, 256, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 1),
         ),
     }  # fmt: skip
-    # Must match kFmhaTdmSchedFp8{,Bias,D256,OneWave}BlockPerCu in the policy.
+    # Must match kFmhaTdmSchedFp8{,Bias,D256,D192Mx,D192Merged,OneWave}BlockPerCu in the policy.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
     _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
+    _QR_TDM_SCHED_FP8_D192_MX_OCCUPANCY = 1
+    _QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY = 1
     # Workgroups per CU the D64 instances of resident_blocks_per_cu keep on hardware.
     _QR_TDM_SCHED_FP8_D64_RESIDENT_BLOCKS = 3
 
@@ -1690,9 +1709,30 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         return dict(sorted(result.items()))
 
     @classmethod
-    def qr_tdm_fp8_sched_occupancy(cls, hdim: int, bias: str) -> int:
+    def qr_tdm_fp8_sched_occupancy(
+        cls,
+        hdim: int,
+        bias: str,
+        qscale: str = "no",
+        dtype: str = "fp8",
+        tag: str = "qr_tdm_fp8_sched",
+        mask: str = "no",
+        sink: str = "f",
+    ) -> int:
         if hdim == 256:
             return cls._QR_TDM_SCHED_FP8_D256_OCCUPANCY
+        if hdim == 192 and qscale == "mx":
+            return cls._QR_TDM_SCHED_FP8_D192_MX_OCCUPANCY
+        # D192 merged-GQA: FP32 O with row descales overflows LDS, masked sink overflows VGPRs.
+        if (
+            hdim == 192
+            and tag == "qr_tdm_fp8_sched_mgqa"
+            and (
+                (dtype in cls._DT_FP8FP32 and qscale in ("perhead", "blockscale"))
+                or (sink == "t" and mask not in ("no", "s_no"))
+            )
+        ):
+            return cls._QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY
         if bias == "bias":
             return cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
         return cls._QR_TDM_SCHED_FP8_OCCUPANCY
@@ -1750,8 +1790,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             expr += f" && a.block_scale_size_q % {tile.F_bm0} == 0"
             expr += f" && a.block_scale_size_kv % {kv_scale_align} == 0"
         elif qscale == "mx":
-            # Q/K E8M0 rows (one byte per 32 head elements) are read as int16 or int32s.
-            row = min(hdim // 32, 4)
+            # Q/K E8M0 rows (one byte per 32 head elements): an int16 per K64 step, else int32s.
+            row = 2 if hdim % 128 else 4
             expr += (
                 f" && reinterpret_cast<uintptr_t>(a.q_descale_ptr) % {row} == 0"
                 f" && reinterpret_cast<uintptr_t>(a.k_descale_ptr) % {row} == 0"
@@ -1764,11 +1804,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         return CppConstraint(expr)
 
     # One-wavefront decode: head dims, scales and features generated, and launch-bound occupancy.
-    _QR_TDM_SCHED_FP8_D1_DIMS = ((64, 64), (128, 128), (256, 256))
+    _QR_TDM_SCHED_FP8_D1_DIMS = ((64, 64), (128, 128), (192, 128), (256, 256))
     _QR_TDM_SCHED_FP8_D1_QSCALES = ("no", "pertensor", "perhead", "blockscale", "mx")
     _QR_TDM_SCHED_FP8_D1_LSE = ("f", "t")
     _QR_TDM_SCHED_FP8_D1_SINK = ("f", "t")
-    _QR_TDM_SCHED_FP8_D1_OCCUPANCY = {64: 2, 128: 2, 256: 1}
+    _QR_TDM_SCHED_FP8_D1_OCCUPANCY = {64: 2, 128: 2, 192: 2, 256: 1}
 
     # D1 is chosen whenever the merged rows fit its 32-row tile; there is no parallelism gate.
     @classmethod
@@ -1784,7 +1824,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         )
 
     # Head dims and scales whose merged-GQA decode instances are generated.
-    _QR_TDM_SCHED_FP8_MGQA_DIMS = ((64, 64), (128, 128), (256, 256))
+    _QR_TDM_SCHED_FP8_MGQA_DIMS = ((64, 64), (128, 128), (192, 128), (256, 256))
     _QR_TDM_SCHED_FP8_MGQA_QSCALES = ("no", "pertensor", "perhead", "blockscale", "mx")
 
     @classmethod
@@ -1838,7 +1878,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 and kernel_ctx.pipeline.F_vlayout == "row"
                 and kernel_ctx.tile.F_occupancy
                 == cls.qr_tdm_fp8_sched_occupancy(
-                    problem_ctx.hdim, kernel_ctx.pipeline.F_bias
+                    problem_ctx.hdim,
+                    kernel_ctx.pipeline.F_bias,
+                    kernel_ctx.pipeline.F_qscale,
+                    problem_ctx.dtype,
+                    kernel_ctx.pipeline.tag,
+                    kernel_ctx.pipeline.F_mask,
+                    kernel_ctx.pipeline.F_sink,
                 )
             )
 

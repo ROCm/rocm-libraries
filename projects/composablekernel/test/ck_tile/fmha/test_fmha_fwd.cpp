@@ -1203,7 +1203,7 @@ class QuantScaleHdim64 : public TestWithParam<QuantScaleHdimParam>
 {
 };
 
-void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param)
+void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param, int hdim_v = -1)
 {
     auto [mode, qscale, lse, dims]                                                  = param;
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, bias_str, init_sink] = dims;
@@ -1223,7 +1223,7 @@ void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param)
         {adjust_seqlen(seqlen_q)},
         {adjust_seqlen(seqlen_k)},
         adjust_hdim(hdim),
-        adjust_hdim(hdim),
+        adjust_hdim(hdim_v < 0 ? hdim : hdim_v),
         0,    // seqlen_knew
         {-1}, // seqlen_qpads
         {-1}, // seqlen_kpads
@@ -1381,7 +1381,8 @@ INSTANTIATE_TEST_SUITE_P(
                    MergedDecodeDims{2, 8, -1, 2, 300, "b", 0, true},        // MHA, 2 rows
                    MergedDecodeDims{1, 8, 1, 20, 300, "b", 0, true})));     // 160 rows
 
-TEST_P(QuantScaleMergedDecode, DataTypeConfig)
+void RunMergedDecode(
+    int hdim, int hdim_v, const char* qscale, bool lse, const MergedDecodeDims& dims)
 {
     constexpr bool is_mx_fp8 =
         ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
@@ -1389,7 +1390,6 @@ TEST_P(QuantScaleMergedDecode, DataTypeConfig)
         ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16, FmhaFwdFp8Fp32>::value;
     if(!(is_mx_fp8 || is_fp8) || !ck_tile::is_gfx125_supported())
         GTEST_SKIP() << "decode kernels are gfx125x FP8 only";
-    auto [hdim, qscale, lse, dims]                                              = GetParam();
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, init_sink, perm] = dims;
     const bool is_v_rowmajor = is_mx_fp8 || def_is_v_rowmajor;
 
@@ -1402,7 +1402,7 @@ TEST_P(QuantScaleMergedDecode, DataTypeConfig)
         {adjust_seqlen(seqlen_q)},
         {adjust_seqlen(seqlen_k)},
         adjust_hdim(hdim),
-        adjust_hdim(hdim),
+        adjust_hdim(hdim_v),
         0,    // seqlen_knew
         {-1}, // seqlen_qpads
         {-1}, // seqlen_kpads
@@ -1437,6 +1437,87 @@ TEST_P(QuantScaleMergedDecode, DataTypeConfig)
     CHECK_RESULT(result);
     EXPECT_EQ(DecodeKernelOf(kernel_name), ExpectedDecodeKernel(nhead, nhead_k, seqlen_q, perm))
         << kernel_name;
+}
+
+TEST_P(QuantScaleMergedDecode, DataTypeConfig)
+{
+    auto [hdim, qscale, lse, dims] = GetParam();
+    RunMergedDecode(hdim, hdim, qscale, lse, dims);
+}
+
+// Head dim 192 with a 128-wide V (D128 PV, K64 QK) on the rows of head dims 64 and 256.
+class QuantScaleHdim192 : public TestWithParam<QuantScaleHdimParam>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleHdim192,
+    Combine(ModeValues,
+            QScaleValues,
+            Values(false, true),                                            // lse
+            Values(std::tuple{2, 2, 1, 55, 256, "0", "n", 0},               // GQA, short query
+                   std::tuple{1, 3, -1, 300, 129, "0", "n", 0},             // query/key tails
+                   std::tuple{2, 1, -1, 256, 256, "1", "n", 0},             // causal
+                   std::tuple{1, 2, 1, 256, 700, "t:128,30", "n", 0},       // sliding window
+                   std::tuple{2, 4, 1, 1024, 1024, "t:127,0", "n", 1},      // gpt-oss
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512", "n", 1}, // sink tokens
+                   std::tuple{1, 2, -1, 1000, 300, "b", "n", 1},   // sink logit, empty rows
+                   std::tuple{2, 2, 1, 300, 1000, "0", "e", 0},    // elementwise bias
+                   std::tuple{1, 2, -1, 256, 700, "t", "e", 1}))); // bias, mask and sink logit
+
+TEST_P(QuantScaleHdim192, DataTypeConfig) { RunQuantScaleHdim(192, GetParam(), 128); }
+
+// Decode-length queries on head dim 192 / V 128, as QuantScaleShortQuery.
+class QuantScaleShortQueryHdim192 : public TestWithParam<QuantScaleHdimParam>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleShortQueryHdim192,
+    Combine(Values(mode_enum::batch),
+            QScaleValues,
+            Values(false, true),                                           // lse
+            Values(std::tuple{2, 8, 2, 1, 1024, "0", "n", 0},              // GQA 4, Pack-GQA n/pt
+                   std::tuple{3, 4, -1, 1, 500, "0", "n", 0},              // MHA, key tail
+                   std::tuple{2, 8, 2, 4, 700, "b", "n", 0},               // causal bottom-right
+                   std::tuple{1, 4, 1, 16, 2048, "b", "n", 0},             // causal, GQA ratio 4
+                   std::tuple{2, 8, 2, 16, 1000, "b:127,0", "n", 1},       // gpt-oss
+                   std::tuple{1, 8, 2, 4, 2048, "b:1023,0,4", "n", 0},     // sink tokens
+                   std::tuple{2, 4, 1, 1, 300, "0", "n", 1},               // sink logit
+                   std::tuple{1, 2, -1, 55, 256, "b", "e", 0},             // elementwise bias
+                   std::tuple{2, 4, 2, 127, 300, "b:1023,0,4", "n", 1}))); // 127 = tile - 1
+
+TEST_P(QuantScaleShortQueryHdim192, DataTypeConfig) { RunQuantScaleHdim(192, GetParam(), 128); }
+
+// Decode kernel selection on head dim 192 / V 128, as QuantScaleMergedDecode.
+class QuantScaleMergedDecodeHdim192
+    : public TestWithParam<std::tuple<const char*, bool, MergedDecodeDims>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleMergedDecodeHdim192,
+    Combine(QScaleValues,
+            Values(false, true),                                            // lse
+            Values(MergedDecodeDims{2, 8, 2, 1, 1024, "0", 0, true},        // GQA 4, no mask
+                   MergedDecodeDims{2, 8, 2, 1, 1024, "0", 0, false},       // same, b*s*h*d
+                   MergedDecodeDims{1, 16, 2, 8, 700, "b", 0, true},        // 64 rows, causal
+                   MergedDecodeDims{1, 16, 2, 8, 700, "b", 0, false},       // b*s*h*d, s > 1
+                   MergedDecodeDims{2, 32, 2, 1, 513, "b:127,0", 1, false}, // gpt-oss, b*s*h*d
+                   MergedDecodeDims{1, 32, 4, 8, 300, "0", 1, true},        // sink logit, 64 rows
+                   MergedDecodeDims{2, 8, -1, 2, 300, "b", 0, true},        // MHA, 2 rows
+                   MergedDecodeDims{1, 8, 1, 20, 300, "b", 0, true},        // 160 rows
+                   MergedDecodeDims{2, 64, 8, 4, 1000, "0", 0, true},       // GQA 8, 32 rows
+                   MergedDecodeDims{1, 32, 4, 8, 700, "b:127,0", 1, true},  // masked sink, 64 rows
+                   MergedDecodeDims{1, 32, 2, 1, 2048, "b:1023,0,4", 0, true}))); // 16 groups
+
+TEST_P(QuantScaleMergedDecodeHdim192, DataTypeConfig)
+{
+    auto [qscale, lse, dims] = GetParam();
+    RunMergedDecode(192, 128, qscale, lse, dims);
 }
 
 // Elementwise bias with LSE, including the early exit of empty rows next to a sink logit.

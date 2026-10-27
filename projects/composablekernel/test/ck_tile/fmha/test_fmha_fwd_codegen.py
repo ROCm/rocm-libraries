@@ -1711,6 +1711,99 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     api.index("t.hdim_q <= 256 && t.hdim_v <= 256"),
                 )
 
+    def test_fp8_sched_d192_mirrors_d128(self):
+        key = lambda k: (
+            k.F_pipeline.tag,
+            k.F_mode,
+            k.F_pipeline.F_qscale,
+            k.F_pipeline.F_mask,
+            k.F_pipeline.F_lse,
+            k.F_pipeline.F_sink,
+            k.F_pipeline.F_bias,
+        )
+        fp8_tags = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
+        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+            with self.subTest(dtype=dtype):
+                _, d128 = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+                )
+                pool, d192 = get_fwd_blobs(
+                    ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
+                )
+                # D192/V128 runs only the scheduled FP8 pipelines, with D128's variants.
+                self.assertTrue(d192)
+                self.assertTrue(all(k.F_pipeline.tag in fp8_tags for k in d192))
+                self.assertEqual(
+                    Counter(key(k) for k in d192),
+                    Counter(key(k) for k in d128 if k.F_pipeline.tag in fp8_tags),
+                )
+                for k in d192:
+                    t = k.F_tile
+                    one_wave = k.F_pipeline.tag == "qr_tdm_fp8_sched_d1"
+                    self.assertEqual(
+                        (t.F_bm0, t.F_bn0, t.F_bk0, t.F_bn1, t.F_bk1, t.F_bk0max),
+                        (32 if one_wave else 128, 128, 192, 128, 128, 192),
+                    )
+                    # MX, bias and the merged-GQA LDS/VGPR outliers run one workgroup per CU.
+                    merged_one = k.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa" and (
+                        (
+                            dtype == "fp8fp32"
+                            and k.F_pipeline.F_qscale in ("perhead", "blockscale")
+                        )
+                        or (
+                            k.F_pipeline.F_sink == "t"
+                            and k.F_pipeline.F_mask not in ("no", "s_no")
+                        )
+                    )
+                    occupancy = (
+                        1
+                        if not one_wave
+                        and (
+                            k.F_pipeline.F_qscale == "mx"
+                            or k.F_pipeline.F_bias == "bias"
+                            or merged_one
+                        )
+                        else 2
+                    )
+                    self.assertEqual(
+                        (t.F_wk0, t.F_wk1, t.F_occupancy), (64, 128, occupancy)
+                    )
+                api = pool.render("test")
+                self.assertIn("a.hdim_q == 192 && a.hdim_v == 128", api)
+                self.assertIn("a.hdim_v % 128 == 0", api)
+                self.assertNotIn("a.hdim_v % 192 == 0", api)
+                if dtype.startswith("mx"):
+                    # D192 Q/K scale rows are read as one int16 per K64 step.
+                    self.assertIn(
+                        "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 2 == 0", api
+                    )
+                pool, _ = get_fwd_blobs(
+                    ["gfx1250"], f"*_{dtype}_*", 0, [128, 192, 256], "simplified"
+                )
+                api = pool.render("test")
+                self.assertLess(
+                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
+                    api.index("t.hdim_q <= 192 && t.hdim_v <= 128"),
+                )
+                self.assertLess(
+                    api.index("t.hdim_q <= 192 && t.hdim_v <= 128"),
+                    api.index("t.hdim_q <= 256 && t.hdim_v <= 256"),
+                )
+
+    def test_d192_bias_exception_is_fp8_sched_only(self):
+        # (192, 128) emits bias for the FP8 scheduled pipeline only; other dtypes keep none.
+        for dtype in ("fp16", "bf16", "fp8", "fp8bf16", "fp8fp32"):
+            with self.subTest(dtype=dtype):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
+                )
+                biased = [k for k in kernels if k.F_pipeline.F_bias != "no"]
+                if dtype.startswith("fp8"):
+                    self.assertTrue(biased)
+                self.assertTrue(
+                    all(k.F_pipeline.tag == "qr_tdm_fp8_sched" for k in biased)
+                )
+
     def test_fp8_sched_group_mode_mirrors_batch(self):
         for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
             with self.subTest(dtype=dtype):

@@ -36,9 +36,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr index_t kVLogicalWidth   = Geometry::kDv;
     static constexpr index_t kVPhysicalStride = Layout::kVPhysicalStride;
 
-    using KPadding = detail::LdsPaddingConfig<true, kKValidWidth, Layout::kRowPadBytes>;
+    using KPadding =
+        std::conditional_t<Layout::kKPadByTdm,
+                           detail::LdsPaddingConfig<true, kKValidWidth, Layout::kRowPadBytes>,
+                           detail::LdsPaddingConfig<false, 0, 0>>;
+    // Width of the K TDM box: the row, or the padded row whose tail reads zeros past hdim_q.
+    static constexpr index_t kKDramBoxWidth = Layout::kKPadByTdm ? kKValidWidth : kKPhysicalStride;
     // D128/D256 Q rows take the K row padding so per-lane row reads spread across LDS banks.
-    static constexpr bool kPadQRows = kKValidWidth >= 128;
+    static constexpr bool kPadQRows = kKValidWidth >= 128 && Layout::kKPadByTdm;
     using VPadding = detail::LdsPaddingConfig<true, kVLogicalWidth, Layout::kRowPadBytes>;
     static_assert(sizeof(typename Geometry::KDataType) == 1 &&
                       sizeof(typename Geometry::VDataType) == 1 &&
@@ -86,11 +91,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         s_wait_dscnt<kFmhaTdmSchedFp8DsWait<GetPvTailDsCount<Stage>()>>();
     }
 
-    static constexpr index_t kLdsOffsetK0  = 0;
-    static constexpr index_t kLdsOffsetK1  = kLdsOffsetK0 + kKFootprintBytes;
-    static constexpr index_t kLdsOffsetV0  = kLdsOffsetK1 + kKFootprintBytes;
-    static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + kVFootprintBytes;
-    static constexpr index_t kLdsArenaSize = kLdsOffsetV1 + kVFootprintBytes;
+    // FP8 Q is staged in the V1 buffer, which D192 widens to its unpadded rows.
+    static constexpr index_t kQFootprintBytes =
+        Geometry::kM * (kPadQRows ? kKPhysicalStride : kKValidWidth);
+    static constexpr index_t kV1FootprintBytes = max(kVFootprintBytes, kQFootprintBytes);
+    static constexpr index_t kLdsOffsetK0      = 0;
+    static constexpr index_t kLdsOffsetK1      = kLdsOffsetK0 + kKFootprintBytes;
+    static constexpr index_t kLdsOffsetV0      = kLdsOffsetK1 + kKFootprintBytes;
+    static constexpr index_t kLdsOffsetV1      = kLdsOffsetV0 + kVFootprintBytes;
+    static constexpr index_t kLdsArenaSize     = kLdsOffsetV1 + kV1FootprintBytes;
 
     // fp32 S/O fragments are input-type independent, so the 16-bit softmax/output maps apply.
     using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
@@ -952,7 +961,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
         return make_static_tile_distribution(
             tile_distribution_encoding<
                 sequence<>,
-                tuple<sequence<warp_num, kLdsRows / warp_num>, sequence<kKValidWidth>>,
+                tuple<sequence<warp_num, kLdsRows / warp_num>, sequence<kKDramBoxWidth>>,
                 tuple<sequence<1>>,
                 tuple<sequence<0>>,
                 sequence<1, 2>,
@@ -1078,7 +1087,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 return BasePolicy::template MakeQLdsBlockDescriptor<Problem>();
         }();
         static_assert(desc.get_element_space_size() * sizeof(typename Problem::QDataType) <=
-                          kVFootprintBytes,
+                          kV1FootprintBytes,
                       "Q LDS descriptor overflows the V1 buffer");
         return desc;
     }
@@ -1123,6 +1132,18 @@ inline constexpr index_t kFmhaTdmSchedFp8BlockPerCu = 2;
 inline constexpr index_t kFmhaTdmSchedFp8BiasBlockPerCu = 1;
 // D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
 inline constexpr index_t kFmhaTdmSchedFp8D256BlockPerCu = 1;
+// D192 MX scales (six bytes per Q/K row) spill at two per CU, so it runs one per CU.
+inline constexpr index_t kFmhaTdmSchedFp8D192MxBlockPerCu = 1;
+// D192 merged-GQA decode runs one per CU where two do not fit: FP32 O staging next to the merged
+// row descales overflows the LDS, and masked sink tokens exceed half of the VGPRs.
+inline constexpr index_t kFmhaTdmSchedFp8D192MergedBlockPerCu = 1;
+template <typename Problem>
+inline constexpr bool kFmhaTdmSchedFp8D192MergedOnePerCu =
+    Problem::BlockFmhaShape::kQKHeaddim == 192 && Problem::kMergeNumHeadGroupsSeqLenQ &&
+    (((Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
+       Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE) &&
+      sizeof(typename Problem::ODataType) == 4) ||
+     (Problem::kHasSink && Problem::FmhaMask::IsMasking));
 // One-wavefront workgroups: LDS holds at most this many per SIMD, so the VGPR bound costs nothing.
 template <index_t HeadDim>
 inline constexpr index_t kFmhaTdmSchedFp8OneWaveBlockPerCu = HeadDim == 256 ? 1 : 2;
@@ -1134,7 +1155,11 @@ using FmhaTdmSchedFp8PolicyFor = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<
         FmhaTdmSchedGeometryFor<Problem>,
         Problem::BlockFmhaShape::kM0 == 32
             ? kFmhaTdmSchedFp8OneWaveBlockPerCu<Problem::BlockFmhaShape::kQKHeaddim>
-        : Problem::BlockFmhaShape::kQKHeaddim == 256           ? kFmhaTdmSchedFp8D256BlockPerCu
+        : Problem::BlockFmhaShape::kQKHeaddim == 256 ? kFmhaTdmSchedFp8D256BlockPerCu
+        : Problem::BlockFmhaShape::kQKHeaddim == 192 &&
+                Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX
+            ? kFmhaTdmSchedFp8D192MxBlockPerCu
+        : kFmhaTdmSchedFp8D192MergedOnePerCu<Problem> ? kFmhaTdmSchedFp8D192MergedBlockPerCu
         : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
                                                                : kFmhaTdmSchedFp8BiasBlockPerCu>>;
 

@@ -16,7 +16,7 @@
 
 namespace ck_tile {
 
-// Hand-scheduled gfx125 TDM pipeline for FP8 D64/D128/D256 (K64 QK WMMA at D64, else K128).
+// Hand-scheduled gfx125 TDM pipeline for FP8 D64/D128/D192/D256 (K64 QK WMMA at D64/D192).
 template <typename Problem_,
           typename Policy_        = FmhaTdmSchedFp8PolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
@@ -285,18 +285,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         index_t seqlen_q    = 1;
     };
     static constexpr index_t kMxGranularity = 32;
-    // E8M0 bytes of one Q/K scale row; D64 pads the other two to 1.0 over its zero K half.
-    static constexpr index_t kMxQkScaleBytes = kQKHeaddim / kMxGranularity;
-    static_assert(!kMx || ((kMxQkScaleBytes == 2 || kMxQkScaleBytes == kScaleBytes ||
-                            kMxQkScaleBytes == 2 * kScaleBytes) &&
-                           kPScaleGranularity == kMxGranularity),
-                  "MX needs a 64, 128 or 256 head dim and a 32-element P/V scale block");
-    static constexpr int32_t kMxQkPadScale = kMxQkScaleBytes == 2 ? 0x7f7f0000 : 0;
-    // One scale dword per QK WMMA K step; D256 keeps each step's Q/K scales in its own plane.
+    // E8M0 bytes of one Q/K scale row, and of one QK WMMA K step (K64 steps: two).
+    static constexpr index_t kMxQkScaleBytes   = kQKHeaddim / kMxGranularity;
+    static constexpr index_t kMxStepScaleBytes = Geometry::kQkWmmaK / kMxGranularity;
+    // One scale dword per QK WMMA K step; D192/D256 keep each step's Q/K scales in its own plane.
     static constexpr index_t kMxQkScaleDwords   = Geometry::kQkKIter;
     static constexpr index_t kMxKScalesPerPlane = Geometry::kQkStages * Geometry::kQkSuNIter;
+    static_assert(!kMx || ((kMxStepScaleBytes == 2 || kMxStepScaleBytes == kScaleBytes) &&
+                           kMxQkScaleBytes == kMxStepScaleBytes * kMxQkScaleDwords &&
+                           kPScaleGranularity == kMxGranularity),
+                  "MX needs whole K64/K128 QK steps and a 32-element P/V scale block");
+    // K64 steps pad the two scale bytes of their zero K half to 1.0.
+    static constexpr int32_t kMxQkPadScale = kMxStepScaleBytes == 2 ? 0x7f7f0000 : 0;
     // Pointer and stride alignment of the Q/K scale rows read by LoadMxRowScale.
-    static constexpr index_t kMxQkScaleAlign = min(kMxQkScaleBytes, kScaleBytes);
+    static constexpr index_t kMxQkScaleAlign = min(kMxStepScaleBytes, kScaleBytes);
     // V scale rows each thread copies: two at D256; K rows: kN / kBlockSize (one-wavefront: four).
     static constexpr index_t kMxVRowsPerThread = max(Geometry::kDv / kBlockSize, index_t{1});
     static constexpr index_t kMxKRowsPerThread = Geometry::kN / kBlockSize;
@@ -549,17 +551,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     // Byte i of a WMMA scale operand covers K elements [32i, 32i + 32) of the lane's row.
     CK_TILE_DEVICE static int32_t LoadMxRowScale(const e8m0_t* ptr, index_t row, index_t stride)
     {
-        if constexpr(kMxQkScaleBytes >= kScaleBytes)
+        if constexpr(kMxStepScaleBytes >= kScaleBytes)
             return *reinterpret_cast<const int32_t*>(ptr + row * stride);
         else
             return *reinterpret_cast<const uint16_t*>(ptr + row * stride) | kMxQkPadScale;
     }
 
-    // D64 K scale dwords hold two copied bytes; replace the upper two by the 1.0 pad scale.
+    // K64-step K scale dwords hold two copied bytes; replace the upper two by the 1.0 pad scale.
     template <index_t N>
     CK_TILE_DEVICE static void PadMxKScales(array<int32_t, N>& scales)
     {
-        if constexpr(kMxQkScaleBytes == 2)
+        if constexpr(kMxStepScaleBytes == 2)
             static_for<0, N, 1>{}(
                 [&](auto i) { scales(i) = (scales[i] & 0xffff) | kMxQkPadScale; });
     }
@@ -660,19 +662,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             return static_cast<index_t>(static_cast<uint32_t>(tile) +
                                         static_cast<uint32_t>(lane_off));
         };
-        // A D64 K row has two scale bytes, copied bytewise; PadMxKScales fills the rest.
+        // A K64 step has two scale bytes, copied bytewise; PadMxKScales fills the rest.
         const auto copy_k = [&](const e8m0_t* src, auto* dst) {
             if constexpr(kMxQkScaleBytes == kScaleBytes)
                 __builtin_amdgcn_global_load_async_to_lds_b32(ToGlobalPtr<gint_t>(src), dst, 0, 0);
-            else if constexpr(kMxQkScaleBytes > kScaleBytes)
+            else if constexpr(kMxStepScaleBytes == kScaleBytes)
                 static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
                     __builtin_amdgcn_global_load_async_to_lds_b32(
                         ToGlobalPtr<gint_t>(src + j * kScaleBytes), dst + j * Geometry::kN, 0, 0);
                 });
             else
-                static_for<0, kMxQkScaleBytes, 1>{}([&](auto i) {
-                    __builtin_amdgcn_global_load_async_to_lds_b8(
-                        ToGlobalPtr<gchar_t>(src + i), reinterpret_cast<lchar_t*>(dst) + i, 0, 0);
+                static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
+                    static_for<0, kMxStepScaleBytes, 1>{}([&](auto i) {
+                        __builtin_amdgcn_global_load_async_to_lds_b8(
+                            ToGlobalPtr<gchar_t>(src + j * kMxStepScaleBytes + i),
+                            reinterpret_cast<lchar_t*>(dst + j * Geometry::kN) + i,
+                            0,
+                            0);
+                    });
                 });
         };
         const index_t k_off = lane(kv_base * mx.stride_k, off.k);
@@ -1136,7 +1143,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     (m_iter * Geometry::kWaves + get_warp_id()) * Geometry::QkWmma::kM + mx_lane;
                 static_for<0, kMxQkScaleDwords, 1>{}([&](auto j) {
                     q_scales(number<j * Geometry::kQkMIter + m_iter>{}) = LoadMxRowScale(
-                        mx.q_ptr + j * kScaleBytes, min(row, mx.seqlen_q - 1), mx.stride_q);
+                        mx.q_ptr + j * kMxStepScaleBytes, min(row, mx.seqlen_q - 1), mx.stride_q);
                 });
             });
         }
