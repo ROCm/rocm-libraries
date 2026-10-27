@@ -4867,9 +4867,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
             # three tensors always bind to the same three kernarg slots, so
             # only their extents differ.
-            nhwc = (problem.N, problem.Hi, problem.Wi, problem.C)
-            nhwk = (problem.N, problem.Ho, problem.Wo, problem.K)
-            krsc = (problem.K, problem.Y, problem.X, problem.cpg)
+            if problem.is_3d:
+                # NDHWC / NDHWK / KZYXC: the 3-D kernels index a depth axis.
+                nhwc = (problem.N, problem.Di, problem.Hi, problem.Wi, problem.C)
+                nhwk = (problem.N, problem.Do, problem.Ho, problem.Wo, problem.K)
+                krsc = (problem.K, problem.Z, problem.Y, problem.X, problem.cpg)
+            else:
+                nhwc = (problem.N, problem.Hi, problem.Wi, problem.C)
+                nhwk = (problem.N, problem.Ho, problem.Wo, problem.K)
+                krsc = (problem.K, problem.Y, problem.X, problem.cpg)
             if direction == "wgrad":
                 a_shape, b_shape, d_shape = nhwk, nhwc, krsc
             elif direction == "dgrad":
