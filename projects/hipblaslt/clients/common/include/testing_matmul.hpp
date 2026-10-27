@@ -3114,18 +3114,18 @@ void testing_matmul_with_bias(const Arguments&                                  
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
+    auto collectProblemValues = [&](auto projection) {
+        std::vector<int64_t> values;
+        values.reserve(matmulProblems.size());
+        for(const auto& problem : matmulProblems)
+            values.push_back(projection(problem));
+        return values;
+    };
     hipblaslt_ext::GemmInstance* extProblem = nullptr;
-    if(do_grouped_gemm)
+    if(do_grouped_gemm && arg.api_method != kApiMethodGroupedC)
     {
         if(arg.use_ext_setproblem)
         {
-            auto collectProblemValues = [&](auto projection) {
-                std::vector<int64_t> values;
-                values.reserve(matmulProblems.size());
-                for(const auto& problem : matmulProblems)
-                    values.push_back(projection(problem));
-                return values;
-            };
             auto rows       = collectProblemValues([](const auto& problem) { return problem.m; });
             auto columns    = collectProblemValues([](const auto& problem) { return problem.n; });
             auto reductions = collectProblemValues([](const auto& problem) { return problem.k; });
@@ -3396,22 +3396,27 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
         else if(arg.api_method == kApiMethodGroupedC)
         {
-            groupedC = std::make_unique<GroupedCApiProblem>(handle,
-                                                            arg,
-                                                            transA,
-                                                            transB,
-                                                            M,
-                                                            N,
-                                                            K,
-                                                            lda,
-                                                            ldb,
-                                                            ldc,
-                                                            ldd,
-                                                            da,
-                                                            db,
-                                                            dc,
-                                                            dd,
-                                                            max_workspace_size);
+            groupedC = std::make_unique<GroupedCApiProblem>(
+                handle,
+                arg,
+                transA,
+                transB,
+                collectProblemValues([](const auto& problem) { return problem.m; }),
+                collectProblemValues([](const auto& problem) { return problem.n; }),
+                collectProblemValues([](const auto& problem) { return problem.k; }),
+                collectProblemValues(
+                    [](const auto& problem) { return problem.a.leadingDimension(); }),
+                collectProblemValues(
+                    [](const auto& problem) { return problem.b.leadingDimension(); }),
+                collectProblemValues(
+                    [](const auto& problem) { return problem.c.leadingDimension(); }),
+                collectProblemValues(
+                    [](const auto& problem) { return problem.d.leadingDimension(); }),
+                da,
+                db,
+                dc,
+                dd,
+                max_workspace_size);
             EXPECT_HIPBLAS_STATUS(groupedC->status(), HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(groupedC->heuristic(requestAlgoCount, heuristicResult),
                                   HIPBLAS_STATUS_SUCCESS);
@@ -4371,8 +4376,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     EXPECT_HIPBLAS_STATUS(groupedC->run(0,
                                                         heuristicResult[sol].algo,
-                                                        &h_alpha[0],
-                                                        &h_beta[0],
+                                                        firstRuntimeProblem.alphaPointer,
+                                                        &firstPreparedProblem.beta,
                                                         *dWorkspace,
                                                         workspace_size,
                                                         stream),
@@ -5293,15 +5298,15 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(groupedC)
             {
                 auto runBlock = [&](size_t sol, int b) {
-                    EXPECT_HIPBLAS_STATUS(
-                        groupedC->run(b,
-                                      heuristicResult[sol].algo,
-                                      &h_alpha[0],
-                                      &h_beta[0],
-                                      (unsigned char*)(*dWorkspace) + b * workspace_size,
-                                      workspace_size,
-                                      stream),
-                        HIPBLAS_STATUS_SUCCESS);
+                    EXPECT_HIPBLAS_STATUS(groupedC->run(b,
+                                                        heuristicResult[sol].algo,
+                                                        firstRuntimeProblem.alphaPointer,
+                                                        &firstPreparedProblem.beta,
+                                                        static_cast<unsigned char*>(workspacePtr)
+                                                            + b * workspace_size,
+                                                        workspace_size,
+                                                        stream),
+                                          HIPBLAS_STATUS_SUCCESS);
                 };
                 relaunch = [&](size_t sol) { runBlock(sol, 0); };
                 search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
@@ -5324,7 +5329,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         .cold([&](size_t sol, int32_t i) {
                             runBlock(sol, i % block_count);
                             if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
-                                copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                                copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                         })
                         .launch([&](size_t sol, int64_t i) {
                             runBlock(sol, static_cast<int>(i % block_count));
