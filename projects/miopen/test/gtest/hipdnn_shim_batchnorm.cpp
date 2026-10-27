@@ -29,6 +29,10 @@
 
 namespace hs = hipdnn_shim_test;
 
+MIOPEN_LIB_ENV_VAR(MIOPEN_WARN_SEARCH)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_USER_DB)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
+
 namespace {
 
 using TrainData = BNFwdTrainTestData<float, float, float, float, float, double, BN2DTestCase>;
@@ -42,7 +46,7 @@ constexpr double kProviderEpsilon = 1e-5;
 
 BN2DTestCase SmallCase()
 {
-    return {2, 4, 8, 8, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return {3, 5, 6, 10, miopen::batchnorm::Direction::ForwardTraining, true, true};
 }
 
 void SetActivation(miopenActivationMode_t& mode,
@@ -943,6 +947,43 @@ TEST(GPU_HipdnnShimBNPerActivation_FP32, MatchesCpuReference)
     }
 }
 
+// MIOpen's per-activation training and backward solvers ignore the activation, so
+// the call is served and its results are those without it. TANH is one the provider
+// has no mapping for, and is served all the same.
+TEST(GPU_HipdnnShimBNPerActivation_FP32, IgnoresActivation)
+{
+    auto&& handle = get_handle();
+
+    for(const auto mode : {miopenActivationRELU, miopenActivationTANH})
+    {
+        const std::string name = mode == miopenActivationRELU ? "relu" : "tanh";
+        SCOPED_TRACE(name);
+
+        hs::OwnedActivationDescriptor activ;
+        ASSERT_EQ(miopenCreateActivationDescriptor(&activ.handle), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetActivationDescriptor(activ.handle, mode, 0.1, 0.3, 0.0),
+                  miopenStatusSuccess);
+        {
+            SCOPED_TRACE("train");
+            TrainData d;
+            SetUpTrain(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return TrainActivation(handle, d, activ.handle); });
+            if(ExpectServed("per_activation_" + name + "_train", result))
+                CheckTrain(handle, d, true, true);
+        }
+        {
+            SCOPED_TRACE("bwd");
+            BwdData d;
+            SetUpBwd(d, miopenBNPerActivation);
+            const auto result =
+                hs::CaptureCall([&] { return BwdActivation(handle, d, true, activ.handle); });
+            if(ExpectServed("per_activation_" + name + "_bwd", result))
+                CheckBwd(handle, d);
+        }
+    }
+}
+
 // CLIPPEDRELU and CLAMP forward as ReLU with an upper clip, and with both clips.
 // The clips are set wide enough that every branch of the activation and of its
 // gradient is taken. Backward is covered as well as forward, because it is the
@@ -1035,22 +1076,23 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 // of 1e-5. For any other epsilon, and for backward with an activation, whose
 // graph needs the saved stats, the shim runs training first to compute them into
 // scratch. Every combination is served; the CPU reference is given the true stats
-// of the input at the call's epsilon.
+// of the input at the call's epsilon. The other epsilon is large next to the
+// variance, so that results computed at the provider's epsilon instead fail.
 TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
 {
     struct NoStatsCase
     {
         const char* name;
-        bool provider_epsilon;
+        double epsilon;
         miopenActivationMode_t mode;
     };
 
-    // BwdData's own epsilon is FLT_EPSILON.
+    constexpr double kLargeEpsilon       = 0.5;
     const std::vector<NoStatsCase> cases = {
-        {"bwd_no_saved_stats_provider_epsilon", true, miopenActivationPASTHRU},
-        {"bwd_no_saved_stats_flt_epsilon", false, miopenActivationPASTHRU},
-        {"bwd_act_no_saved_stats", true, miopenActivationRELU},
-        {"bwd_act_no_saved_stats_flt_epsilon", false, miopenActivationRELU},
+        {"bwd_no_saved_stats_provider_epsilon", kProviderEpsilon, miopenActivationPASTHRU},
+        {"bwd_no_saved_stats_large_epsilon", kLargeEpsilon, miopenActivationPASTHRU},
+        {"bwd_act_no_saved_stats", kProviderEpsilon, miopenActivationRELU},
+        {"bwd_act_no_saved_stats_large_epsilon", kLargeEpsilon, miopenActivationRELU},
     };
 
     auto&& handle = get_handle();
@@ -1059,8 +1101,7 @@ TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
         SCOPED_TRACE(c.name);
         BwdData d;
         SetUpBwd(d);
-        if(c.provider_epsilon)
-            d.epsilon = kProviderEpsilon;
+        d.epsilon = c.epsilon;
         SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, c.mode);
 
         hs::OwnedActivationDescriptor activ;
@@ -1113,20 +1154,33 @@ const BN2DTestCase& TuningCase()
     return tuning_case;
 }
 
+// Used only under Search: MIOpen searches only for a shape the handle holds no
+// tuned invoker for, so no other test may run this shape.
+const BN2DTestCase& SearchCase()
+{
+    static const BN2DTestCase search_case{
+        3, 5, 7, 11, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return search_case;
+}
+
 // Training passes no running stats, since a search re-runs the kernel and would
 // apply the running-stat update more than once.
-hs::CallResult
-TrainUnderPolicy(miopen::Handle& handle, TrainData& d, miopenBatchNormMode_t mode = miopenBNSpatial)
+hs::CallResult TrainUnderPolicy(miopen::Handle& handle,
+                                TrainData& d,
+                                miopenBatchNormMode_t mode    = miopenBNSpatial,
+                                const BN2DTestCase& test_case = TuningCase())
 {
-    d.SetUpImpl(TuningCase(), mode, miopenTensorNCHW);
+    d.SetUpImpl(test_case, mode, miopenTensorNCHW);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
     return hs::CaptureCall([&] { return TrainV2(handle, d, {true, true, false, false}); });
 }
 
-hs::CallResult
-BwdUnderPolicy(miopen::Handle& handle, BwdData& d, miopenBatchNormMode_t mode = miopenBNSpatial)
+hs::CallResult BwdUnderPolicy(miopen::Handle& handle,
+                              BwdData& d,
+                              miopenBatchNormMode_t mode    = miopenBNSpatial,
+                              const BN2DTestCase& test_case = TuningCase())
 {
-    d.SetUpImpl(TuningCase(), mode, miopenTensorNCHW);
+    d.SetUpImpl(test_case, mode, miopenTensorNCHW);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
     return hs::CaptureCall([&] { return BwdV1(handle, d, true); });
 }
@@ -1135,27 +1189,43 @@ BwdUnderPolicy(miopen::Handle& handle, BwdData& d, miopenBatchNormMode_t mode = 
 // Search. The provider runs on a handle of its own, so the shim carries Search
 // over as the plan's benchmarking knob, under which the provider sets Search on
 // its handle. Inference is not tunable and is served without the knob.
+//
+// The results alone cannot tell a search from a run under None, so the test also
+// looks for MIOpen's "Search Started" line, which MIOPEN_WARN_SEARCH raises to a
+// warning. Both perf dbs are off, because a record found there, from an earlier
+// run or another test, is loaded in place of a search.
 TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
+    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
+    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
 
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(ExpectServed("tuning_policy_train", TrainUnderPolicy(handle, d)))
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, SearchCase());
+        if(ExpectServed("tuning_policy_train", result))
+        {
+            EXPECT_NE(result.logged.find("Search Started:"), std::string::npos) << result.logged;
             CheckTrain(handle, d, true, false);
+        }
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(ExpectServed("tuning_policy_bwd", BwdUnderPolicy(handle, d)))
+        const auto result = BwdUnderPolicy(handle, d, miopenBNSpatial, SearchCase());
+        if(ExpectServed("tuning_policy_bwd", result))
+        {
+            EXPECT_NE(result.logged.find("Search Started:"), std::string::npos) << result.logged;
             CheckBwd(handle, d);
+        }
     }
     {
         SCOPED_TRACE("infer");
         InferData d;
-        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
+        d.SetUpImpl(SearchCase(), miopenBNSpatial, miopenTensorNCHW, false);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
         if(ExpectServed("tuning_policy_infer", result))
             CheckInfer(handle, d);
@@ -1191,7 +1261,8 @@ TEST(GPU_HipdnnShimBNTuning_FP32, PerActivationIgnoresPolicy)
 
 // The provider sets only None or Search on its handle, so it cannot run the
 // policies that also write or clean the perf db. The shim declines them for
-// training and backward; DbUpdate stands for all three.
+// training and backward, and for inference without the estimated stats, which
+// runs training; DbUpdate stands for all three.
 TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
 {
     auto&& handle = get_handle();
@@ -1209,6 +1280,14 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
         BwdData d;
         if(RecordOutcome("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
+        if(RecordOutcome("tuning_policy_dbupdate_infer", result, reason))
+            CheckInfer(handle, d);
     }
 }
 

@@ -46,6 +46,8 @@ namespace hipdnn {
 // Some problems take a different route through hipDNN than through MIOpen:
 // - Per-activation mode runs as spatial batchnorm on x viewed as {N, C*H*W, 1,
 //   1}, which normalizes each element over the batch exactly as MIOpen does.
+//   Training and backward then ignore the activation, whatever its mode,
+//   because MIOpen's per-activation solvers never read it. Inference applies it.
 // - CLIPPEDRELU and CLAMP run as ReLU with an upper clip, and with a lower and
 //   an upper clip.
 // - Backward without the saved statistics, at an epsilon other than 1e-5 or
@@ -59,16 +61,19 @@ namespace hipdnn {
 // thus tell that forwarding did not happen. miopenGetErrorString adds a
 // "[hipDNN-forwarded]" prefix. The reason goes to stderr unless MIOPEN_LOG_LEVEL
 // hides errors. The wrapper declines these problems:
-// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP. A null
+// - Any activation other than PASTHRU, RELU, CLIPPEDRELU or CLAMP, where the
+//   call applies it (not per-activation training or backward). A null
 //   activation descriptor means no activation, as it does in MIOpen.
 // - Tensors that are not packed, data tensors of different types or shapes, or
 //   scale, bias or statistics not shaped {1, C, 1, ...} ({1, C, H, W, ...} in
 //   per-activation mode). MIOpen reshapes a 5-D x to 4-D, so a non-packed 5-D x
 //   is declined here, not rejected with miopenStatusBadParm.
-// - Per-activation mode on tensors that are not row-major (NCHW or NCDHW).
-// - Training or backward when the handle has a tuning policy other than
-//   miopenTuningPolicyNone. The provider runs on its own handle and cannot apply
-//   the policy. Inference has no tunable solver, so the policy does not matter.
+// - Spatial training or backward when the handle's tuning policy is DbUpdate,
+//   SearchDbUpdate or DbClean. That includes inference without an estimated
+//   mean or variance, which runs training. The provider runs on its own handle
+//   and can only set None, or Search through its benchmarking knob. Inference
+//   with the estimates has no tunable solver, and neither has per-activation
+//   mode, so for them the policy does not matter.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
 //
 // The wrapper also returns miopenStatusBadParm for a null alpha or beta, a null

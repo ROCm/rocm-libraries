@@ -163,6 +163,19 @@ const char* ReadProblem(BnProblem& problem,
     return nullptr;
 }
 
+// MIOpen's per-activation training and backward solvers never read the
+// activation, so MIOpen runs those calls as if it were PASTHRU, whatever its
+// mode, and so does the forwarded call. Its inference solver applies the
+// activation in both modes, so inference keeps it.
+void DropPerActivationActivation(BnProblem& problem)
+{
+    if(problem.bnMode != miopenBNPerActivation)
+        return;
+    problem.act      = miopenActivationPASTHRU;
+    problem.actAlpha = 0.0;
+    problem.actBeta  = 0.0;
+}
+
 // MIOpen's BadParm checks for the forward entry points, in its order, so a
 // forwarded call fails the way the native one does. A truncated x has no
 // reliable dims, so the checks that read them are left to CheckSupported.
@@ -235,7 +248,8 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
 // carry the whole policy to the provider (ROCm/rocm-libraries#14372);
 // MIOPEN_DISABLE_HIPDNN_FOR sends these calls back to MIOpen meanwhile. The
 // inference and per-activation solvers are not tunable and ignore the policy,
-// so inference skips this check and per-activation runs as under None.
+// so inference with the estimates skips this check and per-activation runs as
+// under None. Inference without them runs training, so it gets this check.
 // MIOPEN_FIND_ENFORCE needs no check: it is process-wide, so the provider's
 // handle sees it too.
 miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
@@ -730,6 +744,7 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
     if(const char* reason = ReadProblem(
            problem, {xDesc, yDesc, scaleDesc, biasDesc, meanDesc, varianceDesc}, activDesc))
         return RecordFailure(miopenStatusBadParm, reason);
+    DropPerActivationActivation(problem);
 
     if(const char* reason = CheckForwardParams(problem, true, x, y, scale, bias))
         return RecordFailure(miopenStatusBadParm, reason);
@@ -959,6 +974,7 @@ miopenStatus_t Backward(miopenHandle_t handle,
                        {xDesc, dyDesc, scaleDesc, biasDesc, meanDesc, varianceDesc, dxDesc},
                        activDesc))
         return RecordFailure(miopenStatusBadParm, reason);
+    DropPerActivationActivation(problem);
     // Without an activation the fused entry point is plain backward, and sharing
     // its kind lets the two share a plan.
     problem.kind = problem.act == miopenActivationPASTHRU ? GraphKind::BnBackward
