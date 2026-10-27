@@ -86,6 +86,13 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
+    // Ascending axes: for a matrix, row-major order.
+    std::vector<size_t> indexOrderLastDimensionFastest() const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), size_t{0});
+        return order;
+    }
+
     // Convert coordinates to a logical linear index.
     //
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
@@ -112,9 +119,7 @@ class Shape {
     }
 
     size_t linearIndexLastDimensionFastest(std::span<const size_t> indices) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return linearIndex(indices, order);
+        return linearIndex(indices, indexOrderLastDimensionFastest());
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
@@ -128,19 +133,11 @@ class Shape {
     }
 
     std::vector<size_t> coordinatesLastDimensionFastest(size_t index) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return coordinates(index, order);
+        return coordinates(index, indexOrderLastDimensionFastest());
     }
 
     bool operator==(const Shape& other) const noexcept {
         return m_dimensions == other.m_dimensions;
-    }
-
-    std::vector<size_t> indexOrderLastDimensionFastest() const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), size_t{0});
-        return order;
     }
 
     // Visit flat indices and their coordinates in the original axis order.
