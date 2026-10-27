@@ -378,12 +378,14 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
 // Build an fp8-in / bf16-out forward SDPA graph, optionally with q/k/v descale
 // tensors, to exercise the fp8 applicability policy. descaleDims defaults to a
 // per-tensor scalar ([1,1,1,1]); pass a larger shape (e.g. [B,H_kv,1,1]) to build
-// the non-scalar descales the engine must reject. qStrides overrides the
-// contiguous Q strides, which is what the fp8 Ts boundary cases need.
+// the non-scalar descales the engine must reject. qStrides and vStrides override
+// the contiguous Q and V strides, which is what the fp8 Ts and byte-stride
+// boundary cases need.
 flatbuffers::FlatBufferBuilder createSdpaFwdFp8Graph(bool withDescale,
                                                      const std::vector<int64_t>& descaleDims
                                                      = {1, 1, 1, 1},
-                                                     const std::vector<int64_t>& qStrides = {})
+                                                     const std::vector<int64_t>& qStrides = {},
+                                                     const std::vector<int64_t>& vStrides = {})
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -393,6 +395,7 @@ flatbuffers::FlatBufferBuilder createSdpaFwdFp8Graph(bool withDescale,
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t>& qStridesUsed = qStrides.empty() ? strides : qStrides;
+    const std::vector<int64_t>& vStridesUsed = vStrides.empty() ? strides : vStrides;
     const std::vector<int64_t>& scalarDims = descaleDims;
     const std::vector<int64_t> scalarStrides
         = hipdnn_data_sdk::utilities::generateStrides(scalarDims);
@@ -405,8 +408,8 @@ flatbuffers::FlatBufferBuilder createSdpaFwdFp8Graph(bool withDescale,
     tensorAttributes.push_back(
         CreateTensorAttributesDirect(builder, kUid, "k", DataType::FP8_E4M3_FNUZ, &strides, &dims));
     const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &vStridesUsed, &dims));
     const auto oUid = uid++;
     tensorAttributes.push_back(
         CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
@@ -1540,6 +1543,113 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwFp8PastLimit(
         fp8BuilderPastLimit.GetBufferPointer(), fp8BuilderPastLimit.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwFp8PastLimit));
+}
+
+// The forward byte-stride guard checks the batch, head and sequence stride of V
+// one field at a time (batch_stride_v, nhead_stride_v, stride_v). Each case
+// moves one V stride to its bound and leaves every other tensor contiguous, so
+// the at-limit graph is accepted and the past-limit graph can only be declined
+// by that one V field. Q, K and O stay normal, which keeps the Ts guard (a Q
+// property) out of the picture.
+struct VStrideFieldCase
+{
+    const char* label;
+    size_t strideIndex;
+};
+
+const std::vector<VStrideFieldCase> K_V_STRIDE_FIELDS = {
+    {"batch_stride_v", 0},
+    {"nhead_stride_v", 1},
+    {"stride_v", 2},
+};
+
+std::vector<int64_t>
+    contiguousStridesWithField(const std::vector<int64_t>& dims, size_t strideIndex, int64_t value)
+{
+    std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    strides[strideIndex] = value;
+    return strides;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachBf16VByteStrideField)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // bf16 scales the element stride by two bytes, so the largest accepted
+    // element stride is UINT32_MAX / 2.
+    constexpr int64_t K_BF16_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX) / 2;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    for(const auto& field : K_V_STRIDE_FIELDS)
+    {
+        SCOPED_TRACE(field.label);
+
+        auto atLimitBuilder = createSdpaFwdGraphWithStrides(
+            dims,
+            normalStrides,
+            normalStrides,
+            contiguousStridesWithField(dims, field.strideIndex, K_BF16_STRIDE_LIMIT),
+            normalStrides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+            atLimitBuilder.GetBufferPointer(), atLimitBuilder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+        auto pastLimitBuilder = createSdpaFwdGraphWithStrides(
+            dims,
+            normalStrides,
+            normalStrides,
+            contiguousStridesWithField(dims, field.strideIndex, K_BF16_STRIDE_LIMIT + 1),
+            normalStrides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+            pastLimitBuilder.GetBufferPointer(), pastLimitBuilder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
+    }
+}
+
+// fp8 forward kernels ship for gfx942 only. The kernarg builder scales the Q/K/V
+// strides by one byte, so V's bound is UINT32_MAX elements, twice the bf16 one.
+// The element stride that bf16 declines (UINT32_MAX / 2 + 1) is therefore a
+// case fp8 must still accept, which is what the resolved element size restores.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachFp8VByteStrideField)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_FP8_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX);
+    constexpr int64_t K_BF16_PAST_LIMIT = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+
+    const auto isApplicableWithV = [&](size_t strideIndex, int64_t value) {
+        auto builder = createSdpaFwdFp8Graph(/*withDescale=*/true,
+                                             /*descaleDims=*/{1, 1, 1, 1},
+                                             /*qStrides=*/{},
+                                             contiguousStridesWithField(dims, strideIndex, value));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, gw);
+    };
+
+    for(const auto& field : K_V_STRIDE_FIELDS)
+    {
+        SCOPED_TRACE(field.label);
+        EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_BF16_PAST_LIMIT));
+        EXPECT_TRUE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT));
+        EXPECT_FALSE(isApplicableWithV(field.strideIndex, K_FP8_STRIDE_LIMIT + 1));
+    }
 }
 
 // =============================================================================
