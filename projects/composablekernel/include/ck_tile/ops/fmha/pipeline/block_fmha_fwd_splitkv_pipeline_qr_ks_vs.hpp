@@ -349,8 +349,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         }
         const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
-        // make sure the first tile is completely located in page-block (page-block size should be
-        // divisible by kN0)
+        // align the first tile to kN0 so that every tile origin is kN0 aligned. With a page that is
+        // a multiple of kN0 each tile then lies in one page-block; the cross-page tile relies on
+        // the same alignment to reach at most one page-block ahead.
         // relationship between each *_start variables: aligned_physical_seqlen_k_start <=
         // physical_seqlen_k_start, logical_seqlen_k_start <= physical_seqlen_k_start
         const index_t aligned_physical_seqlen_k_start =
@@ -404,6 +405,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 
         static_assert(2 <= k0_loops);
         static_assert(1 <= k1_loops);
+        // The cross-page merge covers the K tile and the V prefetch. The V loads
+        // inside the k1 loop of stage 3 are not merged, so it must not run.
+        static_assert(!kPageShorterThanTile || k1_loops == 1,
+                      "the cross-page merge requires kN0 == kK1");
         do
         {
             // STAGE 1, QK gemm
@@ -413,8 +418,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                                                                         // load
 
             // Paged KV whose seq tile crosses a page boundary: the rows past the
-            // current page block read OOB-zero. Keep a mirror window on the next
-            // page so the two halves can be summed back into a whole tile.
+            // current page block fall outside that block's buffer range and the
+            // buffer load returns zero for them. Keep a mirror window on the next
+            // page, whose rows before it read zero the same way, so the two halves
+            // sum back into a whole tile.
             auto k_dram_window_b = k_dram_window;
             bool k_is_cross      = false;
             if constexpr(kPageShorterThanTile)

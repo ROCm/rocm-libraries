@@ -19,10 +19,10 @@ from codegen.ops.fmha_fwd_splitkv import (  # noqa: E402
 )
 
 
-def _pagecheck(bn0: int, merge_next_page: bool) -> str:
+def _pagecheck(bn0: int, page_shorter_than_tile: bool) -> str:
     trait = object.__new__(FmhaFwdSplitKVApiTrait)
     object.__setattr__(trait, "pagedkv", "t")
-    object.__setattr__(trait, "page_shorter_than_tile", merge_next_page)
+    object.__setattr__(trait, "page_shorter_than_tile", page_shorter_than_tile)
     object.__setattr__(trait, "bn0", bn0)
     object.__setattr__(trait, "constraint", "true")
     return trait.pagecheck

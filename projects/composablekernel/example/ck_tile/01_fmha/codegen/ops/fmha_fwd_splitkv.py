@@ -76,7 +76,7 @@ using fmha_trait = ck_tile::TileFmhaFwdSplitKVTraits<{F_spad},
                                                      kMergeNumHeadGroupsSeqLenQ,
                                                      {F_occupancy},
                                                      {F_sink},
-                                                     {F_subtilepage}>;
+                                                     {F_page_shorter_than_tile}>;
 
 using fmha_pipeline_problem = ck_tile::BlockFmhaFwdSplitKVPipelineProblem<
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::QDataType,
@@ -719,7 +719,7 @@ class FmhaFwdSplitKVKernel:
             F_pagedkv=BOOL_MAP[self.F_pipeline.F_pagedkv],
             F_occupancy=self.F_tile.F_occupancy,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
-            F_subtilepage=BOOL_MAP[
+            F_page_shorter_than_tile=BOOL_MAP[
                 "t"
                 if (
                     self.F_pipeline.F_pagedkv == "t"
@@ -909,7 +909,7 @@ class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
                         # selecting it; bn0=32 is reached only when that tile's page
                         # check fails. Restricted to gfx1100, the only target it is
                         # tuned and validated on.
-                        FmhaFwdTileSize( 64,  32,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint('device_name.compare(0, 7, "gfx1100") == 0'), True)],
+                        FmhaFwdTileSize( 64,  32,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint('device_name.compare(0, 7, "gfx1100") == 0'), F_page_shorter_than_tile=True)],
                 "256": [FmhaFwdTileSize( 16,  64,  32, 256,  32,  256,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
