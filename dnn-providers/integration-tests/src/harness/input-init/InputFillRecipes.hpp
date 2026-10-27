@@ -318,8 +318,11 @@ public:
                 {
                     keys = "none";
                 }
-                throw FillRecipeError(
-                    at + ": the input spec has neither \"kind\" nor \"seed\" (keys: " + keys + ")");
+                std::string message = at;
+                message += R"(: the input spec has neither "kind" nor "seed" (keys: )";
+                message += keys;
+                message += ")";
+                throw FillRecipeError(message);
             }
             if(j.contains("kind"))
             {

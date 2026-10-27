@@ -1706,7 +1706,8 @@ TEST(TestFillInputs, NonzeroOnIntegersSkipsZero)
 // Fills a T input with `recipe` and checks every element is in [lowest, highest], nonzero, and
 // that more than one value was drawn.
 template <typename T>
-void expectNonzeroValuesIn(const FillRecipe& recipe, std::int64_t lowest, std::int64_t highest)
+static void
+    expectNonzeroValuesIn(const FillRecipe& recipe, std::int64_t lowest, std::int64_t highest)
 {
     SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
     const auto filled = fillSingle<T>(recipe);
@@ -1714,7 +1715,15 @@ void expectNonzeroValuesIn(const FillRecipe& recipe, std::int64_t lowest, std::i
     std::set<std::int64_t> seen;
     for(const T v : filled.values)
     {
-        const auto value = static_cast<std::int64_t>(v);
+        std::int64_t value = 0;
+        if constexpr(sizeof(T) == 1)
+        {
+            value = static_cast<int>(v);
+        }
+        else
+        {
+            value = static_cast<std::int64_t>(v);
+        }
         ASSERT_GE(value, lowest);
         ASSERT_LE(value, highest);
         ASSERT_NE(value, 0);
