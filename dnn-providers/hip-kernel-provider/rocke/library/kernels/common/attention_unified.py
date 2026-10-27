@@ -1718,8 +1718,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         "tiled",
         arch,
         None if _searches_at_runtime(arch, "2d") else _binary_search_iters(problem),
-        problem.num_query_heads,
-        problem.num_kv_heads,
+        _heads_key(problem, arch, "2d"),
         problem.head_size,
         problem.block_size,
         problem.dtype,
@@ -4079,8 +4078,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # no way to check the key against the arch it compiles for.
         arch,
         search_iters,
-        problem.num_query_heads,
-        problem.num_kv_heads,
+        _heads_key(problem, arch, "3d"),
         problem.head_size,
         problem.block_size,
         problem.dtype,
@@ -4150,6 +4148,15 @@ def _searches_at_runtime(arch: str, path: str) -> bool:
     count from the num_seqs kernarg (``RUNTIME_SEARCH_ITERS``), so num_seqs never
     reaches its IR."""
     return bool(getattr(_tiled_spec_cls(arch, path), "RUNTIME_SEARCH_ITERS", False))
+
+
+def _heads_key(problem: UnifiedAttentionProblem, arch: str, path: str) -> Tuple:
+    """The head counts as the tiled ``path`` body for ``arch`` bakes them: both
+    counts, or only the GQA ratio when the counts are kernargs."""
+    fields = _runtime_kernarg_fields(_tiled_spec_cls(arch, path))
+    if "num_query_heads" in fields and "num_kv_heads" in fields:
+        return ("gqa", problem.num_queries_per_kv)
+    return (problem.num_query_heads, problem.num_kv_heads)
 
 
 def _window_key(problem: UnifiedAttentionProblem, arch: str, path: str):

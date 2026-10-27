@@ -402,7 +402,11 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
         if(ctx->runtime_shape)
+        {
+            ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+            ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
             ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
@@ -1008,7 +1012,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) [&& (row < VALID_ROWS)].
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_gfx942_attn2d_num_qh(ctx));
         rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* row_ok;
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -1036,7 +1040,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
             rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_gfx942_attn2d_num_qh(ctx));
             rocke_value_t* slope = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             /* The softmax bucket reads the per-reg slope from hoist_q_head. */

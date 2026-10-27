@@ -90,7 +90,6 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
     const int BLOCK_M = ctx->BLOCK_M;
     const int NQK = ctx->NQK;
     const int SLIDING_WINDOW = ctx->SLIDING_WINDOW;
-    const int NUM_QH = ctx->NUM_QH;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* ---- max_seq_prefix_len (1982-1984) ---- */
@@ -184,7 +183,7 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
             rocke_value_t* qh_mul = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
-            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, rocke_b_const_i32(B, NUM_QH));
+            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, rocke_gfx942_attn2d_num_qh(ctx));
             rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
             rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
             m_inits[r] = rocke_b_select(B, qh_in, sink_f, neg_inf);

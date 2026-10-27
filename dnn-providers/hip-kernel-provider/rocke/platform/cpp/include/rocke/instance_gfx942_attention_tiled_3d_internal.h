@@ -224,7 +224,10 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* num_seqs_p; /* I32 num_seqs                                */
     rocke_value_t* bt_stride_p; /* I32 block_table_stride                      */
     rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
-    rocke_value_t* sliding_window_p; /* I32 sliding_window (RUNTIME_KERNARG_FIELDS) */
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order. */
+    rocke_value_t* num_qh_p; /* I32 num_query_heads                         */
+    rocke_value_t* num_kv_p; /* I32 num_kv_heads                            */
+    rocke_value_t* sliding_window_p; /* I32 sliding_window                    */
 
     /* ---------- grid ids + thread (lines 331-334) ---------- */
     rocke_value_t* q_block_global_idx; /* block_id_x()                              */
@@ -280,6 +283,8 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* big_bytes; /* const_i32(0x7FFF0000)                     */
     rocke_value_t* key_rsrc; /* buffer_rsrc(key, big_bytes)               */
     rocke_value_t* value_rsrc; /* buffer_rsrc(value, big_bytes)             */
+    rocke_value_t* kv_stride_tok_b; /* num_kv_p * HD * KV_BYTES                */
+    rocke_value_t* kv_stride_blk_b; /* kv_stride_tok_b * BS                    */
     rocke_value_t* lane_half_base; /* tid * HALVES_PER_LANE                     */
     rocke_value_t* K_lds_addr; /* smem_addr_of(K_lds)                       */
     rocke_value_t* V_lds_addr; /* smem_addr_of(V_lds)                       */
@@ -320,6 +325,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* seg_max; /* F32* readonly                             */
     rocke_value_t* seg_l; /* F32* readonly (segm_expsum)               */
     rocke_value_t* red_seq_lens; /* I32* readonly (_seq_lens, unused body)    */
+    rocke_value_t* red_num_qh_p; /* I32 num_query_heads (RUNTIME_KERNARG_FIELDS) */
 
     /* ---------- grid ids (lines 1032-1034) ---------- */
     rocke_value_t* q_token; /* block_id_x()                              */
@@ -401,8 +407,8 @@ rocke_value_t*
     rocke_gfx942_attention_tiled_3d_tile_base(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                               rocke_value_t* page_id,
                                               rocke_value_t* kv_tile_idx,
-                                              int page_stride,
-                                              int token_stride);
+                                              rocke_value_t* page_stride,
+                                              rocke_value_t* token_stride);
 
 /* _load_page_id_window(rel_page): lane l loads the id of the segment's page
  * rel_page + l (0 past the sequence's last page). */

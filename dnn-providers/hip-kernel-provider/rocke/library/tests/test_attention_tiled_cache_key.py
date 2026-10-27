@@ -91,8 +91,13 @@ def _norm_spec(spec):
     if bakes_search and not getattr(spec, "use_decode_grid", False):
         fields["binary_search_iters"] = spec.binary_search_iters
     # A kernarg field reaches IR only through the structure it selects.
-    if "sliding_window" in getattr(type(spec), "RUNTIME_KERNARG_FIELDS", ()):
+    runtime = getattr(type(spec), "RUNTIME_KERNARG_FIELDS", ())
+    if "sliding_window" in runtime:
         fields["sliding_window"] = spec.sliding_window > 0
+    if "num_query_heads" in runtime:
+        fields.pop("num_query_heads")
+        fields.pop("num_kv_heads")
+        fields["num_queries_per_kv"] = spec.num_queries_per_kv
     return fields
 
 
@@ -106,12 +111,17 @@ def _built_2d(problem, arch):
 
 
 def _built_3d(problem, arch):
+    reduce_cls = au._tiled_3d_impl(arch)[1]
+    heads = (
+        (problem.num_queries_per_kv,)
+        if "num_query_heads" in getattr(reduce_cls, "RUNTIME_KERNARG_FIELDS", ())
+        else (problem.num_query_heads, problem.num_kv_heads)
+    )
     return dict(
         spec=_norm_spec(au._tiled_3d_spec_from_problem(problem, arch)),
         reduce=(
             problem.head_size,
-            problem.num_query_heads,
-            problem.num_kv_heads,
+            *heads,
             problem.dtype,
             au._num_segments(problem, arch),
             au._select_3d_waves_per_eu(problem, arch),
@@ -587,6 +597,54 @@ _SHARED_PAIRS = [
         "3d",
         P(total_q=4, num_seqs=4, sliding_window=256, **_D128_DECODE),
         P(total_q=4, num_seqs=4, sliding_window=4096, **_D128_DECODE),
+    ),
+    # gfx942 reads the head counts as kernargs, so head pairs at one GQA ratio
+    # share a binary.
+    (
+        "gfx942-2d-h64kv8-vs-h32kv4",
+        "gfx942",
+        "2d",
+        P(total_q=2048, num_seqs=2, max_seqlen_q=1024, max_seqlen_k=1024, **_D64_GQA8),
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **dict(_D64_GQA8, num_query_heads=32, num_kv_heads=4),
+        ),
+    ),
+    (
+        "gfx942-2d-4warp-h16kv2-vs-h32kv4",
+        "gfx942",
+        "2d",
+        P(total_q=2 * 4096, num_seqs=2, **_D256_4WARP),
+        P(
+            total_q=2 * 4096,
+            num_seqs=2,
+            **dict(_D256_4WARP, num_query_heads=32, num_kv_heads=4),
+        ),
+    ),
+    (
+        "gfx942-2d-4warp-fold-h32kv8-vs-h16kv4",
+        "gfx942",
+        "2d",
+        P(total_q=2 * 8192, num_seqs=2, **_D128_FOLD),
+        P(
+            total_q=2 * 8192,
+            num_seqs=2,
+            **dict(_D128_FOLD, num_query_heads=16, num_kv_heads=4),
+        ),
+    ),
+    (
+        "gfx942-3d-prefill-h32kv8-vs-h64kv16",
+        "gfx942",
+        "3d",
+        P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
+        P(
+            total_q=6,
+            num_seqs=3,
+            **dict(_D128_TWO_TOKENS, num_query_heads=64, num_kv_heads=16),
+        ),
     ),
     # gfx1250 3D floors the search at 32 iterations, so ns 3 and 4 share a
     # binary even though they sit in different log2 buckets.

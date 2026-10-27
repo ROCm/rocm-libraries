@@ -530,7 +530,8 @@ static rocke_status_t
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else

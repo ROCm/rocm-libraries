@@ -73,7 +73,13 @@ from rocke.helpers.attention import (
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
-from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.transforms import (
+    DynamicTensorDescriptor,
+    TensorDescriptor,
+    embed,
+    indirect,
+    unmerge,
+)
 
 
 MFMA_M = 16
@@ -164,7 +170,11 @@ class UnifiedAttention2DTiledSpec:
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
-    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("sliding_window",)
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "num_query_heads",
+        "num_kv_heads",
+        "sliding_window",
+    )
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
@@ -980,7 +990,8 @@ class UnifiedAttention2DTiledSpec:
             f"d{self.head_size}",
             f"b{self.block_size}",
             f"t{self.tile_size_eff}" if self.n_blocks_per_tile != 1 else "",
-            f"h{self.num_query_heads}kv{self.num_kv_heads}",
+            # Head counts are kernargs; only the GQA ratio is baked.
+            f"g{self.num_queries_per_kv}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "fnuz" if self.kv_storage_dtype else "",
@@ -1377,7 +1388,6 @@ def build_unified_attention_2d_tiled(
     # rows would duplicate the first tokens of the NEXT CTA and must be masked.
     VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
-    NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
     USE_SOFTCAP = spec.has_softcap
     USE_SINKS = spec.use_sinks
@@ -1572,6 +1582,8 @@ def build_unified_attention_2d_tiled(
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    num_qh_p = rt["num_query_heads"]
+    num_kv_p = rt["num_kv_heads"]
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -2159,15 +2171,11 @@ def build_unified_attention_2d_tiled(
     # Coordinate transform for Q (and the symmetric output buffer):
     # ``(token, head, dim)`` packed contiguously. The element-unit
     # descriptor is reused below for the output store too.
-    q_desc = TensorDescriptor.naive(
+    # The head count is a kernarg, so the token stride is too.
+    q_desc = DynamicTensorDescriptor.create(
         "Q",
-        # The runtime extents (total_q, num_query_heads, head_size) are
-        # only used by the validity predicate (which we don't request
-        # here). Use generous compile-time bounds so the descriptor's
-        # row-major stride product matches the kernel's layout
-        # assumptions exactly.
-        lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(HD)), HD, 1),
     )
     if not Q_DIRECT_GLOBAL:
         for li in range(Q_VECS_PER_THREAD):
@@ -2180,7 +2188,7 @@ def build_unified_attention_2d_tiled(
             )
             _qmask_inner = b.land(
                 b.cmp_lt(q_pos_t, cur_batch_q_len),
-                b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+                b.cmp_lt(qh_t, num_qh_p),
             )
             qmask_t = (
                 b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
@@ -2362,7 +2370,7 @@ def build_unified_attention_2d_tiled(
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
-            qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+            qh_in = b.cmp_lt(qh, num_qh_p)
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -2372,7 +2380,7 @@ def build_unified_attention_2d_tiled(
                 qh = b.add(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
-                qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+                qh_in = b.cmp_lt(qh, num_qh_p)
                 sink_h = b.global_load(sinks, qh, dtype, align=2)
                 sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
                 m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -2466,10 +2474,11 @@ def build_unified_attention_2d_tiled(
     # so for the FP8 K/V path the loader switches to a sync per-thread
     # dequant chain below; the byte-stride math here is shared so the
     # paged_kv_desc compiles consistently in both branches.
-    kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
-    kv_stride_tok_b = NUM_KV * HD * KV_BYTES
+    # The token and block strides scale with the runtime kv head count.
+    kv_stride_tok_b = b.mul(num_kv_p, b.const_i32(HD * KV_BYTES))
+    kv_stride_blk_b = b.mul(kv_stride_tok_b, b.const_i32(BS))
     kv_stride_h_b = HD * KV_BYTES
-    kv_block_bytes_c = b.const_i32(kv_stride_blk_b)  # one-block buffer bound
+    kv_block_bytes_c = kv_stride_blk_b  # one-block buffer bound
 
     # Per-lane starting half index. With the gfx942 1-dword DMA each lane
     # contributes ``KV_HALVES_PER_LANE`` (= 2) contiguous halves per call,
@@ -2639,13 +2648,10 @@ def build_unified_attention_2d_tiled(
             return None, b.add(block_b, within)
 
     else:
-        _kv_base = TensorDescriptor.naive(
+        _kv_base = DynamicTensorDescriptor.create(
             "paged_kv_bytes",
-            # ``lengths`` here is just informational (validity propagation
-            # is driven by the transforms above, not by these bounds).
-            lengths=[1 << 24, BS, NUM_KV, HD],
-            strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
             coord_names=("physical_block", "token", "kv_head", "dim"),
+            strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES),
         )
         if N_BLOCKS_PER_TILE == 1:
             paged_kv_desc = _kv_base.transform(
@@ -2714,7 +2720,7 @@ def build_unified_attention_2d_tiled(
                     align=4,
                 )
                 base = b.mul(
-                    b.zext(b.to_sgpr_u32(physical), I64), b.const_i64(kv_stride_blk_b)
+                    b.zext(b.to_sgpr_u32(physical), I64), b.zext(kv_stride_blk_b, I64)
                 )
                 ptrs.append(b.global_ptr_add(src, base))
             rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
@@ -2730,7 +2736,7 @@ def build_unified_attention_2d_tiled(
             token = b.div(half, b.const_i32(HD))
             dim = b.mod(half, b.const_i32(HD))
             return b.add(
-                b.add(b.mul(token, b.const_i32(kv_stride_tok_b)), kv_head_b),
+                b.add(b.mul(token, kv_stride_tok_b), kv_head_b),
                 b.mul(dim, b.const_i32(KV_BYTES)),
             )
 
@@ -3846,7 +3852,7 @@ def build_unified_attention_2d_tiled(
                 )
                 q32_mask = b.land(
                     b.cmp_lt(q32_pos, cur_batch_q_len),
-                    b.cmp_lt(q32_h, b.const_i32(NUM_QH)),
+                    b.cmp_lt(q32_h, num_qh_p),
                 )
                 q32_pos_safe = b.select(q32_mask, q32_pos, b.const_i32(0))
                 q32_h_safe = b.select(q32_mask, q32_h, b.const_i32(0))
@@ -3951,7 +3957,7 @@ def build_unified_attention_2d_tiled(
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         _row_ok_inner = b.land(
             b.cmp_lt(qp_r, cur_batch_q_len),
-            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_r, num_qh_p),
         )
         row_ok = (
             b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
@@ -3969,7 +3975,7 @@ def build_unified_attention_2d_tiled(
         hoist_alibi = []
         for reg in range(REGS_PER_LANE):
             qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            qh_ok = b.cmp_lt(qh_r, num_qh_p)
             slope = b.masked_global_load(
                 alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
             )
@@ -3985,7 +3991,7 @@ def build_unified_attention_2d_tiled(
         )
         _st_row_ok_inner = b.land(
             b.cmp_lt(st_qp, cur_batch_q_len),
-            b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+            b.cmp_lt(st_qh, num_qh_p),
         )
         st_row_ok = (
             b.land(_st_row_ok_inner, b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)))
@@ -4012,7 +4018,7 @@ def build_unified_attention_2d_tiled(
         and TRANSPOSED_QK_32X32
         and TRANSPOSED_INVARIANT_HOIST
     ):
-        st_qh_ok = b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        st_qh_ok = b.cmp_lt(st_qh, num_qh_p)
         st_alibi_slope = b.masked_global_load(
             alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
         )
@@ -4074,7 +4080,7 @@ def build_unified_attention_2d_tiled(
             )
             _st_row_ok_iter_inner = b.land(
                 b.cmp_lt(st_qp_iter, cur_batch_q_len),
-                b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+                b.cmp_lt(st_qh_iter, num_qh_p),
             )
             st_row_ok_iter = (
                 b.land(
@@ -4086,7 +4092,7 @@ def build_unified_attention_2d_tiled(
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
-                st_qh_iter_ok = b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH))
+                st_qh_iter_ok = b.cmp_lt(st_qh_iter, num_qh_p)
                 st_alibi_slope_iter = b.masked_global_load(
                     alibi_slopes_ptr,
                     st_qh_iter,
@@ -4409,7 +4415,7 @@ def build_unified_attention_2d_tiled(
                         slope_for_lane = b.masked_global_load(
                             alibi_slopes_ptr,
                             qh_t_alibi,
-                            b.cmp_lt(qh_t_alibi, b.const_i32(NUM_QH)),
+                            b.cmp_lt(qh_t_alibi, num_qh_p),
                             b.const_f32(0.0),
                             dtype=F32,
                             align=4,
@@ -4464,7 +4470,7 @@ def build_unified_attention_2d_tiled(
                                     )
                                     _row_ok_inner_t = b.land(
                                         b.cmp_lt(qp_r, cur_batch_q_len),
-                                        b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                        b.cmp_lt(qh_r, num_qh_p),
                                     )
                                     row_ok = (
                                         b.land(
@@ -5531,7 +5537,7 @@ def build_unified_attention_2d_tiled(
             )
             _op_mask_t_inner = b.land(
                 b.cmp_lt(op_pos_t, cur_batch_q_len),
-                b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+                b.cmp_lt(op_qh_t, num_qh_p),
             )
             op_mask_t = (
                 b.land(_op_mask_t_inner, b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)))
@@ -5584,7 +5590,7 @@ def build_unified_attention_2d_tiled(
         )
         _op_mask32_inner = b.land(
             b.cmp_lt(op_pos32_base, cur_batch_q_len),
-            b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+            b.cmp_lt(op_qh32_base, num_qh_p),
         )
         op_mask32_base = (
             b.land(_op_mask32_inner, b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)))
@@ -5683,7 +5689,7 @@ def build_unified_attention_2d_tiled(
     )
     _op_mask_inner = b.land(
         b.cmp_lt(op_pos, cur_batch_q_len),
-        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+        b.cmp_lt(op_qh, num_qh_p),
     )
     op_mask = (
         b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))
@@ -5820,8 +5826,6 @@ def _build_gfx942_4warp_gqa_lean(
         raise NotImplementedError(
             "4-warp GQA lean body is causal-only (no sliding-window mask)"
         )
-    H = spec.num_query_heads
-    HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     BN = 64  # 4-warp: 64-key tiles
@@ -5876,6 +5880,8 @@ def _build_gfx942_4warp_gqa_lean(
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    hq_p = rt["num_query_heads"]
+    hkv_p = rt["num_kv_heads"]
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))
@@ -5909,8 +5915,10 @@ def _build_gfx942_4warp_gqa_lean(
         b.ret()
 
     V_lds = b.smem_alloc(dtype, [BN, HD], name_hint="Vlds")
-    q_desc = TensorDescriptor.naive(
-        "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
+    q_desc = DynamicTensorDescriptor.create(
+        "query_ptr",
+        coord_names=("token", "head", "dim"),
+        strides=(b.mul(hq_p, b.const_i32(HD)), HD, 1),
     )
 
     def phys_key(kv, keytile):
@@ -5949,9 +5957,7 @@ def _build_gfx942_4warp_gqa_lean(
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(kv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
+            velem = b.add(b.mul(b.add(b.mul(pk, hkv_p), kvh), b.const_i32(HD)), hd)
             b.smem_store_vN(
                 V_lds, [key, hd], b.global_load_vN(Vp, velem, dtype, 8, align=16), 8
             )
@@ -5970,9 +5976,7 @@ def _build_gfx942_4warp_gqa_lean(
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
                 kelem = b.add(
-                    b.mul(
-                        b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh), b.const_i32(HD)
-                    ),
+                    b.mul(b.add(b.mul(pk_kt[kt], hkv_p), kvh), b.const_i32(HD)),
                     koff,
                 )
                 kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
@@ -6054,7 +6058,7 @@ def _build_gfx942_4warp_gqa_lean(
             r, c = at.lane_to_output(b, lane, i)
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
-            oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
+            oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
             val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
@@ -6087,8 +6091,6 @@ def build_gfx942_4warp_gqa(
         raise NotImplementedError("4-warp GQA kernel supports head_size in {128, 256}")
     if HD == _4WGQA_LEAN_HEAD_SIZE:
         return _build_gfx942_4warp_gqa_lean(spec, arch=arch)
-    H = spec.num_query_heads
-    HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
     HD128 = HD == 128
@@ -6177,6 +6179,8 @@ def build_gfx942_4warp_gqa(
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    hq_p = rt["num_query_heads"]
+    hkv_p = rt["num_kv_heads"]
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))
@@ -6246,8 +6250,10 @@ def build_gfx942_4warp_gqa(
         f"(V_lds {_v_lds_bytes} + K_lds {_k_lds_bytes}, HD={HD}, "
         f"HD128_PIPE={HD128_PIPE}) exceeds the {arch} {_lds_cap} B LDS capacity"
     )
-    q_desc = TensorDescriptor.naive(
-        "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
+    q_desc = DynamicTensorDescriptor.create(
+        "query_ptr",
+        coord_names=("token", "head", "dim"),
+        strides=(b.mul(hq_p, b.const_i32(HD)), HD, 1),
     )
 
     def phys_key(kv, keytile):
@@ -6360,9 +6366,7 @@ def build_gfx942_4warp_gqa(
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(tkv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
+            velem = b.add(b.mul(b.add(b.mul(pk, hkv_p), kvh), b.const_i32(HD)), hd)
             row = b.add(buf_off, key)
             b.smem_store_vN(
                 V_lds,
@@ -6387,9 +6391,7 @@ def build_gfx942_4warp_gqa(
             key = b.div(lin, b.const_i32(HD))
             hd = b.mod(lin, b.const_i32(HD))
             pk = phys_key(tkv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
+            velem = b.add(b.mul(b.add(b.mul(pk, hkv_p), kvh), b.const_i32(HD)), hd)
             vr = b.global_load_vN(Vp, velem, dtype, 8, align=16)
             kr = b.global_load_vN(Kp, velem, dtype, 8, align=16)
             pf.append((vr, kr, key, hd))
@@ -6460,7 +6462,7 @@ def build_gfx942_4warp_gqa(
                 else:
                     kelem = b.add(
                         b.mul(
-                            b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh),
+                            b.add(b.mul(pk_kt[kt], hkv_p), kvh),
                             b.const_i32(HD),
                         ),
                         koff,
@@ -6615,12 +6617,12 @@ def build_gfx942_4warp_gqa(
                 _hl = b.mod(_m, b.const_i32(FOLD_HEADS))
                 q_inseq = b.add(qbase, _tl)
                 oi = b.add(
-                    b.mul(b.add(qstart, _tl), b.const_i32(H)),
+                    b.mul(b.add(qstart, _tl), hq_p),
                     b.add(b.mul(kvh, b.const_i32(GQAG)), _hl),
                 )
             else:
                 q_inseq = b.add(qbase, b.add(wq, c))
-                oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
+                oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
             val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)

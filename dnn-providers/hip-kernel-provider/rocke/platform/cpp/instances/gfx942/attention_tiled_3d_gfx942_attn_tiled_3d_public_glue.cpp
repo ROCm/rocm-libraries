@@ -278,7 +278,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
     snprintf(b_part, sizeof(b_part), "b%d", s->block_size);
-    snprintf(h_part, sizeof(h_part), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(h_part, sizeof(h_part), "g%d", s->num_query_heads / s->num_kv_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn3d_tiled_gfx942";
@@ -375,10 +376,9 @@ const rocke_type_t* rocke_unified_attention_reduce_tiled_spec_dtype_ir(
 int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
-    /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+    /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, seg<NUM_SEG>,
+     *   dtype); the head count is a kernarg. */
     char d_part[32];
-    char h_part[32];
     char seg_part[32];
     const char* parts[8];
     size_t np = 0;
@@ -391,12 +391,10 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     }
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
-    snprintf(h_part, sizeof(h_part), "h%d", s->num_query_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn_reduce_tiled_gfx942";
     parts[np++] = d_part;
-    parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
 
