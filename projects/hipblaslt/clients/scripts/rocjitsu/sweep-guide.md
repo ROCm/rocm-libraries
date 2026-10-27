@@ -15,8 +15,9 @@ includes the one-problem guide at
 
 The installed `*.dat` / `*.dat.zlib` metadata supplies solution indices, names,
 hardware predicates and size constraints. Compressed metadata uses the same
-strict framing as the native loader. No maintained inventory or previous
-manifest is an input. Indices are specific to the tested artifact.
+strict framing as the native loader. Every run reads the supplied artifact;
+resuming additionally checks its previous manifest. Indices are specific to the
+tested artifact.
 
 `--solution-index-range-begin BEGIN` and `--solution-index-range-end END` select
 existing original solution IDs in the half-open interval `[BEGIN, END)`. Begin
@@ -206,7 +207,8 @@ not a hard process-memory limit.
 Each backend writes into a fresh report directory:
 
 - `summary.md`: solution index, individual outcome, numerical passes, dispatch counts,
-  elapsed time and reasons. Updated atomically after each result and published
+  elapsed time and reasons. Updated atomically at most once every five seconds
+  during normal execution, on stopping, and at completion; published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
 - `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
   detector revision and known-failure matches.
@@ -215,6 +217,7 @@ Each backend writes into a fresh report directory:
 - `batch-*`: per-process INI/YAML, binary bench input, command, combined log,
   timing breakdown and classified native results.
 - `solution-*.result.json`: per-index evidence and the corresponding `batch_id`.
+- `prior-solution-*.result.json`: earlier incomplete attempts retained when resuming.
 - `progress.json`, `summary.json`: incremental/final accounting and first-failure
 state. Setup/finalization errors also leave `setup-or-run-error.json`.
 
@@ -232,6 +235,62 @@ Race headers naming a unique selected kernel appear with that index. All race he
 Use `--recover-unexecuted` to replay each wholly unexecuted index once in its own native process. Recovery keeps the selected profile, exact YAML and checks, records both attempts, and respects any remaining suite deadline. It runs only when ordered dispatch and record evidence establishes that the original input never launched. Launched failures, native rejections and ambiguous logs are not retried automatically. The original process failure still makes the run exit unsuccessfully, even if every replay passes. Use `--continue-on-failure` as well to complete the remaining selected batches.
 
 Replay the saved batch command and input to preserve the original process context. To investigate a launched failure, repeat the same tool/library/profile arguments with `--batch-size 1 --solution-index-range-begin N --solution-index-range-end N_PLUS_ONE` and a fresh reports directory. A successful isolated replay does not erase the original batch failure.
+
+## Continuing interrupted runs
+
+Supply `--resume-from PREVIOUS_REPORTS` with the same artifact, tools, profiles,
+policy, known-failure settings and original-index range, and a fresh `--reports`
+directory. Stop the previous run before reading its reports. The runner rereads
+the library and rejects changed fingerprints, tool/profile hashes, settings or
+generated inputs before executing anything. Worker count, batch size and time
+budgets can change.
+
+Completed outcomes, including numerical failures, races, planning gaps and
+skips, carry forward without another native execution. Unstarted indices,
+missing cases, unexecuted inputs, timeouts, killed processes and recovery errors
+are attempted again. Each continuation attempts those inputs once, with optional
+`--recover-unexecuted` recovery under its remaining deadline. Completed batch
+receipts are usable even when progress, per-index files or the final summary were
+never written. Raw logs without a classified receipt remain evidence to inspect;
+they do not establish a pass, and their indices run again.
+
+Each completed result is saved immediately; full progress/report checkpoints
+are periodic. Reused results and earlier incomplete attempts are saved before
+new execution so another interruption retains them. The new manifest records
+the source directory, source-manifest/result hashes and carried/retried job IDs.
+Keep the preceding report directories with the continuation for original inputs,
+commands and logs. The source reports are unchanged.
+
+Earlier failed attempts remain in `attempts` and keep the continuation's exit
+unsuccessful, including when a timeout or process failure is followed by a
+successful replay. `PASS_RECOVERED` describes that replay; it does not clear the
+original failure. A fresh run without `--resume-from` independently qualifies a
+fixed artifact. Carried rows identify their prior run's batch; current
+`processes` and `failed_batch_ids` describe this continuation's executions.
+Earlier failed process IDs are retained in the source manifest/receipts and
+the continuation's `resume` metadata. The final summary still accounts for every selected original
+index and distinguishes numerical results, race reports, process failures,
+planning gaps and unstarted work.
+
+## Nightly execution requirements
+
+Use `--continue-on-failure` for defect discovery, a finite `--suite-timeout`, and
+a job timeout long enough to finalize and upload reports. Start with four workers
+and B=32; measure memory on the intended library before raising concurrency.
+The 128 MiB problem estimate does not bound native process memory: library
+loading, emulator state and output validation can require several GiB per worker.
+Enforce aggregate CPU and memory ceilings in the CI runner's container or cgroup,
+including concurrent sweeps. Lower priority alone does not enforce a memory limit.
+
+Retain the complete report directories and exact library/client/emulator artifacts
+even when the sweep fails or is cancelled. Publish the final or most recent
+partial `summary.md` from an always-running finalization step. A timeout,
+unsupported selected index or missing evidence must leave the job unsuccessful;
+numerical passes alone are insufficient. Use `fully_validated` when skipped cases
+must also prevent a clean qualification. Resume only against the identical
+artifacts; a new nightly library needs a fresh inventory and qualification.
+These requirements prepare the runner for a nightly lane; no scheduled workflow
+is enabled by this tool.
 
 ## Hardware profiles
 

@@ -32,6 +32,7 @@ from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
 MAX_WORKERS = 64
+CHECKPOINT_SECONDS = 5
 
 
 def write_text(path, value):
@@ -92,7 +93,9 @@ def failed_batch_ids(results):
         {
             r.get("batch_id", r["id"])
             for r in results
-            if r["failed"] and not r.get("planning_outcome")
+            if r.get("current_attempt_failed", r["failed"])
+            and not r.get("planning_outcome")
+            and not r.get("resumed_from")
         }
     )
 
@@ -139,7 +142,11 @@ def render_report(manifest, summary):
             if final or (summary.get("stop") and not assigned):
                 state = "NOT RUN"
             row = [str(job["solutions"][0]["index"]), state, "—", "—", "—", ""]
-        row[-1] += f" (batch-{job.get('batch_id', job['id']):03})"
+        result = results.get(job["id"], {})
+        if result.get("resumed_from"):
+            row[-1] += f" (prior run batch-{result.get('batch_id', job['id']):03})"
+        else:
+            row[-1] += f" (batch-{job.get('batch_id', job['id']):03})"
         lines.append("| " + " | ".join(map(cell, row)) + " |")
     lines += [
         "",
@@ -824,6 +831,95 @@ def physical_cpus(count):
     raise ValueError(f"Need {count} distinct available physical cores; found {len(cpus)}")
 
 
+def resume_results(directory, manifest):
+    previous = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    for key in (
+        "artifact_fingerprint",
+        "target",
+        "policy",
+        "backend",
+        "tools",
+        "rocjitsu_revision",
+        "known_failures",
+        "solution_index_range",
+    ):
+        if previous[key] != manifest[key]:
+            raise ValueError(f"Cannot resume: {key} changed")
+    profile_hashes = lambda m: {k: p["sha256"] for k, p in m["profiles"].items()}
+    if profile_hashes(previous) != profile_hashes(manifest):
+        raise ValueError("Cannot resume: hardware profiles changed")
+    jobs = lambda m: [{k: v for k, v in j.items() if k != "batch_id"} for j in m["jobs"]]
+    if jobs(previous) != jobs(manifest):
+        raise ValueError("Cannot resume: selected jobs or inputs changed")
+
+    evidence, files = {}, {}
+    failed_processes = []
+    for path in sorted(directory.glob("prior-solution-*.result.json")):
+        result = json.loads(path.read_text(encoding="utf-8"))
+        files[path.name] = sha256(path)
+        evidence[result["id"]] = [result]
+    for path in sorted(
+        directory.glob("batch-*.result.json"), key=lambda p: ("-recovery-" in p.name, p.name)
+    ):
+        process = json.loads(path.read_text(encoding="utf-8"))
+        files[path.name] = sha256(path)
+        if any(r["failed"] for r in process["results"]):
+            failed_processes.append(path.name.removesuffix(".result.json"))
+        for result in process["results"]:
+            evidence.setdefault(result["id"], []).append(result)
+    for path in sorted(directory.glob("solution-*.result.json")):
+        result = json.loads(path.read_text(encoding="utf-8"))
+        files[path.name] = sha256(path)
+        evidence[result["id"]] = [result]
+    by_id = {j["id"]: j for j in manifest["jobs"]}
+    if evidence.keys() - by_id.keys():
+        raise ValueError("Cannot resume: evidence contains unknown jobs")
+    carried, retry = [], {}
+    for job in manifest["jobs"]:
+        attempts = evidence.get(job["id"], [])
+        if not attempts:
+            continue
+        result = copy.deepcopy(attempts[-1])
+        if len(attempts) > 1:
+            result["attempts"] = copy.deepcopy(attempts)
+            result["failed"] = any(r["failed"] for r in attempts)
+            if result.get("outcome") == "PASS":
+                result["outcome"] = "PASS_RECOVERED"
+        result["resumed_from"] = str(directory)
+        observed = {c["case_id"] for c in result["cases"]}
+        expected = {c["id"] for c in job["cases"]}
+        if observed - expected or len(observed) != len(result["cases"]):
+            raise ValueError(f"Cannot resume: invalid case evidence for job {job['id']}")
+        shapes = {c["id"]: c["shape"] for c in job["cases"]}
+        if any(c["shape"] != shapes[c["case_id"]] for c in result["cases"]):
+            raise ValueError(f"Cannot resume: case shapes changed for job {job['id']}")
+        result["cases"] += [c for c in skipped_cases(job) if c["case_id"] not in observed]
+        observed = {c["case_id"] for c in result["cases"]}
+        incomplete = (
+            observed != expected
+            or result.get("returncode", 0) == 124
+            or (result.get("returncode") is not None and result["returncode"] < 0)
+            or any(
+                c["status"] in ("UNEXECUTED", "UNSTARTED", "RECOVERY_ERROR")
+                for c in result["cases"]
+            )
+        )
+        if incomplete:
+            retry[job["id"]] = result
+        else:
+            result["outcome"] = result.get("outcome") or index_outcome(result)
+            carried.append(result)
+    manifest["resume"] = {
+        "reports": str(directory),
+        "manifest_sha256": sha256(directory / "manifest.json"),
+        "result_sha256": files,
+        "carried_job_ids": [r["id"] for r in carried],
+        "retry_job_ids": sorted(retry),
+        "prior_failed_process_ids": failed_processes,
+    }
+    return carried, retry
+
+
 def run(args):
     suite_start = time.monotonic()
     deadline = math.inf if args.suite_timeout is None else suite_start + args.suite_timeout
@@ -843,14 +939,24 @@ def run(args):
             batch_size=batch_size,
             batches=[[j["id"] for j in batch] for batch in batches],
         )
+        carried, retry = [], {}
+        if getattr(args, "resume_from", None) is not None:
+            carried, retry = resume_results(args.resume_from, manifest)
+        carried_ids = {r["id"] for r in carried}
+        execution_batches = [[j for j in batch if j["id"] not in carried_ids] for batch in batches]
+        execution_batches = [batch for batch in execution_batches if batch]
         write_json(args.reports / "manifest.json", manifest)
+        for result in carried:
+            write_json(args.reports / f"solution-{result['id']:03}.result.json", result)
+        for job_id, result in retry.items():
+            write_json(args.reports / f"prior-solution-{job_id:03}.result.json", result)
         print(
             f"{args.backend}: selected {len(manifest['jobs'])} solutions, "
             f"{manifest['planned_cases']} cases; preparation {manifest['preparation_seconds']:.2f}s. "
             f"Reports: {args.reports}",
             flush=True,
         )
-        write_text(args.reports / "summary.md", render_report(manifest, {"results": []}))
+        write_text(args.reports / "summary.md", render_report(manifest, {"results": carried}))
         cpus = physical_cpus(args.workers)
         env = {
             k: v
@@ -1094,17 +1200,36 @@ def run(args):
                         result["outcome"] = "PASS_RECOVERED"
             return completed
 
+        next_checkpoint = 0
+
+        def retain_attempt(result):
+            original = retry.pop(result["id"], None)
+            if original is not None:
+                result["current_attempt_failed"] = result["failed"]
+                result["attempts"] = [original, copy.deepcopy(result)]
+                result["failed"] = original["failed"] or result["failed"]
+                if result.get("outcome") == "PASS":
+                    result["outcome"] = "PASS_RECOVERED"
+
         def progress(value):
+            nonlocal next_checkpoint
             for result in value["completed"]:
                 job = manifest["jobs"][result["id"]]
                 observed = {c["case_id"] for c in result["cases"]}
                 result["cases"] += [c for c in skipped_cases(job) if c["case_id"] not in observed]
                 if result.get("outcome") in (None, "PASS"):
                     result["outcome"] = index_outcome(result)
+                retain_attempt(result)
                 result["batch_id"] = job["batch_id"]
                 write_json(args.reports / f"solution-{job['id']:03}.result.json", result)
-            write_json(args.reports / "progress.json", value)
-            write_text(args.reports / "summary.md", render_report(manifest, value))
+            if time.monotonic() >= next_checkpoint or value["stop"]:
+                checkpoint = {
+                    **value,
+                    "results": sorted(carried + value["results"], key=lambda r: r["id"]),
+                }
+                write_json(args.reports / "progress.json", checkpoint)
+                write_text(args.reports / "summary.md", render_report(manifest, checkpoint))
+                next_checkpoint = time.monotonic() + CHECKPOINT_SECONDS
             for result in value["completed"]:
                 row = solution_report(manifest["jobs"][result["id"]], result, args.backend)
                 print(
@@ -1114,17 +1239,27 @@ def run(args):
 
         start = time.monotonic()
         summary = run_queue(
-            batches,
+            execution_batches,
             args.workers,
             execute,
             progress,
             deadline=deadline,
             continue_on_failure=getattr(args, "continue_on_failure", False),
         )
+        if not execution_batches and time.monotonic() >= deadline:
+            summary["stop"] = {
+                "reason": "suite-timeout",
+                "trigger_job": None,
+                "assigned_jobs": 0,
+                "assigned_job_ids": [],
+                "in_flight": 0,
+            }
+        summary["results"] = sorted(carried + summary["results"], key=lambda r: r["id"])
         by_id = {j["id"]: j for j in manifest["jobs"]}
         counts = Counter()
         missing = []
         for result in summary["results"]:
+            retain_attempt(result)
             job = by_id[result["id"]]
             observed = {c["case_id"] for c in result["cases"]}
             # A worker exception can interrupt native setup/parsing. These cases
@@ -1144,7 +1279,8 @@ def run(args):
                 if c["id"] not in observed
             ]
             counts.update(c["status"] for c in result["cases"])
-            result["batch_id"] = job["batch_id"]
+            if not result.get("resumed_from"):
+                result["batch_id"] = job["batch_id"]
             write_json(args.reports / f"solution-{job['id']:03}.result.json", result)
         unstarted = [
             {
@@ -1176,6 +1312,7 @@ def run(args):
                 for r in summary["results"]
                 if r.get("attempts")
             ],
+            resume=manifest.get("resume"),
         )
         processes = []
         for path in sorted(args.reports.glob("batch-*.result.json")):
@@ -1266,6 +1403,11 @@ def main():
         type=Path,
         action="append",
         help="Complete emulator profile; repeat to select among profiles instead of --config",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help="Continue the identical selection from retained reports, preserving prior failures; use a new --reports directory",
     )
     parser.add_argument(
         "--recover-unexecuted",
@@ -1369,7 +1511,7 @@ def main():
             f"Require 1–{MAX_WORKERS} workers, 0 <= range begin < range end <= 2**31, "
             "and finite positive timeouts"
         )
-    for key in ("rocjitsu", "client", "config", "library_dir", "reports"):
+    for key in ("rocjitsu", "client", "config", "library_dir", "reports", "resume_from"):
         if getattr(args, key) is not None:
             setattr(args, key, getattr(args, key).resolve())
     return run(args)

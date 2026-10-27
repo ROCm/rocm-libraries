@@ -956,6 +956,9 @@ class SweepTests(unittest.TestCase):
         batch_size=1,
         continue_on_failure=False,
         suite_timeout=None,
+        reports_name="reports",
+        resume_from=None,
+        expected_exit=None,
     ):
         """Use the real planner/list/runner; only the native subprocess is simulated."""
         library = root / "library_gfx942.dat"
@@ -975,10 +978,13 @@ class SweepTests(unittest.TestCase):
         data = failure_list()
         entry = data["failures"][0]
         entry["cases"] = cases
+        if not cases:
+            data["failures"] = []
         path = root / "failures.yaml"
         path.write_text(yaml.safe_dump(data))
         args = SimpleNamespace(
-            reports=root / "reports",
+            reports=root / reports_name,
+            resume_from=resume_from,
             backend=backend,
             workers=1,
             batch_size=batch_size,
@@ -1068,7 +1074,10 @@ class SweepTests(unittest.TestCase):
             patch.object(sweep, "convert_bench_input", return_value=0),
             patch.object(sweep, "execute_command", side_effect=execute),
         ):
-            self.assertEqual(sweep.run(args), int(failure is not None))
+            self.assertEqual(
+                sweep.run(args),
+                int(failure is not None) if expected_exit is None else expected_exit,
+            )
         summary = json.loads((args.reports / "summary.json").read_text())
         manifest = json.loads((args.reports / "manifest.json").read_text())
         self.assertEqual(manifest["planned_cases"], 4 * len(indices))
@@ -1076,6 +1085,228 @@ class SweepTests(unittest.TestCase):
         self.assertEqual((args.reports / "known_failures.yaml").read_bytes(), path.read_bytes())
         self.assertEqual(manifest["known_failures"]["sha256"], plan.sha256(path))
         return args.reports, summary, invocations
+
+    def test_resume_after_lost_summary_uses_batch_receipts_and_original_indices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", ["tile"], indices=(7, 8, 9))
+            for path in reports.glob("solution-*.result.json"):
+                path.unlink()
+            for name in (
+                "batch-001.result.json",
+                "batch-002.result.json",
+                "summary.json",
+                "progress.json",
+            ):
+                (reports / name).unlink()
+            retained = {p.name: p.read_bytes() for p in reports.iterdir()}
+            resumed, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                ["tile"],
+                indices=(7, 8, 9),
+                reports_name="resumed",
+                resume_from=reports,
+            )
+            self.assertEqual(invocations, [8, 9])
+            self.assertEqual(summary["resume"]["carried_job_ids"], [0])
+            self.assertEqual([r["index"] for r in summary["index_outcomes"]], [7, 8, 9])
+            self.assertEqual(summary["counts"], {"PASSED": 11, "SKIPPED": 1})
+            self.assertEqual(summary["accounted_cases"], 12)
+            self.assertEqual(summary["results"][0]["resumed_from"], str(reports))
+            self.assertTrue(summary["passed"])
+            self.assertFalse(summary["fully_validated"])
+            self.assertEqual({p.name: p.read_bytes() for p in reports.iterdir()}, retained)
+            self.assertTrue((resumed / "solution-000.result.json").exists())
+
+    def test_resume_retains_races_and_executes_unstarted_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, invocations = self.exercise_skips(root, "bench", [], failure="race")
+            self.assertEqual(invocations, [7])
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [8])
+            self.assertFalse(summary["passed"])
+            self.assertEqual(summary["counts"], {"PASSED": 8})
+            self.assertEqual(summary["failed_batch_ids"], [])
+            self.assertEqual(summary["resume"]["prior_failed_process_ids"], ["batch-000"])
+            self.assertTrue(summary["results"][0]["process_diagnostics"]["race_headers"])
+
+    def test_resume_retries_timeout_without_erasing_previous_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], failure="partial", batch_size=2)
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                batch_size=1,
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [7, 8])
+            self.assertEqual(summary["resume"]["retry_job_ids"], [0, 1])
+            self.assertEqual(summary["accounted_cases"], 8)
+            self.assertEqual(summary["outcome_counts"], {"PASS_RECOVERED": 2})
+            self.assertEqual(summary["failed_batch_ids"], [])
+            for result in summary["results"]:
+                self.assertEqual(result["attempts"][0]["returncode"], 124)
+                self.assertEqual(result["attempts"][1]["returncode"], 0)
+                self.assertTrue(result["failed"])
+
+    def test_resume_complete_selection_never_launches_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], indices=(7, 8, 9))
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                indices=(7, 8, 9),
+                reports_name="resumed",
+                resume_from=reports,
+            )
+            self.assertEqual(invocations, [])
+            self.assertTrue(summary["fully_validated"])
+            self.assertEqual(summary["processes"], [])
+            self.assertEqual(summary["accounted_cases"], 12)
+
+    def test_resume_complete_selection_still_honors_preparation_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [])
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                suite_timeout=1e-12,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [])
+            self.assertEqual(summary["stop"]["reason"], "suite-timeout")
+            self.assertEqual(summary["accounted_cases"], 8)
+            self.assertFalse(summary["passed"])
+
+    def test_resume_rejects_changed_artifacts_tools_profiles_policy_and_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [])
+            original = json.loads((reports / "manifest.json").read_text())
+            changes = {
+                "artifact_fingerprint": "new library",
+                "tools": {},
+                "rocjitsu_revision": "b" * 40,
+                "known_failures": {},
+                "solution_index_range": {"begin": 8, "end": 9},
+                "backend": "tensile",
+                "policy": "new policy",
+                "profiles": {"default": {"sha256": "new profile"}},
+                "jobs": [{**original["jobs"][0], "cases": []}],
+            }
+            for key, value in changes.items():
+                with self.subTest(key=key):
+                    manifest = copy.deepcopy(original)
+                    manifest[key] = value
+                    with self.assertRaisesRegex(ValueError, "Cannot resume"):
+                        sweep.resume_results(reports, manifest)
+
+    def test_resume_an_interrupted_continuation_retains_carried_and_retry_evidence(self):
+        for failure in ("race", "partial"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                reports, _, _ = self.exercise_skips(
+                    root, "bench", [], failure=failure, batch_size=2
+                )
+                with (
+                    patch.object(
+                        sweep, "run_queue", side_effect=RuntimeError("orchestration shutdown")
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "orchestration shutdown"),
+                ):
+                    self.exercise_skips(
+                        root,
+                        "bench",
+                        [],
+                        reports_name="interrupted",
+                        resume_from=reports,
+                    )
+                _, summary, invocations = self.exercise_skips(
+                    root,
+                    "bench",
+                    [],
+                    reports_name="resumed",
+                    resume_from=root / "interrupted",
+                    expected_exit=1,
+                )
+                self.assertEqual(invocations, [7, 8] if failure == "partial" else [])
+                self.assertFalse(summary["passed"])
+                self.assertEqual(summary["accounted_cases"], 8)
+                if failure == "partial":
+                    self.assertEqual(summary["results"][1]["attempts"][0]["returncode"], 124)
+                else:
+                    self.assertTrue(summary["results"][0]["process_diagnostics"]["race_headers"])
+
+    def test_resume_batch_only_recovery_retains_original_failed_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports, _, _ = self.exercise_skips(root, "bench", [], failure="partial", batch_size=2)
+            manifest = json.loads((reports / "manifest.json").read_text())
+            recovered_job = manifest["jobs"][1]
+            recovered = sweep.classify_bench_batch([recovered_job], bench_log(recovered_job), 0)[0]
+            recovered.update(batch_id=0, attempt_id="batch-000-recovery-001")
+            sweep.write_json(
+                reports / "batch-000-recovery-001.result.json", {"results": [recovered]}
+            )
+            for path in reports.glob("solution-*.result.json"):
+                path.unlink()
+            _, summary, invocations = self.exercise_skips(
+                root,
+                "bench",
+                [],
+                reports_name="resumed",
+                resume_from=reports,
+                expected_exit=1,
+            )
+            self.assertEqual(invocations, [7])
+            result = summary["results"][1]
+            self.assertEqual(result["outcome"], "PASS_RECOVERED")
+            self.assertEqual(result["attempts"][0]["outcome"], "UNEXECUTED")
+            self.assertEqual(result["attempts"][1]["outcome"], "PASS")
+            self.assertTrue(result["failed"])
+
+    def test_progress_checkpoints_do_not_rewrite_full_reports_for_every_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            writes = []
+            write = sweep.write_text
+
+            def record(path, value):
+                writes.append(path.name)
+                write(path, value)
+
+            with (
+                patch.object(sweep, "write_text", side_effect=record),
+                patch.object(sweep, "CHECKPOINT_SECONDS", float("inf")),
+            ):
+                reports, summary, _ = self.exercise_skips(
+                    Path(tmp),
+                    "bench",
+                    [],
+                    indices=(7, 8, 9, 10, 11),
+                )
+            self.assertEqual(writes.count("summary.md"), 3)
+            self.assertEqual(writes.count("progress.json"), 1)
+            self.assertEqual(len(list(reports.glob("solution-*.result.json"))), 5)
+            self.assertEqual(summary["accounted_cases"], 20)
 
     def test_optional_suite_deadline_preserves_per_batch_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
