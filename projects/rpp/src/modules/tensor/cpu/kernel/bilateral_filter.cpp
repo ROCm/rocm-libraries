@@ -146,6 +146,8 @@ static inline RppStatus bilateral_filter_generic_host_impl(T* srcPtrImage, RpptD
                    (roi.xywhROI.xy.x * srcDescPtr->strides.wStride);
 
     // colOffsets[j + k] is the source offset of window column k for output column j
+    if (roiWidth <= 0 || roiHeight <= 0) return RPP_SUCCESS;
+
     std::vector<Rpp32s> colOffsets(roiWidth + 2 * padLength);
     for (int j = 0; j < colOffsets.size(); j++)
         colOffsets[j] =
@@ -196,7 +198,9 @@ RppStatus bilateral_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                              kernelSize);
 
         Rpp32f range[256];
-        create_bilateral_range_host(range, stdDevRangeTensor[batchCount]);
+        if (typeid(T) == typeid(Rpp8u) || typeid(T) == typeid(Rpp8s))
+            create_bilateral_range_host(range, stdDevRangeTensor[batchCount]);
+
         // Computed in double, then saturated to the largest float so the per-tap float exponent
         // sees 0 * FLT_MAX = 0 (weight 1) at diff == 0 rather than 0 * inf = NaN for a tiny sigma.
         Rpp64f rangeStdDev = stdDevRangeTensor[batchCount];
