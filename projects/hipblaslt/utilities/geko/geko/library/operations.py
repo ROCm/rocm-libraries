@@ -18,7 +18,7 @@ Functions:
         Load a single library from a YAML file.
     load_collection(lib_dir) -> LibraryCollection
         Load all YAML libraries in a folder into a collection.
-    merge_solutions(input_dir, hipblaslt_path=...) -> LibraryCollection
+    merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
     extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
@@ -28,7 +28,7 @@ Functions:
         Merge incremental library into original using TensileMergeLibrary.
     create(hipblaslt_path, input_dir, output_dir) -> None
         Create a Tensile library from YAML library logic files using TensileCreateLibrary.
-    from_dataframe(df, lib_dir, hipblaslt_path=...) -> LibraryCollection
+    from_dataframe(df, lib_dir) -> LibraryCollection
         Create filtered libraries from a DataFrame of selected solutions.
     prune_library(hipblaslt_path, base_lib) -> Library
         Prune a library to its minimum required solutions, without losing performance.
@@ -37,7 +37,7 @@ Example:
     >>> from library import operations
     >>> lib = operations.load_library("path/to/lib.yaml")
     >>> collection = operations.load_collection("path/to/libs")
-    >>> lib = operations.from_dataframe(df, "path/to/libs", hipblaslt_path="/path/to/hipblaslt")
+    >>> lib = operations.from_dataframe(df, "path/to/libs")
 """
 
 import yaml
@@ -134,8 +134,6 @@ def merge_solutions(
     epilogues: bool = True,
     pattern: str = "**/3_LibraryLogic/*.yaml",
     trim_size: bool = True,
-    *,
-    hipblaslt_path: str | Path,
 ) -> LibraryCollection:
     """Merge optimized solutions from multiple build directories into single libraries.
 
@@ -150,15 +148,12 @@ def merge_solutions(
             Defaults to Tensile format.
         trim_size (bool, optional): Whether to use [M, N, B, K] format or to keep leading dimensions.
             Defaults to True.
-        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Returns:
         LibraryCollection: LibraryCollection with all merged solutions.
 
     Raises:
         ValueError: If no valid YAML library logic files found.
-        FileNotFoundError: If ``SolutionIdGen.py`` is missing from ``hipblaslt_path``.
-        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
 
     Note:
         For duplicate problem sizes, keeps the solution with highest performance.
@@ -171,7 +166,7 @@ def merge_solutions(
     lib_paths = sorted(input_dir.glob(pattern))
     if not lib_paths:
         raise ValueError(f"No valid YAML libraries found in '{input_dir}'")
-    rewritten = uniquify_generated_logic(lib_paths, hipblaslt_path)
+    rewritten = uniquify_generated_logic(lib_paths)
     logger.debug(
         f"Merging solutions, discovered {len(lib_paths)} library files; "
         f"rewrote {rewritten} colliding SolutionUID values"
@@ -530,8 +525,6 @@ def from_dataframe(
     df: pd.DataFrame,
     lib_dir: str | Path,
     type_override: str = None,
-    *,
-    hipblaslt_path: str | Path,
 ) -> LibraryCollection:
     """Create filtered libraries from a DataFrame of selected solutions.
 
@@ -541,12 +534,9 @@ def from_dataframe(
         output_dir (str | Path): Output directory for filtered libraries.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
-        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
-        FileNotFoundError: If ``SolutionIdGen.py`` is missing from ``hipblaslt_path``.
-        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
 
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
@@ -611,7 +601,7 @@ def from_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
-    assign_fresh_solution_uids(libs.libs, hipblaslt_path)
+    assign_fresh_solution_uids(libs.libs)
     return libs
 
 
@@ -620,8 +610,6 @@ def from_full_dataframe(
     lib_dir: str | Path,
     match_table_path: str | Path,
     type_override: str = None,
-    *,
-    hipblaslt_path: str | Path,
 ) -> LibraryCollection:
     """Create full libraries from a DataFrame of solutions.
     Args:
@@ -630,11 +618,8 @@ def from_full_dataframe(
         match_table_path (str | Path): Path to the MatchTable.yaml file.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
-        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
-        FileNotFoundError: If ``SolutionIdGen.py`` is missing from ``hipblaslt_path``.
-        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
     Note:
@@ -730,7 +715,7 @@ def from_full_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
-    assign_fresh_solution_uids(libs.libs, hipblaslt_path)
+    assign_fresh_solution_uids(libs.libs)
     return libs
     
 
@@ -916,12 +901,7 @@ def prune_library(
         logger.info(f"'{cn}': removed {n_before - n_after} solutions out of {n_before}")
     logger.info(f"Final lib: removed {n_before_all - n_after_all} solutions out of {n_before_all}")
 
-    merged = merge_solutions(
-        workdir,
-        epilogues=False,
-        pattern="*/lib/*.yaml",
-        hipblaslt_path=hipblaslt_path,
-    )
+    merged = merge_solutions(workdir, epilogues=False, pattern="*/lib/*.yaml")
     if len(merged) != 1:
         raise RuntimeError(f"Found {len(merged)} libraries after merging, check the results in {workdir}")
 

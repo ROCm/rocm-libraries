@@ -14,8 +14,6 @@ import yaml
 from geko.library import Library
 from geko.library import operations
 
-_HIPBLASLT_PATH = Path(__file__).resolve().parents[3]
-
 
 def _make_min_library() -> Library:
     data = [
@@ -88,7 +86,7 @@ def test_load_collection_missing_dir_raises(tmp_path: Path) -> None:
 
 def test_merge_solutions_no_files_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="No valid YAML libraries"):
-        operations.merge_solutions(tmp_path, hipblaslt_path=_HIPBLASLT_PATH)
+        operations.merge_solutions(tmp_path)
 
 
 def test_merge_solutions_happy_path(tmp_path: Path) -> None:
@@ -96,7 +94,7 @@ def test_merge_solutions_happy_path(tmp_path: Path) -> None:
     ldir.mkdir(parents=True)
     _write_library_yaml(ldir, "x.yaml")
 
-    merged = operations.merge_solutions(tmp_path, epilogues=False, hipblaslt_path=_HIPBLASLT_PATH)
+    merged = operations.merge_solutions(tmp_path, epilogues=False)
     assert len(merged) == 1
     assert merged[0].name == "x.yaml"
 
@@ -170,13 +168,13 @@ def test_from_dataframe_requires_lib_column(tmp_path: Path) -> None:
         ]
     )
     with pytest.raises(ValueError, match="must contain the lib"):
-        operations.from_dataframe(df, tmp_path, hipblaslt_path=_HIPBLASLT_PATH)
+        operations.from_dataframe(df, tmp_path)
 
 
 def test_from_dataframe_requires_gemm_fields(tmp_path: Path) -> None:
     df = pd.DataFrame([{"lib": "a.yaml", "M": 16}])
     with pytest.raises(ValueError, match="missing fields"):
-        operations.from_dataframe(df, tmp_path, hipblaslt_path=_HIPBLASLT_PATH)
+        operations.from_dataframe(df, tmp_path)
 
 
 def test_from_dataframe_happy_path(tmp_path: Path) -> None:
@@ -205,7 +203,7 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
         ]
     )
 
-    libs = operations.from_dataframe(df, lib_dir, hipblaslt_path=_HIPBLASLT_PATH)
+    libs = operations.from_dataframe(df, lib_dir)
     assert len(libs) == 1
     assert libs[0].name == "a.yaml"
     assert len(libs[0].solutions) == 1
@@ -289,9 +287,7 @@ def test_from_full_dataframe_replaces_a_copied_reference_uid(tmp_path: Path) -> 
         ]
     )
 
-    libs = operations.from_full_dataframe(
-        df, lib_dir, match_table, hipblaslt_path=_HIPBLASLT_PATH
-    )
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
 
     uid = libs[0].solutions[0]["SolutionUID"]
     assert uid != "0u5"
@@ -370,7 +366,7 @@ def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> No
         ]
     )
 
-    libs = operations.from_dataframe(df, lib_dir, hipblaslt_path=_HIPBLASLT_PATH)
+    libs = operations.from_dataframe(df, lib_dir)
     assert len(libs) == 1
     assert libs[0].name == "a.yaml"
     assert len(libs[0].sizes) == 2
@@ -454,9 +450,7 @@ def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: 
         ]
     )
 
-    libs = operations.from_full_dataframe(
-        df, lib_dir, match_table, hipblaslt_path=_HIPBLASLT_PATH
-    )
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
 
     assert len(libs) == 1
     assert libs[0].name == "a.yaml"
@@ -891,7 +885,7 @@ def test_merge_solutions_raises_on_default_solution_mismatch(tmp_path: Path) -> 
     _write_library_yaml_with_default(ldir2, "x.yaml", {"StaggerU": 1})
 
     with pytest.raises(NotImplementedError, match="Default solution mismatch"):
-        operations.merge_solutions(tmp_path, epilogues=False, hipblaslt_path=_HIPBLASLT_PATH)
+        operations.merge_solutions(tmp_path, epilogues=False)
 
 
 def test_merge_solutions_ok_with_matching_default_solution(tmp_path: Path) -> None:
@@ -902,7 +896,7 @@ def test_merge_solutions_ok_with_matching_default_solution(tmp_path: Path) -> No
     _write_library_yaml_with_default(ldir1, "x.yaml", {"StaggerU": 0})
     _write_library_yaml_with_default(ldir2, "x.yaml", {"StaggerU": 0})
 
-    merged = operations.merge_solutions(tmp_path, epilogues=False, hipblaslt_path=_HIPBLASLT_PATH)
+    merged = operations.merge_solutions(tmp_path, epilogues=False)
     assert len(merged) == 1
 
 
@@ -914,7 +908,7 @@ def test_merge_solutions_ok_when_both_default_solution_none(tmp_path: Path) -> N
     _write_library_yaml_with_default(ldir1, "x.yaml", None)
     _write_library_yaml_with_default(ldir2, "x.yaml", None)
 
-    merged = operations.merge_solutions(tmp_path, epilogues=False, hipblaslt_path=_HIPBLASLT_PATH)
+    merged = operations.merge_solutions(tmp_path, epilogues=False)
     assert len(merged) == 1
 
 

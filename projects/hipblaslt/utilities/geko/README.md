@@ -597,7 +597,7 @@ invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 
 `TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
 
-`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. Geko draws those UIDs from `SolutionIdGen.py` in the hipBLASLt checkout passed to the run. `TensileMergeLibrary` matches `SolutionNameMin`: an existing Equality solution keeps its UID and the new one is ignored, and a new name (the Origami copy) is merged with the fresh UID so it does not duplicate the Origami file.
+`final_libs` and `full_libs` give every solution a new `SolutionUID`, including one copied from Origami. Geko loads `SolutionIdGen.py` from the hipBLASLt checkout that contains this install, which is what `pip install -e .` keeps. A non-editable `pip install .` cannot see that file: Geko warns and leaves the copied UID unchanged. `TensileMergeLibrary` matches `SolutionNameMin`: an existing Equality solution keeps its UID and the new one is ignored, and a new name (the Origami copy) is merged with the fresh UID so it does not duplicate the Origami file.
 
 **Verify:**
 ```bash

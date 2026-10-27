@@ -20,7 +20,7 @@ Example:
     >>> from library import operations
     >>> lib = operations.load_library("path/to/lib.yaml")
     >>> collection = operations.load_collection("path/to/folder")
-    >>> merged = operations.merge_solutions("path/to/folder", hipblaslt_path="/path/to/hipblaslt")
+    >>> merged = operations.merge_solutions("path/to/folder")
 """
 
 from .library import *
