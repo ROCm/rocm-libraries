@@ -33,7 +33,7 @@
  * @brief Today's reader against checked-in payload bytes: each sample must still decode
  *        to the launch inputs its contract version promises.
  *
- * Each sample is a byte array saved by the build that introduced contract v1. A test
+ * Each sample is a byte array saved by the build that introduced its contract version. A test
  * decodes it and compares the whole payload with the payload the sample was written
  * from. It then asserts every field of the resulting launch inputs by name and value.
  *
@@ -66,6 +66,8 @@ constexpr std::string_view POINTWISE_SAMPLE_DISPATCH = "hipkernel.pointwise.disp
 constexpr std::string_view CONV_FWD_SAMPLE_DISPATCH = "hipkernel.conv_fwd.dispatch.v1";
 constexpr std::string_view GFX950_ATTENTION_DENSE_SAMPLE_DISPATCH
     = "hipkernel.gfx950_attention_dense.dispatch.v1";
+constexpr std::string_view GFX950_ATTENTION_DENSE_V2_SAMPLE_DISPATCH
+    = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
 // The value names and types of each contract, also spelled out so a pack rename fails
 // this test. These are what the generator encodes into a new sample.
@@ -152,6 +154,13 @@ serialization::IngestorPlanPayload convFwdSamplePayload()
 serialization::IngestorPlanPayload gfx950AttentionDenseSamplePayload()
 {
     return samplePayload(std::string(GFX950_ATTENTION_DENSE_SAMPLE_DISPATCH),
+                         gfx950AttentionDenseSampleValues());
+}
+
+// v2 keeps v1's values; only the dispatch name, and the kernel arguments it implies, change.
+serialization::IngestorPlanPayload gfx950AttentionDenseV2SamplePayload()
+{
+    return samplePayload(std::string(GFX950_ATTENTION_DENSE_V2_SAMPLE_DISPATCH),
                          gfx950AttentionDenseSampleValues());
 }
 
@@ -525,6 +534,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, DISABLED_PrintLaunchContractSamples)
     printSample("CONV_FWD_V1_GOLDEN", serialization::encodeIngestorPlan(convFwdSamplePayload()));
     printSample("GFX950_ATTENTION_DENSE_V1_GOLDEN",
                 serialization::encodeIngestorPlan(gfx950AttentionDenseSamplePayload()));
+    printSample("GFX950_ATTENTION_DENSE_V2_GOLDEN",
+                serialization::encodeIngestorPlan(gfx950AttentionDenseV2SamplePayload()));
 }
 
 } // namespace
