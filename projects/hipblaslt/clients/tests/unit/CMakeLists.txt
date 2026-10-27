@@ -7,6 +7,7 @@
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/allclose_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/maf_initialization_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_verify_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_setup_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp

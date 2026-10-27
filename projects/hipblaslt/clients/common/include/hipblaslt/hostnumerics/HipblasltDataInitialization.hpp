@@ -72,7 +72,8 @@ namespace hipblaslt::hostnumerics
                                                  size_t                     blockSize,
                                                  hipblaslt_initialization   initialization,
                                                  uint64_t                   seed,
-                                                 MatrixRole                 role);
+                                                 MatrixRole                 role,
+                                                 size_t                     batchIndex = 0);
 
     ::roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
         mxScaleStorageLayoutForArchName(std::string_view archName);
@@ -107,6 +108,7 @@ namespace hipblaslt::hostnumerics
                           bool                           forceNaN,
                           std::optional<OneSpecialValue> oneSpecialValue,
                           bool                           positiveOnly,
-                          IntegerExactOptions            integerExact);
+                          IntegerExactOptions            integerExact,
+                          size_t                         batchIndex = 0);
 
 } // namespace hipblaslt::hostnumerics

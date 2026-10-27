@@ -9,6 +9,7 @@
 
 #include "DataInitialization.hpp"
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/hostnumerics/MafInitialization.hpp>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <roc/hostnumerics/mx.hpp>
 
@@ -28,6 +29,18 @@ namespace TensileLite
     {
         namespace hostnumerics::detail
         {
+            inline bool isMaf(InitMode mode)
+            {
+                return mode == InitMode::Maf2_0 || mode == InitMode::Maf2_0UnitScale
+                       || mode == InitMode::Maf1_0;
+            }
+            inline hipblaslt::hostnumerics::maf::Mode mafMode(InitMode mode)
+            {
+                using hipblaslt::hostnumerics::maf::Mode;
+                return mode == InitMode::Maf1_0            ? Mode::Maf1
+                       : mode == InitMode::Maf2_0UnitScale ? Mode::Maf2UnitScale
+                                                           : Mode::Maf2;
+            }
             inline roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
                 mxScaleStorageLayoutForArchName(std::string_view archName)
             {
@@ -73,6 +86,9 @@ namespace TensileLite
                 case InitMode::TrigIndAbsCos:
                 case InitMode::UniformLowPrecision:
                     return MxScaleGenerationMode::Derived;
+                case InitMode::Maf2_0:
+                case InitMode::Maf2_0UnitScale:
+                case InitMode::Maf1_0:
                 case InitMode::Free:
                 case InitMode::Count:
                     break;
@@ -166,6 +182,9 @@ namespace TensileLite
                     return MxDataGeneration::preserveRange(
                         recipe(GenerationRecipe::uniformReal({.lower = -6.0, .upper = 6.0})),
                         {.lower = -6.0, .upper = 6.0});
+                case InitMode::Maf2_0:
+                case InitMode::Maf2_0UnitScale:
+                case InitMode::Maf1_0:
                 case InitMode::Free:
                 case InitMode::Count:
                     break;
@@ -189,7 +208,9 @@ namespace TensileLite
                                                               InitMode dataInitialization,
                                                               InitMode scaleInitialization,
                                                               uint64_t seed,
-                                                              bool     independentData)
+                                                              bool     independentData,
+                                                              size_t   operand    = 0,
+                                                              size_t   batchIndex = 0)
             {
                 using roc::hostnumerics::generateMx;
                 using roc::hostnumerics::MxDataGeneration;
@@ -198,6 +219,23 @@ namespace TensileLite
                 const ScalarType hostDataType = toHostNumericsScalarType(dataType);
                 if(leadingDimension > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
                     throw std::runtime_error("TensileLite MX leading dimension exceeds ptrdiff_t.");
+                if(isMaf(dataInitialization))
+                {
+                    MxGenerationOptions options;
+                    options.dataType = hostDataType;
+                    options.scaleType
+                        = scaleType == rocisa::DataType::E8 || scaleType == rocisa::DataType::None
+                              ? ScalarType::E8M0
+                              : toHostNumericsMxScaleType(scaleType);
+                    options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
+                    options.blockAxis        = blockAxis;
+                    options.blockSize        = blockSize;
+                    return hipblaslt::hostnumerics::maf::generateMx(std::move(shape),
+                                                                    options,
+                                                                    mafMode(dataInitialization),
+                                                                    operand,
+                                                                    batchIndex);
+                }
                 MxDataGeneration dataGeneration
                     = mxDataGeneration(independentData ? InitMode::Zero : dataInitialization,
                                        hostDataType,
