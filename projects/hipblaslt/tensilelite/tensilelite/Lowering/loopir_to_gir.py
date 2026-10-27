@@ -8,6 +8,8 @@ Scheduling and logical dependence discovery are completed before conversion.
 
 from __future__ import annotations
 
+import itertools
+
 from dataclasses import dataclass, replace
 
 from ..LoopModel.loopir import (
@@ -215,6 +217,44 @@ def _project_reference(tile, environment, covers=(), omit_axes=()):
     return coordinate, runtime
 
 
+def _effect_source_regions(transfer, coordinate):
+    """Coordinates this read SOURCES beyond the one it names, read off its Effect.
+
+    The Effect's semantic tile carries each sourced coordinate as an expression of the agent, so
+    a tile whose share straddles a storage boundary evaluates to a later value for the agents
+    past it. Enumerating the agent is the whole derivation -- GIR asks the Effect, it does not
+    rebuild the distribution.
+    """
+    effect = getattr(transfer, "effect", None)
+    tile = getattr(effect, "tile", None)
+    if tile is None:
+        return ()
+    named = dict(coordinate)
+    found = []
+    # The semantic tile prepends the agent to the operand's own indices, so align from the end.
+    offset = max(0, len(tile.indices) - len(tile.operand.axes))
+    local = dict(zip((a.name for a in transfer.local_tile.operand.axes),
+                     transfer.local_tile.indices))
+    for axis, expression in zip(tile.operand.axes, tile.indices[offset:]):
+        own = named.get(axis.name)
+        if own is None or expression.constant_value is not None:
+            continue
+        # Only the coordinate the Effect REWROTE is a sourced-elsewhere statement; every other
+        # axis repeats the local tile's own index and says nothing.
+        mine = local.get(axis.name)
+        if mine is None or expr_equivalent(mine, expression):
+            continue
+        bound = list(expression.free_axes())
+        extents = [free.extent.constant_value for free in bound]
+        if not bound or any(extent is None for extent in extents):
+            continue
+        for point in itertools.product(*(range(int(e)) for e in extents)):
+            sourced = _evaluate(expression, dict(zip(bound, point)))
+            if sourced is not None and int(sourced) > int(own):
+                found.append((axis.name, int(sourced)))
+    return tuple(sorted(set(found)))
+
+
 def _logical_coverage(tile, environment):
     bound = {
         id(key)
@@ -326,6 +366,7 @@ def _ref(
     issue_axes=(),
     omit_axes=(),
     projection=None,
+    coord_override=None,
 ):
     space = level.name.lower()
     size_bytes = int(size_bytes_override or 0)
@@ -334,6 +375,10 @@ def _ref(
         _project_reference(tile, environment, covers, omit_axes)
         if projection is None else projection
     )
+    if coord_override:
+        name, value = coord_override
+        coordinate = tuple((axis, value if axis == name else held)
+                           for axis, held in coordinate)
     gir_tile = Tile(
         tile.operand.name,
         space,
@@ -1078,6 +1123,21 @@ def _convert(
             for transfer, covers, size_bytes, size_regs, projection
             in projected_transfers
         )
+        if local_read:
+            # The agents past a storage boundary source this read from the NEXT region. Naming
+            # that buffer here is what gives the frame contract its producer edge, so the wait
+            # lands on this read and not on the first one whose coordinate names the region.
+            srcs = srcs + tuple(
+                _ref(transfer.local_tile, transfer.source, environment, gens,
+                     shared_delta=source_delta, absolute=absolute, profile=profile,
+                     size_bytes_override=size_bytes, size_regs_override=size_regs,
+                     covers=covers, prefetch_steps=prefetch_steps,
+                     issue_axes=issue_axis_names, projection=projection,
+                     coord_override=sourced)
+                for transfer, covers, size_bytes, size_regs, projection
+                in projected_transfers
+                for sourced in _effect_source_regions(transfer, projection[0])
+            )
         operation_deps = _operation_dependencies(
             deps,
             operation,

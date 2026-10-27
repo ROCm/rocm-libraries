@@ -877,8 +877,30 @@ class GirFencePlacementPass final : public StinkyInstPass {
                                               allRawAreTensor(candidate);
                 if (dropsUnwaitedRaw) {
                     auto covered = markerCoverage.find(candidate);
-                    if (covered != markerCoverage.end())
+                    if (covered != markerCoverage.end()) {
+                        // This marker owns no wait of its own because a DEEPER wait at an earlier
+                        // fence already retires its producer -- so that fence is what makes this
+                        // RAW safe, and it kills this storage as surely as its own. Hand the
+                        // hazards over instead of dropping them: a fence that kills two hazards
+                        // has to name both tokens, and forgetting one leaves its storage unfenced.
+                        const StinkyInstruction* heir = nullptr;
+                        for (const StinkyInstruction* earlier : inProgramOrder(markers)) {
+                            if (earlier == candidate) break;
+                            if (earlier->getParent() != candidate->getParent()) continue;
+                            auto earlierWait = virtualWaits.anchorWaits.find(
+                                const_cast<StinkyInstruction*>(earlier));
+                            if (earlierWait != virtualWaits.anchorWaits.end() &&
+                                earlierWait->second.tensorCount != waitcnt::WaitCountSpec::kUnused)
+                                heir = earlier;
+                        }
+                        if (heir != nullptr)
+                            for (const GirFrameHazard* hazard : covered->second)
+                                if (hazard->kind == GirHazardKind::RAW) {
+                                    markerCoverage[heir].insert(hazard);
+                                    finalOwnership[heir][hazard->consumerFrame].insert(hazard);
+                                }
                         eraseHazardKind(covered->second, GirHazardKind::RAW);
+                    }
                 }
                 const bool retiresUnwaitedRaw =
                     dropsUnwaitedRaw && !waitRetiredMarkers.count(candidate);

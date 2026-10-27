@@ -386,6 +386,23 @@ def _build_fuse(hasMXA, hasMXB, kernel, operands):
     return view, groups
 
 
+def _agent_spread(kernel, tile01):
+    """`(vector width, agents on this axis, vector groups each holds)` for one free axis.
+
+    The read-address terms the region derivation needs. One function because the effect
+    predicate and the region layout each need them and must not disagree.
+    """
+    mi = list(kernel["MatrixInstruction"])
+    wave_group = list(kernel.get("MIWaveGroup")
+                      or (mi[7:9] if len(mi) >= 9 else [1, 1])) + [1, 1]
+    wave_tile = list(kernel.get("MIWaveTile") or mi[5:7]) + [1, 1]
+    parent = "A" if tile01 == 0 else "B"
+    width = max(1, int(kernel.get("VectorWidth" + parent, 1) or 1))
+    return (width,
+            max(1, int(wave_group[tile01])),
+            max(1, int(wave_tile[tile01]) // width))
+
+
 def _assign_effects(operands, kernel, nest, splits):
     """Compile target read grouping into logical Effects.
 
@@ -399,8 +416,6 @@ def _assign_effects(operands, kernel, nest, splits):
         or (mi[7:9] if len(mi) >= 9 else [1, 1])
     )
     wave_group += [1, 1]
-    wave_tile = list(kernel.get("MIWaveTile") or mi[5:7])
-    wave_tile += [1, 1]
     axis_extent = {
         axis.name: int(axis.extent.constant_value)
         for axis in nest.ord_
@@ -419,9 +434,7 @@ def _assign_effects(operands, kernel, nest, splits):
         reduction_split = (
             splits.aDU if parent == "A" else splits.bDU
         ) if operand.name in ("A", "B") else 1
-        width = max(1, int(kernel.get("VectorWidth" + parent, 1) or 1))
-        groups = max(1, int(wave_tile[tile01]) // width)
-        wave_extent = max(1, int(wave_group[tile01]))
+        width, wave_extent, groups = _agent_spread(kernel, tile01)
         wave_divisor = 1 if tile01 == 0 else max(1, int(wave_group[0]))
         wave_sensitive = (
             operand.trajectory.shared is not None and total_waves > 1
@@ -452,11 +465,10 @@ def _assign_effects(operands, kernel, nest, splits):
                 if wave is not None and wave_sensitive
                 else tile
             )
-            if region is None or free_split * reduction_split <= 1:
-                return Effect(semantic)
+            split_name = free_role + "_split"
 
             flat = Expr.constant(0)
-            for name in (free_role + "_split", free_role + "_inner"):
+            for name in (split_name, free_role + "_inner"):
                 if name in values:
                     flat = flat * axis_extent[name] + values[name]
             wave_value = (
@@ -464,20 +476,30 @@ def _assign_effects(operands, kernel, nest, splits):
                 if wave is not None and wave_extent > 1
                 else Expr.constant(0)
             )
-            split_name = free_role + "_split"
             # A read group is region-pinned exactly when the split divides
             # numVectorsPerTile. Otherwise wave and vector-group jointly
             # select the producer region (the odd-G middle group included).
-            if free_split > 1 and (
-                wave_extent <= 1 or groups % free_split == 0
-            ):
+            pinned = wave_extent <= 1 or groups % free_split == 0
+            if free_split > 1 and pinned and split_name in values:
                 free_region = (
                     free_split * values[split_name]
-                ) // axis_extent[split_name]
+                ) // max(1, axis_extent.get(split_name, 1))
             else:
                 free_region = (
                     free_split * (wave_extent * (flat // width) + wave_value)
                 ) // max(1, wave_extent * groups)
+
+            if region is None or free_split * reduction_split <= 1:
+                # A read names the region it SOURCES. The agent term can push that past the
+                # region its own coordinate names, and carrying it on the semantic tile is what
+                # lets the consumer see the crossing without re-deriving it.
+                if (region is None and free_split > 1 and not pinned
+                        and split_name in values
+                        and wave is not None and wave_sensitive):
+                    sourced = list(indices)
+                    sourced[[a.name for a in tile.operand.axes].index(split_name)] = free_region
+                    semantic = tile.operand[(wave, *sourced)]
+                return Effect(semantic)
             reduction_region = Expr.constant(0)
             if reduction_split > 1 and "K_split" in values:
                 reduction_region = (
@@ -716,6 +738,9 @@ def _shape_params(elem_bytes, kernel, mi, wt0, wt1):
         "MatrixInstruction": mi,
         "DepthU": kernel["DepthU"],
         "MIWaveTile": [wt0, wt1],
+        # A derived Solution spells the instruction [M,N,K,B], so `mi[7:9]` never fires.
+        "MIWaveGroup": list(kernel.get("MIWaveGroup")
+                            or (mi[7:9] if len(mi) >= 9 else [1, 1])),
         "ElemBytes": max(1, elem_bytes),
         "PrefetchGlobalRead": kernel.get("PrefetchGlobalRead", 2),
         # Both spellings: the solution keeps the pair only where the operands differ.
