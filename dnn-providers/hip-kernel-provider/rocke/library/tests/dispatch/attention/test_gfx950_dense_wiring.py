@@ -34,7 +34,11 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
+from kernels.common.attention_dense_spec import (
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
+)
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import (
     AttentionDenseSpec,
@@ -49,9 +53,11 @@ from rocke.dispatch.core import opt_in_probe
 _GRID = "gfx950_dense_grid"
 _PERSIST = "gfx950_dense_persist"
 _WIDE = "gfx950_dense_persist_widedma"
+_QBMINOR = "gfx950_dense_qbminor"
 _GRID_NAME = f"attention_{_GRID}"
 _PERSIST_NAME = f"attention_{_PERSIST}"
 _WIDE_NAME = f"attention_{_WIDE}"
+_QBMINOR_NAME = f"attention_{_QBMINOR}"
 _DENSE_ALGORITHMS = (DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM)
 
 
@@ -133,6 +139,29 @@ class TestDenseSelection(unittest.TestCase):
             with self.subTest(**kw), self.assertRaises(ValueError):
                 dispatch_attention(_gfx950_dense_req(**kw))
 
+    def test_every_variant_needs_both_pins(self):
+        """Every variant is opt-in: unpinned or half-pinned requests are refused;
+        pinning its algorithm and spec_id routes to it."""
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        by_name = {c.name: c for c in attention_candidates()}
+        for variant in GFX950_DENSE_VARIANTS:
+            candidate = by_name[variant.candidate_name]
+            with self.subTest(spec_id=variant.spec_id):
+                for kw in (
+                    {},
+                    dict(algorithm=variant.algorithm),
+                    dict(spec_id=variant.spec_id),
+                ):
+                    ok, why = candidate.admits(replace(req, **kw))
+                    self.assertFalse(ok, kw)
+                    self.assertIn("opt-in", why)
+                pinned = replace(
+                    req, algorithm=variant.algorithm, spec_id=variant.spec_id
+                )
+                self.assertEqual(
+                    dispatch_attention(pinned).candidate.name, variant.candidate_name
+                )
+
     def test_spec_id_under_the_other_body_is_refused(self):
         """The algorithm names the body: the gfx942 ``attention_dense`` name
         and a spec_id of the other gfx950 body select nothing."""
@@ -210,74 +239,80 @@ class TestDenseWavesPerEuWiring(unittest.TestCase):
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
-    """Invariant-compatible shapes select a balanced GQA-local decode."""
+    """Invariant-compatible shapes accept an explicit balanced GQA-local decode;
+    auto picks the L2-local one."""
 
-    def test_exact_llama3_8b_prefill_auto_selects_gqa_pair(self):
-        spec = _spec(_gfx950_dense_req(**_LLAMA_8K), _WIDE)
+    def test_exact_llama3_8b_prefill_explicit_gqa_pair(self):
+        spec = _spec(_gfx950_dense_req(**_LLAMA_8K), _WIDE, persist_decode="gqa_pair")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertIn("gqapair", spec.kernel_name())
         self.assertTrue(spec.wide_lds_dma)
         self.assertIn("wdma", spec.kernel_name())
         self.assertEqual(spec.num_persistent, 256)
 
-    def test_explicit_gqa_pair_knob_canonicalizes_to_the_default(self):
+    def test_explicit_auto_decode_knob_canonicalizes_to_the_default(self):
         """Pinning the decode auto already picks is the default kernel: the
         knob is dropped, so the id is the default's and no duplicate is minted."""
         req = _gfx950_dense_req(**_LLAMA_8K)
-        pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "gqa_pair"})
-        self.assertEqual(pinned, attention_tuning_spec(req, _WIDE))
+        default = attention_tuning_spec(req, _WIDE)
+        self.assertEqual(default.kernel_spec.resolved_persist_decode, "bt_hkv_minor")
+        pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "bt_hkv_minor"})
+        self.assertEqual(pinned, default)
         # Wide DMA records its problem-dependent default tile.
         self.assertEqual(pinned.knobs, (("block_m", 256),))
-        self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair")
-        self.assertIn("gqapair", pinned.kernel_name())
 
     def test_invalid_dense_decode_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "persist_decode"):
             _spec(_gfx950_dense_req(), _PERSIST, persist_decode="not-a-decode")
 
-    def test_s4096_shape_selects_two_phase_pair_and_wide_dma(self):
+    def test_s4096_shape_accepts_two_phase_pair_and_wide_dma(self):
         req = _gfx950_dense_req(**{**_LLAMA_8K, "seqlen_q": 4096, "seqlen_k": 4096})
-        spec = _spec(req, _WIDE)
+        spec = _spec(req, _WIDE, persist_decode="gqa_pair_2phase")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
         self.assertIn("gqapair2", spec.kernel_name())
         self.assertIn("wdma", spec.kernel_name())
 
     def test_bf16_shape_uses_invariant_compatible_fast_path(self):
-        spec = _spec(_gfx950_dense_req(**{**_LLAMA_8K, "dtype": "bf16"}), _WIDE)
+        spec = _spec(
+            _gfx950_dense_req(**{**_LLAMA_8K, "dtype": "bf16"}),
+            _WIDE,
+            persist_decode="gqa_pair",
+        )
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_s2048_h64_selects_two_phase_pair(self):
+    def test_s2048_h64_accepts_two_phase_pair(self):
         req = _gfx950_dense_req(
             **{**_LLAMA_8K, "nhead_q": 64, "seqlen_q": 2048, "seqlen_k": 2048}
         )
-        spec = _spec(req, _WIDE)
+        spec = _spec(req, _WIDE, persist_decode="gqa_pair_2phase")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair_2phase")
         self.assertTrue(spec.wide_lds_dma)
 
-    def test_explicit_two_phase_pair_knob_canonicalizes_to_the_default(self):
+    def test_explicit_pair_decodes_are_kept_with_their_own_ids(self):
+        """A decode auto does not pick is kept, and gets its own id."""
         req = _gfx950_dense_req(**{**_LLAMA_8K, "seqlen_q": 4096, "seqlen_k": 4096})
-        pinned = tuning_spec_with_knobs(
-            req, _WIDE, {"persist_decode": "gqa_pair_2phase"}
-        )
-        self.assertEqual(pinned, attention_tuning_spec(req, _WIDE))
-        self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair_2phase")
-        # A decode auto does not pick is kept, and gets its own id.
-        other = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "hkv_major"})
-        self.assertEqual(
-            dict(other.knobs), {"block_m": 256, "persist_decode": "hkv_major"}
-        )
-        self.assertNotEqual(other.tuning_id, pinned.tuning_id)
+        default = attention_tuning_spec(req, _WIDE)
+        ids = {default.tuning_id}
+        for decode in ("gqa_pair_2phase", "hkv_major"):
+            with self.subTest(decode=decode):
+                pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": decode})
+                self.assertEqual(
+                    dict(pinned.knobs), {"block_m": 256, "persist_decode": decode}
+                )
+                self.assertEqual(pinned.kernel_spec.resolved_persist_decode, decode)
+                self.assertNotIn(pinned.tuning_id, ids)
+                ids.add(pinned.tuning_id)
 
     def test_exact_shape_with_sinks_keeps_gqa_pair(self):
         req = _gfx950_dense_req(**_LLAMA_8K, use_sinks=True)
-        spec = _spec(req, _PERSIST)
+        spec = _spec(req, _PERSIST, persist_decode="gqa_pair")
         self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
         self.assertTrue(spec.use_sinks)
         self.assertFalse(spec.wide_lds_dma)
         # No dispatch gate stricter than the kernel: wide DMA admits sinks too.
-        self.assertTrue(_spec(req, _WIDE).use_sinks)
+        self.assertTrue(_spec(req, _WIDE, persist_decode="gqa_pair").use_sinks)
 
     def test_sliding_window_falls_back_to_qb_major(self):
         req = _gfx950_dense_req(**_LLAMA_8K, sliding_window=512)
@@ -287,11 +322,34 @@ class TestDenseGqaPairWiring(unittest.TestCase):
                     _spec(req, spec_id).resolved_persist_decode, "qb_major"
                 )
 
-    def test_mha_falls_back_to_qb_major(self):
+    def test_mha_selects_bt_hkv_minor(self):
         spec = _spec(_gfx950_dense_req(**{**_LLAMA_8K, "nhead_k": 32}), _WIDE)
-        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
+
+    def test_large_batch_selects_hkv_major_for_gqa(self):
+        gqa = _gfx950_dense_req(**{**_LLAMA_8K, "batch": 16})
+        self.assertEqual(_spec(gqa, _PERSIST).resolved_persist_decode, "hkv_major")
+
+    def test_large_batch_selects_hq_minor_swz_for_mha(self):
+        mha = dict(_LLAMA_8K, batch=16, nhead_k=32, seqlen_q=2048, seqlen_k=2048)
+        spec = _spec(_gfx950_dense_req(**mha), _PERSIST)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
+
+    def test_large_batch_mha_without_head_bands_selects_qb_major(self):
+        # head bands need a head count divisible by the XCD count
+        mha = dict(
+            _LLAMA_8K, batch=16, nhead_q=36, nhead_k=36, seqlen_q=2048, seqlen_k=2048
+        )
+        spec = _spec(_gfx950_dense_req(**mha), _PERSIST)
+        self.assertEqual(spec.resolved_persist_decode, "qb_major")
+
+    def test_large_causal_mha_uses_persistent_swizzled_head_first(self):
+        mha = dict(_LLAMA_8K, batch=4, nhead_q=64, nhead_k=64)
+        spec = _spec(_gfx950_dense_req(**mha), _WIDE)
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertEqual(spec.resolved_persist_decode, "hq_minor_swz")
 
 
 class TestDenseBottomRightWiring(unittest.TestCase):
@@ -329,6 +387,108 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     self.assertNotIn("persist", spec.kernel_name())
                     self.assertNotIn("wdma", spec.kernel_name())
 
+    def test_cross_length_top_left_ragged_is_unshifted(self):
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.TOP_LEFT_CAUSAL,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertTrue(spec.causal)
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertTrue(spec.ragged)
+                br = _spec(
+                    self._moving_req(
+                        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                        seqlen_q=min(sq, sk),
+                        seqlen_k=max(sq, sk),
+                    )
+                )
+                self.assertNotEqual(spec.kernel_name(), br.kernel_name())
+                self.assertNotEqual(
+                    attention_dense_cache_key(spec, arch="gfx950"),
+                    attention_dense_cache_key(br, arch="gfx950"),
+                )
+
+    def test_no_mask_cross_length_unaligned_is_ragged_cross_attention(self):
+        # Full attention between different lengths (cross-attention) is standard; the
+        # ragged body handles it with the key-pad mask and the guarded store.
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertFalse(spec.causal)
+                self.assertTrue(spec.ragged)
+
+    def test_band_requests_map_to_the_dense_band_fields(self):
+        cases = {
+            "left_only": (dict(sliding_window=256), False, 0),
+            "two_sided": (dict(sliding_window=256, right_bound=64), True, 64),
+            "lookahead": (dict(right_bound=16), True, 16),
+        }
+        for name, (kw, causal, right) in cases.items():
+            with self.subTest(band=name):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=2048,
+                        seqlen_k=2048,
+                        **kw,
+                    )
+                )
+                self.assertEqual((spec.causal, spec.right_bound), (causal, right))
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertEqual(spec.sliding_window, kw.get("sliding_window", 0))
+
+    def test_band_names_are_distinct_and_default_names_unchanged(self):
+        base = dict(
+            seqlen_q=2048,
+            seqlen_k=2048,
+        )
+        names = {
+            label: _spec(
+                self._moving_req(AttentionMaskType.NO_MASK, **base, **kw)
+            ).kernel_name()
+            for label, kw in {
+                "full": {},
+                "left_only": dict(sliding_window=256),
+                "causal_window": dict(sliding_window=256, right_bound=0),
+                "two_sided": dict(sliding_window=256, right_bound=64),
+                "lookahead": dict(right_bound=64),
+            }.items()
+        }
+        self.assertEqual(len(set(names.values())), len(names), names)
+        causal = _spec(
+            self._moving_req(AttentionMaskType.TOP_LEFT_CAUSAL, **base)
+        ).kernel_name()
+        self.assertNotIn("_rb", causal)
+
+    def test_bottom_right_alignment_cross_length_with_a_band_is_rejected(self):
+        # The dense body anchors a window / lookahead on the top-left diagonal; a
+        # shifted (bottom-right) band would silently compute the wrong mask.
+        for kw in (
+            dict(sliding_window=256, diagonal_alignment=1),
+            dict(right_bound=16, diagonal_alignment=1),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "bottom-right alignment"):
+                    _spec(
+                        self._moving_req(
+                            AttentionMaskType.NO_MASK,
+                            seqlen_q=2048,
+                            seqlen_k=4096,
+                            **kw,
+                        )
+                    )
+
     def test_persistent_candidates_refuse_moving_bottom_right(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             for spec_id in (_PERSIST, _WIDE):
@@ -336,7 +496,7 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "bottom.right"):
                         _spec(self._moving_req(mask_type), spec_id)
 
-    def test_equal_length_bottom_right_preserves_gqa_pair_and_wide_dma(self):
+    def test_equal_length_bottom_right_preserves_decode_and_wide_dma(self):
         mask_pairs = (
             (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
             (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
@@ -352,7 +512,9 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                 self.assertEqual(bottom_right_spec, top_left_spec)
                 self.assertFalse(bottom_right_spec.causal_bottom_right)
                 self.assertTrue(bottom_right_spec.persistent)
-                self.assertEqual(bottom_right_spec.resolved_persist_decode, "gqa_pair")
+                self.assertEqual(
+                    bottom_right_spec.resolved_persist_decode, "bt_hkv_minor"
+                )
                 self.assertTrue(bottom_right_spec.wide_lds_dma)
 
 
@@ -392,7 +554,7 @@ class TestDenseGeometrySpec(unittest.TestCase):
         self.assertEqual(spec.lds_v_row_pad, layout["lds_v_row_pad"])
 
     def test_block_m_controls_grid_and_kernel_identity(self):
-        default = self._spec()
+        default = replace(self._spec(), nonpersist_decode="qb_minor")
         bm128 = replace(default, block_m=128)
         self.assertEqual(attention_dense_grid(default), (2, 32, 1))
         self.assertEqual(attention_dense_grid(bm128), (4, 32, 1))
@@ -893,10 +1055,11 @@ class TestGfx950DenseCandidates(unittest.TestCase):
     """Two algorithms (grid and persistent body); wide DMA is a persistent
     candidate; the tile is a knob of each."""
 
-    def test_three_dense_candidates_are_registered(self):
+    def test_four_dense_candidates_are_registered(self):
         by_name = {c.name: c for c in attention_candidates()}
         expected = {
             _GRID_NAME: DENSE_GRID_ALGORITHM,
+            _QBMINOR_NAME: DENSE_GRID_ALGORITHM,
             _PERSIST_NAME: DENSE_PERSIST_ALGORITHM,
             _WIDE_NAME: DENSE_PERSIST_ALGORITHM,
         }
@@ -908,14 +1071,18 @@ class TestGfx950DenseCandidates(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(by_name[name].algorithm, algorithm)
 
-    def test_d128_admits_all_three_dense_candidates(self):
+    def test_d128_admits_all_four_dense_candidates(self):
         req = _gfx950_dense_req(
             hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=2048, seqlen_k=2048
         )
-        self.assertEqual(_admitting(req), {_GRID_NAME, _PERSIST_NAME, _WIDE_NAME})
+        self.assertEqual(
+            _admitting(req), {_GRID_NAME, _QBMINOR_NAME, _PERSIST_NAME, _WIDE_NAME}
+        )
 
     def test_d64_refuses_wide_dma(self):
-        self.assertEqual(_admitting(_gfx950_dense_req()), {_GRID_NAME, _PERSIST_NAME})
+        self.assertEqual(
+            _admitting(_gfx950_dense_req()), {_GRID_NAME, _QBMINOR_NAME, _PERSIST_NAME}
+        )
 
     def test_tile_is_a_knob(self):
         req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
@@ -930,6 +1097,49 @@ class TestGfx950DenseCandidates(unittest.TestCase):
                 self.assertEqual((spec.block_m, spec.block_n), (256, 128))
         with self.assertRaises(ValueError):
             _spec(req, _WIDE, block_n=128)
+
+    def test_nonpersist_decode_is_a_knob_of_the_grid_body(self):
+        """The non-persistent block order is a knob of the grid candidate, kept
+        unless it restates auto; the persistent bodies never read it and the
+        qbminor variant fixes it, so there it is dropped."""
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        grid = _spec(req, _GRID, nonpersist_decode="hq_minor_swz")
+        self.assertEqual(grid.resolved_nonpersist_decode, "hq_minor_swz")
+        self.assertIn("nphqminswz", grid.kernel_name())
+        auto = attention_tuning_spec(req, _GRID)
+        restated = tuning_spec_with_knobs(
+            req,
+            _GRID,
+            {"nonpersist_decode": auto.kernel_spec.resolved_nonpersist_decode},
+        )
+        self.assertEqual(restated, auto)
+        for spec_id, fixed in (
+            (_PERSIST, "auto"),
+            (_WIDE, "auto"),
+            (_QBMINOR, "qb_minor"),
+        ):
+            with self.subTest(spec_id=spec_id):
+                pinned = tuning_spec_with_knobs(
+                    req, spec_id, {"nonpersist_decode": "hq_minor_swz"}
+                )
+                self.assertEqual(pinned, attention_tuning_spec(req, spec_id))
+                self.assertEqual(pinned.kernel_spec.nonpersist_decode, fixed)
+
+    def test_qbminor_sweep_keeps_the_ingestor_grid(self):
+        req = _gfx950_dense_req(
+            hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=2048, seqlen_k=2048
+        )
+        orders = {
+            name: {
+                spec.kernel_spec.resolved_nonpersist_decode
+                for _c, spec in iter_registered_attention_combos(
+                    req, candidate_prefix=name
+                )
+            }
+            for name in (_GRID_NAME, _QBMINOR_NAME)
+        }
+        self.assertEqual(orders[_QBMINOR_NAME], {"qb_minor"})
+        self.assertGreater(len(orders[_GRID_NAME]), 1)
 
     def test_tile_knob_recomputes_ragged(self):
         req = _gfx950_dense_req(
@@ -973,7 +1183,7 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         self.assertEqual(spec.block_m, 256)
         self.assertTrue(spec.persistent)
         self.assertTrue(spec.wide_lds_dma)
-        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        self.assertEqual(spec.resolved_persist_decode, "bt_hkv_minor")
 
     def test_registered_combos_include_dense_not_unified_2d(self):
         from dispatch.attention import registered_attention_combos

@@ -254,6 +254,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"SEndpgm", "s_endpgm"},
         {"SSleep", "s_sleep"},
         {"SGetRegB32", "s_getreg_b32"},
+        {"SSendMsgRtnB32", "s_sendmsg_rtn_b32"},
         {"SSetRegB32", "s_setreg_b32"},
         {"SSetRegIMM32B32", "s_setreg_IMM32_b32"},
         {"SWaitCnt", "s_waitcnt"},

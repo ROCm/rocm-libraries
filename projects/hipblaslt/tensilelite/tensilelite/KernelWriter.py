@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
@@ -70,8 +70,8 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
-  SW_INSTRUCTION_PREFETCH_AUTO
-from .SolutionStructs.Naming import getKernelNameMin
+  parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -227,6 +227,9 @@ class StateValues:
   invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
+  # The overflow code reopened for register allocation to settle, or 0 once
+  # resolveDeferredRegisterOverflow has ruled on it.
+  overflowPendingRA: int                 = 0
   ## Schedule
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
@@ -380,6 +383,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  rndSeedKernArgOffset: int              = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -721,7 +725,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
 
-  # Tensile uses a two-level scheduler.  This the first-level, which
+  # TensileLite uses a two-level scheduler.  This the first-level, which
   # schedules global reads, global incs, and local writes into iteration.
   # Then makeSubIterSchedule schedules the instructions within the iteration.
   #
@@ -3237,6 +3241,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+      elif tdmA and tdmB and isPersistent(kernel) and not kernel["UseSubtileImpl"]:
+        # Subtile offsets Address{A,B} before building its descriptors.
+        module.add(self.tdmApplyTileKOffset(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx already freed for subtile (before graWorkGroup above).
       # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
@@ -4446,6 +4453,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
+      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
       module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync"))
     elif kernel["PrefetchGlobalRead"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
@@ -5040,7 +5049,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # buffer. Emit the wait_tensorcnt+barrier at the wrapped position so
           # the previous trip's TDM has landed before this trip reads from it.
           # SIA gating is narrow on purpose: SIA=2 is handled above; SIA=3
-          # uses a dedicated codegen path; SIA=1 isn't exercised with TDM.
+          # relies on the loop-top tensor wait in _loopBody; SIA=1 isn't
+          # exercised with TDM.
           if (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and not self.states.scheduleGROverBarrier:
             vlcntVal = kernel["PrefetchGlobalRead"] - 1 if kernel["PrefetchGlobalRead"] >= 2 else 0
             waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
@@ -5644,10 +5654,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
 
     # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     #ripo = rocIsaPassOption()
@@ -7097,9 +7108,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module.add(Label("ASM_End", "The end of the kernel"))
 
     moduleKernelBody.addBody(module)
+    # Judge, defer, act. The middle step is this path's alone: it runs the
+    # allocation pipeline below and resolves the deferral.
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.deferRegisterOverflowForAllocation(kernel)
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
@@ -7122,10 +7137,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
+    # A code recorded by now is final: the resolver runs only when it is 0.
+    rejected = self.states.overflowedResources != 0
+
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if not rejected and stinky_opt_level is not None \
+       and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
@@ -7161,6 +7180,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
+                               "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
+                               # The rest of StinkyTofuRegisterAllocation, in its shortest
+                               # spelling; the mode above is the one that holds.
+                               "RegisterAllocationConfig": str(
+                                   kernel.get("StinkyTofuRegisterAllocation", 0)),
+                               "RegisterAllocationDump": bool(
+                                   globalParameters.get("StinkyTofuRegisterAllocationDump") or False),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -7190,15 +7216,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
                                "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
-                               # PrefetchGlobalRead (PGR) for Tensile scheduling, and the
+                               # PrefetchGlobalRead (PGR) for TensileLite scheduling, and the
                                # InsertClusterBarrierPass Rule 3 drain threshold. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
+                               # PrefetchLocalRead (PLR) for TensileLite scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                                # How many unrolled loop bodies were emitted
                                # (states.unrollLoopCopies). HalfPLR sets this to 3.
-                               # SchedulingKnobHeuristics logs an optimistic ds-read
-                               # throttle from it; DsReadThrottleLatency is unchanged.
                                "UnrollLoopCopies": int(self.states.unrollLoopCopies),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
@@ -7232,16 +7256,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
       # Prefetch lead before its tensor_load, in WMMA windows. With HalfPLR the loop body holds
-      # three TDM stages: measured best ~25 when A is sub-byte and ~40 otherwise on gfx1250
-      # MAF. Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
+      # three TDM stages: measured best ~25 when A is sub-byte and ~30 otherwise on gfx1250
+      # MAF (it was 40 while the hazard model delayed each prefetch by about 5 windows).
+      # Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
       # the whole prefetch group in the tensor_load's window (temporary per-shape defaults).
       # stinkytofu drops the lead itself where a stage has under 64 WMMAs (counted in the asm).
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
-        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
-      # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
-      stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
-      stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 30
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
       # Tuning overrides from GlobalParameters win over the values above.
@@ -7259,6 +7281,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                            options=stinky_module_options)
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+
+      # The allocation dump goes to a directory per kernel, named like the
+      # kernel's own files, under StinkyTofuCostOutputDir when that is set.
+      if stinky_module_options["RegisterAllocationDump"]:
+        stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
+        if globalParameters.get("StinkyTofuCostOutputDir"):
+          stModule.setOutputDir(str(globalParameters["StinkyTofuCostOutputDir"]))
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
@@ -7280,7 +7309,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      # Tensile's own assembly, for the comparison ENABLE_DEBUG_STINKYTOFU_ASM
+      # writes below. Taken before the budget is re-judged, because that sets
+      # the kernel body's declared counts to the ones StinkyTofu emitted, which
+      # would leave both files declaring the same registers.
+      debugAsm = os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None
+      if debugAsm:
+        t_str_start = time.perf_counter()
+        orig_asm_str = str(moduleKernelBody)
+        t_str_end = time.perf_counter()
+        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+      # Pay off the deferral, and realign the recorded counts and the occupancy
+      # with them: both now come from what the emitted code declares, not from
+      # the pool estimate. The guard is defensive -- error is always 0 here --
+      # because a resolver that accepts would erase a rejection.
+      if error == 0:
+        error = self.resolveDeferredRegisterOverflow(kernel, moduleKernelBody,
+                                                     stModule.getDeclaredVgprCount(),
+                                                     stModule.getDeclaredSgprCount())
+        if error != 0:
+          # Rejected after all, so the skipped verdict is due: ForceGenerateKernel
+          # builds this source, so replace it with the stubbed rocisa module.
+          self.applyOverflowVerdict(kernel, moduleKernelBody, afterAllocation=True)
+          st_asm = str(moduleKernelBody)
+      else:
+        self.states.overflowPendingRA = 0
+
+      if debugAsm:
         t3_start = time.perf_counter()
         import hashlib, fcntl
         os.makedirs("cmpasm/orig", exist_ok=True)
@@ -7297,11 +7353,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
           st_path = f"cmpasm/st/{base_name}_{suffix}.s"
           suffix += 1
-
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
         with open(orig_path, "w") as f:
           f.write(orig_asm_str)
@@ -7323,6 +7374,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
     else:
+      # Unreachable: the mode gates a deferral on the same two questions the
+      # conversion gate above asks. Kept, and loud, because a deferral nothing
+      # resolves would silently accept an over-budget kernel.
+      if self.states.overflowPendingRA:
+        printWarning("%s: deferred register overflow but no StinkyTofu module; the mode "
+                     "and the conversion gate disagree" % self.states.kernelName)
+        error = self.states.overflowPendingRA
+        self.states.overflowPendingRA = 0
+        self.states.overflowedResources = error
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
@@ -7335,6 +7395,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
         raise ValueError("DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
+    if isStreamKSpatialCluster(kernel):
+      support = kernel["InternalSupportParams"]
+      if support.get("PersistentLoopArgsVersion", 0) != 2 or support["KernArgsVersion"] != 3:
+        raise ValueError("Clustered StreamK requires PersistentLoopArgsVersion=2 and KernArgsVersion=3")
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
@@ -8619,7 +8683,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             maxOffsetB = max(maxOffsetB, reachB)
 
         numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
-        numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+        # maxOffsetB is an extent (last byte is maxOffsetB-1), so an exact multiple of the reach needs no extra register.
+        # B-rotate asserts exactly two B local-read addresses, which this exposes at 128 KiB extents.
+        if kernel.get("LDSSegmentBRotate"):
+          numVgprMultiplierB = (maxOffsetB + maxLDSConstOffset - 1) // maxLDSConstOffset
+        else:
+          numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
         numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
         numVgprMultiplierMXSB = maxOffsetMXSB // maxLDSConstOffset + 1
         numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
@@ -9859,6 +9928,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
+    if kernel.get("LDSSegmentBRotate"):
+      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
+      # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
+      self.defineSgpr("BRotateLRDelta", 1)
 
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
@@ -9878,7 +9951,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)
@@ -10635,6 +10708,43 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
     using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
+
+  def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
+    """Effective register allocation mode from the kernel parameter: 0 off, 1 shadow,
+    2 apply, 3 force apply -- the mode a config string starts with -- and 0 whenever
+    the StinkyTofu path will not run. The module is built on the same conditions
+    checked here, so mode 3 guarantees the resolver is reached, which is what makes
+    deferring safe.
+
+    Only mode 3 defers, because only it needs to: shadow could not lower a count,
+    and plain apply admits no kernel the pool estimate rejected, since a verdict
+    it reaches was never set aside to begin with.
+
+    Every mode is still re-judged on the counts the emitted code declares, mode 0
+    included -- emitAssembly() rewrites those counts whether or not allocation
+    ran, and raises as well as lowers them. So any mode can newly *reject* a
+    kernel the pool estimate admitted, which is the kernel no longer fitting
+    rather than a policy this mode chose.
+    """
+    if kernel.get("_StinkyTofuOptLevel") is None:
+      return 0
+    if not rocisa.isSupportedByStinkyTofu(self.states.version):
+      return 0
+    # TODO: ask whether the backend's capabilities include the allocation passes
+    return parseStinkyTofuRegisterAllocation(kernel.get("StinkyTofuRegisterAllocation", 0))[1]
+
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Override in KernelWriterAssembly to defer a budget verdict to allocation."""
+    pass
+
+  def applyOverflowVerdict(self, kernel, mkb, afterAllocation: bool = False) -> None:
+    """Override in KernelWriterAssembly to report and act on an overflow."""
+    pass
+
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Override in KernelWriterAssembly to re-judge the budget after allocation."""
+    return 0
 
   ##############################################################################
   # Check Resources
@@ -11876,22 +11986,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     fileString += str(kb)
 
-    if isPersistentDataParallel(kernel):
-      # rocisa emits the outer ABI version. DataParallel kernels must also carry
-      # their policy and payload version when this assembly is reused as a
-      # prebuilt custom kernel without its original solution record.
+    if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
+      # rocisa emits the outer ABI version. Persistent kernels with a newer
+      # payload must carry its version when this assembly is reused without
+      # its original solution record. This also prevents unsupported custom
+      # StreamK ABI2 descriptors from being mistaken for legacy ABI0.
       legacyMetadata = "custom.config:\n  InternalSupportParams:\n    KernArgsVersion: 3\n"
-      dataParallelMetadata = (
+      policyMetadata = (
         "custom.config:\n"
-        "  TileProcessingStrategy: DataParallel\n"
+        f"  TileProcessingStrategy: {kernel['TileProcessingStrategy']}\n"
         "  WorkAssignment: StaticGrid\n"
+      )
+      if isStreamKSpatialCluster(kernel):
+        policyMetadata += f"  ClusterDim: {list(kernel['ClusterDim'])}\n"
+      policyMetadata += (
         "  InternalSupportParams:\n"
         "    KernArgsVersion: 3\n"
-        "    PersistentLoopArgsVersion: 1\n"
+        f"    PersistentLoopArgsVersion: {kernel['InternalSupportParams']['PersistentLoopArgsVersion']}\n"
       )
       if legacyMetadata not in fileString:
-        raise ValueError("DataParallel kernel is missing its KernArgsVersion=3 assembly metadata")
-      fileString = fileString.replace(legacyMetadata, dataParallelMetadata, 1)
+        raise ValueError("Persistent kernel is missing its KernArgsVersion=3 assembly metadata")
+      fileString = fileString.replace(legacyMetadata, policyMetadata, 1)
 
     if error != 0:
       if self.debugConfig.forceGenerateKernel:
@@ -11999,6 +12114,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert False, "Should be overrided"
 
   def tdmApplyTileKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyTileKOffset(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
