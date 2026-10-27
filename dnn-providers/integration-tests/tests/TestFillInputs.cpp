@@ -773,8 +773,9 @@ struct SingleFill
 };
 
 // Fills one rows x cols input of element type T through fillInputs() with `recipe` and
-// per-tensor `seed`, on the host. The tensor starts at 1.0 so an element a fill never
-// writes shows up as a 1.0 where no kind produces one. `values` holds the elements in
+// per-tensor `seed`, on the host. The tensor is built as a Tensor<T> directly, since the tensor
+// factory has no entry for every data type (fp8 fnuz). It starts at 1.0 so an element a fill
+// never writes shows up as a 1.0 where no kind produces one. `values` holds the elements in
 // row-major order when the fill was accepted.
 template <typename T>
 SingleFill<T> fillSingle(const FillRecipe& recipe,
@@ -786,7 +787,8 @@ SingleFill<T> fillSingle(const FillRecipe& recipe,
     const std::vector<int64_t> strides = {cols, 1};
     const auto gr = buildMatmulGraph(dataTypeOf<T>(), dims, strides);
     const std::vector<int64_t> ownedUids = {1};
-    auto inputs = makeTensorsFromGraph(gr, ownedUids);
+    InputTensorMap inputs;
+    inputs[1] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<T>>(dims, strides);
     inputs.at(1)->fillTensorWithValue(1.0f);
 
     InputFillRecipes recipes;
@@ -1593,6 +1595,45 @@ TEST(TestFillInputs, SpecialOnTypesThatHoldTheValueIsAccepted)
                             e8m0.values.end(),
                             [](types::fp8_e8m0 v) { return std::isnan(asDouble(v)); }),
               2048);
+}
+
+// Converting an infinity from float saturates it to the largest finite value in the fp8 types, so
+// a planted non-finite value must be written as the type's own encoding. Checked by raw bits
+// (OCP and IEEE encodings), with every element planted: half NaN 0x7E00 and +-inf 0x7C00 / 0xFC00,
+// bf16 0x7FC0 and 0x7F80 / 0xFF80, e4m3 NaN 0x7F, e5m2 NaN 0x7F and +-inf 0x7C / 0xFC, the fnuz
+// formats' NaN 0x80, e8m0 NaN 0xFF.
+template <typename T>
+void expectEveryElementHasBits(const FillRecipe& recipe, unsigned int bits)
+{
+    SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
+    const auto filled = fillSingle<T>(recipe, 7, 4, 4);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    ASSERT_EQ(filled.values.size(), 16u);
+    for(const T v : filled.values)
+    {
+        ASSERT_EQ(static_cast<unsigned int>(v.data), bits);
+    }
+}
+
+TEST(TestFillInputs, SpecialValuesAreWrittenAsTheTypesOwnEncoding)
+{
+    const auto nan = FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 1.0f);
+    const auto inf = FillRecipe::nonFinite(FillRecipe::SpecialValue::POS_INF, 1.0f);
+    const auto negInf = FillRecipe::nonFinite(FillRecipe::SpecialValue::NEG_INF, 1.0f);
+
+    expectEveryElementHasBits<types::half>(nan, 0x7E00U);
+    expectEveryElementHasBits<types::half>(inf, 0x7C00U);
+    expectEveryElementHasBits<types::half>(negInf, 0xFC00U);
+    expectEveryElementHasBits<types::bfloat16>(nan, 0x7FC0U);
+    expectEveryElementHasBits<types::bfloat16>(inf, 0x7F80U);
+    expectEveryElementHasBits<types::bfloat16>(negInf, 0xFF80U);
+    expectEveryElementHasBits<types::fp8_e4m3>(nan, 0x7FU);
+    expectEveryElementHasBits<types::fp8_e5m2>(nan, 0x7FU);
+    expectEveryElementHasBits<types::fp8_e5m2>(inf, 0x7CU);
+    expectEveryElementHasBits<types::fp8_e5m2>(negInf, 0xFCU);
+    expectEveryElementHasBits<types::fp8_e4m3_fnuz>(nan, 0x80U);
+    expectEveryElementHasBits<types::fp8_e5m2_fnuz>(nan, 0x80U);
+    expectEveryElementHasBits<types::fp8_e8m0>(nan, 0xFFU);
 }
 
 // Integers and e8m0 have no subnormal values; "every element is subnormal" has no answer there,

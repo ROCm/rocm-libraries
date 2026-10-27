@@ -226,6 +226,21 @@ not carry a baked `value`:
 expanded graph. If a tensor keeps `is_runtime_pass_by_value: true` and a `value`,
 it fails validation at load.
 
+A patch can also set a tensor's declared `alignment` (bytes, an integer of at least 1),
+which a template otherwise hard-codes (the quick Matmul template declares 16):
+
+```json
+"tensor_patches": [
+  { "uid": 1, "set": { "alignment": 4 } }
+]
+```
+
+A gauntlet [space](running-tests.md#gauntlet-fuzz-runs) writes this patch from its
+`alignment` axis, and `import_graph.py` writes it back when it freezes a graph whose
+tensor alignment differs from the template's, so a frozen finding keeps the alignment
+it failed at. Pair it with [`placement`](#placement-and-placement_uid) to put the
+device pointers there.
+
 ## Metadata sidecar — `{Name}.meta.json`
 
 This file holds provenance and run guards for a single-graph bundle. **Every
@@ -241,7 +256,10 @@ parses it.
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
+| `inputs` | object | Per-input fill recipes keyed by tensor uid as a string (`"3"`); see [`inputs`](#inputs--fill-recipes). A non-numeric key, or a recipe that does not parse, rejects the metadata. |
+| `validator` | string | `default` (when absent) or `match_nonfinite`: how float outputs are graded beyond the tolerance; see [`validator`](#validator). Any other value rejects the metadata. |
+| `placement` | string | `default` (when absent), `exact` or `under`: where the engine run's device pointers sit relative to each tensor's declared `alignment`; see [`placement` and `placement_uid`](#placement-and-placement_uid). Any other value rejects the metadata. |
+| `placement_uid` | int | The tensor `placement: "under"` misaligns. **Required** when `placement` is `under`; ignored by every other placement, so a space can always render it. A non-integer rejects the metadata. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
@@ -253,6 +271,125 @@ A bundle without its metadata is an error. These fields are required:
 
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
+
+### `inputs` — fill recipes
+
+`inputs` maps a tensor uid to the recipe that fills that input tensor. A recipe
+replaces the harness's default fill for that tensor; every input without one keeps its
+default.
+
+```json
+"inputs": {
+  "0": { "kind": "nonzero", "lo": -1, "hi": 1 },
+  "2": { "kind": "zeros" },
+  "3": { "kind": "special", "special": "nan", "fraction": 0.05 },
+  "4": { "seed": 7 }
+}
+```
+
+| `kind` | Fields it reads | Every element is |
+|---|---|---|
+| `free` | `lo`, `hi` (default -1, 1) | uniform over `[lo, hi]` |
+| `fixed` | `value` (default 0) | `value`. This is the constant fill. |
+| `nonzero` | `lo`, `hi` (default -1, 1; `lo <= hi`) | a `free` draw that is not zero in the tensor's data type (redrawn while it rounds to zero, then the endpoint of larger magnitude). Unsupported when that endpoint is itself zero in the data type. |
+| `zeros` | none | zero. Unsupported for `fp8_e8m0`, which has no zero. |
+| `large` | `scale` (**required**, `> 0`) | a magnitude uniform in `[top/2, top]` with a random sign, where `top = min(scale, the data type's largest finite value)`. Never infinite. Integer types need `scale >= 1`. |
+| `subnormal` | none | a subnormal value of the tensor's data type, random sign where signed. Unsupported for integers and for types without subnormals (`fp8_e8m0`). |
+| `special` | `special` (**required**: `"nan"`, `"inf"` or `"-inf"`), `fraction` (**required**, `[0, 1]`), `lo`, `hi` (default -1, 1; `lo <= hi`) | `round(fraction * elements)` elements, and at least one when `fraction > 0`, are the non-finite `special`; the rest are `free` over `[lo, hi]`. Unsupported for integers, and for a value the type lacks (NaN for fp4 and fp6; infinity for fp4, fp6, `fp8_e4m3`, `fp8_e4m3_fnuz`, `fp8_e5m2_fnuz` and `fp8_e8m0`). |
+
+Any entry may add `seed`, an unsigned 32-bit integer that seeds that tensor's draws. An
+entry with a `seed` and no `kind` changes only the seed.
+
+**The parse is strict.** An unknown `kind` (there is no `constant`; use `fixed`), a
+`kind` that is not a string, an entry that is not an object, a field the kind reads
+that is not a finite number in the range of a 32-bit float, a bad `seed`, `lo > hi`
+(`nonzero`, `special`), a `large` without `scale > 0`, or a `special` without a valid
+`special` and a `fraction` in `[0, 1]` is a metadata error: the case registers as a
+failing test that names the uid and the field, and no entry of that case is applied.
+**Fields a kind does not read are ignored**, whatever they hold, so a space can render
+every field for every kind and select the kind with one expression.
+
+Whether a data type can hold a kind is known only when the tensor is filled. A kind the
+type cannot hold (the "Unsupported" entries above) makes the case `UNEXERCISED`, never a pass.
+
+### `validator`
+
+| Value | Grading |
+|---|---|
+| `default` | The tolerance resolved for each tensor, unchanged: the plain allclose and RMS validators fail on any NaN or Inf. |
+| `match_nonfinite` | Non-finite elements are matched by position; finite elements keep the resolved tolerance. |
+
+`match_nonfinite` classifies each position by the reference and engine values:
+
+- NaN against NaN matches, whatever the payloads and signs. Inf against Inf of the
+  **same sign** matches. A matched position is excluded from the tolerance math.
+- NaN against a finite value, a finite value against Inf, `+Inf` against `-Inf` and NaN
+  against Inf all fail.
+- Finite against finite is graded as usual: `atol + rtol * |reference|` for allclose, the
+  relative RMS error for an RMS tensor. The resolved kind (including a per-tensor
+  [TOML](#per-engine-test-config--configengine_nametoml) override) stays in force.
+- A reference with **no finite element** (every element NaN or Inf) **fails**: with the
+  finite part empty there is nothing to grade, and a vacuous pass would hide garbage on
+  both sides.
+- **Unwritten outputs.** With the mask on, NaN matches NaN, so an element the engine
+  never wrote would pass. The engine run's output buffers are therefore prefilled with a
+  NaN carrying a distinctive payload, and an engine element still holding it fails. The
+  reference's buffers keep the plain NaN sentinel.
+- It applies to `float`, `half`, `bfloat16` and `double` outputs only; every other
+  output (integer, fp8, sub-byte) is graded as under `default`.
+- It exists only on the host. Under `--validator auto` the case's comparison is
+  **forced to the host**, even for a GPU reference's output, as `--validator cpu` does.
+  An explicit `--validator gpu` contradicts it: the case fails before the engine runs, as
+  `UNEXERCISED` at stage `setup`, with a message naming `--validator auto` and
+  `--validator cpu` as the options.
+
+Use it with the `special` fill above, so the case can expect non-finite output.
+
+### `placement` and `placement_uid`
+
+`placement` moves the engine run's device buffers relative to each tensor's declared
+`alignment` N (see [`tensor_patches`](#tensor_patches)). It changes only the **engine
+run**: a reference run is never placed, and nothing is placed when the run has no device
+buffers (a host input policy).
+
+| Value | Engine run's device pointers |
+|---|---|
+| `default` | Where the allocator put them. |
+| `exact` | Every device pointer is aligned to its tensor's N and not to 2N. |
+| `under` | The pointer of `placement_uid` is aligned to N/2 and not to N, so a backend that enforces N must reject it; every other pointer stays where it is. Needs N >= 2 for that tensor. |
+
+`placement_uid` is **required** for `under` (the metadata is rejected without it) and
+ignored for `default` and `exact`. For `under` the case expects the backend to refuse
+that one pointer with `BAD_PARAM`; see [the finished record](#finished-record-fields).
+
+A tensor stays where it is, with an `INFO` log line, when it is a runtime pass-by-value
+scalar (a host pointer), an input of the sub-byte packed set, or has no declared
+alignment. A `placement_uid` that names such a tensor, or no tensor of the run, or an
+`under` tensor with N < 2, cannot be set up: the case is `UNEXERCISED` at stage `setup`.
+
+### Finished-record fields
+
+The harness echoes these into the `finished` record of the
+[outcome report](running-tests.md#outcome-report), so a passing run shows what it was
+asked to do:
+
+| Field | Content |
+|---|---|
+| `inputs` | The recipes the harness parsed from `metadata.inputs`, keyed by uid; absent when the case sets none. |
+| `validator` | `"default"` or `"match_nonfinite"`, as the metadata spells it. |
+| `placement` | `"default"`, `"exact"` or `"under"`. |
+| `placement_uid` | Present when the metadata sets one. |
+| `expected_status` | `"BAD_PARAM"` on a pass that verified a rejection; absent otherwise. |
+
+`validator`, `placement` and `placement_uid` are absent from the record of a bundle
+that failed to load, which has no parsed metadata.
+
+**The expected `BAD_PARAM` rule.** A case with `placement: "under"` passes only if the
+engine accepted the graph and the backend then rejected the misaligned pointer of
+`placement_uid` with `BAD_PARAM` for that uid. That is `PASS` at depth `verified` with
+`expected_status: "BAD_PARAM"`, and nothing was compared. Every other result is a
+failure: the backend executed the graph with the pointer below its alignment, the engine
+declined after being handed the graph, or `BAD_PARAM` named another uid or another error.
 
 ## Golden data — `.tensors.dvc` and `.bin`
 

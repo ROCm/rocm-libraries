@@ -235,9 +235,14 @@ metadata and is absent when the case sets none. `stage` is where the test stoppe
 `graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle` or `setup`
 (`none` for a pass).
 
+A case that sets `metadata.inputs`, `validator`, `placement` or `placement_uid` echoes them
+into its `finished` record as `inputs`, `validator`, `placement` and `placement_uid`, and a
+pass that verified a rejection adds `"expected_status":"BAD_PARAM"`. The fields are
+described in [Finished-record fields](file-formats.md#finished-record-fields).
+
 | Outcome | Meaning |
 |---|---|
-| `PASS` | The engine accepted the graph and its output matched an oracle. |
+| `PASS` | The engine accepted the graph and its output matched an oracle. For a case with `placement: "under"` it means instead that the backend rejected the misaligned pointer with `BAD_PARAM` (the record carries `expected_status`); see [reading a placement probe](#reading-an-alignment-or-placement-probe). |
 | `DECLINED` | The support query resolved and the engine is absent from the ranked list, or the engine declined later (`EngineNotApplicableError` while building or running). For a claimed graph the run also fails as `CLAIM_BROKEN`. |
 | `WRONG` | Accepted, ran, and the output did not match the oracle. |
 | `CRASH` | In the ranked list, then failed to build or execute, **including a late `NOT_SUPPORTED`** (accepting a graph is a promise). Also: a hang or a dead process, which only the driver can see. |
@@ -270,6 +275,63 @@ The driver prints the seed it used. Run it again with `--seed` to get the same
 samples. Spaces live in `gauntlet/spaces/` (`<Op>[.<Name>].space.json`); with no
 `--filter` every space runs, and a space whose graphs the engine does not accept
 reports `DECLINED`, not a failure.
+
+**Shipped spaces.** `--filter` matches the id in the first column.
+
+| Space | Engine | Template (quick tier) | Draws |
+|---|---|---|---|
+| `Batchnorm/Default` | `HIP_MLOPS_ENGINE` | `Batchnorm/Default` | forward training, rank 4 or 5, NCHW/NHWC strides |
+| `BatchnormBackward/Default` | `HIP_MLOPS_ENGINE` | `BatchnormBackward/Variant2` | backward with saved mean and inverse variance |
+| `BatchnormInference/Default` | `HIP_MLOPS_ENGINE` | `BatchnormInference/Default` | forward inference, y in x's type or widened to float |
+| `Layernorm/Default` | `HIP_MLOPS_ENGINE` | `Layernorm/Default` | forward training (y, saved mean and inverse variance) |
+| `LayernormBackward/Default` | `HIP_MLOPS_ENGINE` | `LayernormBackward/Variant2` | backward with saved mean and inverse variance |
+| `RMSNorm/Default` | `HIP_MLOPS_ENGINE` | `RMSNorm/Variant4` | forward inference with scale and bias |
+| `RMSNormBackward/Default` | `HIP_MLOPS_ENGINE` | `RMSNormBackward/Default` | backward (dx, dscale, dbias; saved inverse RMS) |
+| `ResampleFwd/Default` | `HIP_MLOPS_ENGINE` | `ResampleFwd/Variant2` | pooling forward, no index output |
+| `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192 |
+| `SdpaFwd/Gfx950Dense` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | SDPA forward, BSHD, head size 64 or 128 |
+| `Matmul/Align` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **not a shape space**: one fixed float batched matmul, varying only `alignment` and `placement` |
+
+The engine column is informational (the space's `engine` key). A space's `description`
+says what it draws, why each constraint exists and which tensor each axis touches.
+
+**Input-value, alignment and placement axes.** Every space except `Matmul/Align` has a
+`domain` axis, and every space has an `alignment` and a `placement` axis. They render
+case metadata and `tensor_patches` rather than shape values:
+
+| Axis | Values | Renders |
+|---|---|---|
+| `domain` | `default`, `narrow`, `wide`, `positive`, `constant`, `nonzero`, `zeros`, `large`, `subnormal`, `nan`, `inf` | The [`metadata.inputs`](file-formats.md#inputs--fill-recipes) recipe of the space's domain tensor(s), below. `nan` and `inf` also set `validator: "match_nonfinite"`. |
+| `alignment` | `1`, `2`, `4`, `8`, `16`, `32`, `64`, `128`, `256` | A `tensor_patches` entry per device tensor that sets its declared `alignment` (bytes). Host scalars such as epsilon keep the template's value. |
+| `placement` | `default`, `exact`, `under` | `metadata.placement`, with `placement_uid` set to one fixed tensor. `under` is rendered as `exact` when the drawn `alignment` is 1, because nothing is below an alignment of 1; the summary still counts the draw as `under`. |
+
+| `domain` | Recipe of the domain tensor |
+|---|---|
+| `default` | `free` over `[-1, 1]` |
+| `narrow` | `free` over `[-0.01, 0.01]` |
+| `wide` | `free` over `[-8, 8]` |
+| `positive` | `free` over `[0.25, 4]` |
+| `constant` | `fixed` at `0.5` |
+| `nonzero` | `nonzero` over `[-1, 1]` |
+| `zeros` | `zeros` |
+| `large` | `large` with `scale` 32 (8 in the SDPA spaces, 4 in `LayernormBackward` and `RMSNormBackward`) |
+| `subnormal` | `subnormal` |
+| `nan`, `inf` | `special` (`"nan"` or `"inf"`), `fraction` 0.05, planted on tensors chosen so a non-finite element stays local to a few outputs (the space's `description` names them); the case grades with `match_nonfinite` |
+
+A domain a data type cannot hold (`subnormal` on an integer tensor, `inf` on fp8) is
+`UNEXERCISED`, not a failure. In the SDPA spaces a non-finite V element reaches a whole
+output column, so most `nan`/`inf` samples with a long kv sequence produce an all
+non-finite reference, which `match_nonfinite` fails by design: expect `WRONG` there
+without an engine defect.
+
+**`late` axes.** `RMSNorm`, `SdpaFwd/Default` and `SdpaFwd/Gfx950Dense` declare their
+`domain`, `alignment` and `placement` axes with `"late": true`; the other spaces declare
+them as ordinary axes. A space draws all its axes from one generator seeded with the shape
+seed, and a draw rejected by a constraint is retried from that generator. Adding an axis
+there would move every later draw, retries included, so `--seed` would no longer reproduce
+the shapes of earlier runs. A `late` axis draws from a stream of its own (shape seed,
+attempt and axis name), so the earlier axes keep their draws: the same seed gives the
+same shape as before, and only the new axes get values. Late axes come last.
 
 Before the first batch the driver lists the binary's tests on an empty bundle root with
 the run's own flags. A healthy binary lists its compiled-in tests (exit 0) or reports
@@ -317,6 +379,15 @@ sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reason
 never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
 tested the engine.
 
+**Sweep directories.** The driver writes one sweep per input data type, under
+`bundles/gauntlet/<Op>/<Space>/<tag>_cases/`, where `<tag>` is `fp32`, `fp16` or `bfp16`
+(a sample's `x_dtype`, or its `dtype` when the space has no `x_dtype`; a space with neither
+axis, such as `Matmul/Align`, has no `<tag>_cases` level). The tag is in the directory,
+and so in the GTest suite name (`gauntlet_RMSNorm_Default_fp16_cases.s123`), because
+an engine's [TOML](file-formats.md#per-engine-test-config--configengine_nametoml)
+tolerance and skip globs match the full test name and the quick bundles carry the dtype
+tag in the case id (`*fp16_*`), while a gauntlet case id is only `s<seed>`.
+
 **Failure artifacts.** `failures/<case>/` is written before the run continues and holds
 the expanded graph (`<case>.json`, tensor UIDs in canonical order), its metadata
 (`<case>.meta.json`, `purpose: regression`), `repro.json` (space, hashes of the space
@@ -326,6 +397,43 @@ binary's log tail, and `replay.sh`: one command that regenerates the same graph 
 same input tensors. Device-filled inputs differ from the host fill's, so a replay uses
 the fill path of the original run. To turn a finding into a checked-in case, see
 [Freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding).
+
+**`summary.json` `axis_outcomes`.** For the `alignment`, `placement` and `domain` axes a
+sample drew, the summary counts outcomes per axis value:
+`axis_outcomes[<space id>][<axis>][<value as a string>]` is an object with a count for each of
+`PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` and `UNEXERCISED`. The value is the
+one drawn, so an `under` that was rendered as `exact` at alignment 1 counts under `under`.
+A space without the axis has no entry for it.
+
+### Reading an alignment or placement probe
+
+Read `axis_outcomes[...]["alignment"]` against `["placement"]`, or a record's `placement`
+and its `reason`. For `default` and `exact` the case is an ordinary run with the tensors
+declared (and placed) at that alignment:
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | The engine accepted the declared alignment, and the output matched. |
+| `DECLINED` | The engine does not take a graph that declares this alignment (for example through the version gate). The expected answer for an alignment it does not support; not a defect. |
+| `CRASH` | The engine accepted the graph, then failed to build or execute: for `exact`, for example, it refused a pointer that sits exactly at the alignment the graph declares. |
+| `WRONG` | It ran, and the output did not match the oracle. |
+| `UNEXERCISED` | The harness could not set the case up (the `reason` says why). |
+
+For `under` the case is written to be refused. The harness misaligns the pointer of
+`placement_uid` to half its declared alignment and the engine must accept the graph and then
+reject that pointer:
+
+| Outcome | Meaning |
+|---|---|
+| `PASS` | **`BAD_PARAM` was returned** for the `placement_uid` tensor; the record has `expected_status: "BAD_PARAM"` and nothing was compared. The backend enforces the declared alignment. |
+| `DECLINED` | The engine is absent from the ranked list for this graph, so the misaligned pointer was never offered to it. It says nothing about alignment enforcement. |
+| `CRASH` | The engine accepted the graph and the backend did not refuse that pointer: it executed the graph (`reason` starts `expected BAD_PARAM for uid N`), declined after accepting it, or failed with another error. A backend that does not enforce the declared alignment lands here. |
+| `UNEXERCISED` | The pointer could not be placed: `placement_uid` is not a device buffer of the run (a by-value scalar, a sub-byte packed input, or not a tensor), or its alignment is below 2. |
+
+Compare the `exact` and `under` rows of one alignment. `exact` `PASS` with `under`
+`PASS` is a backend that honors the declaration. `exact` `PASS` with `under` `CRASH` is one
+that accepts the declaration and ignores it. `DECLINED` in both means the engine's version
+or applicability gate removed that alignment from its support.
 
 Run the driver's own tests with
 `python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`

@@ -272,15 +272,17 @@ std::optional<T> nonFiniteValue(FillRecipe::SpecialValue special)
             }
             return std::nullopt;
         case FillRecipe::SpecialValue::POS_INF:
-            if(std::numeric_limits<T>::has_infinity)
+            if constexpr(std::numeric_limits<T>::has_infinity)
             {
-                return fromDouble<T>(std::numeric_limits<double>::infinity());
+                // Not converted from float: the fp8 constructors saturate an infinity to the
+                // largest finite value.
+                return std::numeric_limits<T>::infinity();
             }
             return std::nullopt;
         case FillRecipe::SpecialValue::NEG_INF:
-            if(std::numeric_limits<T>::has_infinity)
+            if constexpr(std::numeric_limits<T>::has_infinity)
             {
-                return fromDouble<T>(-std::numeric_limits<double>::infinity());
+                return -std::numeric_limits<T>::infinity();
             }
             return std::nullopt;
         default:

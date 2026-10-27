@@ -160,7 +160,7 @@ TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndAnExplicitDeviceOverri
 // Bug caught: a host-only validator selected by the case being sent to the device because the
 // reference left its output there (a GPU reference), or an explicit --validator gpu silently
 // overridden instead of reported.
-TEST(TestResolveValidationSite, ACaseThatNeedsTheHostForcesItAndRefusesAnExplicitGpu)
+TEST(TestResolveValidationSite, ACaseThatNeedsTheHostForcesItAndRefusesAnExplicitDeviceValidator)
 {
     using hipdnn_integration_tests::resolveValidationSite;
     using hipdnn_integration_tests::ValidationSite;

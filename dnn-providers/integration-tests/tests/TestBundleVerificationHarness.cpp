@@ -1127,7 +1127,7 @@ TEST_F(TestGoldenHarnessFixture, MaskedRunFailsAnOutputElementTheEngineNeverWrot
 // Bug caught: the host-only validator running under --validator gpu (which would read device
 // memory through host pointers) or silently overriding the flag; the conflict is reported, and
 // before the engine has spent its time.
-TEST_F(TestGoldenHarnessFixture, MaskedCaseUnderAnExplicitGpuValidatorIsAConfigurationError)
+TEST_F(TestGoldenHarnessFixture, MaskedCaseUnderAnExplicitDeviceValidatorIsAConfigurationError)
 {
     testing_support::HarnessMocks mocks;
     EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);

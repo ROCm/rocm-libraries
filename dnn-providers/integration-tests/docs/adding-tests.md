@@ -214,6 +214,51 @@ a failure seen with device-filled inputs reproduces bit for bit only on the same
 `--gtest_filter`, record the engine's decline or fix in the usual way, and keep the
 fuzz finding's `repro.json` in the issue that reports the defect.
 
+The finding keeps the alignment it failed at. A space's `alignment` axis writes a
+`tensor_patches` entry into the sweep row, and the failure's graph has that alignment
+baked in. `import_graph.py` compares each tensor's `alignment` with the template's and
+emits a `tensor_patches` entry (`{"uid": N, "set": {"alignment": A}}`) on the new case for
+every tensor that differs, so the frozen case declares the same alignment as the
+finding. A graph that matches an existing case with its patches applied, and has the same
+seed and `inputs`, is reported as a duplicate. `<case>.meta.json` also carries the case's
+`inputs` recipes, `validator`, `placement` and `placement_uid`, with the uids remapped
+together with the graph, and `import_graph.py` copies them into the new case, so the
+frozen case replays the same input values, grading and pointer placement
+([formats](file-formats.md#metadata-sidecar--namemetajson)). A finding from an `under`
+placement keeps `placement: "under"`, so the frozen case still expects `BAD_PARAM` and
+fails until the backend rejects that pointer.
+
+### Add a domain, alignment or placement axis to a space
+
+A space (`gauntlet/spaces/<Op>[.<Name>].space.json`) renders one sweep case per sample
+from its axes. The input-value, alignment and placement axes touch only the case's
+`metadata` and `tensor_patches`, never the graph topology, so each is a few lines of
+the space. Copy `RMSNorm.space.json`, `ResampleFwd.space.json` or `Matmul.Align.space.json` as a
+model; the axes are documented in
+[Gauntlet fuzz runs](running-tests.md#gauntlet-fuzz-runs).
+
+| Step | In the space |
+|---|---|
+| Declare the axis | `"axes"`: `"domain": {"values": ["default", "narrow", ..., "nan", "inf"]}`, `"alignment": {"values": [1, 2, 4, ..., 256]}`, `"placement": {"values": ["default", "exact", "under"]}`. Use these names: the summary's `axis_outcomes` breaks outcomes down by `alignment`, `placement` and `domain` only. |
+| Mark it `late` if seeds exist | Add `"late": true` to an axis you add to a space whose `--seed` runs you want to keep reproducing: a `late` axis draws from its own stream, so the earlier axes keep their draws (a new axis in the shared stream shifts every later draw, retries included). Late axes must come last: a non-late axis after a late one is a load error. |
+| Derive the recipe | `"derive"`: one expression per recipe field, selecting from the axis, for example `"dom_kind": "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ...)"`, `dom_lo`, `dom_hi`, `dom_value`, `dom_scale`, `dom_special`, `dom_fraction`, and `"dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'"`. |
+| Render the fills | `case.metadata.inputs`: `"<uid>": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}`. Render every field for every kind: fields a kind does not read are ignored, so one expression picks the kind. Keep the non-finite out of an operand that spreads it over many outputs (put `nan`/`inf` on a tensor each output element meets elementwise, as the spaces do) and say why in `description`. Set `"validator": "${dom_validator}"` beside it. |
+| Declare the alignment | `case.tensor_patches`: `{"uid": N, "set": {"alignment": "${alignment}"}}` for each device tensor. The patch may set only `alignment`; `uid` and `alignment` may be `${expr}` strings; a rendered uid must be an integer and the alignment an integer of at least 1. Leave host scalars (an epsilon, a by-value tensor) at the template's value. |
+| Place the pointers | `case.metadata`: `"placement": "${eff_placement}"` and `"placement_uid": N`, with `"eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"` in `derive` (an `under` placement needs an alignment of at least 2 to be below). `N` is the data operand whose pointer is misaligned; it must be a device buffer of the run, or the case is `UNEXERCISED`. |
+
+`case.metadata` must not set the driver-owned keys `format_version`, `generator`, `seed`
+or `notes` (a load error). Every error in a space names the space.
+
+Then:
+
+1. List the new space's operands in the tables of
+   `gauntlet/test_gauntlet.py` (`PRIMARY_OPERANDS`, `POISONED_OPERANDS`,
+   `PLACEMENT_OPERAND`); `test_every_shipped_space_has_its_operands_listed` fails until
+   each shipped space has an entry.
+2. Run the driver's tests (`python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`; they need no GPU), then a short fuzz run with
+   `--filter '^<Op>/<Name>$' --samples 16`, and read the
+   [placement probe results](running-tests.md#reading-an-alignment-or-placement-probe).
+
 ### Finding existing cases
 
 ```bash
