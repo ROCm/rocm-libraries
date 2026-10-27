@@ -55,9 +55,9 @@ template<>
 struct numeric_limits<test_utils::half> : public _HIPCUB_STD::numeric_limits<test_utils::half>
 {
 public:
-    using T = test_utils::half;
+    using T                              = test_utils::half;
     static constexpr bool is_specialized = true;
-    static inline T min()
+    static inline T       min()
     {
         return T(0.00006104f);
     };
@@ -92,9 +92,9 @@ class numeric_limits<test_utils::bfloat16>
     : public _HIPCUB_STD::numeric_limits<test_utils::bfloat16>
 {
 public:
-    using T = test_utils::bfloat16;
+    using T                              = test_utils::bfloat16;
     static constexpr bool is_specialized = true;
-    static inline T max()
+    static inline T       max()
     {
         return set_half_bits<T>(0x7f7f);
     };
@@ -560,6 +560,22 @@ inline std::vector<int> get_warp_valid_items(T seed_value)
     return sizes;
 }
 
+template<class ForwardIt, class T>
+void segmented_iota(ForwardIt first, ForwardIt last, T init)
+{
+    using value_type = typename std::iterator_traits<ForwardIt>::value_type;
+
+    const value_type max_val = static_cast<size_t>(std::numeric_limits<value_type>::max());
+    const size_t     size    = last - first - 1;
+    const size_t     stride  = (size + max_val + 1) / max_val;
+
+    for(T value = init; first != last && value < max_val; ++value)
+    {
+        const auto segment_size = std::min(stride, static_cast<size_t>(std::distance(first, last)));
+        std::fill(first, first + segment_size, static_cast<value_type>(value));
+        first += segment_size;
+    }
+}
 } // namespace test_utils
 
 #endif // HIPCUB_TEST_HIPCUB_TEST_UTILS_DATA_GENERATION_HPP_

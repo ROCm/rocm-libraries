@@ -36,6 +36,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::DeviceFind::FindIf`.
 * Added new `hipcub::DeviceTransform::Transform` N->M API.
 * Feature parity with CCCL/CUB 3.3.0.
+* Added new `hipcub::DeviceFind::{Lower,Upper}Bound`.
 * Feature parity with CCCL/CUB 3.3.1.
 
 ### Changed

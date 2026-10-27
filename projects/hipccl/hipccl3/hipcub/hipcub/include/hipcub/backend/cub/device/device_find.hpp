@@ -35,6 +35,62 @@ struct DeviceFind
                                                                 num_items,
                                                                 stream));
     }
+
+    template<typename RangeIteratorT,
+             typename RangeNumItemsT,
+             typename ValuesIteratorT,
+             typename ValuesNumItemsT,
+             typename OutputIteratorT,
+             typename CompareOpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t LowerBound(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 RangeIteratorT  d_range,
+                                 RangeNumItemsT  range_num_items,
+                                 ValuesIteratorT d_values,
+                                 ValuesNumItemsT values_num_items,
+                                 OutputIteratorT d_output,
+                                 CompareOpT      comp,
+                                 hipStream_t     stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceFind::LowerBound(d_temp_storage,
+                                                                    temp_storage_bytes,
+                                                                    d_range,
+                                                                    range_num_items,
+                                                                    d_values,
+                                                                    values_num_items,
+                                                                    d_output,
+                                                                    comp,
+                                                                    stream));
+    }
+
+    template<typename RangeIteratorT,
+             typename RangeNumItemsT,
+             typename ValuesIteratorT,
+             typename ValuesNumItemsT,
+             typename OutputIteratorT,
+             typename CompareOpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t UpperBound(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 RangeIteratorT  d_range,
+                                 RangeNumItemsT  range_num_items,
+                                 ValuesIteratorT d_values,
+                                 ValuesNumItemsT values_num_items,
+                                 OutputIteratorT d_output,
+                                 CompareOpT      comp,
+                                 hipStream_t     stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceFind::UpperBound(d_temp_storage,
+                                                                    temp_storage_bytes,
+                                                                    d_range,
+                                                                    range_num_items,
+                                                                    d_values,
+                                                                    values_num_items,
+                                                                    d_output,
+                                                                    comp,
+                                                                    stream));
+    }
 };
 
 END_HIPCUB_NAMESPACE
