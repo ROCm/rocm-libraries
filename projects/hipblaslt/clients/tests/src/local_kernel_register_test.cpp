@@ -546,6 +546,18 @@ TEST(LocalKernelRegister, DISABLED_RegisterWhileLaunchingWorker)
         }
         EXPECT_EQ(hipblasLtDestroy(own), HIPBLAS_STATUS_SUCCESS);
     });
+    struct StopLauncher
+    {
+        std::atomic<bool>& done;
+        std::thread&       launcher;
+
+        ~StopLauncher()
+        {
+            done.store(true);
+            if(launcher.joinable())
+                launcher.join();
+        }
+    } stopLauncher{done, launcher};
 
     for(int i = 0; i < 20; i++)
     {
