@@ -335,10 +335,9 @@ TEST(internal_level3_bsrsm, solve_grid_size_clamps_to_whole_panels)
     // panels so the kernels' stride stays a multiple of mb.
     EXPECT_EQ(rocsparse::bsrsm_solve_grid_size(1000, 16 * 8, 16, 2500), 2000);
 
-    // mb alone above the limit: return mb so the launch fails loudly with
-    // hipErrorInvalidConfiguration rather than running a grid the kernels cannot
-    // stride.
-    EXPECT_EQ(rocsparse::bsrsm_solve_grid_size(1000, 16 * 8, 16, 999), 1000);
+    // mb alone above the limit: the grid is the limit itself, and the kernels
+    // fall back to contiguous chunks of the flattened space.
+    EXPECT_EQ(rocsparse::bsrsm_solve_grid_size(1000, 16 * 8, 16, 999), 999);
 
     // The overflowing configuration: 2,187,500,000 blocks clamped to the grid
     // limit, then trimmed to 42,949 whole panels of 50,000 block rows.
@@ -350,19 +349,28 @@ TEST(internal_level3_bsrsm, solve_grid_size_clamps_to_whole_panels)
     EXPECT_EQ(rocsparse::bsrsm_solve_grid_size(0, 8, 16, max_grid_x), 0);
 }
 
-TEST(internal_level3_bsrsm, solve_grid_size_is_always_a_multiple_of_mb)
+TEST(internal_level3_bsrsm, solve_grid_size_is_a_multiple_of_mb_or_the_limit)
 {
     // The kernels derive their stride as (gridDim.x / mb) * mb. If grid.x were not
     // a whole number of panels the stride would no longer pin a block to a single
     // row-map slot, and a block could wait on a done_array flag owned by a block
-    // that has not been dispatched yet.
+    // that has not been dispatched yet. A limit below mb gives the limit itself,
+    // which the kernels walk in contiguous chunks.
     for(int64_t mb = 1; mb <= 37; ++mb)
     {
         for(int64_t max_grid_x = 1; max_grid_x <= 200; max_grid_x += 7)
         {
             const int64_t grid = rocsparse::bsrsm_solve_grid_size(mb, 16 * 5, 16, max_grid_x);
-            EXPECT_EQ(grid % mb, 0) << "mb=" << mb << ", max_grid_x=" << max_grid_x;
-            EXPECT_GE(grid, mb) << "mb=" << mb << ", max_grid_x=" << max_grid_x;
+            if(max_grid_x < mb)
+            {
+                EXPECT_EQ(grid, max_grid_x) << "mb=" << mb << ", max_grid_x=" << max_grid_x;
+            }
+            else
+            {
+                EXPECT_EQ(grid % mb, 0) << "mb=" << mb << ", max_grid_x=" << max_grid_x;
+                EXPECT_GE(grid, mb) << "mb=" << mb << ", max_grid_x=" << max_grid_x;
+            }
+            EXPECT_LE(grid, max_grid_x);
             EXPECT_LE(grid, rocsparse::bsrsm_num_blocks(mb, 16 * 5, 16));
         }
     }
@@ -450,7 +458,7 @@ TEST(internal_level3_bsrsm, solve_lower_undersized_grid_two_panels)
     expect_exact_solution(true, got, grid_x);
 }
 
-// The tightest grid the clamp can produce: a single RHS panel, so all seven panels
+// The tightest grid that still strides: a single RHS panel, so all seven panels
 // are reached only by striding. Also the case where gridDim.x == mb exactly.
 TEST(internal_level3_bsrsm, solve_lower_undersized_grid_single_panel)
 {
@@ -477,6 +485,21 @@ TEST(internal_level3_bsrsm, solve_lower_ragged_grid_is_not_a_multiple_of_mb)
     const int64_t grid_x = 2 * bsrsm_mb + 3;
     ASSERT_LT(grid_x, bsrsm_blocks);
     ASSERT_NE(grid_x % bsrsm_mb, 0);
+
+    std::vector<test_T> got;
+    rocsparse_int       pivot = 0;
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(true, grid_x, got, pivot));
+    EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
+    expect_exact_solution(true, got, grid_x);
+}
+
+// Fewer blocks than mb, what bsrsm_solve_grid_size returns when mb alone
+// exceeds the limit: the kernels walk contiguous chunks of the flattened space.
+// 56 flattened blocks over 3 blocks, chunks of 19, 19 and 18.
+TEST(internal_level3_bsrsm, solve_lower_undersized_grid_below_mb)
+{
+    const int64_t grid_x = 3;
+    ASSERT_LT(grid_x, bsrsm_mb);
 
     std::vector<test_T> got;
     rocsparse_int       pivot = 0;
@@ -529,6 +552,18 @@ TEST(internal_level3_bsrsm, solve_upper_undersized_grid_two_panels)
     expect_exact_solution(false, got, grid_x);
 }
 
+TEST(internal_level3_bsrsm, solve_upper_undersized_grid_below_mb)
+{
+    const int64_t grid_x = 3;
+    ASSERT_LT(grid_x, bsrsm_mb);
+
+    std::vector<test_T> got;
+    rocsparse_int       pivot = 0;
+    ASSERT_NO_FATAL_FAILURE(solve_on_grid<true>(false, grid_x, got, pivot));
+    EXPECT_EQ(pivot, std::numeric_limits<rocsparse_int>::max());
+    expect_exact_solution(false, got, grid_x);
+}
+
 // ---------------------------------------------------------------------------
 // Defect 1 through the public API, with a forced clamp.
 // ---------------------------------------------------------------------------
@@ -539,9 +574,9 @@ TEST(internal_level3_bsrsm, solve_upper_undersized_grid_two_panels)
 // WIDE ones is under test as well: a clamped grid launched on the narrow kernels
 // leaves every RHS panel past the first sweep at alpha * B.
 //
-// Limits: 0 keeps the device limit (narrow path), 1 is below mb (the grid is
-// raised to mb, one panel per sweep), 8 is exactly mb, 16 is two panels and 19 is
-// ragged, rounded down to 16.
+// Limits: 0 keeps the device limit (narrow path), 1 is below mb (a single block
+// walks the whole flattened space as one chunk), 8 is exactly mb, 16 is two
+// panels and 19 is ragged, rounded down to 16.
 
 namespace
 {

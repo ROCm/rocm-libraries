@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 
 #include <limits>
 #include <type_traits>
@@ -63,8 +64,8 @@ namespace rocsparse
     // block can end up waiting on a block that has not been dispatched yet, and the
     // solve hangs instead of returning (AISPARSE-669 found this in csrsm).
     //
-    // If mb alone exceeds max_grid_x this returns mb, a grid past the limit,
-    // rather than one too small to hold a single RHS panel.
+    // If mb alone exceeds max_grid_x the grid is max_grid_x itself, and the WIDE
+    // kernels walk contiguous chunks of the flattened space instead of striding.
     __host__ __forceinline__ int64_t bsrsm_solve_grid_size(int64_t mb,
                                                            int64_t nrhs,
                                                            int64_t ncols,
@@ -78,7 +79,7 @@ namespace rocsparse
         const int64_t num_blocks = rocsparse::bsrsm_num_blocks(mb, nrhs, ncols);
         const int64_t clamped    = rocsparse::min(num_blocks, max_grid_x);
 
-        return rocsparse::max(clamped / mb, static_cast<int64_t>(1)) * mb;
+        return (clamped >= mb) ? (clamped / mb) * mb : clamped;
     }
 
     // Whether the bsrsm solve launch must take the WIDE instantiation of the
@@ -346,21 +347,45 @@ namespace rocsparse
             // done_array dependency on a lower numbered block of the same sweep, which
             // is what keeps the spin loops from deadlocking when the grid is clamped.
             //
-            // Block uniform: the start, the bound and the stride read only blockIdx.x,
-            // gridDim.x, mb, nrhs and NCOLS, so every thread of the block runs the same
-            // number of iterations and the two __syncthreads() inside
-            // bsrsm_upper_large_block_device stay convergent. The three early returns
-            // below are uniform for the same reason -- the whole block takes them or
-            // none of it does -- so none can strand a subset of threads at a barrier.
+            // Block uniform: the start, the bound, the stride and the chunk bounds
+            // read only blockIdx.x, gridDim.x, mb, nrhs and NCOLS, so every thread of
+            // the block runs the same number of iterations and the two
+            // __syncthreads() inside bsrsm_upper_large_block_device stay convergent.
+            // The early returns below are uniform for the same reason -- the whole
+            // block takes them or none of it does -- so none can strand a subset of
+            // threads at a barrier.
             const int64_t panels_per_sweep = static_cast<int64_t>(gridDim.x) / mb;
 
-            // Fewer than mb blocks cannot be strided safely: a block would have to
-            // change row-map slots between sweeps, and the done_array flag it then
-            // waits on belongs to a block that has not been dispatched.
-            // bsrsm_solve_grid_size never returns less than mb, so this is a contract
-            // violation; bail out rather than hang.
+            // Fewer blocks than one RHS panel cannot be strided: a block would have
+            // to change row-map slots between sweeps and could wait on a block that
+            // has not been dispatched. Walk contiguous chunks of the flattened space
+            // instead. A dependency has a lower flattened id, so it is either earlier
+            // in this block's chunk or in a lower numbered block.
             if(panels_per_sweep == 0)
             {
+                int64_t first;
+                int64_t last;
+                rocsparse::grid_x_chunk(num_blocks, gridDim.x, blockIdx.x, first, last);
+
+                for(int64_t block_id = first; block_id < last; ++block_id)
+                {
+                    rocsparse::bsrsm_upper_large_block_device<BLOCKSIZE, NCOLS, SLEEP, true>(
+                        block_id,
+                        mb,
+                        nrhs,
+                        bsr_row_ptr,
+                        bsr_col_ind,
+                        bsr_val,
+                        block_dim,
+                        X,
+                        ldx,
+                        done_array,
+                        map,
+                        zero_pivot,
+                        idx_base,
+                        diag_type,
+                        dir);
+                }
                 return;
             }
 
@@ -371,8 +396,8 @@ namespace rocsparse
             // would make them repeat pairs a lower numbered block already owns, and the
             // block body is not idempotent: it reads its own X elements as the right
             // hand side and overwrites them, so a second visit corrupts the result.
-            // bsrsm_solve_grid_size always returns a multiple of mb, so this only
-            // guards direct launches (clients/unittests).
+            // bsrsm_solve_grid_size returns a multiple of mb whenever it returns at
+            // least mb, so this only guards direct launches (clients/unittests).
             if(static_cast<int64_t>(blockIdx.x) >= stride)
             {
                 return;
@@ -608,12 +633,36 @@ namespace rocsparse
 
             const int64_t num_blocks = rocsparse::bsrsm_num_blocks(mb, nrhs, NCOLS);
 
-            // See bsrsm_upper_large_kernel for the panel-aligned stride, the
-            // block-uniformity argument and why each early return is safe.
+            // See bsrsm_upper_large_kernel for the panel-aligned stride, the chunk
+            // fallback, the block-uniformity argument and why each early return is
+            // safe.
             const int64_t panels_per_sweep = static_cast<int64_t>(gridDim.x) / mb;
 
             if(panels_per_sweep == 0)
             {
+                int64_t first;
+                int64_t last;
+                rocsparse::grid_x_chunk(num_blocks, gridDim.x, blockIdx.x, first, last);
+
+                for(int64_t block_id = first; block_id < last; ++block_id)
+                {
+                    rocsparse::bsrsm_lower_large_block_device<BLOCKSIZE, NCOLS, SLEEP, true>(
+                        block_id,
+                        mb,
+                        nrhs,
+                        bsr_row_ptr,
+                        bsr_col_ind,
+                        bsr_val,
+                        block_dim,
+                        X,
+                        ldx,
+                        done_array,
+                        map,
+                        zero_pivot,
+                        idx_base,
+                        diag_type,
+                        dir);
+                }
                 return;
             }
 
