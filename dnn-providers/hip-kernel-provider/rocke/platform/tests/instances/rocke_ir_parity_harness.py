@@ -25,9 +25,10 @@ def safe(name: str) -> str:
 
 
 def current_flavor() -> str:
-    """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 for 7.2-7.12, llvm23 for 7.13+). Only the plain dump run (no
-    ``--check`` / ``--write``) uses it; the gate checks every flavor."""
+    """Return ROCKE_LLVM_FLAVOR when explicitly set, otherwise use loaded
+    COMGR compiler evidence. Only the plain dump run (no ``--check`` /
+    ``--write``) uses this selection; the gate checks every flavor.
+    """
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -38,7 +39,7 @@ def lower_case(case, flavor):
     # lower_kernel_to_llvm, whose default 'cpp' path silently falls back to
     # python) and an EXPLICIT llvm flavor. The recorded sha is then a function
     # of the committed IR alone -- independent of whether rocke_engine is built or
-    # which ROCm/comgr vintage the host happens to detect. (llvm20 vs llvm22
+    # which LLVM version the loaded COMGR compiler reports. (llvm20 vs llvm22
     # emit different datalayout/type encodings, so an unpinned flavor would make
     # the same code hash differently across hosts.)
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
