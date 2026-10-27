@@ -58,6 +58,7 @@
 #include "rocke/cbor_dom.h"
 #include "rocke/error.hpp"
 #include "rocke/intexpr.h"
+#include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
 #include "rocke/recipe_guard.h"
 #include "rocke/recipe_launch.h"
@@ -1978,6 +1979,58 @@ static bool rv_plan_cluster(const rocke_kernel_def_t* kernel,
     return true;
 }
 
+/* The kernel's exact workgroup_size attr, read off the built kernel. The kernel
+ * is compiled for exactly that many threads, so the recipe's block must be
+ * (size, 1, 1): a smaller block runs it with threads missing and a larger one
+ * fails at launch. Without a block the caller picks one the plan cannot check,
+ * so such a recipe is refused. (Mirrored, with the same messages, by
+ * _check_workgroup_size in portable_ir/src/launch.py.) */
+static bool rv_plan_workgroup_size(const rocke_kernel_def_t* kernel,
+                                   const rocke_launch_plan_t* plan,
+                                   char* err,
+                                   size_t cap)
+{
+    const rocke_attr_value_t* v = kernel ? rocke_attr_get(&kernel->attrs, "workgroup_size") : NULL;
+    if(!v)
+        return true;
+    if(v->kind != ROCKE_ATTR_INT)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err, cap, "%s: workgroup_size must be one integer", kernel->name);
+        return false;
+    }
+    const long long size = (long long)v->u.i;
+    if(!plan->has_geometry)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "%s: the kernel states workgroup_size %lld but the recipe "
+                               "carries no launch block to check it against -- record the "
+                               "launch geometry, or launch it through "
+                               "KernelLauncher.from_artifact",
+                               kernel->name,
+                               size);
+        return false;
+    }
+    if((long long)plan->block.x != size || plan->block.y != 1 || plan->block.z != 1)
+    {
+        if(err && cap)
+            ROCKE_ERR_SNPRINTF(err,
+                               cap,
+                               "%s: recipe block (%u, %u, %u) differs from the kernel's "
+                               "workgroup_size %lld -- the block must be (%lld, 1, 1)",
+                               kernel->name,
+                               plan->block.x,
+                               plan->block.y,
+                               plan->block.z,
+                               size,
+                               size);
+        return false;
+    }
+    return true;
+}
+
 static rocke_status_t rv_plan_on(jd_val_t* root,
                                  const rocke_recipe_spec_int_t* ints,
                                  int n_ints,
@@ -2000,6 +2053,27 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     rocke_status_t st = rv_run_root(root, ints, n_ints, strs, n_strs, &b, &kernel, err, err_cap);
     if(st != ROCKE_OK)
         return st;
+
+    /* The caller copies argument values into the kernarg itself, so the plan
+     * never sees them and cannot check the facts a parameter states. Refuse
+     * such a recipe rather than describe a launch the GPU would trust
+     * unchecked. (Mirrored, with the same message, by launch.plan in
+     * portable_ir/src/launch.py.) */
+    for(int i = 0; kernel && i < kernel->num_params; i++)
+    {
+        if(rocke_param_states_facts(kernel->params[i]))
+        {
+            if(err && err_cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   err_cap,
+                                   "%s: parameters carry facts, which the C++ launch plan "
+                                   "cannot check yet -- launch it through "
+                                   "KernelLauncher.from_artifact",
+                                   kernel->name);
+            rocke_ir_builder_free(&b);
+            return ROCKE_ERR_VALUE;
+        }
+    }
 
     rocke_launch_plan_t* plan = (rocke_launch_plan_t*)calloc(1, sizeof *plan);
     if(!plan)
@@ -2069,7 +2143,8 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     vm.strs = strs;
     vm.n_strs = n_strs;
     if(!rv_plan_geometry(&vm, root, plan, err, err_cap)
-       || !rv_plan_cluster(kernel, plan, err, err_cap))
+       || !rv_plan_cluster(kernel, plan, err, err_cap)
+       || !rv_plan_workgroup_size(kernel, plan, err, err_cap))
     {
         rocke_ir_builder_free(&b);
         rocke_launch_plan_free(plan);

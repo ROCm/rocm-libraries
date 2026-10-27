@@ -698,6 +698,16 @@ extern "C" int rocke_param_fact_errors(const rocke_param_t* const* params,
     return (int)checker.errors.size();
 }
 
+extern "C" bool rocke_param_states_facts(const rocke_param_t* p)
+{
+    if(!p)
+        return false;
+    for(const char* word : kFactWords)
+        if(rocke_attr_get(&p->attrs, word))
+            return true;
+    return false;
+}
+
 extern "C" void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out)
 {
     rocke_arena_t arena;
