@@ -81,6 +81,8 @@ struct CaseOutcomeRecord
     Verifier verifier = Verifier::NONE;
     /// Why, in the harness's own words. Empty for a PASS.
     std::string reason;
+    /// The non-success status the case expected and got ("BAD_PARAM"); empty otherwise.
+    std::string expectedStatus;
 };
 
 /// Builds the record for a test body that reached an outcome. `reason` is the

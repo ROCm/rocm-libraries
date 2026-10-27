@@ -109,6 +109,7 @@ CaseOutcomeRecord makeCaseOutcomeRecord(CaseIdentity identity,
     record.depth = outcome.depth;
     record.origin = outcome.origin;
     record.verifier = outcome.verifier;
+    record.expectedStatus = outcome.expectedStatus;
 
     if(!outcome.message.empty())
     {
@@ -203,6 +204,10 @@ std::string finishedRecordJson(const CaseOutcomeRecord& record)
     json["origin"] = toString(record.origin);
     json["verifier"] = toString(record.verifier);
     json["reason"] = record.reason;
+    if(!record.expectedStatus.empty())
+    {
+        json["expected_status"] = record.expectedStatus;
+    }
     return dumpLine(json);
 }
 

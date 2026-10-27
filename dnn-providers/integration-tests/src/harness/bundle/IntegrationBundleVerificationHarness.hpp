@@ -36,6 +36,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -503,6 +504,9 @@ private:
         RAN, ///< the engine executed the graph; `outputs` holds what it wrote
         DECLINED, ///< the engine refused the graph
         ERRORED, ///< the engine broke while compiling or executing
+        SETUP_FAILED, ///< the harness could not place the engine run's buffers
+        REJECTED_AS_EXPECTED, ///< placement "under": the backend answered BAD_PARAM for the uid
+        NOT_REJECTED, ///< placement "under": anything but that answer
     };
     struct EngineRunResult
     {
@@ -602,6 +606,10 @@ private:
 
     OutputTensors allocateSentinelOutputs(bool onDevice, bool payloadNanSentinel = false) const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
+    // Moves the engine run's device buffers to the case's placement (never a reference's).
+    // Throws on a buffer that cannot be placed or a device failure.
+    detail::PlacedVariantPack
+        placeEngineRun(CasePlacement placement, VariantPack& variantPack, OutputTensors& outputs);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 

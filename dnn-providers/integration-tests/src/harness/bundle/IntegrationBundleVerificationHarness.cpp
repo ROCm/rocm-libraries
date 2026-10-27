@@ -492,6 +492,31 @@ VerificationOutcome
     const VerificationDepth reached
         = run.plansBuilt ? VerificationDepth::BUILDABLE : VerificationDepth::NOT_REACHED;
 
+    if(run.status == EngineStatus::REJECTED_AS_EXPECTED)
+    {
+        // The case was written to be refused, and it was: the rejection is what was
+        // verified, so this is a pass at the depth a full bundle asks for. Nothing was
+        // compared, hence no verifier.
+        return VerificationOutcome::passed(VerificationDepth::VERIFIED).expecting("BAD_PARAM");
+    }
+
+    if(run.status == EngineStatus::NOT_REJECTED)
+    {
+        // Written to be refused and was not: a failure whatever else happened, because a
+        // case that expected BAD_PARAM verified nothing by being accepted, declined or
+        // broken some other way.
+        return VerificationOutcome::failed(reached, FailureOrigin::ENGINE, run.message)
+            .atStage(run.stage);
+    }
+
+    if(run.status == EngineStatus::SETUP_FAILED)
+    {
+        // Placing the buffers failed: the harness or the device, never the engine.
+        return VerificationOutcome::failed(
+                   VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, run.message)
+            .atStage(OutcomeStage::SETUP);
+    }
+
     if(run.status == EngineStatus::DECLINED)
     {
         std::ostringstream msg;
@@ -839,6 +864,25 @@ std::unordered_map<int64_t, void*>
         inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
 
+detail::PlacedVariantPack IntegrationBundleVerificationHarness::placeEngineRun(
+    CasePlacement placement, VariantPack& variantPack, OutputTensors& outputs)
+{
+    const auto wrapper = _bundle->graphWrapper();
+    // The set buildVariantPack() built this pack from.
+    const bool packed = !_packedInputs.empty();
+    TensorMap& inputs = packed ? _packedInputs : _inputs;
+
+    const auto plan
+        = detail::planPlacement(variantPack, inputs, outputs, wrapper.getTensorMap(), packed);
+    for(const auto& note : plan.leftInPlace)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("placement \"" << toString(placement) << "\" leaves " << note
+                                              << " where it is (" << _bundlePath << ")");
+    }
+    return detail::PlacedVariantPack(
+        variantPack, plan.candidates, placement, _bundle->metadata.placementUid);
+}
+
 IntegrationBundleVerificationHarness::EngineRunResult
     IntegrationBundleVerificationHarness::runEngine(GraphSession& session)
 {
@@ -864,11 +908,32 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
+    const bool useDevice = _deps.policy.useDevice();
     // With the non-finite mask on, NaN matches NaN, so the engine's outputs start as a NaN
     // with a distinctive payload that the validator fails: an unwritten element cannot pass.
     run.outputs = allocateSentinelOutputs(
-        _deps.policy.useDevice(), _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE);
-    auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
+        useDevice, _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE);
+    auto variantPack = buildVariantPack(run.outputs, useDevice);
+
+    // Placement moves the buffers of this run only, and only when they are device buffers:
+    // a HOST policy has no device pointer to move. The reference run never gets here.
+    const CasePlacement placement = _bundle->metadata.placement;
+    std::optional<detail::PlacedVariantPack> placed;
+    if(placement != CasePlacement::DEFAULT && useDevice)
+    {
+        try
+        {
+            placed.emplace(placeEngineRun(placement, variantPack, run.outputs));
+        }
+        catch(const std::exception& e)
+        {
+            run.status = EngineStatus::SETUP_FAILED;
+            run.message = std::string("placement \"") + toString(placement)
+                          + "\" could not be set up: " + e.what();
+            run.stage = OutcomeStage::SETUP;
+            return run;
+        }
+    }
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
     // instead of a disposition read back off GTest, which cannot tell an engine
@@ -881,6 +946,40 @@ IntegrationBundleVerificationHarness::EngineRunResult
     // Plans compile before anything executes, so where the engine stopped follows from
     // how far it got.
     const OutcomeStage stoppedAt = result.plansBuilt ? OutcomeStage::EXECUTE : OutcomeStage::BUILD;
+
+    if(placement == CasePlacement::UNDER)
+    {
+        // The case expects the backend to refuse the misaligned pointer of one tensor. Only
+        // that answer, for that tensor, is a pass; every other result is a failure.
+        const int64_t uid = _bundle->metadata.placementUid.value_or(0);
+        run.stage = stoppedAt;
+        if(!result.ok && !result.declined && result.executeStatus.alignmentRejectedUid == uid)
+        {
+            run.status = EngineStatus::REJECTED_AS_EXPECTED;
+            run.message = result.message;
+            return run;
+        }
+
+        run.status = EngineStatus::NOT_REJECTED;
+        std::string what;
+        if(result.ok)
+        {
+            what = "the backend executed the graph with the pointer of uid " + std::to_string(uid)
+                   + " below its declared alignment";
+            run.stage = OutcomeStage::EXECUTE;
+        }
+        else if(result.declined)
+        {
+            what = "the engine declined the graph: " + result.message;
+        }
+        else
+        {
+            what = "execute failed with another error: " + result.message;
+        }
+        run.message = "expected BAD_PARAM for uid " + std::to_string(uid) + " (" + what + ") on "
+                      + _bundlePath.string();
+        return run;
+    }
 
     if(result.declined)
     {
@@ -898,6 +997,24 @@ IntegrationBundleVerificationHarness::EngineRunResult
         run.message = result.message;
         run.stage = stoppedAt;
         return run;
+    }
+
+    if(placed.has_value())
+    {
+        // What the comparison reads is the original buffers, so the engine's writes in the
+        // shadows go back into them first, unwritten elements and their sentinel included.
+        try
+        {
+            placed->copyBackOutputs();
+        }
+        catch(const std::exception& e)
+        {
+            run.status = EngineStatus::SETUP_FAILED;
+            run.message = std::string("placement \"") + toString(placement)
+                          + "\" could not copy the outputs back: " + e.what();
+            run.stage = OutcomeStage::SETUP;
+            return run;
+        }
     }
 
     markOutputsModified(run.outputs);

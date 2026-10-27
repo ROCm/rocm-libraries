@@ -135,7 +135,12 @@ EngineOpResult
 
             if(auto status = graph.execute(handle, variantPack, workspace.get()); !status.is_good())
             {
-                return EngineOpResult::failed(status.get_message());
+                // The frontend keeps only the text of the backend's status, so the one
+                // status the harness acts on is read back out of it, here, where it is seen.
+                auto failure = EngineOpResult::failed(status.get_message());
+                failure.executeStatus.alignmentRejectedUid
+                    = parseAlignmentRejectedUid(failure.message);
+                return failure;
             }
         }
         catch(const EngineNotApplicableError& e)

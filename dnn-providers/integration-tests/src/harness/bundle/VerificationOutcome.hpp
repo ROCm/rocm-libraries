@@ -215,6 +215,11 @@ struct VerificationOutcome
     /// an engine declined then.
     bool declined = false;
 
+    /// The non-success status the case was written to get, when it got it: "BAD_PARAM" for
+    /// an under-aligned placement the backend rejected. Empty for every other outcome. A
+    /// pass that carries one verified the rejection, not a comparison.
+    std::string expectedStatus;
+
     static VerificationOutcome passed(VerificationDepth depth)
     {
         return make(OutcomeStatus::PASSED, depth, FailureOrigin::NONE, {}, false);
@@ -249,6 +254,12 @@ struct VerificationOutcome
     VerificationOutcome asDecline() &&
     {
         declined = true;
+        return std::move(*this);
+    }
+
+    VerificationOutcome expecting(std::string status) &&
+    {
+        expectedStatus = std::move(status);
         return std::move(*this);
     }
 

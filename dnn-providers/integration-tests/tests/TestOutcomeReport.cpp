@@ -663,6 +663,216 @@ TEST_F(TestOutcomeReport, FinishedRecordNamesTheDefaultsWhenTheCaseSetNothing)
 }
 
 // ---------------------------------------------------------------------------
+// placement "under": the backend must say BAD_PARAM for the named tensor, and only that is a pass
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr int64_t K_UNDER_UID = 3;
+
+// What the runner hands back for the backend's alignment rejection of `uid`.
+EngineOpResult alignmentRejection(int64_t uid)
+{
+    auto result
+        = EngineOpResult::failed("execute failed: Tensor uid " + std::to_string(uid)
+                                 + " device pointer is not aligned to the required 16 bytes");
+    result.executeStatus.alignmentRejectedUid = uid;
+    return result;
+}
+
+} // namespace
+
+// Bug caught: the parser accepting an error that merely mentions alignment, or one that names
+// another tensor, or missing the real message once the frontend wraps it.
+TEST(TestEngineOpResult, AlignmentRejectionNamesTheTensorTheBackendRejected)
+{
+    EXPECT_EQ(parseAlignmentRejectedUid(
+                  "Tensor uid 3 device pointer is not aligned to the required 16 bytes"),
+              std::optional<int64_t>(3));
+    EXPECT_EQ(parseAlignmentRejectedUid(
+                  "graph.execute failed: [BAD_PARAM] Tensor uid 12 device pointer is not aligned "
+                  "to the required 256 bytes (plan 4)"),
+              std::optional<int64_t>(12));
+    EXPECT_EQ(parseAlignmentRejectedUid(
+                  "Tensor uid -7 device pointer is not aligned to the required 16 bytes"),
+              std::optional<int64_t>(-7));
+
+    EXPECT_FALSE(
+        parseAlignmentRejectedUid("device pointer is not aligned to the required 16").has_value());
+    EXPECT_FALSE(parseAlignmentRejectedUid("Tensor uid 3 has a bad shape").has_value());
+    EXPECT_FALSE(parseAlignmentRejectedUid("Tensor uid x device pointer is not aligned to the "
+                                           "required 16 bytes")
+                     .has_value());
+    EXPECT_FALSE(parseAlignmentRejectedUid("Tensor uid  device pointer is not aligned to the "
+                                           "required 16 bytes")
+                     .has_value());
+    EXPECT_FALSE(parseAlignmentRejectedUid("Tensor uid 99999999999999999999 device pointer is not "
+                                           "aligned to the required 16 bytes")
+                     .has_value());
+    EXPECT_FALSE(parseAlignmentRejectedUid("").has_value());
+}
+
+// Bug caught: the factories dropping the new fact, or a success carrying one.
+TEST(TestEngineOpResult, OnlyAnExecuteFailureCarriesAnAlignmentRejection)
+{
+    EXPECT_FALSE(EngineOpResult::succeeded().executeStatus.alignmentRejectedUid.has_value());
+    EXPECT_FALSE(EngineOpResult::failed("boom").executeStatus.alignmentRejectedUid.has_value());
+    EXPECT_FALSE(EngineOpResult::declinedBy("no").executeStatus.alignmentRejectedUid.has_value());
+    EXPECT_TRUE(EngineOpResult::succeeded().ok);
+    EXPECT_TRUE(EngineOpResult::succeeded().plansBuilt);
+    EXPECT_TRUE(EngineOpResult::declinedBy("no").declined);
+}
+
+// Bug caught: an expected rejection reported as a failure (a red gtest for a case that did
+// exactly what it was written to do), or as an ordinary pass with no trace of the expectation.
+TEST_F(TestOutcomeReport, UnderPlacementRejectedForItsUidIsAPass)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    ON_CALL(_mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(alignmentRejection(K_UNDER_UID)));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_FALSE(anyFailed(results)) << allMessages(results);
+    const auto& record = onlyFinished();
+    EXPECT_EQ(record.outcome, CaseOutcome::PASS);
+    EXPECT_EQ(record.expectedStatus, "BAD_PARAM");
+    EXPECT_EQ(record.depth, VerificationDepth::VERIFIED);
+    EXPECT_EQ(record.verifier, Verifier::NONE) << "nothing was compared";
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_EQ(json.at("expected_status"), "BAD_PARAM");
+}
+
+// Bug caught: the engine run succeeding with an under-aligned pointer (the backend not
+// enforcing the declared alignment) passing, because the outputs happened to match.
+TEST_F(TestOutcomeReport, UnderPlacementThatExecutesIsAFailure)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    const auto& record = onlyFinished();
+    EXPECT_NE(record.outcome, CaseOutcome::PASS);
+    EXPECT_TRUE(record.expectedStatus.empty());
+    EXPECT_NE(record.reason.find("expected BAD_PARAM"), std::string::npos) << record.reason;
+    EXPECT_NE(record.reason.find("executed the graph"), std::string::npos) << record.reason;
+}
+
+// Bug caught: any execute error standing in for the expected one, so an engine crash on a
+// misaligned pointer would be counted as the backend doing its job.
+TEST_F(TestOutcomeReport, UnderPlacementFailingForAnotherReasonIsAFailure)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    ON_CALL(_mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(EngineOpResult::failed("kernel launch failed")));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    const auto& record = onlyFinished();
+    EXPECT_NE(record.outcome, CaseOutcome::PASS);
+    EXPECT_NE(record.reason.find("expected BAD_PARAM"), std::string::npos) << record.reason;
+    EXPECT_NE(record.reason.find("kernel launch failed"), std::string::npos) << record.reason;
+}
+
+// Bug caught: a rejection of the wrong tensor counting, which would let an engine that
+// misreads another buffer's alignment pass as if the case's own pointer had been checked.
+TEST_F(TestOutcomeReport, UnderPlacementRejectedForAnotherUidIsAFailure)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    ON_CALL(_mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(alignmentRejection(K_UNDER_UID + 1)));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_NE(onlyFinished().outcome, CaseOutcome::PASS);
+    EXPECT_TRUE(onlyFinished().expectedStatus.empty());
+}
+
+// Bug caught: a late decline passing as the expected rejection, or vanishing as a skip, so the
+// case that was meant to prove the backend enforces alignment proves nothing.
+TEST_F(TestOutcomeReport, UnderPlacementDeclinedByTheEngineIsAFailure)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    ON_CALL(_mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(EngineOpResult::declinedBy("alignment too low")));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_FALSE(anySkipped(results));
+    const auto& record = onlyFinished();
+    EXPECT_NE(record.outcome, CaseOutcome::PASS);
+    EXPECT_NE(record.reason.find("expected BAD_PARAM"), std::string::npos) << record.reason;
+    EXPECT_NE(record.reason.find("alignment too low"), std::string::npos) << record.reason;
+}
+
+// Bug caught: the expectation leaking onto an ordinary case, which would turn a real
+// alignment rejection of an unplaced run into a pass.
+TEST_F(TestOutcomeReport, AnAlignmentRejectionWithoutAnUnderPlacementIsStillACrash)
+{
+    ON_CALL(_mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(alignmentRejection(K_UNDER_UID)));
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(), &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_EQ(onlyFinished().outcome, CaseOutcome::CRASH);
+    EXPECT_TRUE(onlyFinished().expectedStatus.empty());
+}
+
+// Bug caught: a graph the engine never took (a decline at the query) being reported as a
+// failed expectation: nothing was placed, so there is nothing for the backend to reject.
+TEST_F(TestOutcomeReport, UnderPlacementOnAGraphTheEngineDoesNotTakeStaysDeclined)
+{
+    const auto tagged = bundle();
+    tagged->metadata.placement = CasePlacement::UNDER;
+    tagged->metadata.placementUid = K_UNDER_UID;
+    ON_CALL(_mocks.engineRunner, openGraph(::testing::_, ::testing::_))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return declinedSession();
+        });
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_EQ(onlyFinished().outcome, CaseOutcome::DECLINED);
+}
+
+// ---------------------------------------------------------------------------
 // Synthetic tests: a bundle that failed to load still owes the report its two records
 // ---------------------------------------------------------------------------
 

@@ -3,9 +3,12 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -17,6 +20,66 @@ namespace hipdnn_integration_tests::bundle
 {
 
 struct IntegrationTestBundle;
+
+/// What the backend said to `execute()`, when it is something the harness acts on.
+///
+/// The frontend folds the backend's status into error text, so a status the harness needs is
+/// recovered from that text by the runner that saw it, and carried here as a fact.
+struct ExecuteStatus
+{
+    /// BAD_PARAM for a device pointer below the tensor's declared alignment: the uid of the
+    /// tensor the backend rejected (EnginePluginResourceManager::executeOpGraph).
+    std::optional<int64_t> alignmentRejectedUid;
+};
+
+/// The tensor the backend's alignment rejection names, or nullopt when `message` is not one.
+///
+/// The backend's text is "Tensor uid <N> device pointer is not aligned to the required <M>
+/// bytes"; the frontend may wrap it. Both the uid and the sentence must be present, so an
+/// unrelated error that mentions alignment, or one that names another uid, is not taken for it.
+inline std::optional<int64_t> parseAlignmentRejectedUid(std::string_view message)
+{
+    constexpr std::string_view K_PREFIX = "Tensor uid ";
+    constexpr std::string_view K_SENTENCE = " device pointer is not aligned to the required";
+
+    const auto sentence = message.find(K_SENTENCE);
+    if(sentence == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    const auto prefix = message.rfind(K_PREFIX, sentence);
+    if(prefix == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+
+    const auto digits
+        = message.substr(prefix + K_PREFIX.size(), sentence - prefix - K_PREFIX.size());
+    if(digits.empty())
+    {
+        return std::nullopt;
+    }
+    const std::size_t start = digits.front() == '-' ? 1 : 0;
+    if(start == digits.size())
+    {
+        return std::nullopt;
+    }
+    int64_t value = 0;
+    for(std::size_t i = start; i < digits.size(); ++i)
+    {
+        if(digits[i] < '0' || digits[i] > '9')
+        {
+            return std::nullopt;
+        }
+        const int64_t digit = digits[i] - '0';
+        if(value > (std::numeric_limits<int64_t>::max() - digit) / 10)
+        {
+            return std::nullopt;
+        }
+        value = value * 10 + digit;
+    }
+    return digits.front() == '-' ? -value : value;
+}
 
 /// What one frontend operation did.
 ///
@@ -35,20 +98,31 @@ struct EngineOpResult
     /// to compile is denied the depth it actually reached.
     bool plansBuilt = false;
     std::string message;
+    /// What execute() answered, when it was a status the harness acts on. Empty for every
+    /// other result.
+    ExecuteStatus executeStatus;
 
     static EngineOpResult succeeded()
     {
-        return {true, false, true, {}};
+        EngineOpResult result;
+        result.ok = true;
+        result.plansBuilt = true;
+        return result;
     }
 
     static EngineOpResult failed(std::string message)
     {
-        return {false, false, false, std::move(message)};
+        EngineOpResult result;
+        result.message = std::move(message);
+        return result;
     }
 
     static EngineOpResult declinedBy(std::string message)
     {
-        return {false, true, false, std::move(message)};
+        EngineOpResult result;
+        result.declined = true;
+        result.message = std::move(message);
+        return result;
     }
 };
 

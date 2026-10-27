@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PackedElementTraits.hpp>
 #include <hipdnn_data_sdk/utilities/PackedSubByteTensor.hpp>
@@ -344,6 +347,256 @@ TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
                   0)
             << "uid " << uid;
     }
+}
+
+// ---- placement ---------------------------------------------------------------------------
+
+constexpr std::array<int64_t, 9> K_ALIGNMENTS = {1, 2, 4, 8, 16, 32, 64, 128, 256};
+
+// Bug caught: an exact placement that lands on a 2N boundary (so a kernel needing only N
+// never sees a pointer that is merely N-aligned), or one that misses N altogether. Checked
+// over bases that are not themselves aligned, not just the allocator's 256-byte ones.
+TEST(TestBundleVerificationHarness, PlacedAddressIsAlignedToNAndNotTo2NForEveryAlignment)
+{
+    for(const int64_t n : K_ALIGNMENTS)
+    {
+        for(std::uintptr_t base = 0x10000; base < 0x10000 + 600; base += 7)
+        {
+            const auto address = detail::placedAddress(base, n, detail::PlacedAt::EXACT);
+            const auto un = static_cast<std::uintptr_t>(n);
+            EXPECT_EQ(address % un, 0u) << "N=" << n << " base=" << base;
+            EXPECT_NE(address % (2 * un), 0u) << "N=" << n << " base=" << base;
+            EXPECT_GE(address, base);
+            EXPECT_LE(address - base, detail::placementSlack(n)) << "N=" << n;
+        }
+    }
+}
+
+// Bug caught: an under-aligned pointer that still satisfies the declared alignment, which
+// the backend would then accept and the case would silently stop testing the rejection.
+TEST(TestBundleVerificationHarness, UnderPlacedAddressMissesNForEveryAlignmentAboveOne)
+{
+    for(const int64_t n : K_ALIGNMENTS)
+    {
+        if(n < 2)
+        {
+            continue;
+        }
+        for(std::uintptr_t base = 0x10000; base < 0x10000 + 600; base += 7)
+        {
+            const auto address = detail::placedAddress(base, n, detail::PlacedAt::UNDER);
+            const auto un = static_cast<std::uintptr_t>(n);
+            EXPECT_NE(address % un, 0u) << "N=" << n << " base=" << base;
+            EXPECT_EQ(address % (un / 2), 0u) << "N=" << n << " base=" << base;
+            EXPECT_LE(address - base, detail::placementSlack(n)) << "N=" << n;
+        }
+    }
+}
+
+// Bug caught: an alignment of 1 has no smaller alignment to fall under, and a non-positive
+// one is a malformed graph; either silently producing an address would hide the mistake.
+TEST(TestBundleVerificationHarness, PlacedAddressRejectsAlignmentsThatCannotBePlaced)
+{
+    EXPECT_THROW(detail::placedAddress(0x10000, 1, detail::PlacedAt::UNDER), std::invalid_argument);
+    EXPECT_THROW(detail::placedAddress(0x10000, 0, detail::PlacedAt::EXACT), std::invalid_argument);
+    EXPECT_THROW(detail::placedAddress(0x10000, -16, detail::PlacedAt::EXACT),
+                 std::invalid_argument);
+    EXPECT_THROW(detail::placementSlack(0), std::invalid_argument);
+}
+
+// Bug caught: a scalar passed by value (a host pointer) or an input of the sub-byte packed set
+// being moved into a device shadow, which would hand the engine a device pointer where it
+// expects a host value, or place bytes the engine never reads.
+TEST(TestBundleVerificationHarness, PlacementPlanLeavesScalarsAndPackedInputsInPlace)
+{
+    auto bundle = makeRuntimePassByValueBundle();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& attributes = wrapper.getTensorMap();
+
+    TensorMap inputs;
+    inputs.emplace(1, hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes.at(1)));
+    inputs.emplace(3, hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes.at(3)));
+    OutputTensors outputs;
+    outputs.emplace(2, hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes.at(2)));
+    const auto pack = detail::buildVariantPack(
+        inputs, outputs, attributes, bundle->outputTensorUids, /*useDevice=*/false);
+
+    const auto plan = detail::planPlacement(pack, inputs, outputs, attributes, false);
+    std::vector<int64_t> placeable;
+    for(const auto& candidate : plan.candidates)
+    {
+        placeable.push_back(candidate.uid);
+        EXPECT_EQ(candidate.alignment, 16) << "the graph's declared alignment is what is placed";
+    }
+    EXPECT_EQ(placeable, (std::vector<int64_t>{2, 3}));
+    ASSERT_EQ(plan.leftInPlace.size(), 1u);
+    EXPECT_NE(plan.leftInPlace.front().find("uid 1"), std::string::npos);
+
+    const auto packedPlan = detail::planPlacement(pack, inputs, outputs, attributes, true);
+    placeable.clear();
+    for(const auto& candidate : packedPlan.candidates)
+    {
+        placeable.push_back(candidate.uid);
+    }
+    EXPECT_EQ(placeable, (std::vector<int64_t>{2})) << "only outputs move when inputs are packed";
+    EXPECT_EQ(packedPlan.leftInPlace.size(), 2u);
+}
+
+// Bug caught: a pack entry with no tensor behind it reaching hipMalloc with a null tensor.
+TEST(TestBundleVerificationHarness, PlacementPlanRejectsAPackEntryWithoutATensor)
+{
+    auto bundle = makeRuntimePassByValueBundle();
+    const auto wrapper = bundle->graphWrapper();
+    TensorMap inputs;
+    OutputTensors outputs;
+    VariantPack pack;
+    pack[42] = nullptr;
+    EXPECT_THROW(detail::planPlacement(pack, inputs, outputs, wrapper.getTensorMap(), false),
+                 std::invalid_argument);
+}
+
+// Bug caught: "under" naming a uid that is not a device buffer silently placing nothing, so the
+// case would run unplaced and then fail for the wrong reason.
+TEST(TestBundleVerificationHarness, UnderPlacementOfAnUnplaceableUidFailsBeforeAnyDeviceCall)
+{
+    VariantPack pack;
+    const std::vector<detail::PlacementCandidate> none;
+    EXPECT_THROW(detail::PlacedVariantPack(pack, none, CasePlacement::UNDER, 9),
+                 detail::PlacementError);
+    EXPECT_THROW(detail::PlacedVariantPack(pack, none, CasePlacement::UNDER, std::nullopt),
+                 detail::PlacementError);
+}
+
+// Bug caught: the default placement touching the pack, which would move every ordinary case.
+TEST(TestBundleVerificationHarness, DefaultPlacementLeavesThePackAlone)
+{
+    const std::vector<int64_t> dims = {4};
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims);
+    VariantPack pack;
+    pack[1] = tensor.rawHostData();
+    const void* before = pack.at(1);
+    const std::vector<detail::PlacementCandidate> candidates = {{1, &tensor, false, 16}};
+
+    const detail::PlacedVariantPack placed(pack, candidates, CasePlacement::DEFAULT, std::nullopt);
+    EXPECT_EQ(pack.at(1), before);
+    EXPECT_TRUE(placed.placedUids().empty());
+}
+
+// Bug caught: a device pointer that is still 2N-aligned after "exact" placement, an input whose
+// contents did not follow it into the shadow, or an output that did not start as the sentinel.
+TEST(TestBundleVerificationHarness, ExactPlacementMovesDeviceBuffersAtEveryAlignmentIntact)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const int64_t n : K_ALIGNMENTS)
+    {
+        std::vector<float> values(33);
+        for(std::size_t i = 0; i < values.size(); ++i)
+        {
+            values[i] = static_cast<float>(i) + 0.25f;
+        }
+        const std::vector<int64_t> dims = {33};
+        hipdnn_data_sdk::utilities::Tensor<float> input(dims);
+        input.fillWithData(values.data(), values.size() * sizeof(float));
+        hipdnn_data_sdk::utilities::Tensor<float> output(dims);
+        output.fillWithSentinelValue();
+
+        VariantPack pack;
+        pack[1] = input.rawDeviceData();
+        pack[2] = output.rawDeviceData();
+        void* const originalInput = pack.at(1);
+        void* const originalOutput = pack.at(2);
+        const std::vector<detail::PlacementCandidate> candidates
+            = {{1, &input, false, n}, {2, &output, true, n}};
+
+        const detail::PlacedVariantPack placed(
+            pack, candidates, CasePlacement::EXACT, std::nullopt);
+
+        EXPECT_EQ(placed.placedUids(), (std::vector<int64_t>{1, 2})) << "N=" << n;
+        for(const int64_t uid : {1, 2})
+        {
+            const auto address = reinterpret_cast<std::uintptr_t>(pack.at(uid));
+            EXPECT_EQ(address % static_cast<std::uintptr_t>(n), 0u) << "N=" << n << " uid " << uid;
+            EXPECT_NE(address % static_cast<std::uintptr_t>(2 * n), 0u)
+                << "N=" << n << " uid " << uid;
+        }
+        EXPECT_NE(pack.at(1), originalInput);
+        EXPECT_NE(pack.at(2), originalOutput);
+
+        std::vector<float> seen(33, 0.0f);
+        ASSERT_EQ(hipMemcpy(seen.data(), pack.at(1), 33 * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(int i = 0; i < 33; ++i)
+        {
+            EXPECT_FLOAT_EQ(seen[static_cast<std::size_t>(i)], static_cast<float>(i) + 0.25f)
+                << "N=" << n << " element " << i;
+        }
+        ASSERT_EQ(hipMemcpy(seen.data(), pack.at(2), 33 * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        for(const float value : seen)
+        {
+            EXPECT_TRUE(std::isnan(value)) << "N=" << n << ": the output shadow lost the sentinel";
+        }
+    }
+}
+
+// Bug caught: a copy-back that drops the engine's writes, or one that overwrites elements the
+// engine never wrote with something other than the sentinel, which would let an unwritten
+// output pass as written.
+TEST(TestBundleVerificationHarness, PlacementCopyBackKeepsWrittenValuesAndTheSentinelElsewhere)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {16};
+    hipdnn_data_sdk::utilities::Tensor<float> output(dims);
+    output.fillWithSentinelValue();
+    VariantPack pack;
+    pack[2] = output.rawDeviceData();
+    const std::vector<detail::PlacementCandidate> candidates = {{2, &output, true, 64}};
+
+    {
+        detail::PlacedVariantPack placed(pack, candidates, CasePlacement::EXACT, std::nullopt);
+        // The "engine": writes the first four elements only.
+        const std::vector<float> written = {1.0f, 2.0f, 3.0f, 4.0f};
+        ASSERT_EQ(hipMemcpy(pack.at(2), written.data(), 4 * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        placed.copyBackOutputs();
+    }
+
+    output.markDeviceModified();
+    const auto* host = static_cast<const float*>(output.rawHostData());
+    for(int i = 0; i < 4; ++i)
+    {
+        EXPECT_FLOAT_EQ(host[i], static_cast<float>(i) + 1.0f);
+    }
+    for(int i = 4; i < 16; ++i)
+    {
+        EXPECT_TRUE(std::isnan(host[i])) << "element " << i << " lost its sentinel on copy-back";
+    }
+}
+
+// Bug caught: "under" moving every buffer (so the backend's complaint could name any tensor),
+// or leaving the named one on a boundary that still satisfies its declared alignment.
+TEST(TestBundleVerificationHarness, UnderPlacementMovesOnlyTheNamedUidBelowItsAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::vector<int64_t> dims = {8};
+    hipdnn_data_sdk::utilities::Tensor<float> first(dims);
+    hipdnn_data_sdk::utilities::Tensor<float> second(dims);
+    VariantPack pack;
+    pack[1] = first.rawDeviceData();
+    pack[2] = second.rawDeviceData();
+    void* const untouched = pack.at(1);
+    const std::vector<detail::PlacementCandidate> candidates
+        = {{1, &first, false, 16}, {2, &second, false, 16}};
+
+    const detail::PlacedVariantPack placed(pack, candidates, CasePlacement::UNDER, 2);
+    EXPECT_EQ(placed.placedUids(), (std::vector<int64_t>{2}));
+    EXPECT_EQ(pack.at(1), untouched);
+    const auto address = reinterpret_cast<std::uintptr_t>(pack.at(2));
+    EXPECT_NE(address % 16u, 0u);
+    EXPECT_EQ(address % 8u, 0u);
 }
 } // namespace
 
