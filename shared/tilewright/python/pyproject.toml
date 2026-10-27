@@ -1,0 +1,31 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "tilewright"
+dynamic = ["version"]
+description = "Python bindings of the tilewright GEMM kernel ranking engine"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[tool.scikit-build]
+cmake.version = ">=3.25.2"
+cmake.build-type = "Release"
+wheel.packages = ["src/tilewright"]
+sdist.exclude = ["build/", "dist/", "**/__pycache__"]
+metadata.version.provider = "scikit_build_core.metadata.regex"
+metadata.version.input = "src/tilewright/__init__.py"
+metadata.version.regex = '^__version__\s*=\s*["\x27](?P<value>[^"\x27]+)["\x27]'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
