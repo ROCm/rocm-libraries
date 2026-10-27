@@ -19,9 +19,10 @@
  * _GENERIC_CFGS.
  * Indices 45..48: the Toeplitz MFMA form with fwd (the rotated filter; 48,
  * fwd without mfma, both reject) -- mirrors _WIN_FWD_CFGS.
- * Indices 49..54: its grouped forward form (cpg = kpg = 8 / 16 / 32; 51
- * without fwd and 54, a block narrower than a group, both reject) -- mirrors
- * _WIN_G8_CFGS.
+ * Indices 49..57: its grouped forward form (cpg = kpg = 8 / 16 / 32; 51
+ * without fwd and 54, a block narrower than a group, both reject) and the
+ * forward form at stride 2 (55..57; 57, an odd block_h, both reject) --
+ * mirrors _WIN_G8_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -279,8 +280,8 @@ static int
 }
 
 /* The grouped forward form (cpg = kpg = 8, G counts groups), emitted as
- * WIN_G8_CFG_BASE + idx (mirrors _WIN_G8_CFGS); WIN_G8_FWD / WIN_G8_CPG
- * hold each config's fwd and cpg. 51 (no fwd) both reject. */
+ * WIN_G8_CFG_BASE + idx (mirrors _WIN_G8_CFGS); WIN_G8_FWD / WIN_G8_CPG /
+ * WIN_G8_STRIDE hold each config's fwd, cpg and out_stride. 51 (no fwd) both reject. */
 #define WIN_G8_CFG_BASE 49
 static const win_cfg_t WIN_G8_CFGS[] = {
     {2, 13, 21, 10, 3, 3, 1, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 2, 2},
@@ -289,9 +290,13 @@ static const win_cfg_t WIN_G8_CFGS[] = {
     {2, 13, 21, 6, 3, 3, 1, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 2, 2},
     {2, 9, 11, 4, 3, 3, 1, "bf16", "gfx950", 8, 8, 1, 9, 0, 1, 1, 2},
     {2, 13, 21, 6, 3, 3, 1, "fp16", "gfx950", 8, 1, 1, 8, 0, 1, 1, 1},
+    {2, 14, 22, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 8, 0, 1, 1, 2},
+    {2, 10, 12, 6, 3, 3, 1, "bf16", "gfx950", 8, 4, 1, 4, 0, 1, 2, 2},
+    {2, 14, 22, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 7, 0, 1, 1, 2},
 };
-static const int WIN_G8_FWD[] = {1, 1, 0, 1, 1, 1};
-static const int WIN_G8_CPG[] = {8, 8, 8, 16, 32, 16};
+static const int WIN_G8_FWD[] = {1, 1, 0, 1, 1, 1, 1, 1, 1};
+static const int WIN_G8_CPG[] = {8, 8, 8, 16, 32, 16, 1, 16, 1};
+static const int WIN_G8_STRIDE[] = {1, 1, 1, 1, 1, 1, 2, 2, 2};
 
 static int
     make_win_g8_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
@@ -322,6 +327,7 @@ static int
     spec->w_fold = c->w_fold;
     spec->prefetch_rows = c->prefetch_rows;
     spec->fwd = WIN_G8_FWD[idx] != 0;
+    spec->out_stride = WIN_G8_STRIDE[idx];
     *arch = c->arch;
     return 0;
 }

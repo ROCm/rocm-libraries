@@ -59,6 +59,7 @@ rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_de
     s.prefetch_rows = 1;
     s.wave_size = 64;
     s.fwd = false;
+    s.out_stride = 1;
     return s;
 }
 
@@ -155,7 +156,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
     if(spec->mfma)
         n = snprintf(out,
                      out_cap,
-                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s",
+                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s%s",
                      name,
                      p->KH,
                      p->KW,
@@ -166,7 +167,8 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->prefetch_rows,
                      dw_win_is_bf16(p) ? "_bf16" : "",
                      spec->fwd ? "_fwd" : "",
-                     gtag);
+                     gtag,
+                     spec->out_stride == 2 ? "_s2" : "");
     else
         n = snprintf(out,
                      out_cap,
@@ -244,6 +246,11 @@ static bool
         DW_WIN_FAIL("prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
     if(spec->fwd && !spec->mfma)
         DW_WIN_FAIL("fwd requires mfma");
+    if((spec->out_stride != 1 && spec->out_stride != 2) || (spec->out_stride != 1 && !spec->fwd))
+        DW_WIN_FAIL("out_stride must be 1, or 2 with fwd (got %d)", spec->out_stride);
+    if(spec->block_h % spec->out_stride != 0)
+        DW_WIN_FAIL(
+            "block_h=%d must be a multiple of out_stride=%d", spec->block_h, spec->out_stride);
     if(spec->mfma)
     {
         if(spec->dot2 || cpl != 1)
@@ -777,11 +784,13 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     const int PER_PX = BLOCK_CH / ROCKE_DW_DGRAD_MFMA_CH;
     const int CH_PAD = BLOCK_CH + ROCKE_DW_DGRAD_MFMA_CH;
     const int PF = spec->prefetch_rows;
+    const bool FWD = spec->fwd;
+    const int S = spec->out_stride;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
     rocke_dconv_params_t prm;
-    rocke_dconv_emit_params(b, &prm, "dgrad", io_type);
+    rocke_dconv_emit_params(b, &prm, FWD ? "fwd" : "dgrad", io_type);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     V* p_N = prm.p_N;
@@ -789,6 +798,23 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* p_Wi = prm.p_Wi;
     V* p_Ho = prm.p_Ho;
     V* p_Wo = prm.p_Wo;
+    V* c_S = NULL;
+    if(FWD)
+    {
+        /* The forward ABI: the rows produced (dX) are the forward output, the
+         * rows streamed (dY) the forward input; a stride-S output is every
+         * S-th row and column of the stride-1 grid walked, S times its extent. */
+        p_Hi = prm.p_Ho;
+        p_Wi = prm.p_Wo;
+        if(S > 1)
+        {
+            c_S = rocke_b_const_i32(b, S);
+            p_Hi = rocke_b_mul(b, p_Hi, c_S);
+            p_Wi = rocke_b_mul(b, p_Wi, c_S);
+        }
+        p_Ho = prm.p_Hi;
+        p_Wo = prm.p_Wi;
+    }
     V* p_G = prm.p_groups;
     const bool G8 = p->cpg > 1;
     const int CPG = p->cpg;
@@ -930,8 +956,15 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* c4 = rocke_b_const_i32(b, 4);
     V* tm4 = rocke_b_mul(b, tm, c4);
     V* o_ch = rocke_b_add(b, wave_ch, tm4);
-    const int n_out = F * TW * PER_PX;
+    const int n_out = F * (TW / S) * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
+    V* c_TWS = NULL;
+    V* x0_out = NULL;
+    if(S > 1)
+    {
+        c_TWS = rocke_b_const_i32(b, TW / S);
+        x0_out = rocke_b_div(b, x0, c_S);
+    }
     std::vector<dw_win_plan> drain;
     for(int i = 0; i < dw_win_cdiv(n_out, THREADS); ++i)
     {
@@ -940,10 +973,31 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* px = rocke_b_div(b, idx, c_per_px);
         V* im = rocke_b_mod(b, idx, c_per_px);
         V* ch8 = rocke_b_mul(b, im, c8);
-        V* pd = rocke_b_div(b, px, c_TW);
-        V* img_o = rocke_b_add(b, img0, pd);
-        V* pm = rocke_b_mod(b, px, c_TW);
-        V* wi_o = rocke_b_add(b, x0, pm);
+        V* img_o;
+        V* wi_o;
+        V* wi_st;
+        if(S > 1)
+        {
+            /* Output pixel px is staged column S * (px % (TW / S)) of image
+             * px / (TW / S); its stride-1 column bounds it against p_Wi. */
+            V* f_o = rocke_b_div(b, px, c_TWS);
+            V* cs = rocke_b_mod(b, px, c_TWS);
+            img_o = rocke_b_add(b, img0, f_o);
+            V* fm = rocke_b_mul(b, f_o, c_TW);
+            V* cm2 = rocke_b_mul(b, cs, c_S);
+            px = rocke_b_add(b, fm, cm2);
+            V* cm3 = rocke_b_mul(b, cs, c_S);
+            wi_o = rocke_b_add(b, x0, cm3);
+            wi_st = rocke_b_add(b, x0_out, cs);
+        }
+        else
+        {
+            V* pd = rocke_b_div(b, px, c_TW);
+            img_o = rocke_b_add(b, img0, pd);
+            V* pm = rocke_b_mod(b, px, c_TW);
+            wi_o = rocke_b_add(b, x0, pm);
+            wi_st = wi_o;
+        }
         V* ch_o = rocke_b_add(b, ch_blk, ch8);
         V* cn = rocke_b_const_i32(b, n_out);
         V* l1 = rocke_b_cmp_lt(b, idx, cn);
@@ -954,7 +1008,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         V* a2 = rocke_b_land(b, l3, l4);
         V* ok = rocke_b_land(b, a1, a2);
         V* m1 = rocke_b_mul(b, img_o, dx_img);
-        V* m2 = rocke_b_mul(b, wi_o, dx_px);
+        V* m2 = rocke_b_mul(b, wi_st, dx_px);
         V* c2 = rocke_b_const_i32(b, 2);
         V* m3 = rocke_b_mul(b, ch_o, c2);
         V* s1 = rocke_b_add(b, m2, m3);
@@ -1042,7 +1096,9 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     auto dx_row_part = [&](int hi_local) -> V* {
         V* c = rocke_b_const_i32(b, hi_local);
         V* hi = rocke_b_add(b, h0, c);
-        V* part = rocke_b_mul(b, hi, dx_row_bytes);
+        /* A stride-S output row is stride-1 row hi / S. */
+        V* hr = S > 1 ? rocke_b_div(b, hi, c_S) : hi;
+        V* part = rocke_b_mul(b, hr, dx_row_bytes);
         V* lt = rocke_b_cmp_lt(b, hi, p_Hi);
         return rocke_b_select(b, lt, part, oob_uniform);
     };
@@ -1072,7 +1128,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         for(int r = 0; r < KH; ++r)
         {
             const int hl = y + r - (KH - 1);
-            if(hl >= 0 && hl < ROWS)
+            if(hl >= 0 && hl < ROWS && hl % S == 0)
             {
                 rs.push_back(r);
                 slots.push_back(hl % KH);
@@ -1154,7 +1210,11 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         std::vector<V*> accs;
         for(int sl : slots)
             accs.push_back(acc[sl]);
-        if(halo)
+        if(slots.empty())
+        {
+            /* A stride-2 window row whose output rows are all dropped. */
+        }
+        else if(halo)
             dw_win_guarded(b, row_ok[y], c0, c1, accs, "dwm", y, true, multiply);
         else
             accs = multiply(accs);
@@ -1163,7 +1223,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         for(size_t i = 0; i < slots.size(); ++i)
             acc[slots[i]] = accs[i];
         const int hi_local = y - (KH - 1);
-        if(hi_local < 0 || hi_local >= ROWS)
+        if(hi_local < 0 || hi_local >= ROWS || hi_local % S != 0)
             continue;
         const int slot = hi_local % KH;
         pend_val = dw_win_trunc_vec(b, bf16, acc[slot]);

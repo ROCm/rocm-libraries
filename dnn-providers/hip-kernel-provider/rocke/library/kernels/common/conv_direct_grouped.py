@@ -7533,12 +7533,17 @@ class DirectDepthwiseDgradWindowedSpec:
     # Read the filter rotated by 180 degrees (MFMA form only): the kernel then
     # runs the forward depthwise convolution whose dgrad ``problem`` is the
     # transpose -- dY is the forward input, dX the forward output, and PAD is
-    # ``KH - 1 - pad`` (see :func:`dw_win_fwd_problem`). A forward problem may
+    # ``KH - 1 - pad`` (see :func:`dw_win_fwd_problem`). It takes the forward
+    # kernarg block. A forward problem may
     # also be grouped with ``cpg = kpg`` a multiple of 8 (at most
     # DW_WIN_MAX_GROUP_CH): a wave's 8 output channels then contract the
     # ``cpg / 8`` 8-channel chunks of their group, with the group's dense
     # weights as A fragments instead of the one-hot diagonal.
     fwd: bool = False
+    # Forward output stride (``fwd`` only): 2 keeps every second row and
+    # column of the stride-1 grid the kernel walks (the problem is then that
+    # grid's: see :func:`dw_win_fwd_problem`), skipping the odd rows' MFMAs.
+    out_stride: int = 1
 
     @property
     def threads_per_block(self) -> int:
@@ -7634,6 +7639,7 @@ class DirectDepthwiseDgradWindowedSpec:
                     "bf16": p.dtype == "bf16",
                     "fwd": self.fwd,
                     f"g{p.cpg}": self.grouped,
+                    "s2": self.out_stride == 2,
                 },
             )
         return kernel_name_join(
@@ -7654,13 +7660,15 @@ class DirectDepthwiseDgradWindowedSpec:
 
 def dw_win_fwd_problem(problem: DirectConvProblem) -> DirectConvProblem:
     """The dgrad problem whose windowed MFMA kernel, with ``fwd=True``, runs
-    the stride-1 depthwise forward convolution ``problem``.
+    the depthwise (or grouped) forward convolution ``problem``.
 
     The forward pass is a dgrad over the rotated filter with the roles of the
-    activations swapped: its dX is the forward output (``Ho x Wo``), its dY
-    the forward input (``H x W``), and its padding ``KH - 1 - PAD`` (the same
-    for "same" padding), so the transposed problem's ``Ho x Wo`` is the
-    forward ``H x W`` again.
+    activations swapped: its dX is the forward output, its dY the forward
+    input, and its padding ``KH - 1 - PAD`` (the same for "same" padding). At
+    stride 2 the dX is the stride-1 grid of ``2 Ho x 2 Wo`` the kernel walks
+    (``out_stride=2`` keeps every second row and column). The kernel reads
+    the forward kernarg block of ``problem`` itself; this transposed problem
+    sizes the spec's launch grid and checks.
     """
     from dataclasses import replace
 
@@ -7670,8 +7678,18 @@ def dw_win_fwd_problem(problem: DirectConvProblem) -> DirectConvProblem:
             f"the forward windowed kernel needs a square filter "
             f"(got {problem.KH}x{problem.KW})"
         )
+    if problem.stride not in (1, 2):
+        raise ValueError(
+            f"the forward windowed kernel runs stride 1 or 2 (got {problem.stride})"
+        )
+    # The stride-1 grid the kernel walks: stride x the output extents.
+    S = problem.stride
     return replace(
-        problem, H=problem.Ho, W=problem.Wo, PAD=problem.KH - 1 - problem.PAD
+        problem,
+        H=S * problem.Ho,
+        W=S * problem.Wo,
+        PAD=problem.KH - 1 - problem.PAD,
+        stride=1,
     )
 
 
@@ -7754,6 +7772,13 @@ def _depthwise_dgrad_win_check(
         return False, f"prefetch_rows must be >= 1 (got {spec.prefetch_rows})"
     if spec.fwd and not spec.mfma:
         return False, "fwd requires mfma"
+    if spec.out_stride not in (1, 2) or (spec.out_stride != 1 and not spec.fwd):
+        return False, f"out_stride must be 1, or 2 with fwd (got {spec.out_stride})"
+    if spec.block_h % spec.out_stride:
+        return False, (
+            f"block_h={spec.block_h} must be a multiple of out_stride="
+            f"{spec.out_stride}"
+        )
     if spec.mfma:
         ok, why = _depthwise_dgrad_win_mfma_check(spec)
         if not ok:
@@ -7808,17 +7833,29 @@ def is_valid_depthwise_dgrad_win_spec(
     return _depthwise_dgrad_win_check(spec)
 
 
-def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value]):
+def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value], fwd: bool = False):
     """Byte strides of the dgrad tensors from the element-stride kernargs:
-    ``(dy_img, dy_row, dy_px, dx_img, dx_row, dx_px)``."""
+    ``(dy_img, dy_row, dy_px, dx_img, dx_row, dx_px)``. Under the forward
+    ABI (``fwd``) dY is the forward input A and dX the forward output D."""
     c2 = b.const_i32(2)
     names = (
-        "p_dY_stride_n",
-        "p_dY_stride_ho",
-        "p_dY_stride_wo",
-        "p_dX_stride_n",
-        "p_dX_stride_hi",
-        "p_dX_stride_wi",
+        (
+            "p_A_stride_n",
+            "p_A_stride_hi",
+            "p_A_stride_wi",
+            "p_D_stride_n",
+            "p_D_stride_ho",
+            "p_D_stride_wo",
+        )
+        if fwd
+        else (
+            "p_dY_stride_n",
+            "p_dY_stride_ho",
+            "p_dY_stride_wo",
+            "p_dX_stride_n",
+            "p_dX_stride_hi",
+            "p_dX_stride_wi",
+        )
     )
     return tuple(b.mul(params[n], c2) for n in names)
 
@@ -8170,14 +8207,31 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     CH_PAD = BLOCK_CH + DW_DGRAD_MFMA_CH
     io_type = _io_type(p.dtype)
 
+    FWD = spec.fwd
+    S = spec.out_stride
+
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    params = emit_direct_params(b, direction="dgrad", io_type=io_type)
+    params = emit_direct_params(b, direction="fwd" if FWD else "dgrad", io_type=io_type)
     p_N = params["p_N"]
-    p_Hi = params["p_Hi"]
-    p_Wi = params["p_Wi"]
-    p_Ho = params["p_Ho"]
-    p_Wo = params["p_Wo"]
+    if FWD:
+        # The forward ABI: the rows this kernel produces (its dX) are the
+        # forward output and the rows it streams (its dY) the forward input.
+        # A stride-S output is every S-th row and column of the stride-1 grid
+        # the kernel walks, S times its extent.
+        p_Hi = params["p_Ho"]
+        p_Wi = params["p_Wo"]
+        if S > 1:
+            c_S = b.const_i32(S)
+            p_Hi = b.mul(p_Hi, c_S)
+            p_Wi = b.mul(p_Wi, c_S)
+        p_Ho = params["p_Hi"]
+        p_Wo = params["p_Wi"]
+    else:
+        p_Hi = params["p_Hi"]
+        p_Wi = params["p_Wi"]
+        p_Ho = params["p_Ho"]
+        p_Wo = params["p_Wo"]
     p_G = params["p_groups"]
     G8 = spec.grouped
     CPG = p.cpg
@@ -8216,7 +8270,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     k = b.mod(col16, c8)
     q = b.div(col16, c8)
     dy_img, dy_row_bytes, dy_px, dx_img, dx_row_bytes, dx_px = _dw_win_byte_strides(
-        b, params
+        b, params, fwd=FWD
     )
 
     a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])
@@ -8278,15 +8332,29 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     o_smem = b.smem_alloc(io_type, [2, F * TW, CH_PAD], name_hint="dx_stage")
     o_col = b.add(b.mul(f, b.const_i32(TW)), b.add(pair2, b.div(t, b.const_i32(2))))
     o_ch = b.add(wave_ch, b.mul(b.mod(t, b.const_i32(2)), b.const_i32(4)))
-    n_out = F * TW * PER_PX
+    n_out = F * (TW // S) * PER_PX
     c_TW = b.const_i32(TW)
+    if S > 1:
+        c_TWS = b.const_i32(TW // S)
+        x0_out = b.div(x0, c_S)
     drain: List[Tuple[Value, Value, Value]] = []
     for i in range(-(-n_out // THREADS)):
         idx = b.add(tid, b.const_i32(i * THREADS))
         px = b.div(idx, c_per_px)
         ch8 = b.mul(b.mod(idx, c_per_px), c8)
-        img_o = b.add(img0, b.div(px, c_TW))
-        wi_o = b.add(x0, b.mod(px, c_TW))
+        if S > 1:
+            # Output pixel px is staged column S * (px % (TW / S)) of image
+            # px // (TW / S); its stride-1 column bounds it against p_Wi.
+            f_o = b.div(px, c_TWS)
+            cs = b.mod(px, c_TWS)
+            img_o = b.add(img0, f_o)
+            px = b.add(b.mul(f_o, c_TW), b.mul(cs, c_S))
+            wi_o = b.add(x0, b.mul(cs, c_S))
+            wi_st = b.add(x0_out, cs)
+        else:
+            img_o = b.add(img0, b.div(px, c_TW))
+            wi_o = b.add(x0, b.mod(px, c_TW))
+            wi_st = wi_o
         ch_o = b.add(ch_blk, ch8)
         ok = b.land(
             b.land(b.cmp_lt(idx, b.const_i32(n_out)), b.cmp_lt(img_o, p_N)),
@@ -8294,7 +8362,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         )
         g_off = b.add(
             b.mul(img_o, dx_img),
-            b.add(b.mul(wi_o, dx_px), b.mul(ch_o, b.const_i32(2))),
+            b.add(b.mul(wi_st, dx_px), b.mul(ch_o, b.const_i32(2))),
         )
         drain.append((px, ch8, b.select(ok, g_off, oob_lane)))
 
@@ -8349,7 +8417,9 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
 
     def dx_row_part(hi_local: int) -> Value:
         hi = b.add(h0, b.const_i32(hi_local))
-        part = b.mul(hi, dx_row_bytes)
+        # A stride-S output row is stride-1 row hi / S (block_h keeps hi % S
+        # the local row's).
+        part = b.mul(b.div(hi, c_S) if S > 1 else hi, dx_row_bytes)
         return b.select(b.cmp_lt(hi, p_Hi), part, oob_uniform)
 
     def drain_out(buf: Value, dx_row: Value) -> None:
@@ -8419,7 +8489,13 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     pend_out: Optional[Tuple[Value, Value]] = None
     acc: List[Value] = [zero_acc] * KH
     for y in range(n_rows):
-        rs = [r for r in range(KH) if 0 <= y + r - (KH - 1) < ROWS]
+        # Output rows y + r - (KH - 1) of the tile; a stride-S output keeps
+        # every S-th one.
+        rs = [
+            r
+            for r in range(KH)
+            if 0 <= y + r - (KH - 1) < ROWS and (y + r - (KH - 1)) % S == 0
+        ]
         slots = [(y + r - (KH - 1)) % KH for r in rs]
         raw = pending.pop(y)
         buf = b.const_i32(y % 2)
@@ -8439,7 +8515,10 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
             pend_out = None
         if y + PF < n_rows:
             pending[y + PF] = load_row(y + PF)
-        if halo:
+        if not rs:
+            # A stride-2 window row whose output rows are all dropped.
+            new = []
+        elif halo:
             trip = b.select(row_ok[y], c1, c0)
             loop = b.scf_for_iter(
                 c0,
@@ -8456,7 +8535,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         for sl, v in zip(slots, new):
             acc[sl] = v
         hi_local = y - (KH - 1)
-        if not 0 <= hi_local < ROWS:
+        if not 0 <= hi_local < ROWS or hi_local % S:
             continue
         slot = hi_local % KH
         pend_out = (_trunc_f32(b, p.dtype, acc[slot]), dx_row_part(hi_local))

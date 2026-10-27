@@ -82,7 +82,6 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
-    DIRECT_DEPTHWISE_WIN_FWD,
     DIRECT_MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
@@ -569,11 +568,8 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
                 spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
             )
         )
-    # The MFMA dgrad's own kernel is a forward pass over the transposed
-    # problem; the windowed depthwise forward is a dgrad kernel over its own.
+    # The MFMA dgrad's own kernel is a forward pass over the transposed problem.
     direction = "fwd" if spec.helpers else spec.direction
-    if spec.algorithm == DIRECT_DEPTHWISE_WIN_FWD:
-        direction = "dgrad"
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
 
 
@@ -716,12 +712,6 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
             num_sub_gemms=len(sub_gemms),
         )
     problem, _ = _direct_problem(req)
-    if ident.algorithm == DIRECT_DEPTHWISE_WIN_FWD:
-        # The windowed dgrad kernel with the filter rotated: dgrad extents of
-        # the transposed problem, x riding its dY and y its dX.
-        launch_spec, _ = _direct_launch_spec(ident, req)
-        args = ConvArgs.from_problem(launch_spec.problem, direction="dgrad")
-        return ConvLaunchPlan((step(args),))
     if not spec.helpers:
         args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))

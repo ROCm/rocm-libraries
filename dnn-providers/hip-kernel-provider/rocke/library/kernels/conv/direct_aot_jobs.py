@@ -607,18 +607,20 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         ),
     ),
     # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
-    # filter over the transposed problem): stride 1, "same" padding; and its
+    # filter over its stride-1 grid): stride 1 and 2, "same" padding; and its
     # grouped form with 8..64 channels per group.
     _DW_WIN_FWD: (
         "fwd",
         tuple(
-            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=1, kpg=1)
             for k in DW_WIN_FWD_FILTERS
+            for s in _STRIDES
         )
         + tuple(
-            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=c)
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
             for k in DW_WIN_FWD_G8_FILTERS
             for c in DW_WIN_FWD_GROUP_CH
+            for s in _STRIDES
         ),
     ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every

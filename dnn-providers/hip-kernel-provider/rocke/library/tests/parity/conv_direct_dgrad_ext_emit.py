@@ -29,7 +29,8 @@
 # Indices 45..48: the MFMA form with fwd (the rotated filter; 48, fwd
 # without mfma, both reject).
 # Indices 49..54: its grouped forward form (cpg = kpg = 8 / 16 / 32; 51,
-# without fwd, and 54, a block narrower than a group, both reject).
+# without fwd, and 54, a block narrower than a group, both reject); 55..57
+# the forward form at stride 2 (57, an odd block_h, both reject).
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -445,6 +446,72 @@ _WIN_G8_CFGS = (
             w_fold=1,
             prefetch_rows=1,
             block_h=8,
+        ),
+    ),
+    # 55: depthwise stride 2 (the stride-1 grid of the output, every second
+    # row and column kept); 56: cpg 16 stride 2, bf16, w_fold 2; 57: stride 2
+    # with an odd block_h -- both reject.
+    (
+        2,
+        14,
+        22,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=1,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=8,
+        ),
+    ),
+    (
+        2,
+        10,
+        12,
+        6,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=4,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=4,
+        ),
+    ),
+    (
+        2,
+        14,
+        22,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=1,
+            mfma=True,
+            fwd=True,
+            out_stride=2,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=7,
         ),
     ),
 )

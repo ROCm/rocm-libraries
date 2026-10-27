@@ -54,10 +54,10 @@ DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
-# Depthwise forward (stride 1, square filter) on the windowed dgrad kernel's
-# Toeplitz MFMA form with the filter rotated (``fwd=True``): a dgrad over the
-# transposed problem (dgrad_win_fwd_problem) whose dY is the forward input and
-# whose dX is the forward output. Takes the dgrad kernarg block.
+# Depthwise (and 8..64-channel grouped) forward, stride 1 or 2, square filter,
+# on the windowed dgrad kernel's Toeplitz MFMA form with the filter rotated
+# (``fwd=True``): the spec's problem is the transposed stride-1 grid
+# (dw_win_fwd_problem); the kernel takes the forward kernarg block.
 DIRECT_DEPTHWISE_WIN_FWD = "direct_depthwise_win"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
@@ -187,6 +187,7 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
             name="rocke_direct_dw_win_fwd",
             mfma=True,
             fwd=True,
+            out_stride=problem.stride,
             **knobs,
         )
     if variant == "direct_grouped_dgrad":

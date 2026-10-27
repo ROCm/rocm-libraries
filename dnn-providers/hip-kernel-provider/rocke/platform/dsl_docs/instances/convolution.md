@@ -938,10 +938,14 @@ rotated by 180 degrees (`W[k, KH-1-r, s]` instead of `W[k, r, KW-1-s]`), which
 makes it the stride-1 depthwise *forward* convolution of the transposed
 problem: dY is the forward input, dX the forward output and `PAD` is
 `KH - 1 - pad` (`dw_win_fwd_problem`; square filters only, the same `PAD` for
-"same" padding). The kernel name gains `_fwd`; the kernargs are the dgrad
-block of the transposed problem. AOT variant `direct_depthwise_win`
-(direction fwd, 3x3..9x9 "same" padding), registered in the gfx950 forward
-dispatcher list ahead of the tiled depthwise instances.
+"same" padding). The kernel name gains `_fwd`, and the kernel takes the
+*forward* kernarg block (A = input, D = output); the transposed problem only
+sizes the spec's grid and checks. `out_stride=2` (name `_s2`) runs a
+stride-2 forward pass: the kernel walks the stride-1 grid of `2 Ho x 2 Wo`,
+skips the odd rows' MFMAs and stages / stores only the even columns
+(`block_h` must be even). AOT variant `direct_depthwise_win` (direction fwd,
+3x3..9x9 "same" padding, stride 1 and 2), registered in the gfx950 forward
+dispatcher list (the stride-1 depthwise instances ahead of the tiled ones).
 
 The forward pass also takes a grouped problem with `cpg = kpg` a multiple of 8
 up to `DW_WIN_MAX_GROUP_CH` (64): a wave still owns 8 output channels, its A

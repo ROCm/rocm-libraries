@@ -1064,11 +1064,12 @@ def test_nongrouped_only_serves_one_group(cache):
     plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
     assert not _nongrouped(plans)
     assert all(i.algorithm != "direct_nongrouped" for i, _ in rejected)
-    # Grouped forward has no stride-2 kernel; the non-grouped one does.
+    # At stride 2 the non-grouped kernel serves one group; so does the
+    # windowed MFMA forward, whose grouped form takes a 64-channel group.
     plans, _ = dks.direct_plans(
         cache, _problem(groups=1, cpg=64, kpg=64, stride=2), "fwd", _ARCH
     )
-    assert plans and _variants(plans) == {"direct_nongrouped"}
+    assert plans and _variants(plans) == {"direct_nongrouped", "direct_depthwise_win"}
 
 
 def test_depthwise_forward_offers_col_alongside_preload(cache):
@@ -1080,6 +1081,7 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
         "direct_depthwise_spatial",
         "direct_depthwise_col",
         "direct_depthwise_tiled",
+        "direct_depthwise_win",
     }
     other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)
     plans, _ = dks.direct_plans(cache, other, "fwd", _ARCH)
@@ -1096,7 +1098,7 @@ def test_capabilities_outside_the_list_are_not_served(cache):
     # The baked-channel grouped kernels cover cpg in {4, 8, 16, 32} at stride
     # 1 (and the windowed MFMA forward multiples of 8 up to 64); anything else
     # grouped is left to the runtime-channel LDS-halo kernel.
-    for problem in (_problem(cpg=12, kpg=12), _problem(stride=2)):
+    for problem in (_problem(cpg=12, kpg=12), _problem(cpg=12, kpg=12, stride=2)):
         plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
         assert plans
         assert _variants(plans) == {"direct_grouped_halo"}
