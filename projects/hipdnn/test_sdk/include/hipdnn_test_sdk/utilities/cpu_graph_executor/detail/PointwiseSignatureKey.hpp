@@ -217,14 +217,17 @@ struct PointwiseSignatureKey
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // fp32 + fp16 / bf16 written as fp16 / bf16, computed in fp32: a fused residual or
+        // bias add whose other operand is a virtual fp32 tensor. Order is
+        // input0 / input1 / compute / output.
         addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
         addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
 
         addComparisonPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                  hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
