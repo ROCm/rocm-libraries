@@ -367,7 +367,7 @@ typedef NumericalNote NumericalNote_t; ///< @brief Type alias for NumericalNote
  */
 enum class BuildPlanPolicy
 {
-    HEURISTICS_CHOICE, ///< Compile the active plan; fall back only if its engine has no solver
+    HEURISTICS_CHOICE, ///< Compile the active plan; fall back to other ranked plans if it fails
     ALL ///< Build all available plans, skipping any that fail to compile
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy

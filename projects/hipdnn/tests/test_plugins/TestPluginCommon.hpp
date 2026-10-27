@@ -406,7 +406,8 @@ public:
 
     // Called from CreateExecutionContext once the engine is known to be usable.
     // Derived classes override this to simulate a plugin that accepts a graph in
-    // GetApplicableEngineIds but cannot build a plan for it (e.g. no solver).
+    // GetApplicableEngineIds but then fails to build a plan for it (e.g. no solver,
+    // out of memory).
     virtual void onCreateExecutionContext() const {}
 
     /// Returns the calling thread's mutable last-call record for this plugin.

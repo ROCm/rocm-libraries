@@ -10,9 +10,9 @@ thread_local char
     = "";
 
 // Reports its engine applicable for every graph, then fails to create the execution plan
-// with a resource failure (HIPDNN_PLUGIN_STATUS_ALLOC_FAILED). Unlike the no-solver fake,
-// this is a fault rather than a decline, so callers must stop instead of trying another
-// engine.
+// with a resource failure (HIPDNN_PLUGIN_STATUS_ALLOC_FAILED). It is a second kind of
+// plan-creation failure next to the no-solver fake's plain failure; the frontend falls back
+// to the next engine for either.
 class ResourceFailPlugin : public TestPluginBase
 {
 public:

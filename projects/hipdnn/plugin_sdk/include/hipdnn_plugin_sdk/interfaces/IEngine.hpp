@@ -63,9 +63,9 @@ public:
      * thrown from here is skipped with a warning for this engine; any other exception type is not
      * caught by the SDK and ends this plugin's applicability query. The host skips the plugin in
      * that case, except for an explicitly pinned engine, where the owning plugin's error is
-     * reported. Accepting a graph means the engine can build a plan for it; an engine that learns
-     * only while building that it has no solver throws NOT_APPLICABLE from
-     * initializeExecutionContext instead.
+     * reported. Accepting a graph means the engine can build a plan for it; an engine that
+     * accepted a graph but fails to build its plan has a bug (the frontend tolerates it by trying
+     * another ranked engine, but that is not a way to decline).
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to check.
@@ -175,11 +175,9 @@ public:
      * @param opGraph The operation graph.
      * @param engineConfig The engine configuration settings.
      * @param executionContext The execution context to initialize with a plan.
-     * @throws HipdnnPluginException with status NOT_APPLICABLE if the engine accepted the graph at
-     *         applicability but has no solver for it (the host reports it as not supported and the
-     *         frontend's default plan build falls back to another ranked engine, scanning from the
-     *         top of the list). Any other status is a failure that is returned to the caller: no
-     *         applicable plan builder is found, or plan creation fails.
+     * @throws HipdnnPluginException if no applicable plan builder is found or if plan creation
+     *         fails. Every failure is reported to the host as a plan failure; NOT_APPLICABLE has no
+     *         special meaning here.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(

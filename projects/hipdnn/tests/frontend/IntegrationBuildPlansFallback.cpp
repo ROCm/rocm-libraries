@@ -5,10 +5,11 @@
 // accepts a graph (it is returned by GetApplicableEngineIds) but cannot build an execution
 // plan for it.
 //
-// Only the "no solver" outcome falls back to another ranked engine: the plugin answers
-// plan creation with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. Any other plan-creation failure
-// (here an out-of-memory status) stops and is returned, even when the failing engine is
-// the user's soft preferred engine. BuildPlanPolicy::ALL skips every failing plan.
+// Any failure to finalize the active plan falls back to the next ranked engine and is
+// logged at WARN. Here the failure is either a plain plan-creation failure ("no solver")
+// or an out-of-memory status, and the failing engine is the user's soft preferred engine.
+// When no plan finalizes, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED with
+// every attempted engine's failure. BuildPlanPolicy::ALL skips every failing plan.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -32,21 +33,17 @@ namespace
 
 const std::vector<int64_t> K_DIMS = {1, 3, 4, 4};
 
-class IntegrationBuildPlansFallback : public hipdnn_tests::IntegrationTestFixture
+// Shared scenario for a failing engine that is the soft preferred engine. Concrete suites
+// choose which fake plugin fails and whether a healthy engine is also loaded.
+class IntegrationBuildPlansFallbackBase : public hipdnn_tests::IntegrationTestFixture
 {
 protected:
-    std::vector<std::string> getPluginPaths() const override
-    {
-        return {hipdnn_tests::plugin_constants::testNoSolverPluginPath(),
-                hipdnn_tests::plugin_constants::testGoodPluginPath()};
-    }
-
     // The engine made the active plan through the soft preferred-engine setter, so the
     // tests do not depend on heuristic order.
-    virtual int64_t preferredEngineId() const
-    {
-        return noSolverEngineId();
-    }
+    virtual int64_t failingEngineId() const = 0;
+
+    // The plugin's own failure text, which the reported error must carry.
+    virtual const char* failureText() const = 0;
 
     static int64_t noSolverEngineId()
     {
@@ -85,7 +82,7 @@ protected:
         auto y = graph->pointwise(x, attrs);
         y->set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
 
-        graph->set_preferred_engine_id_ext(preferredEngineId());
+        graph->set_preferred_engine_id_ext(failingEngineId());
 
         auto result = graph->validate();
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -129,76 +126,125 @@ protected:
         result = graph.execute(_handle, variantPack, nullptr);
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
+
+    // Both engines are offered; the preferred one fails to finalize. build_plans() must
+    // move on to the engine that works.
+    void expectBuildPlansFallsBack(const std::string& name)
+    {
+        auto graph = createBuiltGraph(name);
+
+        std::vector<int64_t> ranked;
+        auto result = graph->get_ranked_engine_ids(ranked);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(ranked.size(), 2u) << "both engines must be offered for this scenario";
+
+        result = graph->create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
+    }
+
+    // Same scenario through the one-call build().
+    void expectOneCallBuildFallsBack(const std::string& name)
+    {
+        auto graph = createBuiltGraph(name);
+
+        auto result = graph->build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
+    }
+
+    // Control: BuildPlanPolicy::ALL skips a plan that fails to finalize.
+    void expectPolicyAllSkipsFailingEngine(const std::string& name)
+    {
+        auto graph = createBuiltGraph(name);
+
+        auto result = graph->create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->build_plans(BuildPlanPolicy::ALL);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
+    }
+
+    // With no healthy engine to fall back to, build_plans() reports that no plan finalized
+    // together with the failing engine's own error, and leaves the active plan unchanged.
+    void expectBuildPlansReportsAggregatedError(const std::string& name)
+    {
+        auto graph = createBuiltGraph(name);
+
+        auto result = graph->create_execution_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->build_plans();
+        EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+        EXPECT_NE(result.err_msg.find("Failed to finalize any execution plan"), std::string::npos)
+            << result.err_msg;
+        EXPECT_NE(result.err_msg.find(failureText()), std::string::npos) << result.err_msg;
+
+        EXPECT_EQ(activeEngineId(*graph), failingEngineId());
+    }
+
+    // Same scenario through the one-call build().
+    void expectOneCallBuildReportsAggregatedError(const std::string& name)
+    {
+        auto graph = createBuiltGraph(name);
+
+        auto result = graph->build(_handle);
+        EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+        EXPECT_NE(result.err_msg.find("Failed to finalize any execution plan"), std::string::npos)
+            << result.err_msg;
+        EXPECT_NE(result.err_msg.find(failureText()), std::string::npos) << result.err_msg;
+    }
 };
 
-// Both engines are offered; the preferred one has no solver. Plan building must move
-// on to the engine that does.
-TEST_F(IntegrationBuildPlansFallback, BuildFallsThroughEngineWithNoSolver)
-{
-    auto graph = createBuiltGraph("BuildFallsThroughEngineWithNoSolver");
-
-    std::vector<int64_t> ranked;
-    auto result = graph->get_ranked_engine_ids(ranked);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_EQ(ranked.size(), 2u) << "both engines must be offered for this scenario";
-
-    result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
-}
-
-// Same scenario through the one-call build().
-TEST_F(IntegrationBuildPlansFallback, OneCallBuildFallsThroughEngineWithNoSolver)
-{
-    auto graph = createBuiltGraph("OneCallBuildFallsThroughEngineWithNoSolver");
-
-    auto result = graph->build(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
-}
-
-// Control: BuildPlanPolicy::ALL skips a plan that fails to finalize.
-TEST_F(IntegrationBuildPlansFallback, PolicyAllSkipsEngineWithNoSolver)
-{
-    auto graph = createBuiltGraph("PolicyAllSkipsEngineWithNoSolver");
-
-    auto result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_plans(BuildPlanPolicy::ALL);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
-}
-
-// With no healthy engine to fall back to, the failing engine's error is reported.
-class IntegrationBuildPlansNoSolverOnly : public IntegrationBuildPlansFallback
+// The preferred engine fails plan creation with a plain failure; a healthy engine is loaded.
+class IntegrationBuildPlansNoSolver : public IntegrationBuildPlansFallbackBase
 {
 protected:
     std::vector<std::string> getPluginPaths() const override
     {
-        return {hipdnn_tests::plugin_constants::testNoSolverPluginPath()};
+        return {hipdnn_tests::plugin_constants::testNoSolverPluginPath(),
+                hipdnn_tests::plugin_constants::testGoodPluginPath()};
+    }
+
+    int64_t failingEngineId() const override
+    {
+        return noSolverEngineId();
+    }
+
+    const char* failureText() const override
+    {
+        return "no applicable solver";
     }
 };
 
-TEST_F(IntegrationBuildPlansNoSolverOnly, BuildReportsErrorWhenNoEngineHasASolver)
+TEST_F(IntegrationBuildPlansNoSolver, BuildFallsBackFromEngineWithNoSolver)
 {
-    auto graph = createBuiltGraph("BuildReportsErrorWhenNoEngineHasASolver");
-
-    auto result = graph->build(_handle);
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
-    EXPECT_NE(result.err_msg.find("no applicable solver"), std::string::npos) << result.err_msg;
+    expectBuildPlansFallsBack("BuildFallsBackFromEngineWithNoSolver");
 }
 
-// The preferred engine fails with something other than "no solver" (an out-of-memory
-// status from plan creation). That is a fault, not a decline: plan building stops with
-// the engine's error and does not fall back to the healthy engine.
-class IntegrationBuildPlansResourceFailure : public IntegrationBuildPlansFallback
+TEST_F(IntegrationBuildPlansNoSolver, OneCallBuildFallsBackFromEngineWithNoSolver)
+{
+    expectOneCallBuildFallsBack("OneCallBuildFallsBackFromEngineWithNoSolver");
+}
+
+TEST_F(IntegrationBuildPlansNoSolver, PolicyAllSkipsEngineWithNoSolver)
+{
+    expectPolicyAllSkipsFailingEngine("PolicyAllSkipsEngineWithNoSolver");
+}
+
+// The preferred engine fails plan creation with an out-of-memory status; a healthy engine
+// is loaded. Any failure falls back, whatever its kind.
+class IntegrationBuildPlansResourceFailure : public IntegrationBuildPlansFallbackBase
 {
 protected:
     std::vector<std::string> getPluginPaths() const override
@@ -207,60 +253,70 @@ protected:
                 hipdnn_tests::plugin_constants::testGoodPluginPath()};
     }
 
-    int64_t preferredEngineId() const override
+    int64_t failingEngineId() const override
     {
         return resourceFailEngineId();
     }
+
+    const char* failureText() const override
+    {
+        return "out of memory";
+    }
 };
 
-TEST_F(IntegrationBuildPlansResourceFailure, BuildStopsAtEngineWithResourceFailure)
+TEST_F(IntegrationBuildPlansResourceFailure, BuildFallsBackFromEngineWithResourceFailure)
 {
-    auto graph = createBuiltGraph("BuildStopsAtEngineWithResourceFailure");
-
-    std::vector<int64_t> ranked;
-    auto result = graph->get_ranked_engine_ids(ranked);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_EQ(ranked.size(), 2u) << "both engines must be offered for this scenario";
-
-    result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->check_support();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_plans();
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
-    EXPECT_NE(result.err_msg.find("out of memory"), std::string::npos) << result.err_msg;
-
-    // No fallback happened: the failing engine is still the active one.
-    int64_t selectedEngineId = 0;
-    result = graph->get_execution_plan_engine_id(selectedEngineId);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    EXPECT_EQ(selectedEngineId, resourceFailEngineId());
-    EXPECT_EQ(activeEngineId(*graph), resourceFailEngineId());
+    expectBuildPlansFallsBack("BuildFallsBackFromEngineWithResourceFailure");
 }
 
-// Same scenario through the one-call build().
-TEST_F(IntegrationBuildPlansResourceFailure, OneCallBuildStopsAtEngineWithResourceFailure)
+TEST_F(IntegrationBuildPlansResourceFailure, OneCallBuildFallsBackFromEngineWithResourceFailure)
 {
-    auto graph = createBuiltGraph("OneCallBuildStopsAtEngineWithResourceFailure");
-
-    auto result = graph->build(_handle);
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
-    EXPECT_NE(result.err_msg.find("out of memory"), std::string::npos) << result.err_msg;
+    expectOneCallBuildFallsBack("OneCallBuildFallsBackFromEngineWithResourceFailure");
 }
 
-// Control: BuildPlanPolicy::ALL skips every failing plan, whatever the failure.
 TEST_F(IntegrationBuildPlansResourceFailure, PolicyAllSkipsEngineWithResourceFailure)
 {
-    auto graph = createBuiltGraph("PolicyAllSkipsEngineWithResourceFailure");
+    expectPolicyAllSkipsFailingEngine("PolicyAllSkipsEngineWithResourceFailure");
+}
 
-    auto result = graph->create_execution_plans();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+// Only the plain-failure engine is loaded: nothing to fall back to.
+class IntegrationBuildPlansNoSolverOnly : public IntegrationBuildPlansNoSolver
+{
+protected:
+    std::vector<std::string> getPluginPaths() const override
+    {
+        return {hipdnn_tests::plugin_constants::testNoSolverPluginPath()};
+    }
+};
 
-    result = graph->build_plans(BuildPlanPolicy::ALL);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
+TEST_F(IntegrationBuildPlansNoSolverOnly, BuildPlansReportsErrorWhenNoEngineFinalizes)
+{
+    expectBuildPlansReportsAggregatedError("BuildPlansReportsErrorWhenNoEngineFinalizes");
+}
+
+TEST_F(IntegrationBuildPlansNoSolverOnly, OneCallBuildReportsErrorWhenNoEngineFinalizes)
+{
+    expectOneCallBuildReportsAggregatedError("OneCallBuildReportsErrorWhenNoEngineFinalizes");
+}
+
+// Only the out-of-memory engine is loaded: nothing to fall back to.
+class IntegrationBuildPlansResourceFailureOnly : public IntegrationBuildPlansResourceFailure
+{
+protected:
+    std::vector<std::string> getPluginPaths() const override
+    {
+        return {hipdnn_tests::plugin_constants::testResourceFailPluginPath()};
+    }
+};
+
+TEST_F(IntegrationBuildPlansResourceFailureOnly, BuildPlansReportsErrorWhenNoEngineFinalizes)
+{
+    expectBuildPlansReportsAggregatedError("BuildPlansReportsErrorWhenNoEngineFinalizes");
+}
+
+TEST_F(IntegrationBuildPlansResourceFailureOnly, OneCallBuildReportsErrorWhenNoEngineFinalizes)
+{
+    expectOneCallBuildReportsAggregatedError("OneCallBuildReportsErrorWhenNoEngineFinalizes");
 }
 
 } // namespace

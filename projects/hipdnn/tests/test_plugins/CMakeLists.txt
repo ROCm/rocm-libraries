@@ -59,8 +59,8 @@ add_test_plugin(${TEST_GOOD_PLUGIN_NAME} TestGoodPlugin.cpp)
 # test_execute_fails_plugin is a plugin that fails during execution
 add_test_plugin(${TEST_EXECUTE_FAILS_PLUGIN_NAME} TestExecuteFailsPlugin.cpp)
 
-# test_no_solver_plugin reports its engine applicable, then declines to create the execution plan
-# with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE
+# test_no_solver_plugin reports its engine applicable, then fails to create the execution plan
+# with HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR
 add_test_plugin(${TEST_NO_SOLVER_PLUGIN_NAME} TestNoSolverPlugin.cpp)
 
 # test_resource_fail_plugin reports its engine applicable, then fails to create the execution plan

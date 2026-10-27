@@ -251,14 +251,13 @@ void graphBindings(nb::module_& m)
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
              "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan (the "
              "preferred engine's plan when it is among the ranked candidates, otherwise the "
-             "top-ranked plan). Only "
-             "if that plan fails because its engine accepted the graph but has no solver for "
-             "it are the other ranked plans tried, from the top of the list; the first that "
-             "compiles becomes active. Candidates barred by deselect_engines() or over the "
-             "deselect_workspace_greater_than() limit are skipped, and a candidate that fails "
-             "for any other reason stops the scan and its error is returned. Any other "
-             "failure of the active plan is returned, and an active plan over the workspace "
-             "limit is an error. ALL compiles every plan, skipping any that fail.")
+             "top-ranked plan). If that plan fails to finalize for any reason, the other "
+             "ranked plans are tried, from the top of the list; the first that finalizes "
+             "becomes active. Candidates barred by deselect_engines() or over the "
+             "deselect_workspace_greater_than() limit are skipped. If no plan finalizes, an "
+             "error listing every attempted engine and its failure is returned and the active "
+             "plan is unchanged. An active plan that finalizes but is over the workspace limit "
+             "is an error. ALL compiles every plan, skipping any that fail.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -753,20 +752,16 @@ void graphBindings(nb::module_& m)
              nb::arg("engineId") = std::nullopt,
              nb::rv_policy::reference_internal,
              "Prefer an engine ID for plan selection (None clears it). The preference is soft: "
-             "if the preferred engine's plan fails because the engine accepted the graph but "
-             "has no solver for it, build_plans() falls back to another ranked engine (the "
-             "list is scanned from the top); any "
-             "other failure of the preferred engine is returned. Read the serving engine with "
-             "get_execution_plan_engine_id() or get_plan_name().")
+             "if the preferred engine's plan fails to finalize for any reason, build_plans() "
+             "falls back to another ranked engine (the list is scanned from the top). Read "
+             "the serving engine with get_execution_plan_engine_id() or get_plan_name().")
         .def("set_preferred_engine_id_ext",
              nb::overload_cast<const std::string&>(&graph::Graph::set_preferred_engine_id_ext),
              nb::rv_policy::reference_internal,
              "Prefer an engine by name (an empty string clears it). The preference is soft: "
-             "if the preferred engine's plan fails because the engine accepted the graph but "
-             "has no solver for it, build_plans() falls back to another ranked engine (the "
-             "list is scanned from the top); any "
-             "other failure of the preferred engine is returned. Read the serving engine with "
-             "get_execution_plan_engine_id() or get_plan_name().")
+             "if the preferred engine's plan fails to finalize for any reason, build_plans() "
+             "falls back to another ranked engine (the list is scanned from the top). Read "
+             "the serving engine with get_execution_plan_engine_id() or get_plan_name().")
         .def("set_ranking_metric",
              &graph::Graph::set_ranking_metric,
              nb::arg("metric"),

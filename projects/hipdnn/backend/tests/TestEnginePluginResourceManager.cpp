@@ -4655,22 +4655,10 @@ const auto MISMATCHED_NAME_PLUGIN_PATH
     = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
       / plugin_constants::getTestPluginDefaultDir() / "custom"
       / hipdnn_data_sdk::utilities::getLibraryName(TEST_MISMATCHED_NAME_PLUGIN_NAME);
-
-const auto NO_SOLVER_PLUGIN_PATH
-    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
-      / plugin_constants::getTestPluginDefaultDir() / "custom"
-      / hipdnn_data_sdk::utilities::getLibraryName(TEST_NO_SOLVER_PLUGIN_NAME);
-
-const auto RESOURCE_FAIL_PLUGIN_PATH
-    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
-      / plugin_constants::getTestPluginDefaultDir() / "custom"
-      / hipdnn_data_sdk::utilities::getLibraryName(TEST_RESOURCE_FAIL_PLUGIN_NAME);
 // NOLINTEND(bugprone-throwing-static-initialization)
 
 constexpr int64_t K_MISMATCHED_NAME_ENGINE_ID = -29;
 constexpr const char* K_MISMATCHED_NAME = "TEST_MISMATCHED_NAME_ENGINE";
-constexpr int64_t K_NO_SOLVER_ENGINE_ID = -31;
-constexpr int64_t K_RESOURCE_FAIL_ENGINE_ID = -32;
 
 // Mirrors TestPluginEngineIdMap.hpp. That header is not included because
 // tests/test_plugins/ carries its own TestPluginConstants.hpp, which would
@@ -4983,36 +4971,6 @@ TEST_F(TestEnginePluginOptionalCapabilities, FailedEnumerationIsAPluginErrorWith
         HIPDNN_STATUS_PLUGIN_ERROR);
     EXPECT_THAT(message, HasSubstr("Candidate enumeration failed"));
     EXPECT_THAT(message, HasSubstr("Candidate page limit must be in [1, 10000]"));
-}
-
-// The plugin answers NOT_APPLICABLE from plan creation when the engine accepted the graph
-// but has no solver for it. The backend reports that as NOT_SUPPORTED, not as a failure.
-TEST_F(TestEnginePluginOptionalCapabilities, NoSolverAtPlanCreationIsNotSupportedWithPluginMessage)
-{
-    load(NO_SOLVER_PLUGIN_PATH);
-    const auto engineConfig = config(K_NO_SOLVER_ENGINE_ID);
-    const auto opGraph = graph();
-
-    const auto message = thrownMessage(
-        [&] { std::ignore = _plugin->createExecutionContext(_handle, &engineConfig, &opGraph); },
-        HIPDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_THAT(message, HasSubstr("NoSolverPlugin: no applicable solver"));
-}
-
-// Any other plan-creation failure stays a plugin error, so callers do not mistake a fault
-// for a decline.
-TEST_F(TestEnginePluginOptionalCapabilities, ResourceFailureAtPlanCreationIsAPluginError)
-{
-    load(RESOURCE_FAIL_PLUGIN_PATH);
-    const auto engineConfig = config(K_RESOURCE_FAIL_ENGINE_ID);
-    const auto opGraph = graph();
-
-    const auto message = thrownMessage(
-        [&] { std::ignore = _plugin->createExecutionContext(_handle, &engineConfig, &opGraph); },
-        HIPDNN_STATUS_PLUGIN_ERROR);
-    EXPECT_THAT(message, HasSubstr("Failed to create execution context"));
-    EXPECT_THAT(message, HasSubstr("HIPDNN_PLUGIN_STATUS_ALLOC_FAILED"));
-    EXPECT_THAT(message, HasSubstr("ResourceFailPlugin: out of memory"));
 }
 
 TEST_F(TestEnginePluginOptionalCapabilities, PluginWithoutTheExportsReportsNoCapability)

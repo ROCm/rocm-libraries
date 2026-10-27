@@ -454,18 +454,9 @@ protected:
     // not updated; on success plan.workspaceSize holds the queried value. The
     // plan's engine config and execution plan descriptors must already be valid.
     // Returns {ErrorCode::OK, ""} on success, or a populated backend Error
-    // identifying the step that failed. When noSolver is non-null it is set to
-    // true only if the execution plan finalize step returned
-    // HIPDNN_STATUS_NOT_SUPPORTED: the engine accepted the graph at applicability
-    // but has no solver for it. A failure of any other step, or any other
-    // finalize status, leaves it false.
-    static Error finalizePlanDescriptor(CompiledPlan& plan, bool* noSolver = nullptr)
+    // identifying the step that failed.
+    static Error finalizePlanDescriptor(CompiledPlan& plan)
     {
-        if(noSolver != nullptr)
-        {
-            *noSolver = false;
-        }
-
         auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
@@ -484,10 +475,6 @@ protected:
         auto finStatus = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
         if(finStatus != HIPDNN_STATUS_SUCCESS)
         {
-            if(noSolver != nullptr)
-            {
-                *noSolver = (finStatus == HIPDNN_STATUS_NOT_SUPPORTED);
-            }
             std::array<char, 1024> backendErrMsg{};
             detail::hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -3231,27 +3218,26 @@ public:
      *   - HEURISTICS_CHOICE: compile the active plan. The active plan is the
      *     preferred engine's plan when set_preferred_engine_id_ext() names an engine
      *     among the ranked candidates, otherwise the top-ranked plan. If it fails
-     *     to finalize because its engine accepted the graph but has no solver for
-     *     it (the backend reports HIPDNN_STATUS_NOT_SUPPORTED), the other plans are
-     *     tried in ranked order starting at the top of the list and the first one
-     *     that compiles becomes active. A candidate that also has no solver is
-     *     skipped; candidates barred by deselect_engines() or whose workspace
-     *     exceeds the deselect_workspace_greater_than() limit are skipped too. If a
-     *     candidate fails for any other reason the scan stops and that error is
-     *     returned. If no candidate compiles, the active plan's error is returned
-     *     and the active plan is unchanged. Any other failure of the active plan
-     *     itself (out of memory, device or execution-context failure, workspace
-     *     query failure, invalid descriptor, internal error) is returned without
-     *     trying another plan, including when the active plan is the preferred
-     *     engine's. An active plan that compiles but whose workspace exceeds the
-     *     deselect_workspace_greater_than() limit is an error; no other plan is
-     *     tried.
+     *     to finalize for any reason (engine config rejected, backend finalize or
+     *     execution-context creation failure, workspace query failure), a warning is
+     *     logged and the other plans are tried in ranked order starting at the top of
+     *     the list; the first one that finalizes becomes active. A candidate that
+     *     also fails is logged and skipped. Candidates barred by deselect_engines(),
+     *     whose descriptors are invalid, or whose workspace exceeds the
+     *     deselect_workspace_greater_than() limit are skipped with an info log. If no
+     *     plan finalizes, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED is returned
+     *     with a message listing every attempted engine and its failure, and the
+     *     active plan is unchanged. This applies to a single-plan graph too. An
+     *     active plan that finalizes but whose workspace exceeds the
+     *     deselect_workspace_greater_than() limit is an error
+     *     (ErrorCode::INVALID_VALUE); no other plan is tried.
      *   - ALL: compile every plan in _compiledPlans, setting _activePlanIndex
      *     to the first plan that compiles successfully
      *
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
-     *         ErrorCode::HIPDNN_BACKEND_ERROR on failure. Call get_message() for the
-     *         specific failure reason.
+     * @return ErrorCode::OK on success; ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED
+     *         when no plan finalizes under HEURISTICS_CHOICE; ErrorCode::INVALID_VALUE /
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on other failures. Call get_message() for
+     *         the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error build_plans(BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE)
@@ -3337,9 +3323,9 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        // HEURISTICS_CHOICE path: compile the active plan. Only when it reports that
-        // its engine has no solver for the graph are the other plans tried, in ranked
-        // order from the top of the list; any other failure is returned as is.
+        // HEURISTICS_CHOICE path: compile the active plan. If it fails to finalize for any
+        // reason, the other plans are tried in ranked order from the top of the list and the
+        // first one that finalizes becomes active.
         auto& activePlan = _compiledPlans[_activePlanIndex];
         if(activePlan.barred)
         {
@@ -3364,60 +3350,69 @@ public:
         }
 
         // Set the engine config, finalize the plan, and cache its workspace size.
-        bool activeNoSolver = false;
-        auto finalizeErr = finalizePlanDescriptor(activePlan, &activeNoSolver);
+        auto finalizeErr = finalizePlanDescriptor(activePlan);
         if(finalizeErr.is_bad())
         {
-            if(!activeNoSolver)
-            {
-                HIPDNN_FE_LOG_ERROR("Failed to finalize active plan (engine "
-                                    << activePlan.engineId << "): " << finalizeErr.get_message()
-                                    << "; not a no-solver failure, stopping");
-                return finalizeErr;
-            }
+            HIPDNN_FE_LOG_WARN("Failed to finalize active plan (engine "
+                               << activePlan.engineId << "): " << finalizeErr.get_message()
+                               << "; trying the other ranked plans");
 
-            HIPDNN_FE_LOG_WARN("Active plan (engine "
-                               << activePlan.engineId << ") has no solver for this graph: "
-                               << finalizeErr.get_message() << "; trying the other ranked plans");
+            // Failures in attempt order, the active plan first.
+            std::string failures = "engine " + std::to_string(activePlan.engineId) + ": "
+                                   + finalizeErr.get_message();
 
             for(size_t i = 0; i < _compiledPlans.size(); ++i)
             {
-                auto& candidate = _compiledPlans[i];
-                if(i == _activePlanIndex || candidate.barred || !candidate.engineConfigDesc
-                   || !candidate.engineConfigDesc->valid() || !candidate.executionPlanDesc
-                   || !candidate.executionPlanDesc->valid())
+                if(i == _activePlanIndex)
                 {
+                    continue;
+                }
+
+                auto& candidate = _compiledPlans[i];
+                if(candidate.barred)
+                {
+                    HIPDNN_FE_LOG_INFO("Skipping plan index " << i << " (engine "
+                                                              << candidate.engineId
+                                                              << "): already barred");
+                    continue;
+                }
+
+                if(!candidate.engineConfigDesc || !candidate.engineConfigDesc->valid()
+                   || !candidate.executionPlanDesc || !candidate.executionPlanDesc->valid())
+                {
+                    HIPDNN_FE_LOG_INFO("Skipping plan index "
+                                       << i << " (engine " << candidate.engineId
+                                       << "): missing or invalid descriptor");
                     continue;
                 }
 
                 if(_barredEngineIds.count(candidate.engineId) > 0)
                 {
                     candidate.barred = true;
+                    HIPDNN_FE_LOG_INFO("Skipping plan index " << i << " (engine "
+                                                              << candidate.engineId
+                                                              << "): barred by deselect_engines()");
                     continue;
                 }
 
-                bool candidateNoSolver = false;
-                auto candidateErr = finalizePlanDescriptor(candidate, &candidateNoSolver);
+                auto candidateErr = finalizePlanDescriptor(candidate);
                 if(candidateErr.is_bad())
                 {
-                    if(!candidateNoSolver)
-                    {
-                        HIPDNN_FE_LOG_ERROR("Failed to finalize plan index "
-                                            << i << " (engine " << candidate.engineId
-                                            << "): " << candidateErr.get_message()
-                                            << "; not a no-solver failure, stopping");
-                        return candidateErr;
-                    }
-
-                    HIPDNN_FE_LOG_WARN("Plan index " << i << " (engine " << candidate.engineId
-                                                     << ") has no solver for this graph: "
-                                                     << candidateErr.get_message() << "; skipping");
+                    HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
+                                       << i << " (engine " << candidate.engineId
+                                       << "): " << candidateErr.get_message() << "; skipping");
+                    failures += "; engine " + std::to_string(candidate.engineId) + ": "
+                                + candidateErr.get_message();
                     continue;
                 }
 
                 if(_maxWorkspaceAllowed >= 0 && candidate.workspaceSize > _maxWorkspaceAllowed)
                 {
                     candidate.barred = true;
+                    HIPDNN_FE_LOG_INFO("Skipping plan index "
+                                       << i << " (engine " << candidate.engineId << "): workspace "
+                                       << candidate.workspaceSize << " exceeds limit "
+                                       << _maxWorkspaceAllowed);
                     continue;
                 }
 
@@ -3427,7 +3422,9 @@ public:
                 return {ErrorCode::OK, ""};
             }
 
-            return finalizeErr;
+            return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                    "Failed to finalize any execution plan (policy=HEURISTICS_CHOICE): "
+                        + failures};
         }
 
         if(_maxWorkspaceAllowed >= 0 && activePlan.workspaceSize > _maxWorkspaceAllowed)
@@ -3468,16 +3465,17 @@ public:
      * @param modes Heuristic modes for engine selection
      * @param policy Build plan policy: HEURISTICS_CHOICE compiles the active plan
      *        (the preferred engine's plan when it is among the ranked candidates,
-     *        otherwise the top-ranked plan) and tries another ranked plan only if
-     *        that plan's engine accepted the graph but has no solver for it; any other failure is
-     *        returned. See build_plans() for the details. ALL compiles every
-     *        engine config
+     *        otherwise the top-ranked plan) and, if that plan fails to finalize for
+     *        any reason, tries the other ranked plans in order. See build_plans()
+     *        for the details. ALL compiles every engine config
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
      *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
      *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
-     *         solution on the current device) on failure. Call get_message() for
-     *         the specific failure reason.
+     *         solution on the current device) /
+     *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED (when no plan
+     *         finalizes under HEURISTICS_CHOICE) on failure. Call get_message()
+     *         for the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
@@ -6694,13 +6692,10 @@ public:
      * @brief Set the preferred engine ID for execution plan selection
      *
      * The preference is soft. When the ID is among the ranked candidates its plan
-     * becomes the active plan that build_plans() compiles. If that plan fails
-     * because the engine accepted the graph but has no solver for it, the other
-     * ranked plans are tried from the top of the list and the engine that ends up
-     * serving the graph may differ; read it with @c get_execution_plan_engine_id()
-     * or @c get_plan_name(). Any other failure of the preferred engine's plan (out
-     * of memory, device or execution-context failure, workspace query failure,
-     * internal error) is returned and no other engine is tried.
+     * becomes the active plan that build_plans() compiles. If that plan fails to
+     * finalize for any reason, the other ranked plans are tried from the top of
+     * the list and the engine that ends up serving the graph may differ; read it
+     * with @c get_execution_plan_engine_id() or @c get_plan_name().
      *
      * @param engineId Engine ID to prefer, or std::nullopt to clear
      * @return Reference to this Graph for method chaining
@@ -6727,13 +6722,10 @@ public:
      * graph descriptor, so this is what keeps such a preference from being
      * silently dropped on deserialize.
      *
-     * The preference is soft. If the preferred engine's plan fails because the
-     * engine accepted the graph but has no solver for it, build_plans() falls back
-     * to another ranked engine, scanning from the top of the list; read the engine
-     * that serves the graph with @c get_execution_plan_engine_id() or
-     * @c get_plan_name(). Any other failure of the preferred engine's plan (out of
-     * memory, device or execution-context failure, workspace query failure,
-     * internal error) is returned and no other engine is tried.
+     * The preference is soft. If the preferred engine's plan fails to finalize
+     * for any reason, build_plans() falls back to another ranked engine, scanning
+     * from the top of the list; read the engine that serves the graph with
+     * @c get_execution_plan_engine_id() or @c get_plan_name().
      *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
