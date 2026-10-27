@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstdio>
 #include <thread>
+#include <tuple>
 
 namespace
 {
@@ -368,8 +369,8 @@ TEST(LocalKernelRegister, ForeignProcessorMetadata)
         << "the worker failed; its output is above";
 }
 
-// Payloads that reach the code object load and fail there are refused cleanly:
-// nothing is registered and the shipped kernel already in use still runs.
+// Payloads with a bad shard or code object are refused cleanly: nothing is
+// registered and the shipped kernel already in use still runs.
 TEST(LocalKernelRegister, DISABLED_BadPayloadsWorker)
 {
     const std::vector<std::string> candidates = candidatePayloads();
@@ -397,18 +398,34 @@ TEST(LocalKernelRegister, DISABLED_BadPayloadsWorker)
     ASSERT_TRUE(compileCodeObject(standInKernels(names), otherArch(), wrongArch));
     ASSERT_TRUE(
         compileCodeObject(standInKernels({"NotAKernelOfThisShard"}), deviceArch(), unrelated));
-    std::vector<std::pair<char const*, std::string>> cases = {
-        {"a truncated code object", truncated},
-        {"a code object for another architecture", wrongArch},
-        {"a code object without the shard's kernels", unrelated},
+
+    // {"solutions": 1}: valid msgpack, but msgpack throws converting the 1.
+    const std::string mistyped   = scratch.file("mistyped.dat");
+    const std::string notMsgpack = scratch.file("not_msgpack.dat");
+    {
+        const unsigned char bytes[]
+            = {0x81, 0xa9, 's', 'o', 'l', 'u', 't', 'i', 'o', 'n', 's', 0x01};
+        std::ofstream(mistyped, std::ios::binary)
+            .write(reinterpret_cast<char const*>(bytes), sizeof(bytes));
+        std::ofstream(notMsgpack, std::ios::binary) << "not a shard";
+    }
+
+    const std::string co = candidates[0] + ".co";
+
+    std::vector<std::tuple<char const*, std::string, std::string>> cases = {
+        {"a truncated code object", dat, truncated},
+        {"a code object for another architecture", dat, wrongArch},
+        {"a code object without the shard's kernels", dat, unrelated},
+        {"a shard with a field of the wrong type", mistyped, co},
+        {"a shard that is not msgpack", notMsgpack, co},
     };
 
-    for(auto const& [what, co] : cases)
+    for(auto const& [what, shard, code] : cases)
     {
         int numIndices = -1;
-        EXPECT_EQ(
-            hipblasLtLocalKernelRegister(handle, dat.c_str(), co.c_str(), nullptr, 0, &numIndices),
-            HIPBLAS_STATUS_INVALID_VALUE)
+        EXPECT_EQ(hipblasLtLocalKernelRegister(
+                      handle, shard.c_str(), code.c_str(), nullptr, 0, &numIndices),
+                  HIPBLAS_STATUS_INVALID_VALUE)
             << what;
         EXPECT_EQ(numIndices, 0) << what;
 
