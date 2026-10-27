@@ -12,13 +12,13 @@ from rocke.analysis.lds.registry import (
 )
 
 
-@pytest.mark.parametrize("target", ["gfx90a", "gfx942", "gfx950"])
+@pytest.mark.parametrize("target", ["gfx90a", "gfx942", "gfx950", "gfx1201"])
 def test_registry_selects_explicit_profile(target):
     profile = resolve_profile(target)
 
     assert profile.identity.target == target
     assert profile.identity.profile_version == 1
-    assert registered_targets() == ("gfx90a", "gfx942", "gfx950")
+    assert registered_targets() == ("gfx1201", "gfx90a", "gfx942", "gfx950")
 
 
 @pytest.mark.parametrize(

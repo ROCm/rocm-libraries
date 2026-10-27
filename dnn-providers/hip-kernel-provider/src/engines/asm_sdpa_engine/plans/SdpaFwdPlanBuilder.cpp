@@ -283,6 +283,8 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "page_table_k tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
+    // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
 
     // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
     // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
@@ -445,7 +447,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        const auto band
+            = plan_utils::makeCoveringBoundsUnbound(plan_utils::resolveDiagonalBand(attrs),
+                                                    qTensor->dims()->Get(2),
+                                                    kTensor->dims()->Get(2));
+        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -645,7 +651,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    params.maskType = plan_utils::getMaskType(sdpaAttrs);
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), seqLenQ, seqLenKv);
+    params.maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 
     const auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());

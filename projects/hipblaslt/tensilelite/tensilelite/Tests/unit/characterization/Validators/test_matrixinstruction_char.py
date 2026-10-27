@@ -41,12 +41,12 @@ so the snapshots are reproducible in the dev container. See resistance.md.
 
 import pytest
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.Common.Types import IsaVersion
-from Tensile.Toolchain.Validators import validateToolchain
-from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Toolchain.Validators import validateToolchain
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
 )
 
