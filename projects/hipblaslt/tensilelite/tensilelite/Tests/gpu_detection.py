@@ -24,9 +24,13 @@
 
 """
 GPU architecture detection for TensileLite unit and common tests.
+
+``get_available_archs``: every arch on the machine, for common-config ``skip-gfxNNNN``.
+``detect_gpu_target``: the device HIP gives this process, for the unit-test ``gpu`` mark.
 """
 
 import contextlib
+import functools
 import os
 
 from Tensile.GpuArch import cmake_gpu_target, detect_gpu_archs
@@ -94,3 +98,71 @@ def get_available_archs() -> list[str]:
 def has_arch(target: str) -> bool:
     """Check if a specific GPU architecture is available."""
     return any(target in arch for arch in get_available_archs())
+
+
+# ---- Unit-test device (HIP; lazy, so `-m "not gpu"` never initialises it) ----
+
+@functools.cache
+def _hip():
+    try:
+        from hip import hip
+    except ImportError:
+        return None
+    return hip
+
+
+def hip_available() -> bool:
+    """True when hip-python is importable."""
+    return _hip() is not None
+
+
+def _check(result):
+    """Unwrap a hip-python ``(err, value)`` result; raise on a HIP error."""
+    err, *rest = result if isinstance(result, tuple) else (result,)
+    if int(err) != 0:
+        raise RuntimeError(f"HIP error {int(err)}")
+    return rest[0] if len(rest) == 1 else rest
+
+
+@functools.cache
+def detect_gpu_target() -> str | None:
+    """Arch of HIP device 0 (e.g. ``gfx1250-strict``), or None.
+
+    ``TENSILE_GPU_TARGET`` overrides. HIP, unlike rocm_agent_enumerator, honours
+    ROCR_VISIBLE_DEVICES, sees only devices this process can open, and keeps
+    the stepping.
+    """
+    override = os.environ.get("TENSILE_GPU_TARGET")
+    if override:
+        return override
+    hip = _hip()
+    if hip is None:
+        return None
+    try:
+        if int(_check(hip.hipGetDeviceCount())) == 0:
+            return None
+        try:
+            # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
+            props = _check(hip.hipGetDeviceProperties(0))
+        except TypeError:
+            # Earlier releases fill a caller-owned struct instead.
+            props = hip.hipDeviceProp_t()
+            _check(hip.hipGetDeviceProperties(props, 0))
+    except RuntimeError:
+        return None
+    name = props.gcnArchName
+    if isinstance(name, bytes):
+        name = name.decode()
+    # gcnArchName carries target features (gfx942:sramecc+:xnack-).
+    return name.split(":")[0] or None
+
+
+def arch_matches(found: str, wanted: str) -> bool:
+    """``gfx1250`` matches ``gfx1250`` and ``gfx1250-strict``; ``gfx1250-strict`` only itself."""
+    return found == wanted or found.startswith(wanted + "-")
+
+
+def gpu_is(*archs: str) -> bool:
+    """True if the GPU matches any of *archs*. For non-gate code; tests use ``gpu(...)``."""
+    found = detect_gpu_target()
+    return found is not None and any(arch_matches(found, a) for a in archs)

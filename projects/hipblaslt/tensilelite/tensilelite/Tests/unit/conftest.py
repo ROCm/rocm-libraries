@@ -13,7 +13,35 @@ if _CODEGEN_DIR not in sys.path:
     sys.path.insert(0, _CODEGEN_DIR)
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
+from tensilelite.Tests.gpu_detection import arch_matches, detect_gpu_target, hip_available
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+_UNIT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """Skip ``gpu``-marked tests the GPU can't run.
+
+    ``gpu`` = any GPU; ``gpu("gfx950", ...)`` = one of those (``gfx1250`` covers
+    ``gfx1250-strict``). Nearest mark wins: function/param > class > module.
+    Don't mark both a function and its params; the function's mark wins.
+    Runs after ``-m`` deselection, so ``-m "not gpu"`` never probes the GPU.
+    """
+    for item in items:
+        if not str(item.path).startswith(_UNIT_DIR + os.sep):
+            continue
+        mark = item.get_closest_marker("gpu")
+        if mark is None:
+            continue
+        if not hip_available():
+            item.add_marker(pytest.mark.skip(reason="needs hip-python"))
+            continue
+        found = detect_gpu_target()
+        if found is None:
+            item.add_marker(pytest.mark.skip(reason="needs a GPU (none visible to HIP)"))
+        elif mark.args and not any(arch_matches(found, a) for a in mark.args):
+            item.add_marker(pytest.mark.skip(reason=f"needs {'/'.join(mark.args)}, found {found}"))
 
 
 @pytest.fixture(autouse=True)
