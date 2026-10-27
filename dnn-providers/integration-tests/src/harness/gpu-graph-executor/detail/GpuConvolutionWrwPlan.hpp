@@ -110,7 +110,7 @@ public:
         const auto* nodeAttributes = node.attributes_as_ConvolutionWrwAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes are not of type ConvolutionWrwAttributes");
+            return false;
         }
 
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
