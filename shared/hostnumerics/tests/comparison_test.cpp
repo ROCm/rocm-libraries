@@ -5,6 +5,14 @@
 
 #include "hostnumerics_test_support.hpp"
 
+TEST(Comparison, Float32ToleranceUsesWiderDifference) {
+    using namespace roc::hostnumerics;
+    auto options = allCloseComparisonOptions(1.0, 0.0, false);
+    const auto result = compare(Tensor(1.0f), Tensor(-0x1p-25f), options);
+    EXPECT_FALSE(result.passed());
+    EXPECT_GT(result.maxAbsoluteDifference, options.absoluteTolerance);
+}
+
 namespace hostnumerics_test {
 void testComparisonProgram() {
     using namespace roc::hostnumerics;
