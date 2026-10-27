@@ -3340,10 +3340,12 @@ void case_lowbit_dtype_aliases()
         if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
            || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
             fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        // The catalog lists fp4 and fp6 only as the scaled 32x32x64 atoms.
+        const rocke_mma_scale_filter_t e8m0_k32 = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
         const auto* arch = rocke_arch_target_from_gfx("gfx950");
-        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
         if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
-           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+           && !rocke_mma_catalog_has_shape(
+               &arch->mma, "mfma_scaled", pair[0], pair[1], "fp32", 32, 32, 64, &e8m0_k32))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
 }
