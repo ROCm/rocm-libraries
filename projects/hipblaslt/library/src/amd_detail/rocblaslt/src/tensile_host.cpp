@@ -8851,7 +8851,6 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
 }
 
 rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t* registered)
-try
 {
     if(registered)
         *registered = 0;
@@ -8882,15 +8881,6 @@ try
     if(registered)
         *registered = added;
     return rocblaslt_status_success;
-}
-catch(const std::exception& e)
-{
-    log_error(__func__, e.what());
-    return rocblaslt_status_internal_error;
-}
-catch(...)
-{
-    return rocblaslt_status_internal_error;
 }
 
 rocblaslt_status
