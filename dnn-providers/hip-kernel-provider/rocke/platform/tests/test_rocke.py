@@ -3587,7 +3587,7 @@ def _assert_engines_agree(test, kernel, python_ir, **kw):
 
     try:
         cpp_ir = _lower_via_cpp_engine(
-            serialize(kernel), kw.get("arch") or "gfx950", kw.get("llvm_flavor")
+            serialize(kernel), kw["arch"], kw.get("llvm_flavor")
         )
     except BackendError as e:
         test.skipTest(f"C++ engine unavailable, cross-engine check not run: {e}")
@@ -3617,8 +3617,13 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.kernel.attrs["max_workgroup_size"] = 64
         return b
 
-    def _lower(self, name, build, **kw):
+    def _lower(self, name, build, *, arch="gfx950", **kw):
         """Build a single-intrinsic kernel and return its lowered LLVM IR.
+
+        ``arch`` must be a target that has the intrinsic: the arch-domain lane
+        refuses a kernel lowered for one that cannot lower it, and a test that
+        only passes by lowering for the wrong target is not testing anything a
+        build would do.
 
         Pins the NATIVE Python lowerer rather than going through
         ``lower_kernel_to_llvm``, whose engine comes from ``ROCKE_BACKEND``
@@ -3632,9 +3637,8 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
         b = self._builder(name)
         build(b)
-        kw.setdefault("arch", "gfx950")
-        ll = _lower_kernel_to_llvm_python(b.kernel, **kw)
-        _assert_engines_agree(self, b.kernel, ll, **kw)
+        ll = _lower_kernel_to_llvm_python(b.kernel, **kw, arch=arch)
+        _assert_engines_agree(self, b.kernel, ll, arch=arch, **kw)
         _assert_ir_assembles(self, ll, name)
         return ll
 
@@ -4243,13 +4247,17 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
-        ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))
+        ll = self._lower(
+            "dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432), arch="gfx1201"
+        )
         self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)", ll)
         # 0x765432 == 7754802, passed through as the 24-bit lane-select imm.
         self.assertIn("call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)", ll)
 
     def test_mov_dpp8_f32_emits_typed_intrinsic(self):
-        ll = self._lower("dpp8f", lambda b: b.mov_dpp8(b.const_f32(1.0), 0x765432))
+        ll = self._lower(
+            "dpp8f", lambda b: b.mov_dpp8(b.const_f32(1.0), 0x765432), arch="gfx1201"
+        )
         self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)", ll)
         self.assertIn("call float @llvm.amdgcn.mov.dpp8.f32(float", ll)
 
@@ -4264,7 +4272,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.mov_dpp8(b.const_i32(1), 0x11)
             b.mov_dpp8(b.const_f32(1.0), 0x11)
 
-        ll = self._lower("dpp8_both", build)
+        ll = self._lower("dpp8_both", build, arch="gfx1201")
         self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(", ll)
         self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(", ll)
         # No bare (untyped) declare, which is what caused the duplicate symbol.
@@ -4354,6 +4362,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         ll = self._lower(
             "pl16",
             lambda b: b.permlane16(*[b.const_i32(i) for i in range(4)]),
+            arch="gfx1201",
         )
         # The data type is an overloaded position, so the mangled name carries
         # its suffix. LLVM accepts the bare "permlane16" and auto-upgrades it,
@@ -4376,6 +4385,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             lambda b: b.permlane16(
                 *[b.const_i32(i) for i in range(4)], fi=True, bound_ctrl=True
             ),
+            arch="gfx1201",
         )
         self.assertIn(
             "call i32 @llvm.amdgcn.permlane16.i32"
@@ -4517,7 +4527,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- s_alloc_vgpr ----
     def test_s_alloc_vgpr_zexts_i1_result_to_i32(self):
-        ll = self._lower("valloc", lambda b: b.s_alloc_vgpr(8))
+        ll = self._lower("valloc", lambda b: b.s_alloc_vgpr(8), arch="gfx1250")
         self.assertIn("declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)", ll)
         self.assertIn("call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)", ll)
         # The intrinsic returns i1; the IR value is an i32, so a zext is required.
@@ -4540,7 +4550,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("call void @llvm.amdgcn.wait.asyncmark(i16 3)", ll)
 
     def test_s_wait_event_passes_i16_bitmask(self):
-        ll = self._lower("sevt", lambda b: b.s_wait_event(1))
+        ll = self._lower("sevt", lambda b: b.s_wait_event(1), arch="gfx1201")
         self.assertIn("declare void @llvm.amdgcn.s.wait.event(i16 immarg)", ll)
         self.assertIn("call void @llvm.amdgcn.s.wait.event(i16 1)", ll)
 
@@ -4551,7 +4561,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             code = b.param("code", PtrType(I32, "global"), align=4)
             b.s_prefetch_inst(code, b.const_i32(64))
 
-        ll = self._lower("sprefetch", build)
+        ll = self._lower("sprefetch", build, arch="gfx1250")
         # The operand is llvm_anyptr_ty, so the call and its declare have to
         # name the pointer's real space. Emitting a bare ``ptr`` for this
         # addrspace(1) param is what LLVM rejects with "'%code' defined with
@@ -4582,7 +4592,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.s_prefetch_inst(glob, n)
             b.s_prefetch_inst(const, n)
 
-        ll = self._lower("sprefetch_spaces", build)
+        ll = self._lower("sprefetch_spaces", build, arch="gfx1250")
         self.assertIn(
             "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
         )
@@ -4659,12 +4669,8 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             )
 
     def test_global_load_async_to_lds_supports_b8_width(self):
-        """width_bytes=1 selects the LLVM 23 ``.b8`` async copy.
-
-        The opcode is a gfx1250 one, but its lowering is arch-independent, so
-        this runs on the default backend to keep the expected text identical to
-        the C++ parity gate (which has no gfx1250 ISA backend).
-        """
+        """width_bytes=1 selects the LLVM 23 ``.b8`` async copy, a gfx1250
+        opcode, so it is lowered for gfx1250."""
         from rocke.core.ir import I32, PtrType
 
         def build(b):
@@ -4674,7 +4680,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                 src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=1
             )
 
-        ll = self._lower("gl_async_b8", build)
+        ll = self._lower("gl_async_b8", build, arch="gfx1250")
         self.assertIn(
             "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
             "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, "
