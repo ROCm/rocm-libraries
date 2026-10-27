@@ -265,12 +265,12 @@ namespace TensileLite::Client
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::GeluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                             roc::hostnumerics::GeluDerivativeActivation{});
+                           roc::hostnumerics::GeluDerivativeActivation{});
         case ActivationType::DRelu:
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::ReluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                             roc::hostnumerics::ReluDerivativeActivation{});
+                           roc::hostnumerics::ReluDerivativeActivation{});
         case ActivationType::Silu:
             return roc::hostnumerics::ActivationFunction(roc::hostnumerics::SiluActivation{});
         case ActivationType::Swish:

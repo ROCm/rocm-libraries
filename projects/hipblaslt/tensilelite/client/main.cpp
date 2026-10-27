@@ -934,8 +934,8 @@ try
 
         if(runKernels)
         {
-            bool hasIcacheFlush
-                = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
+            bool hasIcacheFlush = std::any_of(
+                begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs
                 = hasIcacheFlush ? estimate_flush_kernel_time(device0->stream, gpuTimer) : 0.f;
             // Before ReferenceValidator: postSolution runs listeners in
@@ -1187,14 +1187,14 @@ try
                                             auto kernel
                                                 = useUserArgs
                                                       ? solution->solveTensileGPU(
-                                                            (*problem),
-                                                            *device0->inputArr[r],
-                                                            *hardware,
-                                                            &dUA,
-                                                            &dUAHost,
-                                                            nullptr,
-                                                            0,
-                                                            device0->stream)
+                                                          (*problem),
+                                                          *device0->inputArr[r],
+                                                          *hardware,
+                                                          &dUA,
+                                                          &dUAHost,
+                                                          nullptr,
+                                                          0,
+                                                          device0->stream)
                                                       : solution->solve((*problem),
                                                                         *device0->inputArr[r],
                                                                         *hardware,
