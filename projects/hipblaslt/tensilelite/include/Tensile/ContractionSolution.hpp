@@ -151,6 +151,8 @@ namespace TensileLite
         X_MACRO(GSUSync) \
         /* Random seed args */ \
         X_MACRO(RNDSeed) \
+        /* The whole fixed-size fused GEMM-A2A kernarg segment */ \
+        X_MACRO(FusedA2ASegment) \
         /* Appended to preserve existing CustomArgSemantic values. */ \
         X_MACRO(PersistentGrid) \
         X_MACRO(BatchOffsetD) \
