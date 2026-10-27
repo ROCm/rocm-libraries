@@ -153,8 +153,8 @@ void PrintTo(const DeclineCase& declineCase, std::ostream* os)
     *os << declineCase.name;
 }
 
-/// The Unified2D geometries the manifest pins: (tile_size at block_size 16, num_warps,
-/// block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32), named for the case.
+/// A Unified2D geometry: (tile_size at block_size 16, num_warps, block_m_per_warp,
+/// use_mfma_32x32, use_transposed_qk_32x32), named for the case.
 struct Geometry2D
 {
     const char* name;
@@ -165,14 +165,14 @@ struct Geometry2D
     int64_t useTransposedQk32x32;
 };
 
-constexpr std::array<Geometry2D, 4> GEOMETRIES_2D{{
-    {"Narrow4x16T64", 64, 4, 16, 0, 0},
-    {"Narrow2x16T32", 32, 2, 16, 0, 0},
-    {"Wide32x4T64", 64, 4, 32, 1, 0},
-    {"Transposed32x4T64", 64, 4, 32, 1, 1},
-}};
+/// Every cell's default geometry. The reduced catalog (variant_reduce over the MI355X sweep)
+/// keeps the other two only in the cells whose graphs they won, and drops the wide 32x32 one.
+constexpr Geometry2D NARROW_4X16{"Narrow4x16T64", 64, 4, 16, 0, 0};
+constexpr Geometry2D NARROW_2X16{"Narrow2x16T32", 32, 2, 16, 0, 0};
+constexpr Geometry2D TRANSPOSED_32X4{"Transposed32x4T64", 64, 4, 32, 1, 1};
 
-constexpr std::array<int64_t, 3> SEGMENTS_3D{16, 32, 64};
+/// Unified3D's default num_segments, shipped in every decode cell.
+constexpr int64_t DEFAULT_SEGMENTS_3D = 16;
 
 /// Head configurations the cases cycle through: MHA, GQA and MQA at both head sizes.
 struct Heads
@@ -185,6 +185,47 @@ struct Heads
 constexpr std::array<Heads, 6> HEADS_2D{
     {{128, 8, 2}, {64, 16, 2}, {128, 32, 8}, {64, 8, 8}, {128, 8, 1}, {64, 32, 4}}};
 constexpr std::array<Heads, 4> HEADS_3D{{{128, 8, 2}, {64, 16, 2}, {128, 32, 8}, {64, 8, 1}}};
+
+/// A kernel class the catalog ships only in some cells, forced on a head configuration whose
+/// cell carries it. CoversEveryCatalogKernelClass holds these tables to the catalog.
+struct Class2D
+{
+    const Geometry2D* geometry;
+    DataType dataType;
+    Mask mask;
+    Heads heads;
+};
+
+struct Class3D
+{
+    int64_t segments;
+    DataType dataType;
+    Mask mask;
+    Heads heads;
+};
+
+const std::array<Class2D, 6> CELL_CLASSES_2D{{
+    {&NARROW_2X16, DataType::BFLOAT16, Mask::TOP_LEFT, {128, 32, 8}},
+    {&NARROW_2X16, DataType::BFLOAT16, Mask::BOTTOM_RIGHT, {128, 32, 8}},
+    {&TRANSPOSED_32X4, DataType::BFLOAT16, Mask::NO_MASK, {128, 24, 24}},
+    {&TRANSPOSED_32X4, DataType::BFLOAT16, Mask::TOP_LEFT, {128, 32, 8}},
+    {&TRANSPOSED_32X4, DataType::BFLOAT16, Mask::BOTTOM_RIGHT, {128, 32, 8}},
+    {&TRANSPOSED_32X4, DataType::HALF, Mask::TOP_LEFT, {128, 32, 8}},
+}};
+
+const std::array<Class3D, 2> CELL_CLASSES_3D{{
+    {32, DataType::BFLOAT16, Mask::BOTTOM_RIGHT, {128, 32, 4}},
+    {64, DataType::BFLOAT16, Mask::BOTTOM_RIGHT, {128, 32, 8}},
+}};
+
+Knobs knobsOf(const Geometry2D& g)
+{
+    return {{"tile_size", g.tileSize},
+            {"num_warps", g.numWarps},
+            {"block_m_per_warp", g.blockMPerWarp},
+            {"use_mfma_32x32", g.useMfma32x32},
+            {"use_transposed_qk_32x32", g.useTransposedQk32x32}};
+}
 
 std::string dtypeName(DataType dataType)
 {
@@ -207,91 +248,85 @@ std::string maskName(Mask mask)
 }
 
 /// Every Unified2D kernel class -- geometry x dtype x mask -- forced once, on a prefill shape
-/// with B > 1 and Sq != Skv that cycles through the head configurations; then one cold case,
-/// which the engine's ranking serves with the baseline geometry.
+/// with B > 1 and Sq != Skv: the default geometry cycling through the head configurations
+/// (every cell ships it), the others on a cell that ships them; then one cold case, which
+/// the engine's ranking serves with the default geometry.
 std::vector<KnobCase> knobCases2D()
 {
     std::vector<KnobCase> cases;
+    const auto add = [&cases](const Geometry2D& g, DataType dataType, Mask mask, const Heads& h) {
+        cases.push_back(
+            {std::string("Unified2D_") + g.name + "_" + dtypeName(dataType) + "_" + maskName(mask),
+             ENGINE_2D,
+             {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 2, 96, 256},
+             knobsOf(g),
+             knobsOf(g)});
+    };
     std::size_t at = 0;
-    for(const auto& g : GEOMETRIES_2D)
+    for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
     {
-        for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
+        for(const auto mask : {Mask::NO_MASK, Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
         {
-            for(const auto mask : {Mask::NO_MASK, Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
-            {
-                const auto& h = HEADS_2D[at++ % std::size(HEADS_2D)];
-                const Knobs knobs{{"tile_size", g.tileSize},
-                                  {"num_warps", g.numWarps},
-                                  {"block_m_per_warp", g.blockMPerWarp},
-                                  {"use_mfma_32x32", g.useMfma32x32},
-                                  {"use_transposed_qk_32x32", g.useTransposedQk32x32}};
-                cases.push_back({std::string("Unified2D_") + g.name + "_" + dtypeName(dataType)
-                                     + "_" + maskName(mask),
-                                 ENGINE_2D,
-                                 {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 2, 96, 256},
-                                 knobs,
-                                 knobs});
-            }
+            add(NARROW_4X16, dataType, mask, HEADS_2D[at++ % std::size(HEADS_2D)]);
         }
     }
-    // Heads are baked per cell, so each head configuration is its own set of binaries. Every
-    // geometry is also forced on the Llama-3-70B prefill cell (Hq 64, Hkv 8, D 128, bf16,
-    // top-left causal at S 512), which the cycled cases above never reach.
-    for(const auto& g : GEOMETRIES_2D)
+    for(const auto& c : CELL_CLASSES_2D)
     {
-        const Knobs knobs{{"tile_size", g.tileSize},
-                          {"num_warps", g.numWarps},
-                          {"block_m_per_warp", g.blockMPerWarp},
-                          {"use_mfma_32x32", g.useMfma32x32},
-                          {"use_transposed_qk_32x32", g.useTransposedQk32x32}};
-        cases.push_back({std::string("Unified2D_") + g.name + "_Bf16_TopLeft_Hq64Hkv8S512",
+        add(*c.geometry, c.dataType, c.mask, c.heads);
+    }
+    // Heads are baked per cell, so each head configuration is its own set of binaries. Every
+    // geometry the catalog ships on the Llama-3-70B prefill cell (Hq 64, Hkv 8, D 128, bf16,
+    // top-left causal at S 512) is also forced there.
+    for(const auto* g : {&NARROW_4X16, &TRANSPOSED_32X4})
+    {
+        cases.push_back({std::string("Unified2D_") + g->name + "_Bf16_TopLeft_Hq64Hkv8S512",
                          ENGINE_2D,
                          {DataType::BFLOAT16, 128, 64, 8, Mask::TOP_LEFT, 1, 512, 512},
-                         knobs,
-                         knobs});
+                         knobsOf(*g),
+                         knobsOf(*g)});
     }
-    const auto& baseline = GEOMETRIES_2D[0];
     cases.push_back({"Unified2D_Cold_SelectsTheBaselineGeometry",
                      ENGINE_2D,
                      {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 3, 512, 512},
                      {},
-                     {{"tile_size", baseline.tileSize},
-                      {"num_warps", baseline.numWarps},
-                      {"block_m_per_warp", baseline.blockMPerWarp},
-                      {"use_mfma_32x32", baseline.useMfma32x32},
-                      {"use_transposed_qk_32x32", baseline.useTransposedQk32x32}}});
+                     knobsOf(NARROW_4X16)});
     return cases;
 }
 
 /// Every Unified3D kernel class -- num_segments x dtype x causal mask -- forced once on a
-/// decode shape (Sq 1); a NO_MASK decode graph (served by the bottom-right kernel); and a
-/// cold B = 1024 decode case, past any 2D batch capacity: the decode grid has none.
+/// decode shape (Sq 1): the default num_segments cycling through the head configurations, the
+/// others on a cell that ships them; a NO_MASK decode graph (served by the bottom-right
+/// kernel); and a cold B = 1024 decode case, past any 2D batch capacity: the decode grid has
+/// none.
 std::vector<KnobCase> knobCases3D()
 {
     std::vector<KnobCase> cases;
+    const auto add = [&cases](int64_t segments, DataType dataType, Mask mask, const Heads& h) {
+        const Knobs knobs{{"num_segments", segments}};
+        cases.push_back({"Unified3D_Seg" + std::to_string(segments) + "_" + dtypeName(dataType)
+                             + "_" + maskName(mask),
+                         ENGINE_3D,
+                         {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 3, 1, 1024},
+                         knobs,
+                         knobs});
+    };
     std::size_t at = 0;
-    for(const auto segments : SEGMENTS_3D)
+    for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
     {
-        for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
+        for(const auto mask : {Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
         {
-            for(const auto mask : {Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
-            {
-                const auto& h = HEADS_3D[at++ % std::size(HEADS_3D)];
-                const Knobs knobs{{"num_segments", segments}};
-                cases.push_back({"Unified3D_Seg" + std::to_string(segments) + "_"
-                                     + dtypeName(dataType) + "_" + maskName(mask),
-                                 ENGINE_3D,
-                                 {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 3, 1, 1024},
-                                 knobs,
-                                 knobs});
-            }
+            add(DEFAULT_SEGMENTS_3D, dataType, mask, HEADS_3D[at++ % std::size(HEADS_3D)]);
         }
+    }
+    for(const auto& c : CELL_CLASSES_3D)
+    {
+        add(c.segments, c.dataType, c.mask, c.heads);
     }
     cases.push_back({"Unified3D_NoMaskDecodeIsTheBottomRightKernel",
                      ENGINE_3D,
                      {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 2, 1, 512},
-                     {{"num_segments", SEGMENTS_3D[0]}},
-                     {{"num_segments", SEGMENTS_3D[0]}}});
+                     {{"num_segments", DEFAULT_SEGMENTS_3D}},
+                     {{"num_segments", DEFAULT_SEGMENTS_3D}}});
     cases.push_back({"Unified3D_Cold_Batch1024",
                      ENGINE_3D,
                      {DataType::HALF, 64, 8, 1, Mask::BOTTOM_RIGHT, 1024, 1, 256},
