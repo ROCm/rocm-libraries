@@ -1255,6 +1255,13 @@ void check(hipStream_t                   stream,
     double ulp_sum_total   = 0.0;
     size_t ulp_count_total = 0;
 
+    // Every gemm and batch folds its allclose pair into this one; see allclose.hpp.
+    if(arg.allclose_check)
+    {
+        hipblaslt_atol = 0;
+        hipblaslt_rtol = 0;
+    }
+
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
         if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -1543,38 +1550,51 @@ void check(hipStream_t                   stream,
 
         if(arg.allclose_check)
         {
+            double          gemm_atol = 0;
+            double          gemm_rtol = 0;
+            AllcloseFailure failure;
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                bool is_allclose = allclose_check_general('F',
-                                                          M[gemmIdx],
-                                                          N[gemmIdx],
-                                                          ldd[gemmIdx],
-                                                          stride_d[gemmIdx],
-                                                          hD_gold[gemmIdx].buf(),
-                                                          hD_1[gemmIdx].buf(),
-                                                          num_batches[gemmIdx],
-                                                          hipblaslt_atol,
-                                                          hipblaslt_rtol,
-                                                          To);
+                allclose_check_general('F',
+                                       M[gemmIdx],
+                                       N[gemmIdx],
+                                       ldd[gemmIdx],
+                                       stride_d[gemmIdx],
+                                       hD_gold[gemmIdx].buf(),
+                                       hD_1[gemmIdx].buf(),
+                                       num_batches[gemmIdx],
+                                       gemm_atol,
+                                       gemm_rtol,
+                                       To,
+                                       &failure);
             }
             else
             {
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    bool is_allclose = allclose_check_general('F',
-                                                              M[gemmIdx],
-                                                              N[gemmIdx],
-                                                              ldd[gemmIdx],
-                                                              0,
-                                                              hD_gold[batch].buf(),
-                                                              hD_1[batch].buf(),
-                                                              1,
-                                                              hipblaslt_atol,
-                                                              hipblaslt_rtol,
-                                                              To);
+                    double          batch_atol;
+                    double          batch_rtol;
+                    AllcloseFailure batch_failure;
+                    allclose_check_general('F',
+                                           M[gemmIdx],
+                                           N[gemmIdx],
+                                           ldd[gemmIdx],
+                                           0,
+                                           hD_gold[batch].buf(),
+                                           hD_1[batch].buf(),
+                                           1,
+                                           batch_atol,
+                                           batch_rtol,
+                                           To,
+                                           &batch_failure);
+                    allclose_merge_pair(gemm_atol, gemm_rtol, batch_atol, batch_rtol);
+                    allclose_merge_failure(failure, batch_failure, batch);
                 }
             }
-            //TODO: confirm if allclose_check_assert is neccessary
+            allclose_merge_pair(hipblaslt_atol, hipblaslt_rtol, gemm_atol, gemm_rtol);
+            if(failure.bad_count)
+                hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
+                               << allclose_failure_message(failure) << std::endl;
         }
 
         if(arg.ulp_check)
@@ -1992,6 +2012,33 @@ void testing_matmul(const Arguments& arg)
     return;
 }
 
+// Owns a hipStream_t and destroys it when it goes out of scope, including on early returns
+// (gtest assertions) and exceptions.
+class HipStreamOwner
+{
+public:
+    HipStreamOwner() = default;
+    ~HipStreamOwner()
+    {
+        if(m_stream)
+            (void)hipStreamDestroy(m_stream);
+    }
+    HipStreamOwner(const HipStreamOwner&)            = delete;
+    HipStreamOwner& operator=(const HipStreamOwner&) = delete;
+
+    hipStream_t* put()
+    {
+        return &m_stream;
+    }
+    operator hipStream_t() const
+    {
+        return m_stream;
+    }
+
+private:
+    hipStream_t m_stream = nullptr;
+};
+
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
                               hipDataType      TiB,
@@ -2016,8 +2063,14 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
     hipblaslt_local_handle handle{arg};
-    hipStream_t            stream;
-    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    // The stream must be declared before every device buffer, including placedWorkspace. Locals
+    // are destroyed in reverse order, so the buffers go first and ~PlacedRegion's
+    // hipDeviceSynchronize() drains this stream before it is destroyed. Before ROCm 7.1,
+    // destroying a stream with pending work leaks its last command, which keeps a placed window
+    // alive and breaks a later hipMemAddressFree at the same address.
+    HipStreamOwner stream_owner;
+    CHECK_HIP_ERROR(hipStreamCreate(stream_owner.put()));
+    hipStream_t stream = stream_owner; // non-owning copy; some helpers take hipStream_t&
 
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
@@ -6987,13 +7040,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(h)
                 (void)hipblasLtMatmulDescDestroy(h);
 
-    // Before ROCm 7.1, destroying a stream with unsynchronized work leaks its last command,
-    // which keeps that command's buffers alive. A leaked placed buffer leaves a stale VA
-    // reservation that breaks a later hipMemAddressFree at the same address. Only tests that
-    // place a buffer (PlacedRegion) are affected, so only they pay for the synchronization.
-    if(arg.placement[0])
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    // The stream is destroyed by stream_owner after the device buffers (see its declaration).
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
 }

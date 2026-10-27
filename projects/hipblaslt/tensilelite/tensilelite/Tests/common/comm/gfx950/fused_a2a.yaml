@@ -12,7 +12,7 @@ GlobalParameters:
   NumBenchmarks: 1
   EnqueuesPerSync: 1
   DataInitTypeAlpha: 1
-  DataInitTypeBeta: 2
+  DataInitTypeBeta: 0
   Device: 0
   PrintSolutionRejectionReason: True
   Architecture: gfx950

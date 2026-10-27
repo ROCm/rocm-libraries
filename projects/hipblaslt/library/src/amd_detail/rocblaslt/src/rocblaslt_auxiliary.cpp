@@ -53,6 +53,7 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <hip/hip_runtime_api.h>
 #include <map>
@@ -580,8 +581,8 @@ namespace
      */
     struct ReplayCandidates
     {
-        uint64_t         generation = 0;
-        std::vector<int> indexes;
+        uint64_t                             generation = 0;
+        std::vector<TensileLite::TunedEntry> entries;
 
         // What the lookup tally has been told about this key: 0 nothing, 1
         // that it fell back, 2 that it matched. Replay asks on every call; the
@@ -625,7 +626,7 @@ namespace
                 if(rocblaslt_status_success == getSolutionsFromIndex(handle, index, resolved, 0)
                    && !resolved.empty()
                    && tuned_entry_identity_matches(handle, key, entry, resolved[0]))
-                    fresh->indexes.push_back(entry.solutionIndex);
+                    fresh->entries.push_back(entry);
             }
 
             std::unique_lock<std::shared_mutex> lock(m_mutex);
@@ -644,6 +645,42 @@ namespace
         std::unordered_map<TensileLite::ProblemOverride, std::shared_ptr<ReplayCandidates>> m_byKey;
     };
 
+    /** Whether an index supports this call within the workspace, filling *algo to launch it. */
+    bool index_supports_call(rocblaslt_handle                   handle,
+                             int                                index,
+                             const RocblasltContractionProblem& problem,
+                             std::shared_ptr<void>              gemmData,
+                             size_t                             max_workspace_bytes,
+                             rocblaslt_matmul_algo*             algo)
+    {
+        // What getSolutionsFromIndex returns for this index.
+        *algo                               = rocblaslt_matmul_algo{};
+        *reinterpret_cast<int*>(algo->data) = index;
+        algo->max_workspace_bytes           = max_workspace_bytes;
+
+        size_t required = 0;
+        if(rocblaslt_status_success
+               == isSolutionSupportedInPlace(handle, problem, gemmData, algo, &required)
+           && required <= max_workspace_bytes)
+            return true;
+
+        // The heuristic replay's XF32 fallback, as a pure probe: the call may
+        // go on to launch some other algorithm, which must not find gemmData
+        // left in FP32 mode.
+        if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
+        {
+            RocblasltContractionProblem supportProblem = problem;
+            supportProblem.compute_type                = rocblaslt_compute_f32;
+            required                                   = 0;
+            if(rocblaslt_status_success
+                   == isSolutionSupportedNoMutation(
+                       handle, supportProblem, gemmData, algo, &required)
+               && required <= max_workspace_bytes)
+                return true;
+        }
+        return false;
+    }
+
     /** The first candidate that supports this call, with the algo to launch it, or -1. */
     int first_supported_candidate(rocblaslt_handle                   handle,
                                   const ReplayCandidates&            candidates,
@@ -652,37 +689,34 @@ namespace
                                   size_t                             max_workspace_bytes,
                                   rocblaslt_matmul_algo*             algo)
     {
-        for(const int index : candidates.indexes)
-        {
-            // What getSolutionsFromIndex returns for this index.
-            *algo                               = rocblaslt_matmul_algo{};
-            *reinterpret_cast<int*>(algo->data) = index;
-            algo->max_workspace_bytes           = max_workspace_bytes;
-
-            size_t required = 0;
-            if(rocblaslt_status_success
-                   == isSolutionSupportedInPlace(handle, problem, gemmData, algo, &required)
-               && required <= max_workspace_bytes)
-                return index;
-
-            // The heuristic replay's XF32 fallback, as a pure probe: the call
-            // may go on to launch some other algorithm, which must not find
-            // gemmData left in FP32 mode.
-            if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
-            {
-                RocblasltContractionProblem supportProblem = problem;
-                supportProblem.compute_type                = rocblaslt_compute_f32;
-                required                                   = 0;
-                if(rocblaslt_status_success
-                       == isSolutionSupportedNoMutation(
-                           handle, supportProblem, gemmData, algo, &required)
-                   && required <= max_workspace_bytes)
-                    return index;
-            }
-        }
+        for(const auto& entry : candidates.entries)
+            if(index_supports_call(
+                   handle, entry.solutionIndex, problem, gemmData, max_workspace_bytes, algo))
+                return entry.solutionIndex;
         return -1;
     }
 } // namespace
+
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes)
+{
+    // Matched on the whole identity: after a rebuild two rows can share an
+    // index while naming different kernels, and only one of them still holds.
+    const auto candidates = ReplayCandidatesByKey::instance().find(handle, key);
+    const bool named      = std::any_of(
+        candidates->entries.begin(),
+        candidates->entries.end(),
+        [&](const TensileLite::TunedEntry& valid) { return valid.sameIdentity(entry); });
+
+    rocblaslt_matmul_algo algo;
+    return named
+           && index_supports_call(
+               handle, entry.solutionIndex, problem, gemmData, max_workspace_bytes, &algo);
+}
 
 int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,

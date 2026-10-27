@@ -800,4 +800,59 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterVersionTwoRoundTrips)
+    {
+        canonical(policies[2]);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 4, 1});
+        auto legacy = readSolution();
+        EXPECT_FALSE(legacy->usesStreamKSpatialCluster());
+        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.y, 4u);
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        for(int outer : {0, 1, 2})
+        {
+            internalArgs["version"] = object(outer);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
+        internalArgs = output(decoded->internalArgsSupport);
+        size = output(decoded->sizeMapping);
+        EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterLayoutRejectsInvalidPolicyAndShape)
+    {
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        internalArgs["version"] = object(3);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 1, 1});
+        for(const auto& policy : policies)
+        {
+            SCOPED_TRACE(::testing::Message() << policy.strategy << '/' << policy.assignment);
+            canonical(policy);
+            if(std::string(policy.strategy) == "StreamK"
+               && std::string(policy.assignment) == "StaticGrid")
+                EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        canonical(policies[2]);
+        for(uint32_t n : {2, 4, 8})
+        {
+            size["clusterDim"] = object(std::vector<uint32_t>{1, n, 1});
+            EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+        }
+        for(const auto& shape : std::vector<std::vector<uint32_t>>{
+                {1, 1, 1}, {1, 16, 1}, {3, 1, 1}, {16, 1, 1}, {4, 8, 1}, {2, 1, 2}})
+        {
+            size["clusterDim"] = object(shape);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
 }

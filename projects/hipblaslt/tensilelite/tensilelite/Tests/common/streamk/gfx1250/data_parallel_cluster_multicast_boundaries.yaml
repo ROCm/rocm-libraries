@@ -18,12 +18,13 @@ GlobalParameters:
   DataInitTypeB: 3
   DataInitTypeC: 3
   DataInitTypeD: 2
-  DataInitTypeAlpha: 1
-  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  - - OperationType: GEMM
+  - - &dp_problem
+      OperationType: GEMM
       DataType: b
       DestDataType: s
       ComputeDataType: s
@@ -32,28 +33,64 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-    - BenchmarkCommonParameters:
+    - BenchmarkCommonParameters: &dp_defaults
         - KernelLanguage: [Assembly]
-      ForkParameters:
         - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
         - DepthU: [64]
         - TileProcessingStrategy: [DataParallel]
         - WorkAssignment: [StaticGrid]
-        - ClusterDim: [[4, 1], [2, 2]]
         - TDMInst: [3]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
         - GlobalSplitU: [0]
         - StaggerU: [0]
-        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ForceDisableShadowInit: [False]
         - ScheduleIterAlg: [4]
         - 1LDSBuffer: [0]
         - ExpandPointerSwap: [False]
         - StoreRemapVectorWidth: [0]
+      ForkParameters:
+        - ClusterDim: [[4, 1], [2, 2], [1, 4]]
+        - PrefetchGlobalRead: [1, 2]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [96, 96, 3, 0]
           - Exact: [96, 96, 3, 64]
           - Exact: [1056, 320, 3, 1056]
+
+    # Shared one-wave descriptor/barrier paths; PGR1 also folds increments.
+    - BenchmarkCommonParameters: *dp_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[2, 2]]
+        - PrefetchGlobalRead: [1]
+        - ForceDisableShadowInit: [true]
+      BenchmarkFinalParameters: &dp_one_wave_problems
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]
+          - Exact: [1056, 320, 3, 1056]
+    - BenchmarkCommonParameters: *dp_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[2, 2]]
+        - PrefetchGlobalRead: [2]
+      BenchmarkFinalParameters: *dp_one_wave_problems
+    # N-only PAP retains A multicast; the host uses one block per cluster.
+    - BenchmarkCommonParameters: *dp_defaults
+      ForkParameters:
+        - ClusterDim: [[1, 4]]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [1]
+      BenchmarkFinalParameters: *dp_one_wave_problems
+  # DP remap needs the two-byte final D shift and has no GSULog2BpeD register.
+  - - {<<: *dp_problem, DestDataType: b}
+    - BenchmarkCommonParameters: *dp_defaults
+      ForkParameters:
+        - ClusterDim: [[2, 2]]
+        - PrefetchGlobalRead: [1]
+        - ForceDisableShadowInit: [true]
+        - StoreRemapVectorWidth: [4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [33, 65, 2, 1031]

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -86,15 +87,14 @@ void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 
     // SpMV structures
     hipsparseSpMatDescr_t matA;
-    hipsparseDnVecDescr_t x, y;
 
     size_t bsize;
 
     // Create SpMV structures
     verify_hipsparse_status_success(
         hipsparseCreateCooAoS(&matA, m, n, nnz, dind, dval, idxType, idxBase, aType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, n, dx, xType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, m, dy, yType), "success");
+    hipsparseLocalDnVec x(n, dx, xType);
+    hipsparseLocalDnVec y(m, dy, yType);
 
     // SpMV buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpMV_bufferSize(
@@ -148,8 +148,6 @@ void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
@@ -247,10 +245,9 @@ void testing_spmv_coo_aos(Arguments argus)
         hipsparseCreateCooAoS(&matA, m, n, nnz, dind, dval, typeI, idx_base, aType));
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, xType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, yType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, yType));
+    hipsparseLocalDnVec x(n, dx, xType);
+    hipsparseLocalDnVec y1(m, dy_1, yType);
+    hipsparseLocalDnVec y2(m, dy_2, yType);
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -347,9 +344,6 @@ void testing_spmv_coo_aos(Arguments argus)
 
     CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 

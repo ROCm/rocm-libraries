@@ -44,6 +44,8 @@
  */
 #include "rocke/recipe_vm.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -308,13 +310,50 @@ static void rv_ivar_push(rvm_t* vm, const char* name, long value)
 
 /* ----------------------------------------------------------- intexpr eval */
 
+static bool rv_number_to_long(double n, long* out)
+{
+    /* Check before casting: larger adjacent integer spellings can round to the
+     * same double, while non-finite and out-of-range conversions are undefined.
+     * The upper long bound is exclusive so the first out-of-range power of two
+     * is rejected even where LONG_MAX rounds to it. */
+    if(!isfinite(n) || n < -9007199254740991.0 || n > 9007199254740991.0 || n < (double)LONG_MIN
+       || n >= (double)LONG_MAX + 1.0)
+        return false;
+    long value = (long)n;
+    if(n != (double)value)
+        return false;
+    *out = value;
+    return true;
+}
+
+static bool rv_number_to_int64(double n, int64_t* out)
+{
+    /* Recipe numbers use a double-backed DOM, so values outside the safe-integer
+     * range can silently change when adjacent spellings round to one double. */
+    if(!isfinite(n) || !(n >= -9007199254740991.0 && n <= 9007199254740991.0))
+        return false;
+    int64_t value = (int64_t)n;
+    if(n != (double)value)
+        return false;
+    *out = value;
+    return true;
+}
+
 static long rv_int(rvm_t* vm, const jd_val_t* e)
 {
     if(vm->failed || !e)
         return 0;
     double n;
     if(rocke_jnum(e, &n))
-        return (long)n;
+    {
+        long value;
+        if(!rv_number_to_long(n, &value))
+        {
+            rv_fail(vm, "intexpr number is not an integer");
+            return 0;
+        }
+        return value;
+    }
     if(e->kind == JD_OBJ)
     {
         const jd_val_t* s = rocke_jget(e, "spec");
@@ -437,19 +476,26 @@ static bool rv_abi_ok(const jd_val_t* node, char* err, size_t err_cap)
     const jd_val_t* abi = rocke_jget(node, "abi");
     if(!abi || abi->kind != JD_OBJ)
         return true;
-    double need;
-    if(!rocke_jnum(rocke_jget(abi, "min_reader"), &need))
+    double need_number;
+    if(!rocke_jnum(rocke_jget(abi, "min_reader"), &need_number))
         return true;
-    if((int)need <= ROCKE_RECIPE_ABI)
+    long need;
+    if(!rv_number_to_long(need_number, &need))
+    {
+        if(err && err_cap)
+            ROCKE_ERR_SNPRINTF(err, err_cap, "artifact min_reader is not an integer");
+        return false;
+    }
+    if(need <= ROCKE_RECIPE_ABI)
         return true;
     if(err && err_cap)
     {
         const char* who = rocke_jstr(rocke_jget(abi, "engine"));
         ROCKE_ERR_SNPRINTF(err,
                            err_cap,
-                           "artifact needs a recipe reader >= %d, this engine is %d "
+                           "artifact needs a recipe reader >= %ld, this engine is %d "
                            "(written by engine %s)",
-                           (int)need,
+                           need,
                            ROCKE_RECIPE_ABI,
                            who ? who : "?");
     }
@@ -505,8 +551,9 @@ static bool rv_point_matches(rvm_t* vm, const jd_val_t* pt)
             continue;
         }
         double d;
-        long have;
-        if(!rocke_jnum(v, &d) || !rv_spec_int(vm, k, &have) || have != (long)d)
+        long want_int, have;
+        if(!rocke_jnum(v, &d) || !rv_number_to_long(d, &want_int) || !rv_spec_int(vm, k, &have)
+           || have != want_int)
             return false;
     }
     return true;
@@ -786,8 +833,10 @@ static const rocke_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             const jd_val_t* cnt = rocke_jget(t, "count");
             if(!elem || !cnt)
                 return vm->failed ? nullptr : (rv_fail(vm, "bad vector type"), nullptr);
-            int n = (int)rv_int(vm, cnt); /* count may be an intexpr */
-            return vm->failed ? NULL : rocke_vector_type(vm->b, elem, n);
+            long count = rv_int(vm, cnt); /* count may be an intexpr */
+            if(!vm->failed && (count < INT_MIN || count > INT_MAX))
+                rv_fail(vm, "vector count is outside the int range");
+            return vm->failed ? NULL : rocke_vector_type(vm->b, elem, (int)count);
         }
         if(kind && strcmp(kind, "smem") == 0)
         {
@@ -803,7 +852,12 @@ static const rocke_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             }
             int dims[8];
             for(int i = 0; i < rank; i++)
-                dims[i] = (int)rv_int(vm, shape->arr[i]); /* dims may be intexprs */
+            {
+                long dim = rv_int(vm, shape->arr[i]); /* dims may be intexprs */
+                if(!vm->failed && (dim < INT_MIN || dim > INT_MAX))
+                    rv_fail(vm, "smem shape item %d is outside the int range", i);
+                dims[i] = vm->failed ? 0 : (int)dim;
+            }
             /* exclusive is reconstructed from the op attr in rv_op (the type
              * node, like the canonical type name, omits it). */
             return vm->failed ? NULL : rocke_smem_type(vm->b, elem, dims, rank, 0);
@@ -878,13 +932,11 @@ static void rv_kernel_int_list(rvm_t* vm, rocke_attr_map_t* m, const char* key, 
             rv_fail(vm, "kernel attr '%s': item %d is not a bare int", key, i);
             return;
         }
-        /* Range test first: the cast is undefined for out-of-range doubles. */
-        if(!(d >= -9007199254740992.0 && d <= 9007199254740992.0) || d != (double)(int64_t)d)
+        if(!rv_number_to_int64(d, &ints[i]))
         {
             rv_fail(vm, "kernel attr '%s': item %d is not an integer", key, i);
             return;
         }
-        ints[i] = (int64_t)d;
     }
     rocke_attr_set_int_list(vm->b, m, key, ints, v->arr_len);
 }
@@ -946,8 +998,14 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
                 }
                 else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
                 {
-                    opts.align = (int)d;
-                    opts.align_set = true;
+                    long align;
+                    if(!rv_number_to_long(d, &align) || align < INT_MIN || align > INT_MAX)
+                        rv_fail(vm, "param '%s' align is not an integer", name);
+                    else
+                    {
+                        opts.align = (int)align;
+                        opts.align_set = true;
+                    }
                 }
                 else if(strcmp(key, "addr_space") == 0)
                 {
@@ -1399,7 +1457,13 @@ static rocke_status_t rv_run_root(jd_val_t* root,
                 rv_fail(
                     &vm, "kernel attr '%s' requires tag \"l\", got \"%s\"", key, t ? t : "(none)");
             else if(t && v && strcmp(t, "i") == 0 && rocke_jnum(v, &d))
-                rocke_attr_set_int(out_builder, &k->attrs, key, (int64_t)d);
+            {
+                int64_t value;
+                if(!rv_number_to_int64(d, &value))
+                    rv_fail(&vm, "kernel attr '%s' value is not an integer", key);
+                else
+                    rocke_attr_set_int(out_builder, &k->attrs, key, value);
+            }
         }
     }
 

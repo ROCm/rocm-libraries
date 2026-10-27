@@ -38,7 +38,7 @@ csd = _load_module()
 
 pytestmark = pytest.mark.unit
 
-CHAR_DIR = "Tensile/Tests/unit/characterization"
+CHAR_DIR = "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization"
 
 
 # --------------------------------------------------------------------------- #
@@ -388,8 +388,7 @@ def test_cmd_check_passes_over_threshold_with_override(repo: _Repo, capsys):
 
 def test_cmd_check_override_found_when_repo_root_is_a_subdirectory(repo: _Repo):
     # git reports top-level-relative paths even when run from a subdirectory with
-    # subdirectory-relative pathspecs (e.g. from projects/hipblaslt/tensilelite
-    # with the default --characterization-dir).
+    # subdirectory-relative pathspecs.
     sub = "projects/tensilelite"
     base_sha = repo._git("rev-parse", "HEAD").strip()
     for i in range(csd.DEFAULT_THRESHOLD + 1):
@@ -518,3 +517,81 @@ def test_main_end_to_end_fail(repo: _Repo):
         ]
     )
     assert rc == 1
+
+
+def test_main_default_characterization_dir_detects_bulk_change(repo: _Repo, capsys):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    changed_count = csd.DEFAULT_THRESHOLD + 1
+    head_sha = _change_n_goldens(repo, changed_count, "blanket regen")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+        ]
+    )
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert f"{changed_count} .ambr golden file(s) changed" in err
+    assert f"{CHAR_DIR}/Module0" in err
+
+
+def test_main_honors_non_default_characterization_dir(repo: _Repo, capsys):
+    other_dir = "elsewhere/characterization"
+    for i in range(csd.DEFAULT_THRESHOLD + 1):
+        repo.write(f"{other_dir}/Module{i}/__snapshots__/test_char.ambr", "# v1\n")
+    base_sha = repo.commit("add goldens in a non-default dir")
+    for i in range(csd.DEFAULT_THRESHOLD + 1):
+        repo.write(f"{other_dir}/Module{i}/__snapshots__/test_char.ambr", "# v2\n")
+    head_sha = repo.commit("blanket regen in non-default dir")
+
+    args = ["--base", base_sha, "--head", head_sha, "--repo-root", str(repo.root)]
+    assert csd.main([*args, "--characterization-dir", other_dir]) == 1
+    assert f"{other_dir}/Module0" in capsys.readouterr().err
+
+
+def test_main_returns_two_when_characterization_dir_missing_at_head(repo: _Repo, capsys):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    head_sha = _change_n_goldens(repo, 1, "scoped change")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+            "--characterization-dir",
+            "no/such/dir",
+        ]
+    )
+
+    assert rc == 2
+    assert "does not exist at" in capsys.readouterr().err
+
+
+def test_main_returns_two_when_characterization_dir_is_a_file(repo: _Repo, capsys):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    head_sha = _change_n_goldens(repo, 1, "scoped change")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+            "--characterization-dir",
+            f"{CHAR_DIR}/adr/0001-placeholder.md",
+        ]
+    )
+
+    assert rc == 2
+    assert "is not a directory" in capsys.readouterr().err

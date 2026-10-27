@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -405,6 +406,8 @@ struct rocke_lower
     const rocke_isa_backend_t* backend; /* &backend_resolved once running  */
     rocke_isa_backend_t backend_resolved; /* the target's row + datalayout/triple */
     rocke_llvm_flavor_t flavor; /* resolved (never AUTO once running) */
+    /* The arch-domain lane's mode, read once per lowering at entry. */
+    rocke_arch_domain_mode_t arch_domain_mode;
 
     /* block model */
     ROCKE_VEC(rocke_ll_block_t*) blocks; /* blocks[len-1] is _current()       */

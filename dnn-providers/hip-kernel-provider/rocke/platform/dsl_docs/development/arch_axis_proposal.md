@@ -339,17 +339,19 @@ silently targeted gfx950." `_Lowerer` now requires a non-empty architecture and
 passes it directly to `backend_for`; outer APIs that intentionally default an
 architecture do so explicitly.
 
-### S4 — Mirror into the C++ engine from the same source (proposed)
+### S4 — Mirror into the C++ engine from the same source — **DONE**
 
 Byte-identity is the #1 invariant, and it covers behaviour, not just bytes: if
 Python raises on an unavailable key and C++ emits a declare, the engines have
 diverged. So S1's artifact must feed **both**.
 
-Generate the C++ table into `cpp/core/lower_llvm/` from the same record set and
-commit the generated file, rather than hand-transcribing it — hand-transcription
-is what made the Tier 0 declare-parity test necessary
-(`tests/core/test_intrinsic_decl_table_parity.py`). One source, two emitted
-tables, CI checks regeneration is a no-op.
+*As built:* the C++ table is generated **at build time** rather than committed.
+CMake runs `tools/gen_arch_domain_cpp.py`, which reads the columns through
+`rocke.core.arch.domain` itself and emits the negative cells into the build
+tree; `rocke_ll_need` consults them. A committed copy would have needed a no-op
+gate to keep it honest; a build dependency cannot go stale, and regenerating a
+column reaches both engines with no other step. The cost is that configuring
+the C++ build now needs a Python interpreter.
 
 ### 4.1 Rollout status
 
@@ -358,18 +360,19 @@ tables, CI checks regeneration is a no-op.
    and dedicated reproduction CTest.
 3. **S2 (warn)** *(done)* — wire Python `_need()` and the emitted-IR corpus gate
    to the artifact; enforce the chokepoint and warning allowlist.
-4. **S4** *(pending)* — mirror the in-engine lookup into C++, then re-run byte
-   identity at every flavor.
-5. **S2 (error)** *(pending)* — promote once the warning stream is quiet.
+4. **S4** *(done)* — mirror to C++, re-run byte-identity at every flavor.
+5. **S2 (error)** — promote once the warning stream is quiet. The `error` mode
+   and the per-cell waivers exist in both engines; the default stays `warn`
+   until the judgement that the stream is quiet on real kernels is recorded.
 
 ### 4.2 What does and does not change
 
 | | effect |
 |---|---|
 | emitted IR bytes | **none** — S1–S4 add checks and a data file; no emission path changes |
-| golden | **no re-bless** |
+| golden | **no re-bless** of any shipped kernel. The parity corpus golden moved for its four gfx942 3D/reduce attention cases, because the harness was building the gfx950 kernels for them |
 | byte-identity | must be re-run after S4 (behaviour parity), expected GREEN |
-| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, both the same llvm23 backend fatal on attention 3d on gfx942 |
+| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, attention 3d d128/b64 on gfx942, which overflow gfx942's LDS at every flavor |
 | B9 | fixed as a consequence: S1 flags it `name_absent` on every arch |
 
 ---

@@ -477,7 +477,7 @@ dual-engine vs Python-only split.
 
 | flag | meaning |
 |---|---|
-| `ROCKE_ARCH_DOMAIN` | `warn` (default) \| `off` — warn when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `off` skips the lookup entirely. Any other value raises rather than falling back to `warn`: every way of misspelling this is an attempt to switch the lane *off*, and defaulting would leave it on |
+| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` (default) \| `off` — what both engines do when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `error` refuses the lowering (`ArchDomainError`) unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it; `off` skips the lookup. Any other value raises rather than falling back to the default, because a misspelling is always an attempt to change what the lane does. A wrong measurement is waived per cell, not worked around with this variable; see TESTING.md, the arch-domain gate |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |

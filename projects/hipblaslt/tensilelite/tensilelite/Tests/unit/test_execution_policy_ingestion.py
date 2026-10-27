@@ -199,7 +199,7 @@ def test_data_parallel_generated_layout_is_rederived_after_selector_override(
 @pytest.mark.parametrize("selector", ({"TileProcessingStrategy": "StreamK"}, {"StreamKForceDPOnly": 0}))
 @pytest.mark.parametrize("support,reason", (
     ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 1}, "requires DataParallel/StaticGrid"),
-    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}, "Unsupported PersistentLoopArgsVersion"),
+    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 3}, "Unsupported PersistentLoopArgsVersion"),
     ({"KernArgsVersion": 4, "PersistentLoopArgsVersion": 0}, "Unsupported KernArgsVersion"),
 ))
 @pytest.mark.parametrize("boundary", ("patch", "defaults"))

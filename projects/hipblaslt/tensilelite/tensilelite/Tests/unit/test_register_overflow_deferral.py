@@ -29,7 +29,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile.KernelWriterAssembly import (
+from tensilelite.KernelWriterAssembly import (
     REGISTER_BUDGET_OVERFLOW_CODES,
     KernelWriterAssembly,
 )
@@ -105,6 +105,9 @@ def _writer(vgprs=256, agprs=0, sgprs=64, standing=0):
         overflowPendingRA=0,
         invalidLSUCode=False,
         doubleVgpr=False,
+        # An over-budget PLSIN kernel exits loudly rather than being stubbed, so
+        # judgeRegisterBudget reads this. Off here: these are gfx1250 kernels.
+        postLoopStoreInNll=False,
         regCaps={"MaxVgpr": _MAX_VGPR, "MaxSgpr": _MAX_SGPR,
                  "PhysicalMaxSgpr": 800, "PhysicalMaxVgprCU": 4096 * 32},
         archCaps={"MaxWavesPerSimd": 10, "DeviceLDS": 327680, "LdsGranularity": 1024},
@@ -464,7 +467,7 @@ class TestRejectionReporting:
         mkb.setGprs(totalVgprs=288, totalAgprs=0, totalSgprs=_MAX_SGPR + 2)
 
         warnings = []
-        import Tensile.KernelWriterAssembly as kwa_module
+        import tensilelite.KernelWriterAssembly as kwa_module
         original = kwa_module.printWarning
         kwa_module.printWarning = warnings.append
         try:

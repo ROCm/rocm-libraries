@@ -286,11 +286,14 @@ def _lower_via_cpp_engine(
 
     if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
+    refused = getattr(engine, "ArchDomainError", None)
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
     except (
         Exception
     ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+        if refused is not None and isinstance(e, refused):
+            raise _arch_domain_refusal(str(e)) from None
         msg = str(e)
         if "unknown opcode" in msg:
             so = getattr(engine, "__file__", "<unknown>")
@@ -300,6 +303,36 @@ def _lower_via_cpp_engine(
                 f"it (the .so predates the opcode). Loaded from: {so}"
             ) from e
         raise
+
+
+def _arch_domain_refusal(message: str) -> Exception:
+    """The C++ engine's arch-domain refusal, as the Python lowerer raises it.
+
+    The engine passes only its message, which ``domain.message`` formats and
+    ``domain.parse_message`` reads back. The cell is then looked up again in
+    this checkout's table, so a refusal the Python side would not make -- an
+    extension built from other columns or waivers -- is reported as the
+    engines disagreeing rather than passed off as a verdict.
+    """
+    from .arch import domain as arch_domain
+    from .lower_llvm import ArchDomainError
+
+    parsed = arch_domain.parse_message(message)
+    table = arch_domain.load(parsed[2]) if parsed is not None else None
+    cell = table.lookup(parsed[0], parsed[1]) if table is not None else None
+    if (
+        parsed is None
+        or cell is None
+        or not arch_domain.is_negative(cell.status)
+        or arch_domain.is_waived(*parsed[:3])
+    ):
+        return BackendMismatch(
+            "the C++ engine refused a lowering that this checkout's arch-domain "
+            f"table does not refuse ({message!r}); the rocke_engine extension "
+            "was built from other columns or waivers -- rebuild it"
+        )
+    key, arch, flavor, _ = parsed
+    return ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
 
 
 def _effective_flavor(llvm_flavor: Optional[str]) -> str:
@@ -357,9 +390,9 @@ def lower_kernel_via_backend(
     # The Python lowerer reads the mode only for a kernel that demands an
     # intrinsic and the C++ path only in its post-pass, so one bad value used to
     # raise for some kernels and some backends and be ignored by the rest.
-    from .lower_llvm import _arch_domain_mode
+    from .arch import domain as arch_domain
 
-    _arch_domain_mode()
+    arch_domain.mode()
 
     chosen = resolve_backend()
 
@@ -376,12 +409,18 @@ def lower_kernel_via_backend(
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
     from .ir_serialize import serialize
+    from .lower_llvm import ArchDomainError
 
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
             flavor = _effective_flavor(llvm_flavor)
             out = _lower_via_cpp_engine(ir_text, _arch, flavor)
+        except ArchDomainError:
+            # A verdict about the kernel, not an engine failure. The Python
+            # lowerer reads the same table and would refuse the same kernel, so
+            # falling back would only print a misleading "fell back" line first.
+            raise
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
@@ -408,10 +447,39 @@ def lower_kernel_via_backend(
     # One flavor for both engines: each resolving for itself could compare IR
     # lowered at two different flavors and report the gap as a parity failure.
     flavor = _effective_flavor(llvm_flavor)
-    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    #
+    # An arch-domain refusal is compared like the IR is: both engines must
+    # refuse, over the same intrinsic, or this is a mismatch. The refusal is
+    # what `both` returns then, as the other modes do.
+    try:
+        py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    except ArchDomainError as py_refusal:
+        try:
+            _lower_via_cpp_engine(serialize(kernel), _arch, flavor)
+        except ArchDomainError as cpp_refusal:
+            if (cpp_refusal.key, cpp_refusal.arch, cpp_refusal.flavor) == (
+                py_refusal.key,
+                py_refusal.arch,
+                py_refusal.flavor,
+            ):
+                raise py_refusal from None
+            raise BackendMismatch(
+                f"python vs cpp engine refused kernel '{name}' on {_arch} over "
+                f"different intrinsics: python {py_refusal.key!r}, cpp "
+                f"{cpp_refusal.key!r}"
+            ) from py_refusal
+        raise BackendMismatch(
+            f"the python lowerer refused kernel '{name}' on {_arch} and the cpp "
+            f"engine lowered it: {py_refusal}"
+        ) from py_refusal
     ir_text = serialize(kernel)
     try:
         cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
+    except ArchDomainError as cpp_refusal:
+        raise BackendMismatch(
+            f"the cpp engine refused kernel '{name}' on {_arch} and the python "
+            f"lowerer lowered it: {cpp_refusal}"
+        ) from cpp_refusal
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError

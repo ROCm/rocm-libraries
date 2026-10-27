@@ -417,8 +417,8 @@ unchanged.
 | `attention_rdna_wmma_prefill` (priority 5) | multi-wave prefill (`kernels.gfx1151.wmma_fmha_fwd_v2`) | `algorithm="wmma_fmha_fwd_v2"`, `spec_id="rdna_wmma_fmha_fwd_v2"` | every other request |
 
 The decode/prefill rule is `gfx1151.rdna_attention_use_decode`, a pure function
-of the problem, the WMMA family and the CU count; its docstring describes the
-crossover points it encodes. A decode bucket
+of the problem, the WMMA family and the CU count, which the hipDNN native
+mirrors; its docstring describes the crossover points it encodes. A decode bucket
 (64/128/256) serves Q/K widths only from its own minimum up
 (`wmma_fmha_decode_bucket`), so widths no bucket serves (Q64/V128, for
 instance) and `runtime_head_dims` requests run the prefill. Pinning either
@@ -478,11 +478,19 @@ stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog does not package these
-kernels yet: it still builds the single-wave `kernels.gfx1151.wmma_fmha_fwd`
-objects (runtime-head-dim buckets, plus exact D64/D128 transposed-QK objects
-on gfx11), which rocKE dispatch no longer selects. Moving the catalog to the
-prefill/decode pair is a separate packaging change. Kernel design and
+The shipped catalog packages the same two kernels per RDNA family (generic
+targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
+in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+`hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
+64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
+kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
+matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
+and the decode engine uses the split count of `decode_launch_plan`, with one
+difference: more than one split always merges in the `merge` launch, never in
+the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
+would need zeroed every launch), so the hipDNN workspace holds only the split
+partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`

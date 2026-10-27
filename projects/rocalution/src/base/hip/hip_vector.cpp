@@ -1146,6 +1146,9 @@ namespace rocalution
                                   &index);
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
+            // rocBLAS returns a 1-based index
+            --index;
+
             copy_d2h(1, this->vec_ + index, &value);
         }
 

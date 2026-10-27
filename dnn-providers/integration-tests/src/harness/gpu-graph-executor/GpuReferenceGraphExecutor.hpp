@@ -151,6 +151,10 @@ private:
             return detail::GpuPointwiseSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::ReductionAttributes:
             return detail::GpuReductionSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ResampleFwdAttributes:
+            return detail::GpuResampleFwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ResampleBwdAttributes:
+            return detail::GpuResampleBwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormAttributes:
             return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormBackwardAttributes:

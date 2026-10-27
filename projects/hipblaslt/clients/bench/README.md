@@ -116,6 +116,21 @@ Run fp32 GEMM with validation
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,CPU-Gflops,CPU-us,norm_error,atol,rtol
     N,N,0,1,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,f32_r,f32_r,f32_r,0,0,0,0,0,none,0,non-supported type,403.298,17.6063,10.4,0.0960059,43688,2.44879e-07,1e-05,1e-05
 ```
+
+### What `-v` checks
+
+`-v` (`--verify`) compares the GPU result D with a CPU reference computed from the same inputs, and adds three columns to the output.
+
+- `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+- `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
+
+When the element-wise check fails, the bench also prints one line per failing gemm to stderr:
+```
+allclose check failed for D of gemm 0: 3 of 18 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 1, column 1: result 9, reference 4
+```
+
+The exit code is 0 whether or not a check fails. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
 Show the frequency with environment variable
 ```
 HIPBLASLT_BENCH_FREQ=1 ./clients/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r

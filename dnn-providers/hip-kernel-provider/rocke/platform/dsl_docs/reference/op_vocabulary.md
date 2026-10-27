@@ -171,6 +171,8 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if  |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
 
+A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
+
 `static_for` and `unroll` are Python-time helpers that emit no `scf.for`; they execute their body in Python and emit straight-line IR.
 
 ## Compile-Time Helpers

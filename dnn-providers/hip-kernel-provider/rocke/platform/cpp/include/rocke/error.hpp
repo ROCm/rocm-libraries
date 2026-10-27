@@ -17,6 +17,7 @@
  *   KeyError                   ckc::KeyError           ROCKE_ERR_KEY
  *   MemoryError / OOM          ckc::OOMError           ROCKE_ERR_OOM
  *   NotImplementedError        ckc::NotImplError       ROCKE_ERR_NOTIMPL
+ *   ArchDomainError            ckc::ArchDomainError    ROCKE_ERR_ARCH_DOMAIN
  *
  * Each carries a human-readable message and its rocke_status_t code. The message
  * text is kept byte-identical to the legacy *_set_err strings so that parity /
@@ -118,6 +119,20 @@ public:
     }
 };
 
+/* maps to Python ArchDomainError (rocke.core.lower_llvm): the committed
+ * arch-domain table says the target cannot lower a demanded intrinsic. Its own
+ * code rather than NOTIMPL, so a caller can tell a verdict about the kernel
+ * from an engine that could not lower it -- the cpp backend falls back to the
+ * Python lowerer on the second and must not on the first. */
+class ArchDomainError : public Error
+{
+public:
+    explicit ArchDomainError(std::string msg)
+        : Error(ROCKE_ERR_ARCH_DOMAIN, std::move(msg))
+    {
+    }
+};
+
 /* printf-style message formatting, bounded to ROCKE_ERR_MSG_CAP exactly like the
  * legacy *_set_err sites (truncation of an over-long reason string is
  * intentional and harmless -- these are reject/error paths only). Returns the
@@ -158,6 +173,8 @@ inline std::string format_error(const char* fmt, ...)
         throw OOMError(std::move(m));
     case ROCKE_ERR_NOTIMPL:
         throw NotImplError(std::move(m));
+    case ROCKE_ERR_ARCH_DOMAIN:
+        throw ArchDomainError(std::move(m));
     case ROCKE_ERR_VALUE:
     default:
         throw ValueError(std::move(m));

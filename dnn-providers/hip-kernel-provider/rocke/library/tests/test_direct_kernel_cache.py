@@ -1486,6 +1486,17 @@ def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
             "direct_wgrad_gather",
             _problem(groups=1, cpg=24, kpg=96, stride=2, H=30, W=40),
         ),
+        (
+            "direct_wgrad_dw_mfma",
+            _problem(groups=192, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=56, W=56),
+        ),
+        # Small images: the packed-image binaries join in.
+        (
+            "direct_wgrad_dw_mfma",
+            _problem(N=128, groups=1024, cpg=1, kpg=1, KH=7, KW=7, PAD=3, H=7, W=7),
+        ),
+        ("direct_wgrad_grouped_mfma", _problem(groups=32, cpg=4, kpg=4, H=56, W=56)),
+        ("direct_wgrad_grouped_mfma", _problem(groups=32, cpg=8, kpg=8, H=56, W=56)),
     ],
 )
 def test_folded_wgrad_plans_run_the_pass_then_the_fold(cache, variant, problem):
@@ -1505,7 +1516,7 @@ def test_folded_wgrad_plans_run_the_pass_then_the_fold(cache, variant, problem):
         assert fold.buffers == ("ws", None, "dw")
         spec = dks.make_spec(variant, problem, json.loads(plan.identity.knobs))
         assert (main.grid, main.block) == spec.launch_geometry()
-        if variant == "direct_wgrad_gather":
+        if hasattr(spec, "fold_channels"):
             channels, taps = spec.fold_channels(), spec.fold_taps()
         else:
             channels, taps = problem.groups, problem.KH * problem.KW
