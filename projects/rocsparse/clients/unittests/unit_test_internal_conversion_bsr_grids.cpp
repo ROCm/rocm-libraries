@@ -817,12 +817,12 @@ namespace
         }
 
         const size_t scratch_per_block
-            = static_cast<size_t>(slice) * sizeof(int32_t) * (with_values ? 2 : 1);
+            = static_cast<size_t>(slice) * sizeof(rocsparse_int) * (with_values ? 2 : 1);
         const size_t need
-            = sizeof(int32_t) * (static_cast<size_t>(m) + static_cast<size_t>(mb) + 2)
+            = sizeof(rocsparse_int) * (static_cast<size_t>(m) + static_cast<size_t>(mb) + 2)
               + scratch_per_block * static_cast<size_t>(mb)
-              + static_cast<size_t>(csr_nnz) * (sizeof(int32_t) + sizeof(float))
-              + static_cast<size_t>(nnzb) * sizeof(int32_t)
+              + static_cast<size_t>(csr_nnz) * (sizeof(rocsparse_int) + sizeof(float))
+              + static_cast<size_t>(nnzb) * sizeof(rocsparse_int)
               + (with_values ? static_cast<size_t>(nnzb) * block_dim * block_dim * sizeof(float)
                              : 0);
         size_t free_bytes  = 0;
@@ -832,10 +832,10 @@ namespace
             GTEST_SKIP() << "Insufficient device memory: need about " << need << " bytes";
         }
 
-        std::vector<int32_t> want_ptr(static_cast<size_t>(mb) + 1, 0);
+        std::vector<rocsparse_int> want_ptr(static_cast<size_t>(mb) + 1, 0);
         for(const int64_t b : planted)
         {
-            want_ptr[static_cast<size_t>(b) + 1] = static_cast<int32_t>(blocks_of(b));
+            want_ptr[static_cast<size_t>(b) + 1] = static_cast<rocsparse_int>(blocks_of(b));
         }
         for(int64_t b = 0; b < mb; ++b)
         {
@@ -843,24 +843,41 @@ namespace
         }
         ASSERT_EQ(static_cast<int64_t>(want_ptr[static_cast<size_t>(mb)]), nnzb);
 
-        // The CSR row pointer is constant between the planted rows. It is
-        // written in runs on the device rather than from a 6 GB host array.
-        device_vector<int32_t> csr_ptr(static_cast<size_t>(m) + 1);
+        // The CSR row pointer is constant between the planted rows, so it is written in
+        // runs on the device (hipMemsetD32 for 32-bit indices, copies from a host chunk
+        // of at most 2^20 entries for 64-bit ones) rather than from a host array of
+        // m + 1 indices (6 GB, or 12 GB with rocsparse_ILP64).
+        device_vector<rocsparse_int> csr_ptr(static_cast<size_t>(m) + 1);
         if(csr_ptr.ptr == nullptr)
         {
             ADD_FAILURE() << "device allocation failed";
             return;
         }
-        std::vector<int32_t> h_ind;
-        std::vector<float>   h_val;
+        std::vector<rocsparse_int> h_ind;
+        std::vector<float>         h_val;
         {
-            int64_t next = 0;
-            int32_t acc  = 0;
-            auto    fill = [&](int64_t last) {
-                ASSERT_EQ(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(csr_ptr.ptr + next),
-                                       acc,
-                                       static_cast<size_t>(last - next + 1)),
-                          hipSuccess);
+            int64_t       next = 0;
+            rocsparse_int acc  = 0;
+            auto          fill = [&](int64_t last) {
+                const size_t len = static_cast<size_t>(last - next + 1);
+                if constexpr(sizeof(rocsparse_int) == 4)
+                {
+                    ASSERT_EQ(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(csr_ptr.ptr + next),
+                                           static_cast<int>(acc),
+                                           len),
+                              hipSuccess);
+                    return;
+                }
+                // hipMemsetD32 cannot write a 64-bit value: copy the run from a host chunk.
+                const std::vector<rocsparse_int> chunk(std::min(len, size_t(1) << 20), acc);
+                for(size_t done = 0; done < len; done += chunk.size())
+                {
+                    ASSERT_EQ(hipMemcpy(csr_ptr.ptr + next + done,
+                                        chunk.data(),
+                                        std::min(chunk.size(), len - done) * sizeof(rocsparse_int),
+                                        hipMemcpyHostToDevice),
+                              hipSuccess);
+                }
             };
             for(int64_t s = 0; s < count; ++s)
             {
@@ -873,10 +890,10 @@ namespace
                     }
                     fill(b * block_dim + r);
                     next = b * block_dim + r + 1;
-                    acc += static_cast<int32_t>(cols_of(b));
+                    acc += static_cast<rocsparse_int>(cols_of(b));
                     for(int64_t k = 0; k < cols_of(b); ++k)
                     {
-                        h_ind.push_back(static_cast<int32_t>(col_at(b, r, k)));
+                        h_ind.push_back(static_cast<rocsparse_int>(col_at(b, r, k)));
                         h_val.push_back(value_at(b, r, k));
                     }
                 }
@@ -885,9 +902,9 @@ namespace
         }
         ASSERT_EQ(static_cast<int64_t>(h_ind.size()), csr_nnz);
 
-        device_vector<int32_t> csr_ind(h_ind);
-        device_vector<float>   csr_val(h_val);
-        device_vector<int32_t> bsr_ptr(static_cast<size_t>(mb) + 1);
+        device_vector<rocsparse_int> csr_ind(h_ind);
+        device_vector<float>         csr_val(h_val);
+        device_vector<rocsparse_int> bsr_ptr(static_cast<size_t>(mb) + 1);
         if(csr_ind.ptr == nullptr || csr_val.ptr == nullptr || bsr_ptr.ptr == nullptr)
         {
             ADD_FAILURE() << "device allocation failed";
@@ -928,7 +945,7 @@ namespace
         if(!with_values)
         {
             // Poison the row pointer so a skipped block row cannot pass.
-            ASSERT_EQ(hipMemset(bsr_ptr.ptr, 0xFF, bsr_ptr.n * sizeof(int32_t)), hipSuccess);
+            ASSERT_EQ(hipMemset(bsr_ptr.ptr, 0xFF, bsr_ptr.n * sizeof(rocsparse_int)), hipSuccess);
 
             rocsparse_int bsr_nnz = -1;
             ASSERT_EQ(rocsparse_csr2bsr_nnz(handle,
@@ -945,8 +962,8 @@ namespace
                       rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-            const std::vector<int32_t> got_ptr = to_host(bsr_ptr);
-            const int64_t              diff    = first_diff(got_ptr, want_ptr);
+            const std::vector<rocsparse_int> got_ptr = to_host(bsr_ptr);
+            const int64_t                    diff    = first_diff(got_ptr, want_ptr);
             EXPECT_EQ(diff, -1) << "bsr_row_ptr differs from block row " << diff << ": "
                                 << got_ptr[static_cast<size_t>(std::max<int64_t>(diff, 0))]
                                 << ", want "
@@ -982,17 +999,17 @@ namespace
 
         ASSERT_EQ(hipMemcpy(bsr_ptr.ptr,
                             want_ptr.data(),
-                            want_ptr.size() * sizeof(int32_t),
+                            want_ptr.size() * sizeof(rocsparse_int),
                             hipMemcpyHostToDevice),
                   hipSuccess);
-        device_vector<int32_t> bsr_ind(static_cast<size_t>(nnzb));
-        device_vector<float>   bsr_val(static_cast<size_t>(nnzb) * block_dim * block_dim);
+        device_vector<rocsparse_int> bsr_ind(static_cast<size_t>(nnzb));
+        device_vector<float>         bsr_val(static_cast<size_t>(nnzb) * block_dim * block_dim);
         if(bsr_ind.ptr == nullptr || bsr_val.ptr == nullptr)
         {
             ADD_FAILURE() << "device allocation failed";
             return;
         }
-        ASSERT_EQ(hipMemset(bsr_ind.ptr, 0xFF, bsr_ind.n * sizeof(int32_t)), hipSuccess);
+        ASSERT_EQ(hipMemset(bsr_ind.ptr, 0xFF, bsr_ind.n * sizeof(rocsparse_int)), hipSuccess);
         ASSERT_EQ(hipMemset(bsr_val.ptr, 0xFF, bsr_val.n * sizeof(float)), hipSuccess);
 
         ASSERT_EQ(rocsparse_scsr2bsr(handle,
@@ -1011,8 +1028,8 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const std::vector<int32_t> got_ind  = to_host(bsr_ind);
-        const int64_t              ind_diff = first_diff(got_ind, want.ind);
+        const std::vector<rocsparse_int> got_ind  = to_host(bsr_ind);
+        const int64_t                    ind_diff = first_diff(got_ind, want.ind);
         EXPECT_EQ(ind_diff, -1) << "bsr_col_ind differs at block " << ind_diff;
 
         const std::vector<float> got_val = to_host(bsr_val);

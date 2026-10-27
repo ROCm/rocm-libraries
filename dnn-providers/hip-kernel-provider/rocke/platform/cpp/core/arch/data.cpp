@@ -1097,9 +1097,8 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x16_fp8", 16},
     {"mfma_f32_32x32x16_bf8", 16},
     /* --- MFMA MX (wave64), frag lengths only --- */
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
     {"mfma_f32_16x16x128_fp8", 4},
+    {"mfma_f32_16x16x128_fp4fp6fp8", 4},
     {"mfma_scale_f32_16x16x128_f8f6f4", 4},
     /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
     {"wmma_f32_16x16x16_f16", 8},
@@ -1797,24 +1796,6 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      16,
      "mfma_f32_32x32x16_bf8",
      64},
-    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
-     * only (no verified maps), per _MMA_FRAGMENT_INFO. */
-    {"mma",
-     {{"fp4e2m1", 16, NULL}, {"fp4e2m1", 16, NULL}, {"fp32", 4, NULL}},
-     {"fp32", 4, NULL},
-     16,
-     16,
-     128,
-     "mfma_f32_16x16x128_fp4",
-     64},
-    {"mma",
-     {{"fp6e2m3", 12, NULL}, {"fp6e2m3", 12, NULL}, {"fp32", 4, NULL}},
-     {"fp32", 4, NULL},
-     16,
-     16,
-     96,
-     "mfma_f32_16x16x96_fp6",
-     64},
     /* TF32 via BF16x3 emulation. No native encoding: each row issues three
      * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
      * operands. Frag lengths, wave size and layout maps are inherited verbatim
@@ -2286,7 +2267,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     "cdna",
     "gfx12_cdna",
     32,
-    163840,
+    327680,
     6,
     {k_mma_gfx1250.ops, K_NUM(k_mma_gfx1250.ops)},
     {false, true, false, true, 4, 0, true, true, true, true},

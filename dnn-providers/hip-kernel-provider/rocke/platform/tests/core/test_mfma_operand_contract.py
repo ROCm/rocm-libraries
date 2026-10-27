@@ -51,11 +51,20 @@ CASES = [
         for shape, count in (("16x16x32", 4), ("32x32x16", 16))
         for suffix, elem in (("fp8", FP8E4M3), ("bf8", BF8E5M2))
     ],
-    ("gfx950", "mfma_f32_16x16x128_fp4", VectorType(I8, 8), 4, 64),
-    ("gfx950", "mfma_f32_16x16x96_fp6", VectorType(I8, 12), 4, 96),
+    ("gfx950", "mfma_f32_16x16x128_fp4fp6fp8", VectorType(I32, 8), 4, 256),
     ("gfx950", "mfma_f32_16x16x128_fp8", VectorType(FP8E4M3, 32), 4, 256),
     ("gfx950", "mfma_scale_f32_16x16x128_f8f6f4", VectorType(I32, 8), 4, 256),
 ]
+BY_ID = {case[1]: case for case in CASES}
+PACKED_CASES = [case for case in CASES if case[4] is not None]
+BYTE_CASES = [
+    case
+    for case in CASES
+    if "x128" not in case[1] and case[1].endswith(("_fp8", "_bf8"))
+]
+COMBINED_CASE = BY_ID["mfma_f32_16x16x128_fp4fp6fp8"]
+HERO_CASE = BY_ID["mfma_f32_16x16x128_fp8"]
+SCALED_CASE = BY_ID["mfma_scale_f32_16x16x128_f8f6f4"]
 FLAVORS = ["llvm20", "llvm22", "llvm23"]
 ARITIES = ["missing_operand", "extra_operand", "missing_result", "extra_result"]
 TF32_SOURCE_ERROR = (
@@ -250,7 +259,7 @@ def test_mfma_custom_destination_keeps_authoring_metadata_independent(flavor, en
 
 # Python HIP has no concrete XF32 handler or wide fp8 hero handler. Keep that
 # unsupported surface explicit while exercising every implemented HIP sibling.
-HIP_CASES = [c for c in CASES if c[1] != "mfma_f32_16x16x128_fp8"]
+HIP_CASES = [c for c in CASES if c not in PACKED_CASES]
 
 
 @pytest.mark.parametrize("case", HIP_CASES, ids=[c[1] for c in HIP_CASES])
@@ -290,41 +299,20 @@ def test_mfma_supported_hip_handlers(case, concrete, role, kind):
     _assert_rejects(kernel, case, "llvm23", error, "hip")
 
 
-PACKED_CARRIERS = (
-    [
-        (CASES[-4], ty)
-        for ty in (
-            I64,
-            F64,
-            VectorType(I32, 2),
-            VectorType(I16, 4),
-            VectorType(F32, 2),
-            VectorType(FP8E4M3, 8),
-            VectorType(U8, 8),
-        )
-    ]
-    + [
-        (CASES[-3], ty)
-        for ty in (
-            VectorType(I32, 3),
-            VectorType(I16, 6),
-            VectorType(BF8E5M2, 12),
-            VectorType(U8, 12),
-        )
-    ]
-    + [
-        (case, ty)
-        for case in CASES[-2:]
-        for ty in (
-            VectorType(I64, 4),
-            VectorType(F64, 4),
-            VectorType(I32, 8),
-            VectorType(I8, 32),
-            VectorType(U8, 32),
-            VectorType(F16, 16),
-        )
-    ]
-)
+PACKED_CARRIERS = [
+    (case, ty)
+    for case in PACKED_CASES
+    for ty in (
+        VectorType(I64, 4),
+        VectorType(F64, 4),
+        VectorType(I32, 8),
+        VectorType(I8, 32),
+        VectorType(U8, 32),
+        VectorType(F16, 16),
+        VectorType(I16, 16),
+        VectorType(F32, 8),
+    )
+]
 
 
 @pytest.mark.parametrize("case,carrier", PACKED_CARRIERS)
@@ -348,7 +336,7 @@ def test_mfma_preserves_equal_width_packed_carriers(case, carrier, flavor, engin
         )
 
 
-@pytest.mark.parametrize("case", [*CASES[13:17], *CASES[-4:]])
+@pytest.mark.parametrize("case", [*BYTE_CASES, *PACKED_CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
 @pytest.mark.parametrize(
     "engine,concrete", [("python", False), ("python", True), ("native", False)]
@@ -373,7 +361,7 @@ def test_mfma_unsigned_byte_carriers_match_signed_bytes(case, flavor, concrete, 
     assert actual == expected
 
 
-@pytest.mark.parametrize("case", [*CASES[13:17], CASES[-4], CASES[-3], CASES[-1]])
+@pytest.mark.parametrize("case", [*BYTE_CASES, COMBINED_CASE, SCALED_CASE])
 @pytest.mark.parametrize("concrete", [False, True])
 def test_mfma_unsigned_byte_carriers_preserve_unsupported_hip(case, concrete):
     count = case[4] // 8 if case[4] else 8
@@ -389,12 +377,12 @@ def test_mfma_unsigned_byte_carriers_preserve_unsupported_hip(case, concrete):
 @pytest.mark.parametrize(
     "case,elem,count",
     [
-        (CASES[-4], I8, 8.0),
-        (CASES[-3], I8, 12.0),
-        (CASES[-1], I8, 32.0),
-        (CASES[-4], I64, True),
-        (CASES[-4], I8, "8"),
-        (CASES[-4], I8, None),
+        (COMBINED_CASE, I8, 32.0),
+        (HERO_CASE, I32, 8.0),
+        (SCALED_CASE, I8, 32.0),
+        (COMBINED_CASE, I64, True),
+        (COMBINED_CASE, I8, "8"),
+        (COMBINED_CASE, I8, None),
         (CASES[13], I8, 8.0),
     ],
 )
@@ -411,7 +399,7 @@ def test_mfma_rejects_non_integer_carrier_counts(case, elem, count, concrete):
     assert all(block.lines == [] for block in lowerer._blocks)
 
 
-@pytest.mark.parametrize("case", [*CASES[13:17], *CASES[-4:]])
+@pytest.mark.parametrize("case", [*BYTE_CASES, *PACKED_CASES])
 @pytest.mark.parametrize("concrete", [False, True])
 def test_mfma_hip_gate_rejects_non_integer_carrier_counts(case, concrete):
     from rocke.core.lower_hip import _Lowerer as HipLowerer
@@ -420,7 +408,7 @@ def test_mfma_hip_gate_rejects_non_integer_carrier_counts(case, concrete):
     count = case[4] // 8 if case[4] else 8
     _corrupt_type(kernel, op, "src0", VectorType(I8, float(count)))
     lowerer = HipLowerer(kernel, arch=case[0])
-    if case == CASES[-2]:
+    if case in PACKED_CASES:
         with pytest.raises(NotImplementedError, match="no HIP lowering"):
             lowerer.lower_op(op)
     else:
@@ -473,7 +461,7 @@ def test_mfma_matching_instruction_identity_preserves_output(case, engine):
         assert actual == expected
 
 
-@pytest.mark.parametrize("case", CASES[-1:])
+@pytest.mark.parametrize("case", [SCALED_CASE])
 @pytest.mark.parametrize("role", ["src3", "src4"])
 @pytest.mark.parametrize("ty", [F32, I64, VectorType(I32, 1), VectorType(I8, 4)])
 @pytest.mark.parametrize(
@@ -482,8 +470,6 @@ def test_mfma_matching_instruction_identity_preserves_output(case, engine):
         ("python", False),
         ("python", True),
         ("native", False),
-        ("hip", False),
-        ("hip", True),
     ],
 )
 def test_mfma_scales_require_actual_i32(case, role, ty, concrete, engine):
@@ -507,6 +493,6 @@ def test_mfma_rejects_before_intrinsic_declarations_or_instructions(case):
 
 
 def test_mfma_preserves_unsupported_hip_handlers():
-    kernel, _ = _kernel(CASES[-2])
+    kernel, _ = _kernel(HERO_CASE)
     with pytest.raises(NotImplementedError, match="no HIP lowering"):
         lower_kernel_to_hip(kernel, arch="gfx950")

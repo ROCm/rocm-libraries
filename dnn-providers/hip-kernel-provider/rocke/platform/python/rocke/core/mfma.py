@@ -31,8 +31,7 @@ _SOURCES = {
     "mfma_f32_32x32x16_bf8": VectorType(I8, 8),
 }
 _PACKED_BITS = {
-    "mfma_f32_16x16x128_fp4": 64,
-    "mfma_f32_16x16x96_fp6": 96,
+    "mfma_f32_16x16x128_fp4fp6fp8": 256,
     "mfma_f32_16x16x128_fp8": 256,
     "mfma_scale_f32_16x16x128_f8f6f4": 256,
 }

@@ -757,48 +757,6 @@
           }
         },
         {
-          "family": "mma",
-          "m": 16,
-          "n": 16,
-          "k": 128,
-          "op_id": "mfma_f32_16x16x128_fp4",
-          "srcs": [
-            {
-              "dtype": "fp4"
-            },
-            {
-              "dtype": "fp4"
-            },
-            {
-              "dtype": "fp32"
-            }
-          ],
-          "dst": {
-            "dtype": "fp32"
-          }
-        },
-        {
-          "family": "mma",
-          "m": 16,
-          "n": 16,
-          "k": 96,
-          "op_id": "mfma_f32_16x16x96_fp6",
-          "srcs": [
-            {
-              "dtype": "fp6"
-            },
-            {
-              "dtype": "fp6"
-            },
-            {
-              "dtype": "fp32"
-            }
-          ],
-          "dst": {
-            "dtype": "fp32"
-          }
-        },
-        {
           "family": "mfma_scaled",
           "m": 32,
           "n": 32,
@@ -1758,7 +1716,7 @@
       "virtual_address_bits": 57,
       "wgp_cache_lds_shared": true,
       "wave_size": 32,
-      "lds_capacity_bytes": 163840,
+      "lds_capacity_bytes": 327680,
       "vmcnt_bits": 6,
       "memory": {
         "has_async_lds": false,
