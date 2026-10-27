@@ -17,9 +17,11 @@ namespace rocke_wino
 namespace
 {
 
-/* toom_cook_gen(m, r) of every conv_winograd_gen.POINTS entry, exact. The
- * byte-identity parity pairs of the Winograd families pin these values
- * against the Python construction. */
+/* toom_cook_gen(m, r) of every conv_winograd_gen.POINTS entry, exact.
+ * library/tests/test_conv_winograd_gen_cpu.py
+ * (test_cpp_toom_cook_tables_match_generator) checks every entry, and the key
+ * set, against the Python construction through the rocke_engine binding
+ * conv_winograd_toom_cook_tables(); a change to POINTS must be mirrored here. */
 const ToomCook kTables[] = {
     /* F(1,1) */
     {1, 1, 1, {{1, 1}}, {{1, 1}}, {{1, 1}}},
@@ -747,6 +749,12 @@ const ToomCook* toom_cook(int m, int r)
             return &t;
     }
     return nullptr;
+}
+
+const ToomCook* toom_cook_tables(size_t* count)
+{
+    *count = sizeof kTables / sizeof kTables[0];
+    return kTables;
 }
 
 int pow2_vec(int n, int cap)

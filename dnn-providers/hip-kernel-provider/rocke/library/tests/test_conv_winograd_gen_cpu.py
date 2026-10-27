@@ -48,6 +48,27 @@ def test_toom_cook_identity(mr):
     assert y == ref
 
 
+def test_cpp_toom_cook_tables_match_generator():
+    """The C++ engine's literal Toom-Cook tables (``kTables`` in
+    conv_winograd_common.cpp) equal ``toom_cook_gen`` over :data:`POINTS`
+    exactly, entry by entry, with the same key set on both sides. Exact means
+    the same reduced ``(numerator, denominator)`` of every coefficient, so a
+    transcription error in any entry fails here whether or not a parity case
+    happens to use that ``F(m, r)``."""
+    eng = pytest.importorskip("rocke_engine")
+    tables = eng.conv_winograd_toom_cook_tables()
+    assert set(tables) == set(WG.POINTS), (
+        f"only in C++: {sorted(set(tables) - set(WG.POINTS))}, "
+        f"only in Python: {sorted(set(WG.POINTS) - set(tables))}"
+    )
+    for (m, r), cpp in sorted(tables.items()):
+        for name, mat in zip(("at", "g", "bt"), WG.toom_cook_gen(m, r)):
+            want = tuple(
+                tuple((q.numerator, q.denominator) for q in row) for row in mat
+            )
+            assert cpp[name] == want, f"F({m},{r}) {name} differs"
+
+
 def test_matches_3x3_module():
     """The default F(2,3) / F(4,3) points reproduce the 3x3 pipeline's matrices."""
     for m in (2, 4):

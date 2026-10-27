@@ -17,6 +17,7 @@
 #ifndef ROCKE_INSTANCE_CONV_WINOGRAD_INTERNAL_H
 #define ROCKE_INSTANCE_CONV_WINOGRAD_INTERNAL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <utility>
@@ -75,6 +76,11 @@ struct ToomCook
 
 /* toom_cook_gen(m, r) with the default points; NULL when there is none. */
 const ToomCook* toom_cook(int m, int r);
+
+/* Every table entry (read-only; *count receives the number of entries). Lets
+ * the bindings expose the tables so a test can check them against the Python
+ * generator (conv_winograd_gen.toom_cook_gen over POINTS). */
+const ToomCook* toom_cook_tables(size_t* count);
 
 /* _pow2_vec: the largest power of two <= cap that divides n. */
 int pow2_vec(int n, int cap);

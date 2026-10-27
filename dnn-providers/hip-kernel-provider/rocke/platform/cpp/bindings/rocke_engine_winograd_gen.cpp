@@ -5,6 +5,10 @@
  * Winograd forward transform kernels (conv_winograd_gen; see
  * winograd_glue.hpp). Registered via register_winograd_gen():
  *   conv_winograd_gen_lower_llvm(spec, arch) / _serialize_ir / _verify
+ *   conv_winograd_toom_cook_tables() -> {(m, r): {"at", "g", "bt"}}: the
+ *     engine's literal Toom-Cook tables (read-only), each matrix a tuple of
+ *     rows of exact (numerator, denominator) pairs, for the cross-check
+ *     against conv_winograd_gen.toom_cook_gen.
  * The dict mirrors WinogradGenSpec with the problem and both axes nested
  * ({"m", "r", "seg"}) plus "stage": "K1" | "K2" | "K4".
  */
@@ -13,6 +17,7 @@
 extern "C" {
 #include "rocke/instance_conv_winograd_gen.h"
 }
+#include "rocke/instance_conv_winograd_internal.h"
 
 namespace py = pybind11;
 
@@ -100,10 +105,47 @@ std::vector<std::string> conv_winograd_gen_verify(const py::dict& d, const std::
                              rocke_build_winograd_gen_stage_new(&b, &s, st.c_str(), arch.c_str()));
 }
 
+py::tuple tc_matrix(const rocke_wino::Rational* v, int rows, int cols)
+{
+    py::tuple out(rows);
+    for(int i = 0; i < rows; i++)
+    {
+        py::tuple row(cols);
+        for(int j = 0; j < cols; j++)
+        {
+            const rocke_wino::Rational& q = v[i * cols + j];
+            row[j] = py::make_tuple(q.num, q.den);
+        }
+        out[i] = row;
+    }
+    return out;
+}
+
+py::dict conv_winograd_toom_cook_tables()
+{
+    size_t count = 0;
+    const rocke_wino::ToomCook* t = rocke_wino::toom_cook_tables(&count);
+    py::dict out;
+    for(size_t k = 0; k < count; k++)
+    {
+        const rocke_wino::ToomCook& tc = t[k];
+        py::dict e;
+        e["at"] = tc_matrix(tc.at, tc.m, tc.n);
+        e["g"] = tc_matrix(tc.g, tc.n, tc.r);
+        e["bt"] = tc_matrix(tc.bt, tc.n, tc.n);
+        py::tuple key = py::make_tuple(tc.m, tc.r);
+        if(out.contains(key))
+            throw std::runtime_error("duplicate Toom-Cook table entry");
+        out[key] = e;
+    }
+    return out;
+}
+
 } // namespace
 
 void register_winograd_gen(py::module_& m)
 {
+    m.def("conv_winograd_toom_cook_tables", &conv_winograd_toom_cook_tables);
     m.def("conv_winograd_gen_lower_llvm",
           &conv_winograd_gen_lower_llvm,
           py::arg("spec"),
