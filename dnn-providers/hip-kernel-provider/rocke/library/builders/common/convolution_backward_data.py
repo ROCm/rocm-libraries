@@ -83,18 +83,50 @@ _KERNEL_FAMILIES = (
 #: ``direct_variant`` values. Implicit GEMM carries "none".
 DIRECT_VARIANT_NONE = "none"
 DIRECT_VARIANT_DEPTHWISE = "depthwise_dgrad"
+DIRECT_VARIANT_DEPTHWISE_WIN = "depthwise_dgrad_win"
 DIRECT_VARIANT_MFMA = "grouped_dgrad_mfma"
+DIRECT_VARIANT_MFMA_RTC = "dgrad_mfma_rtc"
+DIRECT_VARIANT_FUSED = "grouped_dgrad_fused"
+DIRECT_VARIANT_4C = "grouped_dgrad_4c"
 HELPER_VARIANT_TRANSPOSE = "transpose"
 HELPER_VARIANT_REORGANIZE = "reorganize"
-_DIRECT_VARIANTS = (DIRECT_VARIANT_DEPTHWISE, DIRECT_VARIANT_MFMA)
-_HELPER_VARIANTS = (HELPER_VARIANT_TRANSPOSE, HELPER_VARIANT_REORGANIZE)
+HELPER_VARIANT_TRANSPOSE_RTC = "transpose_rtc"
+HELPER_VARIANT_REORGANIZE_RTC = "reorganize_rtc"
+_DIRECT_VARIANTS = (
+    DIRECT_VARIANT_DEPTHWISE,
+    DIRECT_VARIANT_DEPTHWISE_WIN,
+    DIRECT_VARIANT_MFMA,
+    DIRECT_VARIANT_MFMA_RTC,
+    DIRECT_VARIANT_FUSED,
+    DIRECT_VARIANT_4C,
+)
+_HELPER_VARIANTS = (
+    HELPER_VARIANT_TRANSPOSE,
+    HELPER_VARIANT_REORGANIZE,
+    HELPER_VARIANT_TRANSPOSE_RTC,
+    HELPER_VARIANT_REORGANIZE_RTC,
+)
+#: The MFMA pipelines, which launch weight transforms before their compute pass.
+_MFMA_VARIANTS = (DIRECT_VARIANT_MFMA, DIRECT_VARIANT_MFMA_RTC)
 
 #: Each dgrad direct-sweep algorithm (``direct_kernel_sweep.DIRECT_CAPABILITIES`` and
 #: its helper variants) and the ``(kernel_family, direct_variant)`` an instance of it
 #: carries.
 AOT_DGRAD_DIRECT_ALGORITHMS = {
     "direct_depthwise_dgrad": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_DEPTHWISE),
+    "direct_depthwise_dgrad_win": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_DEPTHWISE_WIN),
     "direct_grouped_dgrad_mfma": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_MFMA),
+    "direct_dgrad_mfma_rtc": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_MFMA_RTC),
+    "direct_grouped_dgrad_fused": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_FUSED),
+    "direct_grouped_dgrad_4c": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_4C),
+    "direct_dgrad_transpose_rtc": (
+        KERNEL_FAMILY_DGRAD_HELPER,
+        HELPER_VARIANT_TRANSPOSE_RTC,
+    ),
+    "direct_dgrad_reorganize_rtc": (
+        KERNEL_FAMILY_DGRAD_HELPER,
+        HELPER_VARIANT_REORGANIZE_RTC,
+    ),
     "direct_dgrad_transpose": (KERNEL_FAMILY_DGRAD_HELPER, HELPER_VARIANT_TRANSPOSE),
     "direct_dgrad_reorganize": (
         KERNEL_FAMILY_DGRAD_HELPER,
@@ -147,23 +179,77 @@ _DIRECT_CAPABILITY_FIELDS = (
 #: Per direct/helper variant, the identity's knob keys (``KernelIdentity.knobs``)
 #: and the instance field each one is carried in. The MFMA ``block_h`` is a knob
 #: token, not the identity's ``block_h`` field (which the direct sweep leaves 0).
+_MFMA_KNOBS = {
+    "block_groups": "block_groups",
+    "block_h": "block_h",
+    "block_q": "block_q",
+    "fold_k32": "fold_k32",
+    "persistent_grid": "persistent_grid",
+    "runtime_k_loop": "runtime_k_loop",
+    "waves_k": "waves_k",
+    "waves_q": "waves_q",
+}
 AOT_DGRAD_DIRECT_KNOBS = {
     DIRECT_VARIANT_DEPTHWISE: {"block_w": "block_w", "block_waves": "block_waves"},
-    DIRECT_VARIANT_MFMA: {
+    DIRECT_VARIANT_DEPTHWISE_WIN: {
+        "block_h": "block_h",
+        "block_w": "block_w",
+        "block_waves": "block_waves",
+        "ch_per_lane": "ch_per_lane",
+        "dot2": "dot2",
+        "mfma": "mfma",
+        "prefetch_rows": "prefetch_rows",
+        "w_fold": "w_fold",
+    },
+    DIRECT_VARIANT_MFMA: _MFMA_KNOBS,
+    # The runtime-channel pipeline takes the MFMA knobs plus its own K-loop shape.
+    DIRECT_VARIANT_MFMA_RTC: {
+        **_MFMA_KNOBS,
+        "k_atoms": "k_atoms",
+        "m_tiles": "m_tiles",
+    },
+    DIRECT_VARIANT_FUSED: {
         "block_groups": "block_groups",
         "block_h": "block_h",
         "block_q": "block_q",
+        "dgrad_weights_lds": "dgrad_weights_lds",
         "fold_k32": "fold_k32",
-        "persistent_grid": "persistent_grid",
-        "runtime_k_loop": "runtime_k_loop",
-        "waves_k": "waves_k",
-        "waves_q": "waves_q",
+        "lds_only_sync": "lds_only_sync",
+        "lds_pad": "lds_pad",
+        "prefetch_rows": "prefetch_rows",
+        "row_exit": "row_exit",
+        "stage_out": "stage_out",
+        "waves_per_eu": "waves_per_eu",
+        "xcd_tiles": "xcd_tiles",
+    },
+    DIRECT_VARIANT_4C: {
+        "block_groups": "block_groups",
+        "block_q": "block_q",
+        "dgrad_weights_lds": "dgrad_weights_lds",
+        "stage_rows": "stage_rows",
     },
     HELPER_VARIANT_TRANSPOSE: {},
     HELPER_VARIANT_REORGANIZE: {"fold_k32": "fold_k32"},
+    HELPER_VARIANT_TRANSPOSE_RTC: {},
+    HELPER_VARIANT_REORGANIZE_RTC: {"fold_k32": "fold_k32"},
 }
+#: Knobs whose 0 is a value rather than "not stated": no LDS padding, and the
+#: unset occupancy hint.
+_ZERO_IS_A_VALUE = ("lds_pad", "waves_per_eu")
 #: Knobs rocKE spells as a bool; the descriptor holds 0/1.
-_BOOL_KNOBS = ("fold_k32", "persistent_grid", "runtime_k_loop")
+_BOOL_KNOBS = (
+    "fold_k32",
+    "persistent_grid",
+    "runtime_k_loop",
+    "dot2",
+    "mfma",
+    "dgrad_weights_lds",
+    "lds_only_sync",
+    "row_exit",
+    "stage_out",
+    "xcd_tiles",
+    "stage_rows",
+)
 #: The block knobs after the capabilities, with the value each holds where its
 #: variant does not use it (the KMD default).
 _KNOB_DEFAULTS = {
@@ -177,6 +263,21 @@ _KNOB_DEFAULTS = {
     "waves_q": 0,
     "persistent_grid": 0,
     "runtime_k_loop": 0,
+    "ch_per_lane": 0,
+    "dot2": 0,
+    "mfma": 0,
+    "prefetch_rows": 0,
+    "w_fold": 0,
+    "k_atoms": 0,
+    "m_tiles": 0,
+    "dgrad_weights_lds": 0,
+    "lds_only_sync": 0,
+    "lds_pad": 0,
+    "row_exit": 0,
+    "stage_out": 0,
+    "waves_per_eu": 0,
+    "xcd_tiles": 0,
+    "stage_rows": 0,
 }
 #: Geometry an implicit-GEMM instance may state, because the tilde kernel can be
 #: compiled for one filter, stride and dilation instead of reading them from its
@@ -363,14 +464,25 @@ def _problem_error(problem: Gfx950ConvDgradProblem) -> str:
 def aot_dgrad_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
     """The instance fields a direct or helper identity's ``knobs`` set.
 
-    Raises ``ValueError`` when the keys are not exactly the variant's, or a bool
-    knob is not a bool.
+    A variant's knobs are what it *may* set, not what it must: the windowed
+    depthwise pipeline alone has a dot2 and an MFMA mode that take different ones,
+    and the sweep states only the mode's. An unlisted knob is still refused -- it
+    would otherwise be dropped silently and the instance would be packaged for a
+    kernel nobody asked for. An omitted one keeps its _KNOB_DEFAULTS value.
+
+    Raises ``ValueError`` for a knob the variant does not take, or a bool knob that
+    is not a bool.
     """
     mapping = AOT_DGRAD_DIRECT_KNOBS[variant]
-    if set(knobs) != set(mapping):
-        raise ValueError(f"knobs {sorted(knobs)} are not {sorted(mapping)}")
+    unknown = sorted(set(knobs) - set(mapping))
+    if unknown:
+        raise ValueError(
+            f"knobs {unknown} are not {variant}'s (it takes {sorted(mapping)})"
+        )
     values = {}
     for key, field_name in mapping.items():
+        if key not in knobs:
+            continue
         value = knobs[key]
         if field_name in _BOOL_KNOBS:
             if type(value) is not bool:
@@ -466,6 +578,33 @@ class Gfx950ConvDgradAotSpec:
     waves_q: int = 0
     persistent_grid: int = 0
     runtime_k_loop: int = 0
+    # Implicit-GEMM dY-halo and K-decode tuning. Each selects emission, so two
+    # instances differing only here are different binaries.
+    dy_halo: int = 0
+    dy_halo_setprio: int = 0
+    dy_halo_kouter_pad: int = 0
+    halo_max_wo: int = 0
+    patch: int = 0
+    tap_outer_k: int = 0
+    uniform_k_decode: int = 0
+    # Windowed depthwise.
+    ch_per_lane: int = 0
+    dot2: int = 0
+    mfma: int = 0
+    prefetch_rows: int = 0
+    w_fold: int = 0
+    # Runtime-channel MFMA.
+    k_atoms: int = 0
+    m_tiles: int = 0
+    # Fused and 4c forward-on-transposed pipelines.
+    dgrad_weights_lds: int = 0
+    lds_only_sync: int = 0
+    lds_pad: int = 0
+    row_exit: int = 0
+    stage_out: int = 0
+    waves_per_eu: int = 0
+    xcd_tiles: int = 0
+    stage_rows: int = 0
 
     # ---- family ----
 
@@ -480,16 +619,27 @@ class Gfx950ConvDgradAotSpec:
 
     @property
     def is_mfma(self) -> bool:
+        """An MFMA pipeline: a compute pass preceded by weight transforms."""
         return (
             self.kernel_family == KERNEL_FAMILY_DIRECT
-            and self.direct_variant == DIRECT_VARIANT_MFMA
+            and self.direct_variant in _MFMA_VARIANTS
+        )
+
+    @property
+    def is_runtime_channels(self) -> bool:
+        """Takes the per-group channel counts as kernargs instead of baking them:
+        the runtime-channel MFMA pipeline and the two transforms it launches."""
+        return self.direct_variant in (
+            DIRECT_VARIANT_MFMA_RTC,
+            HELPER_VARIANT_TRANSPOSE_RTC,
+            HELPER_VARIANT_REORGANIZE_RTC,
         )
 
     @property
     def is_depthwise(self) -> bool:
-        return (
-            self.kernel_family == KERNEL_FAMILY_DIRECT
-            and self.direct_variant == DIRECT_VARIANT_DEPTHWISE
+        return self.kernel_family == KERNEL_FAMILY_DIRECT and self.direct_variant in (
+            DIRECT_VARIANT_DEPTHWISE,
+            DIRECT_VARIANT_DEPTHWISE_WIN,
         )
 
     @property
@@ -507,7 +657,14 @@ class Gfx950ConvDgradAotSpec:
         knobs = {}
         for key, field_name in AOT_DGRAD_DIRECT_KNOBS[self.direct_variant].items():
             value = getattr(self, field_name)
-            knobs[key] = bool(value) if field_name in _BOOL_KNOBS else value
+            if field_name in _BOOL_KNOBS:
+                knobs[key] = bool(value)
+            elif value or field_name in _ZERO_IS_A_VALUE:
+                knobs[key] = value
+            # Otherwise the instance did not state it -- a knob its mode does not
+            # apply (the windowed depthwise MFMA form takes no block_w) -- so it is
+            # left out and rocKE's own default stands. Passing 0 would be a value,
+            # and its spec rejects one.
         return knobs
 
     def kernel_symbol_prefix(self) -> str:
@@ -521,12 +678,64 @@ class Gfx950ConvDgradAotSpec:
 
     # ---- the sweep's build ----
 
+    def to_identity(self):
+        """The rocKE ``KernelIdentity`` this implicit-GEMM instance was packaged
+        from. Every field the packaging does not carry is at its KernelIdentity
+        default, which is exactly what supports_gfx950_conv_dgrad_aot enforces, so
+        this reconstructs the identity rather than approximating it.
+
+        ``llvm_flavor`` comes from the ambient rocKE flavor: a catalog is built and
+        packaged under one, and the descriptor does not restate it.
+        """
+        if self.is_direct:
+            raise ValueError("a direct instance has no implicit-GEMM identity")
+        from benchmarks.common.kernel_cache import KernelIdentity
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+        carried = (
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "pipeline",
+            "epilogue",
+            "wave_size",
+            "vector_size_a",
+            "vector_size_b",
+            "vector_size_c",
+            "max_sub_gemms",
+            "filter_h",
+            "filter_w",
+            "stride_h",
+            "stride_w",
+            "dilation_h",
+            "dilation_w",
+            "dy_halo",
+            "dy_halo_setprio",
+            "dy_halo_kouter_pad",
+            "halo_max_wo",
+        )
+        flags = ("lds_k_outer", "grouped", "patch", "tap_outer_k", "uniform_k_decode")
+        return KernelIdentity(
+            arch=_ARCH,
+            direction="dgrad",
+            algorithm="implicit_gemm",
+            dtype_a=self.dtype,
+            dtype_b=self.dtype,
+            dtype_d=self.dtype,
+            llvm_flavor=_resolve_llvm_flavor(),
+            **{name: getattr(self, name) for name in carried},
+            **{name: bool(getattr(self, name)) for name in flags},
+        )
+
     def probe_problem(self) -> ConvProblem | _direct.DirectConvProblem:
         """The problem rocKE's sweep builds this instance against.
 
-        Implicit GEMM mirrors ``kernel_sweep._probe_problem("dgrad", caps)`` with
-        ``caps = {grouped, tilde: True}``: 16x16, 3x3, stride 2 (the tilde kernel),
-        pad 1, 64 channels per group, two groups when grouped. A direct instance
+        Implicit GEMM asks rocKE for it (see below). A direct instance
         mirrors ``direct_kernel_sweep.probe_problem``: 64x64, 256 depthwise groups,
         64 groups for the grouped MFMA rows and 1 for the dense ones. A helper is
         built against the probe of the MFMA row that pulls it in (its identity zeroes
@@ -535,46 +744,47 @@ class Gfx950ConvDgradAotSpec:
         binary the one the sweep benchmarked.
         """
         if self.is_direct:
-            cpg, kpg = self.cpg, self.kpg
-            if (cpg, kpg) in _DENSE_MFMA_CHANNELS:
-                groups = 1
-            else:
-                groups = 256 if cpg == 1 else 64
+            # rocKE's own probe, not a mirror: it sizes the image for the knobs (an
+            # xcd_tiles remap needs eight row bands), takes runtime channel counts
+            # (cpg == 0) and derives the runtime-channel MFMA probe from k_atoms and
+            # m_tiles. A probe that is merely "big enough" is not good enough -- it
+            # has to be the one the sweep built the binary against, or the packaged
+            # kernel is not the kernel that was benchmarked.
+            from kernels.conv.direct_aot_jobs import DirectCaps, probe_problem
+
             pad, stride = self.pad_h, self.stride_h
             if self.is_helper:
                 pad, stride = (self.filter_h - 1) // 2, 1
-            return _direct.DirectConvProblem(
-                N=1,
-                H=_DIRECT_PROBE_HW,
-                W=_DIRECT_PROBE_HW,
-                groups=groups,
-                cpg=cpg,
-                kpg=kpg,
+            caps = DirectCaps(
                 KH=self.filter_h,
-                KW=self.filter_w,
                 PAD=pad,
                 stride=stride,
-                dtype=self.dtype,
+                cpg=self.cpg,
+                kpg=self.kpg,
                 dil_h=self.dilation_h,
                 dil_w=self.dilation_w,
             )
+            return probe_problem(
+                caps,
+                dtype=self.dtype,
+                variant=self.algorithm,
+                knobs=self.direct_knobs(),
+            )
         groups = 2 if self.grouped else 1
-        return ConvProblem(
-            N=1,
-            Hi=16,
-            Wi=16,
-            C=64 * groups,
-            K=64 * groups,
-            Y=3,
-            X=3,
-            sH=2,
-            sW=2,
-            dH=1,
-            dW=1,
-            pH=1,
-            pW=1,
-            groups=groups,
-        )
+        # The probe carries the geometry the instance baked, where it baked any: a
+        # kernel compiled for stride 1 must be built against a stride-1 problem, or
+        # rocKE validates the emission it was never going to run (tap_outer_k is only
+        # legal at stride 1 and dilation 1). 0 keeps the runtime probe, whose stride 2
+        # is what selects the tilde code path.
+        # rocKE's own probe for this identity, not a mirror of it. The probe is not
+        # cosmetic: the emitted IR depends on the capability axes, so a probe that
+        # does not match them silently builds a binary the cache then offers for
+        # shapes it cannot compute. Each axis (tilde stride, patch embedding, a dY
+        # halo sized for halo_max_wo) has its own shape, and restating them here is
+        # what let this adapter drift behind rocKE in the first place.
+        from kernels.conv.aot_jobs import _probe_problem, job_for_identity
+
+        return _probe_problem("dgrad", job_for_identity(self.to_identity()).caps)
 
     def to_instance_spec(
         self, problem: ConvProblem | None = None
@@ -604,6 +814,13 @@ class Gfx950ConvDgradAotSpec:
             vector_size_b=self.vector_size_b,
             vector_size_c=self.vector_size_c,
             lds_k_outer=bool(self.lds_k_outer),
+            dy_halo=self.dy_halo,
+            dy_halo_setprio=self.dy_halo_setprio,
+            dy_halo_kouter_pad=self.dy_halo_kouter_pad,
+            halo_max_wo=self.halo_max_wo,
+            patch=bool(self.patch),
+            tap_outer_k=bool(self.tap_outer_k),
+            uniform_k_decode=bool(self.uniform_k_decode),
             max_sub_gemms=self.max_sub_gemms,
         )
 
@@ -617,20 +834,29 @@ class Gfx950ConvDgradAotSpec:
             raise ValueError("an implicit-GEMM instance has no direct spec")
         knobs = self.direct_knobs()
         variant = self.direct_variant
-        if variant == DIRECT_VARIANT_DEPTHWISE:
-            return _direct.DirectDepthwiseDgradStreamSpec(
-                problem=problem, name=self.kernel_symbol_prefix(), **knobs
+        if not self.is_helper:
+            # rocKE's own factory, the one the direct sweep builds through, rather
+            # than a per-variant mirror here: a pipeline that gains a knob or changes
+            # its spec stays packageable without a change in this file.
+            from kernels.conv.direct_variants import make_direct_spec
+
+            spec = make_direct_spec(
+                self.algorithm, problem, knobs, wave_size=self.wave_size
             )
-        if variant == DIRECT_VARIANT_MFMA:
-            fold_k32 = knobs.pop("fold_k32")
-            spec = _direct.make_dgrad_fprop_spec(problem, **knobs)
-            if fold_k32:
-                spec = replace(spec, fold_k32=fold_k32)
             return replace(spec, name=self.kernel_symbol_prefix())
-        if variant == HELPER_VARIANT_TRANSPOSE:
-            return _direct.DirectTransposeWeightsDgradSpec(problem=problem)
-        if variant == HELPER_VARIANT_REORGANIZE:
-            return _direct.DirectReorganizeWeightsSpec(problem=problem, **knobs)
+        # The _rtc transforms are the same kernels reading their channel counts from
+        # kernargs, so one binary per filter serves every channel count.
+        if variant in (HELPER_VARIANT_TRANSPOSE, HELPER_VARIANT_TRANSPOSE_RTC):
+            return _direct.DirectTransposeWeightsDgradSpec(
+                problem=problem,
+                runtime_channels=variant == HELPER_VARIANT_TRANSPOSE_RTC,
+            )
+        if variant in (HELPER_VARIANT_REORGANIZE, HELPER_VARIANT_REORGANIZE_RTC):
+            return _direct.DirectReorganizeWeightsSpec(
+                problem=problem,
+                runtime_channels=variant == HELPER_VARIANT_REORGANIZE_RTC,
+                **knobs,
+            )
         raise ValueError(f"unknown direct variant {variant!r}")
 
     def to_direct_spec(self):
@@ -648,17 +874,17 @@ class Gfx950ConvDgradAotSpec:
     # ---- launch mirrors ----
 
     def block(self) -> tuple[int, int, int]:
-        """Workgroup size; for the MFMA pipeline, its compute pass's."""
+        """Workgroup size; for an MFMA pipeline, its compute pass's.
+
+        Taken from rocKE's own direct_launch_geometry for a direct kernel: the
+        block is problem-independent, so the probe problem answers for every one,
+        and a pipeline that changes its block shape needs no mirror here.
+        """
         if self.is_helper:
             return 64, 1, 1
-        if self.is_depthwise:
-            return self.block_waves * self.wave_size, 1, 1
-        if self.is_mfma:
-            return (
-                self.block_groups * self.waves_q * self.waves_k * self.wave_size,
-                1,
-                1,
-            )
+        if self.is_direct:
+            _, block = _direct.direct_launch_geometry(self.to_direct_spec())
+            return block
         return self.warp_m * self.warp_n * self.wave_size, 1, 1
 
     def sub_gemms(self, problem: Gfx950ConvDgradProblem) -> list:
@@ -798,13 +1024,16 @@ def gfx950_conv_dgrad_aot_helper_fields(
         "cpg": spec.cpg,
         "kpg": spec.kpg,
     }
-    helpers = [dict(common, direct_variant=HELPER_VARIANT_TRANSPOSE, fold_k32=0)]
+    # The runtime-channel pipeline launches the _rtc transforms: same passes, reading
+    # their channel counts from kernargs.
+    transpose, reorganize = (
+        (HELPER_VARIANT_TRANSPOSE_RTC, HELPER_VARIANT_REORGANIZE_RTC)
+        if spec.is_runtime_channels
+        else (HELPER_VARIANT_TRANSPOSE, HELPER_VARIANT_REORGANIZE)
+    )
+    helpers = [dict(common, direct_variant=transpose, fold_k32=0)]
     if _uses_coalesced_weights(spec):
-        helpers.append(
-            dict(
-                common, direct_variant=HELPER_VARIANT_REORGANIZE, fold_k32=spec.fold_k32
-            )
-        )
+        helpers.append(dict(common, direct_variant=reorganize, fold_k32=spec.fold_k32))
     return helpers
 
 
@@ -910,21 +1139,30 @@ def gfx950_conv_dgrad_aot_mfma_launch_values(
 def _direct_validate(spec: Gfx950ConvDgradAotSpec, rocke_spec, arch: str):
     """rocKE's validator for ``rocke_spec``, as ``direct_kernel_sweep.validate_spec``
     runs it (the helpers have none)."""
+    if spec.is_helper:
+        return True, "ok"
+    # rocKE's own validator, keyed on the algorithm, rather than a per-variant
+    # mirror: a pipeline whose validity rule changes stays packageable unchanged.
+    from kernels.conv.direct_variants import validate_direct_spec
+
     try:
-        if spec.is_depthwise:
-            return _direct.is_valid_depthwise_dgrad_stream_spec(rocke_spec, arch=arch)
-        if spec.is_mfma:
-            rocke_spec.validate()
-            return _direct.is_valid_spec(rocke_spec, arch=arch)
-        if spec.is_helper:
-            return True, "ok"
-    except (TypeError, ValueError, ZeroDivisionError) as exc:
+        return validate_direct_spec(spec.algorithm, rocke_spec, arch)
+    except (TypeError, ValueError, ZeroDivisionError, KeyError) as exc:
         return False, str(exc)
-    return False, f"unknown direct variant {spec.direct_variant!r}"
 
 
 def _mfma_knobs_reason(spec: Gfx950ConvDgradAotSpec, kpg: int) -> str:
-    """``direct_kernel_sweep._mfma_knobs_reason`` for a problem with ``kpg``."""
+    """``direct_kernel_sweep._mfma_knobs_reason`` for a problem with ``kpg``.
+
+    The runtime-channel pipeline bakes its K-atom count rather than deriving it
+    from a channel count it does not know, so k_atoms answers directly.
+    """
+    if spec.is_runtime_channels:
+        if spec.k_atoms == 0 or spec.k_atoms % spec.waves_k:
+            return (
+                f"k_atoms={spec.k_atoms} does not split over waves_k={spec.waves_k}"
+            )
+        return ""
     if spec.fold_k32:
         if kpg % 32:
             return f"fold_k32 needs kpg % 32 == 0 (got kpg={kpg})"
@@ -978,9 +1216,20 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
         value = getattr(spec, name)
         if type(value) is not int or not 0 <= value <= _INT32_MAX:
             return f"{name} must be a nonnegative signed 32-bit integer"
-    for name in ("filter_h", "filter_w", "cpg", "kpg"):
+    for name in ("filter_h", "filter_w"):
         if getattr(spec, name) == 0:
             return f"{name} must be positive"
+    # cpg == kpg == 0 is rocKE's "runtime channel counts" (DirectCaps): the
+    # runtime-channel MFMA pipeline takes them as kernargs and bakes only its
+    # channel *tile* counts, so one binary per filter serves every channel count.
+    # Either both are runtime or neither is.
+    if (spec.cpg == 0) != (spec.kpg == 0):
+        return "cpg and kpg are both runtime (0) or both baked"
+    if spec.cpg == 0 and not spec.is_runtime_channels:
+        return (
+            f"only the runtime-channel pipeline takes runtime channel counts; "
+            f"{spec.direct_variant} bakes them"
+        )
     if spec.filter_h != spec.filter_w:
         return "the direct sweep builds square filters only"
     if spec.dilation_h != 1 or spec.dilation_w != 1:
@@ -1012,8 +1261,12 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
         elif name in _BOOL_KNOBS:
             if value not in (0, 1):
                 return f"{name} must be 0 or 1"
-        elif not 0 < value <= _INT32_MAX:
-            return f"{name} must be a positive signed 32-bit integer"
+        elif not 0 <= value <= _INT32_MAX:
+            # 0 is a knob the variant takes and this instance left out, or one whose
+            # own zero means something (lds_pad, waves_per_eu). Whether the value
+            # makes sense for the kernel is rocKE's validator to say, not this shape
+            # check's.
+            return f"{name} must be a nonnegative signed 32-bit integer"
     if spec.is_mfma:
         why = _mfma_knobs_reason(spec, spec.kpg)
         if why:

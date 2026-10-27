@@ -8,10 +8,7 @@
   },
   "metadata": "11e87973-b7f3-42eb-a69b-c51c3b49a835",
   "sort_kernel_catalog": {
-    "default": [
-      "8c8c5135-8f2c-4b49-9e32-51b333565e3c",
-      "d1de3948-a405-4292-8e39-0bd4be5f09f4"
-    ]
+    "default": "8c8c5135-8f2c-4b49-9e32-51b333565e3c"
   },
   "knobs": [
     "kernel_family",
@@ -30,6 +27,14 @@
     "vector_size_b",
     "vector_size_c",
     "lds_k_outer",
+    "grouped",
+    "dy_halo",
+    "dy_halo_setprio",
+    "dy_halo_kouter_pad",
+    "halo_max_wo",
+    "patch",
+    "tap_outer_k",
+    "uniform_k_decode",
     "block_w",
     "block_waves",
     "block_h",
@@ -39,6 +44,21 @@
     "waves_k",
     "waves_q",
     "persistent_grid",
-    "runtime_k_loop"
+    "runtime_k_loop",
+    "ch_per_lane",
+    "dot2",
+    "mfma",
+    "prefetch_rows",
+    "w_fold",
+    "k_atoms",
+    "m_tiles",
+    "dgrad_weights_lds",
+    "lds_only_sync",
+    "lds_pad",
+    "row_exit",
+    "stage_out",
+    "waves_per_eu",
+    "xcd_tiles",
+    "stage_rows"
   ]
 }

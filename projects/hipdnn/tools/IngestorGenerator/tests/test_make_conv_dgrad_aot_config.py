@@ -88,20 +88,26 @@ def _document(kind):
     return json.loads((_SHIPPED_DIR / f"{_SLUG}.{kind}.json").read_text())
 
 
-def test_the_catalog_is_291_selectable_kernels_and_9_helpers_per_dtype(specs):
+def test_the_catalog_is_320_selectable_kernels_and_4_helpers_per_dtype(specs):
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
     for dtype in ("bf16", "fp16"):
         assert by_dtype[dtype] == {
-            (0, "none"): 235,
-            (1, "depthwise_dgrad"): 30,
-            (1, "grouped_dgrad_mfma"): 26,
-            (2, "transpose"): 6,
-            (2, "reorganize"): 3,
+            (0, "none"): 247,
+            (1, "depthwise_dgrad"): 12,
+            (1, "depthwise_dgrad_win"): 37,
+            (1, "grouped_dgrad_fused"): 18,
+            (1, "grouped_dgrad_mfma"): 3,
+            (1, "grouped_dgrad_4c"): 2,
+            (1, "dgrad_mfma_rtc"): 1,
+            (2, "transpose"): 1,
+            (2, "reorganize"): 1,
+            (2, "transpose_rtc"): 1,
+            (2, "reorganize_rtc"): 1,
         }
-    assert sum(1 for s in specs if not s.is_helper) == 582
-    assert len(specs) == 600
+    assert sum(1 for s in specs if not s.is_helper) == 640
+    assert len(specs) == 648
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -129,14 +135,16 @@ def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, ship
             uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, spec.instance_id)
         )
         assert kernel["id"] == tool.kernel_uuid(spec.instance_id)
-        prefix = {
-            (0, "none"): "gfx950_conv_dgrad_aot_",
-            (1, "depthwise_dgrad"): "gfx950_conv_dgrad_aot_dw_",
-            (1, "grouped_dgrad_mfma"): "gfx950_conv_dgrad_aot_mfma_",
-            (2, "transpose"): "gfx950_conv_dgrad_aot_transpose_",
-            (2, "reorganize"): "gfx950_conv_dgrad_aot_reorganize_",
-        }[(spec.kernel_family, spec.direct_variant)]
-        assert kernel["name"] == f"{prefix}{spec.dtype}_{spec.instance_id}"
+        # The tool's own templates, not a second copy of them: a variant this engine
+        # gains is named once.
+        template = (
+            tool.IMPLICIT_VARIANT_NAME
+            if not spec.is_direct
+            else tool._DIRECT_VARIANT_NAMES[spec.direct_variant]
+        )
+        assert kernel["name"] == template.format(
+            dtype=spec.dtype, instance_id=spec.instance_id
+        )
 
 
 def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
@@ -182,8 +190,8 @@ def test_the_bundle_names_its_own_native_symbols():
     assert ued["metadata"] == kmd["id"]
     # The native fallback scorer comes first; a promoted model packet appends its own.
     assert list(ued["sort_kernel_catalog"]) == ["default"]
-    assert ued["sort_kernel_catalog"]["default"][0] == uhd["id"]
-    assert ued["knobs"] == list(tool.ENGINE_KNOBS)
+    assert ued["sort_kernel_catalog"]["default"] == uhd["id"]
+    assert ued["knobs"] == list(tool.engine_knobs())
     kmd_names = [f["name"] for f in kmd["fields"]]
     assert kmd_names == [f["name"] for f in tool.kmd_fields()]
     assert set(ued["knobs"]) <= set(kmd_names)
@@ -226,7 +234,7 @@ def test_bundle_ids_are_unique_across_the_conv_aot_bundles():
 
 def _knob_tuple(kernel, kmd_defaults):
     values = dict(kmd_defaults, **kernel["metadata"])
-    return tuple(values[k] for k in tool.ENGINE_KNOBS)
+    return tuple(values[k] for k in tool.engine_knobs())
 
 
 def _capability(kernel, kmd_defaults):
@@ -260,19 +268,22 @@ def test_knob_tuples_are_unique_within_every_dtype_family_and_capability(shipped
         if kernel["metadata"].get("kernel_family") == 2:
             continue  # helpers are never matched
         partitions[_capability(kernel, defaults)].append(_knob_tuple(kernel, defaults))
-    assert len(partitions) == 2 * (1 + 3 + 6)
+    # Two dtypes x the capability sets the implicit, direct and helper families
+    # span, which grew with the pipelines the sweep now enumerates.
+    assert len(partitions) == 34
     for key, tuples in partitions.items():
         assert len(tuples) == len(set(tuples)), key
-    # Implicit GEMM and the direct kernels can meet in one graph too.
+    # Implicit GEMM and the direct kernels can meet in one graph too. Uniqueness is
+    # per capability, checked above: two tiles baked for different geometries never
+    # serve the same graph, so they may share a knob tuple.
     for dtype in ("bf16", "fp16"):
-        tuples = [
-            _knob_tuple(kernel, defaults)
+        implicit = [
+            kernel
             for _, kernel in shipped.values()
             if kernel["metadata"]["dtype"] == dtype
-            and kernel["metadata"].get("kernel_family", 0) != 2
+            and kernel["metadata"].get("kernel_family", 0) == 0
         ]
-        implicit = [t for t in tuples if t[0] == 0]
-        assert len(set(implicit)) == len(implicit) == 235
+        assert len(implicit) == 247
 
 
 def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(identities, specs):
@@ -313,7 +324,9 @@ def test_every_mfma_instance_finds_its_helpers_in_the_bundle(shipped):
     specs = {s.instance_id: s for s in _specs_of(shipped)}
     for shard, kernel in shipped.values():
         meta = kernel["metadata"]
-        if meta.get("direct_variant") != "grouped_dgrad_mfma":
+        # Both MFMA pipelines: the baked-channel one and the runtime-channel one,
+        # whose transforms are the _rtc pair.
+        if meta.get("direct_variant") not in ("grouped_dgrad_mfma", "dgrad_mfma_rtc"):
             continue
         for wanted in gfx950_conv_dgrad_aot_helper_fields(specs[meta["instance_id"]]):
             found = [
@@ -344,7 +357,7 @@ def test_the_census_names_every_pack_and_kernel(shipped):
         assert f'"{json.loads(kdp.read_text())["name"]}"' in text
     assert '"hipkernel:Gfx950ConvDgradAot"' in text
     assert "hipkernel.gfx950_conv_dgrad_aot.score" in text
-    assert f"knobs.size(), {len(tool.ENGINE_KNOBS)}U" in text
+    assert f"knobs.size(), {len(tool.engine_knobs())}U" in text
 
 
 @pytest.mark.parametrize(
@@ -430,8 +443,16 @@ def test_an_implicit_identity_without_baked_geometry_stays_runtime(
             "no packaged",
         ),
         ("direct_depthwise_dgrad", {"direction": "direct_fwd"}, "direct_dgrad"),
-        ("direct_depthwise_dgrad", {"knobs": '{"block_w": 4}'}, "are not"),
-        ("direct_grouped_dgrad_mfma", {"cpg": 32, "kpg": 32}, ""),
+        # A knob the variant does not take is named and refused -- by rocKE's own
+        # spec first, by aot_dgrad_direct_fields_from_knobs otherwise. Dropping it
+        # silently would package the instance for a kernel nobody asked for.
+        (
+            "direct_depthwise_dgrad",
+            {"knobs": '{"block_w": 4, "block_waves": 2, "nonsense": 1}'},
+            "nonsense",
+        ),
+        # c32k32 leaves one K-atom, which the row's waves_k=2 cannot split.
+        ("direct_grouped_dgrad_mfma", {"cpg": 32, "kpg": 32}, "K-atoms"),
         ("direct_dgrad_transpose", {"stride_h": 1, "stride_w": 1}, "cannot build"),
     ],
 )
@@ -441,11 +462,23 @@ def test_unsupported_direct_identities_are_named_with_their_reason(
     identity = copy.deepcopy(next(i for i in identities if i["algorithm"] == algorithm))
     identity.update(change)
     spec, why = tool.instance_spec(identity)
-    if algorithm == "direct_grouped_dgrad_mfma":
-        # c32k32 is a sweep row the curated catalog leaves out; it converts.
-        assert spec is not None, why
-        return
     assert spec is None and reason in why, why
+
+
+def test_a_variant_may_state_only_the_knobs_its_mode_uses(identities):
+    """A variant's knobs are what it may set, not what it must: the windowed
+    depthwise has a dot2 and an MFMA mode taking different ones, and the sweep
+    states only the mode's. An omitted knob keeps rocKE's own default."""
+    windowed = [
+        i for i in identities if i["algorithm"] == "direct_depthwise_dgrad_win"
+    ]
+    assert windowed, "the catalog must carry the windowed depthwise pipeline"
+
+    modes = {("mfma" in i["knobs"], "dot2" in i["knobs"]) for i in windowed}
+    assert len(modes) > 1, "both windowed modes must be exercised"
+    for identity in windowed:
+        spec, why = tool.instance_spec(copy.deepcopy(identity))
+        assert spec is not None, why
 
 
 def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, capsys):

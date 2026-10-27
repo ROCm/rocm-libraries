@@ -76,6 +76,34 @@
       "type": "int"
     },
     {
+      "name": "dy_halo",
+      "type": "int"
+    },
+    {
+      "name": "dy_halo_setprio",
+      "type": "int"
+    },
+    {
+      "name": "dy_halo_kouter_pad",
+      "type": "int"
+    },
+    {
+      "name": "halo_max_wo",
+      "type": "int"
+    },
+    {
+      "name": "patch",
+      "type": "int"
+    },
+    {
+      "name": "tap_outer_k",
+      "type": "int"
+    },
+    {
+      "name": "uniform_k_decode",
+      "type": "int"
+    },
+    {
       "name": "instance_id",
       "type": "string"
     },
@@ -190,6 +218,81 @@
     },
     {
       "name": "runtime_k_loop",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "ch_per_lane",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "dot2",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "mfma",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "prefetch_rows",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "w_fold",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "k_atoms",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "m_tiles",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "dgrad_weights_lds",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "lds_only_sync",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "lds_pad",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "row_exit",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "stage_out",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "xcd_tiles",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "stage_rows",
       "type": "int",
       "default_value": 0
     }

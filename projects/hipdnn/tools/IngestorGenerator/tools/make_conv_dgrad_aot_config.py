@@ -15,7 +15,7 @@ runs: an implicit-GEMM identity of the dgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``; it carries ``lds_k_outer`` and
 ``max_sub_gemms``), or a dgrad identity of the direct sweep
 (``benchmarks/common/direct_kernel_sweep.py``) of a packaged algorithm
-(:data:`PACKAGED_DIRECT_ALGORITHMS`), including the MFMA pipeline's weight-transform
+(:func:`packaged_direct_algorithms`), including each MFMA pipeline's weight-transform
 helpers (``direct_dgrad_helper``). The helpers are packaged as kernels of their own
 family (``kernel_family`` 2) that the kernel matcher never admits; the MFMA dispatch
 loads them from the same pack. Anything else is listed with its reason and the tool
@@ -75,8 +75,23 @@ _CARRIED = (
     "lds_k_outer",
     "max_sub_gemms",
     "grouped",
+    # dY-halo and K-decode tuning: each selects emission, so an instance that sets
+    # one is a different binary and the catalog has to say so.
+    "dy_halo",
+    "dy_halo_setprio",
+    "dy_halo_kouter_pad",
+    "halo_max_wo",
+    "patch",
+    "tap_outer_k",
+    "uniform_k_decode",
 )
-_BOOL_CARRIED = ("lds_k_outer", "grouped")
+_BOOL_CARRIED = (
+    "lds_k_outer",
+    "grouped",
+    "patch",
+    "tap_outer_k",
+    "uniform_k_decode",
+)
 #: Geometry an implicit-GEMM identity may bake instead of reading from the tilde
 #: records at run time. 0 means runtime, as before; a non-zero value is a kernel
 #: specialized for exactly that geometry, and the matcher gates on it (_BAKEABLE of
@@ -131,39 +146,41 @@ DIRECT_FIELDS = {
     "kpg": 0,
 }
 #: The variant knobs after DIRECT_FIELDS, with their builder_default. A direct or
-#: helper instance states those of its variant only (DIRECT_VARIANT_FIELDS).
-DIRECT_KNOB_FIELDS = {
-    "block_w": 0,
-    "block_waves": 0,
-    "block_h": 0,
-    "block_q": 0,
-    "block_groups": 0,
-    "fold_k32": 0,
-    "waves_k": 0,
-    "waves_q": 0,
-    "persistent_grid": 0,
-    "runtime_k_loop": 0,
-}
+#: helper instance states those of its variant only (_direct_variant_fields()).
+def _direct_knob_fields() -> dict:
+    """Every direct/helper knob with its KMD default: _KNOB_DEFAULTS of the adapter,
+    not a second list that could drift from it."""
+    from builders.common.convolution_backward_data import _KNOB_DEFAULTS
+
+    return dict(_KNOB_DEFAULTS)
+
+
+def _direct_variant_fields() -> dict:
+    """Per variant, the knobs it states, in KMD order. A variant states every knob it
+    may take (AOT_DGRAD_DIRECT_KNOBS).
+
+    A transpose states fold_k32 as well, always 0: an MFMA dispatch looks its helpers
+    up by (dtype, family, variant, capabilities, cpg/kpg, fold_k32), so both helpers
+    must carry a stated value rather than leaving the transpose on the KMD default.
+    """
+    from builders.common.convolution_backward_data import (
+        AOT_DGRAD_DIRECT_KNOBS,
+        HELPER_VARIANT_TRANSPOSE,
+        HELPER_VARIANT_TRANSPOSE_RTC,
+    )
+
+    order = list(_direct_knob_fields())
+    stated = {
+        variant: set(mapping.values())
+        for variant, mapping in AOT_DGRAD_DIRECT_KNOBS.items()
+    }
+    for variant in (HELPER_VARIANT_TRANSPOSE, HELPER_VARIANT_TRANSPOSE_RTC):
+        stated[variant].add("fold_k32")
+    return {
+        variant: tuple(f for f in order if f in fields)
+        for variant, fields in stated.items()
+    }
 DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
-#: The DIRECT_KNOB_FIELDS each direct and helper variant states, in KMD order.
-DIRECT_VARIANT_FIELDS = {
-    "depthwise_dgrad": ("block_w", "block_waves"),
-    "grouped_dgrad_mfma": (
-        "block_h",
-        "block_q",
-        "block_groups",
-        "fold_k32",
-        "waves_k",
-        "waves_q",
-        "persistent_grid",
-        "runtime_k_loop",
-    ),
-    # The transpose states fold_k32 (always 0) too, so the MFMA dispatch's helper
-    # lookup (dtype, family, variant, capabilities, cpg/kpg, fold_k32) reads stated
-    # values for both helpers rather than relying on the KMD default.
-    "transpose": ("fold_k32",),
-    "reorganize": ("fold_k32",),
-}
 _STRING_FIELDS = (
     "dtype",
     "pipeline",
@@ -172,66 +189,105 @@ _STRING_FIELDS = (
     "layout",
     "direct_variant",
 )
-_INT_FIELDS = tuple(
-    f for f in DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) if f not in _STRING_FIELDS
-)
+def _int_fields() -> tuple:
+    """Every KMD field that is an int. Resolved on first use: the knob set comes from
+    the adapter, which is bound at run time."""
+    return tuple(
+        f
+        for f in DIRECT_SPEC_ORDER + tuple(_direct_knob_fields())
+        if f not in _STRING_FIELDS
+    )
 #: The UED knobs: every KMD field that tunes a kernel, so the ranking model can tell
 #: apart the instances one problem admits; together they make every per-graph
 #: candidate tuple unique. Left out are the fields that only restate the problem the
 #: instance was matched to (dtype, layout, the direct filter, stride, padding,
-#: dilation, cpg/kpg), the constants (wave_size, grouped, max_sub_gemms) and
+#: dilation, cpg/kpg), the constants (wave_size, max_sub_gemms) and
 #: instance_id. The MFMA block_h is its row tile (the knob token), not a constant.
-ENGINE_KNOBS = (
-    "kernel_family",
-    "direct_variant",
-    "tile_m",
-    "tile_n",
-    "tile_k",
-    "warp_m",
-    "warp_n",
-    "warp_tile_m",
-    "warp_tile_n",
-    "warp_tile_k",
-    "pipeline",
-    "epilogue",
-    "vector_size_a",
-    "vector_size_b",
-    "vector_size_c",
-    "lds_k_outer",
-    "block_w",
-    "block_waves",
-    "block_h",
-    "block_q",
-    "block_groups",
-    "fold_k32",
-    "waves_k",
-    "waves_q",
-    "persistent_grid",
-    "runtime_k_loop",
-)
+def engine_knobs() -> tuple:
+    """The UED knobs: every KMD field that tunes a kernel, so the ranking model can
+    tell apart the instances one problem admits. The per-variant knobs come from the
+    adapter, so a pipeline this engine gains is rankable without a change here."""
+    fixed = (
+        "kernel_family",
+        "direct_variant",
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+        "pipeline",
+        "epilogue",
+        "vector_size_a",
+        "vector_size_b",
+        "vector_size_c",
+        "lds_k_outer",
+        # Not a constant: a grouped binary also serves groups == 1, so for such a
+        # problem it and its ungrouped twin both match and the model has to tell
+        # them apart.
+        "grouped",
+        "dy_halo",
+        "dy_halo_setprio",
+        "dy_halo_kouter_pad",
+        "halo_max_wo",
+        "patch",
+        "tap_outer_k",
+        "uniform_k_decode",
+    )
+    return fixed + tuple(_direct_knob_fields())
 #: Every dgrad direct-sweep algorithm the packaged launch runs (or loads, for the
 #: MFMA helpers), and its direct_variant: AOT_DGRAD_DIRECT_ALGORITHMS of the adapter.
-PACKAGED_DIRECT_ALGORITHMS = {
-    "direct_depthwise_dgrad": "depthwise_dgrad",
-    "direct_grouped_dgrad_mfma": "grouped_dgrad_mfma",
-    "direct_dgrad_transpose": "transpose",
-    "direct_dgrad_reorganize": "reorganize",
-}
-#: Direction of each packaged direct algorithm's identities.
-_DIRECT_DIRECTIONS = {
-    "direct_depthwise_dgrad": "direct_dgrad",
-    "direct_grouped_dgrad_mfma": "direct_dgrad",
-    "direct_dgrad_transpose": "direct_dgrad_helper",
-    "direct_dgrad_reorganize": "direct_dgrad_helper",
-}
+#: Derived, not restated: the adapter decides what has a packaged launch, and a
+#: second list here could only drift from it. Resolved on first use, since rocKE is
+#: bound at run time (_bind_rocke), not at import.
+_PACKAGED_DIRECT_CACHE = None
+
+
+def packaged_direct_algorithms() -> dict:
+    """Each dgrad direct-sweep algorithm with a packaged launch, and its
+    ``direct_variant`` (AOT_DGRAD_DIRECT_ALGORITHMS of the adapter)."""
+    return _packaged_direct()[0]
+
+
+def direct_directions() -> dict:
+    """The ``KernelIdentity.direction`` each packaged direct algorithm carries."""
+    return _packaged_direct()[1]
+
+
+def _packaged_direct():
+    global _PACKAGED_DIRECT_CACHE
+    if _PACKAGED_DIRECT_CACHE is None:
+        from builders.common.convolution_backward_data import (
+            AOT_DGRAD_DIRECT_ALGORITHMS,
+            KERNEL_FAMILY_DGRAD_HELPER,
+        )
+
+        algorithms, directions = {}, {}
+        for algorithm, (family, variant) in AOT_DGRAD_DIRECT_ALGORITHMS.items():
+            algorithms[algorithm] = variant
+            directions[algorithm] = (
+                "direct_dgrad_helper"
+                if family == KERNEL_FAMILY_DGRAD_HELPER
+                else "direct_dgrad"
+            )
+        _PACKAGED_DIRECT_CACHE = (algorithms, directions)
+    return _PACKAGED_DIRECT_CACHE
 #: The generator variant (kernel name) of the implicit-GEMM instances and of each
 #: direct and helper variant.
 IMPLICIT_VARIANT_NAME = "gfx950_conv_dgrad_aot_{dtype}_{instance_id}"
 _DIRECT_VARIANT_NAMES = {
     "depthwise_dgrad": "gfx950_conv_dgrad_aot_dw_{dtype}_{instance_id}",
+    "depthwise_dgrad_win": "gfx950_conv_dgrad_aot_dw_win_{dtype}_{instance_id}",
     "grouped_dgrad_mfma": "gfx950_conv_dgrad_aot_mfma_{dtype}_{instance_id}",
+    "dgrad_mfma_rtc": "gfx950_conv_dgrad_aot_mfma_rtc_{dtype}_{instance_id}",
+    "grouped_dgrad_fused": "gfx950_conv_dgrad_aot_fused_{dtype}_{instance_id}",
+    "grouped_dgrad_4c": "gfx950_conv_dgrad_aot_4c_{dtype}_{instance_id}",
     "transpose": "gfx950_conv_dgrad_aot_transpose_{dtype}_{instance_id}",
     "reorganize": "gfx950_conv_dgrad_aot_reorganize_{dtype}_{instance_id}",
+    "transpose_rtc": "gfx950_conv_dgrad_aot_transpose_rtc_{dtype}_{instance_id}",
+    "reorganize_rtc": "gfx950_conv_dgrad_aot_reorganize_rtc_{dtype}_{instance_id}",
 }
 
 _bind_rocke = _fwd._bind_rocke
@@ -251,10 +307,17 @@ def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
 
 
 def spec_order(spec) -> tuple:
-    """The descriptor spec order of ``spec``'s family and variant."""
+    """The descriptor spec order of ``spec``'s family and variant.
+
+    An implicit-GEMM instance states its geometry, 0 where it reads the extent from
+    its sub-GEMM records. All six, always: one order serves the whole variant group,
+    and the fields have to be there anyway -- the native matcher gates on them, and
+    the UED knob tuple has to tell two tiles apart that differ only in what they were
+    compiled for.
+    """
     if not spec.is_direct:
-        return SPEC_ORDER
-    return DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
+        return SPEC_ORDER + _BAKEABLE
+    return DIRECT_SPEC_ORDER + _direct_variant_fields()[spec.direct_variant]
 
 
 def instance_spec(identity_dict: dict):
@@ -363,14 +426,14 @@ def _direct_instance_spec(identity):
 
     if identity.arch != "gfx950":
         return None, f"not a gfx950 dgrad direct identity ({identity.arch})"
-    if identity.algorithm not in PACKAGED_DIRECT_ALGORITHMS:
+    if identity.algorithm not in packaged_direct_algorithms():
         return None, (
             f"direct algorithm {identity.algorithm!r} has no packaged dgrad launch "
-            f"(supported: {sorted(PACKAGED_DIRECT_ALGORITHMS)})"
+            f"(supported: {sorted(packaged_direct_algorithms())})"
         )
-    if identity.direction != _DIRECT_DIRECTIONS[identity.algorithm]:
+    if identity.direction != direct_directions()[identity.algorithm]:
         return None, (
-            f"{identity.algorithm} is a {_DIRECT_DIRECTIONS[identity.algorithm]} "
+            f"{identity.algorithm} is a {direct_directions()[identity.algorithm]} "
             f"algorithm, the identity says {identity.direction}"
         )
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
@@ -425,16 +488,16 @@ def shard_name(spec, sharding: str = "pipeline") -> str:
 def kmd_fields() -> list:
     """The KMD: SPEC_ORDER required, then the direct fields and knobs with defaults."""
     return [
-        {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
+        {"name": name, "type": "int" if name in _int_fields() else "string"}
         for name in SPEC_ORDER
     ] + [
         {
             "name": name,
-            "type": "int" if name in _INT_FIELDS else "string",
+            "type": "int" if name in _int_fields() else "string",
             "default_value": default,
             "builder_default": True,
         }
-        for name, default in {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}.items()
+        for name, default in {**DIRECT_FIELDS, **_direct_knob_fields()}.items()
     ]
 
 
@@ -452,7 +515,7 @@ def build_config(
     builder_default. ``engine_name`` other than :data:`PRODUCT_ENGINE` borrows this
     engine's native symbols.
     """
-    metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS))
+    metadata = list(DIRECT_SPEC_ORDER + tuple(_direct_knob_fields()))
     shards = collections.defaultdict(list)
     for spec in specs:
         shards[shard_name(spec, sharding)].append(spec)
@@ -461,7 +524,11 @@ def build_config(
         variants = []
         implicit = [s for s in shards[shard] if not s.is_direct]
         if implicit:
-            variants.append(_fwd._variant(IMPLICIT_VARIANT_NAME, SPEC_ORDER, implicit))
+            variants.append(
+                _fwd._variant(
+                    IMPLICIT_VARIANT_NAME, spec_order(implicit[0]), implicit
+                )
+            )
         for variant_name in _DIRECT_VARIANT_NAMES:
             members = [
                 s
@@ -491,7 +558,7 @@ def build_config(
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
-        "knobs": list(ENGINE_KNOBS),
+        "knobs": list(engine_knobs()),
         "heuristic": "native",
     }
     if engine_name != PRODUCT_ENGINE:
