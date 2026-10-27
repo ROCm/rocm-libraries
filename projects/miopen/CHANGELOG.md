@@ -16,6 +16,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   one applicable CK instance the enumeration never terminated.
 * [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
   one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
+* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
+  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
+  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
+  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
+  The problem now uses the next recorded solver, `GemmWrwUniversal`.
 
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).

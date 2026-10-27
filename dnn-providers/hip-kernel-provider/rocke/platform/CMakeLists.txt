@@ -14,7 +14,9 @@ cmake_minimum_required(VERSION 3.16)
 project(rocke LANGUAGES CXX)
 
 include(GNUInstallDirs)
-find_package(Python3 COMPONENTS Interpreter QUIET)
+# Required: the engine's copy of the intrinsic arch-domain table is generated
+# at build time from the committed JSON columns (see below).
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -146,12 +148,8 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
-if(Python3_Interpreter_FOUND)
-  set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
-      "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
-else()
-  set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/python/site-packages")
-endif()
+set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
 
@@ -176,6 +174,36 @@ target_include_directories(rocke_core_objects PRIVATE
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# --- Intrinsic arch-domain table ---------------------------------------------
+# Which intrinsic declarations each gfx target can lower is measured by
+# tools/gen_arch_domain.py and committed as one JSON column per LLVM flavor,
+# beside the reviewed waivers in arch_domain_waivers.json. Those files are the
+# one source of truth. The Python engine reads them when it lowers; this engine
+# gets a copy generated here, through the same Python reader, so there is no
+# hand-maintained mirror to drift. Regenerating a column or editing a waiver
+# needs no other step: the next build rewrites this file. It lives in the
+# build tree and is never committed.
+set(_rocke_arch_domain_inc
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/rocke/arch_domain_table.inc")
+file(GLOB _rocke_arch_domain_columns CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
+add_custom_command(
+  OUTPUT "${_rocke_arch_domain_inc}"
+  COMMAND "${Python3_EXECUTABLE}" -I
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain_cpp.py"
+          --out "${_rocke_arch_domain_inc}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain_cpp.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/domain.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/data/arch_domain_waivers.json"
+          ${_rocke_arch_domain_columns}
+  COMMENT "Generating the C++ arch-domain table from the committed columns"
+  VERBATIM)
+# The objects are compiled once in rocke_core_objects and shared by the static
+# and shared libraries, so the table belongs to that target.
+target_sources(rocke_core_objects PRIVATE "${_rocke_arch_domain_inc}")
+target_include_directories(rocke_core_objects PRIVATE
+                           "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine
@@ -323,6 +351,20 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
+    # Host-only differential golden check (Python reference emitters only; no
+    # compiler). The rest of tests/instances/differential needs the C++ build and
+    # stays out of the installed tree (see the tests/ install below); these files
+    # are the Python-only check: the runner, its batch worker, the golden store
+    # and file, and the CPU-count helper the runner imports from tools/.
+    set(_ROCKE_DIFFERENTIAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/differential")
+    install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
+    install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential/golden)
+
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
     # attention_d256, kda_chunkwise and lightning_indexer families (the one platform -> library
     # exception), so the library packages must be importable by both runners.
@@ -372,7 +414,8 @@ if(ROCKE_INSTALL_TESTS)
 
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
-    # the differential harness (needs compiler + source), the WaveScope sidecar
+    # the differential harness (needs compiler + source; its Python-only golden
+    # check is installed separately above), the WaveScope sidecar
     # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
     # and the arch-domain artifact unit tests. The latter remain source-only
     # units, while the full regeneration sweep is installed below as its own
@@ -398,7 +441,6 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
-              # Configures source CMake modules; not an installed runtime test.
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
@@ -482,6 +524,19 @@ if(ROCKE_INSTALL_TESTS)
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1800)\n")
+
+    # The differential golden: every parity family's Python reference output,
+    # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host
+    # checks all of them) and canonical IR. tests/instances/differential/golden/README.md.
+    set(_ROCKE_RUN_DIFF "${ROCKE_TEST_CTEST_REL}tests/instances/differential/run_diff.py")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working

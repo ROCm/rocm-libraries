@@ -2069,10 +2069,20 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Python _op_scf_for: pick unrolled vs normal lowering. */
+/* Python _op_scf_for: refuse a loop-carried buffer descriptor, then pick
+ * unrolled vs normal lowering. */
 static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 3)
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    char descriptor_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", descriptor_error);
+    }
+    if(op->num_operands < 3)
     {
         return;
     }

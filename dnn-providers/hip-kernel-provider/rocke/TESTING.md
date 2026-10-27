@@ -364,18 +364,61 @@ fix cannot leave dead weight behind.
 
 ### 4.5 Can this target lower this intrinsic? (the arch-domain gate)
 
-§4.4 asks a compiler. The **arch-domain gate**,
-[`check_arch_domain.py`](platform/tools/check_arch_domain.py), asks *committed
-measured data* instead: `tools/gen_arch_domain.py` probes, per (declaration key,
-gfx target), whether that declaration actually links, and commits one JSON column
-per LLVM flavor under `platform/python/rocke/core/arch/data/`. The lowerer's
-`_need` chokepoint consults that table on every intrinsic demand and warns
-(`ArchDomainWarning`) when the answer is a measured negative. This gate lowers
-the same corpus §4.4 uses, harvests the warnings, and compares them against an
-`EXPECTED_WARNINGS` allowlist that names, for each entry, the corpus cases allowed
-to demand it.
+§4.4 asks a compiler. The **arch-domain lane** asks *committed measured data*
+instead: `tools/gen_arch_domain.py` probes, per (declaration key, gfx target),
+whether that declaration actually links, and commits one JSON column per LLVM
+flavor under `platform/python/rocke/core/arch/data/`. Both engines consult it at
+their demand chokepoint — `_Lowerer._need` in Python, `rocke_ll_need` in C++ —
+on every intrinsic a kernel demands. The C++ engine's copy of the table is
+generated from the same columns at build time (`tools/gen_arch_domain_cpp.py`),
+so there is one table and no hand-maintained mirror; regenerating a column needs
+no other step.
 
-The two gates overlap on purpose and neither subsumes the other:
+What the lane does with a measured negative is `ROCKE_ARCH_DOMAIN`:
+
+| mode | effect |
+|---|---|
+| `error` | refuse the lowering with `ArchDomainError` (a `NotImplementedError`), unless the cell is waived; both engines refuse with the same message |
+| `warn` (default) | report it as `ArchDomainWarning` and keep lowering |
+| `off` | skip the lookup |
+
+Any other value raises in both engines rather than falling back to the
+default. On the default `cpp` backend a refusal is raised, never "fallen back"
+from: the Python lowerer reads the same table and would refuse the same kernel.
+The C++ engine has no warning channel, so on that backend the reports come from
+a pass over the IR it emitted, which also checks that it refused what it had to.
+
+**Only a definite negative speaks.** `arch_absent` is the sole negative status.
+A flavor with no committed column, an unswept target, a key absent from the
+table, and the no-data statuses (`target_unsupported`, `toolchain_crash`,
+`toolchain_timeout`, `probe_error`) are all silent — 14% of the llvm20 column is
+no-data, and warning on those would train people to ignore the lane.
+`name_absent` is deliberately *not* reported: §4.4 already catches a reachable
+one with a real diagnostic.
+
+**The escape hatch is one cell.** A row can be measured wrong, and in `error`
+mode a wrong `arch_absent` would block every kernel that needs that intrinsic
+until the column is fixed. `platform/python/rocke/core/arch/data/arch_domain_waivers.json`
+lists waived `(key, arch, flavor)` cells, each with the reason the measurement is
+wrong; both engines read it through the same build step as the columns, and a
+waived cell is reported instead of refused — never silenced. It is for a wrong
+measurement, not a kernel bug: a kernel that demands an intrinsic its target
+cannot lower is fixed in the kernel. `ROCKE_ARCH_DOMAIN=warn` reports every
+negative instead of stopping at the first, which is a way to diagnose, not to
+ship.
+
+The gate, [`check_arch_domain.py`](platform/tools/check_arch_domain.py), lowers
+the same corpus §4.4 uses at every committed flavor with the lane in `warn` mode
+and goes red on:
+
+- a negative with no waiver: a kernel is demanding an intrinsic its target
+  cannot lower;
+- a stale waiver: its cell no longer measures negative, so the column was fixed
+  and the waiver is deleted in the same change;
+- when the `rocke_engine` extension is importable, the C++ engine in `error`
+  mode refusing a different set of cases than the Python lowerer would.
+
+This gate and §4.4 overlap on purpose and neither subsumes the other:
 
 - **It needs no toolchain.** Lowering is pure Python and the table is committed
   data, so this gate rules on *every* flavor on any host — where §4.4 can only
@@ -383,20 +426,6 @@ The two gates overlap on purpose and neither subsumes the other:
 - **It names the intrinsic.** §4.4 reports whatever the backend chose to say,
   often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
   diagnostic the probe recorded.
-- **Only a definite negative speaks.** `arch_absent` is the sole negative
-  status. A flavor with no committed column, an unswept target, a key absent
-  from the table, and the no-data statuses (`target_unsupported`,
-  `toolchain_crash`, `toolchain_timeout`, `probe_error`) are all silent — 14% of
-  the llvm20 column is no-data, and warning on those would train people to
-  ignore the lane.
-  `name_absent` is deliberately *not* warned on: §4.4 already catches a reachable
-  one with a real diagnostic.
-
-`EXPECTED_WARNINGS` carries the same rule as `KNOWN_BAD`: **it only shrinks**,
-and an entry, or one of its cases, that stops firing is itself a failure. Naming
-the cases is what stops it widening in silence: a different case that starts
-demanding an allowlisted intrinsic is a new finding. `ROCKE_ARCH_DOMAIN=off`
-disables the lookup.
 
 ### 4.6 Does the measured arch-domain artifact reproduce?
 
