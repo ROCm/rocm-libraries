@@ -266,6 +266,16 @@ const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kern
  * core/ir.py::GPU_CHECKED_VALUE_WRITER). */
 #define ROCKE_GPU_CHECKED_VALUE_WRITER "gpu_checked_value"
 
+/* Why a kernel whose parameters state facts must not be launched from a launch
+ * plan (Python core/ir.py::PARAM_FACTS_UNCHECKED_REASON, same words). */
+#define ROCKE_PARAM_FACTS_UNCHECKED_REASON                                        \
+    "parameters carry facts, which a launch from a code object or from a launch " \
+    "plan does not check"
+
+/* What a refused launch plan tells its caller to do instead (Python
+ * core/ir.py::LAUNCH_THROUGH_FROM_ARTIFACT, same words). */
+#define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
+
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
  * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
  * Otherwise returns false and writes the Python engine's refusal into `err`.
@@ -366,6 +376,10 @@ int rocke_param_fact_errors(const rocke_param_t* const* params,
  * type's dtype width and signedness, and returns true; returns false for any
  * other type. */
 bool rocke_int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi);
+
+/* Whether `p` states an integer fact: one of param_facts.FACT_WORDS (ge, gt, le, lt, eq,
+ * multiple_of) is among its attrs. Pointer attributes are not facts. */
+bool rocke_param_states_facts(const rocke_param_t* p);
 
 /* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
  * the facts `p` states, nothing when it states none. */
