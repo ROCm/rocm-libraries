@@ -32,6 +32,33 @@ struct Catalog
     BoundTokens bound; ///< What graph-scoped matchers resolved, merged across packs.
 };
 
+/// A Catalog that points at its state manager's kernel definitions instead of copying
+/// them. The definitions are immutable and owned by the engine's shared state, which
+/// `owner` keeps alive, so a view stays valid for as long as anyone holds it. A view is
+/// never mutated once published; Catalog copies are for callers that need to own one.
+struct CatalogView
+{
+    std::vector<const KernelDefinition*> entries;
+    bool isSorted = false;
+    std::shared_ptr<const WinnerRecord> measuredRecord; ///< As in Catalog.
+    BoundTokens bound; ///< As in Catalog.
+    std::shared_ptr<const void> owner;
+
+    /// The same catalog as a plain Catalog, for a caller that needs to own and mutate the
+    /// entry list. Both hold pointers into the state manager's immutable kernel set, so
+    /// this copies the list, never the definitions -- but the result drops `owner`, and so
+    /// is only valid while the state manager that produced this view is alive.
+    Catalog toCatalog() const
+    {
+        Catalog catalog;
+        catalog.entries = entries;
+        catalog.isSorted = isSorted;
+        catalog.measuredRecord = measuredRecord;
+        catalog.bound = bound;
+        return catalog;
+    }
+};
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
