@@ -116,6 +116,10 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return visitor(TypeTag<fp8_e4m3>{});
     case DataType::FP8_E5M2:
         return visitor(TypeTag<fp8_e5m2>{});
+    case DataType::FP8_E4M3_FNUZ:
+        return visitor(TypeTag<fp8_e4m3_fnuz>{});
+    case DataType::FP8_E5M2_FNUZ:
+        return visitor(TypeTag<fp8_e5m2_fnuz>{});
     case DataType::INT64:
         return visitor(TypeTag<int64_t>{});
     case DataType::FP8_E8M0:
