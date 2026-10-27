@@ -171,6 +171,9 @@ struct PassFeatureConfig {
         /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
         /// query) is held until just before the next s_barrier_wait; < 0 = off.
         int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::EnableESM2: InsertWaitAlu runs, so the queue keeps its
+        /// scoreboard (WaitAluTracker) and asks it where fillers and unplaced memory ops go.
+        bool waitAluScoreboard = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,

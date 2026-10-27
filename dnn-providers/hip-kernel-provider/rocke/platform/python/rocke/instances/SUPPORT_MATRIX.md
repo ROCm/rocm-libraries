@@ -105,6 +105,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |
 | `direct_wgrad_tiled` | ❌ | ✅ | ❌ | dense and grouped wgrad, stride 1; needs `ds_read_b64_tr_b16` and `mfma_f32_16x16x32`. Built from `library/kernels`; AOT sweep only, not yet wired into dispatch |
 | `dw_wgrad_lds` / `dw_wgrad_cols` / `direct_wgrad_gather` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0` / `C <= 8`) and dense small-C wgrad, partial slots + `dw_wgrad_fold`; validated on gfx950 only (the LDS kernels DMA 16 bytes per lane). AOT sweep only, not yet wired into dispatch |
+| `dw_wgrad_mfma` / `grouped_wgrad_mfma` | ❌ | ✅ | ❌ | depthwise (`C % 8 == 0`, any filter) and 4/8-channel grouped wgrad, stride 1, on `mfma_f32_4x4x4`; partial slots + `dw_wgrad_fold`; need `ds_read_b64_tr_b16`. AOT sweep only, not yet wired into dispatch |
 | `direct_depthwise_tiled` | ✅ | ✅ | ❌ | `cpg=kpg=1`, filters up to 31x31, any padding; scalar FMA at the target's wave size (wave64, or wave32 on gfx1250; spec `wave_size` must match). Built from `library/kernels`; not yet wired into dispatch |
 | `conv_direct_dgrad_wmma` | ❌ | ❌ | ❌ | gfx1250 only: wave32 WMMA 16x16x32 + TDM, stride-1 dgrad, dense and grouped (`cpg`, `kpg` multiples of 8), `PAD` in 0..K-1. Built from `library/kernels`; served by the direct-conv AOT cache, not the dispatcher |
 | Winograd forward (`conv_winograd_fwd`, `conv_winograd_gemm_wmma`, `conv_winograd_gen`, `conv_winograd_fused_1d_wmma`) | ❌ | ❌ | ❌ | gfx1250 only: fp16 / bf16 I/O, stride 1, 2-D, `C/g` and `K/g` >= 32, dilation up to 35; 3x3 as F(m x n, 3x3) with tiles 2..6 (not 6x6), 1-D / 7x1 / 5x5 and segmented long filters through the generalized pipeline, fused 1-D kernel for `1 x r` with `C` in {32, 64, 128} (fp16). Kernels built per problem (no AOT cache); plan from `conv_winograd_select`; opt-in dispatcher route `algorithm="winograd"` (candidate `conv_winograd_fwd`), never picked by `auto` |
@@ -169,7 +170,6 @@ parity runs on the matching device and is not implied by the ✅ here.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `gfx1151/wmma_gemm` | ❌ | ❌ | ✅ | native WMMA GEMM (GPU-verified) |
-| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified); kept for the hipDNN catalog, no longer selected by rocKE dispatch |
 | `gfx1151/wmma_fmha_fwd_v2` | ❌ | ❌ | ✅ | native WMMA FMHA prefill, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
 | `gfx1151/wmma_fmha_decode` | ❌ | ❌ | ✅ | native split-KV WMMA FMHA decode, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1150/gfx1201; not run on gfx1151) |
 
@@ -228,7 +228,7 @@ parity runs on the matching device and is not implied by the ✅ here.
   `add_rmsnorm2d_rdquant` (i8 out only on RDNA), `smoothquant`,
   `moe_smoothquant`, `topk_softmax`, `moe_sorting` (all 4 phases),
   `fmha_fwd_mfma`, `fmha_appendkv`, `unified_attention_2d/3d/reduce`,
-  `gfx1151/wmma_gemm`, `gfx1151/wmma_fmha_fwd`.
+  `gfx1151/wmma_gemm`.
   **Marginal PASS** (a few elements over a strict 2e-2 but 0 bad at 3e-2;
   their scalar bodies hardcode `WARP_SIZE=64`/`block=(64,1,1)`, i.e. 2 waves
   on wave32, but resolve correctly): `fmha_paged_prefill` (2.43e-2),

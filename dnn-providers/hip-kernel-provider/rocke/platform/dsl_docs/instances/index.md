@@ -49,6 +49,8 @@ implementation.
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
 | `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
 | `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `instances/convolution.md` |
+| `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `instances/convolution.md` |
+| `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `instances/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
