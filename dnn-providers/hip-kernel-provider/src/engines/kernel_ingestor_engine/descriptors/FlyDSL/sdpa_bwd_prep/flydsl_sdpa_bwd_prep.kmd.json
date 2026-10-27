@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "8ce86793-4738-5da1-a889-79c7848adad2",
+  "name": "flydsl sdpa_bwd_prep variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "dropout",
+      "type": "int"
+    },
+    {
+      "name": "padded",
+      "type": "int"
+    },
+    {
+      "name": "hints",
+      "type": "int"
+    },
+    {
+      "name": "floor",
+      "type": "string"
+    },
+    {
+      "name": "dform",
+      "type": "string"
+    },
+    {
+      "name": "sink",
+      "type": "int"
+    }
+  ]
+}
