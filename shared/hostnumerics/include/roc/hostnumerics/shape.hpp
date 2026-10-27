@@ -152,17 +152,18 @@ class Shape {
     void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        const IndexRange clipped{range.start, std::min(range.end, elementCount()), range.stride};
+        const IndexRange clipped{range.start(), std::min(range.end(), elementCount()),
+                                 range.stride()};
         const size_t count = clipped.count();
         if (count == 0) return;
         std::vector<size_t> coordinates(rank());
-        computeCoordinates(range.start, order, coordinates);
+        computeCoordinates(range.start(), order, coordinates);
         for (size_t ordinal = 0; ordinal < count; ++ordinal) {
-            const size_t index = range.start + ordinal * range.stride;
-            if (range.stride != 1) computeCoordinates(index, order, coordinates);
+            const size_t index = range.start() + ordinal * range.stride();
+            if (range.stride() != 1) computeCoordinates(index, order, coordinates);
             function(index, std::span<const size_t>(coordinates));
             if (ordinal + 1 == count) break;
-            if (range.stride == 1) {
+            if (range.stride() == 1) {
                 for (size_t position = rank(); position > 0; --position) {
                     const size_t axis = order[position - 1];
                     if (++coordinates[axis] < m_dimensions[axis]) break;

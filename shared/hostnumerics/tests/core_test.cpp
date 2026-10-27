@@ -525,9 +525,10 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(IndexRange(10, 10, 1).count(), 0);
     EXPECT_EQ(IndexRange(10, 9, 1).count(), 0);
     EXPECT_EQ(IndexRange::all(0).count(), 0);
-    IndexRange invalid(0, 0, 1);
-    invalid.stride = 0;
-    EXPECT_THROW(invalid.count(), std::runtime_error);
+    const IndexRange range(1, 7, 2);
+    EXPECT_EQ(range.start(), 1);
+    EXPECT_EQ(range.end(), 7);
+    EXPECT_EQ(range.stride(), 2);
     EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
 }
 
