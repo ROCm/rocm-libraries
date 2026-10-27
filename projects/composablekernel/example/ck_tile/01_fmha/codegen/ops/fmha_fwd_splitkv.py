@@ -584,13 +584,7 @@ class FmhaFwdSplitKVApiPool:
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
                     max_bm0 = max((t.bm0 for t in pool_by_hdim), default=0)
                     inners = str()
-                    # Dispatch returns on the first hit, and the qr entries that
-                    # pad one side only carry predicates loose enough to shadow
-                    # qr_tdm, so qr_tdm has to come first. sorted() is stable,
-                    # so each group keeps its emission order.
-                    for i_trait, trait in enumerate(
-                        sorted(pool_by_hdim, key=lambda t: t.pipeline_tag != "qr_tdm")
-                    ):
+                    for i_trait, trait in enumerate(pool_by_hdim):
                         inners += FMHA_FWD_SPLITKV_API_INNER_DISPATCH.format(
                             F_if=if_(i_trait),
                             F_arch=arch,
@@ -923,39 +917,57 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
 
     @staticmethod
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
-        pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
-        if dtype in ["fp16", "bf16"] and hdim == 128:
-            # Logits soft cap is left out because the pipeline static_asserts
-            # it away, as does the prefill qr_tdm.
-            #
-            # Bias is left out for a different reason: the pipeline does handle
-            # it (the variants compile and validate, elementwise and alibi
-            # alike), but the BUILD_TESTING instance filter keeps split-kv to
-            # *_nbias* in the dispatch api while still building the instances,
-            # so generating them would add compile time for kernels no test can
-            # reach. qr already pays that for its own 396. Lift this once the
-            # filter drops the instances too.
-            #
-            # Like fmha_fwd.py it pads both sequence lengths together and both
-            # head dims together; the qr entries padding one side only stay as
-            # they are, which is why the dispatch chain still has to put qr_tdm
-            # first (see FmhaFwdSplitKVApiPool.api).
-            #
-            # `superseded` is the qr entry the unpadded qr_tdm one replaces
-            # outright -- same dispatch predicate on both sides. The head-dim
-            # padded pair is not in it: qr_tdm needs hdim % 8 == 0 there (see
-            # dcheck) while qr takes any head dim, so qr keeps that entry as
-            # the fallback and qr_tdm wins the aligned case by coming first.
-            Pipeline = FmhaFwdSplitKVPipeline
-            tdm, superseded = [], []
-            for mask, pagedkv, sink in itertools.product(
-                get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
+        # Self-contained, like fmha_fwd.py's gfx125 factory: qr_tdm first, then
+        # the qr entries still reachable behind it. Dispatch returns on the
+        # first hit, so emission order is what hands qr_tdm the shapes it covers.
+        Pipeline = FmhaFwdSplitKVPipeline
+        pipelines = []
+        if dtype in ["fp16", "bf16"]:
+            squant = "f"
+            # qr_tdm: left out are logits soft cap, which the pipeline
+            # static_asserts away (so does the prefill qr_tdm), and bias, which
+            # it does handle but whose instances no test can reach -- the
+            # BUILD_TESTING filter keeps split-kv to *_nbias* in the dispatch
+            # api while still building them. Like fmha_fwd.py it pads both
+            # sequence lengths together and both head dims together.
+            if hdim == 128:
+                for mask, pagedkv, sink in itertools.product(
+                    get_mask_map(mask_impl).keys(), ["t", "f"], ["t", "f"]
+                ):
+                    #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                    pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
+                    pipelines.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", squant, pagedkv, sink, mask))  # fmt: skip
+            # qr: fallback for everything qr_tdm leaves out. Its three dpad == f
+            # entries only accept a head dim of exactly 128, and there qr_tdm's
+            # own dpad == f entry wins every time -- its sequence predicates are
+            # unconditionally true while theirs are not -- so they are skipped
+            # for the traits qr_tdm emits. The head-dim padded entry stays: it
+            # serves the head dims qr_tdm declines (hdim % 8 != 0, see dcheck).
+            for logits, mask, bias, pagedkv, sink in itertools.product(
+                ["t", "f"],
+                get_mask_map(mask_impl).keys(),
+                BIAS_MAP.keys(),
+                ["t", "f"],
+                ["t", "f"],
             ):
-                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
-                tdm.append(Pipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
-                superseded.append(Pipeline("qr", "row", "t", "t", "f", "f", "f", "no", "t", "f", pagedkv, sink, mask))  # fmt: skip
-            pipelines = tdm + [p for p in pipelines if p not in superseded]
+                if not (hdim == 128 and logits == "f" and bias == "no"):
+                    pipelines.append(Pipeline("qr", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                    pipelines.append(Pipeline("qr", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                    pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_nwarp_sshuffle", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
+        elif dtype in ["fp8", "bf8"]:
+            squant = "t" if dtype == "fp8" else "f"
+            for logits, mask, bias in itertools.product(
+                ["t", "f"], get_mask_map(mask_impl).keys(), BIAS_MAP.keys()
+            ):
+                pipelines.append(Pipeline("qr", "row", "f", "f", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
+                pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
+        elif dtype in ["fp8fp16", "fp8bf16"]:
+            # TODO
+            None
+        else:
+            assert False
         return pipelines
 
     @staticmethod
