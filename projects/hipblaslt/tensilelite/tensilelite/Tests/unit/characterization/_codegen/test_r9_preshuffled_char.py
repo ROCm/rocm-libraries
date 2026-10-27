@@ -514,3 +514,43 @@ def test_r9_padding_correction_halves_the_stride_not_the_product():
     assert narrow < product, f"stride must narrow before the multiply:\n{asm}"
     assert re.search(r"s_lshr_b32[^/]*// FP4 elements to bytes", asm), asm
     assert not re.search(r"v_lshrrev_b32[^/]*// FP4 elements to bytes", asm), asm
+
+
+def test_r9_depth_u_ceiling_follows_the_dtl_immediate():
+    """The DepthU ceiling is the immediate divided by the rows and the element size.
+
+    512 is the MXF4 instance of it, not a property of MXF4: a K step covers every
+    row of a swizzle block, so the byte step is ``rows * DepthU * bpe`` and has to
+    fit the 12-bit DTL field.
+    """
+    from tensilelite.Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleMaxDepthU
+
+    # fp4, fp8, bf16 over a 16-row MFMA block, then a 32-row block.
+    assert swizzleMaxDepthU(16, 0.5) == 512
+    assert swizzleMaxDepthU(16, 1) == 256
+    assert swizzleMaxDepthU(16, 2) == 128
+    assert swizzleMaxDepthU(32, 0.5) == 256
+
+    for rows, bpe in ((16, 0.5), (16, 1), (16, 2), (32, 0.5)):
+        maxDepthU = swizzleMaxDepthU(rows, bpe)
+        assert rows * maxDepthU * bpe <= SWIZZLE_DTL_OFFSET12_MAX + 1
+        assert rows * (maxDepthU + 1) * bpe > SWIZZLE_DTL_OFFSET12_MAX + 1
+
+
+def test_r9_swizzled_tensor_gate_is_the_subtile_operand_read():
+    """The gate answers "subtile pre-swizzled A or B", not "pre-swizzled anything".
+
+    It currently delegates to ``isMxf4SubtilePath`` because MXFP8 and BF16 are
+    untuned here, so it must answer alike on every input rather than drift.
+    """
+    from tensilelite.Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor
+
+    kernels = [_streamk_kernel(swizzleA=True), _streamk_kernel(swizzleB=True), _kernel()]
+    for off in ("UseSubtileImpl", "TransposeA", "DataTypeA", "DestDataType"):
+        kernel = _streamk_kernel(swizzleA=True)
+        kernel["ProblemType"].pop(off, None)
+        kernel.pop(off, None)
+        kernels.append(kernel)
+
+    for kernel in kernels:
+        assert isSubtileSwizzledTensor(kernel) == isMxf4SubtilePath(kernel)

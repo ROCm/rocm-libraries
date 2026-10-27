@@ -101,6 +101,25 @@ def isMxf4SubtilePath(kernel) -> bool:
         return False
 
 
+def isSubtileSwizzledTensor(kernel) -> bool:
+    """Scope gate for the subtile global read of a host-swizzled A or B.
+
+    Named off SwizzleTensorA/B, the parameters this reads downstream: the scale
+    blocks have their own swizzle (HasMXScaleSwizzle, graTileAssignmentScaleSwizzled)
+    on a separate layout and a separate read, and nothing here applies to it.
+
+    Distinct from isMxf4SubtilePath even though it currently answers the same
+    question. Nothing about reading a pre-swizzled operand is tied to MXF4 or to
+    a bf16 output -- the layout and the K step are functions of the element size
+    and the matrix instruction, so MXFP8 and BF16 would work the same way. They
+    are simply untuned and untested here, and out of scope for this change, so
+    the narrower gate stands in. Widening is then one edit in one place rather
+    than three, and it will not disturb the store and schedule work, which is
+    genuinely MXF4-and-bf16 specific and stays on isMxf4SubtilePath.
+    """
+    return isMxf4SubtilePath(kernel)
+
+
 def plsinBlockSchedTile(kernel) -> bool:
     """Whether block scheduling may be built for this kernel.
 
@@ -565,14 +584,21 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
 
-# Largest DepthU the pre-swizzled global read supports.  Its K-window step rides
-# in the 12-bit MUBUF immediate, scaled by the rows in a swizzle block, and runs
-# out past this.  Enforced both when deriving a solution and when emitting one.
-SWIZZLE_MAX_DEPTHU = 512
-
 # MUBUF offset12 is a 12-bit unsigned field.  rocisa does not range-check it, so
 # an oversized step would be emitted verbatim rather than rejected.
 SWIZZLE_DTL_OFFSET12_MAX = 4095
+
+
+def swizzleMaxDepthU(rowsPerBlock: int, bpe: float) -> int:
+    """Largest DepthU the pre-swizzled global read can encode.
+
+    A K step consumes a K-extent on every row of a swizzle block, so the byte
+    step is rowsPerBlock times the unit-stride count, and that product rides in
+    the DTL immediate.  The ceiling is therefore a property of the element size
+    and the matrix instruction, not of a data type: 512 for MXF4's half-byte
+    element over 16 rows, 256 for FP8, 128 for BF16.
+    """
+    return int((SWIZZLE_DTL_OFFSET12_MAX + 1) // rowsPerBlock / bpe)
 
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").

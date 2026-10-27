@@ -18,7 +18,7 @@
 
 import contextlib
 from ...ExecutionPolicy import isPersistentDataParallel
-from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, SWIZZLE_MAX_DEPTHU
+from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleMaxDepthU
 import math
 from functools import singledispatch
 
@@ -578,20 +578,22 @@ def _preShuffledKStepBytes(tileInfo, offsetK):
   DTL immediate, so it has a hard ceiling; past it the step has to move into
   soffset the way the TLU=1 K-window path already does.
   """
+  rowsPerBlock = int(tileInfo.mmaTileShape[0])
   depthU = int(tileInfo.depthUBytes / tileInfo.bpe)
-  if depthU > SWIZZLE_MAX_DEPTHU:
+  maxDepthU = swizzleMaxDepthU(rowsPerBlock, tileInfo.bpe)
+  if depthU > maxDepthU:
     raise RuntimeError(
         "SwizzleTensor%s with DepthU %u is not supported: the pre-shuffled global "
         "read is only validated up to DepthU %u.  Emitting it would read the wrong "
         "K positions instead of failing."
-        % (tileInfo.tc, depthU, SWIZZLE_MAX_DEPTHU))
-  scaled = offsetK * int(tileInfo.mmaTileShape[0])
+        % (tileInfo.tc, depthU, maxDepthU))
+  scaled = offsetK * rowsPerBlock
   if scaled > SWIZZLE_DTL_OFFSET12_MAX:
     raise RuntimeError(
         "SwizzleTensor%s: pre-shuffled K-window step is %u bytes (DepthU %u, %u "
         "rows per block), which does not fit the %u byte DTL immediate.  Fold the "
         "step into soffset instead."
-        % (tileInfo.tc, scaled, depthU, int(tileInfo.mmaTileShape[0]), SWIZZLE_DTL_OFFSET12_MAX))
+        % (tileInfo.tc, scaled, depthU, rowsPerBlock, SWIZZLE_DTL_OFFSET12_MAX))
   return scaled
 
 

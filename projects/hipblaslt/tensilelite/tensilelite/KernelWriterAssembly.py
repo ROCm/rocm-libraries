@@ -93,7 +93,7 @@ from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCus
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath
+from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from .Common.DataType import DataType
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
@@ -5971,7 +5971,7 @@ class KernelWriterAssembly(KernelWriter):
       # not the per-wave swizzleK block.  They differ whenever swizzleK > one
       # operand -- 32 against 8 for gfx942 f16 -- so the classic path keeps
       # swizzleK, which is the granularity its own host layout pads to.
-      alignK = tP["swizzleLayoutK"] if isMxf4SubtilePath(kernel) else tP["swizzleK"]
+      alignK = tP["swizzleLayoutK"] if isSubtileSwizzledTensor(kernel) else tP["swizzleK"]
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
       module.addModuleAsFlatItems(self.alignTo(strideName, strideName, alignK))
 

@@ -86,7 +86,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, SWIZZLE_MAX_DEPTHU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleMaxDepthU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -5003,7 +5003,7 @@ class Solution(collections.abc.Mapping):
       # step rides in the MUBUF immediate. The classic swizzle path builds its step
       # differently and ships above the ceiling -- gfx942 F8 swizzle-A logic carries
       # DepthU 1024 -- so only ask on the subtile path.
-      subtilePreShuffled = isMxf4SubtilePath(state)
+      subtileSwizzled = isSubtileSwizzledTensor(state)
 
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
@@ -5011,9 +5011,12 @@ class Solution(collections.abc.Mapping):
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
-          if subtilePreShuffled and state["DepthU"] > SWIZZLE_MAX_DEPTHU:
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {SWIZZLE_MAX_DEPTHU}")
-            continue
+          if subtileSwizzled:
+            rowsPerBlock = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+            maxDepthU = swizzleMaxDepthU(rowsPerBlock, state["ProblemType"][f"DataType{tc}"].numBytes())
+            if state["DepthU"] > maxDepthU:
+              reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {maxDepthU}")
+              continue
           laneSize = swizzleGeometry(state, tc)["laneSize"]
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:

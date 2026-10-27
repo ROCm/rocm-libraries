@@ -30,7 +30,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorS
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import IsaVersion, print2, ceilDivide, log2
-from ..Common.Utilities import isMxf4SubtilePath
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
@@ -456,7 +456,7 @@ class StreamK(TileProcessingStrategy):
             return 1
         if not kernel["ProblemType"].get("SwizzleTensor%s" % tc):
             return 1
-        if not isMxf4SubtilePath(kernel):
+        if not isSubtileSwizzledTensor(kernel):
             return 1
         return kernel["MatrixInstM"] if tc == "A" else kernel["MatrixInstN"]
 
