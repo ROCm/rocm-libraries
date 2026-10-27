@@ -188,7 +188,7 @@ DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
 # Axes whose values are relative to the base spec (request or policy derived),
 # so a choice may equal a dataclass default; the base-equal choice is pruned.
 DENSE_BASE_RELATIVE_KNOBS = frozenset(
-    {"num_persistent", "persistent", "block_m", "block_n"}
+    {"num_persistent", "persistent", "block_m", "block_n", "causal_diag_split"}
 )
 
 _DENSE_LDS_PADS = (0, 8, 16, 24, 32)
@@ -317,7 +317,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_priority", 0, (0, 1, 2, 3)),
     _values("pv_loop_order", "d_major", ("d_major", "k_major")),
     _values("o_store_width", 4, (1, 2, 4)),
-    _values("causal_diag_split", False, (True,)),
+    _choices_axis("causal_diag_split", (True, False)),
     _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
     _values("window_wave_skip", False, (True,)),
 )
