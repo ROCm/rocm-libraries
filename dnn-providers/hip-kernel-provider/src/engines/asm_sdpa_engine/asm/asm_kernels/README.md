@@ -48,3 +48,14 @@ one-time log per `(dtype, hdim, mask)`:
 
 When a configuration is calibrated, update both this table and the `verified`
 predicate in `computeDispatchTuples` so the documentation and code stay in sync.
+
+## Declared tensor alignment
+
+The backend rejects any device pointer that is not a multiple of its tensor's declared alignment
+(`TensorAttributes::alignment()`, default 16). The vendored kernels have no documented alignment
+contract, so `SdpaFwdPlanBuilder` and `SdpaBwdPlanBuilder` decline a graph whose declared
+alignment does not cover the row-load width each tensor is expected to need: 16 bytes for Q, K,
+V, O (forward) and Q, K, V, O, dO, dQ, dK, dV (backward), 8 bytes for fp8 K/V, 16 bytes for the
+LSE (stats) tensor, 4 bytes for the fp8 descales. The values are the named constants at the top of
+`plans/SdpaPlanUtils.hpp` (`K_*_ALIGNMENT_BYTES`) and are to be confirmed by exact-placement
+probes.

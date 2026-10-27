@@ -15,6 +15,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeclaredAlignmentTestUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
 
@@ -735,6 +736,48 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsRaggedTensors)
     hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
         createSdpaBwdGraph(),
         [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _planBuilder.isApplicable(_handle, graph);
+        });
+}
+
+// Bug caught: the backward kernels' wide row loads and stores (odo, dqdkdv, dq_convert) run on a
+// graph tensor whose declared alignment is below the need (the backend then rejects the pointer
+// at execute, or the kernel reads misaligned), or a declared alignment that is a larger multiple
+// is wrongly declined. Each of Q, K, V, O, dO, dQ, dK, dV and stats is under-declared, declared
+// exactly at its need, and declared at a larger multiple, one tensor at a time; default-16
+// graphs stay accepted.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableHonorsDeclaredAlignmentOfEveryTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    using hip_kernel_provider::test_utils::AlignmentRole;
+
+    const auto valid = createSdpaBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        valid.GetBufferPointer(), valid.GetSize());
+    const auto& attrs
+        = wrapper.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+
+    const std::vector<AlignmentRole> roles{
+        {"q", attrs.q_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"k", attrs.k_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"v", attrs.v_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"o", attrs.o_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"do", attrs.do_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dq", attrs.dq_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dk", attrs.dk_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dv", attrs.dv_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"stats", attrs.stats_tensor_uid(), plan_utils::K_STATS_ALIGNMENT_BYTES},
+    };
+
+    hip_kernel_provider::test_utils::expectDeclaredAlignmentHonored(
+        valid, roles, [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
             return _planBuilder.isApplicable(_handle, graph);
         });
 }

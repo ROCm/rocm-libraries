@@ -8,6 +8,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -206,6 +207,72 @@ inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elemen
                            << ", scaled=" << elements * elementBytes << ", max=" << K_U32_MAX_AS_I64
                            << ")");
     return false;
+}
+
+// =============================================================================
+// Declared device-pointer alignment
+// =============================================================================
+//
+// The backend rejects, at execute, any device pointer whose address is not a multiple of the
+// tensor's declared alignment (TensorAttributes::alignment(), bytes, default 16). A declared
+// alignment A therefore only guarantees ptr % A == 0, so it covers a need of N bytes exactly when
+// N divides A: declared 16 covers 16, 8, 4, 2 and 1; declared 8 covers 8 but not 16; declared 24
+// covers 8 but not 16. A non-positive declared value guarantees nothing.
+//
+// Per-tensor NEEDS (bytes). The kernels here are vendored AITER ASM code objects with no source in
+// this tree and no documented alignment contract, so each need is the byte width of the row
+// load/store the kernel is expected to issue (elements per lane x element size), not a
+// disassembly result. Each is a single named constant so a gfx942/gfx950 exact-placement probe can
+// confirm or relax it in one place.
+//
+// Forward (SdpaFwdPlanBuilder):
+//   Q, O      16  16-byte (8 x bf16 / 16 x fp8) row loads of Q and row stores of O
+//   K, V      16  16-byte (8 x bf16) row loads
+//   K, V fp8   8  8-byte (8 x fp8) row loads; the fp8 kernels read K/V rows half as wide
+//   LSE       16  UNCONFIRMED: written per Q row as fp32; assumed to be vector-stored
+//   descales   4  fp32 scalar (SMEM s_load_dword reads need dword alignment) [INFERENCE]
+// Backward (SdpaBwdPlanBuilder):
+//   Q, K, V, O, dO, dQ, dK, dV  16  16-byte row loads/stores (odo, dqdkdv and dq_convert stages)
+//   LSE (stats)                 16  UNCONFIRMED: fp32 per-row stats assumed vector-loaded
+// The dq_acc and D buffers of the backward pass live in the plan workspace (64-byte aligned
+// sub-allocations, SdpaKernelUtils.hpp), not in graph tensors, so they carry no declared alignment.
+inline constexpr int64_t K_ROW_ALIGNMENT_BYTES = 16;
+inline constexpr int64_t K_FP8_KV_ROW_ALIGNMENT_BYTES = 8;
+inline constexpr int64_t K_STATS_ALIGNMENT_BYTES = 16;
+inline constexpr int64_t K_DESCALE_ALIGNMENT_BYTES = 4;
+
+// True when `tensor`'s declared alignment guarantees `needBytes`-byte alignment.
+inline bool
+    declaredAlignmentCovers(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor,
+                            int64_t needBytes)
+{
+    const int64_t declared = tensor.alignment();
+    return needBytes > 0 && declared > 0 && declared % needBytes == 0;
+}
+
+struct TensorAlignmentNeed
+{
+    const char* name;
+    // nullptr marks an absent optional tensor; it is skipped.
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor;
+    int64_t needBytes;
+};
+
+// The decline reason for the first listed tensor whose declared alignment does not cover its
+// need, or nullopt when every present tensor is covered.
+inline std::optional<std::string>
+    findUnderAlignedTensor(std::initializer_list<TensorAlignmentNeed> needs)
+{
+    for(const auto& need : needs)
+    {
+        if(need.tensor != nullptr && !declaredAlignmentCovers(*need.tensor, need.needBytes))
+        {
+            return std::string{need.name} + " tensor declares alignment "
+                   + std::to_string(need.tensor->alignment()) + " bytes, but the kernel needs "
+                   + std::to_string(need.needBytes) + "-byte aligned pointers";
+        }
+    }
+    return std::nullopt;
 }
 
 // =============================================================================

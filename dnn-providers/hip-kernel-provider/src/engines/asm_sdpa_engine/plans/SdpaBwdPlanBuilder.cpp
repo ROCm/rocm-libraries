@@ -635,6 +635,23 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "Head dimension must be one of {64, 128, 192} (Actual value: "
                                    + std::to_string(headDimQk) + ")");
 
+    // The odo, dqdkdv and dq_convert stages issue wide row loads/stores on every graph tensor,
+    // and the backend rejects any pointer that violates the declared alignment, so decline when
+    // a tensor declares less than the kernel needs. See SdpaPlanUtils.hpp for the per-tensor
+    // needs; the dq_acc and D buffers come from the plan workspace and are not graph tensors.
+    const auto underAligned = plan_utils::findUnderAlignedTensor({
+        {"q", qTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"k", kTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"v", vTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"o", oTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"do", doTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dq", dqTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dk", dkTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"dv", dvTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"stats", statsTensor, plan_utils::K_STATS_ALIGNMENT_BYTES},
+    });
+    HIP_KERNEL_RETURN_FALSE_IF(underAligned.has_value(), *underAligned);
+
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
     const int64_t seqLenQ = qTensor->dims()->Get(2);

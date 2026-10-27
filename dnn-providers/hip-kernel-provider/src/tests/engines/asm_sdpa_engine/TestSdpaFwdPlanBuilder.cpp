@@ -18,6 +18,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeclaredAlignmentTestUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
@@ -1228,6 +1229,101 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsRaggedTensors)
 
     hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
         createSdpaFwdGraph(),
+        [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _planBuilder.isApplicable(_handle, graph);
+        });
+}
+
+// Roles (tensor uid and the alignment its kernel needs) of a forward SDPA graph: Q, K, V, O, and
+// the stats and fp8 descale tensors when the graph has them. `kvNeedBytes` is the K/V row need
+// of the graph's input type.
+std::vector<hip_kernel_provider::test_utils::AlignmentRole>
+    fwdAlignmentRoles(const flatbuffers::FlatBufferBuilder& graph, int64_t kvNeedBytes)
+{
+    using hip_kernel_provider::test_utils::AlignmentRole;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+    const auto& attrs = wrapper.getNodeWrapper(0).attributesAs<SdpaAttributes>();
+
+    std::vector<AlignmentRole> roles{
+        {"q", attrs.q_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"k", attrs.k_tensor_uid(), kvNeedBytes},
+        {"v", attrs.v_tensor_uid(), kvNeedBytes},
+        {"o", attrs.o_tensor_uid(), plan_utils::K_ROW_ALIGNMENT_BYTES},
+    };
+    if(attrs.stats_tensor_uid().has_value())
+    {
+        roles.push_back(
+            {"stats", attrs.stats_tensor_uid().value(), plan_utils::K_STATS_ALIGNMENT_BYTES});
+    }
+    if(attrs.descale_q_tensor_uid().has_value())
+    {
+        roles.push_back({"descale_q",
+                         attrs.descale_q_tensor_uid().value(),
+                         plan_utils::K_DESCALE_ALIGNMENT_BYTES});
+        roles.push_back({"descale_k",
+                         attrs.descale_k_tensor_uid().value(),
+                         plan_utils::K_DESCALE_ALIGNMENT_BYTES});
+        roles.push_back({"descale_v",
+                         attrs.descale_v_tensor_uid().value(),
+                         plan_utils::K_DESCALE_ALIGNMENT_BYTES});
+    }
+    return roles;
+}
+
+// Bug caught: the kernels' wide Q/K/V row loads, O row stores and LSE stores run on a tensor whose
+// declared alignment is below the need (the backend then rejects the pointer at execute, or the
+// kernel reads misaligned), or a declared alignment that is a larger multiple is wrongly declined.
+// Each of Q, K, V, O and stats is under-declared, declared exactly at its need, and declared at a
+// larger multiple, one tensor at a time; default-16 graphs stay accepted.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableHonorsDeclaredAlignmentOfRowTensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto valid = createSdpaFwdGraph({4, 8, 256, 128},
+                                          {4, 8, 256, 128},
+                                          DataType::BFLOAT16,
+                                          DataType::FLOAT,
+                                          /*withAttnMask=*/false,
+                                          /*withScale=*/false,
+                                          /*withStats=*/true);
+
+    hip_kernel_provider::test_utils::expectDeclaredAlignmentHonored(
+        valid,
+        fwdAlignmentRoles(valid, plan_utils::K_ROW_ALIGNMENT_BYTES),
+        [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _planBuilder.isApplicable(_handle, graph);
+        });
+}
+
+// Bug caught: the byte-wide input kernels are held to the 16-byte K/V row need of the two-byte
+// kernels, declining a K/V declared at the 8-byte need the narrower rows take, or accepting K/V
+// below it; or the scalar descale tensors are accepted with a declared alignment below their
+// four-byte element size.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableHonorsDeclaredAlignmentWithByteWideInputs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const auto valid = createSdpaFwdFp8Graph(/*withDescale=*/true);
+
+    hip_kernel_provider::test_utils::expectDeclaredAlignmentHonored(
+        valid,
+        fwdAlignmentRoles(valid, plan_utils::K_FP8_KV_ROW_ALIGNMENT_BYTES),
         [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
             return _planBuilder.isApplicable(_handle, graph);
         });

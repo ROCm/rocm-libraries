@@ -437,6 +437,34 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "supported");
     }
 
+    // The kernels issue wide row loads on Q/K/V and row stores on O (and read/write the fp8
+    // descales and the LSE output at fixed widths), and the backend rejects any pointer that
+    // violates the declared alignment, so decline when a tensor declares less than the kernel
+    // needs. fp8 K/V rows are half as wide per vector as bf16. See SdpaPlanUtils.hpp for the
+    // per-tensor needs.
+    {
+        const bool fp8 = dataTypeId == "fp8bf16";
+        const int64_t kvNeed
+            = fp8 ? plan_utils::K_FP8_KV_ROW_ALIGNMENT_BYTES : plan_utils::K_ROW_ALIGNMENT_BYTES;
+        const auto underAligned = plan_utils::findUnderAlignedTensor({
+            {"q", qTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+            {"k", kTensor, kvNeed},
+            {"v", vTensor, kvNeed},
+            {"o", oTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
+            {"stats", statsTensor, plan_utils::K_STATS_ALIGNMENT_BYTES},
+            {"descale_q",
+             fp8 ? tensorMap.at(attrs.descale_q_tensor_uid().value()) : nullptr,
+             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+            {"descale_k",
+             fp8 ? tensorMap.at(attrs.descale_k_tensor_uid().value()) : nullptr,
+             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+            {"descale_v",
+             fp8 ? tensorMap.at(attrs.descale_v_tensor_uid().value()) : nullptr,
+             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+        });
+        HIP_KERNEL_RETURN_FALSE_IF(underAligned.has_value(), *underAligned);
+    }
+
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel
     // (its argument struct exposes only q/k/v descales).
     HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_s_tensor_uid().has_value(),
