@@ -2,13 +2,22 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
-`rocKE/gfx950_attention_dense/` (its KDP is stored in DVC, see
-[Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below), whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and that has rocKE enabled
-(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
-any other build the root has nothing to pack and production packaging is dormant, unless
-the cache variable below is pointed elsewhere.
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds these bundles, each of whose KDPs
+declares gfx950 only, so production packaging runs for a build whose GPU targets include
+gfx950 and that has rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the
+`rocKE/` folder in the walk). For any other build the root has nothing to pack and
+production packaging is dormant, unless the cache variable below is pointed elsewhere:
+
+| Bundle | Engine | Native pack |
+|---|---|---|
+| `rocKE/gfx950_attention_dense/` (KDP in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
+| `rocKE/gfx950_conv_fwd/` | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
+
+`rocKE/gfx950_conv_fwd/` is generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd.yaml`; see
+`docs/gfx950_conv_fwd/README.md` for its catalog scope and regeneration procedure.
+`rocKE/gfx950_conv_fwd_aot/` is described in `docs/gfx950_conv_fwd/aot_instances.md`.
 
 ## Authoring a bundle
 

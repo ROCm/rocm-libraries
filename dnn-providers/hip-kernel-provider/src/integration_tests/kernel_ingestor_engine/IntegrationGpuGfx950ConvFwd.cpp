@@ -25,6 +25,7 @@
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -454,7 +455,9 @@ protected:
         int64_t workspaceSize = -1;
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(workspaceSize, 0);
+        // Only a split-C AOT instance (its fp32 partial sums) needs scratch.
+        ASSERT_GE(workspaceSize, 0);
+        _workspaceSize = workspaceSize;
     }
 
     void executeAndVerifyStorage(Graph& graph, DataType dtype, unsigned int seed)
@@ -475,9 +478,19 @@ protected:
         gpu.getTensor(3).fillWithSentinelValue();
         cpu.getTensor(3).fillWithSentinelValue();
         auto buffers = gpu.toDeviceVariantPack();
-        const auto result = graph.execute(_handle, buffers, nullptr);
+        void* workspace = nullptr;
+        if(_workspaceSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, static_cast<size_t>(_workspaceSize)), hipSuccess);
+        }
+        const auto result = graph.execute(_handle, buffers, workspace);
+        const auto synchronized = hipStreamSynchronize(_stream);
+        if(workspace != nullptr)
+        {
+            EXPECT_EQ(hipFree(workspace), hipSuccess);
+        }
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
+        ASSERT_EQ(synchronized, hipSuccess);
         CpuReferenceGraphExecutor().execute(
             serialized.data(), serialized.size(), cpu.toHostVariantPack());
         gpu.getTensor(3).markDeviceModified();
@@ -499,7 +512,7 @@ protected:
     {
         const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
                                / std::string(ingestor::winnerCacheVersion())
-                               / hipdnn_data_sdk::utilities::sanitizeForPath(ENGINE_NAME);
+                               / hipdnn_data_sdk::utilities::sanitizeForPath(engineName());
         const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(_arch));
         std::vector<std::filesystem::path> shards;
         std::error_code error;
@@ -590,6 +603,8 @@ protected:
     ScopedEnvironmentVariableSetter _forceBenchmarking{"HIPDNN_FORCE_BENCHMARKING", ""};
     ScopedEnvironmentVariableSetter _cacheEnabled{"HIPDNN_DISABLE_CACHE", ""};
     std::string _arch;
+    /// The workspace the last buildAndCompile's plan asked for.
+    int64_t _workspaceSize = 0;
 };
 
 #ifdef HKP_TEST_GFX950_CONV_FWD
@@ -995,42 +1010,42 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 11, 4, 16, 157, 157},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 157, 157},
+        {"Smoke", {}, 11, 4, 24, 140, 140},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 140, 140},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 200, 200},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 4, 200, 200},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 4, 0, 200, 200},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 200, 200},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 140, 140},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 1, 4, 6, 140, 140},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 1, 4, 4, 140, 140},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 140, 140},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 14, 14},
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 1, 1},
         // Eight channels per group: the grouped direct instances serve it too.
-        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 3, 4, 1, 157, 157},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1, 23, 14, 14},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 23, 14, 14},
+        {"GroupedG8Cpg8", {2, 64, 64, 13, 15, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 5, 4, 11, 140, 140},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 3, 33, 11, 11},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 8, 1, 33, 1, 1},
         // 64 groups and more: no spatial instance.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 1, 21, 14, 14},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 1, 21, 14, 14},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 9, 14, 14},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 10, 14, 14},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 1, 4, 14, 14},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 1, 4, 14, 14},
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 7, 3, 31, 11, 11},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 7, 3, 31, 11, 11},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 3, 9, 11, 11},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 3, 9, 11, 11},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 7, 2, 0, 6, 6},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 7, 3, 0, 9, 9},
         // "Valid" padding: of the direct instances, only col serves it.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 1, 1, 14, 14},
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 1, 3, 0, 11, 11},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 4, 4},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 200, 200},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 8, 4, 39, 200, 200},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 140, 140},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 9, 4, 59, 140, 140},
         // Each selects a seed width pair that no row above selects: 2/2/2, 4/4/2, 8/8/4,
         // 1/1/4, the default epilogue's 4/4/1 and cshuffle 2/2/1. The shipped catalog builds
         // no 4/4/2, 1/1/8, 4/4/1 or 2/2/1, so for C12K6, C3K8, C12K5 and C6K5 it runs every
         // instance that serves.
         {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
-        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 15, 15},
-        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 6, 6},
-        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 33, 33},
-        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
-        {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 14, 14},
+        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
+        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 7, 7},
+        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 38, 38},
+        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
+        {"C6K5", {2, 6, 5, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 1, 1},
     };
     return s_graphs;
 }
@@ -1055,49 +1070,49 @@ const std::vector<AotSeedGraph>& aotSeedDirectGraphs()
 {
     static const std::vector<AotSeedGraph> s_graphs{
         // Tiled depthwise: 3x3, 7x7, 15x15 and 31x31 filters, strides 1 and 2.
-        {"TiledG32", {2, 32, 32, 13, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1},
-        {"TiledG200", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, 7, 1},
+        {"TiledG32", {2, 32, 32, 13, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 3},
+        {"TiledG200", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, 7, 3},
         {"TiledG5Strided", {3, 5, 5, 12, 12, 3, 3, 2, 2, 1, 1, 1, 1, 5}, 6, 1},
-        {"TiledG96Strided", {1, 96, 96, 17, 14, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 6, 1},
-        {"TiledG24Strided7x7", {2, 24, 24, 15, 15, 7, 7, 2, 2, 3, 3, 1, 1, 24}, 7, 1},
+        {"TiledG96Strided", {1, 96, 96, 17, 14, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 6, 3},
+        {"TiledG24Strided7x7", {2, 24, 24, 15, 15, 7, 7, 2, 2, 3, 3, 1, 1, 24}, 7, 3},
         {"TiledG130Strided7x7", {1, 130, 130, 21, 9, 7, 7, 2, 2, 3, 3, 1, 1, 130}, 6, 1},
-        {"TiledG16Filter15", {1, 16, 16, 20, 23, 15, 15, 1, 1, 7, 7, 1, 1, 16}, 1, 1},
+        {"TiledG16Filter15", {1, 16, 16, 20, 23, 15, 15, 1, 1, 7, 7, 1, 1, 16}, 1, 3},
         {"TiledG70Filter15", {2, 70, 70, 16, 16, 15, 15, 1, 1, 7, 7, 1, 1, 70}, 1, 1},
-        {"TiledG8Filter31", {1, 8, 8, 40, 37, 31, 31, 2, 2, 15, 15, 1, 1, 8}, 2, 1},
+        {"TiledG8Filter31", {1, 8, 8, 40, 37, 31, 31, 2, 2, 15, 15, 1, 1, 8}, 2, 3},
         {"TiledG65Filter31", {1, 65, 65, 33, 31, 31, 31, 2, 2, 15, 15, 1, 1, 65}, 2, 1},
         // Column-streamed depthwise: "valid" (padding 0) and "same" padding.
-        {"ColG40Valid", {2, 40, 40, 11, 19, 3, 3, 1, 1, 0, 0, 1, 1, 40}, 1, 1},
+        {"ColG40Valid", {2, 40, 40, 11, 19, 3, 3, 1, 1, 0, 0, 1, 1, 40}, 1, 3},
         {"ColG7Valid", {3, 7, 7, 6, 9, 3, 3, 1, 1, 0, 0, 1, 1, 7}, 1, 1},
-        {"ColG24Strided5x5Valid", {2, 24, 24, 13, 17, 5, 5, 2, 2, 0, 0, 1, 1, 24}, 5, 1},
-        {"ColG100Strided5x5Valid", {1, 100, 100, 18, 21, 5, 5, 2, 2, 0, 0, 1, 1, 100}, 5, 1},
-        {"ColG24Strided5x5", {2, 24, 24, 13, 17, 5, 5, 2, 2, 2, 2, 1, 1, 24}, 1, 1},
-        {"ColG72Filter9", {1, 72, 72, 20, 16, 9, 9, 1, 1, 4, 4, 1, 1, 72}, 10, 1},
+        {"ColG24Strided5x5Valid", {2, 24, 24, 13, 17, 5, 5, 2, 2, 0, 0, 1, 1, 24}, 5, 3},
+        {"ColG100Strided5x5Valid", {1, 100, 100, 18, 21, 5, 5, 2, 2, 0, 0, 1, 1, 100}, 5, 2},
+        {"ColG24Strided5x5", {2, 24, 24, 13, 17, 5, 5, 2, 2, 2, 2, 1, 1, 24}, 1, 3},
+        {"ColG72Filter9", {1, 72, 72, 20, 16, 9, 9, 1, 1, 4, 4, 1, 1, 72}, 10, 3},
         {"ColG9Filter9", {2, 9, 9, 13, 11, 9, 9, 1, 1, 4, 4, 1, 1, 9}, 10, 1},
         {"ColG9Strided11x11Valid", {2, 9, 9, 25, 27, 11, 11, 2, 2, 0, 0, 1, 1, 9}, 2, 1},
-        {"ColG64Strided11x11Valid", {1, 64, 64, 31, 23, 11, 11, 2, 2, 0, 0, 1, 1, 64}, 2, 1},
-        {"ColG12Filter7Valid", {2, 12, 12, 16, 18, 7, 7, 1, 1, 0, 0, 1, 1, 12}, 1, 1},
-        {"ColG80Filter7Valid", {1, 80, 80, 9, 20, 7, 7, 1, 1, 0, 0, 1, 1, 80}, 1, 1},
-        {"ColG20Strided9x9", {1, 20, 20, 23, 19, 9, 9, 2, 2, 4, 4, 1, 1, 20}, 4, 1},
+        {"ColG64Strided11x11Valid", {1, 64, 64, 31, 23, 11, 11, 2, 2, 0, 0, 1, 1, 64}, 2, 3},
+        {"ColG12Filter7Valid", {2, 12, 12, 16, 18, 7, 7, 1, 1, 0, 0, 1, 1, 12}, 1, 2},
+        {"ColG80Filter7Valid", {1, 80, 80, 9, 20, 7, 7, 1, 1, 0, 0, 1, 1, 80}, 1, 3},
+        {"ColG20Strided9x9", {1, 20, 20, 23, 19, 9, 9, 2, 2, 4, 4, 1, 1, 20}, 4, 2},
         {"ColG66Strided9x9", {2, 66, 66, 17, 25, 9, 9, 2, 2, 4, 4, 1, 1, 66}, 4, 1},
         // Grouped, 4, 8, 16 and 32 channels per group.
-        {"GroupedG16Cpg4", {2, 64, 64, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 4, 1},
-        {"GroupedG32Cpg4", {1, 128, 128, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 4, 1},
-        {"GroupedG16Cpg8", {2, 128, 128, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 4, 4},
-        {"GroupedG48Cpg8", {1, 384, 384, 7, 33, 3, 3, 1, 1, 1, 1, 1, 1, 48}, 4, 4},
-        {"GroupedG16Cpg16", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 8, 4},
-        {"GroupedG32Cpg16", {2, 512, 512, 8, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 4},
-        {"GroupedG16Cpg32", {1, 512, 512, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 6, 4},
-        {"GroupedG8Cpg32", {2, 256, 256, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 6, 4},
+        {"GroupedG16Cpg4", {2, 64, 64, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 5, 1},
+        {"GroupedG32Cpg4", {1, 128, 128, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 5, 1},
+        {"GroupedG16Cpg8", {2, 128, 128, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 6, 4},
+        {"GroupedG48Cpg8", {1, 384, 384, 7, 33, 3, 3, 1, 1, 1, 1, 1, 1, 48}, 6, 4},
+        {"GroupedG16Cpg16", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 10, 4},
+        {"GroupedG32Cpg16", {2, 512, 512, 8, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 10, 4},
+        {"GroupedG16Cpg32", {1, 512, 512, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 9, 4},
+        {"GroupedG8Cpg32", {2, 256, 256, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 9, 4},
         // Non-grouped: output widths every swept tile width divides, row and channel tails,
         // stride 2 and the swept dilations.
-        {"NongroupedC64K96", {1, 64, 96, 10, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
-        {"NongroupedC32K64", {2, 32, 64, 7, 48, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 7, 4},
-        {"NongroupedC128K32", {1, 128, 32, 5, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
+        {"NongroupedC64K96", {1, 64, 96, 10, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 4},
+        {"NongroupedC32K64", {2, 32, 64, 7, 48, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
+        {"NongroupedC128K32", {1, 128, 32, 5, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
         {"NongroupedWo192", {1, 32, 32, 3, 192, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 14, 4},
-        {"NongroupedWo160", {2, 64, 64, 2, 160, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 4},
-        {"NongroupedWo128", {1, 64, 128, 4, 128, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 4},
+        {"NongroupedWo160", {2, 64, 64, 2, 160, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 11, 4},
+        {"NongroupedWo128", {1, 64, 128, 4, 128, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 11, 4},
         {"NongroupedWo384", {1, 16, 32, 2, 384, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 11, 4},
-        {"NongroupedWo80", {2, 32, 64, 3, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 4},
+        {"NongroupedWo80", {2, 32, 64, 3, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
         {"NongroupedWo320", {1, 16, 32, 2, 320, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 4},
         {"NongroupedC64K64Strided", {1, 64, 64, 13, 191, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 4},
         {"NongroupedC48K96Strided", {2, 48, 96, 9, 95, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 4},

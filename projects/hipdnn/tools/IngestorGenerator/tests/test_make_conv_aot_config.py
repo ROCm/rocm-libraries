@@ -125,21 +125,44 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
         shard, kernel = shipped[spec.instance_id]
         assert shard == tool.shard_name(spec, sharding)
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
-        assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
-        assert kernel["kernel_source"]["builder"] == "build_gfx950_conv_fwd_aot"
         assert kernel["id"] == tool.kernel_uuid(spec.instance_id, engine)
+        if spec.is_split_c:
+            # Two launches over the one spec: the conv pass and rocKE's fold.
+            assert "kernel_source" not in kernel
+            assert {
+                name: (launch["builder"], launch["spec"])
+                for name, launch in kernel["sources"].items()
+            } == {
+                "conv": ("build_gfx950_conv_fwd_aot", expected),
+                "reduce": ("build_gfx950_conv_fwd_aot_split_reduce", expected),
+            }
+            continue
+        assert kernel["kernel_source"]["spec"] == expected
+        assert kernel["kernel_source"]["builder"] == "build_gfx950_conv_fwd_aot"
 
 
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
-    names = sorted(path.name for path in folder.iterdir())
+    # heuristics/ holds the UHD pipeline's trained ranking models, not descriptors.
+    names = sorted(
+        path.name
+        for path in folder.iterdir()
+        if not (path.is_dir() and path.name == "heuristics")
+    )
     shards = {tool.shard_name(spec, sharding) for spec in specs}
+    # The split-C packs launch through a dispatch of their own, with its own UDD.
+    dispatches = (
+        [f"{slug}_{tool.SPLIT_C_DISPATCH}.udd.json"]
+        if any(spec.is_split_c for spec in specs)
+        else []
+    )
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
         + [f"{slug}_{shard}.kdp.json" for shard in shards]
         + ["kernel_dtype_matches_graph.umd.json"]
+        + dispatches
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     for path in folder.iterdir():
@@ -194,23 +217,35 @@ def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
 
 def test_config_shards_the_catalog_into_one_pack_per_dtype(tmp_path, seed_specs):
     config = tool.build_config(seed_specs)
-    assert [pack["name"] for pack in config["packs"]] == ["bf16", "fp16"]
+    # The split-C instances launch twice, through a dispatch of their own.
+    assert [pack["name"] for pack in config["packs"]] == [
+        "bf16",
+        "bf16_split",
+        "fp16",
+        "fp16_split",
+    ]
     for pack in config["packs"]:
         assert "discriminator" not in pack
+        assert pack.get("dispatch") == (
+            tool.SPLIT_C_DISPATCH if pack["name"].endswith("_split") else None
+        )
         dtypes = {
             shape["dtype"]
             for variant in pack["variants"]
             for shape in variant["shapes"]
         }
-        assert dtypes == {pack["name"]}
+        assert dtypes == {pack["name"].split("_")[0]}
     path = tmp_path / "aot.yaml"
     path.write_text(yaml.safe_dump(config, sort_keys=False))
     loaded = load_config(path)
     assert loaded.is_multi_pack and not loaded.has_operation_matchers
     assert [loaded.kdp_stem(pack) for pack in loaded.packs] == [
         "gfx950_conv_fwd_aot_bf16",
+        "gfx950_conv_fwd_aot_bf16_split",
         "gfx950_conv_fwd_aot_fp16",
+        "gfx950_conv_fwd_aot_fp16_split",
     ]
+    assert [pack.dispatch for pack in loaded.packs] == ["", "split_c", "", "split_c"]
 
 
 def test_k_loop_sharding_splits_by_dtype_pipeline_and_k_loop(seed_specs):
@@ -218,7 +253,8 @@ def test_k_loop_sharding_splits_by_dtype_pipeline_and_k_loop(seed_specs):
     expected = set()
     for spec in seed_specs:
         if spec.is_direct:
-            expected.add(f"{spec.dtype}_direct")
+            split = "_split" if spec.is_split_c else ""
+            expected.add(f"{spec.dtype}_direct{split}")
         else:
             loop = "async" if spec.async_dma else "unroll" if spec.unroll_k else "plain"
             expected.add(f"{spec.dtype}_{spec.pipeline}_{loop}")
@@ -246,7 +282,7 @@ def test_instance_specs_in_parallel_are_the_serial_ones(seed_identities):
 
 
 def test_instance_id_is_the_identity_stable_hash(seed_identities):
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in seed_identities:
         spec, _ = tool.instance_spec(identity)
@@ -351,15 +387,29 @@ def forward_direct_identities():
     ]
 
 
-#: Forward identities per dtype and algorithm in rocKE's direct sweep grid.
+#: Forward identities per dtype and algorithm in rocKE's direct sweep grid that the
+#: packaged launch runs.
 _DIRECT_GRID = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
-    "direct_nongrouped": 3058,
+    # 3058 unsplit and 1816 split-C kernels.
+    "direct_nongrouped": 4874,
+    "direct_grouped_halo": 2850,
 }
+#: Forward identities per dtype and algorithm of the direct sweep the packaged launch
+#: does not run, and the start of the reason the adapter refuses them with: the
+#: split-C fold, which ships as the second launch of each split-C instance.
+_DIRECT_REFUSED = {
+    "direct_split_reduce": (4, "'direct_split_reduce' is not packaged"),
+}
+
+
+def _packaged_direct(identity: dict) -> bool:
+    """Whether the packaged launch runs a forward direct identity of the sweep."""
+    return identity["algorithm"] in tool.PACKAGED_DIRECT_ALGORITHMS
 
 
 def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
@@ -369,11 +419,15 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
 
     assert tool.PACKAGED_DIRECT_ALGORITHMS == AOT_DIRECT_ALGORITHMS
     assert tool.DIRECT_ALGORITHMS.items() <= tool.PACKAGED_DIRECT_ALGORITHMS.items()
-    accepted = {}
+    accepted, refused = {}, {}
     for identity in forward_direct_identities:
         spec, why = tool.instance_spec(identity)
-        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
-            assert spec is None and "has no packaged launch" in why, why
+        if not _packaged_direct(identity):
+            key = (identity["dtype_a"], identity["algorithm"])
+            refused[key] = refused.get(key, 0) + 1
+            assert spec is None and why.startswith(
+                _DIRECT_REFUSED[identity["algorithm"]][1]
+            ), why
             continue
         assert spec is not None, why
         assert spec.is_direct
@@ -390,16 +444,25 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
         for algorithm, count in _DIRECT_GRID.items()
         if algorithm in tool.PACKAGED_DIRECT_ALGORITHMS
     }
+    assert refused == {
+        (dtype, algorithm): count
+        for dtype in ("fp16", "bf16")
+        for algorithm, (count, _) in _DIRECT_REFUSED.items()
+    }
 
 
 def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
     forward_direct_identities,
 ):
-    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.direct_aot_jobs import (
+        DirectCaps,
+        direct_job_for_identity,
+        probe_problem,
+    )
+    from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in forward_direct_identities[::7]:
-        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
+        if not _packaged_direct(identity):
             continue
         spec, _ = tool.instance_spec(identity)
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
@@ -419,8 +482,9 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
         # The knobs round-trip, and so does the job the direct sweep builds from them.
         assert spec.direct_knobs() == json.loads(identity["knobs"])
         job = direct_job_for_identity(KernelIdentity.from_dict(identity))
-        assert spec.probe_problem().cpg == (job.caps["cpg"] or 256)
-        assert spec.probe_problem().kpg == (job.caps["kpg"] or 256)
+        assert spec.probe_problem() == probe_problem(
+            DirectCaps(**job.caps), spec.dtype, identity["algorithm"], job.spec_kwargs
+        )
         # The implicit-GEMM fields are the identity's placeholders.
         assert (spec.tile_m, spec.pipeline, spec.vector_size_c, spec.grouped) == (
             0,
@@ -430,6 +494,8 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
         )
         # Only the variant's own knobs leave their KMD default.
         own = set(tool.DIRECT_VARIANT_FIELDS[spec.direct_variant])
+        if spec.is_split_c:
+            own.add("split_c")
         for name, default in tool.DIRECT_KNOB_FIELDS.items():
             if name not in own:
                 assert getattr(spec, name) == default, (name, identity["algorithm"])
@@ -492,11 +558,29 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         [s for s in seed_specs if not s.is_direct] + _specs(firsts.values())
     )
     for pack in config["packs"]:
+        if pack.get("dispatch"):
+            # The split-C instances: one variant, two launches, a dispatch of its own.
+            (split,) = pack["variants"]
+            assert pack["dispatch"] == tool.SPLIT_C_DISPATCH
+            assert pack["kernel_defaults"]["launches"] == tool.SPLIT_C_LAUNCHES
+            assert split["name"] == tool._SPLIT_C_VARIANT_NAME
+            assert split["spec_order"] == list(
+                tool.DIRECT_SPEC_ORDER
+                + tool.DIRECT_VARIANT_FIELDS["nongrouped"]
+                + ("split_c",)
+            )
+            assert all(shape["split_c"] > 1 for shape in split["shapes"])
+            continue
         implicit, *direct = pack["variants"]
         assert implicit["spec_order"] == list(tool.SPEC_ORDER)
         assert not any("kernel_family" in shape for shape in implicit["shapes"])
         variants = {}
         for variant in direct:
+            if variant["name"] == tool._MERGED_VARIANT_NAME:
+                # Group-merged implicit GEMM: its merge degree, no direct field.
+                assert variant["spec_order"] == list(tool.MERGED_SPEC_ORDER)
+                assert all(shape["group_merge"] > 1 for shape in variant["shapes"])
+                continue
             names = {shape["direct_variant"] for shape in variant["shapes"]}
             assert all(shape["kernel_family"] == 1 for shape in variant["shapes"])
             (own,) = {tool.DIRECT_VARIANT_FIELDS[name] for name in names}
@@ -509,6 +593,7 @@ def test_direct_instances_are_variants_stating_their_own_fields(
             ("col",): "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
             ("grouped",): "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
             ("nongrouped",): "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
+            ("grouped_halo",): "gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}",
         }
     # Every direct field is builder_default, so implicit-GEMM descriptors (and std and
     # spatial ones, for the block knobs) leave them to the KMD.
@@ -538,8 +623,8 @@ def test_the_seed_runs_every_direct_variant_knob(
 ):
     """The seed pins each of its instances on the GPU, so per dtype it holds at least 20
     instances of each tiled, col, grouped and non-grouped kernel, together every value
-    of every knob the direct sweep builds for it, and every grouped channel count and
-    non-grouped dilation."""
+    of every knob the direct sweep builds for the kernels the packaged launch runs, and
+    every grouped channel count and non-grouped dilation."""
     for dtype in ("fp16", "bf16"):
         for algorithm in (
             "direct_depthwise_tiled",
@@ -551,9 +636,13 @@ def test_the_seed_runs_every_direct_variant_knob(
             def values(identities):
                 found = set()
                 for identity in identities:
-                    if (identity["dtype_a"], identity["algorithm"]) == (
-                        dtype,
-                        algorithm,
+                    # Split-C kernels run a second launch of their own; the seed
+                    # holds one of those per dtype (checked below).
+                    if (
+                        (identity["dtype_a"], identity["algorithm"])
+                        == (dtype, algorithm)
+                        and _packaged_direct(identity)
+                        and "split_c" not in json.loads(identity["knobs"])
                     ):
                         found |= set(json.loads(identity["knobs"]).items())
                         found.add(
@@ -576,6 +665,29 @@ def test_the_seed_runs_every_direct_variant_knob(
                 dtype,
                 algorithm,
             )
+
+
+def test_the_seed_runs_every_launch_kind_the_catalog_ships(seed_specs, catalogs):
+    """The kinds with a launch of their own -- group-merged implicit GEMM, the
+    grouped-halo direct kernel at two merge degrees, and a split-C non-grouped kernel
+    (two launches and a workspace) -- each have a seed instance per dtype that the GPU
+    suite pins, wherever the catalog ships the kind."""
+
+    def kinds(specs, dtype):
+        found = set()
+        for spec in specs:
+            if spec.dtype != dtype:
+                continue
+            if spec.is_merged:
+                found.add("merged")
+            if spec.direct_variant == "grouped_halo":
+                found.add(("grouped_halo", spec.group_merge > 1))
+            if spec.is_split_c:
+                found.add("split_c")
+        return found
+
+    for dtype in ("fp16", "bf16"):
+        assert kinds(catalogs["product"], dtype) <= kinds(seed_specs, dtype), dtype
 
 
 def _stabilize_ids_one_kernel_at_a_time(kdp_path):

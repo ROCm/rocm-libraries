@@ -31,14 +31,21 @@ An implicit-GEMM instance has:
 | `vector_size_a/b/c` | Baked load/store widths. A and B run along C/groups, D along K/groups. |
 | `unroll_k`, `async_dma`, `async_chunk_a/b` | K-loop driver; an async binary's chunk widths are a capability. |
 | `grouped` | Built with the grouped code path, which also serves groups == 1. The sweep builds only grouped binaries. |
+| `group_merge` | Groups one workgroup owns: > 1 for a group-merged depthwise kernel (KMD default 1). |
 | `instance_id` | `KernelIdentity.stable_hash()` of the source identity. This is the tracking key shared with rocKE's dispatcher. |
+
+A group-merged instance (`group_merge` > 1, `aot_jobs.CACHE_FWD_GROUP_MERGES`) is
+depthwise only. Its builder derives the vector widths from the merged problem, and the
+identity records them as 0. It serves a depthwise graph whose group count it divides,
+with the merged GEMM N, K/groups·`group_merge`, within one `tile_n`
+(`identity_supports_problem`), and launches over the merged grid: (⌈K/groups·`group_merge`/`tile_n`⌉,
+M-tiles, groups/`group_merge`), `implicit_gemm_conv_grid`, with the true problem's
+kernel arguments (`conv::mergedInstanceLaunch`).
 
 Every other `KernelIdentity` field must hold its default, because it selects code this
 launch does not model. Examples are split-K, `chiplet_swizzle`, 3-D and the LDS layout
 knobs. `gfx950_conv_fwd_aot_spec_for_identity` in the adapter names any such field and
-refuses the identity. The forward sweep builds one such family: group-merged depthwise
-kernels (`group_merge` > 1), which launch groups/`group_merge` workgroups along z over a
-merged GEMM-N and record builder-derived widths as 0, so they are refused.
+refuses the identity.
 
 Each instance is built the way its sweep builds it: `Gfx950ConvFwdAotSpec` in
 `rocke/library/builders/common/convolution_forward.py` uses the sweep's probe problem.
@@ -47,7 +54,7 @@ holds the adapter to that, and to the sweep's served-problem predicate.
 
 ## Direct instances
 
-The direct sweep has six forward algorithms. Each is a `direct_variant` of the AOT
+The direct sweep has seven forward algorithms. Each is a `direct_variant` of the AOT
 engine; all share `kernel_family` 1 and the same forward ABI:
 
 | Algorithm | `direct_variant` | Kernel spec | Identities per dtype |
@@ -57,35 +64,35 @@ engine; all share `kernel_family` 1 and the same forward ABI:
 | `direct_depthwise_tiled` | `tiled` | `DirectDepthwiseTiledSpec` | 1,536 |
 | `direct_depthwise_col` | `col` | `DirectDepthwiseColSpec` | 594 |
 | `direct_grouped` | `grouped` | `DirectConvSpec` | 80 |
-| `direct_nongrouped` | `nongrouped` | `DirectNongroupedConvSpec` | 3,058 |
+| `direct_nongrouped` | `nongrouped` | `DirectNongroupedConvSpec` | 4,874 (1,816 split-C) |
+| `direct_grouped_halo` | `grouped_halo` | `DirectNongroupedConvSpec` with `grouped=True` | 2,850 |
 
-That is 5,361 identities per dtype. `make_conv_aot_config.py` accepts every one of them
+That is 10,027 identities per dtype. `make_conv_aot_config.py` accepts every one of them
 (`PACKAGED_DIRECT_ALGORITHMS`, checked by the direct sweep's own round trip
-`direct_job_for_identity`). The direct sweep's other forward kernels need a launch the
-pack does not have, and the adapter refuses them: `direct_grouped_halo` (grouped
-convolution through the non-grouped LDS-halo kernel, over groups/`group_merge` merged
-groups), the split-C `direct_nongrouped` kernels (knob `split_c`: fp32 partial sums in
-a workspace bound to D, then a second kernel, `direct_split_reduce`, that folds them)
-and that fold itself. The exact-shape engine's direct launch runs only `std` and
-`spatial`; the shipped catalog holds all six (see
-[The shipped catalog](#the-shipped-catalog)).
+`direct_job_for_identity`). The one forward kernel of the direct sweep that is not an
+instance is `direct_split_reduce`: it ships as the second launch of each split-C
+instance (see [Split-C instances](#split-c-instances)), and the adapter refuses it as an
+instance of its own. The exact-shape engine's direct launch runs only `std` and
+`spatial`.
 
 A direct binary bakes the filter, stride, padding and dilation, plus its variant's block
 knobs, and for `grouped` the channels per group. Batch, image extents and the group count
-are kernel arguments, and for `nongrouped` the channel counts too: the 6 leading
-arguments plus the 14-argument direct block (`directKernargs`). LDS, where a kernel uses
-it (`grouped`, `nongrouped`), is static. A direct instance carries these trailing fields
+are kernel arguments, and for `nongrouped` and `grouped_halo` the channel counts too: the
+6 leading arguments plus the 14-argument direct block (`directKernargs`). LDS, where a
+kernel uses it (`grouped`, `nongrouped`, `grouped_halo`), is static. A direct instance carries these trailing fields
 of `Gfx950ConvFwdAotSpec`:
 
 | Field | Meaning |
 |---|---|
 | `kernel_family` | 1 for every direct variant; 0 (the default) for implicit GEMM. |
-| `direct_variant` | One of the six above; `none` for implicit GEMM. |
-| `filter_h/w`, `stride_h/w`, `pad_h/w`, `dilation_h/w` | The compiled values. The kernels compile one stride and one padding, and the sweep builds square filters only. Only `nongrouped` has a dilation other than 1. |
+| `direct_variant` | One of the seven above; `none` for implicit GEMM. |
+| `filter_h/w`, `stride_h/w`, `pad_h/w`, `dilation_h/w` | The compiled values. The kernels compile one stride and one padding, and the sweep builds square filters only. Only `nongrouped` and `grouped_halo` have a dilation other than 1. |
 | `block_w`, `block_waves` | `std`, `tiled`, `col`: output columns and waves per block. `spatial` derives its width from the runtime group count, so its `block_w` is 0. |
 | `block_h`, `unroll_rows` | `tiled` and `col`: output rows per block; `tiled` can unroll its filter-row loop. |
 | `block_q`, `block_groups`, `double_buffer`, `cpg`, `kpg`, `block_h` | `grouped`: output columns and groups per block, LDS ping-pong, the compiled channels per group, and the input-row tile (`DirectConvSpec`'s default, which the sweep does not vary). |
-| `tile_h`, `tile_w`, `tile_k_out`, `ck`, `waves_m`, `waves_n`, `atom`, `swizzle_wgm`, `iglp`, `waves_per_eu` | `nongrouped`: `DirectNongroupedConvSpec`'s tile, channel stage, waves, MFMA atom and compile hints. `tile_k_out` is its `tile_k` (output channels per block), renamed so it cannot be the implicit-GEMM `tile_k`; `iglp` -1 and `waves_per_eu` 0 stand for rocKE's `None`. |
+| `tile_h`, `tile_w`, `tile_k_out`, `ck`, `waves_m`, `waves_n`, `atom`, `swizzle_wgm`, `iglp`, `waves_per_eu` | `nongrouped` and `grouped_halo`: `DirectNongroupedConvSpec`'s tile, channel stage, waves, MFMA atom and compile hints. `tile_k_out` is its `tile_k` (output channels per block), renamed so it cannot be the implicit-GEMM `tile_k`; `iglp` -1 and `waves_per_eu` 0 stand for rocKE's `None`. |
+| `split_c` | `nongrouped`: the channel split; > 1 is a split-C instance (KMD default 1, spelled in the identity's knobs only then). |
+| `group_merge` | `grouped_halo`: groups per workgroup, run as one problem of `cpg·group_merge` input and `kpg·group_merge` output channels with block-diagonal weights. The identity also spells `grouped: true`, which no field carries. |
 
 Its implicit-GEMM fields hold exactly what the direct sweep writes into a direct
 identity: 0 for the tile, warp, vector, flag and chunk fields, and `direct` for the
@@ -97,9 +104,13 @@ All the direct fields are `builder_default` in the KMD, with the dataclass defau
 Implicit-GEMM descriptors omit them, so their specs, symbols and pack keys are as before.
 Direct instances are generator variants that state them, one per direct kernel: `std`
 and `spatial` share `gfx950_conv_fwd_aot_dw_<dtype>_<instance_id>` and state only the
-fields they always had, so their descriptors did not change; `tiled`, `col`, `grouped`
-and `nongrouped` are `gfx950_conv_fwd_aot_{dwtiled,dwcol,grouped,nongrouped}_<dtype>_<instance_id>`
-and also state their own knobs (`DIRECT_VARIANT_FIELDS`). Kernel symbols are prefixed
+fields they always had, so their descriptors did not change; `tiled`, `col`, `grouped`,
+`nongrouped` and `grouped_halo` are
+`gfx950_conv_fwd_aot_{dwtiled,dwcol,grouped,nongrouped,groupedhalo}_<dtype>_<instance_id>`
+and also state their own knobs (`DIRECT_VARIANT_FIELDS`), and the split-C instances are
+`gfx950_conv_fwd_aot_nongroupedsplit_<dtype>_<instance_id>`, stating `split_c` too.
+Group-merged implicit-GEMM instances are `gfx950_conv_fwd_aot_merged_<dtype>_<instance_id>`
+and state `group_merge`. Kernel symbols are prefixed
 `hkp_conv_fwd_dw_aot_gfx950_`. The probe problem is `direct_aot_jobs.probe_problem`
 (64x64, one image; 256 groups for the depthwise variants, 8 for spatial, 64 for grouped,
 one group of 1024 channels for non-grouped).
@@ -117,7 +128,8 @@ strides and paddings, no dilation, an odd filter with "same" padding, the input 
 covering every output row and column, the compiled filter, stride and padding, spatial
 only below 64 groups, and every grid axis at most 65535.
 
-The other variants serve what rocKE's grouped-convolution dispatcher admits for them,
+The other variants serve what rocKE's grouped-convolution dispatcher admits for them
+(and `grouped_halo` only for more than one group),
 which is what its direct benchmark offers them (`_aot_direct_serves`;
 `identity_supports_problem`, then `direct_spec_for_problem`, which rebuilds the kernel
 spec on the real problem and runs its validator):
@@ -129,11 +141,14 @@ dilation are the graph's, and then:
 | `tiled` | Pure depthwise; stride at most the filter. Outputs are indexed directly, so it is not tied to "same" padding. | (⌈Wo/block_w⌉, ⌈G/(64·block_waves)⌉, N·⌈Ho/block_h⌉); 64·block_waves |
 | `col` | Pure depthwise; Ho ≤ Hi, padding below the filter, block_w ≤ Wo. Rows are bounded by the runtime Ho, so "valid" padding is served too. | as `tiled` |
 | `grouped` | C/G and K/G are the compiled `cpg`/`kpg`; "same" padding, odd filter, stride 1; `block_groups` divides G. | (⌈Wo/block_q⌉, G/block_groups, N·⌈Hi/block_h⌉); 64·block_groups |
-| `nongrouped` | G = 1; C a multiple of `ck` and of 8, K of the atom tile; every tensor below the kernel's masked-access offset; `tile_w` one of the widths a sweep of Wo tries (`tile_w_candidates`). | (⌈Wo/tile_w⌉·⌈Ho/tile_h⌉·N·⌈K/tile_k_out⌉, 1, 1); 64·waves_m·waves_n |
+| `nongrouped` | G = 1; C a multiple of `ck` and of 8, K of the atom tile; every tensor below the kernel's masked-access offset; `tile_w` one of the widths a sweep of Wo tries (`tile_w_candidates`). Split-C: at least `split_c` whole `ck` chunks, and the workspace below that offset. | (⌈Wo/tile_w⌉·⌈Ho/tile_h⌉·N·⌈K/tile_k_out⌉·split_c, 1, 1); 64·waves_m·waves_n |
+| `grouped_halo` | G > 1 (rocKE's `direct_plans` offers it no other), divisible by `group_merge`; merged C (`cpg·group_merge`) a multiple of `ck` and of 8, merged K of the atom tile and at least `tile_k_out`; `cpg` a multiple of the weight load (4 when merged, else the atom's fragment); tensors and `tile_w` as `nongrouped`. | (⌈Wo/tile_w⌉·⌈Ho/tile_h⌉·N·(G/group_merge)·⌈merged K/tile_k_out⌉, 1, 1); 64·waves_m·waves_n |
 
 On top of rocKE's rules the packaged launch bounds every axis of a 3-D direct grid by
-65535, as for std and spatial, and the non-grouped kernel's flat grid by a 32-bit
-dispatch. The adapter's test compares the served verdict with rocKE's offer over
+65535, as for std and spatial, and the flat grid of the non-grouped and grouped-halo
+kernels by a 32-bit dispatch. A batch whose activation or output reaches the
+masked-access offset runs in pieces, as rocKE's benchmark runs it (see "Batch-split
+launches" below). The adapter's test compares the served verdict with rocKE's offer over
 problems around each sampled instance (tails, images smaller than a block or the filter,
 other paddings, strides, dilations and channel counts). The only differences
 are where the packaged guard is knowingly stricter: spatial at exactly 64 groups (as
@@ -143,9 +158,55 @@ problem cannot state.
 Natively, `aotDirectInstance` in `Gfx950ConvFwdNative.cpp` parses the variant and its
 knobs (`aotDirectVariantUses`), and `conv::directInstanceLaunch` in
 `Gfx950ConvFwdGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
-`groupedDirectLaunch`, `nongroupedDirectLaunch`). `TestGfx950ConvFwdGeometry.cpp`
+`groupedDirectLaunch`, `nongroupedDirectLaunch` for both DirectNongroupedConvSpec
+variants). `TestGfx950ConvFwdGeometry.cpp`
 holds it to a table of (instance, problem) cases that
 `tests/test_make_conv_aot_config.py` recomputes from the adapter.
+
+### Split-C instances
+
+A split-C non-grouped instance (`split_c` > 1) runs two kernels: its conv pass writes
+fp32 partial sums into a `[split_c, N, Ho, Wo, K]` workspace bound to D, over a grid
+`split_c` times wider, and rocKE's `direct_split_reduce` (`DirectSplitReduceSpec`, 256
+threads, 8 outputs each) sums the slabs into the output. Both take the forward
+direct-conv arguments of the problem, as rocKE's direct benchmark runs them
+(`direct_kernel_sweep.plan_for`).
+
+Each split-C descriptor carries both as launches of its `sources` map (UKD 1.1,
+RFC 0017 §15.1): `conv` is the instance's own builder and `reduce` is
+`build_gfx950_conv_fwd_aot_split_reduce`, over the same spec. A dispatch handler declares
+one set of launch names, so the split-C instances are packs of their own
+(`<dtype>_direct_split`) that name their own dispatch: the generator's pack-level
+`dispatch`, `split_c`, gives them the UDD `gfx950_conv_fwd_aot_split_c.udd.json` and the
+native symbol `hipkernel.gfx950_conv_fwd_aot.split_c_dispatch`. Its handler, the same
+admission as the engine's with `launchNames()` {conv, reduce}, sizes the workspace
+(`conv::splitWorkspaceBytes`), loads both launches (`launchKernelDefinition`) and runs
+them in order on the stream. Every other pack keeps the engine's single-launch handler.
+
+### Batch-split launches
+
+The non-grouped and grouped-halo kernels address each operand through one 32-bit buffer
+resource and redirect masked accesses to the offset `0x7F000000`, so no operand may
+reach it. Their images are independent, so rocKE's direct benchmark runs a batch whose
+activation or output does as several launches over windows of the batch
+(`direct_kernel_sweep._batch_chunks` and `_batch_split_plan`). As many images run per
+launch as keep both windows below the offset, and the launches are balanced: a bf16
+3x3 convolution of 4 images of 1024x1024 with 256 channels runs as 2 launches of 2
+images.
+
+The packaged engine runs it the same way. `conv::nongroupedBatchChunks` in
+`Gfx950ConvFwdGeometry.hpp` (`gfx950_conv_fwd_aot_batch_chunks` in the adapter) gives
+the images per launch. The graph matcher admits such a graph even when a whole tensor
+passes the i32 launch ABI; only a non-grouped or grouped-halo instance serves it, and
+only when it serves each chunk as a problem of its own. That is stricter than
+`_batch_split_plan`, which re-validates a chunk's spec but not the rules of
+`direct_spec_for_problem` (a grouped-halo `tile_k_out` past the merged K). A split-C
+instance is never batch-split, since its workspace would span the whole batch. The
+handler loads one code object per chunk, with that chunk's grid, and launches them in
+order on the stream, each with its activation and output pointers offset to its
+window and its own byte counts and batch; the filter is whole in every launch. The
+overlap check covers the whole tensors, in 64-bit byte counts. Every other instance,
+and the exact-shape engine, still needs the whole problem in one launch.
 
 ## Which graphs an instance serves
 
@@ -167,6 +228,9 @@ the exact-shape engine's capability check (`implicitGemmServes`,
 - every grid axis fits 65535;
 - Y·X·C/groups stays below 2^23 (the kernel's 24-bit address products).
 
+A group-merged instance has no recorded widths to check; it serves by its own rule
+(see [What an instance is](#what-an-instance-is)).
+
 The launch is the exact-shape engine's: `warp_m * warp_n * 64` threads, static LDS, and
 the 45-argument AOT ABI computed from the graph. Before any launch, the pack checks the
 packaged symbol's recorded argument names against that ABI.
@@ -175,7 +239,7 @@ Without benchmarking or a recorded winner, `aotScore` orders instances. As in th
 exact-shape engine, a depthwise direct instance (`std`, `spatial`, `tiled`, `col`) ranks
 above every implicit-GEMM one, the default direct arm for the graph's group count first
 (spatial with one wave below 64 groups, otherwise std with `block_w` 4 and one wave).
-The `grouped` and `nongrouped` kernels compete with implicit GEMM on ordinary graphs and
+The `grouped`, `nongrouped` and `grouped_halo` kernels compete with implicit GEMM on ordinary graphs and
 nothing measures yet which wins where, so they take a neutral placeholder below every
 implicit-GEMM instance (and above a refusal): an unbenchmarked dense or grouped graph
 stays on implicit GEMM, and these kernels are chosen by benchmarking, a recorded winner,
@@ -223,8 +287,9 @@ No descriptor changes: a matcher with no filter registered keeps what it admitte
 symbol; the policy itself is `conv::widestVectorSelection` in
 `Gfx950ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
 rocKE's direct benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`)
-runs every direct kernel that serves, with no cross-candidate rule. A graph's direct
-candidates therefore add to its selected implicit-GEMM ones.
+runs every direct kernel that serves, with no cross-candidate rule. So are group-merged
+instances, whose widths are derived (recorded as 0) and never compared. A graph's direct
+and merged candidates therefore add to its selected implicit-GEMM ones.
 
 The selected instances are the engine's catalog for the graph, so everything after it
 applies to them alone, in this order: the knob filter (a forced `tile_k` or
@@ -257,55 +322,45 @@ together:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 239 | 239 |
-| Direct depthwise `tiled` | 78 | 78 |
-| Direct `nongrouped` | 70 | 70 |
-| Direct depthwise `col` | 22 | 22 |
-| Direct depthwise `std` | 16 | 16 |
-| Direct depthwise `spatial` | 13 | 13 |
-| Direct `grouped` | 5 | 5 |
-| **Total** | **443** | **443** |
+| Implicit GEMM | 217 | 217 |
+| Implicit GEMM, group-merged (`group_merge` 4, 8, 16) | 10 | 10 |
+| Direct `nongrouped`, split-C (`split_c` 2, 4, 8, 16) | 91 | 91 |
+| Direct `nongrouped` | 84 | 84 |
+| Direct depthwise `tiled` | 79 | 79 |
+| Direct `grouped_halo` (`group_merge` 1, 2, 4, 8) | 45 | 45 |
+| Direct depthwise `std` | 5 | 5 |
+| Direct `grouped` | 3 | 3 |
+| Direct depthwise `spatial` | 3 | 3 |
+| **Total** | **537** | **537** |
 
-886 instances in all. Every entry must be an identity of rocKE's gfx950 forward
+1,074 instances in all. Every entry must be an identity of rocKE's gfx950 forward
 sweeps (`aot_jobs.py` for implicit GEMM, `direct_aot_jobs.py` for direct) and
 must convert, that is, the packaged launch runs it. The tool fails on any entry that
 is not, rather than dropping it.
 
-The list was chosen from measurements of rocKE's whole packageable forward sweep on
-2-D fp16 and bf16 forward convolutions of public model workloads, plain pointwise
-(1x1, stride 1, no padding) excluded:
+The list is the union of the fastest kernel (top-1) per measured shape over rocKE's
+forward sweeps on 2-D fp16 and bf16 forward convolutions. Unlike the previous catalog it
+adds no coverage of its own: it has no `col` kernel, and only one implicit-GEMM
+instance stores scalars.
 
-1. every packageable sweep kernel was timed on a stratified sample of the shapes, and
-   the kernels close to each sampled shape's best formed a candidate pool;
-2. the pool was timed on a larger stratified sample, each shape weighted by the shapes
-   it stands for;
-3. a weighted greedy selection added, one configuration at a time (in both dtypes),
-   the kernel that most lowered the weighted geometric-mean slowdown against the best
-   pool kernel per shape; the union of that selection with the selections made while
-   holding each model's shapes out was kept, so the list does not depend on one model;
-4. coverage was added on top: one kernel for every implicit-GEMM load/store width
-   combination the sweep builds, and one direct kernel for every packageable direct
-   geometry (filter, padding, stride, dilation, channels per group), measured or not,
-   so a graph outside the measured set with a baked direct geometry still finds one.
-
-The implicit-GEMM instances bake these load/store widths (A and B load widths are
-always equal):
+The implicit-GEMM instances that record their widths bake these load/store widths (A
+and B load widths are always equal):
 
 | Epilogue | Load/store widths, fp16 instances |
 |---|---|
-| `cshuffle` | 8/8/8 (157), 1/1/8 (33), 4/4/8 (13), 8/8/4 (6), 1/1/1 (4), 4/4/4 (1), 2/2/8 (1), 2/2/2 (1) |
-| `default` | 8/8/1 (13), 1/1/1 (10) |
+| `cshuffle` | 8/8/8 (140), 1/1/8 (38), 4/4/8 (15), 8/8/4 (7), 8/8/1 (2), 1/1/1 (1) |
+| `default` | 8/8/1 (14) |
 
-So a problem whose widest combination is 1/1/2, 1/1/4, 2/2/1, 2/2/4, 4/4/1, 4/4/2 or
-8/8/2 has no instance at it, and runs every instance that serves it
-([Serves and selected](#serves-and-selected)). Every problem class still has an
-implicit-GEMM instance (`test_the_catalog_serves_every_problem_class`). No instance
-uses the async DMA K loop.
+So a problem whose widest combination is not one of these has no instance at it, and
+runs every instance that serves it ([Serves and selected](#serves-and-selected)). Every
+problem class still has an implicit-GEMM instance
+(`test_the_catalog_serves_every_problem_class`), though odd or narrow channel counts
+have few (one where only 1/1/1 serves). No instance uses the async DMA K loop.
 
 Which instances serve a given problem, and which of those run, is decided at runtime,
-not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 157
-implicit-GEMM candidates for a dense graph with C and K divisible by 8, 1 to 33 where
-the widest combination is narrower, and 14 for depthwise
+not by the catalog. For the GPU suite's graphs the engine selects, per dtype, 140
+implicit-GEMM candidates for a dense graph with C and K divisible by 8, 1 to 38 where
+the widest combination is narrower, and 6 to 11 for depthwise
 (`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
 
 The lists are compact: one identity per line, holding only the fields that have no
@@ -317,24 +372,27 @@ lists are valid for the LLVM flavor the packer lowers to.
 ### Shards
 
 Every file is far below the 50 MB GitHub warns about. The bundle has one
-pack, and so one KDP, per dtype, implicit-GEMM pipeline and K loop, plus one per dtype
-for the direct instances (`make_conv_aot_config.py --sharding k-loop`, the default):
+pack, and so one KDP, per dtype, implicit-GEMM pipeline and K loop, plus two per dtype
+for the direct instances, the split-C ones apart because they launch through a dispatch
+of their own (`make_conv_aot_config.py --sharding k-loop`, the default):
 
 | KDP shard, per dtype | Instances |
 |---|---:|
-| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 82 |
-| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 19 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 53 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 10 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 60 |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 15 |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 204 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_plain` | 76 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_unroll` | 18 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_plain` | 60 |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_unroll` | 9 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_plain` | 54 |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_unroll` | 10 |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 219 |
+| `gfx950_conv_fwd_aot_<dtype>_direct_split` | 91 |
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
 operation-scoped matcher (the IngestorGenerator README, "UMD policy"). The census
 `TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel name exactly. The test-only
-seed keeps one pack per dtype (`--sharding dtype`).
+seed keeps one pack per dtype, and one more for its split-C instances
+(`--sharding dtype`).
 
 ### Regenerating the bundle
 
@@ -355,9 +413,11 @@ cp "$GEN"/tests/TestGfx950ConvFwdAotPacks.cpp \
 python tools/make_conv_aot_config.py --stabilize-ids "$DEST"/*.kdp.json
 ```
 
-Then run `clang-format` on the census. Keep the document ids of the KMD, UED, UDD, UHD,
+Then run `clang-format` on the census. Keep the document ids of the KMD, UED, UDDs, UHD,
 UMD and KDP files from the previous bundle, so that the diff shows only the kernels.
-The generator mints new ones on every run. The whole flow takes a few minutes.
+The generator mints new ones on every run. Keep the shipped UED itself too: it names the
+trained `sort_kernel_catalog` model under `heuristics/`; take only its `knobs` from the
+generated one. The whole flow takes a few minutes.
 
 How the converter treats the lists:
 
@@ -376,7 +436,7 @@ regenerates it from the lists on every run. The tests hold the pieces together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
   tool builds from the committed labels and the rocKE tree beside them, when a label is
-  not a sweep identity or does not convert, or when the catalog is not 443 kernels per
+  not a sweep identity or does not convert, or when the catalog is not 537 kernels per
   dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
@@ -392,7 +452,8 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, 886 variants for this engine.
+The product pack compiles every instance, 1,074 variants for this engine (and a second
+launch for each of the 182 split-C ones).
 
 The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
@@ -480,7 +541,7 @@ A benchmarked plan adds the candidates' code-object loads and timed runs, which
 
 ## The seed engine and the GPU tests
 
-`hipkernel:Gfx950ConvFwdAotSeed` is a test-only engine over a 208-instance seed, taken
+`hipkernel:Gfx950ConvFwdAotSeed` is a test-only engine over a 220-instance seed, taken
 verbatim from the sweeps' valid forward grids
 (`configs/gfx950_conv_fwd_aot_seed.instances.json`). It has 12 implicit-GEMM instances
 per dtype, covering:
@@ -500,14 +561,18 @@ epilogue, K loop, load width and store width of the shipped catalog, in each dty
 catalog's other width pairs run the same launch with other arguments; rocKE's packaging
 test checks the IR of every width, K loop and async chunk class of the sweep.
 
-It also has 92 direct instances per dtype. 4 are std and spatial: std 3x3 stride 1
+It also has 96 direct instances per dtype, and 2 group-merged implicit-GEMM ones
+(`group_merge` 4 and 8, served by its depthwise graphs). 4 are std and spatial: std 3x3 stride 1
 (`block_w` 4, one wave), std 5x5 stride 2 (`block_w` 16, two waves), spatial 3x3
 stride 1 (one wave) and spatial 7x7 stride 2 (four waves). The other 88 are 22 each of
 `tiled`, `col`, `grouped` and `nongrouped`, chosen deterministically from the sweep so
 that together they hold every value of every knob the sweep builds for the variant,
 every grouped channel count (4, 8, 16, 32) and every non-grouped dilation, and so that
-each serves at least two of the seed's graphs. `tests/test_make_conv_aot_config.py`
-checks the knob coverage and the counts.
+each serves at least two of the seed's graphs. The last 4 cover the direct kinds with a
+launch of their own: `grouped_halo` at `group_merge` 1, 4 and 8, and a split-C non-grouped
+kernel (`split_c` 2, two launches and a workspace), each served by some of the seed's
+grouped or dense graphs. `tests/test_make_conv_aot_config.py` checks the knob coverage,
+that every launch kind of the catalog has a seed instance, and the counts.
 
 The seed is authored under
 `src/engines/kernel_ingestor_engine/test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed`
@@ -554,8 +619,13 @@ integration root packs it for gfx950, the product's where the product root offer
 ## Current limits
 
 - Forward only. The launch runs every forward kernel of rocKE's sweeps, but the shipped
-  catalog packages only the 443 per dtype its label list names; the seed exercises
+  catalog packages only the 537 per dtype its label list names; the seed exercises
   knob values the catalog does not ship.
+- The trained `sort_kernel_catalog` model predates the group-merged, grouped-halo and
+  split-C instances. It ignores the `group_merge` and `split_c` knobs, and the
+  `grouped_halo` value of `direct_variant` is unseen by it; benchmarking measures every
+  selected instance regardless. Retrain it on this catalog before relying on the
+  unbenchmarked ranking.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
   number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it

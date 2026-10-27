@@ -235,6 +235,16 @@
       "name": "waves_per_eu",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "group_merge",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "split_c",
+      "type": "int",
+      "default_value": 1
     }
   ]
 }

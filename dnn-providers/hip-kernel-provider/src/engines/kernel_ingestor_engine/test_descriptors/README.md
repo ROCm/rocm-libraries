@@ -11,7 +11,7 @@ Every set is a top-level folder here, and every one is packed whole.
 |---|---|---|---|---|
 | `shared/` | `conv_fwd/` | `hip` | `unit/shared/`, `integration/shared/` | both binaries |
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
-| `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
+| `integration/` | `pointwise/`, `rocKE/gfx950_conv_fwd_aot_seed/` | `hip`, `packaged` (rocKE) | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/`, `unit_archive_fixture/` | both binaries |
 
 The packer runs six times over these four sets. `shared/` and `archive_fixture/` feed both

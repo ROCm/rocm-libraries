@@ -46,6 +46,8 @@
     "atom",
     "swizzle_wgm",
     "iglp",
-    "waves_per_eu"
+    "waves_per_eu",
+    "group_merge",
+    "split_c"
   ]
 }

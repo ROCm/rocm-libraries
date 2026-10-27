@@ -18,8 +18,9 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -938,13 +939,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// arrives.
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::KPACK;
 
-/// A pack or kernel naming no architecture inherits/wildcards; one that names
-/// architectures must name the requested one, or this is the wrong shard.
-bool coversArch(const std::vector<std::string>& declared, const std::string& arch)
-{
-    return declared.empty() || std::find(declared.begin(), declared.end(), arch) != declared.end();
-}
-
 class TestGfx950AttentionDensePacks : public ::testing::Test
 {
 protected:
@@ -1016,12 +1010,12 @@ TEST_F(TestGfx950AttentionDensePacks, EveryLoadedDescriptorCoversTheRequestedArc
 {
     for(const auto& pack : _set->packs)
     {
-        EXPECT_TRUE(coversArch(pack.arch, _arch))
+        EXPECT_TRUE(ingestor::archSupports(pack.arch, _arch))
             << "pack '" << pack.name << "' does not cover '" << _arch
             << "', so this is not that architecture's shard";
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_TRUE(coversArch(kernel.arch, _arch))
+            EXPECT_TRUE(ingestor::archSupports(kernel.arch, _arch))
                 << "kernel '" << kernel.name << "' does not cover '" << _arch << "'";
         }
     }
@@ -1060,13 +1054,14 @@ TEST_F(TestGfx950AttentionDensePacks, ExposesTheConfiguredKnobs)
 TEST_F(TestGfx950AttentionDensePacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "hipkernel.gfx950_attention_dense.score");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx950_attention_dense.score");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_attention_dense.score"));
 }
 
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950AttentionDensePacks, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());

@@ -15,7 +15,8 @@ authored_subpath: rocKE/gfx950_conv_fwd_aot
 source: builders/common/convolution_forward.py
 builder: build_gfx950_conv_fwd_aot
 kernel_source_kind: rocke
-workspace_policy: none
+# Only a split-C instance asks for scratch, sized per graph by the native handler.
+workspace_policy: derived
 delegates_to_existing_plan: false
 
 engine:
@@ -59,6 +60,8 @@ engine:
     - swizzle_wgm
     - iglp
     - waves_per_eu
+    - group_merge
+    - split_c
   heuristic: native
 
 # Instances are matched per problem by capability, so "dispatch" resolves the problem
@@ -168,6 +171,6 @@ launch_surface:
   - name: workspace
     python_source: builders/common/convolution_forward.py:build_gfx950_conv_fwd_aot
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:workspaceBytes
-    kmd_fields: [pipeline]
-    guard: The forward instances take no workspace argument and use static LDS only; workspaceBytes returns zero and prepare requests zero dynamic shared memory.
+    kmd_fields: [pipeline, split_c]
+    guard: The forward instances use static LDS only and prepare requests zero dynamic shared memory. Only a split-C non-grouped instance (split_c > 1, its own pack and dispatch, hipkernel.gfx950_conv_fwd_aot.split_c_dispatch) needs scratch, the fp32 [split_c, N, Ho, Wo, K] partial sums its conv pass writes and its direct_split_reduce launch folds (splitWorkspaceBytes, DirectNongroupedConvSpec.workspace_bytes); workspaceBytes returns zero for every other instance.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp

@@ -41,6 +41,8 @@ engine:
   - swizzle_wgm
   - iglp
   - waves_per_eu
+  - group_merge
+  - split_c
   heuristic: native
   native_symbols_from: hipkernel:Gfx950ConvFwdAot
 kmd_fields:
@@ -204,8 +206,16 @@ kmd_fields:
   type: int
   default_value: 0
   builder_default: true
+- name: group_merge
+  type: int
+  default_value: 1
+  builder_default: true
+- name: split_c
+  type: int
+  default_value: 1
+  builder_default: true
 kernel_source_kind: rocke
-workspace_policy: none
+workspace_policy: derived
 graph_match:
   shape: shared_shape
   discriminator: none
@@ -262,6 +272,8 @@ specialization:
   - swizzle_wgm
   - iglp
   - waves_per_eu
+  - group_merge
+  - split_c
   matcher_only_fields: []
   bindings:
     dtype:
@@ -366,6 +378,10 @@ specialization:
       field: iglp
     waves_per_eu:
       field: waves_per_eu
+    group_merge:
+      field: group_merge
+    split_c:
+      field: split_c
 packs:
 - name: bf16
   arch:
@@ -439,6 +455,62 @@ packs:
     - {dtype: bf16, tile_m: 128, tile_n: 64, tile_k: 32, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: compv3, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 4, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: b604f664962522fa17460431d4eb10234d732afa, layout: NHWC, knobs: instance}
     - {dtype: bf16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: default, vector_size_a: 4, vector_size_b: 4, vector_size_c: 1, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: e168e2e92ed068ec9a788d053cece0779c088388, layout: NHWC, knobs: instance}
     - {dtype: bf16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 8, unroll_k: 1, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: ee66277efaa31ec317f45115139212a525d31b52, layout: NHWC, knobs: instance}
+  - name: gfx950_conv_fwd_aot_merged_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - group_merge
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - group_merge
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: bf16, tile_m: 32, tile_n: 32, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 16, warp_tile_n: 16, warp_tile_k: 32, wave_size: 64, pipeline: compv4, epilogue: cshuffle, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 4de6542c7fd117ad0ead1ff4cb684f9fa8b6c7d8, layout: NHWC, group_merge: 4, knobs: instance}
+    - {dtype: bf16, tile_m: 128, tile_n: 32, tile_k: 64, warp_m: 4, warp_n: 1, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 5251562cf6abf1b9b736f1e44434dce56052bc58, layout: NHWC, group_merge: 8, knobs: instance}
   - name: gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}
     metadata:
     - dtype
@@ -949,6 +1021,219 @@ packs:
     - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: daa741a90b4ee6ab49a6a73cb7d48cf453b132e3, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 80, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, knobs: instance}
     - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: e1cd5cd11eaca89fe67a3228b96674c083156db1, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, pad_h: 1, pad_w: 1, dilation_h: 3, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 16, tile_k_out: 128, ck: 32, waves_m: 1, waves_n: 8, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, knobs: instance}
     - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: ef13351d71cb9dbd095dc6322a0868333d1f1368, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 160, tile_k_out: 32, ck: 16, waves_m: 1, waves_n: 4, atom: 32x32x16, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, knobs: instance}
+  - name: gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - group_merge
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - group_merge
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 3bcabacc33be9c2f41922aa7c6d354828d08d24a, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 16, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, group_merge: 4, knobs: instance}
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 63f51983367586c03a7a54857b7af2f43adb5c61, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 4, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, group_merge: 8, knobs: instance}
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: c35904e15c9f82c2c3b8e627052765e12a80b7c8, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 4, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 2, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, group_merge: 1, knobs: instance}
+- name: bf16_split
+  arch:
+  - gfx950
+  dispatch: split_c
+  kernel_defaults:
+    kind: rocke
+    source: builders/common/convolution_forward.py
+    builder: build_gfx950_conv_fwd_aot
+    launches:
+      conv: {}
+      reduce:
+        builder: build_gfx950_conv_fwd_aot_split_reduce
+  variants:
+  - name: gfx950_conv_fwd_aot_nongroupedsplit_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - split_c
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - split_c
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 1c6d3c476b4e80423770725801bdc1d21c5d3050, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 12, tile_w: 16, tile_k_out: 64, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, split_c: 2, knobs: instance}
 - name: fp16
   arch:
   - gfx950
@@ -1021,6 +1306,62 @@ packs:
     - {dtype: fp16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: default, vector_size_a: 4, vector_size_b: 4, vector_size_c: 1, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: bfd186694db076cf5a5604e73de530fca2b20c55, layout: NHWC, knobs: instance}
     - {dtype: fp16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 8, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: e7ebc978a77a58f14b9af52d996c93676aeff9d8, layout: NHWC, knobs: instance}
     - {dtype: fp16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 8, unroll_k: 1, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: f84f45411995eea50269b23a96eb664e903144e5, layout: NHWC, knobs: instance}
+  - name: gfx950_conv_fwd_aot_merged_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - group_merge
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - group_merge
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: fp16, tile_m: 32, tile_n: 32, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 16, warp_tile_n: 16, warp_tile_k: 32, wave_size: 64, pipeline: compv3, epilogue: cshuffle, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 0ede971cb91080e1b4baa6e114f606e07c1d993b, layout: NHWC, group_merge: 4, knobs: instance}
+    - {dtype: fp16, tile_m: 64, tile_n: 16, tile_k: 64, warp_m: 4, warp_n: 1, warp_tile_m: 16, warp_tile_n: 16, warp_tile_k: 32, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 4e6736c38099f75e93ba9bdae130e7f83bcf1e73, layout: NHWC, group_merge: 8, knobs: instance}
   - name: gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}
     metadata:
     - dtype
@@ -1531,3 +1872,216 @@ packs:
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: ff93046afbee75345e55ff244cea2cde5d176414, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 4, pad_w: 4, dilation_h: 4, dilation_w: 4, block_w: 0, block_waves: 0, tile_h: 16, tile_w: 16, tile_k_out: 64, ck: 32, waves_m: 2, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, knobs: instance}
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: ff9adfa27927c5be194f71a3885307f27e65e9b5, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 160, tile_k_out: 32, ck: 16, waves_m: 1, waves_n: 4, atom: 32x32x16, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, knobs: instance}
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: ffe58eeeddda7cca4b4dc7896b6e083ce546758b, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 16, tile_k_out: 64, ck: 64, waves_m: 2, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, knobs: instance}
+  - name: gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - group_merge
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - group_merge
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 0fbc5a35fc9cbf432707ec9bbaecbdf31a3e8590, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 16, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, group_merge: 4, knobs: instance}
+    - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 298fdcf3118585005c5ebe91c9cf483a72b8b505, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 4, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 3, group_merge: 8, knobs: instance}
+    - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: fb07943ed690022ab00e2653baba0aa3d342812a, layout: NHWC, kernel_family: 1, direct_variant: grouped_halo, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 4, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, group_merge: 1, knobs: instance}
+- name: fp16_split
+  arch:
+  - gfx950
+  dispatch: split_c
+  kernel_defaults:
+    kind: rocke
+    source: builders/common/convolution_forward.py
+    builder: build_gfx950_conv_fwd_aot
+    launches:
+      conv: {}
+      reduce:
+        builder: build_gfx950_conv_fwd_aot_split_reduce
+  variants:
+  - name: gfx950_conv_fwd_aot_nongroupedsplit_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - split_c
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    - tile_h
+    - tile_w
+    - tile_k_out
+    - ck
+    - waves_m
+    - waves_n
+    - atom
+    - swizzle_wgm
+    - iglp
+    - waves_per_eu
+    - split_c
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 30e9cbb3336308239f0b6afdb800d6adb56bb498, layout: NHWC, kernel_family: 1, direct_variant: nongrouped, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 0, tile_h: 8, tile_w: 16, tile_k_out: 32, ck: 32, waves_m: 1, waves_n: 4, atom: 16x16x32, swizzle_wgm: 8, iglp: 0, waves_per_eu: 0, split_c: 2, knobs: instance}

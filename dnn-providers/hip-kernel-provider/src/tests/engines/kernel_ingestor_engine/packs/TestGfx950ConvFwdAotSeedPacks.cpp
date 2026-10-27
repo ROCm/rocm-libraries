@@ -18,8 +18,9 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
@@ -70,11 +71,13 @@ constexpr const char* ARCH_WILDCARD = "*";
 // clang-format off
 
 // "gfx950"
-constexpr std::array<const char*, 2> ARCH0_PACK_NAMES = {
+constexpr std::array<const char*, 4> ARCH0_PACK_NAMES = {
     "hipkernel:gfx950_conv_fwd_aot_seed_bf16",
+    "hipkernel:gfx950_conv_fwd_aot_seed_bf16_split",
     "hipkernel:gfx950_conv_fwd_aot_seed_fp16",
+    "hipkernel:gfx950_conv_fwd_aot_seed_fp16_split",
 };
-constexpr std::array<const char*, 208> ARCH0_KERNEL_NAMES = {
+constexpr std::array<const char*, 220> ARCH0_KERNEL_NAMES = {
     "gfx950_conv_fwd_aot_bf16_087671e72fecacc183df196736b81341f5a15f38",
     "gfx950_conv_fwd_aot_bf16_320d13d55f49b010e8762b78fb1a5580775c5c0d",
     "gfx950_conv_fwd_aot_bf16_491ce61a97465092b975aa3c1a8b6ad798d5e823",
@@ -239,6 +242,16 @@ constexpr std::array<const char*, 208> ARCH0_KERNEL_NAMES = {
     "gfx950_conv_fwd_aot_grouped_fp16_f82eaceb5932a740851a1259dd65ab5f7d716a7e",
     "gfx950_conv_fwd_aot_grouped_fp16_f8b4ea7259bf0eb7f2cba2bdb8ad837dfc9b1f25",
     "gfx950_conv_fwd_aot_grouped_fp16_f8df2bb85f913b2b6e88c85f09abcd2bfb6ea8e7",
+    "gfx950_conv_fwd_aot_groupedhalo_bf16_3bcabacc33be9c2f41922aa7c6d354828d08d24a",
+    "gfx950_conv_fwd_aot_groupedhalo_bf16_63f51983367586c03a7a54857b7af2f43adb5c61",
+    "gfx950_conv_fwd_aot_groupedhalo_bf16_c35904e15c9f82c2c3b8e627052765e12a80b7c8",
+    "gfx950_conv_fwd_aot_groupedhalo_fp16_0fbc5a35fc9cbf432707ec9bbaecbdf31a3e8590",
+    "gfx950_conv_fwd_aot_groupedhalo_fp16_298fdcf3118585005c5ebe91c9cf483a72b8b505",
+    "gfx950_conv_fwd_aot_groupedhalo_fp16_fb07943ed690022ab00e2653baba0aa3d342812a",
+    "gfx950_conv_fwd_aot_merged_bf16_4de6542c7fd117ad0ead1ff4cb684f9fa8b6c7d8",
+    "gfx950_conv_fwd_aot_merged_bf16_5251562cf6abf1b9b736f1e44434dce56052bc58",
+    "gfx950_conv_fwd_aot_merged_fp16_0ede971cb91080e1b4baa6e114f606e07c1d993b",
+    "gfx950_conv_fwd_aot_merged_fp16_4e6736c38099f75e93ba9bdae130e7f83bcf1e73",
     "gfx950_conv_fwd_aot_nongrouped_bf16_059fd29a270379642f79c09eeab0f55e6e6f4a39",
     "gfx950_conv_fwd_aot_nongrouped_bf16_1413d8a0fc0a3379742149b168933c517c9b89ee",
     "gfx950_conv_fwd_aot_nongrouped_bf16_17ed01a97f6f6c5351e2b6e29d3c4be915b16dd3",
@@ -283,6 +296,8 @@ constexpr std::array<const char*, 208> ARCH0_KERNEL_NAMES = {
     "gfx950_conv_fwd_aot_nongrouped_fp16_ff93046afbee75345e55ff244cea2cde5d176414",
     "gfx950_conv_fwd_aot_nongrouped_fp16_ff9adfa27927c5be194f71a3885307f27e65e9b5",
     "gfx950_conv_fwd_aot_nongrouped_fp16_ffe58eeeddda7cca4b4dc7896b6e083ce546758b",
+    "gfx950_conv_fwd_aot_nongroupedsplit_bf16_1c6d3c476b4e80423770725801bdc1d21c5d3050",
+    "gfx950_conv_fwd_aot_nongroupedsplit_fp16_30e9cbb3336308239f0b6afdb800d6adb56bb498",
 };
 // clang-format on
 
@@ -305,13 +320,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// is lowered to a kpack archive first, so the authored builder kind is not what
 /// arrives.
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::KPACK;
-
-/// A pack or kernel naming no architecture inherits/wildcards; one that names
-/// architectures must name the requested one, or this is the wrong shard.
-bool coversArch(const std::vector<std::string>& declared, const std::string& arch)
-{
-    return declared.empty() || std::find(declared.begin(), declared.end(), arch) != declared.end();
-}
 
 class TestGfx950ConvFwdAotSeedPacks : public ::testing::Test
 {
@@ -383,12 +391,12 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, EveryLoadedDescriptorCoversTheRequestedArc
 {
     for(const auto& pack : _set->packs)
     {
-        EXPECT_TRUE(coversArch(pack.arch, _arch))
+        EXPECT_TRUE(ingestor::archSupports(pack.arch, _arch))
             << "pack '" << pack.name << "' does not cover '" << _arch
             << "', so this is not that architecture's shard";
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_TRUE(coversArch(kernel.arch, _arch))
+            EXPECT_TRUE(ingestor::archSupports(kernel.arch, _arch))
                 << "kernel '" << kernel.name << "' does not cover '" << _arch << "'";
         }
     }
@@ -400,6 +408,19 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, EveryKernelDeclaresTheEmittedRuntimeSource
     {
         for(const auto& kernel : pack.kernels)
         {
+            // A multi-launch kernel keeps a default `source`; the kinds it ships are its
+            // `sources` entries'.
+            if(!kernel.sources.empty())
+            {
+                for(const auto& [launch, source] : kernel.sources)
+                {
+                    EXPECT_EQ(source.kind, EXPECTED_SOURCE_KIND)
+                        << "kernel '" << kernel.name << "' launch '" << launch
+                        << "' reached the loader as a different source kind than this "
+                        << "bundle ships";
+                }
+                continue;
+            }
             EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)
                 << "kernel '" << kernel.name << "' reached the loader as a different "
                 << "source kind than this bundle ships";
@@ -414,23 +435,82 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950ConvFwdAotSeedPacks, ExposesTheConfiguredKnobs)
 {
-    // Every KMD field that tunes a kernel, so the ranker can tell apart the instances
-    // one problem admits (make_conv_aot_config.ENGINE_KNOBS).
-    ASSERT_EQ(_set->engine.knobs.size(), 36U);
-    for(const auto* knob : {"kernel_family",
-                            "tile_m",
-                            "tile_n",
-                            "tile_k",
-                            "pipeline",
-                            "unroll_k",
-                            "direct_variant",
-                            "waves_per_eu"})
-    {
-        EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), knob),
-                  _set->engine.knobs.end())
-            << knob;
-    }
-    EXPECT_EQ(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "instance_id"),
+    ASSERT_EQ(_set->engine.knobs.size(), 38U);
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "kernel_family"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "direct_variant"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_m"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_n"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_k"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "warp_m"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "warp_n"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "warp_tile_m"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "warp_tile_n"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "warp_tile_k"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "pipeline"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "epilogue"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "vector_size_a"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "vector_size_b"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "vector_size_c"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "unroll_k"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "async_dma"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "async_chunk_a"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "async_chunk_b"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_w"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_waves"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_h"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "unroll_rows"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_q"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "block_groups"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "double_buffer"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_h"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_w"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_k_out"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "ck"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "waves_m"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "waves_n"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "atom"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "swizzle_wgm"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "iglp"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "waves_per_eu"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "group_merge"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "split_c"),
               _set->engine.knobs.end());
 }
 
