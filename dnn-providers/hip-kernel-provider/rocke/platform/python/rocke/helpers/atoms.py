@@ -247,11 +247,13 @@ class MfmaAtom:
         ``f8f6f4`` instruction whose LLVM intrinsic is
         ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (there is NO plain
         ``mfma.f32.16x16x128.fp8.fp8`` — only the sparse ``smfmac`` and the
-        scaled ``f8f6f4`` exist). The lowering pins the in-instruction E8M0
-        scale operands to 0 (exponent 0 => scale factor 2^0 == 1.0), and
-        the format selectors ``cbsz=0`` / ``blgp=0`` (fp8e4m3 for both A
-        and B), making the instruction numerically equivalent to a plain
-        unscaled fp8 MFMA. This is the block-scale design's intended use:
+        scaled ``f8f6f4`` exist). The lowering passes literal 0 for both
+        scale operands. The backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4`` (LLVM pattern
+        ``UnscaledMFMAOptimizationPat``). The format selectors
+        ``cbsz=0`` / ``blgp=0`` choose fp8e4m3 for both A and B. A literal 0
+        marks "no scale". As an E8M0 value, 0 would mean 2^-127, so a loaded
+        or computed 0 must never replace the literal. This is the block-scale design's intended use:
         the per-block dequant is applied to the f32 accumulator afterward,
         NOT in-instruction.
 
@@ -412,41 +414,6 @@ class MfmaAtom:
         )
 
     @classmethod
-    def fp4_16x16x128(cls) -> "MfmaAtom":
-        """fp4 MX MFMA atom (gfx950+, P52).
-
-        Per-lane: A = 16 fp4 nibbles packed as i64 (= 8 bytes per
-        lane × 2 nibbles); B same; C = ``<4 x float>``. K = 128
-        elements per atom — the densest gfx950 MFMA shape.
-        """
-        return cls(
-            m=16,
-            n=16,
-            k=128,
-            a_per_lane=16,
-            b_per_lane=16,
-            c_per_lane=4,
-            dtype_in="fp4",
-            dtype_out="f32",
-            name="mfma_f32_16x16x128_fp4",
-        )
-
-    @classmethod
-    def fp6_16x16x96(cls) -> "MfmaAtom":
-        """fp6 MX MFMA atom (gfx950+, P52)."""
-        return cls(
-            m=16,
-            n=16,
-            k=96,
-            a_per_lane=12,
-            b_per_lane=12,
-            c_per_lane=4,
-            dtype_in="fp6",
-            dtype_out="f32",
-            name="mfma_f32_16x16x96_fp6",
-        )
-
-    @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
 
@@ -581,18 +548,26 @@ class MfmaAtom:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
     ) -> Value:
-        """Issue the existing 16x16x128 scaled MFMA wrapper (P15).
+        """Issue a scaled MX MFMA (P15).
 
-        This always calls ``mfma_scale_f32_16x16x128_f8f6f4``;
-        it does not select an instruction from this atom's shape or dtype.
-        For gfx950 32x32x64 with independent A/B formats and K32 E8M0
-        scales, resolve ``family="mfma_scaled"`` through
-        ``ArchTarget.mma.op_for_shape`` and pass that ``MmaOp`` and both
-        scale operands to ``IRBuilder.mma``. See the field manual's
-        ``reference/mma_metadata.md`` for the two paths.
+        Currently routes every shape through the
+        ``mfma_scale_f32_16x16x128_f8f6f4`` intrinsic; the
+        per-output-row scale broadcast happens inside the
+        instruction. Future expansion: dedicated scaled intrinsics
+        for the 32x32 hero shape if AMDGPU exposes them.
+
+        ``a_format`` and ``b_format`` pass through to
+        :meth:`IRBuilder.mfma_scale_f32_16x16x128_f8f6f4`. A and B must use
+        the same format in this version; see that method for the formats and
+        the operand width.
         """
-        return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
+        return b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, c, a_scale, b_scale, a_format=a_format, b_format=b_format
+        )
 
     def zero_acc(self, b: IRBuilder) -> Value:
         """Allocate a fresh `<c_per_lane x float>` accumulator (all zeros).
@@ -917,19 +892,13 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x128(),
 )
 
-# P52: MX fp4 / fp6 atoms (gfx950+).
-MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
-    MfmaAtom.fp4_16x16x128(),
-    MfmaAtom.fp6_16x16x96(),
-)
-
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,

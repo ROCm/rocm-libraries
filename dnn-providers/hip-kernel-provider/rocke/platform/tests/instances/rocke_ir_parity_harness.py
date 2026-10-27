@@ -1552,6 +1552,43 @@ def build_streaming_copy(arch):
     return _build
 
 
+def build_f8f6f4_16x16x128(kind, fmt=None):
+    """One-wave K=128 f8f6f4 MFMA on gfx950. ``hero`` is the unscaled fp8 atom
+    (both scales literal 0); ``mx`` is the MX op with unit E8M0 scales;
+    ``unscaled`` is the unscaled op for every format. ``fmt`` sets the data type
+    of A and B (default fp8e4m3), so the golden pins the shared declaration and
+    each format's selectors at every flavor."""
+
+    def _build():
+        from rocke.core.ir import F32, I32, IRBuilder, PtrType
+
+        suffix = f"_{fmt}" if fmt else ""
+        b = IRBuilder(f"irhash_f8f6f4_16x16x128_{kind}{suffix}")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        pa = b.param("A", PtrType(I32, "global"), align=32)
+        pb = b.param("B", PtrType(I32, "global"), align=32)
+        pc = b.param("C", PtrType(F32, "global"), align=16)
+        tid = b.thread_id_x()
+        off8 = b.mul(tid, b.const_i32(8))
+        a = b.global_load_vN(pa, off8, I32, 8, align=32)
+        bb = b.global_load_vN(pb, off8, I32, 8, align=32)
+        acc = b.vector_splat(b.const_f32(0.0), 4)
+        kw = {"a_format": fmt, "b_format": fmt} if fmt else {}
+        if kind == "hero":
+            r = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
+        elif kind == "unscaled":
+            r = b.mfma_f32_16x16x128_fp4fp6fp8(a, bb, acc, **kw)
+        else:
+            r = b.mfma_scale_f32_16x16x128_f8f6f4(
+                a, bb, acc, b.const_i32(127), b.const_i32(127), **kw
+            )
+        b.global_store_vN(pc, b.mul(tid, b.const_i32(4)), r, 4, align=16)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def build_warp_shuffle_xor_dpp_reduce(arch, masks):
     """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
     pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
@@ -5079,6 +5116,30 @@ def cases():
             f"nontemporal/{_arch}/copy_bf16x8",
             _arch,
             build_streaming_copy(_arch),
+        )
+
+    # K=128 f8f6f4 MFMA (gfx950): the unscaled fp8 hero atom and the MX op share
+    # one declaration; the validity gate links both.
+    for _kind in ("hero", "mx"):
+        add(
+            "mma_atom",
+            f"mma_atom/gfx950/f8f6f4_16x16x128_{_kind}",
+            "gfx950",
+            build_f8f6f4_16x16x128(_kind),
+        )
+    for _fmt in ("bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"):
+        add(
+            "mma_atom",
+            f"mma_atom/gfx950/f8f6f4_16x16x128_mx_{_fmt}",
+            "gfx950",
+            build_f8f6f4_16x16x128("mx", _fmt),
+        )
+    for _fmt in ("fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"):
+        add(
+            "mma_atom",
+            f"mma_atom/gfx950/f8f6f4_16x16x128_unscaled_{_fmt}",
+            "gfx950",
+            build_f8f6f4_16x16x128("unscaled", _fmt),
         )
 
     # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP
