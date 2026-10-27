@@ -114,7 +114,7 @@ def derive(toolchain):
     defaultSolution.update(saved_ds)
 
 
-_WMMA_MI = [16, 16, 16, 1, 1, 4, 4, 2, 2]
+_WMMA_MI = [16, 16, 16, 1, 1, 2, 2, 2, 2]
 
 
 @pytest.mark.parametrize(
@@ -125,7 +125,7 @@ _WMMA_MI = [16, 16, 16, 1, 1, 4, 4, 2, 2]
         ("gfx1151", "H", True, False, 16, 8, 8),
         ("gfx1100", "H", True, False, 16, 8, 8),
         # NN: only B is K-major in LDS; A keeps its own (TLU) formula.
-        ("gfx1151", "H", False, False, 16, 0, 8),
+        ("gfx1151", "H", False, False, 16, 32, 8),
         # 8-bit: one b128 is 16 bytes.
         ("gfx1151", "I8", True, False, 16, 16, 16),
         # gfx12 (WMMA V2): a single b128 read is no longer doubled.
