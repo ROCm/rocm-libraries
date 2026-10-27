@@ -1187,14 +1187,47 @@ TEST(TestOutputComparison, NonFiniteMaskIsOnlyLayeredOnFloatingPointOutputs)
         EXPECT_TRUE(masked.matchNonFinite) << EnumNameDataType(type);
         EXPECT_TRUE(masked.unwrittenSentinelBits.has_value()) << EnumNameDataType(type);
     }
-    for(const auto type :
-        {DataType::INT32, DataType::INT8, DataType::UINT8, DataType::FP8_E4M3, DataType::BOOLEAN})
+    for(const auto type : {DataType::INT32,
+                           DataType::INT8,
+                           DataType::UINT8,
+                           DataType::FP8_E4M3,
+                           DataType::FP8_E5M2,
+                           DataType::BOOLEAN})
     {
         const auto masked = withNonFiniteMask(exact(), type);
         EXPECT_FALSE(canMatchNonFinite(type)) << EnumNameDataType(type);
         EXPECT_FALSE(masked.matchNonFinite) << EnumNameDataType(type);
         EXPECT_FALSE(masked.unwrittenSentinelBits.has_value()) << EnumNameDataType(type);
     }
+}
+
+// Bug caught: the harness's own "can this output carry the mask" list drifting from the SDK's
+// payload-sentinel list. A type matchable here without a payload sentinel would let an unwritten
+// output pass as NaN matching NaN; one with a sentinel but not matchable would never be graded.
+// Walks every DataType enumerator, so a type added later is covered without editing the test.
+TEST(TestOutputComparison, NonFiniteMaskMatchableTypesAreExactlyThoseWithAPayloadSentinel)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_integration_tests::bundle::canMatchNonFinite;
+    using hipdnn_integration_tests::bundle::withNonFiniteMask;
+
+    std::vector<DataType> matchable;
+    for(const auto type : hipdnn_flatbuffers_sdk::data_objects::EnumValuesDataType())
+    {
+        const bool hasSentinel
+            = hipdnn_test_sdk::utilities::payloadNanSentinelBits(type).has_value();
+        EXPECT_EQ(canMatchNonFinite(type), hasSentinel) << EnumNameDataType(type);
+        EXPECT_EQ(withNonFiniteMask(exact(), type).matchNonFinite, hasSentinel)
+            << EnumNameDataType(type);
+        if(canMatchNonFinite(type))
+        {
+            matchable.push_back(type);
+        }
+    }
+
+    EXPECT_EQ(matchable,
+              (std::vector<DataType>{
+                  DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE}));
 }
 
 // Bug caught: a device-site request served by the host validator (reading device memory

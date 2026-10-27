@@ -104,17 +104,9 @@ std::string tensorLabel(int64_t uid,
 
 bool canMatchNonFinite(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    switch(dataType)
-    {
-    case DataType::FLOAT:
-    case DataType::HALF:
-    case DataType::BFLOAT16:
-    case DataType::DOUBLE:
-        return true;
-    default:
-        return false;
-    }
+    // The data types with a payload NaN sentinel are the ones the mask can grade: without one
+    // an unwritten element would pass as NaN matching NaN.
+    return hipdnn_test_sdk::utilities::payloadNanSentinelBits(dataType).has_value();
 }
 
 ComparisonTolerance withNonFiniteMask(ComparisonTolerance tolerance,

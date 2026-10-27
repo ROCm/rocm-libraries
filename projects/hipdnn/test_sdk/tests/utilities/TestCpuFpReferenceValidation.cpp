@@ -1382,18 +1382,20 @@ TEST(TestPayloadNanSentinel, DataTypeOverloadMatchesTypedHelper)
     EXPECT_EQ(payloadNanSentinelBits(DataType::DOUBLE), payloadNanSentinelBits<double>());
     EXPECT_EQ(payloadNanSentinelBits(DataType::HALF), payloadNanSentinelBits<half>());
     EXPECT_EQ(payloadNanSentinelBits(DataType::BFLOAT16), payloadNanSentinelBits<bfloat16>());
-    EXPECT_EQ(payloadNanSentinelBits(DataType::FP8_E5M2), payloadNanSentinelBits<fp8_e5m2>());
 }
 
-// Bug caught: reporting a payload sentinel for types that have none, which would make the
-// harness fill with an ordinary NaN and the validator reject legitimate NaN outputs.
+// Bug caught: reporting a payload sentinel for types that have none or that no validator
+// factory grades (every fp8 format): a caller filling with it would get an output no validator
+// can check, and a hand-written list elsewhere could drift from this one.
 TEST(TestPayloadNanSentinel, TypesWithoutPayloadNaNReportNone)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     EXPECT_FALSE(payloadNanSentinelBits(DataType::FP8_E4M3).has_value());
+    EXPECT_FALSE(payloadNanSentinelBits(DataType::FP8_E5M2).has_value());
     EXPECT_FALSE(payloadNanSentinelBits(DataType::INT32).has_value());
     EXPECT_FALSE(payloadNanSentinelBits(DataType::UINT8).has_value());
     EXPECT_FALSE(payloadNanSentinelBits<fp8_e4m3>().has_value());
+    EXPECT_FALSE(payloadNanSentinelBits<fp8_e5m2>().has_value());
     EXPECT_FALSE(payloadNanSentinelBits<int32_t>().has_value());
 }
 
@@ -1470,27 +1472,15 @@ TYPED_TEST(CpuFpReferenceValidationRagged, MaskFailsWhenEveryReferenceValueIsNaN
 
 /* ======== Eight-bit float tests ======== */
 
-// fp8 e5m2 has three NaN encodings (0x7D, 0x7E, 0x7F), so a distinctive payload exists.
-TEST(TestCpuFpReferenceValidationNonFiniteMaskFp8E5m2, SentinelIsADistinctNaNEncoding)
-{
-    const auto sentinelBits = payloadNanSentinelBits<fp8_e5m2>();
-    ASSERT_TRUE(sentinelBits.has_value());
-
-    EXPECT_TRUE(hipdnn_data_sdk::types::isnan(payloadNanSentinelValue<fp8_e5m2>()));
-    EXPECT_NE(*sentinelBits,
-              non_finite_detail::elementBits(std::numeric_limits<fp8_e5m2>::quiet_NaN()));
-
-    Tensor<fp8_e5m2> tensor({2});
-    tensor.fillTensorWithValue(1.0f);
-    tensor.setHostValue(payloadNanSentinelValue<fp8_e5m2>(), 0);
-    EXPECT_EQ(non_finite_detail::elementBits(tensor.getHostValue(0)), *sentinelBits);
-}
-
-// Bug caught: the sentinel check or the NaN and Inf matching not working for a one-byte type.
+// fp8 e5m2 has three NaN encodings (0x7D, 0x7E, 0x7F). payloadNanSentinelBits offers none (no
+// validator factory grades fp8), but a caller grading it directly can pass 0x7D explicitly.
+//
+// Bug caught: the sentinel check or the NaN and Inf matching not working for a one-byte type,
+// or the sentinel being compared against the wrong bits.
 TEST(TestCpuFpReferenceValidationNonFiniteMaskFp8E5m2, MaskMatchesNonFiniteAndFlagsTheSentinel)
 {
-    const auto detectingValidation
-        = makeMaskedValidation<fp8_e5m2>(0.0f, payloadNanSentinelBits<fp8_e5m2>());
+    constexpr uint8_t SENTINEL_BITS = 0x7D;
+    const auto detectingValidation = makeMaskedValidation<fp8_e5m2>(0.0f, uint64_t{SENTINEL_BITS});
     const std::vector<int64_t> dims = {2, 2};
 
     Tensor<fp8_e5m2> reference(dims);
@@ -1510,8 +1500,8 @@ TEST(TestCpuFpReferenceValidationNonFiniteMaskFp8E5m2, MaskMatchesNonFiniteAndFl
     EXPECT_FALSE(detectingValidation.allClose(reference, implementation));
     implementation.setHostValue(fp8_e5m2::from_bits(0x7C), 0, 1);
 
-    // An unwritten element.
-    implementation.setHostValue(payloadNanSentinelValue<fp8_e5m2>(), 0, 0);
+    // An unwritten element, still holding the sentinel NaN.
+    implementation.setHostValue(fp8_e5m2::from_bits(SENTINEL_BITS), 0, 0);
     EXPECT_FALSE(detectingValidation.allClose(reference, implementation));
 }
 

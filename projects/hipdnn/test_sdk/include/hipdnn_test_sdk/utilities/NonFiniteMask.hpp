@@ -44,9 +44,10 @@ namespace hipdnn_test_sdk::utilities
 /// payloadNanSentinelBits.
 ///
 /// The sentinel is an element's raw storage bits, zero extended to 64 bits, so it also
-/// supports a finite pattern. That matters for element types with a single NaN encoding
-/// (OCP fp8 e4m3fn: 0x7F and 0xFF), where no distinctive payload exists and
-/// payloadNanSentinelBits returns std::nullopt. For such a type the harness chooses one of:
+/// supports a finite pattern, and a payload NaN of a type payloadNanSentinelBits does not
+/// offer (fp8 e5m2: 0x7D, a NaN a float conversion never yields). That matters for element
+/// types with no offered payload: fp8 e4m3fn has a single NaN encoding (0x7F and 0xFF), so no
+/// distinctive payload exists at all. A caller grading such a type directly chooses one of:
 ///   (a) Pass no sentinel. NaN-NaN matching still works; an unwritten element simply cannot be
 ///       told from a legitimate NaN, so unwritten-output detection is unavailable for that
 ///       type and the harness should say so. This is the default and the safe choice.
@@ -134,12 +135,11 @@ void requireSentinelFits([[maybe_unused]] const NonFiniteMask& nonFiniteMask)
 /// default quiet NaN or an input's NaN) does not collide with it. std::nullopt for a type
 /// that cannot carry one.
 ///
-/// float, double, half, bfloat16 (both rounding modes) and fp8 e5m2 have one. fp8 e5m2 has no
-/// quiet/signaling distinction in this SDK, only three NaN encodings (0x7D, 0x7E, 0x7F with
-/// either sign); 0x7D is used because a float-to-e5m2 conversion yields 0x7F. fp8 e4m3 has the
-/// single NaN encoding 0x7F/0xFF, hence no payload; see NonFiniteMask for what the harness
-/// does instead. The FNUZ fp8 formats (single NaN 0x80), fp8 e8m0 (single NaN 0xFF), fp6, fp4
-/// and the integer types likewise return std::nullopt.
+/// Exactly float, double, half and bfloat16 (both rounding modes) have one. Every other type
+/// returns std::nullopt: the fp8 formats (e4m3 has the single NaN encoding 0x7F/0xFF; e5m2 has
+/// payload encodings, but no validator factory grades fp8, so none is offered; see NonFiniteMask
+/// for what a caller grading such a type directly does), the FNUZ fp8 formats (single NaN 0x80),
+/// fp8 e8m0 (single NaN 0xFF), fp6, fp4 and the integer types.
 ///
 /// The pattern survives only a bitwise store and load. Converting through another floating
 /// point type or arithmetic may canonicalize the payload, so fill with the raw bits (or with
@@ -165,10 +165,6 @@ constexpr std::optional<uint64_t> payloadNanSentinelBits() noexcept
     {
         return static_cast<uint64_t>(0x7FEDU);
     }
-    else if constexpr(std::is_same_v<T, types::fp8_e5m2>)
-    {
-        return static_cast<uint64_t>(0x7DU);
-    }
     else
     {
         return std::nullopt;
@@ -191,8 +187,6 @@ inline std::optional<uint64_t>
         return payloadNanSentinelBits<hipdnn_data_sdk::types::half>();
     case DataType::BFLOAT16:
         return payloadNanSentinelBits<hipdnn_data_sdk::types::bfloat16>();
-    case DataType::FP8_E5M2:
-        return payloadNanSentinelBits<hipdnn_data_sdk::types::fp8_e5m2>();
     default:
         return std::nullopt;
     }

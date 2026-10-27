@@ -27,12 +27,12 @@ namespace hipdnn_integration_tests::bundle::detail
 namespace
 {
 
-// The element types the non-finite mask grades, and so the ones whose output sentinel can carry
-// a payload (see hipdnn_test_sdk::utilities::payloadNanSentinelBits).
+// The element types whose output sentinel can carry a payload: exactly the ones
+// hipdnn_test_sdk::utilities::payloadNanSentinelBits reports a pattern for, so this cannot drift
+// from the validators' side of the contract.
 template <class T>
-constexpr bool K_HAS_PAYLOAD_SENTINEL = std::is_same_v<T, float> || std::is_same_v<T, double>
-                                        || std::is_same_v<T, hipdnn_data_sdk::types::half>
-                                        || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
+constexpr bool K_HAS_PAYLOAD_SENTINEL
+    = hipdnn_test_sdk::utilities::payloadNanSentinelBits<T>().has_value();
 
 // What TensorBase<T>::fillWithSentinelValue() writes: a quiet NaN where the type has
 // one, its largest value where it does not. With `payloadNan`, the types that can carry
