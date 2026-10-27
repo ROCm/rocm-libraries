@@ -1522,14 +1522,6 @@ def gfx950_conv_dgrad_aot_runtime_candidates(
 # ---------------------------------------------------------------------------
 
 
-_DIRECT_BUILDERS = {
-    DIRECT_VARIANT_DEPTHWISE: _direct.build_direct_depthwise_dgrad_streaming,
-    DIRECT_VARIANT_MFMA: _direct.build_direct_conv,
-    HELPER_VARIANT_TRANSPOSE: _direct.build_direct_transpose_weights_dgrad,
-    HELPER_VARIANT_REORGANIZE: _direct.build_direct_reorganize_weights,
-}
-
-
 def build_gfx950_conv_dgrad_aot(
     spec: Gfx950ConvDgradAotSpec, *, arch: str = _ARCH
 ) -> KernelDef:
@@ -1540,12 +1532,21 @@ def build_gfx950_conv_dgrad_aot(
     and helper kernels through ``direct_kernel_sweep._build_kernel``'s builders. A
     helper's kernel is renamed to :meth:`Gfx950ConvDgradAotSpec.kernel_symbol_prefix`
     (its builder names it after the probe problem, which fp16 and bf16 share).
+
+    The direct builder is rocKE's own dispatch over its sweep algorithms, as the
+    spec factory above is: a per-variant table here is a mirror, and a mirror goes
+    stale -- it is what left the windowed depthwise unbuildable while the catalog
+    already packaged it.
     """
     ok, reason = supports_gfx950_conv_dgrad_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT dgrad instance: {reason}")
     if spec.is_direct:
-        kernel = _DIRECT_BUILDERS[spec.direct_variant](spec.to_direct_spec(), arch=arch)
+        from kernels.conv.direct_variants import select_direct_kernel_builder
+
+        kernel = select_direct_kernel_builder(
+            spec.algorithm, spec.to_direct_spec(), arch
+        )
         if spec.is_helper:
             kernel = replace(kernel, name=spec.kernel_symbol_prefix())
         return kernel
