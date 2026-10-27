@@ -60,6 +60,18 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy : BlockFmhaBwdPipelineTrLoadDefaultPo
 #endif
     }
 
+    // Same, but leaves the newest kInFlight TDM ops outstanding.
+    template <index_t kInFlight>
+    CK_TILE_DEVICE static void WaitBlockToLds()
+    {
+#if defined(__gfx125__)
+        s_wait_tensorcnt_barrier<kInFlight>();
+        block_sync_lds();
+#else
+        s_waitcnt</*vmcnt=*/0>();
+#endif
+    }
+
     CK_TILE_DEVICE static void WaitAllMem()
     {
 #if defined(__gfx125__)
