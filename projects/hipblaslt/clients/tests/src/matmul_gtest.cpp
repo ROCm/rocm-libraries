@@ -95,6 +95,43 @@ namespace
         expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
     }
 
+    TEST(PreswizzledScaleLayout, smoke_rejects_padded_lda)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // TN, so the orientation guards pass and only the leading dimension is at fault.
+        arg.transA = 'T';
+        arg.transB = 'N';
+        arg.M[0]   = 32;
+        arg.N[0]   = 32;
+        arg.K[0]   = 64;
+        arg.lda[0] = 128; // A_row is K = 64
+        arg.ldb[0] = 64;
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        // The generator sizes its scales from the stride it is handed, so a padded lda
+        // writes past the buffer allocated from the logical extent.
+        expect_preswizzled_layout_error(arg, "MX scales require lda equal to the rows stored");
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_padded_ldb)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'T';
+        arg.transB              = 'N';
+        arg.M[0]                = 32;
+        arg.N[0]                = 32;
+        arg.K[0]                = 64;
+        arg.lda[0]              = 64; // correct, so it cannot mask a missing B check
+        arg.ldb[0]              = 128; // B_row is K = 64
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        expect_preswizzled_layout_error(arg, "MX scales require ldb equal to the rows stored");
+    }
+
     TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
     {
         Arguments arg{};
