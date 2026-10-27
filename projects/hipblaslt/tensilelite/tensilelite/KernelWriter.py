@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
@@ -66,12 +66,12 @@ from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
-  swizzleGeometry
+  swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
-  SW_INSTRUCTION_PREFETCH_AUTO
-from .SolutionStructs.Naming import getKernelNameMin
+  parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -227,6 +227,9 @@ class StateValues:
   invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
+  # The overflow code reopened for register allocation to settle, or 0 once
+  # resolveDeferredRegisterOverflow has ruled on it.
+  overflowPendingRA: int                 = 0
   ## Schedule
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
@@ -334,6 +337,10 @@ class StateValues:
   totalAgprs: int                        = 0
   maxLimitAgprs: int                     = 0
   totalMixedAgprs: int                   = 0
+  # [lo, hi) arch-vgpr ranges holding D accumulator tiles that did not fit in the
+  # agpr file (subtile kernels with MIWaveTile0*MIWaveTile1 > agprs/4).  These are
+  # live from the MFMA loop through the epilogue, so no store path may use them.
+  subtileSpilledDRanges: list            = field(default_factory=list)
   totalVgprs: int                        = 0
   totalSgprs: int                        = 0
   lastValuAB: int                        = 0
@@ -380,6 +387,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  rndSeedKernArgOffset: int              = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -449,6 +457,60 @@ class StateValues:
   WGMTransformLevels: int                = -1
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
+  postLoopStoreInNll: bool               = False
+  postLoopStoreInjected: bool            = False
+  postLoopSrdDHoisted: bool              = False
+  # PostLoopStoreInNll (PLSIN) store/init-weave state. Declared here rather than
+  # attached dynamically, so a misspelled name is an AttributeError instead of a
+  # silent fall back to the default. All default to the "not weaving" value, so
+  # a non-PLSIN kernel is unaffected.
+  subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
+  subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
+  subtileWeaveLookahead: int             = 4       # store-pairs ahead a pair's MFMAs are issued
+  subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
+  subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
+  # writePartials builds its deferred block while vgprValuC is 0 and names its
+  # staging registers with absolute indices, so it pins the base for the block's
+  # duration.  Set when that pin is emitted; cleared once the base is restored.
+  deferredPartialsValuCPinned: bool       = False
+  # 16bit-subtile store lane offsets materialized once per store by
+  # emitSubtileStoreLaneMath instead of in every write batch's preamble.
+  subtileHoistedLaneGroupDelta: bool     = False   # vgprLaneGroupDelta is live from the hoist
+  subtileHoistedPermAddr: bool           = False   # vgprPermAddr holds the permlane16 row delta
+  subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
+  subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
+  subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
+  subtileWeaveCaptureInstances: Optional[list] = None  # generated activation/store-path captures
+  subtileWeaveCaptureCurrent: Optional[dict] = None     # capture receiving the current store path
+  subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
+  subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
+  subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
+  subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
+  subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
+  subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
+  subtileStoreTt1PerStage: int           = 0       # element-space N groups per stage (0 = not staging)
+  subtileStoreTt0PerStage: int           = 0       # element-space M groups per stage
+  subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
+  subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
+  subtilePairPackSlot: int               = 0       # rotating index into the paired-store pack ring
+  # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch
+  # holds, kept here so it survives the per-batch rebuild of GlobalWriteBatch.
+  # subtileHoistedAddrArm pins the owning store arm, because arms (edge / beta /
+  # activation) are runtime-exclusive branches that only the emit order makes
+  # look sequential -- a base produced in one must never be reused in another.
+  # It is the arm counter and not the StoreState itself, which reaches the
+  # writer's register pools and must not be retained here.
+  subtileHoistedAddrDVgpr: int           = -1
+  # Rows the fused store has already passed, when it addresses them absolutely
+  # rather than by advancing SrdD. See GlobalWriteBatch._subtileStoreSoffset.
+  subtileAbsRowAddr: bool                = False
+  subtileHoistedAddrBlockN: int          = -1
+  subtileHoistedAddrArm: int             = -1
+  subtileStoreArmId: int                 = 0       # bumped per StoreState (store arm)
+  subtileFusedStoreNoActivation: bool    = False   # fused arm emits only the no-activation store body
+  subtileM32ValidBlocksSgpr: Optional[int] = None  # SubtileMGuard SGPR
+  subtileN16ValidBlocksSgpr: Optional[int] = None  # SubtileNGuard SGPR
+  # (subtileTotalMOffsetSgpr is declared with the other KWA SGPR fields above)
   staggerUCode: bool                     = 0
   waveIdxReleasedAfterStagger: bool      = False
   # Wave-separated TDM packs loop-invariant WaveIdx bits into ArgType[8+] before
@@ -582,6 +644,21 @@ class ExternClasses:
 ################################################################################
 class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCMeta):
   #__metaclass__=abc.ABCMeta
+
+  ##############################################################################
+  # Spilled D accumulator guard
+  ##############################################################################
+  def assertNotSpilledDTile(self, lo, numRegs, what):
+    """Fail generation if [lo, lo+numRegs) overlaps a D accumulator tile that
+    spilled into the arch vgpr pool.  Those registers are live from the MFMA
+    loop through the epilogue, so a store path that targets them silently
+    corrupts one 16x16 output block per wave."""
+    hi = lo + numRegs
+    for (a, b) in self.states.subtileSpilledDRanges:
+      if not (hi <= a or lo >= b):
+        raise RuntimeError(
+            "Kernel %s: %s targets v[%u:%u), which overlaps spilled D accumulator "
+            "tile v[%u:%u)." % (self.states.kernelName, what, lo, hi, a, b))
 
   ##############################################################################
   # Init
@@ -721,7 +798,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
 
-  # Tensile uses a two-level scheduler.  This the first-level, which
+  # TensileLite uses a two-level scheduler.  This the first-level, which
   # schedules global reads, global incs, and local writes into iteration.
   # Then makeSubIterSchedule schedules the instructions within the iteration.
   #
@@ -3237,6 +3314,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+      elif tdmA and tdmB and isPersistent(kernel) and not kernel["UseSubtileImpl"]:
+        # Subtile offsets Address{A,B} before building its descriptors.
+        module.add(self.tdmApplyTileKOffset(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx already freed for subtile (before graWorkGroup above).
       # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
@@ -4804,6 +4884,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       localReadsMXSA = Module()
       localReadsMXSB = Module()
       localReadsB = Module()
+      localReadsMXSB = Module()
       localReadsM = Module()
       localReadsSecondHalf = Module()
 
@@ -5473,12 +5554,40 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
-    module.add(lraTileAssignment(self, kernel))
-    module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
+
+    # Pre-loop scheduling (Change A): the A/B and scale LDS read-address setup
+    # (lraTileAssignment -> v9/v14, the DTL swap-vgpr init that READS v9/v14, and
+    # lraTileAssignmentScaleSwizzled -> v19/v22 + scale swaps) is pure loop-invariant
+    # VALU whose only consumers are the post-barrier ds_reads and the main-loop LR
+    # swaps. For any subtile kernel that prefetches (PGR>=1, no TDM) we DEFER these
+    # three modules into the preloop so ~750 cycles of address math overlaps the
+    # in-flight prefetch buffer_loads instead of sitting on the pre-main-loop critical
+    # path. The functions are still CALLED here, in the same order, so vgpr/sgpr-pool
+    # checkout/checkin bookkeeping is byte-identical -- only the emission position of the
+    # returned modules moves. localReadDTLInitCommonSwapVgpr consumes v9/v14 so it must
+    # travel WITH lraTileAssignment; graTileAssignmentScaleSwizzled computes GR offsets
+    # (feeds the prefetch) and stays inline. On the fast path (K>=DepthU) lraDeferred
+    # lands between initC and wait_gr as overlapping filler. On the NoTailLoop path
+    # (no split) it lands before wait_gr. The slow path (K<DepthU) gets its own copy:
+    # the tail loop reads LDS through these address registers. TDM / PGR==0 kernels
+    # emit inline as before.
+    _deferLra = (isMxf4SubtilePath(kernel)
+                 and kernel["PrefetchGlobalRead"] >= 1
+                 and not hasTDM)
+    self._deferredPreloopLraModules = None
+    _lraModule     = lraTileAssignment(self, kernel)
+    _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
+    if not _deferLra:
+      module.add(_lraModule)
+      module.add(_lraSwapModule)
 
     if not hasTDM:
       module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
+    _lraScaleModule = lraTileAssignmentScaleSwizzled(self, kernel)
+    if _deferLra:
+      self._deferredPreloopLraModules = [_lraModule, _lraSwapModule, _lraScaleModule]
+    else:
+      module.add(_lraScaleModule)
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
@@ -5500,6 +5609,51 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
+
+    # PostLoopStoreInNll: compute the loop-invariant tail guard SGPR before the
+    # main loop. calculateLoopNumIter(-1) only materializes the tail counter AFTER
+    # emitMainAndExitLoops, but the fused-store front guard (emitted at the top of
+    # the NLL, inside mainLoop) needs "does a tail run?" available up front. DepthU
+    # is a power of two for every eligible (fp4 + UseSubtileImpl) config, so
+    # (SizesSum % DepthU) reduces to a single AND: the result is 0 iff the NLL is
+    # terminal (no tail). Beta is tested directly from the persistent sgprBeta at
+    # the guard site (it stays live through the main loop), so no snapshot is made
+    # here. The write-index VGPRs stay drain-anchored and are materialized in the
+    # NLL builder (see emitMainAndExitLoops); the existing post-loop
+    # notLocalSplitUGlobalWriteIndices call is kept intact for the fallback arm.
+    # PostLoopStoreInNll SGPR-defer: no persistent pre-loop flags. The former
+    # PostLoopHasTail (no-tail bit) is recomputed transiently inside the shared
+    # emitFusedStoreGuard, and the former PostLoopStored (did-fuse dedup bit) is
+    # eliminated -- the post-loop dedup re-evaluates the same guard instead of
+    # carrying a bit across endSummation (see post-loop code below). Both flags being
+    # persistent added +2 to the store-path SGPR peak (MT256x256 fp4 hit 104 > 102).
+
+      # Step 4b (SGPR-defer): SrdD's value is NO LONGER hoisted before the main loop.
+      # Hoisting required SrdD to be main-loop-resident (4 SGPRs across the loop),
+      # overflowing MT256x256 fp4. Instead SrdD is computed lazily on each path that
+      # needs it: the PLAIN / SkipToEnd post-loop store computes it after endSummation's
+      # reclaim (globalWriteWorkGroupInit channels=None, baseline behavior), and the
+      # FUSED NLL store defines a transient SrdD from the drain-era pool
+      # (buildSubtileFusedStore). postLoopSrdDHoisted stays False so the post-loop init
+      # emits the full C+D SRD compute.
+
+    # PostLoopStoreInNll: precompute the structural fused-store predicate into the
+    # persistent PostLoopFusedStore SGPR BEFORE the main loop. Alpha==1.0 and a null
+    # ScaleAlphaVec pointer are part of that predicate; the fused epilogue stores
+    # ValuC without a scalar or vector multiply.
+    #
+    # PLSIN guard-hoist (subtile fused-store path ONLY): when this kernel prefetches
+    # global reads (PGR>=1), DEFER the fold into the preloop global-read shadow
+    # (LogicalScheduler.emitMainAndExitLoops injects it right after the MT0 buffer_load
+    # issue, before the wait_gr drain) so its loop-invariant SALU/VALU executes while
+    # the prefetch loads are in flight instead of sitting on the pre-main-loop critical
+    # path. PGR==0 (no shadow) and non-fused-store-eligible kernels emit here unchanged
+    # -- computePostLoopFusedStore returns an empty module for the latter, so the
+    # non-subtile / non-eligible code path is byte-identical.
+    _plsinDeferFold = (self._plsinFusedFlagEligible(kernel)
+                       and kernel["PrefetchGlobalRead"] >= 1)
+    if not _plsinDeferFold:
+      module.add(self.computePostLoopFusedStore(kernel))
 
     module.add(mainLoop(self, kernel))
 
@@ -5557,15 +5711,63 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
       if isPersistent(kernel):
         module.add(Component.TileProcessingStrategy.find(self).skipPhantomTileStore(self, kernel))
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdD")
-        self.removeSgprVarFromPool("SrdC")
-        module.add(self.globalWriteWorkGroupInit(kernel))
 
       ####################################
       # NOT LocalSplitU
       ####################################
 
+
+
+      # 4d-3a dedup (flag-free): re-evaluate the SAME fused-store guard. A WG whose
+      # FUSED NLL already stored D re-passes the guard here and branches over the
+      # whole post-loop store; any WG that took the PLAIN arm / K<DepthU SkipToEnd
+      # fast-exit fails the guard (has-tail, or non-full-tile, or beta!=0) and falls
+      # through to store normally. This replaces the persistent PostLoopStored flag
+      # (all guard inputs are loop-invariant and still live post-endSummation). When
+      # the feature is off, no guard/branch is emitted (byte-identical).
+      #
+      # Tail-reduction: the guard is emitted BEFORE the post-loop store-init (SrdC/SrdD
+      # address math) so a fused full-tile owner branches over BOTH the store-init AND
+      # the store body. Previously the store-init ran ahead of the guard, so a fused
+      # owner paid the full ~SrdC/SrdD recompute in the exposed post-store tail even
+      # though its store body was skipped. The store-init's SrdC/SrdD values are only
+      # consumed by the (also-skipped) store body, so skipping the init for a fused
+      # owner is runtime-safe; non-fused waves fall through doPostLoopStoreLabel and run
+      # the full init + store unchanged.
+      postLoopStoreDedupLabel = None
+      if self.states.postLoopStoreInNll:
+        postLoopStoreDedupLabel = Label("SkipPostLoopStore", "")
+        doPostLoopStoreLabel = Label("DoPostLoopStore", "")
+        # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
+        module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
+        # The skip jump spans the post-loop store-init + store body. That span is
+        # tile-dependent and, measured, sits well inside the short-branch window
+        # (85 KB / 15350 instructions of a 128 KB / 16384 budget on MT256x64, the
+        # largest tile carrying the fused store), so it must not be hard-coded to
+        # the 32-bit form: doing so took a 3-SGPR temp at the pool's high-water
+        # mark, pushing 31 kernels past MaxSgpr. Leave a placeholder and let
+        # updateBranchPlaceHolder choose from the measured distance once the body
+        # has been emitted -- if it does pick the long form, the temp is allocated
+        # there instead, after the store temps have been checked back in.
+        dedupBranch = Module("postLoopStoreDedup_placeholder")
+        dedupBranch.addComment1("FUSED NLL already stored D -> skip redundant post-loop store-init + store")
+        module.add(dedupBranch)
+        module.add(doPostLoopStoreLabel)
+
+      # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
+      # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
+      # builds no guard was emitted, so this runs inline exactly as before.
+      # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
+      # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
+      # valid and re-emitting its SRD-init would duplicate the D labels. When the
+      # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
+      # to the full C+D init (channels=None), byte-identical to the legacy path.
+      if not self.states.doShadowInit:
+        self.removeSgprVarFromPool("SrdD")
+        self.removeSgprVarFromPool("SrdC")
+        module.add(self.buildSubtileStoreInitModule(
+          kernel,
+          channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
@@ -5575,6 +5777,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #module.addComment1("not-LocalSplitU: global write")
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
+      if postLoopStoreDedupLabel is not None:
+        module.add(postLoopStoreDedupLabel)
+        # module now ends at the branch target, so the placeholder-to-end
+        # instruction count that updateBranchPlaceHolder measures is the real span.
+        self.updateBranchPlaceHolder(module, ["postLoopStoreDedup_placeholder"],
+                                     [postLoopStoreDedupLabel.label], ["SBranch"])
 
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
@@ -5618,6 +5826,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if hasDeferredPartials:
         module.appendModule(self.states.deferredPartialsModule)
         self.states.deferredPartialsModule = None
+        # writePartials pins vgprValuC to 0 for the duration of its block.
+        if self.states.deferredPartialsValuCPinned:
+          module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+          self.states.deferredPartialsValuCPinned = False
       if hasDeferredGSU0:
         module.appendModule(deferredGSU0)
       if hasDeferredActivation:
@@ -5647,10 +5859,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
 
     # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     #ripo = rocIsaPassOption()
@@ -7100,9 +7313,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module.add(Label("ASM_End", "The end of the kernel"))
 
     moduleKernelBody.addBody(module)
+    # Judge, defer, act. The middle step is this path's alone: it runs the
+    # allocation pipeline below and resolves the deferral.
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+    self.deferRegisterOverflowForAllocation(kernel)
+    self.applyOverflowVerdict(kernel, moduleKernelBody)
 
-    # Tensile instruction pass, temporarily disable due to build time.
+    # TensileLite instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
@@ -7125,10 +7342,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
+    # A code recorded by now is final: the resolver runs only when it is 0.
+    rejected = self.states.overflowedResources != 0
+
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if not rejected and stinky_opt_level is not None \
+       and rocisa.isSupportedByStinkyTofu(self.states.version):
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
@@ -7164,6 +7385,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
+                               "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
+                               # The rest of StinkyTofuRegisterAllocation, in its shortest
+                               # spelling; the mode above is the one that holds.
+                               "RegisterAllocationConfig": str(
+                                   kernel.get("StinkyTofuRegisterAllocation", 0)),
+                               "RegisterAllocationDump": bool(
+                                   globalParameters.get("StinkyTofuRegisterAllocationDump") or False),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -7193,10 +7421,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
                                "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
-                               # PrefetchGlobalRead (PGR) for Tensile scheduling, and the
+                               # PrefetchGlobalRead (PGR) for TensileLite scheduling, and the
                                # InsertClusterBarrierPass Rule 3 drain threshold. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
+                               # PrefetchLocalRead (PLR) for TensileLite scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                                # How many unrolled loop bodies were emitted
                                # (states.unrollLoopCopies). HalfPLR sets this to 3.
@@ -7233,13 +7461,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
       # Prefetch lead before its tensor_load, in WMMA windows. With HalfPLR the loop body holds
-      # three TDM stages: measured best ~25 when A is sub-byte and ~40 otherwise on gfx1250
-      # MAF. Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
+      # three TDM stages: measured best ~25 when A is sub-byte and ~30 otherwise on gfx1250
+      # MAF (it was 40 while the hazard model delayed each prefetch by about 5 windows).
+      # Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
       # the whole prefetch group in the tensor_load's window (temporary per-shape defaults).
       # stinkytofu drops the lead itself where a stage has under 64 WMMAs (counted in the asm).
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
-        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 30
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
       # Tuning overrides from GlobalParameters win over the values above.
@@ -7257,6 +7486,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                            options=stinky_module_options)
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+
+      # The allocation dump goes to a directory per kernel, named like the
+      # kernel's own files, under StinkyTofuCostOutputDir when that is set.
+      if stinky_module_options["RegisterAllocationDump"]:
+        stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
+        if globalParameters.get("StinkyTofuCostOutputDir"):
+          stModule.setOutputDir(str(globalParameters["StinkyTofuCostOutputDir"]))
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
@@ -7278,7 +7514,34 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      # Tensile's own assembly, for the comparison ENABLE_DEBUG_STINKYTOFU_ASM
+      # writes below. Taken before the budget is re-judged, because that sets
+      # the kernel body's declared counts to the ones StinkyTofu emitted, which
+      # would leave both files declaring the same registers.
+      debugAsm = os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None
+      if debugAsm:
+        t_str_start = time.perf_counter()
+        orig_asm_str = str(moduleKernelBody)
+        t_str_end = time.perf_counter()
+        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+      # Pay off the deferral, and realign the recorded counts and the occupancy
+      # with them: both now come from what the emitted code declares, not from
+      # the pool estimate. The guard is defensive -- error is always 0 here --
+      # because a resolver that accepts would erase a rejection.
+      if error == 0:
+        error = self.resolveDeferredRegisterOverflow(kernel, moduleKernelBody,
+                                                     stModule.getDeclaredVgprCount(),
+                                                     stModule.getDeclaredSgprCount())
+        if error != 0:
+          # Rejected after all, so the skipped verdict is due: ForceGenerateKernel
+          # builds this source, so replace it with the stubbed rocisa module.
+          self.applyOverflowVerdict(kernel, moduleKernelBody, afterAllocation=True)
+          st_asm = str(moduleKernelBody)
+      else:
+        self.states.overflowPendingRA = 0
+
+      if debugAsm:
         t3_start = time.perf_counter()
         import hashlib, fcntl
         os.makedirs("cmpasm/orig", exist_ok=True)
@@ -7295,11 +7558,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
           st_path = f"cmpasm/st/{base_name}_{suffix}.s"
           suffix += 1
-
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
         with open(orig_path, "w") as f:
           f.write(orig_asm_str)
@@ -7321,6 +7579,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
     else:
+      # Unreachable: the mode gates a deferral on the same two questions the
+      # conversion gate above asks. Kept, and loud, because a deferral nothing
+      # resolves would silently accept an over-budget kernel.
+      if self.states.overflowPendingRA:
+        printWarning("%s: deferred register overflow but no StinkyTofu module; the mode "
+                     "and the conversion gate disagree" % self.states.kernelName)
+        error = self.states.overflowPendingRA
+        self.states.overflowPendingRA = 0
+        self.states.overflowedResources = error
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
@@ -7333,6 +7600,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
         raise ValueError("DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
+    if isStreamKSpatialCluster(kernel):
+      support = kernel["InternalSupportParams"]
+      if support.get("PersistentLoopArgsVersion", 0) != 2 or support["KernArgsVersion"] != 3:
+        raise ValueError("Clustered StreamK requires PersistentLoopArgsVersion=2 and KernArgsVersion=3")
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
@@ -7407,6 +7678,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #exit(1)
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
+    # PostLoopStoreInNll: fuse the fp4+UseSubtileImpl paired dwordx4 store into the
+    # NLL. Solution-level gating already narrowed this to eligible configs; here we
+    # just snapshot it and reset the per-kernel "already injected" flag.
+    self.states.postLoopStoreInNll = kernel["PostLoopStoreInNll"]
+    self.states.postLoopStoreInjected = False
+    # Step 4b-2: set True once SrdD's value is computed before the main loop, so
+    # the post-loop store-init emits only the C channel (D already done) instead
+    # of the full C+D init. Reset per kernel; only the pre-main-loop D-hoist below
+    # flips it on.
+    self.states.postLoopSrdDHoisted = False
     hasMx = kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]
     usesTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
     usesDTL = kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
@@ -7576,6 +7857,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
     if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
       self.states.lrvwTileA = kernel["VectorWidthA"]
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.lrvwTileMXSA = kernel["VectorWidthA"]
     else:
       self.states.lrvwTileA = 1
     forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
@@ -9576,9 +9859,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += numVgprsEmuB # for vgpr 32XEmulation B
 
       if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
-        if hasStaticAssignment(kernel):
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.persistentConstVgprNames(kernel))
         self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9638,9 +9919,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       #vgprIdx += self.states.c.numVgprValu
       if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
-        if hasStaticAssignment(kernel):
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.persistentConstVgprNames(kernel))
         self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9685,9 +9964,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     numSgprAddressD = self.states.rpga # til end
     numSgprAddressC = self.states.rpga # til end
     numSgprAddressA = self.states.rpga # til read offsets
-    numSgprAddressB = self.states.rpga # til read offsets
     if kernel["ProblemType"]["MXBlockA"]:
       numSgprAddressMXSA = self.states.rpga
+    numSgprAddressB = self.states.rpga # til read offsets
     if kernel["ProblemType"]["MXBlockB"]:
       numSgprAddressMXSB = self.states.rpga
     numSgprAddressWS = self.states.rpga
@@ -9705,9 +9984,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.states.c.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.gate.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.a.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsA"])
-    self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSA"])
+    self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSB"])
     if not kernel["ProblemType"]["UseInitialStridesCD"]:
@@ -9717,9 +9996,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.gate.numSgprStrides -= 1
     if not kernel["ProblemType"]["UseInitialStridesAB"]:
       self.states.a.numSgprStrides -= 1
-      self.states.b.numSgprStrides -= 1
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.numSgprStrides -= 1
+      self.states.b.numSgprStrides -= 1
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.mxsb.numSgprStrides -= 1
     if kernel["ProblemType"]["Sparse"]:
@@ -9867,13 +10146,44 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
       self.defineSgpr("BRotateLRDelta", 1)
 
+    # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
+    # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
+    # fused-store structural sub-guard (no-tail, beta==0, full-tile M/N, StreamK
+    # owner, Alpha==1.0, null ScaleAlphaVec) into one bit so all three guard sites
+    # collapse to a single flag compare. The fused epilogue does not apply alpha.
+    # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
+    # endSummation and is live at all guard sites. Only defined when the optimization is
+    # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
+    if kernel["PostLoopStoreInNll"] and kernel["ProblemType"]["ComputeDataType"].isSingle():
+      self.defineSgpr("PostLoopFusedStore", 1)
+
+
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well
-    if self.states.doShadowInit and kernel["BufferStore"]:
+    # PostLoopStoreInNll (fp4 subtile weave) reserves SrdD here too — even though
+    # subtile kernels never set doShadowInit — so SrdD gets a stable index in the
+    # common allocator *before* the deferred loop places SrdWS. This is what
+    # prevents the SrdD/SrdWS register-pool collision on StreamK (the old bespoke
+    # mid-loop SrdD define grabbed the parked SrdWS registers). The value of SrdD
+    # is still computed early (before the main loop) in the kernel body. SrdC is
+    # NOT reserved early for the PLSIN path: it is only needed by the post-loop
+    # beta/C path and is defined in endSummation, so it stays free as a main-loop
+    # temp (parking it through the whole loop would let a temp grab its registers).
+    # PostLoopStoreInNll (fp4 subtile weave) SGPR-defer: SrdD is intentionally NOT
+    # reserved early here. Reserving it early made it main-loop-resident (survives
+    # via nonPostLoopSgpr), costing 4 SGPRs across the whole loop and overflowing
+    # MT256x256 fp4. Baseline defines SrdD only *after* endSummation's reclaim, so
+    # it never costs main-loop SGPRs. We mirror that: the PLAIN / SkipToEnd post-loop
+    # store computes SrdD after the reclaim (globalWriteWorkGroupInit channels=None),
+    # and the FUSED NLL store defines a *transient* SrdD from the drain-era pool
+    # (buildSubtileFusedStore). Only doShadowInit (never set for subtile) reserves
+    # SrdD/SrdC early.
+    earlyStoreSrd = self.states.doShadowInit
+    if earlyStoreSrd and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
 
@@ -9885,7 +10195,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)
@@ -10642,6 +10952,43 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
     using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
+
+  def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
+    """Effective register allocation mode from the kernel parameter: 0 off, 1 shadow,
+    2 apply, 3 force apply -- the mode a config string starts with -- and 0 whenever
+    the StinkyTofu path will not run. The module is built on the same conditions
+    checked here, so mode 3 guarantees the resolver is reached, which is what makes
+    deferring safe.
+
+    Only mode 3 defers, because only it needs to: shadow could not lower a count,
+    and plain apply admits no kernel the pool estimate rejected, since a verdict
+    it reaches was never set aside to begin with.
+
+    Every mode is still re-judged on the counts the emitted code declares, mode 0
+    included -- emitAssembly() rewrites those counts whether or not allocation
+    ran, and raises as well as lowers them. So any mode can newly *reject* a
+    kernel the pool estimate admitted, which is the kernel no longer fitting
+    rather than a policy this mode chose.
+    """
+    if kernel.get("_StinkyTofuOptLevel") is None:
+      return 0
+    if not rocisa.isSupportedByStinkyTofu(self.states.version):
+      return 0
+    # TODO: ask whether the backend's capabilities include the allocation passes
+    return parseStinkyTofuRegisterAllocation(kernel.get("StinkyTofuRegisterAllocation", 0))[1]
+
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Override in KernelWriterAssembly to defer a budget verdict to allocation."""
+    pass
+
+  def applyOverflowVerdict(self, kernel, mkb, afterAllocation: bool = False) -> None:
+    """Override in KernelWriterAssembly to report and act on an overflow."""
+    pass
+
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Override in KernelWriterAssembly to re-judge the budget after allocation."""
+    return 0
 
   ##############################################################################
   # Check Resources
@@ -11883,22 +12230,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     fileString += str(kb)
 
-    if isPersistentDataParallel(kernel):
-      # rocisa emits the outer ABI version. DataParallel kernels must also carry
-      # their policy and payload version when this assembly is reused as a
-      # prebuilt custom kernel without its original solution record.
+    if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
+      # rocisa emits the outer ABI version. Persistent kernels with a newer
+      # payload must carry its version when this assembly is reused without
+      # its original solution record. This also prevents unsupported custom
+      # StreamK ABI2 descriptors from being mistaken for legacy ABI0.
       legacyMetadata = "custom.config:\n  InternalSupportParams:\n    KernArgsVersion: 3\n"
-      dataParallelMetadata = (
+      policyMetadata = (
         "custom.config:\n"
-        "  TileProcessingStrategy: DataParallel\n"
+        f"  TileProcessingStrategy: {kernel['TileProcessingStrategy']}\n"
         "  WorkAssignment: StaticGrid\n"
+      )
+      if isStreamKSpatialCluster(kernel):
+        policyMetadata += f"  ClusterDim: {list(kernel['ClusterDim'])}\n"
+      policyMetadata += (
         "  InternalSupportParams:\n"
         "    KernArgsVersion: 3\n"
-        "    PersistentLoopArgsVersion: 1\n"
+        f"    PersistentLoopArgsVersion: {kernel['InternalSupportParams']['PersistentLoopArgsVersion']}\n"
       )
       if legacyMetadata not in fileString:
-        raise ValueError("DataParallel kernel is missing its KernArgsVersion=3 assembly metadata")
-      fileString = fileString.replace(legacyMetadata, dataParallelMetadata, 1)
+        raise ValueError("Persistent kernel is missing its KernArgsVersion=3 assembly metadata")
+      fileString = fileString.replace(legacyMetadata, policyMetadata, 1)
 
     if error != 0:
       if self.debugConfig.forceGenerateKernel:
@@ -12006,6 +12358,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert False, "Should be overrided"
 
   def tdmApplyTileKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyTileKOffset(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:

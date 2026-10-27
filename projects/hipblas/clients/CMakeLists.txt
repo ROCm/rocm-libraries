@@ -323,6 +323,13 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
 
   if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/libgtest.a")
     set( GTEST_ROOT "${BUILD_DIR}/deps/deps-install")
+    # deps-install/include is also the bundled LAPACK include dir, so it sits on
+    # the client include path ahead of /usr/include and its googletest headers
+    # win. find_package must resolve to that same tree; GTEST_ROOT alone does not
+    # steer config mode. Compiling against one googletest and linking another
+    # changes the number of TestEventListener virtuals, so listener dispatch runs
+    # off the end of the vtable.
+    list( PREPEND CMAKE_PREFIX_PATH "${GTEST_ROOT}" )
   endif()
   find_package( GTest REQUIRED )
 

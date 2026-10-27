@@ -308,6 +308,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
@@ -596,6 +597,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
@@ -610,6 +612,15 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      # The touch makes the build run flatc again, also when the checkout gives the committed
+      # header a newer timestamp than the schema.
+      - name: Check the committed ingestor plan header matches its schema
+        run: |
+          set -euo pipefail
+          touch dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs
+          cmake --build build --target hkp_generate_ingestor_plan_header
+          git diff --exit-code -- dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.

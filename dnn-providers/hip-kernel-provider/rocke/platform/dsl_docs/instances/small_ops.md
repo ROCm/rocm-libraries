@@ -765,15 +765,16 @@ multiply post-MFMA, against the same spec surface.
 
 ## MX GEMM File: `instances/mx_gemm.py`. Matches CK Tile ``42_mx_gemm``. Uses the
 OCP MX-spec shared-exponent format: each 32-element mantissa block
-carries one 8-bit unbiased E8M0 scale.
+carries one 8-bit biased E8M0 scale (bias 127).
 
 Per-element math::
 
  A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
 
 The kernel uses :func:`rocke.helpers.decode_mx_scale_e8m0` to turn
-the E8M0 byte into an f32 multiplier (with NaN / zero sentinel
-handling matching the AMDGPU MX MFMA hardware path) and
+the E8M0 byte into an f32 multiplier (per the OCP MX spec: the byte
+is unsigned, codes 0..254 give ``2^(code - 127)`` and code 255 gives
+NaN) and
 :func:`rocke.helpers.apply_mx_scale` to apply the scale before the
 accumulate.
 
