@@ -618,8 +618,11 @@ def _mapKernelsByBackend(fn, nativeFn, kernels):
 
     results = [None] * len(kernels)
 
-    def runBatch(f, idx, message):
-        batch = ParallelMap2(f, [kernels[i] for i in idx], message, multiArg=False, return_as="list")
+    def runBatch(f, idx, message, spawn_worker=False):
+        batch = ParallelMap2(
+            f, [kernels[i] for i in idx], message, multiArg=False, return_as="list",
+            spawn_worker=spawn_worker,
+        )
         for i, r in zip(idx, batch):
             results[i] = r
 
@@ -628,7 +631,7 @@ def _mapKernelsByBackend(fn, nativeFn, kernels):
     if adapterIdx:
         runBatch(fn, adapterIdx, "Generating assembly kernels (gfx1250, stinkytofu)")
     with _native_rocisa_workers():
-        runBatch(nativeFn, nativeIdx, "Generating assembly kernels (native rocisa)")
+        runBatch(nativeFn, nativeIdx, "Generating assembly kernels (native rocisa)", spawn_worker=True)
     return results
 
 

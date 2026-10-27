@@ -277,6 +277,7 @@ def run_where_backend_matches_isa(isa, fn, *args):
             "native rocisa",
             multiArg=False,
             return_as="list",
+            spawn_worker=True,
         )[0]
 
 
