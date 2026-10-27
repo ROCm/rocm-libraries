@@ -970,7 +970,8 @@ output. We tested this directly: passing a per-lane swizzled LDS
 pointer to `raw_ptr_buffer_load_lds` corrupted the result, so swizzle
 has to be expressed in the address arithmetic of a lane-contiguous
 distribution, the way CK's tile descriptors do, not by handing the
-intrinsic an arbitrary LDS pointer.
+intrinsic an arbitrary LDS pointer. To swizzle a gfx9 async copy anyway, permute which
+source chunk each lane fetches (§6.4a).
 
 `AsyncTileLoader.choose_dwords` selects `{4, 3, 1}` only (the AMDGPU
 `raw_ptr_buffer_load_lds` intrinsic on this target does not accept 2
@@ -1096,15 +1097,19 @@ the per-opcode conflict-period table.
 
 **gfx9 async DRAM→LDS copies: swizzle the source, not the destination.** On
 gfx942/gfx950 an async `buffer_load … lds` copy writes lane *n* of the wave to LDS
-slot *n*, so its destination address cannot be XORed. Permute which global chunk each
-lane fetches instead. With 16-byte chunks, chunk `c` of row `r` is stored at LDS chunk
-`c ^ (r mod chunks_per_row)`. XOR is its own inverse, so the lane that writes LDS
-chunk `c` fetches global chunk `c ^ (r mod chunks_per_row)`, and every LDS reader
+slot *n*, so its destination address cannot be XORed (§6.3). Permute which global
+chunk each lane fetches instead. With 16-byte chunks, chunk `c` of row `r` is stored at
+LDS chunk `c ^ (r mod chunks_per_row)`. XOR is its own inverse, so the lane that writes
+LDS chunk `c` fetches global chunk `c ^ (r mod chunks_per_row)`, and every LDS reader
 applies the same permutation to its column. The copies stay contiguous and the tile
 needs no padding. A loader that stages through registers can permute on the store
-instead. The 3D attention kernels' `use_kv_lds_swizzle` is the worked example
-(§12.1.K2). gfx1250's `global_load_async_to_lds` takes a per-lane LDS address and does
-not have this constraint.
+instead (the gfx942 3D wide feed does, by default for decode at head size 64 and 128,
+with no A/B of its own recorded: see the
+[3D decode case study](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md)),
+but §6.4 measured a manually swizzled layout with register-staged LDS writes to regress
+slightly, so A/B it on your loader. The 3D attention kernels' `use_kv_lds_swizzle` is
+the worked example (§12.1.K2). gfx1250's `global_load_async_to_lds` takes a per-lane LDS
+address and does not have this constraint.
 
 ### 6.5 Registers
 
@@ -1131,10 +1136,11 @@ not have this constraint.
 - Do not tune only for warm cache unless production has warm cache.
 - Consider L2 prefetch only when the memory pattern is predictable.
 - Mark data that is read exactly once (the K/V of single-token decode, one-shot
-  streams) non-temporal (`CACHE_STREAM` / `"stream"`; bits in
+  streams) non-temporal (`CACHE_STREAM` / `"stream"`, which sets the NT bit only: `"nt"`
+  also sets SC0 and is a different policy; bits in
   [`ir_model.md`](../ir_lowering/ir_model.md)) so it does not evict lines something
   else will reuse. The 3D decode kernels' `kv_cache_policy` does this when every
-  sequence decodes (§12.1.K2).
+  sequence decodes and K/V is fp16/bf16 (§12.1.K2).
 - Judge a non-temporal hint on data that is *not* cache-resident between calls
   (rotating buffers). Replaying the same small K/V keeps it warm for the baseline
   and makes the hint look like a regression.
@@ -1259,7 +1265,8 @@ layout match, independent of the atom's compute throughput.
 - Ensure boundary lanes write zeros or that suppressed loads do not
   leave stale LDS.
 - Understand whether async instruction writes lane-contiguous or
-  arbitrary addresses (lane-contiguous on AMD; see Section 6.3).
+  arbitrary addresses (lane-contiguous for gfx9 `buffer_load … lds`; gfx1250's
+  `global_load_async_to_lds` takes a per-lane LDS address; see Sections 6.3 and 6.4a).
 - If arbitrary swizzle is needed, verify the intrinsic supports it.
 
 ### 8.3 Waits And Barriers
@@ -2113,11 +2120,11 @@ them by hand only through an explicit tuning spec.
 
 | Field | Effect | Selected by / when to change |
 |---|---|---|
-| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough workgroups (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences; the rule is spelled out in [gfx950 §6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule) and [gfx942 §8.3](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule) |
-| `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few workgroups to fill the device; gfx942 `_gfx942_3d_tile_size_override` |
+| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough workgroups (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences; the rule is spelled out in [gfx950 §6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule) and [gfx942 §8.3](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule); tuning candidate `0` takes the count `_num_segments` picks (the split rule's, where it applies), so a sweep can include the dispatched config when it tunes at the dispatcher's `num_cus` (without one, tuning uses the architecture's full-part CU count) |
+| `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few workgroups to fill the device (under revision, [case study §7](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#7-open-items)); gfx942 `_gfx942_3d_tile_size_override` |
 | `use_wide_kv_load` (gfx942) | Wide synchronous K/V loads instead of 4-byte async copies | `_enable_gfx942_3d_wide_kv_load`; relies on the compiler overlapping the loads, so large head sizes keep the async copies |
-| `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes, since each K/V byte is read once |
-| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; pays where LDS reads stall the loop (large tiles, gfx942) |
+| `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes and K/V is fp16/bf16 (fp8 keeps `"all"`), since each K/V byte is read once |
+| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; measured faster with gfx950 multi-page tiles and neutral with page-sized ones; gfx942 decode turns it on with no outcome of its own recorded (at head size 256 only together with `use_wave_page_id_load`, since alone it is slower under some compilers) |
 | `use_wave_page_id_load` | The wave loads 64 page-table entries at once and each tile reads its page ids from registers | `_wave_page_id_load_3d`; takes the page-table load off the KV loop's critical path, which lets fewer workgroups per CU hide latency |
 | `use_decode_grid` | One workgroup per sequence on grid x, no search over `query_start_len` | Derived (`_use_decode_grid`), legal only when every sequence has one query token; not a tuning axis |
 | `use_invariant_hoist` | Inert; kept so saved specs that set it still load | — |
@@ -2125,27 +2132,31 @@ them by hand only through an explicit tuning spec.
 **Baked in, no field (already applied: a Step 0 sweep should not repeat them).** The
 segment and reduce kernels always do the following; there is nothing to flip:
 
-- **Transposed scores, register-resident P.** $S^{\top} = K\,Q^{\top}$ gives each lane
-  one query row, so the softmax state is one $(m, \ell)$ per lane and $P^{\top}$ is
-  the B operand of $O^{\top} = V^{\top} P^{\top}$ straight from registers, with no
-  `P_lds`. The 2D rows above (`use_transposed_qk_32x32`,
-  `use_transposed_scalar_state`, `use_register_pv`) are the same idea behind flags.
-  `use_register_pv` alone is a net regression on the 16×16 atom there; the 3D kernels
-  avoid that because the transposed layout is what lets $P^{\top}$ stay in registers as
-  the PV B operand.
-- **$Q^{\top}$ read from LDS once**, before the KV loop; every tile's QK MFMAs reuse
-  the registers.
-- **One V LDS slot** (K stays double-buffered): $V(i)$ is consumed in the iteration
-  that loads it, so a second slot never held a live tile.
-- **Native `exp2`** (`exp2_fast`) in the segment softmax and in the reduce kernel.
+- **Transposed scores, register-resident P.** `S^T = K Q^T` gives each lane one query
+  row, so the softmax state is one `(m, l)` per lane and `P^T` is the B operand of
+  `O^T = V^T P^T` straight from registers, with no `P_lds`. The 2D rows in §12.1.K
+  (`use_transposed_qk_32x32`, `use_transposed_scalar_state`, `use_register_pv`) are the
+  same idea behind flags. In 2D, `use_register_pv` is a net regression on the 16×16
+  atom unless paired with `use_mfma_32x32` and `use_transposed_pv_tr_read` (§12.1.K);
+  the 3D kernels keep P in registers on 16×16 atoms without such a pairing, because the
+  transposed scores already have the layout PV needs as its B operand.
+- **`Q^T` read from LDS once**, before the KV loop; every tile's QK MFMAs reuse the
+  registers.
+- **One V LDS slot** (K stays double-buffered): `V(i)` is consumed in the iteration that
+  loads it, so a second slot never held a live tile.
+- **Native `exp2`** in the segment softmax and in the reduce kernel: one `v_exp_f32` in
+  place of the `llvm.exp2` lowering.
 - **gfx950: PV on `16x16x32` MFMAs** for tiles of 32 or more tokens.
-- **gfx950: page ids a tile ahead.** For paged fp16/bf16 K/V the next tile's page id
-  is read during the current tile and passed as the copy's `soffset` (or folded into a
-  64-bit buffer base above 2 GiB), so no table read sits in front of the K/V copies
-  already in flight.
+- **gfx950: page ids a tile ahead** for paged fp16/bf16 K/V (under revision,
+  [case study §7](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#7-open-items)).
 
 Derivations: [gfx950 ALGORITHM.md §5.1](../../../library/builders/gfx950/attention/ALGORITHM.md#51-inside-the-segment-kernel)
 and [gfx942 ALGORITHM.md §8](../../../library/builders/gfx942/attention/ALGORITHM.md#8-the-decode-path-3d-split-kv).
+Outcomes, caveats and the replay:
+[case study](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md). To
+re-measure one baked-in lever, A/B the series commit that added it against that
+commit's parent on `refs/pull/13492/head` (§6 there); the squash merge's first parent
+measures the whole series at once.
 
 #### 12.1.L Multi-XCD / chiplet grid swizzle
 
