@@ -32,7 +32,7 @@ Exit codes:
     1 - One or more validation failures
 
 Usage:
-    python -m Tensile.ValidateMetadata [--strict] [--custom-kernels-root DIR]
+    python -m tensilelite.ValidateMetadata [--strict] [--custom-kernels-root DIR]
 
     --strict    Treat missing or incomplete metadata as errors.
                 Without --strict, validation failures produce warnings only.

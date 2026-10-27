@@ -125,6 +125,7 @@ Frontend API control flow
            -> ExecutionPlanDescriptor::finalize()
               -> Plugin: hipdnnEnginePluginCreateExecutionContext()
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+              -> Record the device of the graph handle's stream
         c. If finalize fails (any error), log a warning and repeat a-b for another
            ranked plan (the list is scanned from the top) until one finalizes. If none
            does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
@@ -153,11 +154,21 @@ Frontend API control flow
      4. Backend: hipdnnBackendSetAttribute(variantPack, WORKSPACE, ...)
      5. Backend: hipdnnBackendFinalize(variantPackDesc)
      6. Backend: hipdnnBackendExecute(handle, execPlanDesc, variantPackDesc)
+        -> Check that the handle's stream is on the plan's device [else BAD_PARAM]
         -> EnginePluginResourceManager::executeOpGraph()
            -> Extract engine ID from execution plan chain
            -> Look up plugin handle for engine ID
            -> Plugin: hipdnnEnginePluginExecuteOpGraph(handle, ctx, workspace, buffers, count)
               [Actual GPU kernel execution happens here]
+
+An execution plan is bound to the device of the handle it was finalized on, or of the
+handle passed to ``hipdnnBackendCreateAndDeserializeExecutionPlan_ext()``. A concrete
+stream maps to the device that owns it; the null, ``hipStreamLegacy`` and
+``hipStreamPerThread`` streams map to the calling thread's current device. The plan can
+run on any handle whose stream is on that device, for example one handle per thread, at
+the cost of one HIP device query per execute. A handle on another device fails with
+``HIPDNN_STATUS_BAD_PARAM`` before any plugin is called. If the device could not be
+determined when the plan was created, the check is skipped.
 
 
 Handle destruction (implicit via RAII)

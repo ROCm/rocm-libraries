@@ -56,6 +56,13 @@ For example, to run ``fp32`` GEMM with validation, use this command:
    transA,transB,M,N,K,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,d_type,compute_type,activation_type,bias_vector,hipblaslt-Gflops,us
    N,N,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,none,0, 415.278, 10.
 
+``-v`` compares the GPU result with a CPU reference computed from the same inputs and adds three columns to the output:
+
+* ``norm_error`` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+* ``atol`` and ``rtol`` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest ``atol`` first, and reports the first pair under which every element satisfies ``|reference - result| <= atol + rtol * |result|``. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. ``failed`` means at least one element is outside even ``atol 0.1 + rtol 0.1 * |result|``; the bench then also prints the number of such elements and the worst one to stderr.
+
+The exit code is 0 whether or not a check fails. Only the first launch of each solution is compared with the reference; the launches timed by ``--iters`` and ``--cold_iters`` are not checked.
+
 For more information, run the command with the ``--help`` option. The output of this command is shown below.
 
 .. code-block:: bash
@@ -139,7 +146,7 @@ For more information, run the command with the ``--help`` option. The output of 
 Building clients with prebuilt libraries
 ========================================
 
-Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build Tensile libraries.
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build TensileLite libraries.
 
 Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through invoke, the same effect can be achieved with the following steps:
 
@@ -153,7 +160,7 @@ Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. I
        -DTensile_SKIP_BUILD=ON ..
    make
 
-To run the clients with existing Tensile libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the Tensile libraries. For example, if the Tensile libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
+To run the clients with existing TensileLite libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the TensileLite libraries. For example, if the TensileLite libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
 
 .. code-block:: bash
 
