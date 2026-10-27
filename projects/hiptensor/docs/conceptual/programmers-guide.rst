@@ -101,7 +101,8 @@ These environment variables, read at every plan creation and workspace estimate,
     *   -   ``HIPTENSOR_ROCKE_JIT``
         -   ``all`` or ``0``, for plans created with ``HIPTENSOR_JIT_MODE_DEFAULT`` on the rocKE backend: ``all``
             also specializes the elementwise launches the default rule leaves on the kernel pack (no vector
-            form, or no input read with vector loads); ``0`` turns the JIT off.
+            form, or no input read with vector loads: every input gathered or broadcast along the output's
+            fastest mode); ``0`` turns the JIT off.
     *   -   ``HIPTENSOR_JIT_MAX_MS``
         -   The compile time, in milliseconds, one ``hiptensorCreatePlan`` may spend on JIT compiles. Past it, the
             remaining launches of the plan keep their kernel-pack kernels (kernels already in the kernel cache are
@@ -164,13 +165,13 @@ library and rocKE's recipe engine. Plans created on the rocKE backend with ``HIP
 replace the elementwise launches of the plan (permutations, elementwise binary and trinary operations, and the
 operand packing and epilogue launches of contractions) by kernels compiled for the problem at plan creation: every
 size, stride and operator a constant, and, when the output and an input are contiguous in the output's fastest
-mode, 16-byte vector loads and stores along that mode. A launch without such an input (for example a
-permutation that moves the fastest mode) keeps its kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all``
-specializes it too). The kernels come from recipes that the build
-records from rocKE's kernel builder (``share/hiptensor/rocke/rocke.recipes``); the library replays them in C++ and
-compiles the result with COMGR, without Python. A specialized launch keeps its kernel-pack launch, which execution
-takes when a buffer is not aligned to the vector width or the plan runs on another device than the one it was
-created on.
+mode, 16-byte vector loads and stores along that mode. A launch without such an input (every input gathered or
+broadcast along the output's fastest mode, for example a permutation that moves the fastest mode) keeps its
+kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all`` specializes it too). The choice is made when the plan is created
+and is kept by the plans the plan cache restores. The kernels come from recipes that the build records from
+rocKE's kernel builder (``share/hiptensor/rocke/rocke.recipes``); the library replays them in C++ and compiles the
+result with COMGR, without Python. A specialized launch keeps its kernel-pack launch, which execution takes when
+a buffer is not aligned to the vector width or the plan runs on another device than the one it was created on.
 
 Plans created with ``HIPTENSOR_JIT_MODE_NONE`` (the default) never compile and never use JIT kernels; every
 problem the rocKE backend serves runs without JIT. Plan creation with ``HIPTENSOR_JIT_MODE_DEFAULT`` can take as

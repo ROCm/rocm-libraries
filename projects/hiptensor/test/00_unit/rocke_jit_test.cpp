@@ -665,7 +665,8 @@ namespace
     }
 
     // The cases: vector classes (all inputs packed like D), gathered inputs (permuted modes),
-    // every arity, f16 and f32, mixed types, a layout without a vector form.
+    // every arity, f16 and f32, mixed types, a fully transposing permute (a vector form with
+    // gathered loads only, not promoted by default) and a layout without a vector form.
     std::vector<Case> cases()
     {
         std::vector<Case> out;
@@ -712,8 +713,9 @@ TEST(RockeJit, ModeNoneNeverCompiles)
     EXPECT_FALSE(j.found);
 }
 
-// HIPTENSOR_JIT_MODE_DEFAULT specializes every launch with a vector form; the results are exact,
-// also with buffers one element off the vector alignment (the pack kernel then runs).
+// HIPTENSOR_JIT_MODE_DEFAULT specializes every launch with a vector form and at least one input
+// read with vector loads; the results are exact, also with buffers one element off the vector
+// alignment (the pack kernel then runs).
 TEST(RockeJit, DefaultSpecializesExactly)
 {
     std::mt19937 rng(12);
@@ -737,15 +739,23 @@ TEST(RockeJit, DefaultSpecializesExactly)
 }
 
 // HIPTENSOR_ROCKE_JIT=all also specializes launches without a vector form (constant geometry
-// only); HIPTENSOR_ROCKE_JIT=0 turns the JIT off.
+// only) and vector launches whose inputs are all gathered; HIPTENSOR_ROCKE_JIT=0 turns the JIT
+// off.
 TEST(RockeJit, PromotionKnobs)
 {
     std::mt19937 rng(13);
-    Case         odd = cases().back();
+    for(auto const& c : cases())
     {
+        if(c.name.find("odd") == std::string::npos
+           && c.name.find("transposing") == std::string::npos)
+        {
+            continue;
+        }
         ScopedEnvironmentVariable all("HIPTENSOR_ROCKE_JIT", "all");
-        auto                      j = runCase(odd, HIPTENSOR_JIT_MODE_DEFAULT, rng);
-        EXPECT_EQ(j.specialized, 1);
+        auto                      j = runCase(c, HIPTENSOR_JIT_MODE_DEFAULT, rng);
+        ASSERT_TRUE(j.found) << c.name << ": the library has no rocKE JIT";
+        EXPECT_EQ(j.launches, 1) << c.name;
+        EXPECT_EQ(j.specialized, 1) << c.name;
     }
     {
         ScopedEnvironmentVariable off("HIPTENSOR_ROCKE_JIT", "0");
