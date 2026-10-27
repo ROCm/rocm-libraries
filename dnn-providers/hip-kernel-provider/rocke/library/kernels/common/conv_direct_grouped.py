@@ -7528,6 +7528,11 @@ class DirectDepthwiseDgradWindowedSpec:
     # dY window rows in flight ahead of the row being multiplied.
     prefetch_rows: int = 1
     wave_size: int = 64
+    # Read the filter rotated by 180 degrees (MFMA form only): the kernel then
+    # runs the forward depthwise convolution whose dgrad ``problem`` is the
+    # transpose -- dY is the forward input, dX the forward output, and PAD is
+    # ``KH - 1 - pad`` (see :func:`dw_win_fwd_problem`).
+    fwd: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -7608,7 +7613,7 @@ class DirectDepthwiseDgradWindowedSpec:
                 f"bh{self.block_h}",
                 f"f{self.w_fold}",
                 f"pf{self.prefetch_rows}",
-                flags={"mfma": True, "bf16": p.dtype == "bf16"},
+                flags={"mfma": True, "bf16": p.dtype == "bf16", "fwd": self.fwd},
             )
         return kernel_name_join(
             self.name,
@@ -7624,6 +7629,29 @@ class DirectDepthwiseDgradWindowedSpec:
         ok, why = _depthwise_dgrad_win_check(self)
         if not ok:
             raise ValueError(f"DirectDepthwiseDgradWindowedSpec: {why}")
+
+
+def dw_win_fwd_problem(problem: DirectConvProblem) -> DirectConvProblem:
+    """The dgrad problem whose windowed MFMA kernel, with ``fwd=True``, runs
+    the stride-1 depthwise forward convolution ``problem``.
+
+    The forward pass is a dgrad over the rotated filter with the roles of the
+    activations swapped: its dX is the forward output (``Ho x Wo``), its dY
+    the forward input (``H x W``), and its padding ``KH - 1 - PAD`` (the same
+    for "same" padding), so the transposed problem's ``Ho x Wo`` is the
+    forward ``H x W`` again.
+    """
+    from dataclasses import replace
+
+    if problem.KH != problem.KW:
+        # One PAD serves both axes; only a square filter keeps it one value.
+        raise ValueError(
+            f"the forward windowed kernel needs a square filter "
+            f"(got {problem.KH}x{problem.KW})"
+        )
+    return replace(
+        problem, H=problem.Ho, W=problem.Wo, PAD=problem.KH - 1 - problem.PAD
+    )
 
 
 def _depthwise_dgrad_win_mfma_check(
@@ -7690,6 +7718,8 @@ def _depthwise_dgrad_win_check(
         return False, f"dot2 requires ch_per_lane=1 (got {spec.ch_per_lane})"
     if spec.prefetch_rows < 1:
         return False, f"prefetch_rows must be >= 1 (got {spec.prefetch_rows})"
+    if spec.fwd and not spec.mfma:
+        return False, "fwd requires mfma"
     if spec.mfma:
         ok, why = _depthwise_dgrad_win_mfma_check(spec)
         if not ok:
@@ -8163,7 +8193,11 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         for ph in range(KWP):
             s = b.sub(b.add(t, b.const_i32(4 * ph)), q)
             ok = b.land(ch_ok, b.land(b.cmp_ge(s, c0), b.cmp_lt(s, c_KW)))
-            tap = b.sub(b.const_i32(r * KW + KW - 1), s)
+            if spec.fwd:
+                # The rotated filter: W[k, KH - 1 - r, s].
+                tap = b.add(b.const_i32((KH - 1 - r) * KW), s)
+            else:
+                tap = b.sub(b.const_i32(r * KW + KW - 1), s)
             off = b.select(ok, b.add(w_base, b.mul(tap, b.const_i32(2))), oob_lane)
             if p.dtype == "bf16":
                 w = b.buffer_load_bf16(b_rsrc, off, c0)

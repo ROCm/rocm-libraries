@@ -35,6 +35,11 @@ kernels' knob rules); --algorithm, --instance and --sample narrow that further.
 The instances run in the dispatcher's priority order, so the table also shows
 where its default pick (marked '*') ranks.
 
+Every reported time is measured the way hipDNN's ``dnn-benchmark`` times a
+call (``--timing staged``, the default: one stalled event pair per launch, the
+median; see :mod:`benchmarks.common.batched_timing`), so the numbers compare
+with hipDNN and MIOpen. ``--timing block`` restores the back-to-back average.
+
 The instances record the LLVM flavor they are lowered for (``llvm22``); run
 with ``ROCKE_LLVM_FLAVOR`` set to it.
 
@@ -69,6 +74,7 @@ from pathlib import Path
 # where the C++ engine extension is not built.
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
+from benchmarks.common.batched_timing import add_timing_arg  # noqa: E402
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg  # noqa: E402
 
 _DTYPES = ("fp16", "bf16")
@@ -984,6 +990,7 @@ def _parser() -> argparse.ArgumentParser:
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
     add_early_stop_arg(parser)
+    add_timing_arg(parser)
     parser.add_argument(
         "--top", type=int, default=10, help="print the top-N instances (default: 10)"
     )

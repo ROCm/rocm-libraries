@@ -610,6 +610,7 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *      w_fold: int = 1           # images per MFMA tile (mfma only)
  *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
  *      wave_size: int = 64
+ *      fwd: bool = False         # rotated filter: the forward pass (mfma only)
  *
  *  AOT: takes the direct dgrad kernarg block (N, H, W, Ho, Wo, groups and the
  *  dY/dX strides are runtime); KH, KW and PAD are baked.
@@ -641,6 +642,7 @@ typedef struct rocke_direct_depthwise_dgrad_win_spec
     int w_fold; /* default 1 */
     int prefetch_rows; /* default 1 */
     int wave_size; /* default 64 */
+    bool fwd; /* default false */
 } rocke_direct_depthwise_dgrad_win_spec_t;
 
 rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);

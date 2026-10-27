@@ -59,8 +59,10 @@ a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
 order -- each one's identity, launch geometry, kernarg signature and buffers
 -- plus the scratch and host tables they need. Most instances are one kernel;
 the MFMA direct dgrad first runs the weight transforms named in its spec's
-``helpers``, and implicit-GEMM dgrad reads a tilde sub-GEMM table the caller
-uploads.
+``helpers``, a split-C direct forward instance runs the reduction named there
+after it (into ``y`` from an fp32 workspace), and implicit-GEMM dgrad reads a
+tilde sub-GEMM table the caller uploads. Implicit-GEMM instances run a
+convolution whose width folds into its channels (a patch embedding) folded.
 """
 
 from __future__ import annotations
@@ -80,6 +82,7 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
+    DIRECT_DEPTHWISE_WIN_FWD,
     DIRECT_MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
@@ -284,14 +287,16 @@ def _conv_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
     """The problem the implicit-GEMM instances run for ``req``.
 
-    A dgrad whose width folds into its channels
+    A convolution whose width folds into its channels
     (:func:`kernels.common.conv_implicit_gemm_dgrad.fold_width`: a patch
-    embedding, say) runs folded -- the same bytes in all three tensors, in
-    fewer and wider tilde sub-GEMMs. Admission, grid and kernargs all read
+    embedding, say) runs folded -- the same bytes in all three tensors. A
+    dgrad runs fewer and wider tilde sub-GEMMs; a forward pass reads the
+    ``X * C`` contiguous input of a patch row as one channel run, so a
+    3-channel stem loads vector-wide. Admission, grid and kernargs all read
     this problem, so an instance is admitted for the shape it actually runs.
     """
     p = _conv_problem(req)
-    if p is None or req.direction.lower() != "dgrad":
+    if p is None:
         return p
     return fold_width(p)
 
@@ -402,8 +407,9 @@ class ConvInstanceSpec:
     identity it decodes to -- the key its binary is built and cached under.
     ``block`` is the workgroup size the binary is launched with; it is a
     function of the instance's tuning alone, never of the shape. ``helpers``
-    are the binaries a run launches before it (the MFMA dgrad's weight
-    transforms), built and cached alongside it.
+    are the other binaries a run launches -- before it, the MFMA dgrad's
+    weight transforms; after it, a split-C instance's reduction -- built and
+    cached alongside it.
     """
 
     name: str
@@ -503,13 +509,30 @@ def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     return (spec.threads_per_block, 1, 1)
 
 
-def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
-    """The weight-transform binaries an MFMA dgrad instance launches first.
+def _split_c(identity: KernelIdentity) -> int:
+    """The C-split degree of a forward direct instance (1: not split)."""
+    if not identity.is_direct or identity.direction != "direct_fwd":
+        return 1
+    return int(_instance_knobs(identity).get("split_c", 1))
 
-    They read the filter and channel counts alone, so the AOT cache keys them
-    with padding and stride zeroed: every instance sharing a filter shares
-    them.
+
+def _instance_helpers(identity: KernelIdentity) -> tuple[KernelIdentity, ...]:
+    """The helper binaries an instance launches besides its own kernel.
+
+    An MFMA dgrad instance launches its weight transforms first. They read the
+    filter and channel counts alone, so the AOT cache keys them with padding
+    and stride zeroed: every instance sharing a filter shares them. A split-C
+    forward instance launches the reduction that folds its fp32 partial sums
+    into the output after it; it bakes no shape, only the degree.
     """
+    split_c = _split_c(identity)
+    if split_c > 1:
+        from kernels.conv.direct_aot_jobs import _split_reduce_identity
+
+        reduce_id = _split_reduce_identity(
+            identity.arch, identity.wave_size, split_c, identity.dtype_a
+        )
+        return (dataclasses.replace(reduce_id, llvm_flavor=identity.llvm_flavor),)
     if identity.algorithm not in DIRECT_MFMA_DGRAD:
         return ()
     return tuple(
@@ -546,8 +569,11 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
                 spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
             )
         )
-    # The MFMA dgrad's own kernel is a forward pass over the transposed problem.
+    # The MFMA dgrad's own kernel is a forward pass over the transposed
+    # problem; the windowed depthwise forward is a dgrad kernel over its own.
     direction = "fwd" if spec.helpers else spec.direction
+    if spec.algorithm == DIRECT_DEPTHWISE_WIN_FWD:
+        direction = "dgrad"
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
 
 
@@ -614,7 +640,8 @@ class ConvLaunchPlan:
     """Everything a launcher needs to run one instance on one request.
 
     The steps run in order on one stream; the last is the instance's own
-    kernel. Buffers are named: the operands ``x``/``w``/``y`` (fwd) or
+    kernel, except for a split-C forward instance, whose fp32 partial sums the
+    reduction after it folds into ``y``. Buffers are named: the operands ``x``/``w``/``y`` (fwd) or
     ``dy``/``w``/``dx`` (dgrad), the caller-allocated scratch in
     ``workspaces`` (name -> bytes, no initial contents), and for implicit-GEMM
     dgrad ``sub_gemms``, a device copy of the i32 table ``sub_gemm_table``
@@ -689,9 +716,36 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
             num_sub_gemms=len(sub_gemms),
         )
     problem, _ = _direct_problem(req)
+    if ident.algorithm == DIRECT_DEPTHWISE_WIN_FWD:
+        # The windowed dgrad kernel with the filter rotated: dgrad extents of
+        # the transposed problem, x riding its dY and y its dX.
+        launch_spec, _ = _direct_launch_spec(ident, req)
+        args = ConvArgs.from_problem(launch_spec.problem, direction="dgrad")
+        return ConvLaunchPlan((step(args),))
     if not spec.helpers:
         args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))
+    split_c = _split_c(ident)
+    if split_c > 1:
+        # Split-C: the conv pass writes fp32 partial sums into a workspace and
+        # the reduction folds them into y. Both take the forward ABI and the
+        # same extents (as benchmarks/common/direct_kernel_sweep.direct_plan).
+        (reduce_id,) = spec.helpers
+        launch_spec, _ = _direct_launch_spec(ident, req)
+        reduce_spec = make_direct_spec(
+            reduce_id.algorithm, problem, {"split_c": split_c}
+        )
+        args = ConvArgs.from_problem(problem, direction="fwd")
+        conv = dataclasses.replace(step(args), buffers=("x", "w", "ws_split"))
+        fold = ConvLaunchStep(
+            reduce_id,
+            reduce_spec.grid(problem),
+            (reduce_spec.threads, 1, 1),
+            conv.signature,
+            ("ws_split", "w", "y"),
+            args,
+        )
+        return ConvLaunchPlan((conv, fold), {"ws_split": launch_spec.workspace_bytes})
 
     # MFMA dgrad: the weight transforms, then a forward pass over the
     # transposed problem reading the transformed weights.

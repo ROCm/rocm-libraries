@@ -105,6 +105,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     wgrad_waves,
 )
 from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
+    DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_REORGANIZE as _REORGANIZE,
     DIRECT_DGRAD_REORGANIZE_RTC as _REORGANIZE_RTC,
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
@@ -540,6 +541,13 @@ def plan_for(
             DirectPlan(identity, (conv, fold), {"ws_split": spec.workspace_bytes}),
             "ok",
         )
+    if variant == _DW_WIN_FWD:
+        # The windowed dgrad kernel with the filter rotated: dgrad ABI over
+        # the transposed problem, x riding its dY and y its dX.
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, spec.problem, "dgrad", ("x", "w", "y")
+        )
+        return DirectPlan(identity, (step,)), "ok"
     if identity.direction == "direct_fwd":
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "y")

@@ -17,6 +17,8 @@
  * fused-weight dgrad and row-stream knobs, three rejects (39, 40, 44) and
  * develop's persistent / waves_k / runtime-channel forms -- mirrors
  * _GENERIC_CFGS.
+ * Indices 45..48: the Toeplitz MFMA form with fwd (the rotated filter; 48,
+ * fwd without mfma, both reject) -- mirrors _WIN_FWD_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -229,6 +231,50 @@ static int make_generic_cfg(int idx, rocke_direct_conv_spec_t* spec, const char*
     return 0;
 }
 
+/* The Toeplitz MFMA form with fwd (the rotated filter), emitted as
+ * WIN_FWD_CFG_BASE + idx (mirrors _WIN_FWD_CFGS); 48 (fwd without mfma) both
+ * reject. */
+#define WIN_FWD_CFG_BASE 45
+static const win_cfg_t WIN_FWD_CFGS[] = {
+    {3, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", 8, 8, 1, 14, 0, 1, 2, 2},
+    {2, 13, 37, 40, 5, 5, 2, "fp16", "gfx950", 8, 4, 1, 4, 0, 1, 1, 1},
+    {1, 13, 13, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 4, 0, 1, 4, 3},
+    {2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", 7, 1, 1, 14, 0, 0, 1, 1},
+};
+
+static int
+    make_win_fwd_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WIN_FWD_CFGS) / sizeof(WIN_FWD_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const win_cfg_t* c = &WIN_FWD_CFGS[idx];
+    *spec = rocke_direct_depthwise_dgrad_win_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = 1;
+    spec->problem.kpg = 1;
+    spec->problem.KH = c->KH;
+    spec->problem.KW = c->KW;
+    spec->problem.PAD = c->PAD;
+    spec->problem.stride = 1;
+    spec->problem.dtype = c->dtype;
+    spec->block_w = c->block_w;
+    spec->block_waves = c->block_waves;
+    spec->ch_per_lane = c->ch_per_lane;
+    spec->block_h = c->block_h;
+    spec->dot2 = c->dot2 != 0;
+    spec->mfma = c->mfma != 0;
+    spec->w_fold = c->w_fold;
+    spec->prefetch_rows = c->prefetch_rows;
+    spec->fwd = true;
+    *arch = c->arch;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -245,7 +291,11 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
-    if(make_generic_cfg(idx - GENERIC_CFG_BASE, &specgen, &arch) == 0)
+    if(make_win_fwd_cfg(idx - WIN_FWD_CFG_BASE, &spec, &arch) == 0)
+    {
+        /* the windowed kernel, rotated filter */
+    }
+    else if(make_generic_cfg(idx - GENERIC_CFG_BASE, &specgen, &arch) == 0)
     {
         is_generic = 1;
     }

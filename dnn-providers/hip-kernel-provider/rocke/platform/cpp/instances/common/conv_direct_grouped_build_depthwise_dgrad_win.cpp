@@ -58,6 +58,7 @@ rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_de
     s.w_fold = 1;
     s.prefetch_rows = 1;
     s.wave_size = 64;
+    s.fwd = false;
     return s;
 }
 
@@ -150,7 +151,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
     if(spec->mfma)
         n = snprintf(out,
                      out_cap,
-                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s",
+                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s",
                      name,
                      p->KH,
                      p->KW,
@@ -159,7 +160,8 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->block_h,
                      spec->w_fold,
                      spec->prefetch_rows,
-                     dw_win_is_bf16(p) ? "_bf16" : "");
+                     dw_win_is_bf16(p) ? "_bf16" : "",
+                     spec->fwd ? "_fwd" : "");
     else
         n = snprintf(out,
                      out_cap,
@@ -228,6 +230,8 @@ static bool
         DW_WIN_FAIL("dot2 requires ch_per_lane=1 (got %d)", cpl);
     if(spec->prefetch_rows < 1)
         DW_WIN_FAIL("prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
+    if(spec->fwd && !spec->mfma)
+        DW_WIN_FAIL("fwd requires mfma");
     if(spec->mfma)
     {
         if(spec->dot2 || cpl != 1)
@@ -838,8 +842,18 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
             V* lt = rocke_b_cmp_lt(b, s, c_KW);
             V* in = rocke_b_land(b, ge, lt);
             V* ok = rocke_b_land(b, ch_ok, in);
-            V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
-            V* tap = rocke_b_sub(b, cr, s);
+            V* tap;
+            if(spec->fwd)
+            {
+                /* The rotated filter: W[k, KH - 1 - r, s]. */
+                V* cr = rocke_b_const_i32(b, (KH - 1 - r) * KW);
+                tap = rocke_b_add(b, cr, s);
+            }
+            else
+            {
+                V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
+                tap = rocke_b_sub(b, cr, s);
+            }
             V* c2 = rocke_b_const_i32(b, 2);
             V* tb = rocke_b_mul(b, tap, c2);
             V* a = rocke_b_add(b, w_base, tb);

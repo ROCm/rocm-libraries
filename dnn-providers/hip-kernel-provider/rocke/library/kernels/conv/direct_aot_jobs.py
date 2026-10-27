@@ -21,6 +21,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
@@ -138,6 +139,9 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# The forward pass on the same Toeplitz MFMA kernel (rotated filter,
+# direct_depthwise_win): "same"-padded square filters, stride 1.
+DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
 # the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
@@ -599,6 +603,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
+    # filter over the transposed problem): stride 1, "same" padding.
+    _DW_WIN_FWD: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in DW_WIN_FWD_FILTERS
+        ),
+    ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
     # padding (it bounds its rows by p_Ho and its columns by p_Wo).
     "direct_depthwise_dgrad_win": (
@@ -821,6 +834,16 @@ def _knob_grid(
         ):
             yield dict(
                 mfma=True,
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+    elif variant == _DW_WIN_FWD:
+        for fold, waves, bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, DW_WIN_MFMA_BLOCK_H
+        ):
+            yield dict(
                 w_fold=fold,
                 block_waves=waves,
                 block_h=bh,

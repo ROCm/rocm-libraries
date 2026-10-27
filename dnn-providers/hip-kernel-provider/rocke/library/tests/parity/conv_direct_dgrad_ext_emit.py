@@ -26,6 +26,8 @@
 # 40: xcd_tiles on gfx942, 44: waves_m = 2 with kpg = 16) and develop's forms
 # (41: persistent grid with the runtime K loop, 42: waves_q = waves_k = 2,
 # 43: runtime channels).
+# Indices 45..48: the MFMA form with fwd (the rotated filter; 48, fwd
+# without mfma, both reject).
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -293,6 +295,53 @@ def _generic_spec(idx: int):
     return DirectConvSpec(problem=problem, **knobs), arch
 
 
+# The Toeplitz MFMA form with ``fwd`` (the rotated filter: the stride-1
+# depthwise forward pass over the transposed problem), after the generic
+# configs. 45: odd N under w_fold 2; 46: ragged rows, 2 W tiles and a partial
+# channel block; 47: 3x3, w_fold 4 with three rows in flight; 48: ``fwd``
+# without ``mfma`` -- both engines reject.
+_WIN_FWD_CFG_BASE = _GENERIC_CFG_BASE + len(_GENERIC_CFGS)
+_WIN_FWD_CFGS = (
+    (
+        3,
+        14,
+        14,
+        64,
+        7,
+        7,
+        3,
+        "bf16",
+        "gfx950",
+        dict(mfma=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14),
+    ),
+    (
+        2,
+        13,
+        37,
+        40,
+        5,
+        5,
+        2,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=1, block_h=4),
+    ),
+    (
+        1,
+        13,
+        13,
+        64,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=8, w_fold=4, prefetch_rows=3, block_h=4),
+    ),
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_w=7, block_h=14)),
+)
+
+
 def _build(spec, arch):
     if isinstance(spec, DirectConv4cSpec):
         return build_direct_conv_4c(spec, arch=arch)
@@ -306,9 +355,15 @@ def _spec(idx: int):
         return _generic_spec(idx - _GENERIC_CFG_BASE)
     if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
         return _fourc_spec(idx - _FOURC_CFG_BASE)
-    if not 0 <= idx < len(_WIN_CFGS):
+    if _WIN_FWD_CFG_BASE <= idx < _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS):
+        N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_FWD_CFGS[
+            idx - _WIN_FWD_CFG_BASE
+        ]
+        knobs = dict(knobs, fwd=True)
+    elif not 0 <= idx < len(_WIN_CFGS):
         raise SystemExit(f"unknown config index {idx}")
-    N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_CFGS[idx]
+    else:
+        N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_CFGS[idx]
     problem = DirectConvProblem(
         N=N,
         H=H,
