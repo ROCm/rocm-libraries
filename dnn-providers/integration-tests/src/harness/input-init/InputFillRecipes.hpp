@@ -212,6 +212,8 @@ public:
             return "subnormal";
         case FillRecipe::Kind::SPECIAL:
             return "special";
+        default:
+            break;
         }
         throw std::logic_error("InputFillRecipes: unhandled FillRecipe::Kind");
     }
@@ -246,6 +248,7 @@ public:
                 break;
             case FillRecipe::Kind::ZEROS:
             case FillRecipe::Kind::SUBNORMAL:
+            default:
                 break;
             }
             if(auto it = _seeds.find(uid); it != _seeds.end())
@@ -350,6 +353,8 @@ private:
             return "inf";
         case FillRecipe::SpecialValue::NEG_INF:
             return "-inf";
+        default:
+            break;
         }
         throw std::logic_error("InputFillRecipes: unhandled FillRecipe::SpecialValue");
     }
@@ -376,8 +381,8 @@ private:
             throw FillRecipeError(at + ": \"" + field + "\" must be a number, got " + v.dump());
         }
         const auto d = v.get<double>();
-        constexpr auto maxFloat = static_cast<double>(std::numeric_limits<float>::max());
-        if(!std::isfinite(d) || std::fabs(d) > maxFloat)
+        constexpr auto MAX_FLOAT = static_cast<double>(std::numeric_limits<float>::max());
+        if(!std::isfinite(d) || std::fabs(d) > MAX_FLOAT)
         {
             throw FillRecipeError(at + ": \"" + field + "\" = " + v.dump()
                                   + " is not a finite float-range number");
@@ -447,6 +452,7 @@ private:
             break;
         case FillRecipe::Kind::ZEROS:
         case FillRecipe::Kind::SUBNORMAL:
+        default:
             break;
         }
 
@@ -461,7 +467,7 @@ private:
         {
             if(!j.contains("scale"))
             {
-                throw FillRecipeError(at + ": kind \"large\" requires \"scale\"");
+                throw FillRecipeError(at + R"(: kind "large" requires "scale")");
             }
             if(!(f.scale > 0.0f))
             {
@@ -493,9 +499,9 @@ private:
 
             if(!j.contains("fraction"))
             {
-                throw FillRecipeError(at + ": kind \"special\" requires \"fraction\"");
+                throw FillRecipeError(at + R"(: kind "special" requires "fraction")");
             }
-            if(!(f.fraction >= 0.0f && f.fraction <= 1.0f))
+            if(f.fraction < 0.0f || f.fraction > 1.0f)
             {
                 throw FillRecipeError(at + ": \"fraction\" must be in [0, 1], got "
                                       + std::to_string(f.fraction));
