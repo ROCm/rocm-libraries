@@ -1014,3 +1014,83 @@ def test_generic_target_provenance_names_the_compile_target(
         "kernelDescriptors"
     ][0]
     assert native_ukd["provenance"]["compile_target"] == "gfx1151"
+
+
+# A producer whose kernels state launch facts. A kernel stating parameter facts
+# or an exact workgroup size is checked on the host before every launch by
+# rocke's KernelLauncher.from_artifact; a packed code object carries none of
+# those rows and the ingestor launches it with its own geometry, so the packer
+# must refuse it rather than ship it with its checks gone.
+_CONTRACT_PRODUCER = """
+    import dataclasses
+
+    from rocke.core.ir import I32, IRBuilder, PtrType, F32
+    from rocke.helpers import KernelModule
+
+    @dataclasses.dataclass
+    class FactSpec:
+        n: int
+
+    def _kernel(name, *, fact=False, workgroup_size=False):
+        b = IRBuilder(name)
+        if workgroup_size:
+            b.kernel.attrs["workgroup_size"] = 64
+        b.param("out", PtrType(F32, "global"))
+        b.param("n", I32, ge=1) if fact else b.param("n", I32)
+        b.ret()
+        return b.kernel
+
+    def is_valid_spec(spec: FactSpec, *, arch="gfx950"):
+        return True, ""
+
+    def build_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_fact", fact=True)
+
+    def build_with_a_workgroup_size(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_workgroup_size", workgroup_size=True)
+
+    def build_module_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return KernelModule(
+            primary=_kernel("plain_primary"),
+            companions={"merge": _kernel("fact_companion", fact=True)},
+        )
+
+    def build_without_facts(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_nothing")
+"""
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("builder", "kernel_name"),
+    [
+        ("build_with_a_fact", "states_a_fact"),
+        ("build_with_a_workgroup_size", "states_a_workgroup_size"),
+        ("build_module_with_a_fact", "fact_companion"),
+    ],
+)
+def test_a_kernel_stating_launch_facts_is_refused_before_it_is_compiled(
+    tmp_path, rocke_importable, builder, kernel_name
+):
+    """The refusal names the builder and the kernel, and comes before any
+    compile: no code object is written."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract")
+    with pytest.raises(HkpPackError) as raised:
+        compile_rocke_variant(src, builder, {"n": 1}, ARCH, tmp_path / "co")
+    message = str(raised.value)
+    assert f"builder '{builder}' @ {ARCH} returned kernel '{kernel_name}'" in message
+    assert "a launch through the ingestor would go unchecked" in message
+    assert "KernelLauncher.from_artifact" in message
+    assert not (tmp_path / "co").exists()
+
+
+def test_a_kernel_stating_no_launch_facts_still_packs(
+    tmp_path, rocke_available, rocke_importable
+):
+    """The same producer's fact-free kernel compiles through comgr and packs."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract_ok")
+    co, symbol, _observations = compile_rocke_variant(
+        src, "build_without_facts", {"n": 1}, ARCH, tmp_path / "co"
+    )
+    assert symbol == "states_nothing"
+    assert co.read_bytes()[:4] == b"\x7fELF"

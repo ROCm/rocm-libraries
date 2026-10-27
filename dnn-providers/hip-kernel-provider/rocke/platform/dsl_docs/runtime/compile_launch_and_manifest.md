@@ -132,7 +132,7 @@ values = {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K}
 launcher(values, config=LaunchConfig(
     stream=0,                     # 0 -> resolve to torch current stream
     grid=(grid_x, grid_y, grid_z),
-    block=(block_size, 1, 1),     # default None -> (64, 1, 1)
+    block=(block_size, 1, 1),     # default None -> (64, 1, 1), or the kernel's workgroup_size (below)
     shared_bytes=0,
     fence=True,                   # default; HIP-event sync after launch
 ))
@@ -143,6 +143,53 @@ Construct **once** per (problem-shape, problem-dtype). The HIP module is loaded 
 `LaunchConfig.fence=True` (default) makes the launcher synchronize on the launch's completion before returning (`hipStreamSynchronize`). This matches CK Tile's `launch_kernel` contract; the per-call cost is ~0.3 us. `fence=False` is fire-and-forget; the caller must drain (`time_launches` does this under the hood).
 
 The `no_fence()` context manager forces `fence=False` for every nested launcher call regardless of per-call config; `time_launches` uses it to wrap a timed loop.
+
+## Checked launches: `KernelLauncher.from_artifact`
+
+A kernel states facts on its parameters (`b.param("M", I32, ge=1, multiple_of=64)`), alignments on its
+pointers (`align=16`) and may state its exact block size (`b.kernel.attrs["workgroup_size"] = 64`). The GPU
+trusts all of them, so the host checks them before every launch. `parameter_contract(kernel)`
+(`runtime/contract.py`) turns them into rows: an integer fact (an int bound, or a relation such as
+`ge=product_of(M, ldc)` evaluated by `rocke.core.intexpr.eval_intexpr`), a pointer alignment, or the
+workgroup size.
+
+The contract is read from the `KernelDef` an artifact holds; nothing is emitted into the code object. So the
+door that checks it is the one that takes the artifact:
+
+```python
+from rocke.runtime import KernelLauncher, LaunchConfig, LaunchRefused, first_supported
+
+launcher = KernelLauncher.from_artifact(compile_kernel(kernel, arch="gfx942"))
+launcher(values, config=LaunchConfig(grid=grid))   # block unset -> (workgroup_size, 1, 1)
+print(launcher.contract)                            # host rows, trusted promises, GPU checks
+launcher.supports({"M": 1000, "N": 128})            # LaunchSupport; alignment "checked at launch"
+first_supported([aligned, ragged], values)          # the first launcher that accepts values
+```
+
+- `from_artifact(artifact, kernel_name=None)` takes a `KernelArtifact` (from `compile_kernel` or
+  `compile_kernel_via_hipcc`, checked alike) or a `ModuleArtifact` (`kernel_name` picks a kernel; the primary
+  by default). The signature and `cluster_dims` come from the kernel; the caller restates nothing.
+- Every launch, `__call__` and `bind` alike, goes through one check-and-pack step. A failed row raises
+  `LaunchRefused` (a `ValueError`) listing every failed row before anything reaches the GPU:
+
+  ```text
+  k refused this launch:
+    M = 1000: needs M multiple_of 64                            (b.param("M", ..., multiple_of=64))
+    ldc = 100: needs ldc ge N (N = 128)                         (b.param("ldc", ..., ge=N))
+    batch_stride_c = 12800: needs batch_stride_c ge product_of(M, ldc) (= 1000 * 100 = 100000)
+    C = 0x7f3a00000002: needs align 16
+    block (128, 1, 1) differs from the kernel's workgroup_size 64 -- pass (64, 1, 1) or leave block unset
+  ```
+
+- A block left unset becomes `(workgroup_size, 1, 1)`; a passed block must equal it. `make_kernel` and
+  `PipelineLauncher` pass their block on and need no change.
+- `bind` checks once, when it packs.
+
+Doors that see only code-object bytes cannot see the contract and check nothing: the raw
+`KernelLauncher(hsaco=..., kernel_name=..., signature=...)`, `launch_torch_kernel`, and direct
+`Runtime.load_module`. A kernel that states facts launches in-tree through `from_artifact`. `write_artifact`,
+which would leave only bytes on disk, refuses a kernel that states parameter facts or a `workgroup_size`
+(pointer alignment alone is not refused: written kernels always launched without checking it).
 
 ## PipelineLauncher
 
@@ -336,7 +383,8 @@ write_artifact(artifact, out_dir, manifest,
                write_ir_text=True, write_llvm_text=True)
 ```
 
-`write_artifact` produces:
+`write_artifact` refuses a kernel that states parameter facts or a `workgroup_size` (see "Checked
+launches" above). Otherwise it produces:
 
 ```text
 <out_dir>/<kernel_name>.hsaco
