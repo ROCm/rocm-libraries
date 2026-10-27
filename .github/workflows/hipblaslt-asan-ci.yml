@@ -31,7 +31,7 @@ jobs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
       # these jobs exercise its actual math-libs build system.
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
-      docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      docker_image: ghcr.io/rocm/therock_build_manylinux_x86_64:users-rkayaith-ccache-4.12.1
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       test_matrix: ${{ steps.matrix.outputs.test_matrix }}
@@ -104,17 +104,6 @@ jobs:
         run: |
           git config --global --add safe.directory "$PWD"
           git config fetch.parallel 10
-
-      - name: Install ccache with host sanitizer flag support
-        # TODO: Remove this pin once the shared CI image has ccache >= 4.12.1.
-        # Older versions drop -Xarch_host options (https://github.com/ccache/ccache/issues/1632).
-        run: |
-          curl --fail --location --silent --show-error \
-            https://github.com/ccache/ccache/releases/download/v4.12.1/ccache-4.12.1-linux-x86_64.tar.xz \
-            --output "$RUNNER_TEMP/ccache.tar.xz"
-          echo "742e6a6e17c0a060046874eece2949b221c228e1119698a4c6e0b096cbc87152  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
-          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/ccache-4.12.1-linux-x86_64" >> "$GITHUB_PATH"
 
       - name: Setup ccache
         run: |
