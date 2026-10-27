@@ -1100,6 +1100,18 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                                                                      4);
                     score = rocke_b_fadd(b, score, rocke_b_fmul(b, qq_v, rcp_ln2));
                 }
+                if(ctx->USE_ADDITIVE_BIAS)
+                {
+                    score = rocke_add_additive_bias(b,
+                                                    score,
+                                                    &ctx->additive_bias,
+                                                    ctx->seq_idx,
+                                                    ctx->hoist_qh_r[reg],
+                                                    qp_r,
+                                                    col_abs,
+                                                    m_ok,
+                                                    rcp_ln2);
+                }
                 masked[n][reg] = score;
             }
         }

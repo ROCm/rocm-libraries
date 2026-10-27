@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _ADDITIVE_BIAS_ARCHES,
     _has_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
@@ -266,7 +267,11 @@ def _spec_generic_2d_non_gfx950(problem: UnifiedAttentionProblem, arch: str):
     unchanged.
     """
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(arch)
-    return UnifiedAttention2DTiledSpec(**_base_2d_generic_fields(problem, arch))
+    # Of the arches this builder serves, only gfx942's spec declares the field.
+    bias = (
+        {"use_additive_bias": problem.use_additive_bias} if arch == "gfx942" else {}
+    )
+    return UnifiedAttention2DTiledSpec(**_base_2d_generic_fields(problem, arch), **bias)
 
 
 def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
@@ -399,9 +404,10 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr_3d(problem, arch),
         use_decode_grid=_use_decode_grid(problem, arch),
-        # Additive bias is gfx950-only for now; gfx942's spec has no such field.
         **(
-            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+            {"use_additive_bias": problem.use_additive_bias}
+            if arch in _ADDITIVE_BIAS_ARCHES
+            else {}
         ),
         **(
             {

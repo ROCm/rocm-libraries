@@ -3420,6 +3420,40 @@ def cases():
             num_segments=4,
         ),
     )
+    # Additive bias: the narrow 16x16 2D path (the only one gfx942 routes a
+    # score-bias problem to) and the 3D split-KV segment on the wide K/V loader.
+    add(
+        "attention",
+        "attention/gfx942/2d_bf16_d128_b64_addb",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_bf16_addb",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            use_additive_bias=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/3d_bf16_d128_b16_addb_wkv",
+        "gfx942",
+        build_attention_3d(
+            "irhash_attn_942_3d_bf16_addb",
+            "gfx942",
+            head_size=128,
+            block_size=16,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            use_additive_bias=True,
+            use_wide_kv_load=True,
+        ),
+    )
     add(
         "attention",
         "attention/gfx942/reduce_fp16_d128",

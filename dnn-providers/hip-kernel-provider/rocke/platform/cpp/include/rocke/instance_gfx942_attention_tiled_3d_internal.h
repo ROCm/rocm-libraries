@@ -65,6 +65,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                  */
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t          */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t          */
+#include "rocke/instance_attention_additive_bias_internal.h"
 #include "rocke/instance_attention_strided_kv_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/ir.h"
@@ -109,6 +110,7 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     bool USE_SINKS; /* spec.use_sinks                                     */
     bool USE_ALIBI; /* spec.use_alibi                                     */
     bool USE_QQ_BIAS; /* spec.use_qq_bias                                  */
+    bool USE_ADDITIVE_BIAS; /* spec.use_additive_bias                            */
     bool KV_FP8; /* kv_storage_dtype == "fp8e4m3"                     */
     int KV_BYTES; /* 1 if KV_FP8 else 2                                */
 
@@ -188,6 +190,7 @@ bool rocke_gfx942_attn_tiled_3d_reduce_config_from_spec(
 typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
 {
     bool strided_kv;
+    rocke_additive_bias_params_t additive_bias; /* set only when USE_ADDITIVE_BIAS */
     rocke_strided_kv_params_t k_strides;
     rocke_strided_kv_params_t v_strides;
     /* ---------- inputs / configuration ---------- */

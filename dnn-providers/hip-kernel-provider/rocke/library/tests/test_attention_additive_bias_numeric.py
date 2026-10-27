@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU numeric lane for additive attention bias on gfx950.
+"""On-GPU numeric lane for additive attention bias on gfx942 and gfx950.
 
 Drives ``run_unified_attention_torch`` with an fp32 additive bias on both the 2D
 tiled (``backend="tiled"``) and 3D split-KV (``backend="3d"``) paths and checks
@@ -14,8 +14,12 @@ group past max_seqlen_q=512 that compiles through hipcc. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. Every 2D group asserts its score path
 and compile backend so the coverage cannot silently drift. A dispatcher group
-launches an ``AttentionRequest(use_attn_bias=True)`` through the gfx950 tuning
+launches an ``AttentionRequest(use_attn_bias=True)`` through the tuning
 candidates' binding with ``tensors["attn_bias"]``.
+
+The groups run on whichever of gfx942 / gfx950 the device is (``_ROUTES`` holds
+each arch's expected 2D routing: gfx942 serves every bias problem on its narrow
+16x16 path through LLVM-direct). The combo group is gfx950-only.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -29,7 +33,7 @@ a torch-specific dtype string), so they are gated with ``requires_torch`` and
 skip, rather than erroring the whole module, on an image with no torch (e.g.
 TheRock's gfx94X CI). Run standalone:
 
-    HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
+    HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_numeric.py
 """
 
 from __future__ import annotations
@@ -49,16 +53,21 @@ except ImportError:
 requires_torch = pytest.mark.skipif(not _HAS_TORCH, reason="ROCm torch required")
 
 
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch (gate on ``gcnArchName``)."""
+def _gpu_arch():
+    """``gfx942`` / ``gfx950`` on such a box with ROCm torch, else ``None``
+    (gate on ``gcnArchName``)."""
     if not _HAS_TORCH or not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
+        return None
+    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
+    return next((arch for arch in ("gfx942", "gfx950") if arch in name), None)
 
 
+_GPU_ARCH = _gpu_arch()
+requires_bias_gpu = pytest.mark.skipif(
+    _GPU_ARCH is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
+)
 requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+    _GPU_ARCH != "gfx950", reason="needs a gfx950 GPU with ROCm torch"
 )
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
@@ -109,8 +118,8 @@ _COMBO_KNOBS = {
 }
 
 # Pinned 2D routing so coverage cannot silently drift:
-# case -> {dtype: (score path, compile backend)}.
-_ROUTES = {
+# arch -> case -> {dtype: (score path, compile backend)}.
+_GFX950_ROUTES = {
     "tiled": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_long": {"fp16": ("transposed32", "llvm"), "bf16": ("transposed32", "llvm")},
     "tiled_long_1seq": {
@@ -125,6 +134,14 @@ _ROUTES = {
     "tiled_window": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_window_1seq": {"fp16": ("transposed32", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_combo": {"bf16": ("transposed32", "llvm")},
+}
+_ROUTES = {
+    "gfx950": _GFX950_ROUTES,
+    "gfx942": {
+        case: {dtype: ("16x16", "llvm") for dtype in ("fp16", "bf16")}
+        for case in _GFX950_ROUTES
+        if case != "tiled_combo"
+    },
 }
 
 # bias layouts: name -> (broadcast batch, broadcast head, broadcast Sq,
@@ -238,13 +255,13 @@ def _reference(
     return torch.cat(outs, dim=0)
 
 
-def _2d_route(problem):
+def _2d_route(problem, arch):
     from kernels.common.attention_unified import (
         _select_2d_compile_backend,
         _tiled_spec_from_problem,
     )
 
-    spec = _tiled_spec_from_problem(problem, "gfx950")
+    spec = _tiled_spec_from_problem(problem, arch)
     assert spec.use_additive_bias
     if spec.use_mfma_32x32 and spec.use_transposed_qk_32x32:
         assert spec.block_m_per_warp == 32
@@ -253,7 +270,7 @@ def _2d_route(problem):
         path = "32x32"
     else:
         path = "16x16"
-    return path, _select_2d_compile_backend(problem, "gfx950"), spec
+    return path, _select_2d_compile_backend(problem, arch), spec
 
 
 def _check_case(
@@ -297,13 +314,14 @@ def _check_case(
         num_kv_blocks=int(k.shape[0]),
     )
     if backend == "tiled":
-        *route, spec = _2d_route(problem)
+        *route, spec = _2d_route(problem, _GPU_ARCH)
         route = tuple(route)
         for knob, want in (spec_knobs or {}).items():
             assert getattr(spec, knob) == want, f"{case}/{dtype}/{heads}: {knob}"
-        assert route == _ROUTES[case][dtype], (
-            f"{case}/{dtype}/{heads}: expected (path, compile backend) "
-            f"{_ROUTES[case][dtype]}, got {route}"
+        want_route = _ROUTES[_GPU_ARCH][case][dtype]
+        assert route == want_route, (
+            f"{_GPU_ARCH}/{case}/{dtype}/{heads}: expected (path, compile backend) "
+            f"{want_route}, got {route}"
         )
     out = torch.empty_like(q)
     run_unified_attention_torch(
@@ -346,7 +364,7 @@ def _check_case(
         assert gap > 3 * tol, f"softcap too weak to pin the order (gap={gap:.3e})"
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
@@ -357,7 +375,7 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
     _check_case(case, backend, seq_lens, {}, dtype, bias_mode, heads)
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
@@ -387,23 +405,30 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
     )
 
 
-# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a gfx950
-# tuning geometry, bound with tensors["attn_bias"] and launched through the
-# candidate's binding. One geometry per score path.
+# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a tuning
+# geometry of the device's arch, bound with tensors["attn_bias"] and launched
+# through the candidate's binding. One geometry per score path (gfx942: one and
+# two M atoms per warp on its single 2D path).
 _DISPATCH_GEOMETRIES = (
     "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
     "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
     "attention_gfx950_u3d_splitkv_seg8_t1xb",
+    "attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm",
+    "attention_gfx942_u2d_narrow_nw2_mw32_t1xb_llvm",
+    "attention_gfx942_u3d_splitkv_seg8_t1xb",
 )
 
 
-@requires_gfx950_gpu
+@requires_bias_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("bias_shape", ["full", "key_padding"])
 @pytest.mark.parametrize("geometry", _DISPATCH_GEOMETRIES)
 def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
     from dispatch.attention import AttentionRequest, attention_execution_candidates
     from dispatch.attention.common import AttentionMaskType
+
+    if not geometry.startswith(f"attention_{_GPU_ARCH}_"):
+        pytest.skip(f"{geometry} is not a {_GPU_ARCH} geometry")
 
     batch, seqlen_q, seqlen_k, hq, hkv, dtype = 2, 96, 200, 8, 2, "bf16"
     seq_lens = [(seqlen_q, seqlen_k)] * batch
@@ -425,7 +450,7 @@ def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
         hdim_q=_HEAD_SIZE,
         hdim_v=_HEAD_SIZE,
         kv_block_size=_BLOCK_SIZE,
-        arch="gfx950",
+        arch=_GPU_ARCH,
         dtype=dtype,
         mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         use_attn_bias=True,

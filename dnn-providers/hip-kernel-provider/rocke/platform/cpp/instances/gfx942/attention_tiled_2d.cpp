@@ -263,11 +263,14 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
-    /* The gfx942 Python spec has no additive-bias field. */
-    if(s->use_additive_bias)
+    /* Additive bias is emitted on the narrow 16x16 score path only: the
+     * selectors route every score-bias problem there on gfx942. */
+    if(s->use_additive_bias && (s->use_mfma_32x32x8 || s->use_register_pv))
     {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "use_additive_bias on gfx942 supports only the narrow 16x16 "
+                             "path, not use_mfma_32x32x8 or use_register_pv");
         return false;
     }
 

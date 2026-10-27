@@ -301,6 +301,74 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
+    case 18:
+        /* Additive bias composed with ALiBi, QQ bias and softcap on the wide K/V loader. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->use_alibi = true;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        s->use_wide_kv_load = true;
+        break;
+    case 19:
+        /* Additive bias on the spec the selector builds for gfx942 decode (wide loader,
+         * decode grid, swizzled K/V LDS, page-id window). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 32;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        s->use_wide_kv_load = true;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        s->use_wave_page_id_load = true;
+        break;
+    case 20:
+        /* Additive bias with half-page tiles, sinks and a sliding window. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 256;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 16;
+        s->use_decode_grid = true;
+        break;
+    case 21:
+        /* Additive bias with an fp8 K/V cache. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 4;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = "fp8e4m3";
+        break;
     default:
         return -1;
     }
