@@ -423,7 +423,28 @@ struct ImplicitInstance
     int64_t vectorC; ///< dX store width, along C / groups.
     int64_t maxSubGemms; ///< Records the kernel's table walk supports.
     bool grouped; ///< Built with the grouped code path, which also serves groups == 1.
+    /// Geometry the binary was compiled for, or 0 where it reads the value from its
+    /// sub-GEMM records at run time. A stated extent serves only that extent: the code
+    /// indexes with it, so another problem would compute wrong dX rather than fail.
+    int64_t filterH = 0;
+    int64_t filterW = 0;
+    int64_t strideH = 0;
+    int64_t strideW = 0;
+    int64_t dilationH = 0;
+    int64_t dilationW = 0;
 };
+
+/// Does @p instance's baked geometry, where it has any, match @p problem?
+inline bool implicitGeometryMatches(const Problem& problem, const ImplicitInstance& instance)
+{
+    const auto serves = [](int64_t bakedH, int64_t bakedW, int64_t actualH, int64_t actualW) {
+        return (bakedH == 0 && bakedW == 0) || (bakedH == actualH && bakedW == actualW);
+    };
+    return serves(instance.filterH, instance.filterW, problem.y, problem.x)
+           && serves(instance.strideH, instance.strideW, problem.strideH, problem.strideW)
+           && serves(
+               instance.dilationH, instance.dilationW, problem.dilationH, problem.dilationW);
+}
 
 /// The launch of an implicit-GEMM instance on one problem: the flat grid, the packed
 /// sub-GEMM table and what launch() does around the kernel.
@@ -453,6 +474,10 @@ inline std::optional<ImplicitLaunch> implicitInstanceLaunch(const Problem& probl
 {
     if(instance.vectorA <= 0 || instance.vectorB <= 0 || instance.vectorC <= 0
        || instance.warpM <= 0 || instance.warpN <= 0 || instance.maxSubGemms <= 0)
+    {
+        return std::nullopt;
+    }
+    if(!implicitGeometryMatches(problem, instance))
     {
         return std::nullopt;
     }

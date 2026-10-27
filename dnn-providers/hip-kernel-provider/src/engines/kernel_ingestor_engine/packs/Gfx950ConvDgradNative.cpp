@@ -327,6 +327,13 @@ constexpr std::array<const char*, 10> DIRECT_CAPABILITY_FIELDS{"filter_h",
                                                                "dilation_w",
                                                                "cpg",
                                                                "kpg"};
+/// The capabilities an implicit-GEMM binary may state, in dgrad::ImplicitInstance
+/// order, and the ones it must leave at 0. Together these partition
+/// DIRECT_CAPABILITY_FIELDS.
+constexpr std::array<const char*, 6> IMPLICIT_BAKEABLE_FIELDS{
+    "filter_h", "filter_w", "stride_h", "stride_w", "dilation_h", "dilation_w"};
+constexpr std::array<const char*, 4> IMPLICIT_RUNTIME_ONLY_FIELDS{
+    "pad_h", "pad_w", "cpg", "kpg"};
 /// The direct and helper knobs, each 0 where its variant does not use it
 /// (_KNOB_DEFAULTS in convolution_backward_data.py).
 constexpr std::array<const char*, 10> DIRECT_KNOB_FIELDS{"block_w",
@@ -391,8 +398,32 @@ std::optional<dgrad::ImplicitInstance> aotImplicitGemmInstance(const KernelDefin
     }
     const auto isZero
         = [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); };
-    if(!std::all_of(DIRECT_CAPABILITY_FIELDS.begin(), DIRECT_CAPABILITY_FIELDS.end(), isZero)
+    // A tilde kernel may be compiled for one filter, stride and dilation instead of
+    // reading them from its sub-GEMM records (_IMPLICIT_BAKEABLE in
+    // convolution_backward_data.py); the rest of the direct capabilities stay 0, since
+    // nothing bakes padding or a channel count into an implicit-GEMM binary.
+    if(!std::all_of(IMPLICIT_RUNTIME_ONLY_FIELDS.begin(),
+                    IMPLICIT_RUNTIME_ONLY_FIELDS.end(),
+                    isZero)
        || !std::all_of(DIRECT_KNOB_FIELDS.begin(), DIRECT_KNOB_FIELDS.end(), isZero))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, IMPLICIT_BAKEABLE_FIELDS.size()> baked{};
+    for(size_t i = 0; i < IMPLICIT_BAKEABLE_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, IMPLICIT_BAKEABLE_FIELDS[i]);
+        // 0 is "runtime"; anything else is an extent the binary indexes with.
+        if(!value || *value < 0 || *value > dgrad::I32_MAX)
+        {
+            return std::nullopt;
+        }
+        baked[i] = *value;
+    }
+    // Stated per axis pair, as the builder writes them: one axis alone would leave the
+    // other reading a record the code no longer consults.
+    if((baked[0] == 0) != (baked[1] == 0) || (baked[2] == 0) != (baked[3] == 0)
+       || (baked[4] == 0) != (baked[5] == 0))
     {
         return std::nullopt;
     }
@@ -434,7 +465,13 @@ std::optional<dgrad::ImplicitInstance> aotImplicitGemmInstance(const KernelDefin
                                    vectors[1],
                                    vectors[2],
                                    *maxSubGemms,
-                                   *grouped == 1};
+                                   *grouped == 1,
+                                   baked[0],
+                                   baked[1],
+                                   baked[2],
+                                   baked[3],
+                                   baked[4],
+                                   baked[5]};
 }
 
 /// The direct or helper instance @p kernel describes (_direct_error): the direct

@@ -355,7 +355,8 @@ def test_the_census_names_every_pack_and_kernel(shipped):
         ({"arch": "gfx942"}, "dgrad implicit-GEMM"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
-        ({"stride_h": 2}, "stride_h"),
+        # Padding stays runtime-only: the tilde records carry it, and nothing bakes it.
+        ({"pad_h": 1}, "pad_h"),
         ({"unroll_k": True}, "unroll_k"),
         ({"pipeline": "basic"}, "not produced"),
     ],
@@ -368,6 +369,56 @@ def test_unsupported_implicit_identities_are_named_with_their_reason(
     identity.update(change)
     spec, why = tool.instance_spec(identity)
     assert spec is None and reason in why, why
+
+
+@pytest.fixture(scope="module")
+def swept_implicit_identities():
+    """Implicit-GEMM dgrad identities straight from rocKE's sweep, so these tests
+    state the packaging contract rather than whatever the committed catalog holds."""
+    from benchmarks.common import kernel_sweep
+    from rocke.core.arch import ArchTarget
+
+    jobs = kernel_sweep.enumerate_jobs(
+        arch="gfx950",
+        dtype="bf16",
+        target=ArchTarget.from_gfx("gfx950"),
+        directions=("dgrad",),
+        jobs=1,
+    )
+    return [
+        job.identity.to_dict()
+        for job in jobs
+        if job.identity.algorithm == "implicit_gemm"
+    ]
+
+
+@pytest.mark.parametrize("field", ["stride_h", "filter_h", "dilation_h"])
+def test_an_implicit_identity_may_bake_its_geometry(swept_implicit_identities, field):
+    """A tilde kernel compiled for one filter, stride or dilation states it, instead
+    of leaving it 0 and reading it from the sub-GEMM records at run time. The matcher
+    then gates on it (convolution_backward_data._implicit_serves)."""
+    baked = [i for i in swept_implicit_identities if i[field]]
+    if not baked:
+        pytest.skip(f"the sweep enumerates no implicit dgrad kernel baking {field}")
+
+    spec, why = tool.instance_spec(copy.deepcopy(baked[0]))
+
+    assert spec is not None, why
+    assert getattr(spec, field) == baked[0][field]
+
+
+def test_an_implicit_identity_without_baked_geometry_stays_runtime(
+    swept_implicit_identities,
+):
+    """The default is unchanged: 0, which is what serves every geometry."""
+    runtime = [i for i in swept_implicit_identities if not i["stride_h"]]
+    assert runtime, "the sweep must still enumerate runtime-geometry dgrad kernels"
+
+    spec, why = tool.instance_spec(copy.deepcopy(runtime[0]))
+
+    assert spec is not None, why
+    for name in ("filter_h", "filter_w", "stride_h", "stride_w", "dilation_h"):
+        assert getattr(spec, name) == 0
 
 
 @pytest.mark.parametrize(

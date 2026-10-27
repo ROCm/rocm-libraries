@@ -77,9 +77,14 @@ _CARRIED = (
     "grouped",
 )
 _BOOL_CARRIED = ("lds_k_outer", "grouped")
+#: Geometry an implicit-GEMM identity may bake instead of reading from the tilde
+#: records at run time. 0 means runtime, as before; a non-zero value is a kernel
+#: specialized for exactly that geometry, and the matcher gates on it (_BAKEABLE of
+#: the adapter's _implicit_serves).
+_BAKEABLE = ("filter_h", "filter_w", "stride_h", "stride_w", "dilation_h", "dilation_w")
 #: Identity fields an implicit-GEMM identity must hold at their KernelIdentity
 #: default (they select emission the packaged launch or matcher does not model).
-#: Stride, dilation and padding are 0 (runtime, read from the tilde records).
+#: Padding is 0 (runtime, read from the tilde records).
 _CONSTANT = (
     "chiplet_swizzle",
     "unroll_k",
@@ -98,13 +103,7 @@ _CONSTANT = (
     "cshuffle_no_alias",
     "is_3d",
     "is_pointwise",
-    "filter_h",
-    "filter_w",
     "filter_d",
-    "stride_h",
-    "stride_w",
-    "dilation_h",
-    "dilation_w",
     "pad_h",
     "pad_w",
     "cpg",
@@ -344,6 +343,9 @@ def _implicit_instance_spec(identity):
     values = {name: getattr(identity, name) for name in _CARRIED}
     for name in _BOOL_CARRIED:
         values[name] = int(values[name])
+    # Omitted (left at the KMD builder default 0) when the kernel reads its geometry
+    # from the tilde records; stated when it was compiled for one geometry.
+    values.update({name: getattr(identity, name) for name in _BAKEABLE})
     spec = Gfx950ConvDgradAotSpec(
         dtype=identity.dtype_a, instance_id=identity.stable_hash(), **values
     )

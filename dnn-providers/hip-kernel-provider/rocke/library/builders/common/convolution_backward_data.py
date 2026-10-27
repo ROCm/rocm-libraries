@@ -178,13 +178,29 @@ _KNOB_DEFAULTS = {
     "persistent_grid": 0,
     "runtime_k_loop": 0,
 }
+#: Geometry an implicit-GEMM instance may state, because the tilde kernel can be
+#: compiled for one filter, stride and dilation instead of reading them from its
+#: sub-GEMM records. 0 keeps the runtime behaviour; a stated value is a promise the
+#: matcher enforces (_implicit_serves). Padding, cpg and kpg stay runtime-only.
+_IMPLICIT_BAKEABLE = (
+    "filter_h",
+    "filter_w",
+    "stride_h",
+    "stride_w",
+    "dilation_h",
+    "dilation_w",
+)
 #: Fields appended after the implicit-GEMM ones. An implicit-GEMM instance leaves
-#: each at this value (the KMD default); a direct or helper instance leaves the
-#: knobs its variant does not use at it.
+#: each at this value (the KMD default), apart from _IMPLICIT_BAKEABLE; a direct or
+#: helper instance leaves the knobs its variant does not use at it.
 _FAMILY_DEFAULTS = {
     "kernel_family": KERNEL_FAMILY_IMPLICIT_GEMM,
     "direct_variant": DIRECT_VARIANT_NONE,
-    **{name: 0 for name in _DIRECT_CAPABILITY_FIELDS},
+    **{
+        name: 0
+        for name in _DIRECT_CAPABILITY_FIELDS
+        if name not in _IMPLICIT_BAKEABLE
+    },
     **_KNOB_DEFAULTS,
 }
 
@@ -793,7 +809,7 @@ def gfx950_conv_dgrad_aot_helper_fields(
 
 
 def _uses_coalesced_weights(spec: Gfx950ConvDgradAotSpec) -> bool:
-    """``direct_kernel_sweep._uses_coalesced_weights``."""
+    """``kernels.conv.direct_variants.direct_uses_coalesced_weights``."""
     return spec.waves_k > 1 or bool(spec.runtime_k_loop)
 
 
@@ -1096,6 +1112,19 @@ def _implicit_serves(
     spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
 ) -> tuple[bool, str]:
     """The dgrad branch of ``KernelCache.supports_problem`` plus the launch bounds."""
+    # A tilde kernel reads stride and dilation from its sub-GEMM records, so 0 here
+    # means "serves every value". A kernel compiled for one geometry states it, and
+    # then only that geometry is correct: the emitted code indexes with the baked
+    # extents, so serving another problem would silently compute wrong dX.
+    for label, baked, actual in (
+        ("filter", (spec.filter_h, spec.filter_w), (problem.Y, problem.X)),
+        ("stride", (spec.stride_h, spec.stride_w), (problem.sH, problem.sW)),
+        ("dilation", (spec.dilation_h, spec.dilation_w), (problem.dH, problem.dW)),
+    ):
+        if baked != (0, 0) and baked != actual:
+            return False, (
+                f"kernel compiled for {label} {baked}, problem has {actual}"
+            )
     cpg, kpg = problem.cpg, problem.kpg
     for name, width, extent, label in (
         ("vector_size_a", spec.vector_size_a, kpg, "kpg"),
