@@ -157,6 +157,10 @@ def _field_defaults(spec_type: type) -> Mapping[str, object]:
     return {f.name: f.default for f in _dataclass_fields(spec_type)}
 
 
+def _identity_omit_names(spec_type: type) -> Tuple[str, ...]:
+    return tuple(getattr(spec_type, "_IDENTITY_OMIT_WHEN_OFF", ()))
+
+
 @lru_cache(maxsize=None)
 def _declared_defaults(spec_type: type) -> Tuple[Tuple[str, object], ...]:
     """The fields with a declared default -- the ones knobs are a delta
@@ -387,10 +391,13 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
+            # A field the spec class omits from its identity while off (see
+            # _identity_omitted) is off in every declared default, so it stays out.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
                 if name not in recorded
+                and name not in _identity_omit_names(type(kernel.kernel_spec))
             },
             # ``emit_lse`` is an output the problem selects, not a default that
             # knobs are a delta against: keeping it out leaves every split-KV

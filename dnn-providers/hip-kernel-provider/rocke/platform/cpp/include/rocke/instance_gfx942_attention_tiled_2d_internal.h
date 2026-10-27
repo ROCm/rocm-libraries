@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_additive_bias_internal.h" /* additive-bias params + add */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -120,7 +121,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     int BLOCK_M, BLOCK_Q, NQK, NUM_KV, NUM_QH;
     int VALID_ROWS; /* BLOCK_Q * NQK -- rows that map to complete GQA groups */
     int SLIDING_WINDOW;
-    bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS;
+    bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS, USE_ADDITIVE_BIAS;
     /* transposed-softmax + experimental predicate aliases (spec.*) */
     bool TRANSPOSED_SCALAR_STATE, TRANSPOSED_INVARIANT_HOIST;
     bool TRANSPOSED_MASK_ONCE, TRANSPOSED_HALF_LOCAL_PV;
@@ -177,6 +178,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    rocke_additive_bias_params_t additive_bias; /* set only when USE_ADDITIVE_BIAS */
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -331,6 +333,8 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* hoist_state_row[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_q_pos[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_q_head[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    /* The per-row query head; hoist_q_head becomes the ALiBi slope when USE_ALIBI. */
+    rocke_value_t* hoist_qh_r[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 
     /* ---- KV-loop body live carry (set per _emit_kv_body invocation) ---- *

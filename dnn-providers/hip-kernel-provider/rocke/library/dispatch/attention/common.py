@@ -953,6 +953,13 @@ class AttentionSpec:
         return kernel_name_join(*parts)
 
 
+def _identity_omitted(spec) -> frozenset:
+    """Fields ``spec`` leaves out of its identity payloads: those its class lists
+    in ``_IDENTITY_OMIT_WHEN_OFF`` (added after stored ids existed) while off."""
+    names = getattr(type(spec), "_IDENTITY_OMIT_WHEN_OFF", ())
+    return frozenset(name for name in names if not getattr(spec, name))
+
+
 def _dense_kernel_module(arch: str):
     if arch == "gfx950":
         from kernels.gfx950 import attention_dense
@@ -1030,11 +1037,14 @@ class AttentionTuningSpec:
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
             # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
-            # spec_hash taken over it) is the one stored before the field existed.
+            # spec_hash taken over it) is the one stored before the field existed;
+            # _identity_omitted does the same for the fields a spec class lists.
+            omitted = _identity_omitted(spec)
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (f.name == "emit_lse" and not spec.emit_lse)
+                and f.name not in omitted
             )
 
         return (

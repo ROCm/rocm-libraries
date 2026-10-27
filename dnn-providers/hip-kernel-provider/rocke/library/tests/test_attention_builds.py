@@ -1254,6 +1254,161 @@ class TestAttentionHelpers(unittest.TestCase):
                 # The same variant without bias is still a valid spec.
                 replace(spec, use_additive_bias=False, **knobs)
 
+    def test_gfx942_additive_bias_abi_matches_signature(self):
+        """gfx942 shares the launcher signatures with gfx950, so its kernels
+        must declare the bias params in the same positions (bias on and off)."""
+        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.gfx942.attention_tiled_2d import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+        from kernels.gfx942.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        common = dict(
+            head_size=64,
+            block_size=32,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+        for use_ab in (False, True):
+            with self.subTest(kind="2d", use_additive_bias=use_ab):
+                k = build_unified_attention_2d_tiled(
+                    UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab),
+                    arch="gfx942",
+                )
+                sig = _attn_signature(
+                    "bf16",
+                    include_bt_stride=True,
+                    include_qq_bias_stride=True,
+                    include_additive_bias=use_ab,
+                )
+                self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
+            for wide in (False, True):
+                with self.subTest(kind="3d", use_additive_bias=use_ab, wide=wide):
+                    seg = build_unified_attention_3d_tiled(
+                        UnifiedAttention3DTiledSpec(
+                            **common,
+                            num_segments=4,
+                            use_wide_kv_load=wide,
+                            use_additive_bias=use_ab,
+                        ),
+                        arch="gfx942",
+                    )
+                    sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                    self.assertEqual(
+                        [p.name for p in seg.params], [a["name"] for a in sig]
+                    )
+
+    def test_gfx942_additive_bias_spec_checks(self):
+        """gfx942 emits the bias on the narrow 16x16 and split-KV paths only;
+        the flag must be a real bool on both specs."""
+        from dataclasses import replace
+
+        from kernels.gfx942.attention_tiled_2d import (
+            UnifiedAttention2DTiledSpec,
+            build_gfx942_4warp_gqa,
+        )
+        from kernels.gfx942.attention_tiled_3d import UnifiedAttention3DTiledSpec
+
+        common = dict(
+            head_size=128,
+            block_size=32,
+            num_query_heads=8,
+            num_kv_heads=1,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+        )
+        for bad in ("false", 1, None):
+            with self.subTest(value=bad):
+                with self.assertRaisesRegex(ValueError, "must be a bool"):
+                    UnifiedAttention2DTiledSpec(**common, use_additive_bias=bad)
+                with self.assertRaisesRegex(ValueError, "must be a bool"):
+                    UnifiedAttention3DTiledSpec(
+                        **common, num_segments=4, use_additive_bias=bad
+                    )
+        narrow = UnifiedAttention2DTiledSpec(**common, use_additive_bias=True)
+        for name, knobs in {
+            "x8": dict(
+                use_mfma_32x32x8=True,
+                block_m_per_warp=32,
+                num_warps=2,
+                tile_size=32,
+            ),
+            "x8_transposed": dict(
+                use_mfma_32x32x8=True,
+                use_transposed_qk_32x32=True,
+                block_m_per_warp=32,
+                num_warps=2,
+                tile_size=32,
+            ),
+            "register_pv": dict(use_register_pv=True),
+        }.items():
+            with self.subTest(path=name):
+                with self.assertRaisesRegex(ValueError, "narrow 16x16 path"):
+                    replace(narrow, **knobs)
+                replace(narrow, use_additive_bias=False, **knobs)
+        with self.assertRaisesRegex(NotImplementedError, "additive bias"):
+            build_gfx942_4warp_gqa(replace(narrow, head_size=256), arch="gfx942")
+        with self.assertRaisesRegex(ValueError, "strided KV"):
+            UnifiedAttention3DTiledSpec(
+                **common,
+                num_segments=4,
+                kv_layout="strided",
+                use_additive_bias=True,
+            )
+
+    def test_gfx942_bias_problems_route_to_the_bias_paths(self):
+        from dataclasses import replace
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+        from kernels import UnifiedAttentionProblem
+        from kernels.common.attention_unified import (
+            _tiled_3d_spec_from_problem,
+            _tiled_spec_from_problem,
+        )
+
+        prefill = UnifiedAttentionProblem(
+            total_q=1024,
+            num_seqs=2,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=512,
+            max_seqlen_k=1024,
+            dtype="fp16",
+            use_additive_bias=True,
+        )
+        decode = replace(prefill, total_q=2, max_seqlen_q=1, max_seqlen_k=8192)
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+            for problem in (prefill, decode):
+                gate = (
+                    au.supports_native_unified_attention_tiled
+                    if problem.select_path() == "2d"
+                    else au.supports_native_unified_attention_3d_tiled
+                )
+                ok, why = gate(problem, "gfx942")
+                self.assertTrue(ok, why)
+            spec = _tiled_spec_from_problem(prefill, "gfx942")
+            self.assertTrue(spec.use_additive_bias)
+            self.assertFalse(spec.use_mfma_32x32x8 or spec.use_register_pv)
+            spec3 = _tiled_3d_spec_from_problem(decode, "gfx942")
+            self.assertTrue(spec3.use_additive_bias)
+        for arch in ("gfx1201", "gfx1250"):
+            with self.subTest(arch=arch):
+                ok, why = au.supports_native_unified_attention_tiled(prefill, arch)
+                self.assertFalse(ok)
+
     def test_unified_attention_3d_tiled_kernel_compiles(self):
         from kernels import (
             UnifiedAttention3DTiledSpec,

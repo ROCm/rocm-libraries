@@ -36,7 +36,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
+
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -161,6 +166,11 @@ def _sched_group_pin_mfma_step(b, ds_reads: int, mfma_count: int, sgid: int) -> 
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
+    # Fields added after tuning ids and kernel cache keys were first stored for
+    # this spec: identity payloads leave them out while off, so stored entries
+    # keep resolving (see dispatch.attention.common._identity_omitted).
+    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
+
     head_size: int
     block_size: int
     num_query_heads: int
@@ -171,6 +181,7 @@ class UnifiedAttention2DTiledSpec:
     has_softcap: bool
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # Number of wave64 warps per CTA. `BLOCK_M = num_warps * 16` rows are
     # processed per CTA, with each warp owning its own 16-row slice. The
@@ -479,6 +490,13 @@ class UnifiedAttention2DTiledSpec:
     use_causal_mask_phase_split: bool = False
 
     def __post_init__(self):
+        # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
+        # "false" must not silently enable it.
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -526,6 +544,13 @@ class UnifiedAttention2DTiledSpec:
                 "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
                 "default path and the K=8 32x32x8 wide path; these are not "
                 f"available on gfx942: {', '.join(_unsupported)}"
+            )
+        # Additive bias is emitted on the narrow 16x16 score path only: the
+        # selectors route every score-bias problem there on gfx942.
+        if self.use_additive_bias and (self.use_mfma_32x32x8 or self.use_register_pv):
+            raise ValueError(
+                "use_additive_bias on gfx942 supports only the narrow 16x16 path, "
+                "not use_mfma_32x32x8 or use_register_pv"
             )
         # gfx942 transposed orientation is legal in the x8 pairing (S^T = K @ Q^T
         # via the 32x32x8 f16/bf16 atom + register P^T -> PV). The x16 pairing is
@@ -989,6 +1014,7 @@ class UnifiedAttention2DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
             f"w{self.num_warps}" if self.num_warps != 1 else "",
             f"wpe{self.waves_per_eu}" if self.waves_per_eu is not None else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
@@ -1062,6 +1088,7 @@ def supports_tiled_2d(
     use_qq_bias: bool,
     use_fp8: bool,
     q_dtype,
+    use_additive_bias: bool = False,
     num_warps: int = 1,
     block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
@@ -1382,6 +1409,7 @@ def build_unified_attention_2d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     TRANSPOSED_SCALAR_STATE = spec.use_transposed_scalar_state
     TRANSPOSED_INVARIANT_HOIST = spec.use_transposed_invariant_hoist
     TRANSPOSED_MASK_ONCE = spec.use_transposed_mask_once
@@ -1568,6 +1596,9 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -4770,6 +4801,21 @@ def build_unified_attention_2d_tiled(
                             align=4,
                         )
                         score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                    if USE_ADDITIVE_BIAS:
+                        # Per-row query head (GQA-correct). Under ``m_ok``,
+                        # padding rows and tail columns (col_abs >= seq_len)
+                        # load element 0 instead of an out-of-range index.
+                        score = add_additive_bias(
+                            b,
+                            score,
+                            additive_bias,
+                            seq_idx=seq_idx,
+                            q_head=hoist_qh_r[reg],
+                            q_row=qp_r,
+                            col=col_abs,
+                            mask=m_ok,
+                            rcp_ln2=rcp_ln2,
+                        )
                     masked[(n, reg)] = score
 
             # ---- per-row max via cross-lane butterfly ----
@@ -6012,6 +6058,9 @@ def build_gfx942_4warp_gqa(
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
+    if spec.use_additive_bias:
+        # This body has no score-bias path; the selectors never route bias here.
+        raise NotImplementedError("4-warp GQA kernel does not support additive bias")
     if spec.use_i64_kv_addr:
         # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
         # under a spec that claims i64; dispatch keeps the flag off through

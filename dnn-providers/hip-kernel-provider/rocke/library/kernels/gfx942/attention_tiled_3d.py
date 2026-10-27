@@ -31,8 +31,12 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -103,6 +107,11 @@ class UnifiedAttention3DTiledSpec:
     dispatcher and harnesses can construct it identically.
     """
 
+    # Fields added after tuning ids and kernel cache keys were first stored for
+    # this spec: identity payloads leave them out while off, so stored entries
+    # keep resolving (see dispatch.attention.common._identity_omitted).
+    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
+
     head_size: int
     block_size: int
     num_query_heads: int
@@ -114,6 +123,7 @@ class UnifiedAttention3DTiledSpec:
     num_segments: int
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     waves_per_eu: Optional[int] = None
     kv_storage_dtype: Optional[str] = None
@@ -166,10 +176,17 @@ class UnifiedAttention3DTiledSpec:
     use_wave_page_id_load: bool = False
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
+        if self.kv_layout == "strided" and self.use_additive_bias:
+            raise ValueError("strided KV does not support use_additive_bias")
         if self.kv_layout == "strided" and (
             self.kv_storage_dtype is not None
             or self.use_i64_kv_addr
@@ -250,6 +267,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
             "wkv" if self.use_wide_kv_load else "",
             "dg" if self.use_decode_grid else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "all" else "",
@@ -269,6 +287,7 @@ def supports_tiled_3d(
     use_qq_bias: bool,
     use_fp8: bool,
     q_dtype,
+    use_additive_bias: bool = False,
     kv_storage_dtype: Optional[str] = None,
     arch: str = "gfx942",
 ) -> Tuple[bool, str]:
@@ -368,6 +387,7 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
     KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy)
     KV_TEMPORAL_HINT = (
@@ -445,6 +465,9 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")
@@ -1160,6 +1183,21 @@ def build_unified_attention_3d_tiled(
                         align=4,
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
+                if USE_ADDITIVE_BIAS:
+                    # Per-row query head (GQA-correct). Under ``m_ok``, padding
+                    # rows and tail columns (col_abs >= seq_len) load element 0
+                    # instead of an out-of-range index.
+                    s_scaled = add_additive_bias(
+                        b,
+                        s_scaled,
+                        additive_bias,
+                        seq_idx=seq_idx,
+                        q_head=qh_r,
+                        q_row=qp_r,
+                        col=col_abs,
+                        mask=m_ok,
+                        rcp_ln2=rcp_ln2,
+                    )
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's

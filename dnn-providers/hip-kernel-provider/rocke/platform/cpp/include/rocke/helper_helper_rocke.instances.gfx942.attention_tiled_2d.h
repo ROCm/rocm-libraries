@@ -94,7 +94,7 @@ typedef struct rocke_attention_tiled_2d_spec
     /* ---- defaulted ---- */
     bool use_alibi; /* False */
     bool use_qq_bias; /* False */
-    /* gfx950 only; the gfx942 validator rejects it. Appends four kernel params. */
+    /* Appends four kernel params. gfx942: narrow 16x16 path only. */
     bool use_additive_bias; /* False */
     int num_seqs; /* 0 */
     int num_warps; /* 1 */
