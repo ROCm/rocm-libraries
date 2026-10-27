@@ -239,8 +239,7 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
             options.arithmeticPrecision == ComparisonArithmeticPrecision::Float64 &&
             !options.strictElementwiseTolerance)
             return run([&options](auto observedValue, auto expectedValue) {
-                return valuesCloseFixed<double, ElementwiseToleranceModel::ExpectedScaled, false>(
-                    observedValue, expectedValue, options);
+                return valuesCloseExpectedDouble(observedValue, expectedValue, options);
             });
         if (options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled &&
             options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32 &&
