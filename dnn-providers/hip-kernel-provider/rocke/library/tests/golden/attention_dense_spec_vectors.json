@@ -692,9 +692,9 @@
     "preflight_ok": false,
     "preflight_reason": "seqlen_q must be positive, got -256",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq-256_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -801,9 +801,9 @@
     "preflight_ok": false,
     "preflight_reason": "num_kv_heads must be positive, got -2",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": -4
+    "num_queries_per_kv": -4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1411,6 +1411,150 @@
     "head_size": 128,
     "causal": true,
     "dtype": "bf16",
+    "sliding_window": 256,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 8,
+    "num_kv_blocks": 64,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa256_pgd8_nb64_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 1024,
+    "seqlen_kv": 448,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 224,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 1024,
+    "block_n": 224,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 8,
+    "num_kv_blocks": 64,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "paged block_size (8) must be >= and a multiple of ROWS_PER_WAVE (7)",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: paged block_size (8) must be >= and a multiple of ROWS_PER_WAVE (7)"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 16,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 16,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": null,
+    "preflight_ok": false,
+    "preflight_reason": null
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 2048,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 2048,
+    "block_n": 32,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 16,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": null,
+    "preflight_ok": false,
+    "preflight_reason": null
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
     "sliding_window": 0,
     "ragged": false,
     "varlen": false,
@@ -1469,6 +1613,80 @@
     "reason": "paged cache 8589934592 B exceeds i32 addressing (2 GiB)",
     "preflight_ok": false,
     "preflight_reason": "invalid AttentionDenseSpec: paged cache 8589934592 B exceeds i32 addressing (2 GiB)"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 256,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 16,
+    "num_kv_blocks": 65536,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "paged cache 2147483648 B exceeds i32 addressing (2 GiB)",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: paged cache 2147483648 B exceeds i32 addressing (2 GiB)"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": -8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 256,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": true,
+    "block_size": 16,
+    "num_kv_blocks": 65536,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": false,
+    "preflight_reason": "num_kv_heads must be positive, got -8",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv-8_bn64_bf16_sq512_sk512_causal_swa256_pgd16_nb65536_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": -1,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1718,6 +1936,438 @@
   },
   {
    "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 7,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "num_query_heads (8) must be a positive multiple of num_kv_heads (7)",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: num_query_heads (8) must be a positive multiple of num_kv_heads (7)"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 320,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "seqlen_q must be a multiple of block_m=256, got 320",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: seqlen_q must be a multiple of block_m=256, got 320"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 0,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": true,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "ragged requires positive seqlen_q/seqlen_kv",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: ragged requires positive seqlen_q/seqlen_kv"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": true
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_br_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 8,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 0,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "qb_majorx",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_majorx'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_majorx'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "qb_maj",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_maj'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_maj'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16x",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "dtype must be one of ['bf16', 'fp16'], got bf16x",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: dtype must be one of ['bf16', 'fp16'], got bf16x"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "a\\b",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\\\b'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\\\b'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "a\nb",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\nb'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\nb'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "a\u0001b",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\x01b'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\x01b'"
+   }
+  },
+  {
+   "spec": {
     "batch": 0,
     "seqlen_q": 512,
     "seqlen_kv": 512,
@@ -1750,9 +2400,9 @@
     "preflight_ok": false,
     "preflight_reason": "batch must be positive, got 0",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1789,9 +2439,9 @@
     "preflight_ok": false,
     "preflight_reason": "batch must be positive, got -1",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1828,9 +2478,9 @@
     "preflight_ok": false,
     "preflight_reason": "seqlen_kv must be positive, got -512",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk-512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1867,9 +2517,9 @@
     "preflight_ok": false,
     "preflight_reason": "num_query_heads must be positive, got 0",
     "kernel_name": "rocke_attention_dense_d128_hq0_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 0
+    "num_queries_per_kv": 0,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1906,9 +2556,9 @@
     "preflight_ok": false,
     "preflight_reason": "block_n must divide the 128-row query tile (got block_n=96; the spec also requires block_n % 32 == 0, so use 32, 64, 128 or 256). Load-bearing for causal=True, where n_per = 128 // block_n floors and drops keys",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn96_bf16_bm128_sq384_sk384_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 4,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1945,9 +2595,9 @@
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 2147483648 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
     "kernel_name": "rocke_attention_dense_d128_hq128_kv128_bn64_bf16_sq65536_sk65536_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 1
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -1984,9 +2634,9 @@
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 2535301046979548251017181102080 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
     "kernel_name": "rocke_attention_dense_d128_hq2147483647_kv2147483647_bn64_bf16_bm128_sq2147483520_sk2147483520_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 4,
-    "num_queries_per_kv": 1
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2023,9 +2673,126 @@
     "preflight_ok": false,
     "preflight_reason": "Q/O extent is 137438953472 elements, at or past the 32-bit addressing limit (2147483648)",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq65536_sk64_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 1
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 131072,
+    "seqlen_kv": 64,
+    "num_query_heads": 128,
+    "num_kv_heads": 1,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": false,
+    "preflight_reason": "Q/O extent is 2147483648 elements, at or past the 32-bit addressing limit (2147483648)",
+    "kernel_name": "rocke_attention_dense_d128_hq128_kv1_bn64_bf16_sq131072_sk64_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 128,
+    "resolved_persist_decode": "hkv_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1953125,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": false,
+    "preflight_reason": "K/V extent is 512000000000 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 2147483647,
+    "seqlen_q": 512,
+    "seqlen_kv": 1048576,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": false,
+    "preflight_reason": "K/V extent is 4611686016279904256 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk1048576_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2062,9 +2829,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2101,9 +2868,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq127_kv127_bn64_bf16_sq65536_sk65536_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 1
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2140,9 +2907,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_fp16_sq512_sk512_full",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2179,9 +2946,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn64_bf16_bm128_kpad0_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 4,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2218,9 +2985,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn32_bf16_kpad16_sq512_sk512_causal_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2257,9 +3024,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq256_sk1024_causal_br_swa256_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2296,9 +3063,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq500_sk500_causal_ragged_sinks_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2335,9 +3102,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa128_varlen_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2374,9 +3141,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa256_pgd16_nb64_lazyrs",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2413,9 +3180,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist304_intl",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2452,9 +3219,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist4_hkvmaj",
-    "resolved_persist_decode": "hkv_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
    }
   },
   {
@@ -2491,9 +3258,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist4",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
    }
   },
   {
@@ -2530,9 +3297,9 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
-    "resolved_persist_decode": "hkv_major",
     "num_waves": 8,
-    "num_queries_per_kv": 4
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
    }
   },
   {
@@ -2569,9 +3336,714 @@
     "preflight_ok": true,
     "preflight_reason": "",
     "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist8",
-    "resolved_persist_decode": "qb_major",
     "num_waves": 8,
-    "num_queries_per_kv": 1
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 8,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 32,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist32_hkvmaj",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 8,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 33,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist33",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "qb_major"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 500,
+    "seqlen_kv": 500,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": true,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist4_hkvmaj",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "hkv_major"
+   }
+  }
+ ],
+ "hooks": {
+  "type_name": "Gfx950AttentionDenseSpec",
+  "supports_noncausal_window": true,
+  "supports_noncausal_cross_length_ragged": true,
+  "persist_decodes": [
+   "auto",
+   "gqa_pair",
+   "gqa_pair_2phase",
+   "hkv_major",
+   "qb_major"
+  ]
+ },
+ "hook_cases": [
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": false,
+    "dtype": "bf16",
+    "sliding_window": 128,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_full_swa128_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 300,
+    "seqlen_kv": 500,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": false,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": true,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq300_sk500_full_ragged_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": "gqapair"
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist4_gqapair",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 8,
+    "interleave": false,
+    "persist_decode": "gqa_pair_2phase",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": "gqapair2"
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist8_gqapair2",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "bogus",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "expect": {
+    "valid": false,
+    "reason": "persist_decode must be one of ['auto', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'qb_major'], got 'bogus'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid Gfx950AttentionDenseSpec: persist_decode must be one of ['auto', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'qb_major'], got 'bogus'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": false,
+    "layout": [
+     "krpad16",
+     "vpad16"
+    ],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_krpad16_vpad16_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": false,
+    "layout": [],
+    "band": [
+     "rb64"
+    ],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_rb64_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 256,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [
+     "rb64"
+    ],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_rb64_swa256_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 1,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": true,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs",
+     "wdma",
+     "wpe1"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_wdma_wpe1_persist256",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": false,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs",
+     "cgdb8f8daf",
+     "lse"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_cgdb8f8daf_lse",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 0,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": true,
+    "shape_parts": false,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": false,
+    "preflight_reason": "batch must be positive, got 0",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false
+   },
+   "name_parts": {
+    "head_parts": false,
+    "shape_parts": false,
+    "layout": [],
+    "band": [],
+    "algorithm": [
+     "lazyrs"
+    ],
+    "persist_decode": ""
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4
    }
   }
  ]
