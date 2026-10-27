@@ -840,7 +840,8 @@ The C++ side lives in `platform/cpp/portable_ir/` (C++20, part of
   provenance: build-ids change every commit, so they cannot gate anything
   without forcing a lockstep upgrade of the whole stack.
 - `ir_import_json.cpp` (+ `rocke/ir_import.h`) — the portable-IR importer.
-- `cbor_dom.cpp`, `json_dom.cpp` — the two DOM decoders.
+- `cbor_dom.cpp` and `cpp/support/json_dom.cpp` -- the two DOM decoders. The
+  integer-expression evaluator the VM calls is `cpp/support/intexpr.cpp`.
 - `online.cpp` (+ `rocke/online.h`) — one-call wrappers (recipe/bundle/IR → `.ll`).
 
 Its ctests, the pytest harnesses, and the standalone `replay_cli` are in

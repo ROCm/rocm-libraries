@@ -317,6 +317,20 @@ if(BUILD_TESTING)
                  rocke_xf32_bf16x3_lowering)
   endif()
 
+  # The integer-expression evaluator (cpp/support/intexpr.cpp). With --eval it is
+  # also the C++ side of tests/core/test_intexpr.py, which pins it against the
+  # Python mirror.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_intexpr.cpp")
+    add_executable(rocke_intexpr core/test_intexpr.cpp)
+    target_link_libraries(rocke_intexpr PRIVATE rocke_core)
+    add_test(NAME rocke_intexpr COMMAND rocke_intexpr)
+    set_tests_properties(rocke_intexpr PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_intexpr)
+    set_target_properties(rocke_intexpr PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_intexpr RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_intexpr)
+  endif()
+
   # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
   # both C++ lowerers, the verifier and the constant folder.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
