@@ -170,6 +170,7 @@ def _fit_or_raise(
     descriptor's LAST axes (a staged buffer's leading stage axis is positioned by the origin), so its
     extents are checked against those axes' lengths.
     """
+    lds_tensor_desc._require_static(what)
     ext = desc_extents(tile_desc, n_lanes)
     lengths = tuple(lds_tensor_desc.lengths)
     covered = lengths[len(lengths) - len(ext) :]

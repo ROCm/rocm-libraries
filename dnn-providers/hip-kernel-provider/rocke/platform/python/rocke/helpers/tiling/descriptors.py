@@ -14,7 +14,12 @@ This module is the MEMORY side of the surface -- it is pure data (no IRBuilder, 
 casting). It says WHERE a tensor sits and WHICH sub-box a tile covers; the IR verbs in
 :mod:`rocke.helpers.tiling.emit` turn a window into actual loads/stores.
 
-- :class:`TensorDesc` -- the pure, ptr-free memory layout (lengths + strides + dtype).
+- :class:`TensorDesc` -- the pure, ptr-free memory layout (lengths + strides + dtype). A length or a
+  stride is a compile-time int or an i32 ``Value`` whose facts are stated: a kernel parameter
+  declared with them (``b.param("M", I32, ge=1, le=4096)``, checked on the host before each launch
+  through ``KernelLauncher.from_artifact``) or a Value ``b.gpu_checked_value`` returned (checked on
+  the GPU). The facts are read with
+  ``rocke.core.facts.stated_facts_of``; nothing here restates them.
 - :class:`TensorWindow` -- a `TensorDesc` positioned at an `origin` (+ optional per-axis clip
   `bounds`): the 'where' handed to load/store.
 
@@ -37,6 +42,13 @@ import numbers
 from dataclasses import dataclass
 from typing import Any
 
+from rocke.core.facts import has_stated_facts, stated_facts_of
+from rocke.core.ir import GPU_CHECKED_VALUE_WRITER, I32, Value, marker_facts
+from rocke.core.param_facts import LOWER_WORDS
+from rocke.core.value_sources import ASSUME_RANGE_OP, value_text
+
+from .tensor_transforms.walk import wave_uniform
+
 __all__ = [
     "TensorDesc",
     "make_tensor_desc",
@@ -55,23 +67,63 @@ class TensorDesc:
     load/store. The same holds in global memory and in LDS: an element's index is
     ``sum(position * stride)`` in both, and an LDS buffer is a flat allocation sized by
     :attr:`element_span`. Axes are positional: batch axes first, the reduction axis last.
+
+    A length or a stride is a compile-time int or an i32 ``Value`` with stated facts, used as it
+    is: the same Value as a length and a stride (``make_tensor_desc((M, K), (K, 1), F16)``) says
+    the rows are packed. A runtime length is the bound every check of a window over this tensor
+    compares against, by the identity of that Value. The contiguous axis keeps the compile-time
+    stride 1.
+
+    ``begin`` is internal: a slice's start in its parent's coordinates, one int or per-wave i32
+    value per axis, all 0 (the default) for a tensor that is not a slice.
     """
 
-    lengths: tuple[int, ...]
-    strides: tuple[int, ...]
+    lengths: tuple[int | Value, ...]
+    strides: tuple[int | Value, ...]
     dtype: Any
+    begin: tuple[int | Value, ...] | None = None
 
     def __post_init__(self) -> None:
         if len(self.lengths) != len(self.strides):
             raise ValueError(
                 f"lengths rank {len(self.lengths)} != strides rank {len(self.strides)}"
             )
-        if any(length <= 0 for length in self.lengths):
-            raise ValueError(f"lengths must be positive -- lengths={self.lengths!r}")
+        for axis, length in enumerate(self.lengths):
+            _check_length(axis, length)
+        for axis, stride in enumerate(self.strides):
+            _check_stride(axis, stride)
+        _check_contiguous_axis(self.strides)
+        if self.begin is None:
+            object.__setattr__(self, "begin", (0,) * len(self.lengths))
+        elif len(self.begin) != len(self.lengths):
+            raise ValueError(
+                f"TensorDesc begin has {len(self.begin)} entries but the tensor has rank "
+                f"{len(self.lengths)} -- one begin per axis"
+            )
 
     @property
     def rank(self) -> int:
         return len(self.lengths)
+
+    def _runtime_extent(self) -> tuple[str, int, Value] | None:
+        """The first runtime length or stride, as ``("lengths" or "strides", axis, Value)``, or
+        ``None`` for a description whose lengths and strides are all ints."""
+        for name, extents in (("lengths", self.lengths), ("strides", self.strides)):
+            for axis, extent in enumerate(extents):
+                if isinstance(extent, Value):
+                    return name, axis, extent
+        return None
+
+    def _require_static(self, reader: str) -> None:
+        """Refuse a runtime length or stride for a reader that needs the whole layout at build
+        time (an LDS buffer is sized at build)."""
+        runtime = self._runtime_extent()
+        if runtime is not None:
+            name, axis, extent = runtime
+            raise ValueError(
+                f"{reader} is static -- {name}[{axis}] is a runtime value "
+                f"({value_text(extent)}); LDS tensors are sized at build"
+            )
 
     @property
     def element_span(self) -> int:
@@ -79,9 +131,10 @@ class TensorDesc:
         ``1 + sum((length - 1) * stride)`` over every axis. It is the size an LDS buffer needs --
         ``b.smem_alloc(td.dtype, [td.element_span])`` -- so the descriptor stays the one home of the
         buffer's layout. Padding (a larger outer stride) is counted up to the last element; the dead
-        space after it is not. Static: every length and stride is an int. The LDS verbs' built-in
+        space after it is not. Static: a runtime length or stride is refused. The LDS verbs' built-in
         swizzle reaches further; size a swizzled buffer with ``lds_element_span``.
         """
+        self._require_static("TensorDesc.element_span")
         for axis, stride in enumerate(self.strides):
             if stride < 0:
                 raise ValueError(
@@ -105,17 +158,129 @@ class TensorDesc:
             tuple(self.lengths[i] for i in order),
             tuple(self.strides[i] for i in order),
             self.dtype,
+            begin=tuple(self.begin[i] for i in order),
         )
 
 
 def make_tensor_desc(
-    lengths: tuple[int, ...],
-    strides: tuple[int, ...],
+    lengths: tuple[int | Value, ...],
+    strides: tuple[int | Value, ...],
     dtype: Any,
 ) -> TensorDesc:
     """Free factory: a pure, ptr-free `TensorDesc` (lengths + strides + dtype), axes written batch
-    first and the reduction axis last, the memory layout in the strides."""
+    first and the reduction axis last, the memory layout in the strides. Each length and stride is
+    a compile-time int or an i32 Value with stated facts (a kernel parameter declared with them, or
+    a Value ``b.gpu_checked_value`` returned). A runtime length needs a stated lower bound of at
+    least 0 and a stated upper bound; a runtime stride a stated lower bound of at least 1.
+    """
     return TensorDesc(tuple(lengths), tuple(strides), dtype)
+
+
+def _check_length(axis: int, length: Any) -> None:
+    """A length is a positive compile-time int, or a runtime Value stated ``>= 0`` with an upper
+    bound."""
+    if isinstance(length, Value):
+        facts = _check_runtime_extent("lengths", axis, length)
+        if facts.lower is None or facts.lower < 0:
+            raise ValueError(
+                f"TensorDesc lengths[{axis}] is {value_text(length)}, which could be negative "
+                f"({_lower_text(length, facts.lower)}).\nFix: {_fix_text(length, 'ge=0')}"
+            )
+        if facts.upper is None:
+            raise ValueError(
+                f"TensorDesc lengths[{axis}] is {value_text(length)}, which has no upper bound: "
+                "state le= or lt=, the tightest bound it can reach"
+            )
+        return
+    if not (_is_compile_time_integer(length) and length > 0):
+        raise ValueError(
+            f"TensorDesc lengths[{axis}] = {length!r} -- a length is a positive int or an i32 "
+            "Value with stated facts"
+        )
+
+
+def _check_stride(axis: int, stride: Any) -> None:
+    """A stride is a compile-time int, or a runtime Value stated ``>= 1``."""
+    if isinstance(stride, Value):
+        facts = _check_runtime_extent("strides", axis, stride)
+        if facts.lower is None or facts.lower < 1:
+            raise ValueError(
+                f"TensorDesc strides[{axis}] is {value_text(stride)}, which could be below 1 "
+                f"({_lower_text(stride, facts.lower)}).\nFix: {_fix_text(stride, 'ge=1')}, or "
+                "ge= a length it is at least"
+            )
+        return
+    if not _is_compile_time_integer(stride):
+        raise ValueError(
+            f"TensorDesc strides[{axis}] = {stride!r} -- a stride is an int or an i32 Value with "
+            "stated facts"
+        )
+
+
+def _check_runtime_extent(name: str, axis: int, value: Value):
+    """The stated facts of a runtime length or stride, after the rules both share: an i32 Value,
+    with stated facts, the same for the whole wave."""
+    where = f"TensorDesc {name}[{axis}] is {value_text(value)}"
+    if value.type != I32:
+        raise TypeError(
+            f"{where}, a {value.type.name} Value -- a runtime length or stride is an i32 Value"
+        )
+    if not has_stated_facts(value):
+        raise ValueError(
+            f"{where}, which has no stated facts. State them on its b.param declaration, or "
+            "check it with b.gpu_checked_value; if you checked it with gpu_checked_value, pass "
+            "the Value gpu_checked_value returned"
+        )
+    if not wave_uniform(value):
+        raise ValueError(
+            f"{where}, which can differ between the lanes of a wave (it depends on a thread id "
+            "or a per-lane load) -- a length or a stride is the same for the whole wave; pass a "
+            "value loaded from memory through b.readfirstlane before checking it"
+        )
+    return stated_facts_of(value)
+
+
+def _lower_text(value: Value, lower: int | None) -> str:
+    """Why a runtime extent's stated lower bound is too low, in the words of its statement."""
+    stated = "declared" if value.param is not None else "checked"
+    if lower is None and not _states_lower_bound(value):
+        return f"{stated} with no lower bound"
+    if lower is None:
+        return f"{stated} with a lower bound that does not resolve to a number"
+    return f"{stated} with the lower bound {lower}"
+
+
+def _states_lower_bound(value: Value) -> bool:
+    """Whether the statement of ``value``'s facts (a declaration or a range marker) states a lower
+    bound, resolved to a number or not."""
+    if value.param is not None:
+        return any(word in value.param.attrs for word in ("eq", *LOWER_WORDS))
+    return marker_facts(value.op).lower is not None
+
+
+def _fix_text(value: Value, word: str) -> str:
+    """The statement that fixes a missing lower bound, where the value's facts are stated."""
+    if value.param is not None:
+        return f'b.param("{value.param.name}", I32, {word}, ...)'
+    return f"b.gpu_checked_value(..., {word}, ...)"
+
+
+def _check_contiguous_axis(strides: tuple[Any, ...]) -> None:
+    """A tensor with a runtime stride keeps its contiguous axis at the compile-time stride 1.
+
+    A runtime stride on the contiguous axis would make every access a gather. A tensor with no
+    int stride of 1 and a runtime stride has it on the axis that must be contiguous; the last such
+    axis is named (the convention puts the reduction axis, usually the contiguous one, last).
+    """
+    runtime_axes = [a for a, s in enumerate(strides) if isinstance(s, Value)]
+    if not runtime_axes:
+        return
+    if any(_is_compile_time_integer(s) and s == 1 for s in strides):
+        return
+    raise ValueError(
+        f"TensorDesc strides[{runtime_axes[-1]}] is a runtime value on the stride-1 axis -- the "
+        "contiguous axis must have the compile-time stride 1"
+    )
 
 
 @dataclass(frozen=True)
@@ -205,6 +370,33 @@ def _same_extent(x: Any, y: Any) -> bool:
     return _is_compile_time_integer(x) and _is_compile_time_integer(y) and x == y
 
 
+def _extent_text(extent: Any) -> str:
+    """An extent as a message names it: an int, or a runtime Value by its parameter's name."""
+    return value_text(extent) if isinstance(extent, Value) else str(extent)
+
+
+def _checked_twice_text(x: Any, y: Any) -> str | None:
+    """The advice for two extents that differ only because one value was checked twice: two
+    Values that two ``gpu_checked_value`` calls returned for the same IR value. ``None`` for any
+    other pair, whose mismatch is a real one."""
+    raws = []
+    for extent in (x, y):
+        op = extent.op if isinstance(extent, Value) else None
+        if (
+            op is None
+            or op.name != ASSUME_RANGE_OP
+            or op.attrs.get("by") != GPU_CHECKED_VALUE_WRITER
+        ):
+            return None
+        raws.append(op.operands[0])
+    if raws[0] is not raws[1]:
+        return None
+    return (
+        f"both check {value_text(raws[0])} with their own gpu_checked_value call; check it once "
+        "and pass the one Value it returned to every tensor"
+    )
+
+
 def check_gemm_shapes(
     a: TensorDesc, b: TensorDesc, c: TensorDesc | None = None
 ) -> None:
@@ -249,11 +441,14 @@ def check_gemm_shapes(
     across = "A, B and C" if c is not None else "A and B"
     for axis in range(rank - 2):
         for name, tensor, _ in named[1:]:
-            if not _same_extent(a.lengths[axis], tensor.lengths[axis]):
+            first_extent, second_extent = a.lengths[axis], tensor.lengths[axis]
+            if not _same_extent(first_extent, second_extent):
+                advice = _checked_twice_text(first_extent, second_extent) or (
+                    f"every batch axis has one extent across {across}"
+                )
                 raise ValueError(
-                    f"check_gemm_shapes: batch axis {axis} is {a.lengths[axis]} in A but "
-                    f"{tensor.lengths[axis]} in {name} -- every batch axis has one extent across "
-                    f"{across}"
+                    f"check_gemm_shapes: batch axis {axis} is {_extent_text(first_extent)} in A "
+                    f"but {_extent_text(second_extent)} in {name} -- {advice}"
                 )
     pairs = [("A's K", a, rank - 1, "B's K", b, rank - 1)]
     if c is not None:
@@ -263,7 +458,8 @@ def check_gemm_shapes(
         first_extent = first_tensor.lengths[first_axis]
         second_extent = second_tensor.lengths[second_axis]
         if not _same_extent(first_extent, second_extent):
+            advice = _checked_twice_text(first_extent, second_extent) or _GEMM_READING
             raise ValueError(
-                f"check_gemm_shapes: {first} (axis {first_axis}) is {first_extent} but {second} "
-                f"(axis {second_axis}) is {second_extent} -- {_GEMM_READING}"
+                f"check_gemm_shapes: {first} (axis {first_axis}) is {_extent_text(first_extent)} "
+                f"but {second} (axis {second_axis}) is {_extent_text(second_extent)} -- {advice}"
             )

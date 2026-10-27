@@ -817,7 +817,7 @@ def _view_prefetch_flow(pipeline, *, operand, scope, buffer, wave, out_path):
         wave_size=wave_size,
         wave=wave,
         stride=int(store.strides[0]),
-        load_strides=tuple(gload.strides),
+        load_strides=gload.static_strides(),
         swizzle=store.swizzle or None,
         title=f"PREFETCH flow {operand} [{dtype}]: global load -> LDS store ({where}, buf {buffer})",
     )
@@ -1536,7 +1536,8 @@ def _view_epilogue_flow(pipeline, *, out_path):
     # 16-wide f32 M-run = 4 shades), and the SAME store-transaction shade colours all three panels: the STORE
     # panel is banded (monotonic in memory order), the NATIVE panel is SCRAMBLED (each datum tinted by WHERE it
     # lands in the store) -- the scramble-vs-bands IS the within-lane reorder, made visible + physically honest.
-    c_addr = lambda m, n, s=tuple(cst.strides): m * s[0] + n * s[1]
+    c_strides = cst.static_strides()
+    c_addr = lambda m, n, s=c_strides: m * s[0] + n * s[1]
     # §9.6: ORDER THE REGISTER AXIS BY MEMORY ADDRESS -- the encoding/vreg index is NOT physical store order.
     # `c_addr` reads the C descriptor's REAL strides (an M-contiguous C -> M stride-1; an N-contiguous C ->
     # N stride-1), so this is descriptor-driven and correct for either contiguous axis. Lane 0 defines the

@@ -142,6 +142,33 @@ Anti-example: `make_tensor_desc((K, N), ...)` for a GEMM's B. Read positionally,
 extent -- refused by `check_gemm_shapes` when the extents differ, caught only by a bit-exact test when
 they do not. Write `(N, K)` and put the memory order in the strides.
 
+### Runtime lengths and strides: parameter Values
+
+A length or a stride is a compile-time int or an i32 `Value` whose facts are stated. The facts have
+one home: the kernel parameter's declaration, which `KernelLauncher.from_artifact` checks on the host
+before each launch, or the Value `b.gpu_checked_value` returned, which the GPU checks. Pass that Value
+itself; nothing wraps it:
+```python
+M = b.param("M", I32, ge=1, le=1 << 20)
+K = b.param("K", I32, ge=1, le=1 << 20)
+a_td = make_tensor_desc((M, K), (K, 1), F16)   # one K Value: the length and the row stride
+```
+- **What a runtime extent needs.** A length is stated `>= 0` with an upper bound (`le=` or `lt=`), the
+  number every range proof over it reads. A stride is stated `>= 1`; a relation carries it
+  (`ldc = b.param("ldc", I32, ge=N)` with `N` declared `ge=1`). A stride with no upper word has the i32
+  limit, so the build may choose 64-bit index forms. The Value is the same for the whole wave: a
+  parameter, or a checked value computed from block ids or a `b.readfirstlane` result. A Value with no
+  stated facts is refused, and so is one whose facts are too weak; each message names the fix.
+- **The host check.** A kernel whose parameters state facts launches through
+  `KernelLauncher.from_artifact(compile_kernel(kernel, arch=...))`, which checks every fact before every
+  launch and raises `LaunchRefused` naming each failed one. `first_supported([aligned, ragged], args)`
+  picks the first kernel that accepts a launch.
+- **The contiguous axis** keeps the int stride 1.
+- **LDS descriptors are static.** An LDS buffer is sized at build: `element_span` refuses a runtime
+  length or stride.
+- **`check_gemm_shapes`** agrees two runtime extents only when they are one and the same Value; two
+  `gpu_checked_value` calls give two different Values, even on one loaded value.
+
 ### `check_gemm_shapes(a, b, c=None)` -- the tensors of one GEMM agree
 
 A pure build-time check (emits no IR). It reads its tensors positionally as A `(batch..., M, K)`,

@@ -13,6 +13,8 @@ per-wave and per-lane parts, and proving each part's range, is this module's job
   and one per-lane part, each with its ``value_facts``.
 - ``leaf_varying_within_workgroup(b, value)`` -- the first leaf that may differ between the waves
   of a workgroup, or ``None``.
+- ``wave_uniform(value)`` -- whether the value is the same in every lane of a wave (the rule
+  below; it needs no builder).
 
 The walk owns no arithmetic: every rule maps an op onto a range operation of ``ranges.py``. Its
 rule set is closed and unknown is a fact, never an abort: a leaf or op outside the set (or a rule
@@ -71,6 +73,7 @@ __all__ = [
     "leaf_varying_within_workgroup",
     "split_coordinate",
     "value_facts",
+    "wave_uniform",
 ]
 
 # The kernel attribute the walk records the workgroup size it derived thread-id ranges with.
@@ -149,6 +152,14 @@ def leaf_varying_within_workgroup(b: IRBuilder, value: Value | int) -> Value | N
     """
     _require_coordinate(value)
     return _first_varying_leaf(b, value, {})
+
+
+def wave_uniform(value: Value | int) -> bool:
+    """Whether ``value`` is the same in every lane of a wave, by the rule of this module's
+    docstring: block ids, kernel parameters, ``readfirstlane`` results, the counter of a loop with
+    uniform bounds, a range marker on a uniform value, and pure arithmetic on those (emits
+    nothing, needs no builder)."""
+    return _is_uniform(value, {})
 
 
 # --- shared checks ----------------------------------------------------------------------------
@@ -536,29 +547,33 @@ class _Splitter:
 
     def is_uniform(self, value: Value | int) -> bool:
         """Wave-uniform by the leaf list or as pure arithmetic on uniform values."""
-        if isinstance(value, int):
-            return True
-        key = id(value)
-        if key not in self._uniform:
-            self._uniform[key] = self._derive_uniform(value)
-        return self._uniform[key]
+        return _is_uniform(value, self._uniform)
 
-    def _derive_uniform(self, value: Value) -> bool:
-        op = value.op
-        if op is None:
-            return value.param is not None
-        if op.name in ("arith.constant", "gpu.block_id", "tile.readfirstlane"):
-            return True
-        if op.name == "scf.for":
-            loop = _loop_of_counter(value)
-            return loop is not None and all(
-                self.is_uniform(v) for v in loop.operands[:3]
-            )
-        if op.name == ASSUME_RANGE_OP:
-            return self.is_uniform(op.operands[0])
-        if op.name in _PURE_ARITH_OPS:
-            return bool(op.operands) and all(self.is_uniform(v) for v in op.operands)
-        return False
+
+def _is_uniform(value: Value | int, memo: dict[int, bool]) -> bool:
+    """The one home of the wave-uniform rule; ``memo`` keeps each value's answer for one walk."""
+    if isinstance(value, int):
+        return True
+    key = id(value)
+    if key not in memo:
+        memo[key] = _derive_uniform(value, memo)
+    return memo[key]
+
+
+def _derive_uniform(value: Value, memo: dict[int, bool]) -> bool:
+    op = value.op
+    if op is None:
+        return value.param is not None
+    if op.name in ("arith.constant", "gpu.block_id", "tile.readfirstlane"):
+        return True
+    if op.name == "scf.for":
+        loop = _loop_of_counter(value)
+        return loop is not None and all(_is_uniform(v, memo) for v in loop.operands[:3])
+    if op.name == ASSUME_RANGE_OP:
+        return _is_uniform(op.operands[0], memo)
+    if op.name in _PURE_ARITH_OPS:
+        return bool(op.operands) and all(_is_uniform(v, memo) for v in op.operands)
+    return False
 
 
 # --- leaf_varying_within_workgroup --------------------------------------------------------------

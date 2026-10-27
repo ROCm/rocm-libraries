@@ -20,6 +20,7 @@ soundness gate). The recorder + witness below are the durable Phase-A surface.
 """
 from __future__ import annotations
 
+import numbers
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from math import ceil
@@ -62,6 +63,28 @@ class PipelineTransaction:
     @property
     def encoding(self) -> Any:
         return self.tile_desc.layout
+
+    def static_strides(self) -> tuple[int, ...]:
+        """The recorded strides as ints, for an analysis that computes concrete addresses. A
+        runtime stride (a kernel-parameter Value) has no value at build time, so it is refused.
+        """
+        if self.strides is None:
+            raise ValueError(
+                f"transaction {self.kind}/{self.space_name} carries no strides (a register-only fill?)"
+            )
+        runtime = [
+            (axis, stride)
+            for axis, stride in enumerate(self.strides)
+            if not isinstance(stride, numbers.Integral)
+        ]
+        if runtime:
+            axis, stride = runtime[0]
+            raise ValueError(
+                f"transaction {self.kind}/{self.space_name}: strides[{axis}] is a runtime "
+                f"value ({stride!r}) -- this analysis computes concrete addresses; record a "
+                "kernel built with int strides"
+            )
+        return tuple(int(stride) for stride in self.strides)
 
     @property
     def tensor(self) -> Any:

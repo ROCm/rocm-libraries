@@ -21,6 +21,8 @@ from __future__ import annotations
 import math
 from typing import Any, Callable
 
+from rocke.core.ir import Value
+
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc
@@ -181,6 +183,14 @@ def _as_value(b: Any, x: Any) -> Any:
     return b.const_i32(x) if isinstance(x, int) else x
 
 
+def _scaled(b: Any, position: Any, stride: Any) -> Any:
+    """``position * stride`` as IR: an int stride 1 adds nothing, another int stride is a
+    constant, a runtime stride is its Value."""
+    if isinstance(stride, Value):
+        return b.mul(position, stride)
+    return position if stride == 1 else b.mul(position, b.const_i32(stride))
+
+
 def _leading_rank(window: TensorWindow, tile_rank: int) -> int:
     """How many leading tensor axes a rank-``tile_rank`` tile leaves to the window origin. A tile
     covers the window's LAST axes, so tile axis ``i`` is tensor axis ``_leading_rank + i``.
@@ -244,12 +254,10 @@ def _address(
     strides = window.tensor.strides
     address: Any = None
     for axis, position in enumerate(positions):
-        stride = strides[lead + axis]
-        term = position if stride == 1 else b.mul(position, b.const_i32(stride))
+        term = _scaled(b, position, strides[lead + axis])
         address = term if address is None else b.add(address, term)
     for axis, position in enumerate(leading_positions):
-        stride = strides[axis]
-        term = position if stride == 1 else b.mul(position, b.const_i32(stride))
+        term = _scaled(b, position, strides[axis])
         address = term if address is None else b.add(address, term)
     return address
 
@@ -348,13 +356,21 @@ def _register_index(
     """The register's element index: the lane base index plus the register's compile-time coordinate
     offset linearized by the tensor strides. Consecutive registers' indices then differ by a constant,
     which the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
-    positions by linearity."""
+    positions by linearity. An offset on a runtime-stride axis is a runtime value, added after the
+    compile-time part."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
     lead = _leading_rank(window, len(deltas))
+    strides = [window.tensor.strides[lead + axis] for axis in range(len(deltas))]
     offset = sum(
-        delta * window.tensor.strides[lead + axis] for axis, delta in enumerate(deltas)
+        delta * stride
+        for delta, stride in zip(deltas, strides)
+        if not isinstance(stride, Value)
     )
-    return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
+    index = base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
+    for delta, stride in zip(deltas, strides):
+        if isinstance(stride, Value) and delta != 0:
+            index = b.add(index, b.mul(b.const_i32(delta), stride))
+    return index
 
 
 def _origin_misaligned(origin: Any, extent: int) -> bool:
@@ -371,8 +387,9 @@ def _clip_mask(
     b: Any, window: TensorWindow, positions: list[Any], tile_shape: tuple[int, ...]
 ) -> Any:
     """In-bounds predicate (i1) for an element at the tile axes' `positions`, or `None` when no axis
-    needs a compare. The per-axis upper bound defaults to ``window.tensor.lengths`` and is overridden
-    by ``window.bounds`` (a `None` entry keeps the length). Predicate = AND over checked axes of
+    needs a compare. The per-axis upper bound defaults to ``window.tensor.lengths`` (a runtime length
+    is its Value) and is overridden by ``window.bounds`` (a `None` entry keeps the
+    length). Predicate = AND over checked axes of
     ``position < bound``. A tile-aligned compile-time bound AT a grid-aligned origin can NEVER overhang,
     so it is SKIPPED at build time -- an aligned kernel emits no compare and stays byte-identical to
     no-clip; a compile-time MID-TILE origin is NOT skipped (it could straddle the boundary). Only the
@@ -435,7 +452,8 @@ def _contiguous_run(
 
     The width must also divide every OTHER stride, leading axes included: a run then starts at a
     multiple of the width whatever the positions on the other axes, so the ``align`` the access claims
-    holds (an odd batch stride would otherwise start a wide run mid-vector)."""
+    holds (an odd batch stride would otherwise start a wide run mid-vector). A runtime stride on
+    another axis has no compile-time residue here, so the access stays scalar."""
     layout = tile_desc.layout
     if dtype.name not in _WIDE_OK:
         return 1
@@ -452,6 +470,8 @@ def _contiguous_run(
     if math.prod(inner_levels) != 1:
         return 1  # an outer level of its axis: consecutive registers are not consecutive positions
     other_strides = [stride for axis, stride in enumerate(strides) if axis != run_axis]
+    if any(isinstance(stride, Value) for stride in other_strides):
+        return 1
     if not is_lds:
         # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile
         # overhangs NO axis it spans -- not just the stride-1 run axis. A wide K-run at a fixed but
@@ -529,6 +549,7 @@ def _swizzled_row_length(tensor: TensorDesc) -> int:
         position (outer = 7)   0..7    8..15   ...  40..47
         swizzled               56..63  48..55  ...  16..23     <- 56..63 lies past the 48
     """
+    tensor._require_static("the built-in LDS swizzle")
     length = tensor.lengths[-1]
     return -(-length // _SWIZZLE_GROUP) * _SWIZZLE_GROUP
 
