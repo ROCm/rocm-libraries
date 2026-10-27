@@ -1012,6 +1012,18 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     verifier_t v;
     memset(&v, 0, sizeof(v));
 
+    /* The two block-size kernel attrs state one fact two ways; a kernel sets
+     * one. Same text as Python verify.py _BOTH_WORKGROUP_SIZES. */
+    if(rocke_attr_get(&k->attrs, "workgroup_size") != NULL
+       && rocke_attr_get(&k->attrs, "max_workgroup_size") != NULL)
+    {
+        v_errf(&v,
+               NULL,
+               "kernel sets both workgroup_size and max_workgroup_size -- set one: "
+               "workgroup_size is the exact launch block size, max_workgroup_size an upper "
+               "bound on it");
+    }
+
     /* top-level scope: kernel params */
     for(int i = 0; i < k->num_params; ++i)
     {

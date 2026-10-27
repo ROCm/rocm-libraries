@@ -187,6 +187,8 @@ _hipStreamWaitValue32 = _b(
 )
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
+_hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
+_hipStreamDestroy = _b("hipStreamDestroy", ctypes.c_void_p)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))
 _hipEventDestroy = _b("hipEventDestroy", _HipEventHandle)
 _hipEventRecord = _b("hipEventRecord", _HipEventHandle, ctypes.c_void_p)
@@ -586,6 +588,25 @@ class Runtime:
             bucket.pop(0)
         if not bucket:
             self._pending_args.pop(s, None)
+
+    def create_stream(self) -> int:
+        """A new HIP stream (``hipStreamCreate``), as the int handle every
+        launch and wait takes. Destroy it with :meth:`destroy_stream`.
+
+        A launch on it is not mapped to torch's current stream, as one on
+        stream 0 is (``torch_interop.resolve_stream``), so a caller that does
+        not use torch never imports or initializes it.
+        """
+        _ensure_hip_init()
+        handle = ctypes.c_void_p(0)
+        _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
+        return int(handle.value)
+
+    def destroy_stream(self, stream: int) -> None:
+        """Drain ``stream`` (:meth:`wait_stream`, which also drops what the
+        runtime retained for it) and destroy it (``hipStreamDestroy``)."""
+        self.wait_stream(stream)
+        _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.

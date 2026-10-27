@@ -35,9 +35,11 @@ non-negative ``x`` as ``div``, not a right shift, and ``x | c`` as ``add`` when 
 disjoint. Any spelling gives a correct value; only this one keeps the per-wave part on the scalar
 unit and the ranges proven.
 
-The first walk that reaches a thread id reads ``b.kernel.attrs["max_workgroup_size"]``, which the
-author must set explicitly, and records it in ``b.kernel.attrs["thread_ranges_workgroup_size"]``;
-every later walk refuses a kernel whose size has changed since.
+The first walk that reaches a thread id reads the kernel's workgroup size, which the author must
+state explicitly in ``b.kernel.attrs["workgroup_size"]`` (exact) or
+``b.kernel.attrs["max_workgroup_size"]`` (an upper bound), and records the value
+``KernelDef.max_workgroup_size`` returns in ``b.kernel.attrs["thread_ranges_workgroup_size"]``; every
+later walk refuses a kernel whose size has changed since.
 """
 
 from __future__ import annotations
@@ -180,14 +182,27 @@ def _require_coordinate(value: object) -> None:
         )
 
 
+def _stated_workgroup_size(b: IRBuilder) -> int | None:
+    """The workgroup size the author stated, read through the one accessor; ``None`` when the
+    kernel sets neither block-size attr (the accessor's 256 fallback is not a stated fact).
+    """
+    kernel = b.kernel
+    if (
+        "workgroup_size" not in kernel.attrs
+        and "max_workgroup_size" not in kernel.attrs
+    ):
+        return None
+    return kernel.max_workgroup_size
+
+
 def _require_unchanged_workgroup_size(b: IRBuilder) -> None:
     attrs = b.kernel.attrs
     if WORKGROUP_SIZE_RECORD not in attrs:
         return
-    old, new = attrs[WORKGROUP_SIZE_RECORD], attrs.get("max_workgroup_size")
+    old, new = attrs[WORKGROUP_SIZE_RECORD], _stated_workgroup_size(b)
     if new != old:
         raise ValueError(
-            f"IR range walk: max_workgroup_size is now {new} but thread-id ranges were already "
+            f"IR range walk: the workgroup size is now {new} but thread-id ranges were already "
             f"derived with {old} -- set it once, before positioning windows from thread ids"
         )
 
@@ -286,16 +301,15 @@ class _FactWalk:
         return _constant_facts(c)
 
     def _thread_id(self, op: Op) -> Facts:
-        attrs = self._b.kernel.attrs
-        size = attrs.get("max_workgroup_size")
+        size = _stated_workgroup_size(self._b)
         if size is None:
             raise ValueError(
                 f"IR range walk: {self._root} depends on gpu.thread_id but the kernel states no "
-                'max_workgroup_size -- set b.kernel.attrs["max_workgroup_size"] to the launch '
-                "block size right after creating the builder"
+                'workgroup size -- set b.kernel.attrs["workgroup_size"] to the launch block size '
+                "right after creating the builder"
             )
-        attrs.setdefault(WORKGROUP_SIZE_RECORD, size)
-        return Interval(0, int(size)), Congruence(1, 0)
+        self._b.kernel.attrs.setdefault(WORKGROUP_SIZE_RECORD, size)
+        return Interval(0, size), Congruence(1, 0)
 
     def _block_id(self, op: Op) -> Facts:
         return Interval(0, None), Congruence(1, 0)

@@ -330,7 +330,7 @@ arithmetic assumes no i32 wrap, exactly as the `nsw` flags the lowering emits le
 | Op | Range | Residue |
 |---|---|---|
 | `arith.constant` `c` | exact `[c, c + 1)` | `0 mod abs(c)` (`0 mod 1` for 0) |
-| `gpu.thread_id` | `[0, max_workgroup_size)` (below) | none |
+| `gpu.thread_id` | `[0, workgroup size)` (below) | none |
 | `gpu.block_id` | `[0, +inf)` | none |
 | `tile.readfirstlane` of `x` | `x`'s | `x`'s |
 | `scf.for` induction variable, exact start `l`, exact step `st > 0` | (a) exact stop `u`: `[l, last + 1)`, `last` the last trip's value (`[0, 256)` step 32 gives `[0, 225)`); a loop that never runs (`u <= l`) gives `[l, l + 1)`. (b) a runtime stop (below): `[l, L + c)`, proven by identity. (c) any other stop: its own upper end (`[l, h)`, or `[l, l + 1)` when it never runs, or `[l, +inf)`) | `l mod st` |
@@ -363,10 +363,12 @@ added or subtracted are removed, is an envelope-marker result `v`: its end is `r
 the removed constants. A marker's runtime upper end (a second operand) is rebuilt the same way.
 
 **The workgroup size is read once and never silently changed.** The first walk that reaches `gpu.thread_id`
-requires `b.kernel.attrs["max_workgroup_size"]` to be set explicitly (the core's launch-bounds fallback is not a
-fact the author stated) and records the value it used in `b.kernel.attrs["thread_ranges_workgroup_size"]`. Every
-later walk refuses a kernel whose size has changed since: a larger size set after the body was built would launch
-more threads than the ranges were proven for.
+requires the kernel to state its workgroup size explicitly, either as `b.kernel.attrs["workgroup_size"]` (the exact
+block size) or as `b.kernel.attrs["max_workgroup_size"]` (an upper bound); the core's launch-bounds fallback is not
+a fact the author stated. It reads the size through the one accessor, `KernelDef.max_workgroup_size`, and records
+the value it used in `b.kernel.attrs["thread_ranges_workgroup_size"]`. Every later walk refuses a kernel whose size
+has changed since: a larger size set after the body was built would launch more threads than the ranges were
+proven for.
 
 **Values the same for the whole workgroup** (`leaf_varying_within_workgroup`, for a guard whose early exit ends
 whole workgroups). Wave-uniform is not enough there: `readfirstlane(thread_id_x / 64)` differs between waves. The
@@ -595,8 +597,8 @@ None of these is on the door; they are listed so the glass box stays open.
 | Where | Message |
 |---|---|
 | walk (`TypeError`) | `IR range walk: {v} has type {t} -- a coordinate is an i32 value` |
-| walk | `IR range walk: {v} depends on gpu.thread_id but the kernel states no max_workgroup_size -- set b.kernel.attrs["max_workgroup_size"] to the launch block size right after creating the builder` |
-| walk | `IR range walk: max_workgroup_size is now {new} but thread-id ranges were already derived with {old} -- set it once, before positioning windows from thread ids` |
+| walk | `IR range walk: {v} depends on gpu.thread_id but the kernel states no workgroup size -- set b.kernel.attrs["workgroup_size"] to the launch block size right after creating the builder` |
+| walk | `IR range walk: the workgroup size is now {new} but thread-id ranges were already derived with {old} -- set it once, before positioning windows from thread ids` |
 | walk (internal) | `IR range walk: the marker on {v} states an end over {h}, which is not a runtime value's marker result -- a runtime end is the .value of a RuntimeValue (from runtime_value)` |
 
 **Emitting** (`emit.py`)

@@ -742,8 +742,8 @@ def test_a_thread_id_needs_an_explicit_workgroup_size():
     value = b.add(b.thread_id_x(), _c(b, 1))
     message = (
         f"IR range walk: {value} depends on gpu.thread_id but the kernel states no "
-        'max_workgroup_size -- set b.kernel.attrs["max_workgroup_size"] to the launch block size '
-        "right after creating the builder"
+        'workgroup size -- set b.kernel.attrs["workgroup_size"] to the launch block size right after '
+        "creating the builder"
     )
     with _raises(ValueError, message):
         value_facts(b, value)
@@ -761,13 +761,31 @@ def test_the_workgroup_size_is_recorded_once_and_never_silently_changed():
     assert b.kernel.attrs[WORKGROUP_SIZE_RECORD] == 128
     b.kernel.attrs["max_workgroup_size"] = 256
     message = (
-        "IR range walk: max_workgroup_size is now 256 but thread-id ranges were already derived "
+        "IR range walk: the workgroup size is now 256 but thread-id ranges were already derived "
         "with 128 -- set it once, before positioning windows from thread ids"
     )
     with _raises(ValueError, message):
         value_facts(b, tid)
     with _raises(ValueError, message):
         split_coordinate(b, b.block_id_x())
+
+
+def test_an_exact_workgroup_size_bounds_thread_ids_and_a_late_change_is_refused():
+    """The exact workgroup_size attr bounds a thread id like max_workgroup_size does. The walk
+    reads it through KernelDef.max_workgroup_size, so a size set after thread-id ranges were
+    derived is refused whichever attr carries it."""
+    b = _builder(None)
+    b.kernel.attrs["workgroup_size"] = 64
+    tid = b.thread_id_x()
+    assert value_facts(b, tid) == (Interval(0, 64), Congruence(1, 0))
+    assert b.kernel.attrs[WORKGROUP_SIZE_RECORD] == 64
+    b.kernel.attrs["workgroup_size"] = 128
+    message = (
+        "IR range walk: the workgroup size is now 128 but thread-id ranges were already derived "
+        "with 64 -- set it once, before positioning windows from thread ids"
+    )
+    with _raises(ValueError, message):
+        value_facts(b, tid)
 
 
 @pytest.mark.parametrize(
