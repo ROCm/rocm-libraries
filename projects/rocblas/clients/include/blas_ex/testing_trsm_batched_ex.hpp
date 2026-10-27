@@ -357,6 +357,14 @@ void testing_trsm_batched_ex(const Arguments& arg)
 
     int blocks = K / TRSM_BLOCK;
 
+    // A full caller invA skips rocblas_trtri_trsm_template. Graph tests with
+    // k >= TRSM_BLOCK pass no invA so capture reaches the batched inversion
+    // synchronize in rocblas_trtri_gemm_block (AIROCBLAS-1440).
+    const bool  library_inversion = arg.graph_test && K >= TRSM_BLOCK;
+    const void* supplied_invA
+        = library_inversion ? nullptr : static_cast<const void*>(dinvA.ptr_on_device());
+    const rocblas_int supplied_invA_size = library_inversion ? 0 : TRSM_BLOCK * K;
+
     double max_err_1 = 0.0;
     double max_err_2 = 0.0;
     double gpu_time_used, cpu_time_used;
@@ -420,8 +428,8 @@ void testing_trsm_batched_ex(const Arguments& arg)
                                                      dXorB.ptr_on_device(),
                                                      ldb,
                                                      batch_count,
-                                                     dinvA.ptr_on_device(),
-                                                     TRSM_BLOCK * K,
+                                                     supplied_invA,
+                                                     supplied_invA_size,
                                                      arg.compute_type));
 
         size_t size;
@@ -489,8 +497,8 @@ void testing_trsm_batched_ex(const Arguments& arg)
                                                        dXorB.ptr_on_device(),
                                                        ldb,
                                                        batch_count,
-                                                       dinvA.ptr_on_device(),
-                                                       TRSM_BLOCK * K,
+                                                       supplied_invA,
+                                                       supplied_invA_size,
                                                        arg.compute_type));
         handle.post_test(arg);
         CHECK_HIP_ERROR(hXorB_1.transfer_from(dXorB));
