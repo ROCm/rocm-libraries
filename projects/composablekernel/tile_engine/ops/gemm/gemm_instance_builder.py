@@ -36,7 +36,7 @@ GEMM_PACKED_B_PIPELINES = _validation_utils.GEMM_PACKED_B_PIPELINES
 
 # gfx1250 pipelines. Only the ops listed here may emit them; every other op
 # raises instead of silently generating an unsupported kernel.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3")
 ASYNC_PIPELINES = ("comp_async",)
 GFX1250_PIPELINES = TDM_PIPELINES + ASYNC_PIPELINES
 GFX1250_PIPELINE_OPS = ("gemm_universal", "batched_gemm")
@@ -51,6 +51,24 @@ DOUBLE_SMEM_BUFFER_PIPELINES = (
     "weight_preshuffle",
     "preshuffle_tdm",
 ) + TDM_PIPELINES
+
+
+def _check_tdm_epilogue(pipeline, epilogue):
+    """Raise unless a TDM pipeline gets its one epilogue (tdm; cshuffle for
+    comp_tdm_v3) and the tdm epilogue gets a TDM pipeline that writes through it."""
+    if pipeline in TDM_PIPELINES:
+        want = _validation_utils.tdm_pipeline_epilogue(pipeline)
+        if epilogue != want:
+            raise ValueError(
+                f"{pipeline} pipeline requires the {want} epilogue, got '{epilogue}'"
+            )
+    tdm_epilogue_pipelines = tuple(
+        p for p in TDM_PIPELINES if _validation_utils.tdm_pipeline_epilogue(p) == "tdm"
+    )
+    if epilogue == "tdm" and pipeline not in tdm_epilogue_pipelines:
+        raise ValueError(
+            f"tdm epilogue requires a TDM pipeline {tdm_epilogue_pipelines}, got '{pipeline}'"
+        )
 
 
 def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
@@ -269,14 +287,12 @@ class GemmKernelBuilder:
         prefix = self.kernel_name_prefix
         if pipeline in GFX1250_PIPELINES and prefix not in GFX1250_PIPELINE_OPS:
             raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
-        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
-            raise ValueError(
-                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
-            )
-        if pipeline in TDM_PIPELINES and epilogue != "tdm":
-            raise ValueError(
-                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
-            )
+        if (
+            pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE
+            and prefix not in _validation_utils.GFX1250_TDM_V3_OPS
+        ):
+            raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
+        _check_tdm_epilogue(pipeline, epilogue)
         pad_reason = _validation_utils.tdm_pad_reject_reason(
             pipeline, epilogue, pad_m, pad_n, pad_k
         )
@@ -695,6 +711,7 @@ class GemmKernelBuilder:
                 "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
                 "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
                 "comp_tdm_pc": "ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer",
+                "comp_tdm_v3": "ck_tile::GemmPipelineAgBgCrCompTDMV3",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
@@ -705,6 +722,7 @@ class GemmKernelBuilder:
                 "comp_tdm": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_pc": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_v3": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
             self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
             if validate:
@@ -1050,8 +1068,17 @@ struct SelectedKernel {{
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>,
         false, false>;"""
 
-        # Tile partitioner
-        instance_code += """
+        # Tile partitioner. comp_tdm_v3 walks the output tiles in plain row-major
+        # order (tile id -> (id / NBlocks, id % NBlocks)), the raster of the
+        # rocKE kernel it ports; GemmTile2DPartitioner gives the same order but
+        # does not build with GemmKernel outside cluster launch.
+        if pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE:
+            instance_code += """
+
+    // Tile partitioner (plain row-major raster)
+    using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;"""
+        else:
+            instance_code += """
 
     // Tile partitioner
     using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>;"""
@@ -1687,14 +1714,7 @@ struct SelectedKernel {{
         // Epilogue
         """
 
-        if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
-            raise ValueError(
-                f"tdm epilogue requires a TDM pipeline {TDM_PIPELINES}, got '{pipeline}'"
-            )
-        if pipeline in TDM_PIPELINES and epilogue != "tdm":
-            raise ValueError(
-                f"{pipeline} pipeline requires the tdm epilogue, got '{epilogue}'"
-            )
+        _check_tdm_epilogue(pipeline, epilogue)
         double_smem = pipeline in DOUBLE_SMEM_EPILOGUE_PIPELINES
 
         if epilogue == "tdm" and self.kernel_name_prefix in [

@@ -36,11 +36,57 @@ GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 # gfx1250 pipelines for the non-MX GEMM ops. They are opt-in per arch so
 # the pipeline sets (and therefore generated kernels) of every other arch stay
 # exactly GEMM_PIPELINES.
-GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2", "comp_tdm_pc"]
+GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3"]
 GEMM_ASYNC_PIPELINES = ["comp_async"]
 GEMM_PIPELINES_BY_ARCH = {
     "gfx1250": GEMM_PIPELINES + GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES,
 }
+# comp_tdm_v3 (GemmPipelineAgBgCrCompTDMV3, the 16-wave fp8/bf8 TDM pipeline)
+# differs from the other TDM pipelines in four opt-in ways, all scoped to it:
+# - it writes C through the CShuffle epilogue, not TdmEpilogue
+#   (TDM_PIPELINE_EPILOGUE; every other TDM pipeline keeps "tdm");
+# - it is the only pipeline allowed the [4, 4, 1] wave map
+#   (PIPELINE_EXTRA_WARP_COMBINATIONS; the shared table is unchanged);
+# - its wave maps are the two it is tested with, 2x2x1 and 4x4x1, and its A/B
+#   are fp8/bf8 only (GFX1250_TDM_V3_*);
+# - it is registered for gemm_universal only.
+# No default or CI config lists it; gemm_universal/configs/
+# gfx1250_fp8_comp_tdm_v3.json holds its one instance.
+GEMM_TDM_V3_PIPELINE = "comp_tdm_v3"
+TDM_PIPELINE_EPILOGUE = {GEMM_TDM_V3_PIPELINE: "cshuffle"}
+PIPELINE_EXTRA_WARP_COMBINATIONS = {GEMM_TDM_V3_PIPELINE: {"gfx1250": [[4, 4, 1]]}}
+GFX1250_TDM_V3_WARPS = ([2, 2, 1], [4, 4, 1])
+GFX1250_TDM_V3_DTYPES = ("fp8", "bf8")
+GFX1250_TDM_V3_OPS = ("gemm_universal",)
+
+
+def tdm_pipeline_epilogue(pipeline):
+    """The one epilogue a TDM pipeline accepts: "cshuffle" for comp_tdm_v3,
+    "tdm" for every other TDM pipeline."""
+    return TDM_PIPELINE_EPILOGUE.get(pipeline, "tdm")
+
+
+def gfx1250_tdm_v3_reject_reason(
+    pipeline, a_datatype, b_datatype, warp_m, warp_n, warp_k, kernel_name_prefix=""
+):
+    """Reason string if a comp_tdm_v3 config is outside what it supports, else ""."""
+    if pipeline != GEMM_TDM_V3_PIPELINE:
+        return ""
+    if kernel_name_prefix and kernel_name_prefix not in GFX1250_TDM_V3_OPS:
+        return f"{kernel_name_prefix} does not support the {pipeline} pipeline"
+    if (
+        a_datatype not in GFX1250_TDM_V3_DTYPES
+        or b_datatype not in GFX1250_TDM_V3_DTYPES
+    ):
+        return f"{pipeline} requires fp8/bf8 A and B, got {a_datatype}/{b_datatype}"
+    if [warp_m, warp_n, warp_k] not in GFX1250_TDM_V3_WARPS:
+        return (
+            f"{pipeline} supports the 2x2x1 and 4x4x1 wave maps only, got "
+            f"{warp_m}x{warp_n}x{warp_k}"
+        )
+    return ""
+
+
 # Exact arch required by the TDM / async pipelines outside mx_gemm. Off this
 # arch the TDM path compiles to a no-op and produces an all-zero C.
 GFX1250_ONLY_PIPELINE_ARCH = "gfx1250"
@@ -697,16 +743,23 @@ def is_trait_combination_valid(
     else:
         if kernel_name_prefix != "mx_gemm":
             if pipeline in GEMM_TDM_PIPELINES:
-                # TDM: intrawave only, TdmEpilogue only, no persistent kernel
+                # TDM: intrawave only, TdmEpilogue only (CShuffle only for
+                # comp_tdm_v3, see tdm_pipeline_epilogue), no persistent kernel
                 # (TdmEpilogue has no split-K / persistent write path), and no
                 # padding, which would only duplicate the unpadded kernel (see
                 # TDM_PAD_REJECT_REASON).
                 if tdm_pad_reject_reason(pipeline, epilogue, pad_m, pad_n, pad_k):
                     logging.debug(f"{pipeline}: {TDM_PAD_REJECT_REASON}")
                     return False
+                if (
+                    pipeline == GEMM_TDM_V3_PIPELINE
+                    and kernel_name_prefix
+                    and kernel_name_prefix not in GFX1250_TDM_V3_OPS
+                ):
+                    return False
                 return (
                     scheduler == "intrawave"
-                    and epilogue == "tdm"
+                    and epilogue == tdm_pipeline_epilogue(pipeline)
                     and persistent_or_preshuffle_quant not in (True, "true")
                 )
             if epilogue == "tdm":
@@ -728,10 +781,20 @@ def validate_warp_configuration(
     warp_n: int,
     warp_k: int,
     gpu_name: str,
+    pipeline: str = "",
 ) -> bool:
-    """Validate warp configuration."""
+    """Validate warp configuration.
+
+    pipeline (optional) adds that pipeline's PIPELINE_EXTRA_WARP_COMBINATIONS
+    for the arch (today only [4, 4, 1] for comp_tdm_v3 on gfx1250); the shared
+    table below is the same for every pipeline.
+    """
 
     current_combination = [warp_m, warp_n, warp_k]
+
+    extra = PIPELINE_EXTRA_WARP_COMBINATIONS.get(pipeline, {})
+    if current_combination in extra.get(_base_gfx_arch(gpu_name), []):
+        return True
 
     # Deliberately a RAW lookup. Unlike every other arch test in this module, this
     # one is NOT normalized, and that asymmetry is the point.
@@ -782,7 +845,9 @@ def validate_warp_configuration(
     # The hang was observed while named_barrier.hpp was missing its release/acquire
     # fences; those are restored now, so re-testing against the fenced build is the first
     # step. Until then the sweep generates only the shared gfx1250 warp shapes for
-    # comp_tdm_pc, same as every other pipeline.
+    # comp_tdm_pc, same as every other pipeline. comp_tdm_v3 gets [4, 4, 1] through
+    # PIPELINE_EXTRA_WARP_COMBINATIONS above: it has no producer waves and no named
+    # barriers, and it is not in any default or CI config.
 
     # Check if current combination is in the allowed list
     if current_combination not in allowed_combinations:
@@ -862,6 +927,10 @@ PIPELINE_SMEM_SLOTS = {
     "comp_tdm": 2,
     "comp_tdm_v2": 2,
     "comp_tdm_pc": 4,
+    # GemmPipelineAgBgCrCompTDMV3::GetSmemSize() is 2 * the policy per-slot size
+    # (two LDS stages); fp8 256x256x256 gives 278464 B, the per-slot model below
+    # times 2 exactly.
+    "comp_tdm_v3": 2,
 }
 DEFAULT_SMEM_SLOTS = 1
 
@@ -1179,7 +1248,7 @@ def validate_gemm_gfx1250_pipeline(
                 f"({tile_m}x{tile_n} over {waves} wave(s)), exceeding "
                 f"{MAX_ACC_VGPRS_PER_LANE}",
             )
-    if pipeline in GEMM_TDM_PIPELINES:
+    if pipeline in GEMM_TDM_PIPELINES and tdm_pipeline_epilogue(pipeline) == "tdm":
         # TdmEpilogue stages the full output tile in the shared LDS allocation.
         c_tile_bytes = tile_m * tile_n * element_size(c_datatype)
         if c_tile_bytes > LDS_SIZE_MAP[arch]:
@@ -1237,7 +1306,7 @@ def is_tile_config_valid(
         and (warp_m, warp_n, warp_k) == (4, 2, 1)
     )
     if not mx_eight_waves and not validate_warp_configuration(
-        warp_m, warp_n, warp_k, gpu_target
+        warp_m, warp_n, warp_k, gpu_target, pipeline
     ):
         logging.debug(
             f"Invalid warp configuration: warp_m({warp_m}), warp_n({warp_n}), warp_k({warp_k})"
@@ -1338,6 +1407,15 @@ def is_tile_config_valid(
             )
             or gfx1250_tdm_fp32_layout_reject_reason(
                 pipeline, a_datatype, b_datatype, layout
+            )
+            or gfx1250_tdm_v3_reject_reason(
+                pipeline,
+                a_datatype,
+                b_datatype,
+                warp_m,
+                warp_n,
+                warp_k,
+                kernel_name_prefix,
             )
         )
         if dtype_reason:
