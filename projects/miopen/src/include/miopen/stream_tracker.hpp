@@ -49,8 +49,10 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
 
         /// Completion of the evaluation's last kernel, recorded on `stream`.
         /// Set this before abandoning a slot: acquire() tests it to reclaim a
-        /// slot without waiting for the worker. Optional - a slot abandoned
-        /// without one is tested by polling `stream`, which is coarser.
+        /// slot without waiting for the worker, and it is the only way to see a
+        /// finished slot whose callback is late or lost - polling `stream` reads
+        /// busy until that callback has returned. Optional, but never hand over
+        /// an event that was not recorded: HIP reports it as already complete.
         EventPtr done;
 
         /// Set by abandon(): names this abandonment to its completion callback,
@@ -69,7 +71,7 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     {
     }
 
-    /// Blocks until every abandoned stream has drained, then stops the worker.
+    /// Blocks until every owned stream has drained, then stops the worker.
     /// Kernels left running by a timed-out evaluation execute from code objects
     /// the Handle unloads during teardown, so they must finish before this
     /// tracker's owner goes away.
@@ -92,6 +94,10 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     /// HIP never clears one and the backlog could never drain; see SweepLocked.
     Slot acquire(const Handle& handle);
 
+    /// Hands back a slot whose work has finished; abandon() is for work that may
+    /// not have. The scratch is dropped on the calling thread, outside the
+    /// tracker's lock, and the done event cleared, so the slot returns to the
+    /// pool clean.
     void release(Slot slot);
 
     /// Hands the slot back while its work may still be running, and queues its
@@ -102,13 +108,19 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     /// How many abandoned streams may be outstanding before acquire() blocks.
     std::size_t MaxDraining() const { return max_draining_; }
 
-    /// The cap a default-constructed tracker uses, derived from GPU_MAX_HW_QUEUES,
-    /// the same variable ROCclr uses to decide how many hardware rings streams
-    /// get before they start sharing. A slot sharing a ring with a runaway kernel
-    /// from an earlier abandonment times that contention rather than the solver,
-    /// and that number is what reaches the find-db, so the backlog is bounded by
-    /// the runtime's own budget.
+    /// The cap a default-constructed tracker uses: MaxDrainingFor() applied to
+    /// the process's GPU_MAX_HW_QUEUES, read once.
     static std::size_t DefaultMaxDraining();
+
+    /// The backlog cap for a GPU_MAX_HW_QUEUES value, null meaning unset.
+    /// GPU_MAX_HW_QUEUES is the variable ROCclr uses to decide how many hardware
+    /// rings streams get before they start sharing. A slot sharing a ring with a
+    /// runaway kernel from an earlier abandonment times that contention rather
+    /// than the solver, and that number is what reaches the find-db, so the
+    /// backlog is bounded by the runtime's own budget: the rings less the
+    /// handle's stream and the slot being handed out, and at least 1. An unset,
+    /// non-positive, or unparseable value counts as ROCclr's default of 4.
+    static std::size_t MaxDrainingFor(const char* gpu_max_hw_queues);
 
 private:
     struct RetireContext;
@@ -119,19 +131,28 @@ private:
     /// hands the ticket to the worker.
     static void OnSlotRetired(void* context);
 
-    /// Worker body: retires the slots named by callbacks and drops their
-    /// scratch outside mutex_.
+    /// Worker body: retires the slots named by callbacks and frees all retired
+    /// scratch, its own and SweepLocked's, outside mutex_.
     void RetireLoop();
 
     /// Callers already holding mutex_. Retires only slots whose query succeeds,
-    /// which is acquire()'s fallback for a callback that never arrives. Stops at
-    /// and returns the first answer that is neither success nor "not ready" -
-    /// the runtime's sticky device error - and returns hipSuccess otherwise.
+    /// and hands their scratch to the worker rather than freeing it. Stops at and
+    /// returns the first answer that is neither success nor "not ready" - the
+    /// runtime's sticky device error - and returns hipSuccess otherwise.
+    ///
+    /// The backstop for a callback that is late or never comes. The worker
+    /// normally gets there first, but a query does not depend on the callback, so
+    /// this is what guarantees a finished slot is reclaimed whatever happens to
+    /// it; without it a lost callback would leave acquire() waiting at the cap
+    /// forever. That is also why slots carry tickets: a slot reclaimed here may
+    /// still have its callback to come. Only slots with a done event are
+    /// covered - a stream query reads busy until the callback queued on that
+    /// stream has returned - which is why every abandonment in find sets one.
     hipError_t SweepLocked();
 
     /// Guards the slot containers and next_ticket_. acquire()/release()/abandon()
-    /// run during find while the worker retires slots, so two threads always
-    /// reach these concurrently.
+    /// run during find while the worker retires slots, so two threads can reach
+    /// these at once.
     std::mutex mutex_;
 
     /// Signalled by the worker whenever it returns a slot to available_, for an
@@ -147,11 +168,14 @@ private:
     std::vector<Slot> available_;
     std::vector<Slot> draining_;
 
-    /// Callback-to-worker hand-off. Kept apart from mutex_ so the runtime's
-    /// callback thread never waits behind a find holding the slot containers.
+    /// Hand-off to the worker, from the runtime's callback thread and from
+    /// SweepLocked. Kept apart from mutex_ so the callback thread never waits
+    /// behind a find holding the slot containers. Taken after mutex_ where both
+    /// are held, never before it.
     std::mutex retire_mutex_;
     std::condition_variable retire_cv_;
     std::vector<std::uint64_t> retired_tickets_;
+    std::vector<std::shared_ptr<ScratchAllocation>> deferred_scratch_;
     bool stop_worker_ = false;
 
     /// Started by the first abandon(), joined by the destructor.

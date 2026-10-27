@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <iterator>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
@@ -288,6 +289,9 @@ struct HandleImpl
     KernelCache cache;
     TargetProperties target_properties;
     mutable StreamTracker stream_tracker_;
+    /// Guards the two below: two threads sharing a handle can run find, and
+    /// so reach GetScratchBuffer, at once.
+    std::mutex scratch_mutex_;
     std::weak_ptr<ScratchAllocation> active_scratch_;
     std::size_t scratch_cap_ = 0;
 };
@@ -427,6 +431,7 @@ std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) cons
     if(sz == 0)
         return nullptr;
 
+    const std::lock_guard<std::mutex> lock(impl->scratch_mutex_);
     if(impl->scratch_cap_ == 0)
         impl->scratch_cap_ = GetGlobalMemorySize() / 8;
 
@@ -489,32 +494,38 @@ private:
 
 } // namespace
 
+std::size_t StreamTracker::MaxDrainingFor(const char* gpu_max_hw_queues)
+{
+    // ROCclr's own default for GPU_MAX_HW_QUEUES (rocclr/utils/flags.hpp).
+    // HIP has no API reporting the effective value, so mirror its parsing.
+    long long hw_queues = 4;
+    if(gpu_max_hw_queues != nullptr)
+    {
+        try
+        {
+            // Signed, so "-1" is rejected rather than wrapping to a huge cap.
+            const auto parsed = std::stoll(gpu_max_hw_queues);
+            if(parsed > 0)
+                hw_queues = parsed;
+            else
+                MIOPEN_LOG_W("Ignoring non-positive GPU_MAX_HW_QUEUES=" << gpu_max_hw_queues);
+        }
+        catch(const std::exception&)
+        {
+            MIOPEN_LOG_W("Ignoring unparseable GPU_MAX_HW_QUEUES=" << gpu_max_hw_queues);
+        }
+    }
+
+    // Two rings are already spoken for whenever this matters: the handle's
+    // own stream, and the slot the blocked acquire() is about to hand out.
+    return hw_queues > 3 ? static_cast<std::size_t>(hw_queues - 2) : std::size_t{1};
+}
+
 std::size_t StreamTracker::DefaultMaxDraining()
 {
     static const std::size_t cap = [] {
-        // ROCclr's own default for GPU_MAX_HW_QUEUES (rocclr/utils/flags.hpp).
-        // HIP has no API reporting the effective value, so mirror its parsing.
-        long long hw_queues = 4;
-        if(const auto raw = env::getEnvironmentVariable("GPU_MAX_HW_QUEUES"))
-        {
-            try
-            {
-                // Signed, so "-1" is rejected rather than wrapping to a huge cap.
-                const auto parsed = std::stoll(*raw);
-                if(parsed > 0)
-                    hw_queues = parsed;
-                else
-                    MIOPEN_LOG_W("Ignoring non-positive GPU_MAX_HW_QUEUES=" << *raw);
-            }
-            catch(const std::exception&)
-            {
-                MIOPEN_LOG_W("Ignoring unparseable GPU_MAX_HW_QUEUES=" << *raw);
-            }
-        }
-
-        // Two rings are already spoken for whenever this matters: the handle's
-        // own stream, and the slot the blocked acquire() is about to hand out.
-        return hw_queues > 3 ? static_cast<std::size_t>(hw_queues - 2) : std::size_t{1};
+        const auto raw = env::getEnvironmentVariable("GPU_MAX_HW_QUEUES");
+        return MaxDrainingFor(raw ? raw->c_str() : nullptr);
     }();
     return cap;
 }
@@ -532,14 +543,17 @@ hipError_t StreamTracker::SweepLocked()
 
     const ScopedRelaxedCaptureMode capture_guard;
 
+    std::vector<std::shared_ptr<ScratchAllocation>> released;
+    auto status = hipSuccess;
     for(auto it = draining_.begin(); it != draining_.end();)
     {
-        const auto status = it->done ? hipEventQuery(it->done.get()) : hipStreamQuery(it->stream);
-        if(status == hipSuccess)
+        const auto query = it->done ? hipEventQuery(it->done.get()) : hipStreamQuery(it->stream);
+        if(query == hipSuccess)
         {
             // Its callback may still arrive; the cleared ticket makes the worker
             // ignore it.
-            it->scratch.reset();
+            if(it->scratch)
+                released.push_back(std::move(it->scratch));
             it->done.reset();
             it->ticket = 0;
             available_.push_back(std::move(*it));
@@ -557,11 +571,28 @@ hipError_t StreamTracker::SweepLocked()
         // before looking at the stream or event, and which never clears - so any
         // other answer means this backlog can no longer drain, and no later query
         // in this loop could answer differently.
-        if(status != hipErrorNotReady)
-            return status;
+        if(query != hipErrorNotReady)
+        {
+            status = query;
+            break;
+        }
         ++it;
     }
-    return hipSuccess;
+
+    // Freed by the worker, never here: this runs inside find with mutex_ held,
+    // and the default deallocator's hipFree waits for every stream on the
+    // device, so freeing here would stall find - and the worker - until every
+    // other abandoned kernel had finished. Lock order is mutex_ then
+    // retire_mutex_; nothing takes them the other way round.
+    if(!released.empty())
+    {
+        {
+            const std::lock_guard<std::mutex> lock(retire_mutex_);
+            std::move(released.begin(), released.end(), std::back_inserter(deferred_scratch_));
+        }
+        retire_cv_.notify_one();
+    }
+    return status;
 }
 
 void StreamTracker::OnSlotRetired(void* context)
@@ -580,15 +611,19 @@ void StreamTracker::RetireLoop()
     std::unique_lock<std::mutex> retire_lock(retire_mutex_);
     while(true)
     {
-        retire_cv_.wait(retire_lock, [this] { return !retired_tickets_.empty() || stop_worker_; });
-        if(retired_tickets_.empty())
+        retire_cv_.wait(retire_lock, [this] {
+            return !retired_tickets_.empty() || !deferred_scratch_.empty() || stop_worker_;
+        });
+        if(retired_tickets_.empty() && deferred_scratch_.empty())
             return; // Stopping, with every queued retirement handled.
 
         auto tickets = std::move(retired_tickets_);
         retired_tickets_.clear();
+        auto released = std::move(deferred_scratch_);
+        deferred_scratch_.clear();
         retire_lock.unlock();
 
-        std::vector<std::shared_ptr<ScratchAllocation>> released;
+        if(!tickets.empty())
         {
             const std::lock_guard<std::mutex> lock(mutex_);
             for(const auto ticket : tickets)
@@ -600,14 +635,15 @@ void StreamTracker::RetireLoop()
                 // acquire() reclaimed it on its done event first.
                 if(it == draining_.end())
                     continue;
-                released.push_back(std::move(it->scratch));
+                if(it->scratch)
+                    released.push_back(std::move(it->scratch));
                 it->done.reset();
                 it->ticket = 0;
                 available_.push_back(std::move(*it));
                 draining_.erase(it);
             }
+            retired_cv_.notify_all();
         }
-        retired_cv_.notify_all();
 
         {
             // Outside mutex_, so a deallocator that blocks - hipFree waits for
@@ -622,8 +658,16 @@ void StreamTracker::RetireLoop()
 
 void StreamTracker::release(Slot slot)
 {
-    const std::lock_guard<std::mutex> lock(mutex_);
+    // Back to the pool clean, whatever the caller left on it: an idle slot must
+    // not pin a buffer, and a done event left behind would read as complete if
+    // this stream were later abandoned without a fresh one. The scratch goes
+    // before the lock is taken, so a deallocator that blocks holds up nobody
+    // else.
     slot.scratch.reset();
+    slot.done.reset();
+    slot.ticket = 0;
+
+    const std::lock_guard<std::mutex> lock(mutex_);
     available_.push_back(std::move(slot));
 }
 
@@ -657,13 +701,19 @@ StreamTracker::~StreamTracker()
 
     if(!owned_streams_.empty())
     {
-        MIOPEN_LOG_I("Waiting for " << draining_.size() << " abandoned stream(s) to drain");
+        // The worker may still be retiring slots, so the count is read under the
+        // lock it changes them under.
+        const auto abandoned = [this] {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            return draining_.size();
+        }();
+        MIOPEN_LOG_I("Waiting for " << abandoned << " abandoned stream(s) to drain");
 
         // Every owned stream, not just the draining ones. Kernels left running by
         // a timed-out evaluation execute from code objects the Handle unloads
-        // during teardown, and release() does not require a slot to be quiescent,
-        // so an entry sitting in available_ carries no guarantee of its own.
-        // Synchronizing a stream that is already idle costs nothing.
+        // during teardown; synchronizing all of them does not depend on every
+        // caller having released only finished work, and an idle stream costs
+        // nothing.
         const auto start = std::chrono::steady_clock::now();
         for(auto& stream : owned_streams_)
             (void)hipStreamSynchronize(stream.get());

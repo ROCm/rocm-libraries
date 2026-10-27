@@ -320,6 +320,12 @@ static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
     }
     catch(...)
     {
+        // Kernels launched before the throw may still be running. Mark the end of
+        // whatever reached the stream, so the slot stays reclaimable without its
+        // callback. An event that was never recorded reads as complete, so hand
+        // it over only if this record succeeded.
+        if(hipEventRecord(ev_stop.get(), slot.stream) == hipSuccess)
+            slot.done = StreamTracker::EventPtr{std::move(ev_stop)};
         tracker.abandon(slot);
         throw;
     }
