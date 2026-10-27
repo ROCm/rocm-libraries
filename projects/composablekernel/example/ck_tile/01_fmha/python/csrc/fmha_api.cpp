@@ -19,7 +19,8 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
         int window_size_right,
         const float softcap,
         const bool return_softmax,
-        std::optional<at::Generator> gen_);
+        std::optional<at::Generator> gen_,
+        std::optional<at::Tensor> bias_);
 
 std::vector<at::Tensor> mha_varlen_fwd(
     at::Tensor& q, // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
@@ -70,7 +71,9 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
         const float softcap,
         const bool deterministic,
         std::optional<at::Generator> gen_,
-        std::optional<at::Tensor>& rng_state);
+        std::optional<at::Tensor>& rng_state,
+        std::optional<at::Tensor> bias_,
+        std::optional<at::Tensor> dbias_);
 
 std::vector<at::Tensor> mha_varlen_bwd(
     const at::Tensor& dout, // total_q x num_heads x head_size
@@ -131,10 +134,49 @@ std::vector<at::Tensor> mha_fwd_kvcache(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.doc() = "CK Tile FMHA PyTorch bindings";
-    m.def("fwd", &ck_tile::fmha::torch_api::mha_fwd, "Forward pass");
+    m.def("fwd",
+          &ck_tile::fmha::torch_api::mha_fwd,
+          "Forward pass",
+          pybind11::arg("q"),
+          pybind11::arg("k"),
+          pybind11::arg("v"),
+          pybind11::arg("out"),
+          pybind11::arg("alibi_slopes"),
+          pybind11::arg("dropout_p"),
+          pybind11::arg("softmax_scale"),
+          pybind11::arg("causal"),
+          pybind11::arg("window_size_left"),
+          pybind11::arg("window_size_right"),
+          pybind11::arg("softcap"),
+          pybind11::arg("return_softmax"),
+          pybind11::arg("gen"),
+          pybind11::arg("bias") = pybind11::none());
     m.def(
         "varlen_fwd", &ck_tile::fmha::torch_api::mha_varlen_fwd, "Forward pass (variable length)");
-    m.def("bwd", &ck_tile::fmha::torch_api::mha_bwd, "Backward pass");
+    m.def("bwd",
+          &ck_tile::fmha::torch_api::mha_bwd,
+          "Backward pass",
+          pybind11::arg("dout"),
+          pybind11::arg("q"),
+          pybind11::arg("k"),
+          pybind11::arg("v"),
+          pybind11::arg("out"),
+          pybind11::arg("softmax_lse"),
+          pybind11::arg("dq"),
+          pybind11::arg("dk"),
+          pybind11::arg("dv"),
+          pybind11::arg("alibi_slopes"),
+          pybind11::arg("dropout_p"),
+          pybind11::arg("softmax_scale"),
+          pybind11::arg("causal"),
+          pybind11::arg("window_size_left"),
+          pybind11::arg("window_size_right"),
+          pybind11::arg("softcap"),
+          pybind11::arg("deterministic"),
+          pybind11::arg("gen"),
+          pybind11::arg("rng_state"),
+          pybind11::arg("bias")  = pybind11::none(),
+          pybind11::arg("dbias") = pybind11::none());
     m.def(
         "varlen_bwd", &ck_tile::fmha::torch_api::mha_varlen_bwd, "Backward pass (variable length)");
     m.def("fwd_kvcache", &ck_tile::fmha::torch_api::mha_fwd_kvcache, "Forward pass, with KV-cache");

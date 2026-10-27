@@ -80,3 +80,117 @@ def test_rotary_reference_batch_offsets(interleaved):
     first = [-2, 1, -4, 3, 5, 6] if interleaved else [-3, -4, 1, 2, 5, 6]
     expected = torch.tensor([first, [1, 2, 3, 4, 5, 6]], device="cuda", dtype=x.dtype)
     assert torch.equal(actual[:, 0, 0], expected)
+
+
+@pytest.mark.parametrize("invalid", ["shape", "dtype", "device", "stride", "alibi"])
+def test_bias_validation(invalid):
+    q = torch.randn(1, 4, 2, 64, device="cuda", dtype=torch.float16)
+    bias = torch.zeros(4, 4, device=q.device, dtype=q.dtype)
+    kwargs = {}
+    if invalid == "shape":
+        bias = bias.unsqueeze(0)
+        message = "bias shape"
+    elif invalid == "dtype":
+        bias = bias.float()
+        message = "same dtype"
+    elif invalid == "device":
+        bias = bias.cpu()
+        message = "same device"
+    elif invalid == "stride":
+        bias = bias.t()
+        message = "contiguous last dimension"
+    else:
+        kwargs["alibi_slopes"] = torch.ones(2, device=q.device)
+        message = "cannot apply bias and alibi"
+    with pytest.raises(RuntimeError, match=message):
+        flash_attn_func(q, q, q, bias=bias, **kwargs)
+
+
+def test_bias_operator_metadata():
+    q = torch.randn(2, 32, 4, 64, device="cuda", dtype=torch.float16)
+    k, v = torch.randn_like(q), torch.randn_like(q)
+    bias = torch.randn(32, 32, device=q.device, dtype=q.dtype)
+    fwd = torch.ops.ck_tile_fmha._flash_attn_forward
+    args = (q, k, v, 0.17, 0.125, False, -1, -1, 0.0, None, True, bias)
+    torch.library.opcheck(fwd, args, test_utils=("test_schema", "test_faketensor"))
+    out, lse, _, rng = fwd(*args)
+    dq, dk, dv, dbias = (torch.empty_like(x) for x in (q, k, v, bias))
+    args = (
+        torch.randn_like(out),
+        q,
+        k,
+        v,
+        out,
+        lse,
+        dq,
+        dk,
+        dv,
+        0.17,
+        0.125,
+        False,
+        -1,
+        -1,
+        0.0,
+        None,
+        False,
+        rng,
+        bias,
+        dbias,
+    )
+    torch.library.opcheck(
+        torch.ops.ck_tile_fmha._flash_attn_backward,
+        args,
+        test_utils=("test_schema", "test_faketensor"),
+    )
+
+
+def test_bias_torch_compile():
+    q, k, v = (
+        torch.randn(1, 32, 2, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        for _ in range(3)
+    )
+    bias = torch.randn(32, 32, device=q.device, dtype=q.dtype, requires_grad=True)
+    compiled = torch.compile(flash_attn_func, backend="aot_eager", fullgraph=True)
+    actual = compiled(q, k, v, bias=bias)
+    expected = flash_attn_func(q, k, v, bias=bias)
+    torch.testing.assert_close(actual, expected)
+    dout = torch.randn_like(actual)
+    args = (q, k, v, bias)
+    for grad, ref in zip(
+        torch.autograd.grad(actual, args, dout), torch.autograd.grad(expected, args, dout)
+    ):
+        torch.testing.assert_close(grad, ref)
+
+
+def test_native_bias_defaults_preserve_positional_api():
+    from ck_tile_fmha import _C
+
+    q, k, v = (torch.randn(1, 32, 2, 64, device="cuda", dtype=torch.float16) for _ in range(3))
+    args = (q, k, v, None, None, 0.0, 0.125, False, -1, -1, 0.0, False, None)
+    out, lse, _, rng = _C.fwd(*args)
+    explicit = _C.fwd(*args, None)
+    torch.testing.assert_close(out, explicit[0])
+    torch.testing.assert_close(lse, explicit[1])
+    args = (
+        torch.randn_like(out),
+        q,
+        k,
+        v,
+        out,
+        lse,
+        None,
+        None,
+        None,
+        None,
+        0.0,
+        0.125,
+        False,
+        -1,
+        -1,
+        0.0,
+        False,
+        None,
+        rng,
+    )
+    for actual, expected in zip(_C.bwd(*args), _C.bwd(*args, None, None)):
+        torch.testing.assert_close(actual, expected)

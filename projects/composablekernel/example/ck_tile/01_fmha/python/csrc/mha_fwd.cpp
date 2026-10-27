@@ -15,7 +15,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info& mask,
                                        int head_size,
                                        bool has_dropout,
                                        bool has_lse,
-                                       bool enable_alibi)
+                                       bias_enum bias_type)
 {
     return fmha_fwd_traits{head_size,
                            head_size,
@@ -24,7 +24,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info& mask,
                            true,  // is_v_rowmajor
                            false, // has_logits_soft_cap
                            mask.type,
-                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
+                           bias_type,
                            has_lse,
                            has_dropout,
                            quant_scale_enum::no_scale}; // qscale_type
@@ -45,6 +45,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                                    const at::Tensor k,
                                    const at::Tensor v,
                                    std::optional<at::Tensor>& alibi_slopes_,
+                                   const std::optional<at::Tensor>& bias_,
                                    at::Tensor out,
                                    at::Tensor softmax_lse,
                                    at::Tensor dropout_randval,
@@ -82,10 +83,15 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
     ck_tile::index_t batch_stride_lse     = has_lse ? softmax_lse.stride(0) : 0;
     ck_tile::index_t batch_stride_randval = has_dropout_randval ? dropout_randval.stride(0) : 0;
 
-    void* alibi_slopes_ptr               = nullptr;
-    ck_tile::index_t stride_alibi_slopes = 0;
+    void* bias_ptr               = nullptr;
+    ck_tile::index_t stride_bias = 0;
 
-    if(alibi_slopes_.has_value())
+    if(bias_.has_value())
+    {
+        bias_ptr    = bias_.value().data_ptr();
+        stride_bias = bias_.value().stride(0);
+    }
+    else if(alibi_slopes_.has_value())
     {
         auto alibi_slopes = alibi_slopes_.value();
         CK_TILE_FMHA_CHECK_DEVICE(alibi_slopes);
@@ -93,18 +99,18 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                     "ALiBi slopes tensor must have contiguous last dimension");
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({h}) ||
                     alibi_slopes.sizes() == torch::IntArrayRef({b, h}));
-        alibi_slopes_ptr    = alibi_slopes.data_ptr();
-        stride_alibi_slopes = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        bias_ptr    = alibi_slopes.data_ptr();
+        stride_bias = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
     }
 
     return fmha_fwd_args{nullptr, // selected_kernel_name
                          q.data_ptr(),
                          k.data_ptr(),
                          v.data_ptr(),
-                         alibi_slopes_ptr, // bias
-                         nullptr,          // q_descale_ptr
-                         nullptr,          // k_descale_ptr
-                         nullptr,          // v_descale_ptr
+                         bias_ptr, // bias
+                         nullptr,  // q_descale_ptr
+                         nullptr,  // k_descale_ptr
+                         nullptr,  // v_descale_ptr
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
@@ -133,7 +139,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          stride_q,
                          stride_k,
                          stride_v,
-                         stride_alibi_slopes,
+                         stride_bias,
                          stride_randval,
                          stride_o,
                          0, // stride_q_descale
@@ -142,7 +148,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          nhead_stride_q,
                          nhead_stride_k,
                          nhead_stride_v,
-                         0, // nhead_stride_bias, FA without bias
+                         0, // nhead_stride_bias: broadcast across heads
                          nhead_stride_randval,
                          nhead_stride_lse,
                          nhead_stride_o,
@@ -152,7 +158,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
-                         0, // batch_stride_bias, FA without bias
+                         0, // batch_stride_bias: broadcast across batches
                          batch_stride_randval,
                          batch_stride_lse,
                          batch_stride_o,
@@ -185,7 +191,8 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
         int window_size_right,
         const float softcap,
         const bool return_dropout_randval,
-        std::optional<at::Generator> gen_)
+        std::optional<at::Generator> gen_,
+        std::optional<at::Tensor> bias_)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
     auto q_dtype = q.dtype();
@@ -219,6 +226,11 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
                 "query, key, value, and out_ must have a head_size that is a multiple of 8");
     TORCH_CHECK(num_heads % num_heads_k == 0,
                 "Number of heads in key/value must divide number of heads in query");
+
+    detail::check_bias(bias_, alibi_slopes_, q, seqlen_q, seqlen_k);
+    const auto bias_type = bias_.has_value()           ? bias_enum::elementwise_bias
+                           : alibi_slopes_.has_value() ? bias_enum::alibi
+                                                       : bias_enum::no_bias;
 
     if(window_size_left >= seqlen_k)
     {
@@ -259,7 +271,7 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
     // this case H/t Daniel Haziza
     const int seqlenq_ngroups_swapped =
         seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 &&
-        p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value();
+        p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value() && !bias_.has_value();
     const int ngroups = num_heads / num_heads_k;
     if(seqlenq_ngroups_swapped)
     {
@@ -337,8 +349,8 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
 #endif
         ck_tile::stream_config stream_config{stream};
 
-        auto traits = get_ck_fmha_fwd_traits(
-            mask, q_dtype_str, head_size, has_dropout, has_lse, alibi_slopes_.has_value());
+        auto traits =
+            get_ck_fmha_fwd_traits(mask, q_dtype_str, head_size, has_dropout, has_lse, bias_type);
 
         auto args = get_ck_fmha_fwd_args(has_lse,
                                          return_dropout_randval,
@@ -353,6 +365,7 @@ mha_fwd(at::Tensor& q,       // batch_size x seqlen_q x num_heads x round_multip
                                          k,
                                          v,
                                          alibi_slopes_,
+                                         bias_,
                                          out,
                                          softmax_lse,
                                          p,

@@ -1,26 +1,19 @@
 # CK Tile FMHA Python
 
-`ck_tile_fmha` exposes CK Tile FMHA through the FlashAttention Python API and
-validates it with the FlashAttention CK pytest matrix and GPU PyTorch references.
-It is a separate package, native extension, and `torch.ops` namespace, so it can
-coexist with `flash_attn`. It never falls back to another attention backend.
+`ck_tile_fmha` provides a FlashAttention-compatible Python API backed by CK Tile.
+It supports FP16/BF16 fixed-length and variable-length attention, packed inputs,
+forward/backward, MHA/GQA/MQA, causal/local masks, ALiBi, dropout, deterministic
+backward, and KV-cache operations, subject to CK backend restrictions.
 
-The initial validation target is **gfx1250**. This integration covers the
-FlashAttention CK backend's existing FP16/BF16 functionality: fixed and variable
-length attention, packed inputs, forward and backward, MHA/GQA/MQA, causal/local
-masks, ALiBi, dropout, deterministic backward, and KV-cache operations. Existing
-backend restrictions still apply. Nonzero `softcap` is explicitly rejected; CK
-extensions such as FP8, attention sinks and unequal Q/V head dimensions are
-outside this initial API.
+Validated on **gfx1250**. Nonzero `softcap`, FP8, attention sinks, and unequal Q/V
+head dimensions are unsupported. The package can coexist with `flash_attn` and
+does not fall back to other backends.
 
 ## Build and install
 
-Use a Linux environment with ROCm PyTorch >= 2.4, a ROCm compiler supporting the
-target GPU, Python >= 3.9, CMake >= 3.21, Ninja, setuptools >= 64 and wheel.
-The installation directory must be writable; a virtual environment is suitable.
-Install the ROCm PyTorch build appropriate to your environment first. Build in
-that environment using `--no-build-isolation`, so the extension uses the same
-PyTorch headers and ABI as the runtime.
+Requires Linux, ROCm PyTorch >= 2.4, a ROCm compiler supporting the target GPU,
+Python >= 3.9, CMake >= 3.21, Ninja, setuptools >= 64, and wheel. Install PyTorch
+first; `--no-build-isolation` builds against that installation.
 
 From this directory:
 
@@ -28,25 +21,10 @@ From this directory:
 GPU_ARCHS=gfx1250 MAX_JOBS=64 python -m pip install --no-build-isolation '.[test]'
 ```
 
-The setuptools entry point is also supported:
-
-```bash
-GPU_ARCHS=gfx1250 MAX_JOBS=64 python setup.py install
-python -m pip install pytest einops
-```
-
-If `GPU_ARCHS` is unset, the current GPU is detected. Set it explicitly for
-cross-compilation. Other architectures are configurable but are not part of the
-initial gfx1250 validation. The compiler must support every requested target.
-`CK_ROOT` optionally selects another CK checkout. A source distribution includes
-the CK headers and FMHA generator needed to build without the original checkout.
-
-The build reuses `01_fmha/CMakeLists.txt`, including CK's per-architecture forward
-head-dimension list, so the Python tests exercise the same specialized kernels as
-the C++ example (for gfx1250, including head dimensions 96, 160 and 192). It
-generates `--receipt 2` for forward and backward, including deterministic kernels,
-and does not use the example's reduced testing filters. Per-instance scheduling
-and per-direction BF16 conversion settings come from the existing CK targets.
+`GPU_ARCHS` defaults to the detected GPU; set it for cross-compilation.
+`CK_ROOT` selects an alternate CK checkout. The build uses the C++ example's
+architecture-specific kernels, including deterministic backward and fixed-length
+bias support.
 
 ## Development and incremental builds
 
@@ -56,15 +34,9 @@ GPU_ARCHS=gfx1250 MAX_JOBS=64 python -m pip install --no-build-isolation -e '.[t
 GPU_ARCHS=gfx1250 MAX_JOBS=64 python setup.py build_ext --inplace
 ```
 
-CMake/Ninja track CK headers, generated kernels and compiler options. Codegen
-preserves unchanged generated files. The PyTorch binding build uses private
-copies for hipification and relinks whenever the CK kernel archive changes.
-Keep the build directory to reuse compiled objects. Python-only edits take effect
-immediately with an editable installation. Restart the Python process after
-rebuilding a loaded native extension.
-
-All installation methods share a persistent cache under `python/build/`, including
-editable pip installs. Set `CK_TILE_FMHA_BUILD_DIR` to relocate that cache.
+Keep `python/build/` to reuse compiled objects, or set `CK_TILE_FMHA_BUILD_DIR`
+to relocate the cache. Editable installs pick up Python edits immediately;
+restart Python after rebuilding a loaded native extension.
 
 ## Use
 
@@ -79,34 +51,42 @@ out = flash_attn_func(q, k, v, causal=True)
 out.sum().backward()
 ```
 
-The public function names and signatures match FlashAttention. Import them from
-`ck_tile_fmha` instead of `flash_attn`. ROCm PyTorch uses the `cuda` device name.
+Import FlashAttention function names from `ck_tile_fmha`; existing positional
+arguments are preserved. ROCm PyTorch uses the `cuda` device name.
 
-## Test before a PR
+Fixed-length `flash_attn_func`, `flash_attn_kvpacked_func`, and
+`flash_attn_qkvpacked_func` additionally accept an optional trailing `bias` argument:
+
+```python
+bias = torch.randn(128, 128, device="cuda", dtype=q.dtype, requires_grad=True)
+out = flash_attn_func(q, k, v, bias=bias, causal=True)
+out.sum().backward()  # Computes gradients for q, k, v, and bias.
+```
+
+`bias` has shape `(seqlen_q, seqlen_k)`, matches Q/K/V's device and FP16/BF16 dtype,
+and requires a contiguous last dimension. It is shared across batches and heads
+and added to `Q @ K.T * softmax_scale` before softmax. It cannot be combined with
+`alibi_slopes` and is unavailable in variable-length and KV-cache APIs.
+
+Bias gradients require a `(batch_size, nheads, seqlen_q, seqlen_k)` temporary,
+reduced across batches and heads.
+
+## Tests
+
+| File | Coverage |
+| --- | --- |
+| `tests/test_fixedlen.py` | Fixed-length/packed forward and backward, bias |
+| `tests/test_varlen.py` | Variable-length/packed forward and backward, paged attention |
+| `tests/test_kvcache.py` | Cache updates, decode, rotary embeddings, cache indexing |
+| `tests/test_interface.py` | Validation, native compatibility, fake tensors, `torch.compile` |
+
+Tests use GPU PyTorch references in `tests/reference.py`; FlashAttention and
+Triton are not required. Shared helpers live in `tests/utils.py`.
 
 ```bash
+# Full suite (add --junitxml=test-results/fmha.xml to save a report)
 HIP_VISIBLE_DEVICES=0 python -m pytest tests
+
+# Fixed-length bias tests
+HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_fixedlen.py -k bias
 ```
-
-This runs the original parameter matrix, without a default time budget or reduced
-case selection. It contains 412,756 combinations before the original runtime
-skips. Original numeric thresholds, seeds, race repetition counts and determinism
-checks are retained. The FP32 reference uses GPU PyTorch tensor operations rather
-than SDPA or another fused attention implementation. Padding and rotary helpers
-are local, so neither FlashAttention nor its Triton kernels are needed.
-Additional integration tests check unsupported softcap, rotary offsets, and
-native/fake tensor metadata for PyTorch's custom operators.
-
-For a specific failure, use pytest's normal node IDs or `-k` selection. Save a
-complete report when desired:
-
-```bash
-mkdir -p test-results
-HIP_VISIBLE_DEVICES=0 python -m pytest tests --junitxml=test-results/fmha.xml
-```
-
-Failures remain failures. Missing generated kernels are not automatically skipped,
-and tolerances are not relaxed to hide kernel issues. The original skips cover
-unsupported cache combinations and reference-memory restrictions. Kernel fixes
-are separate follow-up work. The C++ tests continue to cover CK functionality
-outside this Python API; the existing performance scripts are unchanged.

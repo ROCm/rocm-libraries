@@ -320,6 +320,34 @@ def attention_ref(
     return output.to(dtype=dtype_og), attention.to(dtype=dtype_og)
 
 
+def bias_reference(q, k, v, bias, scale, causal, window, dropout_p, randval):
+    q, k, v, bias = (x.float() for x in (q, k, v, bias))
+    groups = q.shape[2] // k.shape[2]
+    k, v = (x.repeat_interleave(groups, dim=2) for x in (k, v))
+    scores = torch.einsum("bqhd,bkhd->bhqk", q, k) * scale + bias
+    sq, sk = q.shape[1], k.shape[1]
+    row = torch.arange(sq, device=q.device)[:, None] + sk - sq
+    col = torch.arange(sk, device=q.device)
+    mask = torch.zeros((sq, sk), device=q.device, dtype=torch.bool)
+    left, right = window
+    if causal:
+        right = 0
+    if left >= 0:
+        mask |= col < row - left
+    if right >= 0:
+        mask |= col > row + right
+    scores = scores.masked_fill(mask, -torch.inf)
+    all_masked = mask.all(dim=-1)
+    # Avoid NaNs in the reference's backward for fully masked rows.
+    scores = scores.masked_fill(all_masked[:, None], 0)
+    lse = scores.logsumexp(-1)
+    probs = scores.softmax(-1).masked_fill(all_masked[:, None], 0)
+    if dropout_p:
+        keep = randval.int() <= math.floor(255 * (1 - dropout_p))
+        probs = probs * keep / (1 - dropout_p)
+    return torch.einsum("bhqk,bkhd->bqhd", probs, v), lse, ~all_masked
+
+
 def attention_kvpacked_ref(
     q,
     kv,

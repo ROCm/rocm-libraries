@@ -53,6 +53,7 @@ def _flash_attn_forward(
     softcap: float,
     alibi_slopes: Optional[torch.Tensor],
     return_softmax: bool,
+    bias: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse, S_dmask, rng_state = fmha_gpu.fwd(
@@ -69,6 +70,7 @@ def _flash_attn_forward(
         softcap,
         return_softmax,
         None,  # unused generator slot, kept for backwards-compat arg positioning
+        bias,
     )
     return out, softmax_lse, S_dmask, rng_state
 
@@ -86,6 +88,7 @@ def _flash_attn_forward_fake(
     softcap: float,
     alibi_slopes: Optional[torch.Tensor],
     return_softmax: bool,
+    bias: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     batch_size, seqlen_q, num_heads, head_size = q.shape
@@ -215,7 +218,9 @@ else:
 
 
 @_torch_custom_op_wrapper(
-    "ck_tile_fmha::_flash_attn_backward", mutates_args=("dq", "dk", "dv"), device_types="cuda"
+    "ck_tile_fmha::_flash_attn_backward",
+    mutates_args=("dq", "dk", "dv", "dbias"),
+    device_types="cuda",
 )
 def _flash_attn_backward(
     dout: torch.Tensor,
@@ -236,6 +241,8 @@ def _flash_attn_backward(
     alibi_slopes: Optional[torch.Tensor],
     deterministic: bool,
     rng_state: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+    dbias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     # dq, dk, dv are allocated by us so they should already be contiguous
     dout, q, k, v, out = [maybe_contiguous(x) for x in (dout, q, k, v, out)]
@@ -264,6 +271,8 @@ def _flash_attn_backward(
         deterministic,
         None,  # unused generator slot, kept for backwards-compat arg positioning
         rng_state,
+        bias,
+        dbias,
     )
     return softmax_d
 
@@ -288,6 +297,8 @@ def _flash_attn_backward_fake(
     alibi_slopes: Optional[torch.Tensor],
     deterministic: bool,
     rng_state: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+    dbias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     dout, q, k, v, out = [maybe_contiguous(x) for x in (dout, q, k, v, out)]
     if dq is None:
@@ -437,8 +448,11 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         is_grad_enabled,
+        bias,
     ):
-        is_grad = is_grad_enabled and qkv.requires_grad
+        is_grad = is_grad_enabled and (
+            qkv.requires_grad or (bias is not None and bias.requires_grad)
+        )
         if softmax_scale is None:
             softmax_scale = qkv.shape[-1] ** (-0.5)
         q, k, v = qkv[:, :, 0].detach(), qkv[:, :, 1].detach(), qkv[:, :, 2].detach()
@@ -459,9 +473,10 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
             softcap=softcap,
             alibi_slopes=alibi_slopes,
             return_softmax=return_softmax and dropout_p > 0,
+            bias=bias,
         )
         if is_grad:
-            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state)
+            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state, bias)
             ctx.dropout_p = dropout_p
             ctx.softmax_scale = softmax_scale
             ctx.causal = causal
@@ -474,7 +489,8 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dout, *args):
-        q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
+        q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
         qkv_shape = q.shape[:-2] + (3, *q.shape[-2:])
         dqkv = torch.empty(qkv_shape, dtype=q.dtype, device=q.device)
         head_size_og = dout.size(3)
@@ -500,9 +516,11 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
             ctx.alibi_slopes,
             ctx.deterministic,
             rng_state=rng_state,
+            bias=bias,
+            dbias=dbias,
         )
         dqkv = dqkv[..., : dout.shape[-1]]  # We could have padded the head dimension
-        return dqkv, None, None, None, None, None, None, None, None, None
+        return dqkv, None, None, None, None, None, None, None, None, None, dbias
 
 
 class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
@@ -614,8 +632,11 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         is_grad_enabled,
+        bias,
     ):
-        is_grad = is_grad_enabled and any(x.requires_grad for x in [q, kv])
+        is_grad = is_grad_enabled and (
+            any(x.requires_grad for x in [q, kv]) or (bias is not None and bias.requires_grad)
+        )
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         k, v = kv[:, :, 0].detach(), kv[:, :, 1].detach()
@@ -636,9 +657,10 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
             softcap=softcap,
             alibi_slopes=alibi_slopes,
             return_softmax=return_softmax and dropout_p > 0,
+            bias=bias,
         )
         if is_grad:
-            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state)
+            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state, bias)
             ctx.dropout_p = dropout_p
             ctx.softmax_scale = softmax_scale
             ctx.causal = causal
@@ -651,7 +673,8 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dout, *args):
-        q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
+        q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
         dq = torch.empty_like(q)
         kv_shape = k.shape[:-2] + (2, *k.shape[-2:])
         dkv = torch.empty(kv_shape, dtype=k.dtype, device=k.device)
@@ -678,10 +701,12 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
             ctx.alibi_slopes,
             ctx.deterministic,
             rng_state=rng_state,
+            bias=bias,
+            dbias=dbias,
         )
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dkv = dkv[..., : dout.shape[-1]]
-        return dq, dkv, None, None, None, None, None, None, None, None, None
+        return dq, dkv, None, None, None, None, None, None, None, None, None, dbias
 
 
 class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
@@ -802,8 +827,11 @@ class FlashAttnFunc(torch.autograd.Function):
         deterministic,
         return_softmax,
         is_grad_enabled,
+        bias,
     ):
-        is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
+        is_grad = is_grad_enabled and (
+            any(x.requires_grad for x in [q, k, v]) or (bias is not None and bias.requires_grad)
+        )
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         head_size_og = q.size(3)
@@ -823,9 +851,10 @@ class FlashAttnFunc(torch.autograd.Function):
             softcap=softcap,
             alibi_slopes=alibi_slopes,
             return_softmax=return_softmax and dropout_p > 0,
+            bias=bias,
         )
         if is_grad:
-            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state)
+            ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state, bias)
             ctx.dropout_p = dropout_p
             ctx.softmax_scale = softmax_scale
             ctx.causal = causal
@@ -838,7 +867,8 @@ class FlashAttnFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dout, *args):
-        q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
+        q, k, v, out, softmax_lse, rng_state, bias = ctx.saved_tensors
+        dbias = torch.empty_like(bias) if ctx.needs_input_grad[-1] else None
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
         head_size_og = dout.size(3)
         dout_padded = dout
@@ -863,11 +893,13 @@ class FlashAttnFunc(torch.autograd.Function):
             ctx.alibi_slopes,
             ctx.deterministic,
             rng_state=rng_state,
+            bias=bias,
+            dbias=dbias,
         )
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : dout.shape[-1]]
         dv = dv[..., : dout.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias
 
 
 class FlashAttnVarlenFunc(torch.autograd.Function):
@@ -1001,6 +1033,7 @@ def flash_attn_qkvpacked_func(
     alibi_slopes=None,
     deterministic=False,
     return_attn_probs=False,
+    bias=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If Q, K, V are already stacked into 1 tensor, this function will be faster than
@@ -1027,6 +1060,10 @@ def flash_attn_qkvpacked_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        bias: Optional (seqlen_q, seqlen_k) tensor with the same dtype and device as q.
+            Added to QK^T * softmax_scale before softmax, shared across batches and heads.
+            The last dimension must be contiguous. Cannot be combined with alibi_slopes.
+            Gradients with respect to bias are supported.
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1047,6 +1084,7 @@ def flash_attn_qkvpacked_func(
         deterministic,
         return_attn_probs,
         torch.is_grad_enabled(),
+        bias,
     )
 
 
@@ -1061,6 +1099,7 @@ def flash_attn_kvpacked_func(
     alibi_slopes=None,
     deterministic=False,
     return_attn_probs=False,
+    bias=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     If K, V are already stacked into 1 tensor, this function will be faster than
@@ -1104,6 +1143,10 @@ def flash_attn_kvpacked_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        bias: Optional (seqlen_q, seqlen_k) tensor with the same dtype and device as q.
+            Added to QK^T * softmax_scale before softmax, shared across batches and heads.
+            The last dimension must be contiguous. Cannot be combined with alibi_slopes.
+            Gradients with respect to bias are supported.
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1125,6 +1168,7 @@ def flash_attn_kvpacked_func(
         deterministic,
         return_attn_probs,
         torch.is_grad_enabled(),
+        bias,
     )
 
 
@@ -1140,6 +1184,7 @@ def flash_attn_func(
     alibi_slopes=None,
     deterministic=False,
     return_attn_probs=False,
+    bias=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -1180,6 +1225,10 @@ def flash_attn_func(
         return_attn_probs: bool. Whether to return the attention probabilities. This option is for
            testing only. The returned probabilities are not guaranteed to be correct
            (they might not have the right scaling).
+        bias: Optional (seqlen_q, seqlen_k) tensor with the same dtype and device as q.
+            Added to QK^T * softmax_scale before softmax, shared across batches and heads.
+            The last dimension must be contiguous. Cannot be combined with alibi_slopes.
+            Gradients with respect to bias are supported.
     Return:
         out: (batch_size, seqlen, nheads, headdim).
         softmax_lse [optional, if return_attn_probs=True]: (batch_size, nheads, seqlen). The
@@ -1202,6 +1251,7 @@ def flash_attn_func(
         deterministic,
         return_attn_probs,
         torch.is_grad_enabled(),
+        bias,
     )
 
 

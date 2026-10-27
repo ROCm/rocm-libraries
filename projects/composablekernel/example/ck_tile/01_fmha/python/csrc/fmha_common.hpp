@@ -9,6 +9,7 @@
 #include <torch/nn/functional.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <optional>
 #include <string>
 
 #ifdef USE_ROCM
@@ -28,6 +29,26 @@
 #define CK_TILE_FMHA_CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 namespace ck_tile::fmha::torch_api::detail {
+// Elementwise bias is shared by all batches and heads.
+inline void check_bias(const std::optional<at::Tensor>& bias,
+                       const std::optional<at::Tensor>& alibi_slopes,
+                       const at::Tensor& q,
+                       int seqlen_q,
+                       int seqlen_k)
+{
+    TORCH_CHECK(!(bias.has_value() && alibi_slopes.has_value()),
+                "cannot apply bias and alibi at the same time");
+    if(bias.has_value())
+    {
+        const auto& tensor = bias.value();
+        TORCH_CHECK(tensor.device() == q.device(), "bias must be on the same device as query");
+        TORCH_CHECK(tensor.dtype() == q.dtype(), "bias must have the same dtype as query");
+        TORCH_CHECK(tensor.sizes() == torch::IntArrayRef({seqlen_q, seqlen_k}),
+                    "bias shape must be [seqlen_q, seqlen_k]");
+        TORCH_CHECK(tensor.stride(-1) == 1, "bias must have contiguous last dimension");
+    }
+}
+
 inline __global__ void ParsePhiloxCudaState(at::PhiloxCudaState arg, uint64_t* rng_state)
 {
     // Imitate from PyTorch

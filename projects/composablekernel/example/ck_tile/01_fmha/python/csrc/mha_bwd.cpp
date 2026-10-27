@@ -17,7 +17,8 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info& mask,
                                        int nhead_q,
                                        int nhead_k,
                                        bool has_dropout,
-                                       bool enable_alibi,
+                                       bias_enum bias_type,
+                                       bool has_dbias,
                                        bool deterministic)
 {
     return fmha_bwd_traits{seqlen_q,
@@ -32,8 +33,8 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info& mask,
                            dtype,
                            false, // is_group_mode
                            mask.type,
-                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
-                           false, // has_dbias
+                           bias_type,
+                           has_dbias,
                            has_dropout,
                            false, // s_randval
                            deterministic};
@@ -52,6 +53,8 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                                    const at::Tensor k,
                                    const at::Tensor v,
                                    std::optional<at::Tensor>& alibi_slopes_,
+                                   const std::optional<at::Tensor>& bias_,
+                                   const at::Tensor& dbias,
                                    const at::Tensor out,
                                    const at::Tensor softmax_lse,
                                    const at::Tensor dout,
@@ -113,10 +116,15 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
 
     float p_undrop = 1.0 - p_dropout;
 
-    void* alibi_slopes_ptr               = nullptr;
-    ck_tile::index_t stride_alibi_slopes = 0;
+    void* bias_ptr               = nullptr;
+    ck_tile::index_t stride_bias = 0;
 
-    if(alibi_slopes_.has_value())
+    if(bias_.has_value())
+    {
+        bias_ptr    = bias_.value().data_ptr();
+        stride_bias = bias_.value().stride(0);
+    }
+    else if(alibi_slopes_.has_value())
     {
         auto alibi_slopes = alibi_slopes_.value();
         CK_TILE_FMHA_CHECK_DEVICE(alibi_slopes);
@@ -124,15 +132,19 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                     "ALiBi slopes tensor must have contiguous last dimension");
         TORCH_CHECK(alibi_slopes.sizes() == torch::IntArrayRef({h}) ||
                     alibi_slopes.sizes() == torch::IntArrayRef({b, h}));
-        alibi_slopes_ptr = alibi_slopes.data_ptr();
+        bias_ptr = alibi_slopes.data_ptr();
         // alibi_slopes:(batch_size, nheads) or (nhead)
-        stride_alibi_slopes = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+        stride_bias = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
     }
+
+    const ck_tile::index_t stride_dbias       = dbias.defined() ? dbias.stride(2) : 0;
+    const ck_tile::index_t nhead_stride_dbias = dbias.defined() ? dbias.stride(1) : 0;
+    const ck_tile::index_t batch_stride_dbias = dbias.defined() ? dbias.stride(0) : 0;
 
     return fmha_bwd_args{q.data_ptr(),
                          k.data_ptr(),
                          v.data_ptr(),
-                         alibi_slopes_ptr, // bias
+                         bias_ptr, // bias
                          out.data_ptr(),
                          softmax_lse.data_ptr(),
                          dout.data_ptr(),
@@ -141,7 +153,7 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                          dq.data_ptr(),
                          dk.data_ptr(),
                          dv.data_ptr(),
-                         nullptr, // dbias
+                         dbias.defined() ? dbias.data_ptr() : nullptr,
                          workspace_ptr,
                          nullptr, // sink_ptr
                          nullptr, // d_sink_ptr
@@ -164,18 +176,18 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                          stride_q,
                          stride_k,
                          stride_v,
-                         stride_alibi_slopes,
+                         stride_bias,
                          stride_o,
                          0, // stride_randval
                          stride_do,
                          stride_dq,
                          stride_dk,
                          stride_dv,
-                         0, // stride_dbias, FA without bias
+                         stride_dbias,
                          nhead_stride_q,
                          nhead_stride_k,
                          nhead_stride_v,
-                         0, // nhead_stride_bias, FA without bias
+                         0, // nhead_stride_bias: broadcast across heads
                          nhead_stride_o,
                          0, // nhead_stride_randval
                          nhead_stride_do,
@@ -183,11 +195,11 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                          nhead_stride_dq,
                          nhead_stride_dk,
                          nhead_stride_dv,
-                         0, // nhead_stride_dbias, FA without dbias
+                         nhead_stride_dbias,
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
-                         0, // batch_stride_bias, FA without bias
+                         0, // batch_stride_bias: broadcast across batches
                          batch_stride_o,
                          0, // batch_stride_randval
                          batch_stride_do,
@@ -195,7 +207,7 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info& mask,
                          batch_stride_dq,
                          batch_stride_dk,
                          batch_stride_dv,
-                         0, // batch_stride_dbias, FA without dbias
+                         batch_stride_dbias,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
@@ -223,7 +235,9 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
         const float softcap,
         const bool deterministic,
         std::optional<at::Generator> gen_,
-        std::optional<at::Tensor>& rng_state_)
+        std::optional<at::Tensor>& rng_state_,
+        std::optional<at::Tensor> bias_,
+        std::optional<at::Tensor> dbias_)
 {
     TORCH_CHECK(softcap == 0.0f, "CK Tile FMHA Python bindings do not support softcap");
 #ifdef CK_TILE_FMHA_DISABLE_BACKWARD
@@ -353,6 +367,16 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
         dv = torch::empty_like(v);
     }
 
+    detail::check_bias(bias_, alibi_slopes_, q, seqlen_q, seqlen_k);
+    const auto bias_type = bias_.has_value()           ? bias_enum::elementwise_bias
+                           : alibi_slopes_.has_value() ? bias_enum::alibi
+                                                       : bias_enum::no_bias;
+    if(dbias_.has_value())
+    {
+        TORCH_CHECK(bias_.has_value(), "dbias requires bias");
+        detail::check_bias(dbias_, std::nullopt, q, seqlen_q, seqlen_k);
+    }
+
     const auto traits = get_ck_fmha_bwd_traits(mask,
                                                q_dtype_str,
                                                seqlen_q,
@@ -362,7 +386,8 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
                                                num_heads,
                                                num_heads_k,
                                                is_dropout,
-                                               alibi_slopes_.has_value(),
+                                               bias_type,
+                                               dbias_.has_value(),
                                                deterministic);
     fmha_bwd_launcher launcher(traits);
 
@@ -370,6 +395,14 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
 
     auto opts      = q.options();
     auto softmax_d = torch::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
+
+    // Masked tiles may not be written by the kernel. Reduce the per-batch/head
+    // gradients into the shared [seqlen_q, seqlen_k] bias after the launch.
+    at::Tensor dbias_expanded;
+    if(dbias_.has_value())
+    {
+        dbias_expanded = torch::zeros({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
+    }
 
     // Allocate device workspace
     at::Tensor workspace;
@@ -440,6 +473,8 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
                                          k,
                                          v,
                                          alibi_slopes_,
+                                         bias_,
+                                         dbias_expanded,
                                          out,
                                          softmax_lse,
                                          dout,
@@ -476,6 +511,11 @@ mha_bwd(const at::Tensor& dout, // batch_size x seqlen_q x num_heads, x multiple
             at::reshape(dv_expanded,
                         {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}),
             {3});
+    }
+
+    if(dbias_.has_value())
+    {
+        at::sum_out(dbias_.value(), dbias_expanded, at::IntArrayRef({0, 1}));
     }
 
     return {dq, dk, dv, softmax_d};
