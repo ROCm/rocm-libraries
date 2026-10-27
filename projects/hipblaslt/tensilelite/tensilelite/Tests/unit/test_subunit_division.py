@@ -19,8 +19,8 @@ CPU-only.
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.Common.Utilities import SWIZZLE_LOAD_BYTES, swizzleGeometry
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.Utilities import SWIZZLE_LOAD_BYTES, swizzleGeometry
 
 pytestmark = pytest.mark.unit
 

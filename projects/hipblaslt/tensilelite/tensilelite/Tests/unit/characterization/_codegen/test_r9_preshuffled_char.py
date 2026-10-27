@@ -31,7 +31,7 @@ import contextlib
 
 import pytest
 
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -123,7 +123,7 @@ def _kernel(swizzleA=False, swizzleB=False, miwavegroup=(4, 4), depthU=256):
 
 
 def _tile(tc, kernel, writer=None):
-    from Tensile.Components.Subtile.Kernel import TileInfo, AB_B4
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B4
 
     return TileInfo(AB_B4, tc, writer or _make_writer(), kernel)
 
@@ -172,7 +172,7 @@ def test_r9_mx_scale_tensors_are_never_pre_shuffled():
     MXSA/MXSB derive their ``_tc`` from the same A/B test, so without the
     ``isAB`` guard MXSB would inherit SwizzleTensorB and take B's addressing.
     """
-    from Tensile.Components.Subtile.Kernel import TileInfo, MXSA_B4, MXSB_B4
+    from tensilelite.Components.Subtile.Kernel import TileInfo, MXSA_B4, MXSB_B4
 
     kernel = _kernel(swizzleA=True, swizzleB=True)
     kernel["_DepthUMXSA"] = 8
@@ -187,8 +187,8 @@ def test_r9_mx_scale_tensors_are_never_pre_shuffled():
 # ---------------------------------------------------------------------------
 
 def _gr_ptr_update(tile_char, kernel):
-    import Tensile.Components.Subtile.SubtileGREmit as GR
-    from Tensile.Components.Subtile.SubtileGeometry import GRTag_1x2
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
+    from tensilelite.Components.Subtile.SubtileGeometry import GRTag_1x2
 
     writer = _make_writer()
     ti = _tile(tile_char, kernel, writer)
@@ -231,7 +231,7 @@ def test_r9_gr_ptr_advance_is_unchanged_without_swizzle():
 # ---------------------------------------------------------------------------
 
 def _compute_offset(kernel, tc="B"):
-    import Tensile.Components.Subtile.SubtileGREmit as GR
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
     from rocisa.code import Module
 
     writer = _make_writer()
@@ -265,7 +265,7 @@ def test_r9_pre_shuffled_k_step_rejects_unsupported_depth_u():
     keeps DepthU 1024 out of the swizzled path by accident, so the refusal is
     made explicit here.
     """
-    import Tensile.Components.Subtile.SubtileGREmit as GR
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
 
     ti = _tile("B", _kernel(swizzleB=True, depthU=1024))
     with pytest.raises(RuntimeError, match=r"DepthU 1024 is not supported"):
@@ -274,7 +274,7 @@ def test_r9_pre_shuffled_k_step_rejects_unsupported_depth_u():
 
 def test_r9_pre_shuffled_k_step_rejects_unencodable_immediate():
     """A step past the 12-bit DTL immediate raises rather than being truncated."""
-    import Tensile.Components.Subtile.SubtileGREmit as GR
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
 
     ti = _tile("B", _kernel(swizzleB=True, depthU=512))
     # 16 rows per block, so anything above 4095/16 cannot be encoded.
@@ -313,7 +313,7 @@ def test_r9_padding_correction_folds_aligned_rows_and_narrows_for_fp4():
     so the correction is computed in elements and shifted down to bytes; without
     that shift every pre-shuffled offset is doubled.
     """
-    import Tensile.Components.Subtile.SubtileGREmit as GR
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
     from rocisa.code import Module
 
     kernel = _kernel(swizzleB=True)
@@ -344,7 +344,7 @@ def _rewind_increments(kernel):
     """Return ``{tc: rewind bytes}`` parsed from the emitted cselect comments."""
     import re
 
-    from Tensile.Components.Subtile.Kernel import _emitMultiDUTailSrdRewind
+    from tensilelite.Components.Subtile.Kernel import _emitMultiDUTailSrdRewind
 
     writer = _make_writer()
     tiA = _tile("A", kernel, writer)
@@ -394,8 +394,8 @@ def test_r9_layout_k_matches_the_host_padding_not_swizzle_k():
     so rounding to it puts every block after the first at the wrong offset for any
     K that lands between the two.
     """
-    from Tensile.Common.DataType import DataType
-    from Tensile.Common.Utilities import swizzleGeometry
+    from tensilelite.Common.DataType import DataType
+    from tensilelite.Common.Utilities import swizzleGeometry
 
     solution = {
         "MIInputPerThreadA": 32,
@@ -420,8 +420,8 @@ def test_r9_layout_k_differs_for_the_classic_swizzle_types_too():
     graAddresses must therefore keep aligning the classic path to swizzleK: f16
     would drop from 32 to 8 and read outside the buffer.
     """
-    from Tensile.Common.DataType import DataType
-    from Tensile.Common.Utilities import swizzleGeometry
+    from tensilelite.Common.DataType import DataType
+    from tensilelite.Common.Utilities import swizzleGeometry
 
     def geom(dtype, miInput, miK):
         return swizzleGeometry({
@@ -439,7 +439,7 @@ def test_r9_layout_k_differs_for_the_classic_swizzle_types_too():
 
 def _streamk_kernel(**kwargs):
     """``_kernel`` plus the markers ``isMxf4SubtilePath`` reads."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
 
     kernel = _kernel(**kwargs)
     kernel["MatrixInstM"] = 16
@@ -462,7 +462,7 @@ def test_r9_stream_k_start_offset_scales_by_rows_per_block():
     partway through a tile has to use the same scale or it lands 16x too close to
     the tile start.
     """
-    from Tensile.Components.StreamK import StreamK
+    from tensilelite.Components.StreamK import StreamK
 
     kernel = _streamk_kernel(swizzleA=True)
 
@@ -479,7 +479,7 @@ def test_r9_stream_k_start_offset_is_unscaled_off_the_subtile_path():
     gfx942 ships f16 and f8 swizzle-A solutions that are not subtile kernels;
     scaling their StreamK start would move them off their own range.
     """
-    from Tensile.Components.StreamK import StreamK
+    from tensilelite.Components.StreamK import StreamK
 
     for off in ("UseSubtileImpl", "TransposeA", "DataTypeA"):
         kernel = _streamk_kernel(swizzleA=True)
@@ -497,7 +497,7 @@ def test_r9_padding_correction_halves_the_stride_not_the_product():
     """
     import re
 
-    import Tensile.Components.Subtile.SubtileGREmit as GR
+    import tensilelite.Components.Subtile.SubtileGREmit as GR
     from rocisa.code import Module
 
     kernel = _kernel(swizzleB=True)
