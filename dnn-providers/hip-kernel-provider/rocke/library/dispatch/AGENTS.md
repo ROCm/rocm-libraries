@@ -465,8 +465,14 @@ is a drop-in via the ranker seam once a scoring signal exists.
 
 ## How to tune `num_segments` for a new cohort
 
-See the worked example:
-`benchmarks/gfx942/attention/decode/TUNING_D256.md`
+For gfx942 and gfx950 decode, start from the split rule:
+[gfx950 §6.1](../builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule)
+and [gfx942 §8.3](../builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)
+describe it, and the
+[3D decode case study](../builders/common/attention_3d_decode/CASE_STUDY.md) has the
+replay recipe. Tuning candidate `0` takes the count `_num_segments` picks (the rule's,
+where it applies; the prefill-derived count elsewhere), at the request's `num_cus` or,
+without one, the architecture's full-part CU count.
 
 ## Attention backward: registry, routing and tuning
 

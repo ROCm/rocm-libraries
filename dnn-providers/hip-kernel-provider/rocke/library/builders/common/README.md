@@ -75,7 +75,9 @@ All remaining shapes.  Key knob decisions:
 * **gfx1250**: calls `_resolve_gfx1250_tiled3d` to get a `_ResolvedTiled3D`
   struct, then builds the spec from its fields (`num_waves`, `use_wide_lds_reads`,
   `use_dtla_prefetch`, `use_ds_tr_reads`, `use_fused_reduce`, `use_dpp_softmax`, …).
-* **gfx942 / gfx950 (default)**: `_num_segments`, `_select_3d_waves_per_eu`,
+* **gfx942 / gfx950 (default)**: `_num_segments` (with its scope helpers
+  `_gfx942_3d_decode_ctas_per_segment` and `_gfx950_3d_decode_ctas_per_segment`),
+  `_select_3d_waves_per_eu`,
   `_kv_storage_dtype`, `_gfx942_3d_tile_size_override`,
   `_gfx950_3d_tile_size_override`, `_enable_gfx942_3d_wide_kv_load`,
   `_enable_i64_kv_addr`, `_use_decode_grid`, `_kv_cache_policy_3d`,
@@ -95,11 +97,14 @@ fails when key equality and built-spec equality disagree.
 
 Tiled-3D knobs (gfx942 and gfx950 split-KV segment kernel) come first; the
 Knob Catalog in `platform/dsl_docs/optimization/optimization_runbook.md`
-(§12.1.K2) lists them with the other 3D fields.
+(§12.1.K2) lists them with the other 3D fields. What each lever does to a decode
+problem by default, with outcomes, caveats and the replay, is in the
+[3D decode case study](attention_3d_decode/CASE_STUDY.md).
 
 **`kv_cache_policy`** (3D) — Cache policy of the K/V copies, by the same names
-as the 2D field. `_kv_cache_policy_3d` picks `"stream"` (non-temporal) when every
-sequence decodes: each K/V byte is read once, so caching it only evicts other
+as the 2D field. `_kv_cache_policy_3d` picks `"stream"` (the non-temporal bit only;
+`"nt"` also sets SC0 and is a different policy) when every sequence decodes and K/V is
+fp16/bf16: each K/V byte is read once, so caching it only evicts other
 data. The fp8 K/V loader keeps `"all"`; the gfx942 wide loader takes `"all"` or
 `"stream"`.
 
@@ -109,8 +114,9 @@ The copies fetch permuted source chunks, so the tiles need no padding. fp16/bf16
 K/V, paged or strided. Selected by `_kv_lds_swizzle_3d`.
 
 **`use_wave_page_id_load`** (3D) — The wave loads the segment's page-table
-entries 64 at a time, one per lane, and each tile reads its page ids from those
-registers, so no page-table load sits on the KV loop's critical path. Paged
+entries 64 at a time, one per lane (the *wave page-id window*, unrelated to a sliding
+window), and each tile reads its page ids from those registers, so no page-table load
+sits on the KV loop's critical path. Paged
 fp16/bf16 K/V. Selected by `_wave_page_id_load_3d`; the decode split rule in
 `_num_segments` assumes it where both apply.
 
@@ -119,10 +125,15 @@ sequence has one query token, instead of the prefill upper bound and a search
 over `query_start_len`. Derived from the problem by `_use_decode_grid`, not a
 tuning knob; it stays a spec field because the binary and the launch grid differ.
 
-**`tile_size_override`** (gfx950 3D) — A multiple of the page size: each loop
-iteration gathers several pages. `_gfx950_3d_tile_size_override` uses it for
-decode with too few workgroups to fill the device, together with the K/V LDS
-swizzle (paged K/V; strided K/V takes the tile without it).
+**`tile_size_override`** (3D) — KV tokens per loop iteration when that is not one
+page. gfx950: a multiple of the page size, so each iteration gathers several pages;
+`_gfx950_3d_tile_size_override` uses it for decode with too few workgroups to fill the
+device, together with the K/V LDS swizzle (paged K/V; strided K/V takes the tile
+without it); the multi-page tiles are under revision
+([case study §7](attention_3d_decode/CASE_STUDY.md#7-open-items)). gfx942: a divisor of
+the page size (sub-page tiles);
+`_gfx942_3d_tile_size_override` halves the page for head size 128 and above at
+`block_size` 32 and above.
 
 **`use_transposed_half_local_pv`** — Rewrites the PV phase of the transposed
 32x32 kernel so each 32-lane warp-half reads only the P rows it owns,

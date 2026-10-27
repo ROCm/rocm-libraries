@@ -69,7 +69,8 @@ and `bind_torch`. Direct and dispatched launches share the same spec policy.
 Automatic strided selection applies the same decode policy as paged decode: the split
 rule ([gfx950](../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule),
 [gfx942](../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)),
-the gfx950 tile override, the all-decode grid and the K/V cache policy. It leaves the
+the per-architecture tile override (multi-page tiles on gfx950, sub-page tiles on
+gfx942), the all-decode grid and the K/V cache policy. It leaves the
 K/V LDS swizzle off; an explicit kernel spec may enable it for fp16/bf16 K/V.
 A non-`None` `problem.clamp_arch` must match the selected target (the active device
 at launch).
