@@ -222,7 +222,7 @@ cooperative map; `classify_epilogue(...)` → the branch. Worked example:
 
 ## Tool catalog (load-bearing knobs; full list in `visualization_api_surface.md`)
 
-- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs + dtypes from the atom) OR explicit args. ✗
+- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs from the atom + per-operand dtypes from the TileMma: its A, B and result dtypes) OR explicit args. ✗
   `from_mma` with no `a_enc`/`b_enc` renders CANONICAL (it sources canonical from the `canonical_layouts` helper,
   NOT `mma.a_layout`) — for interleaved you MUST pass explicit `a_enc`/`b_enc` and VERIFY the encoding is
   `!= canonical_layouts(mma.traits, mma.subtiles)` + sound (`mma.a_layout` is the CONFIGURED style now, NOT a

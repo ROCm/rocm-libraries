@@ -19,6 +19,7 @@ rocke_atoms = pytest.importorskip(
     "is available (e.g. the gfx90a host)",
 )
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.mma.warp_encoding import c_warp_encoding  # noqa: E402
 from rocke.helpers.tiling.traits import load_mma_traits  # noqa: E402
 
@@ -35,7 +36,7 @@ def _assert_field_equal(ours, oracle) -> None:
 def test_c_encoding_field_equals_rocke_oracle_16x16x16_f16() -> None:
     catalog = load_mma_traits()
     ours = c_warp_encoding(
-        catalog.select(target="gfx90a", a="fp16", b="fp16", c="fp32", m=16, n=16, k=16)
+        catalog.select(target="gfx90a", a=F16, b=F16, c=F32, m=16, n=16, k=16)
     )
     oracle = rocke_atoms.make_c_warp_dstr_encoding(rocke_atoms.MfmaAtom.f16_16x16x16())
     _assert_field_equal(ours, oracle)
@@ -47,7 +48,7 @@ def test_c_encoding_field_equals_rocke_oracle_32x32x8_f16() -> None:
         pytest.skip("rocke MfmaAtom has no f16_32x32x8 factory in this build")
     catalog = load_mma_traits()
     ours = c_warp_encoding(
-        catalog.select(target="gfx90a", a="fp16", b="fp16", c="fp32", m=32, n=32, k=8)
+        catalog.select(target="gfx90a", a=F16, b=F16, c=F32, m=32, n=32, k=8)
     )
     oracle = rocke_atoms.make_c_warp_dstr_encoding(factory())
     _assert_field_equal(ours, oracle)

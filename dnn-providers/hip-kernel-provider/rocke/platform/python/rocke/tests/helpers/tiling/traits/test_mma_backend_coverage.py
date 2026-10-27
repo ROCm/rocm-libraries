@@ -152,7 +152,12 @@ def candidates(row: MmaTraits, target: str) -> list[MmaOp]:
     return [
         op
         for op in ArchTarget.from_gfx(target).mma.ops
-        if row.accepts(a=op.a_dtype, b=op.b_dtype, c=op.c_dtype, d=op.dst_dtype)
+        if row.accepts(
+            a=dtype_to_ir_type(op.a_dtype),
+            b=dtype_to_ir_type(op.b_dtype),
+            c=dtype_to_ir_type(op.c_dtype),
+            d=dtype_to_ir_type(op.dst_dtype),
+        )
         and (op.m, op.n, op.k) == (row.m, row.n, row.k)
         and _scale_contract_matches(row, op)
     ]

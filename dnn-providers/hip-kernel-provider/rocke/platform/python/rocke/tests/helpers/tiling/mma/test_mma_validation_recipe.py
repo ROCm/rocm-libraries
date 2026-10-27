@@ -32,9 +32,9 @@ from rocke.helpers.tiling.transforms import mma_operand_layout_sound, mma_pair_k
 def _mma(shape=(32, 32, 16), atom=(16, 16, 16), **kw):
     return TileMma(
         shape,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=atom),
         **kw,
@@ -60,9 +60,9 @@ def test_canonical_layouts_byte_identical_to_plan_accessors(shape, atom):
     # accessors differ from canonical_layouts by design.
     p = TileMmaPlan(
         shape,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=atom),
     )
@@ -78,9 +78,9 @@ def test_canonical_layouts_matches_canonical_style_operands():
     # soundness gate would check default-style operands against a diverged reference and never notice.
     p = TileMmaPlan(
         (32, 32, 16),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )

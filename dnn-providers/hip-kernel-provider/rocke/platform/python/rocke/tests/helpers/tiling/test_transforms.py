@@ -14,6 +14,7 @@ import dataclasses
 
 import pytest
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.encoding import WarpDistributionEncoding
 from rocke.helpers.tiling.mma.warp_encoding import a_warp_encoding, b_warp_encoding
 from rocke.helpers.tiling.register_mapper import RegisterMapper
@@ -224,17 +225,17 @@ def test_interleaved_style_operand_desc_is_distinct() -> None:
 
     canon = TileMma(
         (32, 32, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
     inter = TileMma(
         (32, 32, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
         style=InterleavedStyle(),

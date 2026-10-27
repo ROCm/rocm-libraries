@@ -7,6 +7,7 @@ The optimizer discovers each transform (source->target) with rocKE's own solver 
 ladder; it never consults a table. These lock the ladder ordering + the validity gates on real layouts.
 """
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.layouts.tile_distribution import make_tile_desc
 from rocke.helpers.tiling.mma.mma_operation import TileMma, Tiling
 from rocke.helpers.tiling.transforms import TransformPlan, as_forward_map
@@ -22,9 +23,9 @@ from rocke.helpers.tiling.layout_optimizer import (
 def _mma():
     return TileMma(
         (64, 64, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
