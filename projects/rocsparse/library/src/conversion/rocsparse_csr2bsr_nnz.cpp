@@ -534,7 +534,8 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    const rocsparse_pointer_mode bsr_nnz_pointer_mode
+        = (handle == nullptr) ? rocsparse_pointer_mode_host : handle->pointer_mode;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_nnz_impl(handle,
                                                           dir,
                                                           m,
@@ -546,7 +547,7 @@ try
                                                           bsr_descr,
                                                           bsr_row_ptr,
                                                           bsr_nnz,
-                                                          handle->pointer_mode));
+                                                          bsr_nnz_pointer_mode));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

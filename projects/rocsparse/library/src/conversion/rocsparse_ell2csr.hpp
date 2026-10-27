@@ -102,10 +102,10 @@ namespace rocsparse
 
     template <typename I, typename J>
     rocsparse_status ell2csr_nnz_quickreturn(rocsparse_handle          handle,
-                                             J                         m,
-                                             J                         n,
+                                             int64_t                   m,
+                                             int64_t                   n,
                                              const rocsparse_mat_descr ell_descr,
-                                             J                         ell_width,
+                                             int64_t                   ell_width,
                                              const J*                  ell_col_ind,
                                              const rocsparse_mat_descr csr_descr,
                                              I*                        csr_row_ptr,
@@ -114,10 +114,10 @@ namespace rocsparse
 
     template <typename I, typename J>
     rocsparse_status ell2csr_nnz_checkarg(rocsparse_handle          handle,
-                                          J                         m,
-                                          J                         n,
+                                          int64_t                   m,
+                                          int64_t                   n,
                                           const rocsparse_mat_descr ell_descr,
-                                          J                         ell_width,
+                                          int64_t                   ell_width,
                                           const J*                  ell_col_ind,
                                           const rocsparse_mat_descr csr_descr,
                                           I*                        csr_row_ptr,

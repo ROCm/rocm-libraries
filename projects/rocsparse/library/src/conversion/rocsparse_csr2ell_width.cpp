@@ -226,9 +226,10 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    const rocsparse_pointer_mode ell_width_pointer_mode
+        = (handle == nullptr) ? rocsparse_pointer_mode_host : handle->pointer_mode;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2ell_width_impl(
-        handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width, handle->pointer_mode));
+        handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width, ell_width_pointer_mode));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
