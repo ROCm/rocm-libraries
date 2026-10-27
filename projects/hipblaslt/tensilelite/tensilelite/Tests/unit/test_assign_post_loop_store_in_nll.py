@@ -23,8 +23,8 @@ Pure dict in, bool out: no emit, no GPU, no toolchain.
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 

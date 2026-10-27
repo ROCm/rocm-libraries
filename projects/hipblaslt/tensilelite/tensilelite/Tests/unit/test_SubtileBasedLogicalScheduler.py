@@ -15,10 +15,10 @@ Organized by pass:
   12. Integration    — Full pipeline with real instructions
 """
 import pytest
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
@@ -299,7 +299,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from rocisa import rocIsa
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
-    from Tensile.Common.RegisterPool import allocTmpGpr
+    from tensilelite.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
     import shutil
@@ -2425,7 +2425,7 @@ class TestHoistSetupBeforeLastMFMA:
         return body
 
     def test_setup_lands_before_the_last_mfma(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_mfma("mfma0"), _text("filler"), _mfma("mfma1"))
         out = _hoistSetupBeforeLastMFMA(body, [_text("sub"), _text("cmp")])
         assert _labels(out) == ["mfma0", "filler", "sub", "cmp", "mfma1"]
@@ -2433,13 +2433,13 @@ class TestHoistSetupBeforeLastMFMA:
     def test_body_without_mfma_appends_setup(self):
         """A skip branch has no compute to hide the branch behind, so the
         setup just follows the body."""
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_text("a"), _text("b"))
         out = _hoistSetupBeforeLastMFMA(body, [_text("sub")])
         assert _labels(out) == ["a", "b", "sub"]
 
     def test_input_module_is_not_mutated(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
+        from tensilelite.Components.Subtile.LogicalScheduler import _hoistSetupBeforeLastMFMA
         body = self._body(_mfma("mfma0"))
         before = _labels(body)
         _hoistSetupBeforeLastMFMA(body, [_text("sub")])
@@ -2457,14 +2457,14 @@ class TestEmitBodySetupBranch:
         return body, [_text("sub"), _text("cmp")], _text("branch")
 
     def test_without_hoist_setup_follows_the_body(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
         module = Module("loop")
         body, setup, branch = self._parts()
         _emitBodySetupBranch(module, body, setup, branch, hoist=False)
         assert _labels(module) == ["mfma0", "tail", "sub", "cmp", "branch"]
 
     def test_with_hoist_setup_moves_above_the_last_mfma(self):
-        from Tensile.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
+        from tensilelite.Components.Subtile.LogicalScheduler import _emitBodySetupBranch
         module = Module("loop")
         body, setup, branch = self._parts()
         _emitBodySetupBranch(module, body, setup, branch, hoist=True)
@@ -2579,7 +2579,7 @@ class TestPlacementPrinters:
     def test_preops_printer_lists_all_three_sections(self):
         import io
         buf = io.StringIO()
-        from Tensile.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
         p = self._lr()
         p.preOps = [WaitLROp()]
         p.deps = [Dep(ref=self._lr('B', slot=0), mt_offset=0)]
@@ -2788,7 +2788,7 @@ class TestEmitWaitGrPlacementCounts:
     @staticmethod
     def _emitter(loadRatioA=1.0, loadRatioB=1.0, loadRatioSA=1.0, loadRatioSB=1.0,
                  withScale=True):
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         cfg = make_cfg_256x256_fp4()
         mk = lambda r: MagicMock(subtileShape=[1, 1], loadRatioGR=r)
         return InstructionEmitter(
@@ -2844,7 +2844,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numUnroll == {'A': 1, 'B': 1, 'SA': 1, 'SB': 1}
         assert cfg.lrA.k < cfg.numSubIterK  # LR steps per subIterK; emit spans full range
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -2861,7 +2861,7 @@ class TestInstructionEmitterPerUidK:
         assert cfg.numSubIterK == 4
         assert cfg.numUnroll == {'A': 2, 'B': 2, 'SA': 1, 'SB': 1}
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
         emitter = InstructionEmitter(
             writer=MagicMock(), kernel={}, config=cfg,
             tileInfoA=MagicMock(subtileShape=[1, 1]),
@@ -3325,7 +3325,7 @@ class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
         """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -4232,7 +4232,7 @@ class TestBuildNll:
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
                     if em.opType == 'wait_gr':
-                        from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
+                        from tensilelite.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
                             slot_has_lr = any(
@@ -4602,7 +4602,7 @@ class _InitCTileInfo:
 
 
 def _zero_range(writer, firstReg, totalRegs, isAgpr):
-    from Tensile.Components.Subtile.Kernel import _zeroRegRange
+    from tensilelite.Components.Subtile.Kernel import _zeroRegRange
     module = Module()
     _zeroRegRange(module, writer, _InitCTileInfo([]), firstReg, totalRegs, isAgpr)
     return str(module)
@@ -4669,7 +4669,7 @@ class TestInitCInitVgprTilesToZero:
     """initVgprTilesToZero: no scratch needed, uses D self-reuse."""
 
     def test_single_range_uses_mfma(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         dtile = _InitCTileInfo([_InitCTile(0, 96, pool=w.agprPool)])
 
@@ -4678,7 +4678,7 @@ class TestInitCInitVgprTilesToZero:
 
     def test_split_pool_groups(self):
         """A range split across agpr + vgpr pools emits MFMAs for both groups."""
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         vgpr_pool = object()
         dtile = _InitCTileInfo([
@@ -4691,7 +4691,7 @@ class TestInitCInitVgprTilesToZero:
         assert src.count("initD: [") == 4, f"expected 4 matrix ops across 2 groups:\n{src[:600]}"
 
     def test_empty_tiles_is_noop(self):
-        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        from tensilelite.Components.Subtile.Kernel import initVgprTilesToZero
         w = _initc_writer()
         src = str(initVgprTilesToZero(w, {}, _InitCTileInfo([])))
         assert "initD: [" not in src

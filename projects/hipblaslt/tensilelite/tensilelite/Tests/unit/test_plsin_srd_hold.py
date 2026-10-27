@@ -33,7 +33,7 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SCmpEQU32, SCmpLeU32, SCSelectB32
 from rocisa.register import RegisterPool
 
-from Tensile.Components.Subtile.SubtileGREmit import emitSrdAdvance
+from tensilelite.Components.Subtile.SubtileGREmit import emitSrdAdvance
 
 pytestmark = pytest.mark.unit
 

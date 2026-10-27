@@ -134,7 +134,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric. `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` is a plain `fdiv` and accepts f64.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings. `exp2_fast` rejects f64 in the LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only f32: the builder rejects any other operand type. `rcp` is a plain `fdiv` and accepts f64, and `fabs` lowers f64 to `llvm.fabs.f64`.
 
 ```text
 exp2(v)        # llvm.exp2.f32
@@ -182,6 +182,7 @@ global_load_bf16(ptr, idx, align=2)
 global_load_f32(ptr, idx, align=4)
 global_load_i32(ptr, idx, align=4)
 global_load_i64(ptr, idx, align=8)
+global_load_f64(ptr, idx, align=8)
 global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
@@ -236,6 +237,7 @@ mfma_f32_16x16x32_bf16(a, b, c)    # <8 x bfloat>, <8 x bfloat>, <4 x float>
 mfma_f32_32x32x8_f16(a, b, c)      # <4 x half>, <4 x half>, <16 x float>
 mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx950 only)
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
+mfma_f32_4x4x4_bf16(a, b, c)       # bf16 twin, lowers via *_1k variant with <4 x i16> operands
 ```
 
 The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.

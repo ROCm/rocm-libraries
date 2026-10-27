@@ -16,9 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Common.Utilities import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common.Utilities import (
     isMxf4SubtilePath,
     plsinBlockSchedTile,
     plsinDataTypes,
