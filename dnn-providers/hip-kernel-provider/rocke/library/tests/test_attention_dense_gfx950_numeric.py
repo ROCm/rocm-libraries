@@ -947,9 +947,7 @@ class TestDenseKvSegmentsNumeric:
             p = torch.softmax(torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale, -1)
             ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
         else:
-            ref = _bottom_right_reference(
-                q, k, v, None, scale, top_left=mask == "tl"
-            )
+            ref = _bottom_right_reference(q, k, v, None, scale, top_left=mask == "tl")
         err = (out.float() - ref).abs().max().item()
         assert err < _BOTTOM_RIGHT_TOL, (
             f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "
@@ -2272,6 +2270,63 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,window,use_sinks,block_m,num_persistent",
+    [
+        ("bf16", 128, True, 128, 512),
+        ("fp16", 256, True, 128, 512),
+        ("fp16", 128, False, 128, 512),
+        ("bf16", 1024, False, 128, 512),
+        ("bf16", 0, True, 128, 256),
+        ("fp16", 0, True, 256, 256),
+    ],
+)
+def test_wide_dma_window_and_sinks_numeric(
+    dtype, window, use_sinks, block_m, num_persistent
+):
+    """The wide-DMA persistent body with a causal sliding window and/or sinks
+    (the shapes its dispatch default now covers) against the fp32 reference."""
+    hq, hkv, d, B, S = 32, 8, 128, 1, 2048
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+    sinks = torch.randn(hq, device="cuda", dtype=tdt) if use_sinks else None
+    spec = Gfx950AttentionDenseSpec(
+        batch=B,
+        seqlen_q=S,
+        seqlen_kv=S,
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=d,
+        causal=True,
+        dtype=dtype,
+        block_m=block_m,
+        block_n=64,
+        sliding_window=window,
+        use_sinks=use_sinks,
+        persistent=True,
+        num_persistent=num_persistent,
+        wide_lds_dma=True,
+    )
+    assert supports_attention_dense(spec)[0]
+    out = torch.empty_like(q)
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+    )
+    torch.cuda.synchronize()
+    if use_sinks:
+        ref = _sink_reference(q, k, v, sinks, scale, sliding_window=window)
+    else:
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < _tolerance(dtype), f"max_abs={max_abs:.3e}"
 
 
 if __name__ == "__main__":

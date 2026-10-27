@@ -40,9 +40,9 @@ def _request(arch, **overrides):
     [
         # Enough work for the persistent grid, plain causal D128 tile multiples.
         ({}, "attention_gfx950_dense_persist_widedma"),
-        # Persistent, but a window rules out wide DMA.
-        ({"sliding_window": 1024}, "attention_gfx950_dense_persist"),
-        ({"use_sinks": True}, "attention_gfx950_dense_persist"),
+        # A filled persistent grid takes wide DMA with a window or sinks too.
+        ({"sliding_window": 1024}, "attention_gfx950_dense_persist_widedma"),
+        ({"use_sinks": True}, "attention_gfx950_dense_persist_widedma"),
         ({"hdim_q": 64, "hdim_v": 64}, "attention_gfx950_dense_persist"),
         # Too few work items for 256 persistent CTAs: plain causal D128 still
         # takes wide DMA (at the half-height tile); anything else takes grid.
