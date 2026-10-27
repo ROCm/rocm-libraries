@@ -262,6 +262,12 @@ namespace TensileLite
             case InitMode::UniformLowPrecision:
                 return "UniformLowPrecision";
 
+            case InitMode::Maf2_0:
+                return "Maf2_0";
+            case InitMode::Maf2_0UnitScale:
+                return "Maf2_0UnitScale";
+            case InitMode::Maf1_0:
+                return "Maf1_0";
             case InitMode::Count:
                 break;
             }
@@ -334,6 +340,12 @@ namespace TensileLite
                 mode = InitMode::TrigIndAbsCos;
             else if(strValue == ToString(InitMode::UniformLowPrecision))
                 mode = InitMode::UniformLowPrecision;
+            else if((strValue == "Maf2_0" || strValue == "maf2_0"))
+                mode = InitMode::Maf2_0;
+            else if((strValue == "Maf2_0UnitScale" || strValue == "maf2_0_unit_scale"))
+                mode = InitMode::Maf2_0UnitScale;
+            else if((strValue == "Maf1_0" || strValue == "maf1_0"))
+                mode = InitMode::Maf1_0;
             else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
             {
                 int value = atoi(strValue.c_str());
@@ -1508,6 +1520,10 @@ namespace TensileLite
         {
             if(m_mxDataGenerator == 1)
                 throw std::runtime_error("mx-data-generator=1 is not supported for grouped GEMM");
+            if(std::any_of(m_vdata.begin(), m_vdata.end(), [](auto const& data) {
+                   return hostnumerics::detail::isMaf(data.init);
+               }))
+                throw std::runtime_error("MAF initialization is not supported for grouped GEMM.");
 
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
@@ -2002,7 +2018,9 @@ namespace TensileLite
                                                                dataInitMode,
                                                                effectiveScaleInitMode,
                                                                operandSeed + seedBatch,
-                                                               abFromInitArray);
+                                                               abFromInitArray,
+                                                               isMatrixA ? 0 : 1,
+                                                               seedBatch);
                     dataOutput.copyLogicalElementsFrom(generated.data);
                     auto scales = generated.scales;
                     if(mxBlockFree > 1)
@@ -2083,7 +2101,8 @@ namespace TensileLite
                     return;
                 auto const& dataInit  = m_vdata[dataTensorEnum].init;
                 auto const& scaleInit = m_vdata[scaleTensorEnum].init;
-                if(canDecoupleMXScaleInit(dataInit, scaleInit))
+                if(hostnumerics::detail::isMaf(dataInit)
+                   || canDecoupleMXScaleInit(dataInit, scaleInit))
                     return;
                 bool expected = false;
                 if(!warnedScaleInitUnsupported.compare_exchange_strong(
@@ -2167,6 +2186,22 @@ namespace TensileLite
                                                               bool                    transposed,
                                                               bool                    isMatrixA)
         {
+            if(hostnumerics::detail::isMaf(m_vdata[dataTensorEnum].init))
+            {
+                auto& pristine = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
+                if(pristine.initDescriptor[0] != dataDesc)
+                {
+                    initializeHostBufferWithHostNumerics(
+                        dataDesc.dataType(),
+                        m_vdata[dataTensorEnum].init,
+                        pristine.cpuInput.valid.get(),
+                        dataDesc,
+                        {m_initializationSeed,
+                         stableDataInitializationStream(isMatrixA ? "A" : "B")});
+                    pristine.initDescriptor[0] = dataDesc;
+                }
+                return;
+            }
             if(dataDesc.dataType() != rocisa::DataType::Float8
                && dataDesc.dataType() != rocisa::DataType::BFloat8)
                 throw std::runtime_error(

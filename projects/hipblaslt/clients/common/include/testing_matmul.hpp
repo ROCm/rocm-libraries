@@ -1716,26 +1716,32 @@ void testing_matmul_with_bias(const Arguments&                                  
                 order[axis] = order.size() - 1 - axis;
             roc::hostnumerics::generate(tensor, recipe.withIndexOrder(std::move(order)));
         };
-        const auto randomInitializationRecipe
-            = [&](hipDataType                                              type,
-                  hipblaslt::hostnumerics::initialization::OperandSequence sequence,
-                  bool                                                     small = false) {
-                  const auto scalar = hipblaslt::hostnumerics::scalarType(type);
-                  const auto seed   = initializationSeed(sequence);
-                  if(small)
-                  {
-                      return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-                          roc::hostnumerics::GenerationRecipe::uniformInteger(
-                              {.lower = 1, .upper = 10})
-                              .withAffineValueMapping({.scale = 0.1}),
-                          seed);
-                  }
-                  return hipblaslt::hostnumerics::initializationRecipe(
-                      scalar,
-                      hipblaslt_initialization::rand_int,
-                      seed,
-                      hipblaslt::hostnumerics::TrigonometricComponent::Cosine);
-              };
+        const auto randomInitializationRecipe =
+            [&](hipDataType                                              type,
+                hipblaslt::hostnumerics::initialization::OperandSequence sequence,
+                bool                                                     small = false) {
+                if(arg.initialization == hipblaslt_initialization::maf1_0
+                   && (sequence == hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA
+                       || sequence
+                              == hipblaslt::hostnumerics::initialization::OperandSequence::ScaleB))
+                    return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                        roc::hostnumerics::GenerationRecipe::constant({.value = 0.5}), 0);
+                const auto scalar = hipblaslt::hostnumerics::scalarType(type);
+                const auto seed   = initializationSeed(sequence);
+                if(small)
+                {
+                    return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                        roc::hostnumerics::GenerationRecipe::uniformInteger(
+                            {.lower = 1, .upper = 10})
+                            .withAffineValueMapping({.scale = 0.1}),
+                        seed);
+                }
+                return hipblaslt::hostnumerics::initializationRecipe(
+                    scalar,
+                    hipblaslt_initialization::rand_int,
+                    seed,
+                    hipblaslt::hostnumerics::TrigonometricComponent::Cosine);
+            };
 
         const auto initializeHostMatrix = [&](HipHostBuffer&                         buffer,
                                               const hipblaslt::client::MatmulMatrix& matrix,
@@ -1762,7 +1768,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 forceNaN,
                 std::nullopt,
                 positiveOnlyInitialization,
-                {.pattern = iePattern, .reductionAxis = transA != HIPBLAS_OP_N ? 0u : 1u});
+                {.pattern = iePattern, .reductionAxis = transA != HIPBLAS_OP_N ? 0u : 1u},
+                separateBatchStorage && matrix.batchStride() != 0 ? batch : 0);
         };
 
         auto mxScaleBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
@@ -1785,7 +1792,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 size_t                                                       blockColumns,
                 const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
                 uint64_t                                                     seed,
-                hipblaslt::hostnumerics::MatrixRole                          role) {
+                hipblaslt::hostnumerics::MatrixRole                          role,
+                size_t                                                       batch) {
                 if(blockRows == 0 || blockColumns == 0
                    || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                     throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
@@ -1799,7 +1807,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     blockRows * blockColumns,
                     arg.initialization,
                     seed,
-                    role);
+                    role,
+                    batch);
                 dataOutput.copyLogicalElementsFrom(generated.data);
 
                 // gfx950 consumes [MN, K blocks] for either operand orientation.
@@ -1900,7 +1909,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scalePlanA,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::A,
                                problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
-                    hipblaslt::hostnumerics::MatrixRole::A));
+                    hipblaslt::hostnumerics::MatrixRole::A,
+                    problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b)));
             }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(copyHostInputToDevice(dA[i], hA[i], problem.a));
@@ -1992,7 +2002,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scalePlanB,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::B,
                                problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
-                    hipblaslt::hostnumerics::MatrixRole::B));
+                    hipblaslt::hostnumerics::MatrixRole::B,
+                    problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b)));
             }
             refB.emplace_back(std::move(refBAll));
             CHECK_HIP_ERROR(copyHostInputToDevice(dB[i], hB[i], problem.b));

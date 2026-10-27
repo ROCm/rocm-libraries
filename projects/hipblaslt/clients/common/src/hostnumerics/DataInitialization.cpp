@@ -4,6 +4,7 @@
 // Product-private translation from hipBLASLt initialization modes to
 // product-independent HostNumerics tensor generation recipes.
 
+#include <TensileLite/Client/hostnumerics/MafInitialization.hpp>
 #include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 
 #include <cmath>
@@ -33,6 +34,19 @@ namespace hipblaslt::hostnumerics
 
     namespace
     {
+        bool isMaf(hipblaslt_initialization mode)
+        {
+            return mode == hipblaslt_initialization::maf2_0
+                   || mode == hipblaslt_initialization::maf2_0_unit_scale
+                   || mode == hipblaslt_initialization::maf1_0;
+        }
+        maf::Mode mafMode(hipblaslt_initialization mode)
+        {
+            return mode == hipblaslt_initialization::maf1_0              ? maf::Mode::Maf1
+                   : mode == hipblaslt_initialization::maf2_0_unit_scale ? maf::Mode::Maf2UnitScale
+                                                                         : maf::Mode::Maf2;
+        }
+
         // Compatibility values inherited from hipblaslt_init_alt_impl_big/small.
         constexpr double specialInitializationAValue = 65'280.0;
         constexpr double specialInitializationBValue = 0.0000607967376708984375;
@@ -572,7 +586,8 @@ namespace hipblaslt::hostnumerics
                             size_t                   blockSize,
                             hipblaslt_initialization initialization,
                             uint64_t                 seed,
-                            MatrixRole               role)
+                            MatrixRole               role,
+                            size_t                   batchIndex)
     {
         if(shape.rank() != 2)
             throw std::runtime_error("hipBLASLt MX generation requires a rank-two shape.");
@@ -581,6 +596,20 @@ namespace hipblaslt::hostnumerics
         const ScalarType hostDataType = scalarType(dataType);
         const ScalarType hostScaleType
             = scaleType == HIP_R_8F_E4M3 ? ScalarType::E4M3 : scalarType(scaleType);
+        if(isMaf(initialization))
+        {
+            MxGenerationOptions options;
+            options.dataType         = hostDataType;
+            options.scaleType        = hostScaleType;
+            options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
+            options.blockAxis        = blockAxis;
+            options.blockSize        = blockSize;
+            return maf::generateMx(std::move(shape),
+                                   options,
+                                   mafMode(initialization),
+                                   static_cast<size_t>(role),
+                                   batchIndex);
+        }
         if(initialization == hipblaslt_initialization::integer_exact
            && ((hostDataType != ScalarType::Float8E4M3 && hostDataType != ScalarType::Float8E5M2)
                || hostScaleType != ScalarType::E8M0
@@ -681,6 +710,9 @@ namespace hipblaslt::hostnumerics
                                                      initialization::OperandSequence operand,
                                                      uint64_t                        seed)
     {
+        if(isMaf(mode))
+            throw std::runtime_error(
+                "The grouped-GEMM benchmark does not support MAF initialization.");
         switch(mode)
         {
         case hipblaslt_initialization::rand_int:
@@ -743,13 +775,24 @@ namespace hipblaslt::hostnumerics
                           bool                           forceNaN,
                           std::optional<OneSpecialValue> oneSpecialValue,
                           bool                           positiveOnly,
-                          IntegerExactOptions            integerExact)
+                          IntegerExactOptions            integerExact,
+                          size_t                         batchIndex)
     {
         validateInitialization(role, initialization, oneSpecialValue, positiveOnly);
         if(integerExact.pattern != IntegerExactPattern::Standard
            && initialization != hipblaslt_initialization::integer_exact)
             throw std::runtime_error(
                 "An integer-exact pattern requires integer_exact initialization.");
+        if(isMaf(initialization))
+        {
+            maf::validateType(destination.type());
+            if(!forceNaN)
+            {
+                maf::fill(
+                    destination, mafMode(initialization), static_cast<size_t>(role), batchIndex);
+                return;
+            }
+        }
         if(!forceNaN && integerExact.pattern == IntegerExactPattern::SparseK
            && role == MatrixRole::A)
         {

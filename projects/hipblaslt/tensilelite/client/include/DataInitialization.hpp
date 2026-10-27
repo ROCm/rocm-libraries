@@ -112,6 +112,9 @@ namespace TensileLite
             TrigIndAbsSin, // 25
             TrigIndAbsCos, // 26
             UniformLowPrecision, // 27
+            Maf2_0, // 28
+            Maf2_0UnitScale, // 29
+            Maf1_0, // 30
             Count
         };
 
@@ -119,6 +122,7 @@ namespace TensileLite
         {
             std::uint64_t seed;
             std::uint64_t semanticStream;
+            size_t        batchIndex = 0;
         };
 
         std::uint64_t stableDataInitializationStream(std::string_view semanticName);
@@ -149,7 +153,9 @@ namespace TensileLite
             return mode == InitMode::SerialIdx || mode == InitMode::SerialDim0
                    || mode == InitMode::SerialDim1 || mode == InitMode::Identity
                    || mode == InitMode::TrigSin || mode == InitMode::TrigCos
-                   || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos;
+                   || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos
+                   || mode == InitMode::Maf2_0 || mode == InitMode::Maf2_0UnitScale
+                   || mode == InitMode::Maf1_0;
         }
 
         std::string ToString(InitMode mode);

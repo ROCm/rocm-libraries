@@ -449,7 +449,7 @@ try
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
-         "fp16_accumulator_probe")
+         "fp16_accumulator_probe, maf2_0, maf2_0_unit_scale, maf1_0")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -833,15 +833,31 @@ try
         }
     }
 
-    hipblaslt_print_version();
-
     if(vm.find("version") != vm.end())
     {
+        hipblaslt_print_version();
         return 0;
     }
 
     if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
         return EXIT_FAILURE;
+
+    if(auto parsed = string2hipblaslt_initialization(initialization))
+    {
+        arg.initialization = *parsed;
+    }
+    else
+    {
+        throw std::invalid_argument("Invalid value for --initialization " + initialization);
+    }
+
+    if(grouped_gemm
+       && (arg.initialization == hipblaslt_initialization::maf2_0
+           || arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+           || arg.initialization == hipblaslt_initialization::maf1_0))
+        throw std::invalid_argument("MAF initialization is not supported for grouped GEMM.");
+
+    hipblaslt_print_version();
 
     if(api_method_str.compare("c") == 0)
     {
@@ -1048,7 +1064,6 @@ try
                 = stride_e.size() >= length ? stride_e[i] : stride_e[stride_e.size() - 1];
     }
 
-    // Device Query
     hipDeviceProp_t props;
     int64_t         device_count = query_device_property(device_id, props);
 
@@ -1133,15 +1148,6 @@ try
         throw std::invalid_argument("Invalid value for --bias_type " + bias_type);
     else
         arg.bias_type = string_to_hip_datatype(bias_type);
-
-    if(auto parsed = string2hipblaslt_initialization(initialization))
-    {
-        arg.initialization = *parsed;
-    }
-    else
-    {
-        throw std::invalid_argument("Invalid value for --initialization " + initialization);
-    }
 
     if(vm["initialization"].defaulted()
        && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))

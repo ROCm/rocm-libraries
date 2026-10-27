@@ -339,7 +339,34 @@ namespace TensileLite::Client
                                                DataInitializationKey key,
                                                std::optional<double> freeValue = std::nullopt)
         {
-            Tensor              destination = mutableTensorView(type, std::move(layout), storage);
+            Tensor destination = mutableTensorView(type, std::move(layout), storage);
+            if(hostnumerics::detail::isMaf(mode))
+            {
+                if(mode == InitMode::Maf1_0
+                   && (key.semanticStream == stableDataInitializationStream("scaleA")
+                       || key.semanticStream == stableDataInitializationStream("scaleB")))
+                {
+                    hipblaslt::hostnumerics::maf::validateType(type);
+                    generate(destination,
+                             GenerationRecipe::realOnlyLastDimensionFastest(
+                                 GenerationRecipe::constant({.value = 0.5}), 0),
+                             hipblaslt::hostnumerics::maf::conversion(
+                                 hipblaslt::hostnumerics::maf::Mode::Maf1, type));
+                    return;
+                }
+                const size_t operand
+                    = key.semanticStream == 0
+                              || key.semanticStream == stableDataInitializationStream("A")
+                              || key.semanticStream == stableDataInitializationStream("a")
+                          ? 0
+                      : key.semanticStream == stableDataInitializationStream("B")
+                              || key.semanticStream == stableDataInitializationStream("b")
+                          ? 1
+                          : 2;
+                hipblaslt::hostnumerics::maf::fill(
+                    destination, hostnumerics::detail::mafMode(mode), operand, key.batchIndex);
+                return;
+            }
             std::vector<size_t> order(destination.shape().rank());
             for(size_t axis = 0; axis < order.size(); ++axis)
                 order[axis] = order.size() - 1 - axis;

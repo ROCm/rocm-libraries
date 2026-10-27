@@ -35,6 +35,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using TensileLite::ContractionProblemGemm;
@@ -1617,5 +1618,126 @@ TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatterns
                               padding ? 0.0f : ordinaryScales.loadAs<float>({row, col, 0}));
                 }
         }
+    }
+}
+
+TEST(TensileMafInitialization, LogicalBroadcastAndMxTailScales)
+{
+    using namespace roc::hostnumerics;
+    const TensorDescriptor descriptor("A", rocisa::DataType::Double, {3, 4, 2}, {1, 3, 0});
+    std::vector<std::byte> storage(descriptor.totalAllocatedBytes());
+    initializeHostBufferWithHostNumerics(
+        rocisa::DataType::Double,
+        InitMode::Maf1_0,
+        storage.data(),
+        descriptor,
+        {0, TensileLite::Client::stableDataInitializationStream("A")});
+    const auto observed = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float64, TensileLite::Client::hostnumericsLayout(descriptor), storage);
+    for(size_t b = 0; b < 2; ++b)
+        for(size_t j = 0; j < 4; ++j)
+            for(size_t i = 0; i < 3; ++i)
+                EXPECT_EQ(observed.loadAs<double>({i, j, b}), std::sin(double(i + j * 3)));
+    for(size_t axis : {0u, 1u})
+    {
+        auto mx = dt::generateMxData(rocisa::DataType::Float4,
+                                     rocisa::DataType::E8,
+                                     axis == 0 ? Shape{40, 4} : Shape{4, 40},
+                                     48,
+                                     axis,
+                                     32,
+                                     InitMode::Maf1_0,
+                                     InitMode::One,
+                                     0,
+                                     false,
+                                     0,
+                                     0);
+        EXPECT_EQ(mx.scales.type(), ScalarType::E8M0);
+        EXPECT_EQ(mx.scales.elementCount(), 8);
+        EXPECT_EQ(mx.data.loadAs<double>({1, 0}), 1.0);
+        EXPECT_EQ(mx.reference.loadAs<double>({1, 0}), 0.5);
+    }
+}
+
+TEST(TensileMafInitialization, NonMxGeneratorSwitchUsesNormalForBothOperands)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 64, 2, 256}});
+        setOption(args, "mx-data-generator", 1);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::Maf2_0);
+        ClientProblemFactory factory(args);
+        DataInitialization   dataInit(args, factory);
+        const auto&          problem
+            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto& desc     = matrixA ? problem.a() : problem.b();
+            const auto  observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type),
+                hostnumericsLayout(desc),
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                    desc.totalAllocatedBytes()));
+            std::vector<std::byte> expected(desc.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(
+                type,
+                InitMode::Maf2_0,
+                expected.data(),
+                desc,
+                {0, stableDataInitializationStream(matrixA ? "A" : "B")});
+            EXPECT_TRUE(std::ranges::equal(observed.rawEncodedBackingStorage(), expected));
+            double squares = 0;
+            for(size_t b = 0; b < 2; ++b)
+                for(size_t j = 0; j < desc.sizes()[1]; ++j)
+                    for(size_t i = 0; i < desc.sizes()[0]; ++i)
+                        squares += std::pow(observed.loadAs<double>({i, j, b}), 2);
+            EXPECT_NEAR(squares / observed.elementCount(), 1.0, 0.04);
+        }
+    }
+}
+
+TEST(TensileMafInitialization, ParserPreservesConfigurationValues)
+{
+    for(auto const& [mode, name, number] :
+        {std::tuple{InitMode::Maf2_0, "Maf2_0", 28},
+         std::tuple{InitMode::Maf2_0UnitScale, "Maf2_0UnitScale", 29},
+         std::tuple{InitMode::Maf1_0, "Maf1_0", 30}})
+    {
+        EXPECT_EQ(static_cast<int>(mode), number);
+        EXPECT_EQ(TensileLite::Client::ToString(mode), name);
+        for(auto const& text : {std::string(name), std::to_string(number)})
+        {
+            InitMode           parsed = InitMode::Zero;
+            std::istringstream input(text);
+            input >> parsed;
+            EXPECT_EQ(parsed, mode);
+        }
+    }
+}
+
+TEST(TensileMafInitialization, ScalarAndVectorOperandScalesAreHalf)
+{
+    using namespace TensileLite::Client;
+    for(auto name : {"scaleA", "scaleB"})
+    {
+        const TensorDescriptor descriptor(name, rocisa::DataType::Float, {7}, {1});
+        std::vector<float>     values(7);
+        initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                             InitMode::Maf1_0,
+                                             values.data(),
+                                             descriptor,
+                                             {0, stableDataInitializationStream(name)});
+        EXPECT_TRUE(std::ranges::all_of(values, [](float value) { return value == 0.5f; }));
     }
 }
