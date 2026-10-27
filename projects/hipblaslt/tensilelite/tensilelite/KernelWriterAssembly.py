@@ -22217,11 +22217,15 @@ class KernelWriterAssembly(KernelWriter):
   def tdmArgTypeWaveIdBits(self, kernel) -> int:
     """Return the WaveIdx bit count packed into ArgType[8+].
 
-    THE WHOLE INDEX, not just parity: a split region walk and the uneven rows both gate on
-    `wId < first`, which one bit cannot answer once the kernel has more than two waves.
+    The uneven shared-scale groupings gate on `wId < first`, which one bit cannot answer once
+    the kernel has more than two waves; every other row only needs parity.
     `cmpNamedArgTypeEq` masks 0xFF, so every bit from 8 up is free.
+
+    Mirrors `tdmWaveIdxArgTypeBits`, which is what the pack and read sites call.
     """
-    return max(1, ceil(log2(max(1, kernel["NumWaves"]))))
+    if tdmSharedScaleSetActive(kernel):
+      return max(1, ceil(log2(max(1, kernel["NumWaves"]))))
+    return 1
 
   def _emitTdmWaveIdIntoSgpr(self, kernel, dstIdx: int, comment: str = "waveId") -> Module:
     """Materialise WaveIdx from packed ArgType bits or Serial."""
