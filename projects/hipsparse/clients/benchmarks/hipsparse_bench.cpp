@@ -25,6 +25,8 @@
 #include "hipsparse_bench.hpp"
 #include "hipsparse_bench_cmdlines.hpp"
 
+#include <stdexcept>
+
 // Return version.
 std::string hipsparse_get_version()
 {
@@ -37,30 +39,35 @@ std::string hipsparse_get_version()
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseCreate failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetVersion failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseGetVersion failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseGetGitRevision failed: hipsparse status "
+                << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseDestroy failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     std::ostringstream os;
@@ -78,7 +85,10 @@ void hipsparse_bench::parse(int& argc, char**& argv, hipsparse_arguments_config&
     int i = config.parse(argc, argv, this->desc);
     if(i == -1)
     {
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        std::ostringstream message;
+        message << "hipsparse_bench::parse failed: hipsparse status "
+                << hipsparseGetErrorName(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        throw std::runtime_error(message.str());
     }
     else if(i == -2)
     {

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <stdexcept>
 
 #ifdef WIN32
 #define strSUITEcmp(A, B) _stricmp(A, B)
@@ -124,30 +125,35 @@ void query_version(char* version)
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "The creation of the hipsparseHandle_t failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseCreate failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetVersion failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseGetVersion failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "hipsparseGetGitRevision failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseGetGitRevision failed: hipsparse status "
+                << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::cerr << "rocsparse_destroy_handle failed." << std::endl;
-        throw(status);
+        std::ostringstream message;
+        message << "hipsparseDestroy failed: hipsparse status " << hipsparseGetErrorName(status);
+        throw std::runtime_error(message.str());
     }
 
     snprintf(version,
@@ -239,9 +245,11 @@ double get_time_us(void)
 
     if(status != hipSuccess)
     {
-        fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        std::ostringstream message;
+        message << "hipDeviceSynchronize failed: " << hipGetErrorString(status) << " ("
+                << static_cast<int>(status) << "). hipsparse status "
+                << hipsparseGetErrorName(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        throw std::runtime_error(message.str());
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -257,9 +265,11 @@ double get_time_us_sync(hipStream_t stream)
 
     if(status != hipSuccess)
     {
-        fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
-        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
+        std::ostringstream message;
+        message << "hipStreamSynchronize failed: " << hipGetErrorString(status) << " ("
+                << static_cast<int>(status) << "). hipsparse status "
+                << hipsparseGetErrorName(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        throw std::runtime_error(message.str());
     }
 
     auto now = std::chrono::steady_clock::now();

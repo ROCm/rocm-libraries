@@ -27,6 +27,8 @@
 
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
+#include <sstream>
+#include <stdexcept>
 
 #include "arg_check.hpp"
 #include "hipsparse_arguments.hpp"
@@ -45,8 +47,9 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            std::ostringstream message;
+            message << "hipsparseCreate failed: hipsparse status " << hipsparseGetErrorName(status);
+            throw std::runtime_error(message.str());
         }
     }
     hipsparseLocalHandle_t(const Arguments& arg)
@@ -56,8 +59,9 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            std::ostringstream message;
+            message << "hipsparseCreate failed: hipsparse status " << hipsparseGetErrorName(status);
+            throw std::runtime_error(message.str());
         }
     }
     ~hipsparseLocalHandle_t()

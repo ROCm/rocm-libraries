@@ -50,8 +50,9 @@
 namespace hipsparse_test
 {
 
-    // device_malloc wraps hipMalloc and provides the same API as malloc.
-    // A failed allocation throws so callers cannot continue with a null pointer.
+    // device_malloc wraps hipMalloc. A failed allocation throws so the caller does
+    // not continue with an invalid pointer. A successful hipMalloc(0) can still
+    // return nullptr.
     static void* device_malloc(size_t byte_size)
     {
         void*      pointer = nullptr;
@@ -90,7 +91,6 @@ namespace hipsparse_test
                          hipGetErrorString(mem_status));
             }
 
-            fprintf(stderr, "%s\n", message);
             throw std::runtime_error(message);
         }
         return pointer;
@@ -103,7 +103,8 @@ namespace hipsparse_test
     }
 
     // Constructors throw so a failed create cannot be used by the rest of the test.
-    // Destructors only log: throwing while another exception is unwinding calls std::terminate.
+    // Destructors record a failed destroy without throwing, so teardown stays safe
+    // while another exception is unwinding.
     static void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
     {
         if(status == HIPSPARSE_STATUS_SUCCESS)
@@ -112,7 +113,7 @@ namespace hipsparse_test
         }
 
         std::ostringstream message;
-        message << call << " failed: hipsparse status " << static_cast<int>(status);
+        message << call << " failed: hipsparse status " << hipsparseGetErrorName(status);
         throw std::runtime_error(message.str());
     }
 
@@ -120,13 +121,18 @@ namespace hipsparse_test
     {
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            fprintf(stderr, "%s failed: hipsparse status %d\n", call, static_cast<int>(status));
+            fprintf(
+                stderr, "%s failed: hipsparse status %s\n", call, hipsparseGetErrorName(status));
         }
     }
 
     struct descr_struct
     {
         hipsparseMatDescr_t descr = nullptr;
+
+        descr_struct(const descr_struct&) = delete;
+        descr_struct& operator=(const descr_struct&) = delete;
+
         descr_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateMatDescr(&descr), "hipsparseCreateMatDescr");
@@ -145,6 +151,10 @@ namespace hipsparse_test
     struct hyb_struct
     {
         hipsparseHybMat_t hyb = nullptr;
+
+        hyb_struct(const hyb_struct&) = delete;
+        hyb_struct& operator=(const hyb_struct&) = delete;
+
         hyb_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateHybMat(&hyb), "hipsparseCreateHybMat");
@@ -163,6 +173,10 @@ namespace hipsparse_test
     struct bsrsv2_struct
     {
         bsrsv2Info_t info = nullptr;
+
+        bsrsv2_struct(const bsrsv2_struct&) = delete;
+        bsrsv2_struct& operator=(const bsrsv2_struct&) = delete;
+
         bsrsv2_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateBsrsv2Info(&info), "hipsparseCreateBsrsv2Info");
@@ -181,6 +195,10 @@ namespace hipsparse_test
     struct bsrsm2_struct
     {
         bsrsm2Info_t info = nullptr;
+
+        bsrsm2_struct(const bsrsm2_struct&) = delete;
+        bsrsm2_struct& operator=(const bsrsm2_struct&) = delete;
+
         bsrsm2_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateBsrsm2Info(&info), "hipsparseCreateBsrsm2Info");
@@ -200,6 +218,10 @@ namespace hipsparse_test
     struct csrsv2_struct
     {
         csrsv2Info_t info = nullptr;
+
+        csrsv2_struct(const csrsv2_struct&) = delete;
+        csrsv2_struct& operator=(const csrsv2_struct&) = delete;
+
         csrsv2_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsrsv2Info(&info), "hipsparseCreateCsrsv2Info");
@@ -218,6 +240,10 @@ namespace hipsparse_test
     struct csrsm2_struct
     {
         csrsm2Info_t info = nullptr;
+
+        csrsm2_struct(const csrsm2_struct&) = delete;
+        csrsm2_struct& operator=(const csrsm2_struct&) = delete;
+
         csrsm2_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsrsm2Info(&info), "hipsparseCreateCsrsm2Info");
@@ -237,6 +263,10 @@ namespace hipsparse_test
     struct bsrilu02_struct
     {
         bsrilu02Info_t info = nullptr;
+
+        bsrilu02_struct(const bsrilu02_struct&) = delete;
+        bsrilu02_struct& operator=(const bsrilu02_struct&) = delete;
+
         bsrilu02_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateBsrilu02Info(&info),
@@ -256,6 +286,10 @@ namespace hipsparse_test
     struct csrilu02_struct
     {
         csrilu02Info_t info = nullptr;
+
+        csrilu02_struct(const csrilu02_struct&) = delete;
+        csrilu02_struct& operator=(const csrilu02_struct&) = delete;
+
         csrilu02_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsrilu02Info(&info),
@@ -275,6 +309,10 @@ namespace hipsparse_test
     struct bsric02_struct
     {
         bsric02Info_t info = nullptr;
+
+        bsric02_struct(const bsric02_struct&) = delete;
+        bsric02_struct& operator=(const bsric02_struct&) = delete;
+
         bsric02_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateBsric02Info(&info),
@@ -294,6 +332,10 @@ namespace hipsparse_test
     struct csric02_struct
     {
         csric02Info_t info = nullptr;
+
+        csric02_struct(const csric02_struct&) = delete;
+        csric02_struct& operator=(const csric02_struct&) = delete;
+
         csric02_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsric02Info(&info),
@@ -314,6 +356,10 @@ namespace hipsparse_test
     struct csrgemm2_struct
     {
         csrgemm2Info_t info = nullptr;
+
+        csrgemm2_struct(const csrgemm2_struct&) = delete;
+        csrgemm2_struct& operator=(const csrgemm2_struct&) = delete;
+
         csrgemm2_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsrgemm2Info(&info),
@@ -334,6 +380,10 @@ namespace hipsparse_test
     struct prune_struct
     {
         pruneInfo_t info = nullptr;
+
+        prune_struct(const prune_struct&) = delete;
+        prune_struct& operator=(const prune_struct&) = delete;
+
         prune_struct()
         {
             throw_if_hipsparse_error(hipsparseCreatePruneInfo(&info), "hipsparseCreatePruneInfo");
@@ -352,6 +402,10 @@ namespace hipsparse_test
     struct csru2csr_struct
     {
         csru2csrInfo_t info = nullptr;
+
+        csru2csr_struct(const csru2csr_struct&) = delete;
+        csru2csr_struct& operator=(const csru2csr_struct&) = delete;
+
         csru2csr_struct()
         {
             throw_if_hipsparse_error(hipsparseCreateCsru2csrInfo(&info),
@@ -372,6 +426,10 @@ namespace hipsparse_test
     struct spgemm_struct
     {
         hipsparseSpGEMMDescr_t descr = nullptr;
+
+        spgemm_struct(const spgemm_struct&) = delete;
+        spgemm_struct& operator=(const spgemm_struct&) = delete;
+
         spgemm_struct()
         {
             throw_if_hipsparse_error(hipsparseSpGEMM_createDescr(&descr),
@@ -397,6 +455,10 @@ namespace hipsparse_test
     struct spgeam_struct
     {
         hipsparseSpGEAMDescr_t descr = nullptr;
+
+        spgeam_struct(const spgeam_struct&) = delete;
+        spgeam_struct& operator=(const spgeam_struct&) = delete;
+
         spgeam_struct()
         {
             throw_if_hipsparse_error(hipsparseSpGEAM_createDescr(&descr),

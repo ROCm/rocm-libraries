@@ -26,6 +26,8 @@
 #define HIPSPARSE_LOCAL_SPVEC_HPP
 
 #include <hipsparse/hipsparse.h>
+#include <sstream>
+#include <stdexcept>
 
 #include "arg_check.hpp"
 
@@ -47,9 +49,10 @@ public:
             = hipsparseCreateSpVec(&descr, size, nnz, indices, values, idxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateSpVec failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            std::ostringstream message;
+            message << "hipsparseCreateSpVec failed: hipsparse status "
+                    << hipsparseGetErrorName(status);
+            throw std::runtime_error(message.str());
         }
     }
 

@@ -26,6 +26,8 @@
 #define HIPSPARSE_LOCAL_DNVEC_HPP
 
 #include <hipsparse/hipsparse.h>
+#include <sstream>
+#include <stdexcept>
 
 #include "arg_check.hpp"
 
@@ -40,9 +42,10 @@ public:
         const hipsparseStatus_t status = hipsparseCreateDnVec(&descr, size, values, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateDnVec failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            std::ostringstream message;
+            message << "hipsparseCreateDnVec failed: hipsparse status "
+                    << hipsparseGetErrorName(status);
+            throw std::runtime_error(message.str());
         }
     }
 
