@@ -5,7 +5,7 @@
 // accepts a graph (it is returned by GetApplicableEngineIds) but cannot build an execution
 // plan for it.
 //
-// Any failure to finalize the active plan falls back to the next ranked engine and is
+// Any failure to finalize the active plan falls back to another ranked engine (scanning from the top) and is
 // logged at WARN. Here the failure is either a plain plan-creation failure ("no solver")
 // or an out-of-memory status, and the failing engine is the user's soft preferred engine.
 // When no plan finalizes, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED with

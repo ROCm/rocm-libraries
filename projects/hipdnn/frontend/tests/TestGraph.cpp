@@ -181,6 +181,13 @@ public:
         setActivePlanState(index, detail::ActivePlanFinalization::UNFINALIZED);
     }
 
+    /// Make the plan at `index` the active plan and mark it finalized, as a successful
+    /// build_plans() leaves it.
+    void setActivePlanFinalizedForTest(size_t index)
+    {
+        setActivePlanState(index, detail::ActivePlanFinalization::FINALIZED);
+    }
+
     /// Get the engine IDs from all plan specs (for assertions).
     std::vector<int64_t> getPlanSpecEngineIds() const
     {
@@ -10586,12 +10593,39 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailReturnsAggregatedError)
     EXPECT_NE(result.err_msg.find("execution context lost 20"), std::string::npos)
         << result.err_msg;
     EXPECT_NE(result.err_msg.find("out of device memory 30"), std::string::npos) << result.err_msg;
+    // Failures are joined by "; " and each one carries its engine id.
+    EXPECT_NE(result.err_msg.find("; engine 20: "), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("; engine 30: "), std::string::npos) << result.err_msg;
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsItsError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/16, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanFinalizedForTest(0);
+
+    // The backend refuses to finalize the already finalized plan again. That is not an engine
+    // failure: the error is returned and no other plan is activated.
+    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(1), "already finalized");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_NE(result.err_msg.find("already finalized"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
 }
 
 TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageOmitsSkippedCandidates)

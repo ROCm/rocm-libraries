@@ -3349,14 +3349,21 @@ public:
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
         }
 
-        // Set the engine config, finalize the plan, and cache its workspace size.
+        // Set the engine config, finalize the plan, and cache its workspace size. A repeated
+        // call after a plan was already finalized fails here because the backend refuses to
+        // finalize it again; that is returned as is, not treated as an engine failure to
+        // fall back from (which would silently activate a second plan).
+        const bool alreadyFinalized = _executionPlanFinalized;
         auto finalizeErr = finalizePlanDescriptor(activePlan);
+        if(finalizeErr.is_bad() && alreadyFinalized)
+        {
+            return finalizeErr;
+        }
         if(finalizeErr.is_bad())
         {
             HIPDNN_FE_LOG_WARN("Failed to finalize active plan (engine "
                                << activePlan.engineId << "): " << finalizeErr.get_message()
                                << "; trying the other ranked plans");
-
             // Failures in attempt order, the active plan first.
             std::string failures = "engine " + std::to_string(activePlan.engineId) + ": "
                                    + finalizeErr.get_message();
