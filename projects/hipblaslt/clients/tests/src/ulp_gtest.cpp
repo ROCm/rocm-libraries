@@ -76,7 +76,7 @@ namespace
             = compare(copyTensorFromEncodedStorage(hGPU, storageElements, layout),
                       copyTensorFromEncodedStorage(hCPU, storageElements, layout),
                       options,
-                      roc::hostnumerics::IndexRange::all(),
+                      roc::hostnumerics::IndexRange::all(layout.shape().elementCount()),
                       std::vector<size_t>{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
@@ -113,7 +113,7 @@ namespace
             = compare(hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hGPU, scalar, layout),
                       hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
                       options,
-                      roc::hostnumerics::IndexRange::all(),
+                      roc::hostnumerics::IndexRange::all(layout.shape().elementCount()),
                       std::vector<size_t>{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;

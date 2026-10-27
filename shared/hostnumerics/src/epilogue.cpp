@@ -61,12 +61,12 @@ static EpilogueOutputs epilogueOwned(const Tensor& input, const EpilogueOutputTy
 
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options) {
-    epilogueInto(input, std::move(outputs), options, IndexRange::all(),
+    epilogueInto(input, std::move(outputs), options, IndexRange::all(input.elementCount()),
                  input.shape().indexOrderLastDimensionFastest());
 }
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
                                   const EpilogueOptions& options) {
-    return epilogueOwned(input, types, options, IndexRange::all(),
+    return epilogueOwned(input, types, options, IndexRange::all(input.elementCount()),
                          input.shape().indexOrderLastDimensionFastest());
 }
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,

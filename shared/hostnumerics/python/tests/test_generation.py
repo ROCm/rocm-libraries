@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import sys
 
 from _hostnumerics_test_support import *  # noqa: F403
 
@@ -484,7 +483,13 @@ class PermutationGenerationTests(unittest.TestCase):
                 ).with_index_order(invalid)
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
             with self.assertRaises(RuntimeError):
-                hv.compare(observed, expected, options, hv.IndexRange.all(), invalid)
+                hv.compare(
+                    observed,
+                    expected,
+                    options,
+                    hv.IndexRange.all(shape.element_count),
+                    invalid,
+                )
 
     def test_contiguous_axis_order_conversion_and_selections(self):
         dimensions = (2, 3, 4)
@@ -500,15 +505,15 @@ class PermutationGenerationTests(unittest.TestCase):
         converted = source.to(hv.ScalarType.Float64)
         np.testing.assert_array_equal(hv.to_numpy(converted, dtype=None), expected)
         for selection in (
-            hv.IndexRange.all(),
-            hv.IndexRange(2, 3, sys.maxsize * 2 + 1),
+            hv.IndexRange.all(24),
+            hv.IndexRange(2, 24, 3),
             {1, 13, 23},
         ):
             options = hv.ComparisonOptions()
             report = hv.compare(source, converted, options, selection, order)
             self.assertTrue(report.passed)
             expected_count = (
-                selection.count(24)
+                selection.count()
                 if isinstance(selection, hv.IndexRange)
                 else len(selection)
             )
@@ -519,7 +524,7 @@ class PermutationGenerationTests(unittest.TestCase):
             tensor = hv.Tensor(hv.ScalarType.Float32, hv.Shape(dimensions))
             options = hv.ComparisonOptions()
             for factory in (
-                lambda: hv.IndexRange.all(),
+                lambda: hv.IndexRange.all(hv.Shape(dimensions).element_count),
                 lambda: set(),
             ):
                 with self.assertRaises(RuntimeError):

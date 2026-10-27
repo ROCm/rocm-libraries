@@ -3694,12 +3694,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                                             && referenceD.type() != ScalarType::Int8;
                 if(productIsFinal)
                 {
-                    matmulIntoWithBlasBackend(referenceA,
-                                              referenceB,
-                                              referenceD,
-                                              matmulOptions,
-                                              roc::hostnumerics::IndexRange::all(),
-                                              roc::hostnumerics::LastDimensionFastest{});
+                    matmulIntoWithBlasBackend(
+                        referenceA,
+                        referenceB,
+                        referenceD,
+                        matmulOptions,
+                        roc::hostnumerics::IndexRange::all(referenceD.elementCount()),
+                        roc::hostnumerics::LastDimensionFastest{});
                 }
                 else
                 {
@@ -3715,12 +3716,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                     EpilogueOptions conversion(accumulatorType);
                     if(hasProduct)
                     {
-                        matmulIntoWithBlasBackend(referenceA,
-                                                  referenceB,
-                                                  referenceAccumulator,
-                                                  matmulOptions,
-                                                  roc::hostnumerics::IndexRange::all(),
-                                                  roc::hostnumerics::LastDimensionFastest{});
+                        matmulIntoWithBlasBackend(
+                            referenceA,
+                            referenceB,
+                            referenceAccumulator,
+                            matmulOptions,
+                            roc::hostnumerics::IndexRange::all(referenceAccumulator.elementCount()),
+                            roc::hostnumerics::LastDimensionFastest{});
                         conversion.inputScale = alpha;
                     }
                     if(betaValue != std::complex<double>(0.0, 0.0))

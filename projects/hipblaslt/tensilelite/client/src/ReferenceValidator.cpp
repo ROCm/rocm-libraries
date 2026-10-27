@@ -221,11 +221,11 @@ namespace TensileLite
                                const ContractionInputs&      inputs) {
                 if(!problem.stridedBatched())
                     throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
-                auto translated
-                    = hostnumerics::translateGemmInvocation(problem,
-                                                            inputs,
-                                                            roc::hostnumerics::IndexRange::all(),
-                                                            referenceIndexOrder(problem.d()));
+                auto translated = hostnumerics::translateGemmInvocation(
+                    problem,
+                    inputs,
+                    roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+                    referenceIndexOrder(problem.d()));
                 if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
                     throw std::invalid_argument("Freivalds: " + failure->reason);
                 const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
@@ -309,7 +309,7 @@ namespace TensileLite
                                             output.d,
                                             output.maxElements.at(index),
                                             output.gpu,
-                                            roc::hostnumerics::IndexRange(0, 1, 0),
+                                            roc::hostnumerics::IndexRange(0, 0, 1),
                                             -1);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());
@@ -553,8 +553,7 @@ namespace TensileLite
                                 options.maxReportedMismatches);
             }
             if(boundsCheck == BoundsCheckMode::NaN
-               && (outputSelection.count(resultTensor.elementCount()) == resultTensor.elementCount()
-                   || m_freivalds))
+               && (outputSelection.count() == resultTensor.elementCount() || m_freivalds))
             {
                 sentinel.append(roc::hostnumerics::checkUnusedTensorStorage(
                                     resultTensor,

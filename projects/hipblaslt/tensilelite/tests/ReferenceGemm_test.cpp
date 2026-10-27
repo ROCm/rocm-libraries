@@ -92,16 +92,16 @@ TEST(ReferenceInvocationAdapter, ZeroOutputOrBatchIsNoOpWithoutBindings)
                                          batches);
         const ContractionInputs inputs;
 
-        const auto translation
-            = hostnumerics::translateGemmInvocation(problem,
-                                                    inputs,
-                                                    roc::hostnumerics::IndexRange::all(),
-                                                    roc::hostnumerics::LastDimensionFastest{});
+        const auto translation = hostnumerics::translateGemmInvocation(
+            problem,
+            inputs,
+            roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+            roc::hostnumerics::LastDimensionFastest{});
         ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(translation));
         EXPECT_EQ(std::get<hostnumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
         executeReferenceGemm(problem,
                              inputs,
-                             roc::hostnumerics::IndexRange::all(),
+                             roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
                              roc::hostnumerics::LastDimensionFastest{},
                              automaticExecution);
     }
@@ -120,7 +120,7 @@ TEST(ReferenceInvocationAdapter, ZeroReductionDoesNotRequireProductOrAddendBindi
 
     executeReferenceGemm(problem,
                          inputs,
-                         roc::hostnumerics::IndexRange::all(),
+                         roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
                          roc::hostnumerics::LastDimensionFastest{},
                          automaticExecution);
     EXPECT_EQ(output, (std::array<float, 6>{}));
@@ -135,12 +135,12 @@ TEST(ReferenceInvocationAdapter, InvalidAmaxStorageIsAnInvalidDescriptor)
     problem.resetTensor(ContractionProblemGemm::TENSOR::AMAXD, rocisa::DataType::Float, {0}, {1});
     float             a = 2, b = 3, c = 0, d = -99, amax = -99;
     ContractionInputs inputs(&a, &b, &c, &d, 1.0f, 0.0f);
-    inputs.amaxD = &amax;
-    const auto translation
-        = hostnumerics::translateGemmInvocation(problem,
-                                                inputs,
-                                                roc::hostnumerics::IndexRange::all(),
-                                                roc::hostnumerics::LastDimensionFastest{});
+    inputs.amaxD           = &amax;
+    const auto translation = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
     const auto& failure = std::get<hostnumerics::TranslationFailure>(translation);
     EXPECT_EQ(failure.code, hostnumerics::TranslationFailureCode::InvalidDescriptor);
@@ -195,11 +195,11 @@ TEST(ReferenceInvocationAdapter, InvalidScalarVariantIsAnInvalidDescriptor)
             inputs.beta = invalid;
         else
             inputs.activationArgs.push_back(invalid);
-        const auto translation
-            = hostnumerics::translateGemmInvocation(problem,
-                                                    inputs,
-                                                    roc::hostnumerics::IndexRange::all(),
-                                                    roc::hostnumerics::LastDimensionFastest{});
+        const auto translation = hostnumerics::translateGemmInvocation(
+            problem,
+            inputs,
+            roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+            roc::hostnumerics::LastDimensionFastest{});
         ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
         EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
                   hostnumerics::TranslationFailureCode::InvalidDescriptor);
@@ -239,11 +239,11 @@ TEST(ReferenceInvocationAdapter, RejectsUnrepresentableContiguousReferenceOutput
     problem.setBetaType(rocisa::DataType::Float);
     float                   a = 2, b = 3, c = 0, d = -99;
     const ContractionInputs inputs(&a, &b, &c, &d, 1.0f, 0.0f);
-    const auto              translated
-        = hostnumerics::translateGemmInvocation(problem,
-                                                inputs,
-                                                roc::hostnumerics::IndexRange::all(),
-                                                roc::hostnumerics::LastDimensionFastest{});
+    const auto              translated = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translated));
     const auto& error = std::get<hostnumerics::TranslationFailure>(translated);
     EXPECT_EQ(error.code, hostnumerics::TranslationFailureCode::InvalidDescriptor);
@@ -259,11 +259,11 @@ TEST(ReferenceInvocationAdapter, UnsupportedScalarTypeIsDistinctFromInvalidValue
     problem.setAlphaType(rocisa::DataType::Int8);
     float                   a = 2, b = 3, c = 0, d = -99;
     const ContractionInputs inputs(&a, &b, &c, &d, 1.0f, 0.0f);
-    const auto              translated
-        = hostnumerics::translateGemmInvocation(problem,
-                                                inputs,
-                                                roc::hostnumerics::IndexRange::all(),
-                                                roc::hostnumerics::LastDimensionFastest{});
+    const auto              translated = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translated));
     EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translated).code,
               hostnumerics::TranslationFailureCode::UnsupportedDataType);
@@ -290,11 +290,11 @@ TEST(ReferenceInvocationAdapter, NonfiniteIntegerScalarReturnsDescriptorFailure)
                            -std::numeric_limits<float>::infinity()})
         {
             const ContractionInputs inputs(&a, &b, &c, &d, alpha, int32_t{0});
-            const auto              translated
-                = hostnumerics::translateGemmInvocation(problem,
-                                                        inputs,
-                                                        roc::hostnumerics::IndexRange::all(),
-                                                        roc::hostnumerics::LastDimensionFastest{});
+            const auto              translated = hostnumerics::translateGemmInvocation(
+                problem,
+                inputs,
+                roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+                roc::hostnumerics::LastDimensionFastest{});
             if(alphaType == rocisa::DataType::Float)
             {
                 ASSERT_TRUE(
@@ -314,11 +314,11 @@ TEST(ReferenceInvocationAdapter, BatchBoundsUseResultsForRecoverableAPIs)
         rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 1);
     float                   a = 2, b = 3, c = 0, d = -99;
     const ContractionInputs inputs(&a, &b, &c, &d, 1.0f, 0.0f);
-    auto                    translated
-        = hostnumerics::translateGemmInvocation(problem,
-                                                inputs,
-                                                roc::hostnumerics::IndexRange::all(),
-                                                roc::hostnumerics::LastDimensionFastest{});
+    auto                    translated = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(translated));
     const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
     const auto  batch   = adapter.translateBatch(1);
@@ -673,7 +673,7 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
     const auto selection = roc::hostnumerics::primeIndexRange(problem.d().totalLogicalElements(),
                                                               problem.d().totalAllocatedElements(),
                                                               elementsToValidate);
-    const std::vector<size_t> selected = selection.indices(problem.d().totalLogicalElements());
+    const std::vector<size_t> selected = selection.indices();
     ASSERT_EQ(selected.size(), elementsToValidate);
 
     std::vector<bool> expectedWritten(M * N, false);
@@ -2244,11 +2244,11 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
     inputs.scaleA       = &scaleA;
     inputs.scaleB       = &scaleB;
     inputs.batchOffsetD = 3 * sizeof(float);
-    auto invocation
-        = hostnumerics::translateGemmInvocation(problem,
-                                                inputs,
-                                                roc::hostnumerics::IndexRange::all(),
-                                                roc::hostnumerics::LastDimensionFastest{});
+    auto invocation     = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
     auto adapter = std::get<hostnumerics::GemmInvocationAdapter>(std::move(invocation));
     std::vector<hn::FreivaldsPlan> plans;
@@ -2279,10 +2279,11 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
     EXPECT_EQ(d, std::vector<float>(d.size(), -99.0f));
 
     a[0]         = 0.5f;
-    auto changed = hostnumerics::translateGemmInvocation(problem,
-                                                         inputs,
-                                                         roc::hostnumerics::IndexRange::all(),
-                                                         roc::hostnumerics::LastDimensionFastest{});
+    auto changed = hostnumerics::translateGemmInvocation(
+        problem,
+        inputs,
+        roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+        roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(changed));
     auto refused
         = std::get<hostnumerics::GemmInvocationAdapter>(changed).prepareFreivalds(0, {}, {});

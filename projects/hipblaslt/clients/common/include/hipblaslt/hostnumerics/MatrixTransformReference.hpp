@@ -78,7 +78,7 @@ namespace hipblaslt::hostnumerics
                     scaledB,
                     expected,
                     ScalarType::Float32,
-                    roc::hostnumerics::IndexRange::all(),
+                    roc::hostnumerics::IndexRange::all(expected.elementCount()),
                     roc::hostnumerics::LastDimensionFastest{});
         }
         else if(a)
@@ -86,14 +86,14 @@ namespace hipblaslt::hostnumerics
                          Tensor::scalar(ScalarType::Float32, alpha),
                          expected,
                          ScalarType::Float32,
-                         roc::hostnumerics::IndexRange::all(),
+                         roc::hostnumerics::IndexRange::all(expected.elementCount()),
                          roc::hostnumerics::LastDimensionFastest{});
         else if(b)
             multiplyInto(*b,
                          Tensor::scalar(ScalarType::Float32, beta),
                          expected,
                          ScalarType::Float32,
-                         roc::hostnumerics::IndexRange::all(),
+                         roc::hostnumerics::IndexRange::all(expected.elementCount()),
                          roc::hostnumerics::LastDimensionFastest{});
         else
             throw std::runtime_error("MatrixTransform reference requires A or B.");

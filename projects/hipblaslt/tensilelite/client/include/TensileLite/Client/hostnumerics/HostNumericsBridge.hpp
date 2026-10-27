@@ -374,7 +374,7 @@ namespace TensileLite::Client
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
         if(elementsToValidate == 0 || elementsToValidate >= *logicalCount)
-            return IndexRange::all();
+            return IndexRange::all(*logicalCount);
         const size_t candidate
             = std::max<size_t>(1, descriptor.totalAllocatedElements() / elementsToValidate);
         const auto stride = roc::hostnumerics::detail::getNextPrime(candidate);
@@ -383,7 +383,7 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::PrimeStrideOverflow));
         }
-        return IndexRange(0, *stride, std::numeric_limits<size_t>::max());
+        return IndexRange(0, *logicalCount, *stride);
     }
 
     inline roc::hostnumerics::IndexRange referenceIndexRange(TensorDescriptor const& descriptor,

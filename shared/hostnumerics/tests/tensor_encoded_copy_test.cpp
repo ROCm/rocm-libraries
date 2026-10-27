@@ -17,7 +17,7 @@ void testTensorEncodedCopies() {
         static_cast<std::byte>(0x11),
         static_cast<std::byte>(0x11),
     };
-    packedCopySource.copySelectedElementsToEncodedStorage(packedCopyBytes, IndexRange(1, 2, 2),
+    packedCopySource.copySelectedElementsToEncodedStorage(packedCopyBytes, IndexRange(1, 5, 2),
                                                           std::vector<size_t>{0});
     const Tensor selectedPackedCopy = Tensor::copyEncodedBackingStorage(
         ScalarType::Int4, Layout::contiguousLastDimensionFastest(Shape{4}),
@@ -81,7 +81,7 @@ void testTensorEncodedCopies() {
     requireError(
         [&] {
             packedCopySource.copySelectedElementsToEncodedStorage(
-                undersizedCopyDestination, IndexRange(1, 2, 2), std::vector<size_t>{0});
+                undersizedCopyDestination, IndexRange(1, 5, 2), std::vector<size_t>{0});
         },
         "Selected Tensor copy-to accepted undersized storage.");
 
@@ -103,7 +103,7 @@ void testTensorEncodedCopies() {
     const Tensor overlappingSelectedCopyOutSource =
         overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
     overlappingSelectedCopyOutSource.copySelectedElementsToEncodedStorage(
-        overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)), IndexRange(0, 1, 2),
+        overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)), IndexRange(0, 2, 1),
         std::vector<size_t>{0});
     require(overlappingCopyOut.loadAs<int32_t>({0}) == 1 &&
                 overlappingCopyOut.loadAs<int32_t>({1}) == 1 &&
