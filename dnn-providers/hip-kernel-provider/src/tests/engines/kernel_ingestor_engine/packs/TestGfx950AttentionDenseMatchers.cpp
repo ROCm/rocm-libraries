@@ -1219,11 +1219,11 @@ struct AlignmentOperand
 
 const std::vector<AlignmentOperand>& alignmentOperands()
 {
-    static const std::vector<AlignmentOperand> OPERANDS{{"Q", Q_UID, &GraphSpec::qAlignment},
-                                                        {"K", K_UID, &GraphSpec::kAlignment},
-                                                        {"V", V_UID, &GraphSpec::vAlignment},
-                                                        {"O", O_UID, &GraphSpec::oAlignment}};
-    return OPERANDS;
+    static const std::vector<AlignmentOperand> s_operands{{"Q", Q_UID, &GraphSpec::qAlignment},
+                                                          {"K", K_UID, &GraphSpec::kAlignment},
+                                                          {"V", V_UID, &GraphSpec::vAlignment},
+                                                          {"O", O_UID, &GraphSpec::oAlignment}};
+    return s_operands;
 }
 
 /// The default graph with only @p operand's declared alignment changed to @p bytes.

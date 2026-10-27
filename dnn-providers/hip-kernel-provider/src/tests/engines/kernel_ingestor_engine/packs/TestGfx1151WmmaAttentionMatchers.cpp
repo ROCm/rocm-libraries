@@ -787,11 +787,11 @@ struct AlignmentOperand
 
 const std::vector<AlignmentOperand>& alignmentOperands()
 {
-    static const std::vector<AlignmentOperand> OPERANDS{{"Q", &GraphSpec::qAlignment},
-                                                        {"K", &GraphSpec::kAlignment},
-                                                        {"V", &GraphSpec::vAlignment},
-                                                        {"O", &GraphSpec::oAlignment}};
-    return OPERANDS;
+    static const std::vector<AlignmentOperand> s_operands{{"Q", &GraphSpec::qAlignment},
+                                                          {"K", &GraphSpec::kAlignment},
+                                                          {"V", &GraphSpec::vAlignment},
+                                                          {"O", &GraphSpec::oAlignment}};
+    return s_operands;
 }
 
 /// The default graph with only @p operand's declared alignment changed to @p bytes.
