@@ -19,6 +19,7 @@
 10. [Testing Plan](#10-testing-plan)
 11. [Future Considerations](#11-future-considerations)
 12. [Glossary](#12-glossary)
+13. [Appendix A: Changes from Version 1.0](#appendix-a-changes-from-version-10)
 
 ## 1. Executive Summary
 
@@ -268,3 +269,54 @@ Not yet built: unit tests for individual rules, with each rule's counterexamples
 - **First draft**: The translator's output for a module. Once checked in it is hand code.
 - **Package**: A set of modules that share a C naming scheme (`tr/package.py`).
 - **Mechanical share**: The share of Python lines whose C++ the translator writes with no fill.
+
+## Appendix A: Changes from Version 1.0
+
+This appendix records how this design differs from the first draft of this RFC and tool (version 1.0, #14447 at d690ff4f662), for the review only. Remove it before merge; git history keeps the rest.
+
+Version 1.0 treated the translator as the **owner** of the C++: translated files said not to edit them, `tr.regen` rewrote them on every change, and a CI check failed when they differed. Version 2.0 treats it as a **porting assistant**: it writes a first draft, and from then on the C++ is hand code like every other twin.
+
+### A.1 Design Changes
+
+| Topic | Version 1.0 | Version 2.0 |
+|---|---|---|
+| Who owns the translated C++ | The translator. Files say "generated ... never edit by hand" | People and agents. Files say "first draft ...; hand-maintained from here" |
+| Existing files | `tr.regen` writes over them | `tr.regen` skips them (`skip <path> (exists)`, exit 0); `--overwrite` to replace, `--pretend` to preview |
+| Keeping C++ in step with Python | `tr.regen --check` in CI fails on any difference | No currency check. The byte-identity gate is the guard, as for every twin |
+| Prelude `rocke_py.hpp` | In `platform/cpp/include/rocke/`, which is installed | Inside the tool (`tr/prelude/`); copied next to a translated `.cpp` only when a port needs it; never installed |
+| Package adapters header | Shipped with the backward modules | Package data of the tool (`tr/packages/attention_bwd/`) |
+| Files the tool change adds under `platform/cpp` | 1 header | None |
+| Header for an existing module | Always generated | The existing header's ABI is used, so a draft fits its callers |
+| Recorded types | Keyed by function name and line number | Keyed by qualified name; a "facts stale" warning when the Python changed |
+| Self-test | None | `tools/translator/tests` (pytest, 37 tests, about a minute, run by hand; no CMake or CI entry) |
+| Build, CMake, install, CI | Planned CI step (`--check`) | No change and no dependency |
+| Size of the change | About 18.4k added lines | About 41.6k added lines; about 22.2k of them are frozen test fixtures |
+
+### A.2 Risks Compared
+
+| Version 1.0 risk | Version 1.0 mitigation | Version 2.0 | Why |
+|---|---|---|---|
+| 1. Code unlike the attention backward package | `--analyze` before any work; holes filled by hand | **Same** (risk 1) | Nothing in version 2.0 widens the rules |
+| 2. Recorded types miss a case | Unreached code is a hole; add a parity config | **Same** (risk 2), plus a stale-facts warning | Types keyed by qualified name no longer go missing when lines move |
+| 3. Stale generated files | `tr.regen --check` in CI | **Changed** (risk 3, "stale twins"): no tool check; the gate catches IR differences for the configs it covers | A CI check would fail on every legitimate hand edit. Stale twins already happen with hand ports and are caught the same way |
+| 4. Hand edits to generated files | Banner and `--check` | **Changed** (risk 4): hand edits are the normal case and are never overwritten | Version 1.0 assumed edits were rare. On `develop` the twins took 48 edits in about four months, 15 authors, many with an agent co-author. In version 1.0 each edit would have been lost on the next regeneration or failed CI |
+| 5. Generated code is harder to read | clang-format, Python names, module structure kept | **Same** (risk 5) | No change to the emitted shape beyond the banner and include lines |
+| 6. Translator maintenance | Rules are data-driven; the gate checks changes | **Changed** (risk 6): the tool owns no file outside its directory and nothing in the build or CI depends on it | With version 1.0's planned CI check, a broken translator would have blocked every change to a translated module. In version 2.0 it can be ignored or removed with no effect on the tree |
+
+Risks version 1.0 did not list, and how version 2.0 handles them:
+
+| Risk | Version 1.0 | Version 2.0 |
+|---|---|---|
+| A new installed C++ header | `rocke_py.hpp` installed with `platform/cpp/include/` | Removed: the tool change adds nothing under `platform/cpp` |
+| Recorded types silently stop matching after a line shift | Present: types keyed by line number, so any edit above a function dropped its types and the translation degraded without an error | Removed: keyed by qualified name, with a warning when the Python changed |
+| The prelude was never copied by `tr.regen` | Present: it searched a directory the change did not have | Fixed: the prelude ships with the tool and is copied on first use |
+| The translator's own breakage goes unnoticed | Present: no tests shipped with the tool | Reduced: self-test with golden translations; not run in CI, so it can still go stale (see below) |
+
+Risks version 2.0 adds or keeps on purpose:
+
+| Risk | Mitigation |
+|---|---|
+| **No automatic sync.** Nothing makes the C++ follow a Python change; that is the cost of letting people edit it. | The byte-identity gate, as for hand twins. Re-drafting a changed module is a manual `--overwrite` into a scratch tree and a compare |
+| **The self-test can go stale.** It is not in CI, and its goldens depend on the live `cpp/include/rocke/` headers. | It is run by hand when the translator changes; goldens change only through `--update-goldens` |
+| **A larger change to review.** About 22.2k lines of frozen test fixtures (pinned Python modules, recorded types, cut-down code maps, goldens). | They are test data, not code to keep in step with the library; they can be trimmed if reviewers prefer fewer, smaller fixtures |
+| **Narrow audience** (risk 7). | The tool only pays for itself if the remaining hand-twin ports (convolution, GEMM, MoE) use it; until then its cost is its directory |
