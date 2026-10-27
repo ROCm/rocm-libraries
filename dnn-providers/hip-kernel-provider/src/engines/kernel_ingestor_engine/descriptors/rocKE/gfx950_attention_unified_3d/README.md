@@ -15,17 +15,18 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 
 - Architecture: gfx950 only.
 - Decode only: one query token per sequence (every kernel is built with the decode grid).
-- Variants: 348 (all `kind = rocke` multi-launch kernels, compiled at pack time): 116 cells at
-  three segment counts. Variant reduction across `num_segments` on MI355X may drop counts per
-  cell; the count here is the shipped selection's.
+- Variants: 123 (all `kind = rocke` multi-launch kernels, compiled at pack time): every one of
+  the 116 cells at 16 segments, plus 7 variants at 32 or 64 segments in the 5 cells where an
+  MI355X sweep measured them winning. The selection is `variant_reduce`'s cut of the 348-variant full space
+  (116 cells at three segment counts).
 - dtype: bf16, fp16. head_size: 64, 128 (the bf16 D256 decode cohort is deferred).
 - mask: top-left causal and bottom-right causal (KMD `mask_type` 1, 2). A no-mask decode graph is
   served by the bottom-right causal kernel: with one query row the two admit the same keys, and
   rocKE builds no-mask decode as that kernel.
 - Query heads 4 to 128 and KV heads 1 to 128, varying per variant, with a group of 1, 2, 4, 8 or
   16 (the segment kernel fixes BLOCK_M at 16).
-- Segments: 16 (every cell's default), 32 and 64. The count only splits the KV loop; any value
-  computes the same output.
+- Segments: 16 (every cell's default); 32 and 64 only in bf16 bottom-right causal D128 cells.
+  The count only splits the KV loop; any value computes the same output.
 - No batch capacity: the decode grid launches one CTA per sequence and runs no binary search.
 - Fixed in every variant: `block_size` 16 and a one-page KV tile, no sliding window, no sinks, no
   ALiBi, no softcap, no fp8.
@@ -34,7 +35,7 @@ the plan's workspace ahead of the segment scratch (`packs/Gfx950AttentionUnified
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | the 348 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_3d.kdp.json` | DVC | 0.26 MB, the 123 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_3d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_3d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_3d.ued.json` | git | engine, knob `num_segments` |
