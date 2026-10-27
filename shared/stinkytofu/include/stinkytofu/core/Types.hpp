@@ -107,6 +107,10 @@ struct PassFeatureConfig {
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
+        /// Below the refill line (wmmaQueueCoverCycles) a non-WMMA pick normally gives way to
+        /// the WMMA only when it would stall. On: it gives way when the queued cover does not
+        /// outlast its wait and issue, so a stall-free pick cannot run the queue dry either.
+        bool wmmaRefillOnQueueDrain = false;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
         /// for the queued cover to reach wmmaRefillToCycles, counted from the live timeline.

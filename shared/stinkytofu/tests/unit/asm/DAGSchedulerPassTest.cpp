@@ -2535,6 +2535,25 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQu
     EXPECT_EQ(shape, "WdddddddWdWWWWWW");
 }
 
+// wmmaRefillOnQueueDrain: the ready ds_loads still follow the first WMMA, but only while its
+// queued cover outlasts them; the one that would run the queue dry waits behind the next WMMA.
+TEST_F(DAGSchedulerPassTest, WmmaRefillOnQueueDrain_DsLoadIssuesWhileTheQueueOutlastsIt) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.wmmaRefillOnQueueDrain = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddddddWddWWWWWW");
+}
+
 // Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
 // for a credit: a ds queue of 2). Fixed issues wmmaBatchSize WMMAs per refill, Dynamic up to the
 // refill target in cycles; a refill that finds the queue still low starts again.

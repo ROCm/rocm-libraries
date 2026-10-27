@@ -137,7 +137,9 @@
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
     X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
-    X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
+    X(WmmaRefillOnQueueDrain, bool,                                                                \
+      false) /* refill: WMMA first when a pick drains the queue; false = only on a stall */        \
+    X(DsReadCyclesPerLoad, int, 6) /* LDS return rate (cycles per ds_load); 0 = off */             \
     X(QueueStartForceWmmaBurst, bool,                                                              \
       false)                           /* loop head / barrier wait burst ignores ds windows */     \
     X(QueueStartMinWmmaBurst, int, -1) /* forced burst min WMMAs: 1..depth, -1 = depth */          \

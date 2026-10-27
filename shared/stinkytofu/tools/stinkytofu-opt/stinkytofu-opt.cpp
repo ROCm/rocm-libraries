@@ -587,6 +587,8 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--wmma-refill-to-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaRefillToCycles =
                 std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
+        } else if (a == "--wmma-refill-on-queue-drain") {
+            passFeatureConfig.dagFeatures.wmmaRefillOnQueueDrain = true;
         } else if (a == "--queue-start-force-wmma-burst") {
             passFeatureConfig.dagFeatures.queueStartForceWmmaBurst = true;
         } else if (a.starts_with("--queue-start-min-wmma-burst=")) {

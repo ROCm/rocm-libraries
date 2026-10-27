@@ -181,6 +181,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
+                passFeatureConfig.dagFeatures.wmmaRefillOnQueueDrain =
+                    moduleOptions.WmmaRefillOnQueueDrain;
                 passFeatureConfig.dagFeatures.wmmaRefillMode =
                     static_cast<PassFeatureConfig::WmmaRefillMode>(moduleOptions.WmmaRefillMode);
                 passFeatureConfig.dagFeatures.wmmaBatchSize =

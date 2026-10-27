@@ -890,6 +890,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void advanceTime(int cycles, TimeKind kind);
     void chargeDsCreditWait(int wait);
     int computeValuAdvanceCycles(int issueCycles) const;
+    int nonWmmaIssueCycles(const StinkyInstruction& inst) const;
+    int nonWmmaPickCycles(const StinkyInstruction& inst, int wait) const;
     void updateWMMAStatus(DAGNode* node);
     void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
     void touchOperands(const StinkyInstruction& inst);
@@ -1242,19 +1244,30 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
     return elapsed;
 }
 
+// Issue cycles a non-barrier, non-WMMA pick charges the timeline (a ds_read pays the
+// wave-shared ds issue cost).
+int CDNA5ReadyQueue::nonWmmaIssueCycles(const StinkyInstruction& inst) const {
+    return isDSRead(inst) ? dsIssueCost(inst) : static_cast<int>(inst.issueCycles);
+}
+
+// Cycles from now until a non-WMMA pick that first waits \p wait has issued.
+int CDNA5ReadyQueue::nonWmmaPickCycles(const StinkyInstruction& inst, int wait) const {
+    const int issue = nonWmmaIssueCycles(inst);
+    if (isVectorALU(inst) || isTranscendental(inst)) return wait + computeValuAdvanceCycles(issue);
+    return wait + issue;
+}
+
 // After a picked instruction: advance the co-issue timeline. Barriers use
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
 // progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
-    int cycles = node->inst->issueCycles;
+    int cycles = nonWmmaIssueCycles(*node->inst);
     TimeKind kind = TimeKind::Issue;
     if (isBarrier(*node->inst)) {
         cycles = node->inst->latencyCycles;
         kind = TimeKind::Elapsed;
     } else if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
         kind = TimeKind::ValuIssue;
-    } else if (isDSRead(*node->inst)) {
-        cycles = dsIssueCost(*node->inst);
     }
     advanceTime(cycles, kind);
 }
@@ -2592,7 +2605,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         // the queue has room (a full queue already covers it, and the wait fits other work).
         const bool refillActive = wmmaRefillActive(bestWMMA->inst->latencyCycles);
         // The refill only hides a stall: a non-WMMA pick that carries no wait issues now, so a
-        // ready ds_load at a region start does not wait for the queue to fill.
+        // ready ds_load at a region start does not wait for the queue to fill. With
+        // wmmaRefillOnQueueDrain the pick issues only while the queued cover outlasts it (its
+        // wait and its issue), so it cannot run the queue dry either.
+        const bool pickGivesWay =
+            hasPickableNonWmma &&
+            (getPassContext().getPassFeatureConfig().dagFeatures.wmmaRefillOnQueueDrain
+                 ? queuedCoverCycles() - nonWmmaPickCycles(*smallestPickable->inst, pickWait) <= 0
+                 : pickWait > 0);
         // After a forced burst the modeled cover runs ahead of the hardware: once the calibrated
         // cover cannot take one more pick before this WMMA, the WMMA goes first, as in the burst.
         const bool calibratedPreempt = calibratedOn_ && hasPickableNonWmma &&
@@ -2602,7 +2622,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool preBarrierRunPreempt =
             bestLatency <= 0 && inPreBarrierRun(bestWMMA->inst->latencyCycles);
         const bool preemptForQueue = burstPreempt || calibratedPreempt || preBarrierRunPreempt ||
-                                     (refillActive && (!hasPickableNonWmma || pickWait > 0));
+                                     (refillActive && (!hasPickableNonWmma || pickGivesWay));
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);
