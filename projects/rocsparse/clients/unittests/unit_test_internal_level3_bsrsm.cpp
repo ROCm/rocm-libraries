@@ -28,8 +28,8 @@
 //
 // FOCUS (AISPARSE-670): rocsparse_bsrsm_template_large.cpp carried three signed
 // 32-bit product overflows in its launch grids. The fix forms each product in
-// 64 bit, clamps it against handle->properties.maxGridSize[0] and adds a
-// grid-stride loop so the clamped grid still covers the whole iteration space:
+// 64 bit, clamps it with rocsparse::get_grid_size_x and adds a grid-stride loop
+// so the clamped grid still covers the whole iteration space:
 //
 //   1. the solve grid ((nrhs - 1) / NCOL + 1) * mb, which flattens a two
 //      dimensional space (RHS panel, block row) onto grid.x and recovers BOTH
@@ -41,19 +41,22 @@
 //   3. the right hand side setup grid mb * block_dim
 //      (rocsparse::bsrsm_copy_scale).
 //
-// Each clamp only bites at maxGridSize[0] (~2.1e9 blocks), which is unreachable
-// in a test: the solve's done_array alone would need 8 GB. So this suite launches
-// the three kernels DIRECTLY with deliberately undersized grids, which is exactly
-// the situation the clamps create, and checks the full numerical output. Without
-// the grid-stride loops the panels/elements past the first sweep keep their
-// untouched input.
+// Each clamp binds once the grid passes get_grid_size_x, (2^32 - 1) / blockDim.x:
+// 4,194,303 solve blocks at 1024 threads up to 67,108,863 at 64. done_array is
+// small at that point; X, mb * block_dim * nrhs values, is several GB. So this
+// suite launches the three kernels DIRECTLY with deliberately undersized grids,
+// which is exactly the situation the clamps create, and checks the full numerical
+// output. Without the grid-stride loops the panels/elements past the first sweep
+// keep their untouched input.
 //
-// The solve kernels come in two instantiations (AISPARSE-670 follow-up): the
-// narrow one, one block per pair with 32 bit arithmetic, which the host launches
-// when bsrsm_solve_needs_wide is false, and the WIDE grid-stride one. The full
-// grid runs both; the undersized grids run WIDE; the solve_public_* tests shrink
+// The solve kernels come in two instantiations: the narrow one, one block per
+// pair with 32 bit arithmetic, which the host launches when
+// bsrsm_solve_needs_wide is false, and the WIDE grid-stride one. The full grid
+// runs both; the undersized grids run WIDE; the solve_public_* tests shrink
 // maxGridSize[0] and go through rocsparse_sbsrsm_solve, so they also check that
-// the host selects WIDE whenever the grid is clamped.
+// the host selects WIDE whenever the grid is clamped. With trans_A = transpose
+// they also run the bsr_gather launch and the transposed row map under the
+// clamp.
 //
 // The solve problem is an 8 x 8 block-bidiagonal matrix of 2 x 2 blocks (16 scalar
 // rows) with 100 right hand sides, so the whole footprint is a few tens of
@@ -607,7 +610,10 @@ namespace
 
     // Solve through the public API and return X row major, as solve_on_grid does.
     // B(r, c) = c + 1 in the layout trans_X selects, and X starts poisoned.
+    // `lower` is the stored triangle; with trans_A = transpose the solve is with
+    // its transpose, which is the other triangle.
     void solve_public(bool                 lower,
+                      rocsparse_operation  trans_A,
                       rocsparse_operation  trans_X,
                       int                  max_grid_x,
                       std::vector<test_T>& result)
@@ -659,7 +665,7 @@ namespace
         size_t buffer_size = 0;
         ASSERT_EQ(rocsparse_sbsrsm_buffer_size(o.handle,
                                                rocsparse_direction_row,
-                                               rocsparse_operation_none,
+                                               trans_A,
                                                trans_X,
                                                bsrsm_mb,
                                                bsrsm_nrhs,
@@ -678,7 +684,7 @@ namespace
 
         ASSERT_EQ(rocsparse_sbsrsm_analysis(o.handle,
                                             rocsparse_direction_row,
-                                            rocsparse_operation_none,
+                                            trans_A,
                                             trans_X,
                                             bsrsm_mb,
                                             bsrsm_nrhs,
@@ -704,7 +710,7 @@ namespace
 
             ASSERT_EQ(rocsparse_sbsrsm_solve(o.handle,
                                              rocsparse_direction_row,
-                                             rocsparse_operation_none,
+                                             trans_A,
                                              trans_X,
                                              bsrsm_mb,
                                              bsrsm_nrhs,
@@ -741,37 +747,67 @@ namespace
         }
     }
 
-    void solve_public_all_limits(bool lower, rocsparse_operation trans_X)
+    void solve_public_all_limits(bool                lower,
+                                 rocsparse_operation trans_A,
+                                 rocsparse_operation trans_X)
     {
+        const bool solved_lower = (lower != (trans_A == rocsparse_operation_transpose));
+
         for(int limit : solve_clamp_limits)
         {
             SCOPED_TRACE(::testing::Message() << "maxGridSize[0]=" << limit);
 
+            const int64_t launched = rocsparse::bsrsm_solve_grid_size(
+                bsrsm_mb, bsrsm_nrhs, bsrsm_ncols, (limit > 0) ? limit : bsrsm_blocks);
+
             std::vector<test_T> got;
-            ASSERT_NO_FATAL_FAILURE(solve_public(lower, trans_X, limit, got));
-            ASSERT_NO_FATAL_FAILURE(expect_exact_solution(lower, got, limit));
+            ASSERT_NO_FATAL_FAILURE(solve_public(lower, trans_A, trans_X, limit, got));
+            ASSERT_NO_FATAL_FAILURE(expect_exact_solution(solved_lower, got, launched));
         }
     }
 }
 
 TEST(internal_level3_bsrsm, solve_public_lower_clamped)
 {
-    solve_public_all_limits(true, rocsparse_operation_none);
+    solve_public_all_limits(true, rocsparse_operation_none, rocsparse_operation_none);
 }
 
 TEST(internal_level3_bsrsm, solve_public_upper_clamped)
 {
-    solve_public_all_limits(false, rocsparse_operation_none);
+    solve_public_all_limits(false, rocsparse_operation_none, rocsparse_operation_none);
 }
 
 TEST(internal_level3_bsrsm, solve_public_lower_clamped_trans_X)
 {
-    solve_public_all_limits(true, rocsparse_operation_transpose);
+    solve_public_all_limits(true, rocsparse_operation_none, rocsparse_operation_transpose);
 }
 
 TEST(internal_level3_bsrsm, solve_public_upper_clamped_trans_X)
 {
-    solve_public_all_limits(false, rocsparse_operation_transpose);
+    solve_public_all_limits(false, rocsparse_operation_none, rocsparse_operation_transpose);
+}
+
+// trans_A = transpose runs the bsr_gather launch and the transposed row map and
+// column indices under the clamp. The 15-block gather grid itself never binds
+// here; the gather_* tests below cover its stride.
+TEST(internal_level3_bsrsm, solve_public_lower_clamped_trans_A)
+{
+    solve_public_all_limits(true, rocsparse_operation_transpose, rocsparse_operation_none);
+}
+
+TEST(internal_level3_bsrsm, solve_public_upper_clamped_trans_A)
+{
+    solve_public_all_limits(false, rocsparse_operation_transpose, rocsparse_operation_none);
+}
+
+TEST(internal_level3_bsrsm, solve_public_lower_clamped_trans_A_trans_X)
+{
+    solve_public_all_limits(true, rocsparse_operation_transpose, rocsparse_operation_transpose);
+}
+
+TEST(internal_level3_bsrsm, solve_public_upper_clamped_trans_A_trans_X)
+{
+    solve_public_all_limits(false, rocsparse_operation_transpose, rocsparse_operation_transpose);
 }
 
 // ---------------------------------------------------------------------------
