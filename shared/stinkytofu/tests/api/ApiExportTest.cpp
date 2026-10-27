@@ -27,8 +27,8 @@
 // real consumer (rocisa, stinkytofu-opt) is accidentally un-exported, this
 // file will fail to LINK — catching the regression before it reaches downstream.
 //
-// Rule: only add tests here for symbols that rocisa or stinkytofu-opt actually
-// call. Everything else should stay hidden.
+// Rule: only add tests here for symbols that rocisa, stinkytofu-opt, or the
+// Python module actually call. Everything else should stay hidden.
 
 #include <gtest/gtest.h>
 
@@ -241,6 +241,28 @@ TEST(ApiExport, StinkyAsmEmitter) {
     StinkyAsmEmitter emitter(opts);
     std::ostringstream oss;
     emitter.emit(oss, func);
+}
+
+// =============================================================================
+// IR edits and verification (Python module stir_api.cpp)
+// =============================================================================
+
+TEST(ApiExport, ReplaceBlockBody) {
+    Function func("f");
+    BasicBlock* entry = func.createBasicBlock("entry");
+    ParseResult body = parseBlockBodyWithDiagnostics("");
+    ASSERT_NE(body.parsedFunction, nullptr);
+    std::vector<Diagnostic> diagnostics;
+    GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    EXPECT_EQ(StinkyIRConverter::replaceBlockBody(*body.parsedFunction->blocks.front(), *entry,
+                                                  arch, diagnostics),
+              StinkyErrorCode::SUCCESS);
+    (void)discardDefUseAnalysis(func);
+}
+
+TEST(ApiExport, VerifyStinkyIR) {
+    Function func("f");
+    EXPECT_FALSE(verifyStinkyIR(func).empty());
 }
 
 // =============================================================================

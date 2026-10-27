@@ -31,7 +31,9 @@
 
 #include <array>
 #include <cctype>
+#include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -41,6 +43,7 @@
 #include <variant>
 #include <vector>
 
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -65,6 +68,7 @@
 #include "stinkytofu/support/Diagnostic.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -204,9 +208,17 @@ nb::object ssaLiteral(const StinkyOpOperand& operand) {
     return nb::none();
 }
 
+/// Whether an instruction's defs or uses list \p reg; set_operand counts
+/// positions the same way.
+bool isListedOperand(const StinkyRegister& reg) {
+    return reg.dataType != StinkyRegister::Type::Invalid;
+}
+
 nb::list physicalList(const std::vector<StinkyRegister>& regs) {
     nb::list out;
-    for (const StinkyRegister& reg : regs) appendOperand(out, physicalOperand(reg));
+    for (const StinkyRegister& reg : regs) {
+        if (isListedOperand(reg)) out.append(physicalOperand(reg));
+    }
     return out;
 }
 
@@ -418,6 +430,11 @@ struct RunOptions {
     std::optional<DebugPrintInstrumentation::Format> printAfter;
 };
 
+/// A Python int other than a bool, which nanobind's integer casts accept too.
+bool isPlainInt(nb::handle value) {
+    return nb::isinstance<nb::int_>(value) && !nb::isinstance<nb::bool_>(value);
+}
+
 void readFeatures(const nb::dict& features, RunOptions& options) {
     for (auto [key, value] : features) {
         const std::string name = nb::str(key).c_str();
@@ -445,7 +462,7 @@ void readTile(const nb::dict& tile, RunOptions& options) {
         }
         if (field == nullptr)
             throw std::invalid_argument("unknown tile key '" + name + "'; keys: " + keys);
-        if (!nb::isinstance<nb::int_>(value) || nb::isinstance<nb::bool_>(value))
+        if (!isPlainInt(value))
             throw nb::type_error(("tile['" + name + "'] must be an int").c_str());
         uint32_t number = 0;
         if (!nb::try_cast(value, number))
@@ -632,9 +649,8 @@ PyBlock snapshotBlock(const BasicBlock& block) {
         if (succ != nullptr) out.successors.push_back(succ->getLabel());
     }
     for (const IRBase& ir : block) {
-        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst == nullptr || inst->getUnifiedOpcode() == GFX::LABEL) continue;
-        out.instructions.append(snapshotInstruction(*inst));
+        if (isIndexedInstruction(ir))
+            out.instructions.append(snapshotInstruction(*cast<StinkyInstruction>(&ir)));
     }
     return out;
 }
@@ -652,9 +668,195 @@ nb::list moduleFunctions(nb::handle owner) {
     return out;
 }
 
+BasicBlock& selectBlock(Function& function, const std::string& name) {
+    std::string names;
+    for (BasicBlock& block : function) {
+        if (block.getLabel() == name) return block;
+        if (!names.empty()) names += ", ";
+        names += "'^" + block.getLabel() + "'";
+    }
+    throw std::invalid_argument("no block '^" + name + "' in function '" + function.getName() +
+                                "'; blocks: " + names);
+}
+
+StinkyInstruction& selectInstruction(BasicBlock& block, int index) {
+    int count = 0;
+    for (IRBase& ir : block) {
+        if (!isIndexedInstruction(ir)) continue;
+        if (count++ == index) return *cast<StinkyInstruction>(&ir);
+    }
+    throw std::out_of_range("no instruction " + std::to_string(index) + " in block '^" +
+                            block.getLabel() + "', which has " + std::to_string(count));
+}
+
+/// A physical operand from one of the forms functions() lists.
+StinkyRegister operandFromPython(nb::handle value) {
+    const std::string text = nb::repr(value).c_str();
+    if (isPlainInt(value)) {
+        int32_t literal = 0;
+        if (!nb::try_cast(value, literal))
+            throw std::invalid_argument(text + " does not fit a 32-bit literal");
+        return StinkyRegister(static_cast<int>(literal));
+    }
+    if (nb::isinstance<nb::float_>(value)) return StinkyRegister(nb::cast<double>(value));
+    if (nb::isinstance<nb::str>(value)) return StinkyRegister(nb::cast<std::string>(value));
+    if (nb::isinstance<nb::tuple>(value)) {
+        const auto tuple = nb::borrow<nb::tuple>(value);
+        const std::string head = tuple.size() > 0 && nb::isinstance<nb::str>(tuple[0])
+                                     ? nb::cast<std::string>(tuple[0])
+                                     : std::string();
+        auto field = [&tuple](size_t i, auto& out) {
+            return isPlainInt(tuple[i]) && nb::try_cast(tuple[i], out);
+        };
+        if (tuple.size() == 4 && head == "hwreg") {
+            uint16_t id = 0;
+            uint16_t offset = 0;
+            uint16_t size = 0;
+            if (field(1, id) && field(2, offset) && field(3, size))
+                return StinkyRegister::Hwreg(id, offset, size);
+        } else if (tuple.size() == 3 && !head.empty()) {
+            const std::optional<RegType> type = tryParseRegType(head);
+            uint32_t index = 0;
+            uint16_t count = 0;
+            if (type && field(1, index) && field(2, count) && index < StinkyRegister::kVirtualBit &&
+                count > 0)
+                return StinkyRegister(*type, index, count);
+        } else if (tuple.size() == 2) {
+            throw std::invalid_argument(text +
+                                        " is an SSA value; set_operand takes physical operands");
+        }
+    }
+    throw std::invalid_argument(text +
+                                " is not an operand; give (class, index, count), an int, a float, "
+                                "a str, or (\"hwreg\", id, offset, size)");
+}
+
+std::vector<Diagnostic> verifyModule(StinkyAsmModule& module,
+                                     const std::optional<std::string>& functionName) {
+    std::vector<Diagnostic> found;
+    for (Function* function : selectFunctions(module, functionName)) {
+        std::vector<Diagnostic> more = verifyStinkyIR(*function);
+        found.insert(found.end(), std::make_move_iterator(more.begin()),
+                     std::make_move_iterator(more.end()));
+    }
+    return found;
+}
+
+std::vector<std::string> replaceBlock(StinkyAsmModule& module, const std::string& functionName,
+                                      const std::string& blockName, const std::string& body) {
+    BasicBlock& block = selectBlock(*selectFunctions(module, functionName).front(), blockName);
+    if (isSsaForm(body))
+        throw std::invalid_argument("SSA form does not round-trip; give the body as physical STIR");
+    ParseResult parsed = parseBlockBodyWithDiagnostics(body);
+    raiseErrors(parsed.diagnostics);
+    std::vector<Diagnostic> diagnostics = std::move(parsed.diagnostics);
+    const StinkyErrorCode code =
+        StinkyIRConverter::replaceBlockBody(*parsed.parsedFunction->blocks.front(), block,
+                                            checkedArchId(module.getArch()), diagnostics);
+    raiseErrors(diagnostics);
+    if (code != StinkyErrorCode::SUCCESS)
+        throw std::runtime_error("block '^" + blockName + "' could not be replaced");
+    std::vector<std::string> warnings;
+    for (const Diagnostic& diagnostic : diagnostics) warnings.push_back(diagnostic.format());
+    return warnings;
+}
+
+void setOperand(StinkyAsmModule& module, const std::string& functionName,
+                const std::string& blockName, int index, const nb::tuple& operand,
+                nb::handle value) {
+    Function& function = *selectFunctions(module, functionName).front();
+    if (function.hasAttachedSSA())
+        throw std::invalid_argument("function '" + functionName +
+                                    "' has attached SSA, so functions() lists SSA values, not the "
+                                    "physical operands set_operand edits");
+    StinkyInstruction& inst = selectInstruction(selectBlock(function, blockName), index);
+
+    const std::string side = operand.size() == 2 && nb::isinstance<nb::str>(operand[0])
+                                 ? nb::cast<std::string>(operand[0])
+                                 : std::string();
+    int position = 0;
+    if ((side != "defs" && side != "uses") || !isPlainInt(operand[1]) ||
+        !nb::try_cast(operand[1], position))
+        throw std::invalid_argument("operand must be (\"defs\", i) or (\"uses\", i), not " +
+                                    std::string(nb::repr(operand).c_str()));
+    const bool isDef = side == "defs";
+    const std::vector<StinkyRegister>& regs = isDef ? inst.getDestRegs() : inst.getSrcRegs();
+    std::optional<size_t> slot;
+    int listed = 0;
+    for (size_t i = 0; i < regs.size() && !slot; ++i) {
+        if (isListedOperand(regs[i]) && listed++ == position) slot = i;
+    }
+    if (!slot)
+        throw std::out_of_range("no " + side + "[" + std::to_string(position) +
+                                "] on that instruction, which has " + std::to_string(listed));
+
+    const StinkyRegister replacement = operandFromPython(value);
+    discardDefUseAnalysis(function);
+    if (isDef)
+        inst.setDestReg(*slot, replacement);
+    else
+        inst.setSrcReg(*slot, replacement);
+}
+
 }  // namespace
 
 void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
+    nb::class_<Diagnostic>(m, "Diagnostic")
+        .def_prop_ro(
+            "level",
+            [](const Diagnostic& diagnostic) {
+                return std::string(Diagnostic::levelName(diagnostic.getLevel()));
+            },
+            "\"error\", \"warning\", or \"note\"")
+        .def_prop_ro(
+            "id",
+            [](const Diagnostic& diagnostic) {
+                return std::string(diagIdName(diagnostic.getId()));
+            },
+            "The kind of failure, such as \"unknown-mnemonic\"; str() shows it in brackets")
+        .def_prop_ro("message",
+                     [](const Diagnostic& diagnostic) { return diagnostic.getMessage(); })
+        .def_prop_ro(
+            "line",
+            [](const Diagnostic& diagnostic) -> std::optional<unsigned> {
+                if (diagnostic.getIRLocation() != nullptr) return std::nullopt;
+                return diagnostic.getLine();
+            },
+            "Line in the loaded text, or None for a diagnostic about built IR")
+        .def_prop_ro("column",
+                     [](const Diagnostic& diagnostic) -> std::optional<unsigned> {
+                         if (diagnostic.getIRLocation() != nullptr) return std::nullopt;
+                         return diagnostic.getColumn();
+                     })
+        .def_prop_ro(
+            "function",
+            [](const Diagnostic& diagnostic) -> std::optional<std::string> {
+                const IRLocation* at = diagnostic.getIRLocation();
+                if (at == nullptr) return std::nullopt;
+                return at->function;
+            },
+            "Function name, or None for a diagnostic about text")
+        .def_prop_ro(
+            "block",
+            [](const Diagnostic& diagnostic) -> std::optional<std::string> {
+                const IRLocation* at = diagnostic.getIRLocation();
+                if (at == nullptr || at->block.empty()) return std::nullopt;
+                return at->block;
+            },
+            "Block name, or None")
+        .def_prop_ro(
+            "index",
+            [](const Diagnostic& diagnostic) -> std::optional<int> {
+                const IRLocation* at = diagnostic.getIRLocation();
+                if (at == nullptr || at->index < 0) return std::nullopt;
+                return at->index;
+            },
+            "Position in the block's instructions(), or None")
+        .def("__str__", &Diagnostic::format)
+        .def("__repr__", [](const Diagnostic& diagnostic) {
+            return "<Diagnostic " + diagnostic.format() + ">";
+        });
+
     nb::class_<PyFunction>(m, "Function")
         .def_prop_ro("name", [](const PyFunction& function) { return function.name; })
         .def(
@@ -727,6 +929,17 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             "Run named catalog passes, in order, on every function or the one named. Returns one "
             "PassRecord per pass on each function");
     cls.def("functions", &moduleFunctions, "Functions in this module, entry first");
+    cls.def("verify", &verifyModule, nb::kw_only(), nb::arg("function") = nb::none(),
+            "Every problem in every function, or the one named, as Diagnostics. Empty when "
+            "nothing is wrong");
+    cls.def("replace_block", &replaceBlock, nb::arg("function"), nb::arg("block"), nb::arg("body"),
+            "Replace a block's instructions with STIR body text: the lines serialize() prints "
+            "between its header and its Successors line. The block keeps its name, label, and "
+            "edges. Returns the warnings; the module is unchanged when it raises");
+    cls.def("set_operand", &setOperand, nb::arg("function"), nb::arg("block"), nb::arg("index"),
+            nb::arg("operand"), nb::arg("value"),
+            "Set one physical operand: operand is (\"defs\", i) or (\"uses\", i) of the "
+            "instruction at index, and value takes a form functions() lists");
 
     m.def("load_stir", &loadStir, nb::arg("text"), nb::arg("arch") = std::array<int, 3>{12, 5, 0},
           "Parse physical STIR into a module that owns its functions");

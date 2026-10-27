@@ -793,6 +793,24 @@ inline bool isLabel(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::LABEL;
 }
 
+/// Whether a block numbers \p ir among its instructions: every StinkyInstruction
+/// but a label. IRLocation::index counts this way, so a diagnostic's index is
+/// the position Python's functions() lists the instruction at.
+inline bool isIndexedInstruction(const IRBase& ir) {
+    const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+    return inst != nullptr && !isLabel(*inst);
+}
+
+/// The LABEL \p bb starts with, when it carries the block's own name: the label
+/// a STIR block header's `{ label }` stands for. Null when the block has none.
+inline const StinkyInstruction* ownLabel(const BasicBlock& bb) {
+    if (bb.empty() || bb.getLabel().empty()) return nullptr;
+    const auto* inst = dyn_cast<StinkyInstruction>(&*bb.begin());
+    if (inst == nullptr || !isLabel(*inst)) return nullptr;
+    const LabelData* label = inst->getModifier<LabelData>();
+    return label != nullptr && label->label == bb.getLabel() ? inst : nullptr;
+}
+
 /// Determines if an instruction must be preserved and cannot be eliminated.
 ///
 /// This is a comprehensive check that covers all instructions with observable

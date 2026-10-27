@@ -4,11 +4,14 @@
 
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
@@ -65,6 +68,48 @@ AsmDirective* addDirective(AsmIRBuilder& builder, AsmDirectiveKind kind, const s
     directive->value = value;
     return directive;
 }
+
+BasicBlock& blockNamed(Function& func, const std::string& name) {
+    for (BasicBlock& bb : func) {
+        if (bb.getLabel() == name) return bb;
+    }
+    ADD_FAILURE() << "no block " << name;
+    return *func.getEntryBlock();
+}
+
+struct Replaced {
+    StinkyErrorCode code;
+    std::vector<Diagnostic> diagnostics;
+};
+
+Replaced replaceBody(Function& func, const std::string& block, const std::string& body) {
+    const ParseResult parsed = parseBlockBodyWithDiagnostics(body);
+    EXPECT_FALSE(parsed.hasErrors());
+    Replaced out{};
+    out.code = StinkyIRConverter::replaceBlockBody(*parsed.parsedFunction->blocks.front(),
+                                                   blockNamed(func, block), getGfxArchID(12, 5, 0),
+                                                   out.diagnostics);
+    return out;
+}
+
+const char* const kLoopFunction = R"(st.func @f() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop
+^loop: { label, alignment = 16 }
+  "st.s_nop"(1) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+/// \p text as the printer writes it once loaded.
+std::string printed(const std::string& text) {
+    Function func("f");
+    convert(text, func);
+    return print(func);
+}
 }  // namespace
 
 TEST(IRConverterTest, UnknownMnemonicFailsAndIsLeftOut) {
@@ -81,6 +126,7 @@ TEST(IRConverterTest, UnknownMnemonicFailsAndIsLeftOut) {
     EXPECT_EQ(result.entryInstructions, 1u);
     ASSERT_EQ(result.diagnostics.size(), 1u);
     EXPECT_EQ(result.diagnostics[0].getLevel(), Diagnostic::Level::Error);
+    EXPECT_EQ(result.diagnostics[0].getId(), DiagId::UnknownMnemonic);
     EXPECT_EQ(result.diagnostics[0].getMessage(), "Unknown mnemonic 's_nopp' for gfx1250");
     EXPECT_EQ(result.diagnostics[0].getLine(), 4u);
 }
@@ -101,6 +147,7 @@ TEST(IRConverterTest, DanglingSuccessorFailsAndIsLeftOut) {
     ASSERT_EQ(func.getEntryBlock()->getSuccessors().size(), 1u);
     EXPECT_EQ(func.getEntryBlock()->getSuccessors()[0]->getLabel(), "loop");
     ASSERT_EQ(result.diagnostics.size(), 1u);
+    EXPECT_EQ(result.diagnostics[0].getId(), DiagId::UnknownSuccessor);
     EXPECT_EQ(result.diagnostics[0].getMessage(),
               "Successor '^lopo' of block '^entry' is not a block in this function");
     EXPECT_EQ(result.diagnostics[0].getLine(), 4u);
@@ -228,4 +275,103 @@ TEST(IRConverterTest, PrintedFunctionReloadsWhole) {
     EXPECT_EQ(print(reloaded), printed);
     EXPECT_NE(printed.find("^label_loop: { label }"), std::string::npos) << printed;
     EXPECT_NE(printed.find("label_mid: { alignment = 16 }"), std::string::npos) << printed;
+}
+
+TEST(IRConverterTest, BlockBodyHasNoHeaderSuccessorsOrBrace) {
+    const std::string nop = "  \"st.s_nop\"(0) { issueCycles = 1, latencyCycles = 1 }\n";
+    const ParseResult ok = parseBlockBodyWithDiagnostics(nop + "  mid: { alignment = 4 }\n");
+    EXPECT_FALSE(ok.hasErrors());
+    ASSERT_EQ(ok.parsedFunction->blocks.size(), 1u);
+    EXPECT_EQ(ok.parsedFunction->blocks.front()->instructions.size(), 2u);
+
+    for (const char* end : {"^loop:\n", "Successors: ^loop\n", "}\n"}) {
+        const ParseResult bad = parseBlockBodyWithDiagnostics(nop + end);
+        ASSERT_TRUE(bad.hasErrors()) << end;
+        EXPECT_EQ(bad.diagnostics.front().getId(), DiagId::Syntax) << end;
+        EXPECT_EQ(bad.diagnostics.front().getLine(), 2u) << end;
+    }
+}
+
+TEST(IRConverterTest, ReplacedBodyKeepsTheHeaderAndEdges) {
+    Function func("f");
+    ASSERT_EQ(convert(kLoopFunction, func).code, StinkyErrorCode::SUCCESS);
+
+    const Replaced result =
+        replaceBody(func, "loop",
+                    "  \"st.s_nop\"(2) { issueCycles = 1, latencyCycles = 1 }\n"
+                    "  \"st.s_nop\"(3) { issueCycles = 1, latencyCycles = 1 }\n");
+
+    ASSERT_EQ(result.code, StinkyErrorCode::SUCCESS);
+    EXPECT_TRUE(result.diagnostics.empty());
+    std::string expected = kLoopFunction;
+    expected.replace(expected.find("\"st.s_nop\"(1)"), 13, "\"st.s_nop\"(2)");
+    expected.insert(expected.find("  Successors: ^loop, ^exit"),
+                    "  \"st.s_nop\"(3) { issueCycles = 1, latencyCycles = 1 }\n");
+    EXPECT_EQ(print(func), printed(expected));
+}
+
+TEST(IRConverterTest, FailedReplaceLeavesTheBlock) {
+    Function func("f");
+    ASSERT_EQ(convert(kLoopFunction, func).code, StinkyErrorCode::SUCCESS);
+    const std::string before = print(func);
+
+    const Replaced result =
+        replaceBody(func, "loop",
+                    "  \"st.s_nop\"(2) { issueCycles = 1, latencyCycles = 1 }\n"
+                    "  \"st.s_nopp\"(3) { issueCycles = 1, latencyCycles = 1 }\n");
+
+    EXPECT_EQ(result.code, StinkyErrorCode::CONVERT_ERROR);
+    ASSERT_EQ(result.diagnostics.size(), 1u);
+    EXPECT_EQ(result.diagnostics[0].getId(), DiagId::UnknownMnemonic);
+    EXPECT_EQ(result.diagnostics[0].getLine(), 2u);
+    EXPECT_EQ(print(func), before);
+}
+
+TEST(IRConverterTest, ReplacedBodyLabelsTheBlocksItNames) {
+    Function func("f");
+    ASSERT_EQ(convert(kLoopFunction, func).code, StinkyErrorCode::SUCCESS);
+    ASSERT_TRUE(labelsIn(blockNamed(func, "exit")).empty());
+
+    const Replaced result = replaceBody(
+        func, "entry", "  \"st.s_cbranch_scc1\"(exit) { issueCycles = 1, latencyCycles = 1 }\n");
+
+    ASSERT_EQ(result.code, StinkyErrorCode::SUCCESS);
+    const std::vector<const LabelData*> labels = labelsIn(blockNamed(func, "exit"));
+    ASSERT_EQ(labels.size(), 1u);
+    EXPECT_EQ(labels[0]->label, "exit");
+    EXPECT_NE(print(func).find("^exit: { label }"), std::string::npos) << print(func);
+}
+
+TEST(IRConverterTest, LeadingNameLineReplacesTheOwnLabel) {
+    Function func("f");
+    ASSERT_EQ(convert(kLoopFunction, func).code, StinkyErrorCode::SUCCESS);
+
+    const Replaced result =
+        replaceBody(func, "loop",
+                    "  loop: { alignment = 32 }\n"
+                    "  \"st.s_nop\"(1) { issueCycles = 1, latencyCycles = 1 }\n");
+
+    ASSERT_EQ(result.code, StinkyErrorCode::SUCCESS);
+    const std::vector<const LabelData*> labels = labelsIn(blockNamed(func, "loop"));
+    ASSERT_EQ(labels.size(), 1u);
+    EXPECT_EQ(labels[0]->alignment, 32);
+    EXPECT_NE(print(func).find("^loop: { label, alignment = 32 }"), std::string::npos)
+        << print(func);
+}
+
+TEST(IRConverterTest, ReplacedBodyDropsAttachedSSA) {
+    Function func("f");
+    ASSERT_EQ(convert(kLoopFunction, func).code, StinkyErrorCode::SUCCESS);
+    auto* exitNop = dyn_cast<StinkyInstruction>(&*blockNamed(func, "exit").begin());
+    ASSERT_NE(exitNop, nullptr);
+    AttachedSSA ssa;
+    ssa.operands.push_back(makeSSAValueOperand(func.ssaArena().createRegister(RegType::S)));
+    exitNop->attachSSA(std::move(ssa));
+    ASSERT_TRUE(func.hasAttachedSSA());
+
+    const Replaced result =
+        replaceBody(func, "loop", "  \"st.s_nop\"(2) { issueCycles = 1, latencyCycles = 1 }\n");
+
+    ASSERT_EQ(result.code, StinkyErrorCode::SUCCESS);
+    EXPECT_FALSE(func.hasAttachedSSA());
 }

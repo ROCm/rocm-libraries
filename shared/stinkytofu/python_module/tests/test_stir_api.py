@@ -234,7 +234,10 @@ def test_unnamed_function_round_trips():
 
 
 def test_typo_in_an_opcode_raises():
-    with pytest.raises(ValueError, match="4:3: error: Unknown mnemonic 'v_add_f33'"):
+    message = (
+        r"4:3: error: Unknown mnemonic 'v_add_f33' for gfx1250 \[unknown-mnemonic\]"
+    )
+    with pytest.raises(ValueError, match=message):
         stinkytofu.load_stir(KERNEL.replace("st.v_add_f32", "st.v_add_f33"))
 
 
@@ -254,6 +257,7 @@ def test_load_warnings_keep_what_loaded():
     module = stinkytofu.load_stir('st.func @k() {\n^entry:\n  "st.s_nop"(0)\n}\n')
     assert module.load_warnings() == [
         "3:16: warning: Instruction missing attributes (issueCycles, latencyCycles)"
+        " [missing-attributes]"
     ]
     assert len(module.functions()[0].blocks()[0].instructions()) == 1
     assert stinkytofu.load_stir(KERNEL).load_warnings() == []
@@ -290,7 +294,7 @@ def test_load_asm_region():
 def test_unknown_asm_mnemonic_is_kept_as_text():
     module = stinkytofu.load_asm("s_nop 0\ns_bogus_op 0\n")
     assert module.load_warnings() == [
-        "2:1: warning: Unknown mnemonic 's_bogus_op'; storing as text"
+        "2:1: warning: Unknown mnemonic 's_bogus_op'; storing as text [unknown-mnemonic]"
     ]
     assert "s_bogus_op 0" in module.emit_asm()
 
@@ -385,6 +389,7 @@ def test_a_known_mnemonic_kept_as_text_warns():
     module = stinkytofu.load_asm(text)
     assert module.load_warnings() == [
         "1:1: warning: Could not read the operands of 'tensor_load_to_lds'; storing as text"
+        " [unreadable-operands]"
     ]
     assert module.emit_asm() == text
 
@@ -535,6 +540,141 @@ def test_entry_dump_includes_callees():
         ["StinkyRemoveNopPass"], print_before="asm"
     )
     assert [r.before.count("callee Function: helper") for r in records] == [1, 0]
+
+
+EDIT_KERNEL = """\
+st.func @k() {
+^entry:
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
+  "st.s_cbranch_scc1"(loop) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop, ^exit
+^loop:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+NOP = '  "st.s_nop"({}) {{ issueCycles = 1, latencyCycles = 1 }}\n'
+
+
+def test_verify_is_empty_when_nothing_is_wrong():
+    assert stinkytofu.load_stir(KERNEL).verify() == []
+    assert stinkytofu.load_stir(EDIT_KERNEL).verify(function="k") == []
+
+
+def test_set_operand_shows_in_functions_and_verify():
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    module.set_operand("k", "entry", 0, ("defs", 0), ("v", 0, 2))
+    load = module.functions()[0].blocks()[0].instructions()[0]
+    assert load.defs == [("v", 0, 2)]
+
+    [diagnostic] = module.verify()
+    assert (diagnostic.level, diagnostic.id) == ("error", "register-width")
+    assert (diagnostic.function, diagnostic.block, diagnostic.index) == (
+        "k",
+        "entry",
+        0,
+    )
+    assert (diagnostic.line, diagnostic.column) == (None, None)
+    assert str(diagnostic) == (
+        "@k ^entry #0: error: 'ds_load_b128' operand dest[0] has register width 2,"
+        " expected 4 [register-width]"
+    )
+
+    module.set_operand("k", "entry", 0, ("defs", 0), ("v", 0, 4))
+    module.set_operand("k", "loop", 0, ("uses", 0), 7)
+    assert module.verify() == []
+    assert '"st.s_nop"(7)' in module.serialize()
+
+
+@pytest.mark.parametrize(
+    "args, error, message",
+    [
+        (("k", "loop", 0, ("uses", 0), True), ValueError, "is not an operand"),
+        (("k", "loop", 0, ("uses", 0), (3, "v")), ValueError, "is an SSA value"),
+        (("k", "loop", 0, ("uses", 0), ("q", 0, 1)), ValueError, "is not an operand"),
+        (("k", "loop", 0, ("uses", 0), 2**40), ValueError, "does not fit"),
+        (("k", "loop", 0, ("srcs", 0), 1), ValueError, r"\(\"defs\", i\)"),
+        (("k", "loop", 1, ("uses", 0), 1), IndexError, "no instruction 1"),
+        (("k", "loop", 0, ("uses", 1), 1), IndexError, r"no uses\[1\]"),
+        (("k", "nowhere", 0, ("uses", 0), 1), ValueError, "blocks: '\\^entry'"),
+    ],
+)
+def test_set_operand_rejects_what_it_cannot_write(args, error, message):
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    before = module.serialize()
+    with pytest.raises(error, match=message):
+        module.set_operand(*args)
+    assert module.serialize() == before
+
+
+def test_set_operand_refuses_a_lifted_function():
+    module = stinkytofu.load_stir(KERNEL)
+    module.run_passes(["LiftAsmRegistersToSSAPass"])
+    with pytest.raises(ValueError, match="attached SSA"):
+        module.set_operand("k", "entry", 0, ("uses", 0), ("v", 3, 1))
+
+
+def test_replace_block_keeps_the_header_and_reloads():
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    body = NOP.format(3) + '  "st.s_branch"(exit)\n'
+    assert module.replace_block("k", "loop", body) == [
+        "2:22: warning: Instruction missing attributes (issueCycles, latencyCycles)"
+        " [missing-attributes]"
+    ]
+    loop = module.functions()[0].blocks()[1]
+    assert [inst.opcode for inst in loop.instructions()] == ["st.s_nop", "st.s_branch"]
+    assert loop.successors() == ["exit"]
+    printed = module.serialize()
+    assert "^loop: { label }" in printed
+    # The new branch names ^exit, so ^exit now starts with its label.
+    assert "^exit: { label }" in printed
+    assert stinkytofu.load_stir(printed).serialize() == printed
+    assert module.verify() == []
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        (
+            NOP.format(0) + NOP.format(1).replace("s_nop", "s_nopp"),
+            r"\[unknown-mnemonic\]",
+        ),
+        (NOP.format(0) + "  Successors: ^exit\n", r"2:3: error: .*\[syntax\]"),
+        ("^loop:\n" + NOP.format(0), r"\[syntax\]"),
+    ],
+)
+def test_failed_replace_block_leaves_the_module(body, message):
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    before = module.serialize()
+    with pytest.raises(ValueError, match=message):
+        module.replace_block("k", "loop", body)
+    assert module.serialize() == before
+
+
+def test_replace_block_drops_attached_ssa():
+    module = stinkytofu.load_stir(KERNEL)
+    module.run_passes(["LiftAsmRegistersToSSAPass"])
+    module.replace_block(
+        "k",
+        "entry",
+        '  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }\n',
+    )
+    [inst] = module.functions()[0].blocks()[0].instructions()
+    assert inst.defs == [("v", 0, 1)]
+
+
+def test_branch_to_a_missing_label_is_reported():
+    module = stinkytofu.load_stir(EDIT_KERNEL)
+    module.replace_block(
+        "k", "loop", '  "st.s_branch"(nowhere) { issueCycles = 1, latencyCycles = 1 }\n'
+    )
+    [diagnostic] = module.verify()
+    assert diagnostic.id == "undefined-label"
+    assert (diagnostic.block, diagnostic.index) == ("loop", 0)
+    assert "'nowhere'" in diagnostic.message
 
 
 def test_cli_passes(capsys):

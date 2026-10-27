@@ -32,6 +32,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 
 namespace stinkytofu {
 StinkyIRConverter::StinkyIRConverter() : arch({12, 5, 0}) {}
@@ -104,7 +105,7 @@ static bool convertInstruction(AsmIRBuilder& irBuilder,
     auto opcode = findMnemonicIsaOpcode(inst->opcodeStr, arch);
     if (opcode == GFX::INVALID) {
         diagnostics.emplace_back(
-            Diagnostic::Level::Error,
+            Diagnostic::Level::Error, DiagId::UnknownMnemonic,
             "Unknown mnemonic '" + inst->opcodeStr + "' for " + getArchName(arch), inst->line,
             inst->column);
         return false;
@@ -113,7 +114,7 @@ static bool convertInstruction(AsmIRBuilder& irBuilder,
 
     if (hwInstDesc == nullptr) {
         diagnostics.emplace_back(
-            Diagnostic::Level::Error,
+            Diagnostic::Level::Error, DiagId::NoHardwareDescriptor,
             "No hardware descriptor for '" + inst->opcodeStr + "' on " + getArchName(arch),
             inst->line, inst->column);
         return false;
@@ -151,24 +152,27 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string&
     return code;
 }
 
-/// Names an instruction refers to: literal operands, and the `mod.label` target
-/// a long branch carries. Directive text and labels are not references.
-static std::unordered_set<std::string> referencedNames(const ParsedFunction& parsedFunc) {
-    std::unordered_set<std::string> names;
-    for (const auto& block : parsedFunc.blocks) {
-        for (const auto& inst : block->instructions) {
-            if (inst->isLabel || inst->opcodeStr == "asm_directive") continue;
-            for (const StinkyRegister& reg : inst->srcRegs) {
-                if (reg.dataType == StinkyRegister::Type::LiteralString)
-                    names.insert(reg.literalValue);
-            }
-            auto label = inst->modifiers.find("mod.label");
-            if (label == inst->modifiers.end()) continue;
-            auto target = label->second.find("label");
-            if (target != label->second.end()) names.insert(target->second);
+/// Add the names \p block's instructions refer to: literal operands, and the
+/// `mod.label` target a long branch carries. Directive text and labels are not
+/// references.
+static void addReferencedNames(const ParsedBlock& block, std::unordered_set<std::string>& names) {
+    for (const auto& inst : block.instructions) {
+        if (inst->isLabel || inst->opcodeStr == "asm_directive") continue;
+        for (const StinkyRegister& reg : inst->srcRegs) {
+            if (reg.dataType == StinkyRegister::Type::LiteralString) names.insert(reg.literalValue);
         }
+        auto label = inst->modifiers.find("mod.label");
+        if (label == inst->modifiers.end()) continue;
+        auto target = label->second.find("label");
+        if (target != label->second.end()) names.insert(target->second);
     }
-    return names;
+}
+
+/// Whether \p body starts with a `name:` line naming the block \p blockId,
+/// which is then that block's own label.
+static bool spellsOwnLabel(const ParsedBlock& body, const std::string& blockId) {
+    const auto& insts = body.instructions;
+    return !insts.empty() && insts.front()->isLabel && insts.front()->opcodeStr == blockId;
 }
 
 StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
@@ -181,7 +185,8 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
 
     bool lost = false;
     std::unordered_map<std::string, BasicBlock*> blockMap;
-    const std::unordered_set<std::string> referenced = referencedNames(parsedFunc);
+    std::unordered_set<std::string> referenced;
+    for (const auto& parsedBlock : parsedFunc.blocks) addReferencedNames(*parsedBlock, referenced);
 
     for (auto& parsedBlock : parsedFunc.blocks) {
         BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
@@ -190,12 +195,10 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
         AsmIRBuilder irBuilder(*bb, arch);
         // A block is a label when its header says so or an instruction names it,
         // as in LLVM, where every block a branch reaches carries a label.
-        const auto& body = parsedBlock->instructions;
-        const bool spelledOut = !body.empty() && body.front()->isLabel &&
-                                body.front()->opcodeStr == parsedBlock->blockId;
-        if (!spelledOut && (parsedBlock->isLabel || referenced.count(parsedBlock->blockId) != 0))
+        if (!spellsOwnLabel(*parsedBlock, parsedBlock->blockId) &&
+            (parsedBlock->isLabel || referenced.count(parsedBlock->blockId) != 0))
             irBuilder.createLabel(parsedBlock->blockId, parsedBlock->labelAlignment);
-        for (auto& inst : body) {
+        for (auto& inst : parsedBlock->instructions) {
             if (!convertInstruction(irBuilder, inst, arch, diagnostics)) lost = true;
         }
     }
@@ -209,7 +212,7 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
             auto succ = blockMap.find(key);
             if (succ == blockMap.end()) {
                 diagnostics.emplace_back(
-                    Diagnostic::Level::Error,
+                    Diagnostic::Level::Error, DiagId::UnknownSuccessor,
                     "Successor '" + succId + "' of block '^" + parsedBlock->blockId +
                         "' is not a block in this function",
                     parsedBlock->successorsLine, parsedBlock->successorsColumn);
@@ -222,6 +225,48 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
     }
 
     return lost ? StinkyErrorCode::CONVERT_ERROR : StinkyErrorCode::SUCCESS;
+}
+
+StinkyErrorCode StinkyIRConverter::replaceBlockBody(const ParsedBlock& body, BasicBlock& block,
+                                                    GfxArchID arch,
+                                                    std::vector<Diagnostic>& diagnostics) {
+    Function* func = block.getParent();
+    if (func == nullptr) return StinkyErrorCode::CONVERT_ERROR;
+
+    Function scratch(func->getName());
+    BasicBlock* built = scratch.createBasicBlock(block.getLabel());
+    AsmIRBuilder irBuilder(*built, arch);
+    bool lost = false;
+    for (const auto& inst : body.instructions) {
+        if (!convertInstruction(irBuilder, inst, arch, diagnostics)) lost = true;
+    }
+    if (lost) return StinkyErrorCode::CONVERT_ERROR;
+
+    func->clearAttachedSSA();
+    discardDefUseAnalysis(*func);
+
+    const IRBase* kept = spellsOwnLabel(body, block.getLabel()) ? nullptr : ownLabel(block);
+    for (auto it = block.begin(); it != block.end();) {
+        if (&*it == kept)
+            ++it;
+        else
+            it = block.eraseIR(it);
+    }
+    while (!built->empty()) {
+        IRBase* node = &*built->begin();
+        built->removeIR(node);
+        block.appendIR(node);
+    }
+
+    std::unordered_set<std::string> referenced;
+    addReferencedNames(body, referenced);
+    for (BasicBlock& bb : *func) {
+        if (referenced.count(bb.getLabel()) == 0 || ownLabel(bb) != nullptr) continue;
+        AsmIRBuilder labelBuilder(bb, arch);
+        labelBuilder.setInsertionPoint(bb.begin());
+        labelBuilder.createLabel(bb.getLabel());
+    }
+    return StinkyErrorCode::SUCCESS;
 }
 
 Function* StinkyIRConverter::convertToFunction(const std::string& rawInstructions) {

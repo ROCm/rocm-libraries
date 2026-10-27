@@ -55,16 +55,6 @@ const RegClassSet& ssaClassesOf(const StinkyInstruction& inst) {
     return function == nullptr ? kAllClasses : function->ssaArena().liftedClasses();
 }
 
-/// The LABEL \p bb starts with, when it carries the block's own name. The
-/// header's `{ label }` stands for it, so the body does not repeat it.
-const StinkyInstruction* headLabel(const BasicBlock& bb) {
-    if (bb.empty() || bb.getLabel().empty()) return nullptr;
-    const auto* inst = dyn_cast<StinkyInstruction>(&*bb.begin());
-    if (inst == nullptr || inst->getUnifiedOpcode() != GFX::LABEL) return nullptr;
-    const LabelData* label = inst->getModifier<LabelData>();
-    return label != nullptr && label->label == bb.getLabel() ? inst : nullptr;
-}
-
 }  // namespace
 
 //----------------------------------------------------------------------
@@ -157,7 +147,7 @@ void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex) {
 void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex, int baseIndent) {
     std::string blockId =
         bb.getLabel().empty() ? ("bb" + std::to_string(blockIndex)) : bb.getLabel();
-    const StinkyInstruction* label = headLabel(bb);
+    const StinkyInstruction* label = ownLabel(bb);
     os << std::string(static_cast<size_t>(baseIndent), ' ');
     os << "^" << blockId;
     if (options.ssaForm) printBlockArgumentList(bb);

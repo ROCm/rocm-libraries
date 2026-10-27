@@ -177,6 +177,12 @@ struct STINKYTOFU_EXPORT ParseResult {
 /// @return A ParseResult containing parsed instructions and any diagnostics (errors/warnings).
 STINKYTOFU_EXPORT ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
 
+/// Parse \p text as the body of one block: what the printer writes between a
+/// block header and its `Successors:` line, that is instruction, label, and
+/// directive lines. A block header, a `Successors:` line, or a `}` is an error.
+/// The body is parsedFunction's one block, whose blockId is empty.
+STINKYTOFU_EXPORT ParseResult parseBlockBodyWithDiagnostics(const std::string& text);
+
 /// Result of parsing multiple functions from an IR source string.
 struct MultiParseResult {
     std::vector<std::unique_ptr<ParsedFunction>> functions;

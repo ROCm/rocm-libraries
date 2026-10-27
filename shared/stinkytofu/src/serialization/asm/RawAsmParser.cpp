@@ -914,13 +914,13 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
                                        : nullptr;
 
     if (!hwInstDesc) {
-        diags.emplace_back(Diagnostic::Level::Warning,
+        diags.emplace_back(Diagnostic::Level::Warning, DiagId::UnknownMnemonic,
                            "Unknown mnemonic '" + mnemonic + "'; storing as text", lineNo, 1);
         return nullptr;
     }
 
     auto keptAsText = [&]() -> std::unique_ptr<ParsedInstruction> {
-        diags.emplace_back(Diagnostic::Level::Warning,
+        diags.emplace_back(Diagnostic::Level::Warning, DiagId::UnreadableOperands,
                            "Could not read the operands of '" + mnemonic + "'; storing as text",
                            lineNo, 1);
         return nullptr;

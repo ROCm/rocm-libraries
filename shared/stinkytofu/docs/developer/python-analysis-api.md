@@ -13,7 +13,8 @@ Use it to test a pass on a kernel, and to edit a kernel by hand.
 1. Load physical STIR, or assembler `.s`, from a string or a file.
 2. Run catalog passes, in the order you list them, and read the remarks and dumps each one left.
 3. Read each instruction. Registers stay physical until you run `LiftAsmRegistersToSSAPass`. After that pass, operands are SSA value ids.
-4. Print the module back to STIR, or emit assembler source and assemble it.
+4. Check the module with `verify()`, and edit it a block or an operand at a time.
+5. Print the module back to STIR, or emit assembler source and assemble it.
 
 `stinkytofu run` runs only the passes you name. It does not run the optimization pipeline.
 
@@ -111,7 +112,7 @@ The text after `=` is split on commas, the same way `stinkytofu-opt --Pass=...` 
 | `load_stir_file(path, arch=(12, 5, 0))` | The same, read from a file |
 | `load_asm(text, arch=(12, 5, 0), *, ...)` | A module parsed from assembler source, with the parser `stinkytofu-opt` uses for `.s` |
 | `load_asm_file(path, arch=(12, 5, 0), *, ...)` | The same, read from a file |
-| `module.load_warnings()` | The warnings from that load, one `line:column: warning: ...` string each |
+| `module.load_warnings()` | The warnings from that load, one `line:column: warning: ... [id]` string each |
 | `pass_names()` | The catalog names `run_passes` accepts |
 
 `load_stir` reads bare `st.func` text, or the `st.module @name { ... }` that `serialize()` prints, and keeps the module name.
@@ -124,7 +125,13 @@ The text after `=` is split on commas, the same way `stinkytofu-opt --Pass=...` 
 | `preserve_comments` | Keep trailing `//` and `;` comments for `emit_asm(comments=True)` |
 | `from_label`, `to_label` | Keep only the instructions from one label through the other. Give both. The region has no kernel header |
 
-The module owns its functions. A load raises `ValueError` when the arch is unknown, the text is SSA form, or the parser or converter reports an error. A STIR mnemonic the arch does not know, or a `Successors:` label that names no block, is an error. Each error carries its line and column.
+The module owns its functions. A load raises `ValueError` when the arch is unknown, the text is SSA form, or the parser or converter reports an error. A STIR mnemonic the arch does not know, or a `Successors:` label that names no block, is an error. Each error line carries its line, its column, and an id that names the kind of failure:
+
+```text
+4:3: error: Unknown mnemonic 'v_add_f33' for gfx1250 [unknown-mnemonic]
+```
+
+Match on the id rather than the message. [Error codes](../user/error-codes.md) lists the ids.
 
 ### Run
 
@@ -237,4 +244,66 @@ for function in module.functions():
 | Hardware register | `("hwreg", id, offset, size)` |
 | Literal | A Python number or string |
 
-`inst.modifiers` is the `mod.X = { ... }` text `serialize()` prints for each modifier. This API does not build new instructions.
+`inst.modifiers` is the `mod.X = { ... }` text `serialize()` prints for each modifier. To build new instructions, give `replace_block` their STIR text.
+
+### Verify and edit
+
+```python
+module = stinkytofu.load_stir("""\
+st.func @k() {
+^entry:
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
+}
+""")
+module.set_operand("k", "entry", 0, ("defs", 0), ("v", 0, 2))
+for diagnostic in module.verify():
+    print(diagnostic)
+    # @k ^entry #0: error: 'ds_load_b128' operand dest[0] has register width 2, expected 4 [register-width]
+
+module.replace_block("k", "entry",
+                     'v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }\n')
+assert module.verify() == []
+```
+
+`verify(*, function=None)` returns every problem in every function, or in the one named, as a list of `Diagnostic` objects. An empty list means it found none. It makes the checks `StinkyIRVerifierPass` makes, reporting all of them rather than the first kind:
+- an operand that is missing, or has the wrong width or register class;
+- a read-write register missing from the defs or the uses;
+- an instruction without a hardware descriptor.
+
+It makes two more: a branch to a label the function does not define (`undefined-label`), and attached SSA that breaks an invariant (`invalid-ssa`). It does not compare a block's successors with its branches.
+
+| `Diagnostic` field | Meaning |
+| --- | --- |
+| `level` | `"error"`, `"warning"`, or `"note"` |
+| `id` | The kind of failure, such as `"register-width"`. [Error codes](../user/error-codes.md) lists them |
+| `message` | The text, without the location or the id |
+| `function`, `block`, `index` | Where it is. `index` is the position in that block's `instructions()`. `block` and `index` are `None` for a problem with the whole function |
+| `line`, `column` | The position in loaded text, or `None` for a diagnostic about built IR. Every diagnostic `verify()` returns is about built IR |
+
+`str(diagnostic)` is the one line shown above.
+
+`replace_block(function, block, body)` replaces a block's instructions with STIR text. `body` holds the lines `serialize()` prints between the block's header and its `Successors:` line: instructions, label lines, and directives.
+- The block keeps its name, its `{ label }`, and its successors.
+- A first line that names the block, such as `loop: { alignment = 16 }`, replaces the block's own label.
+- A block the new instructions branch to gets a label, as on load.
+- The function's attached SSA is dropped. Run `LiftAsmRegistersToSSAPass` again to see values.
+
+It returns the warnings, one string each, as `load_warnings()` does. Their lines count from the start of `body`.
+
+`set_operand(function, block, index, operand, value)` sets one physical operand.
+- `index` is the instruction's position in `instructions()`.
+- `operand` is `("defs", i)` or `("uses", i)`: a position in that instruction's `defs` or `uses`.
+- `value` takes a form from the operand table above, other than an SSA value.
+
+It does not check the value against the instruction; `verify()` does that. A function with attached SSA is refused, since its `defs` and `uses` list SSA values. To edit its physical operands, load `module.serialize()` again.
+
+These raise, and the module is left as it was:
+
+| What happened | Exception |
+| --- | --- |
+| No function or block has that name | `ValueError`. The message lists the names |
+| The body does not parse, or names an opcode the arch does not have | `ValueError`, with each error line and its id |
+| The body has a block header, a `Successors:` line, or a `}` | `ValueError` (`syntax`) |
+| `set_operand` on a function with attached SSA | `ValueError` |
+| A value with no operand form: a bool, an SSA value, an unknown register class, or an int that does not fit 32 bits | `ValueError` |
+| `index`, or the position in `operand`, is out of range | `IndexError` |

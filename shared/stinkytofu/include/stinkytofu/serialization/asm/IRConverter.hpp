@@ -36,6 +36,7 @@
 
 namespace stinkytofu {
 enum class GfxArchID : uint32_t;
+struct ParsedBlock;
 struct ParsedFunction;
 
 /**
@@ -111,6 +112,21 @@ class STINKYTOFU_EXPORT StinkyIRConverter {
     static StinkyErrorCode populateFunctionFromParsed(ParsedFunction& parsedFunc, Function& func,
                                                       GfxArchID arch,
                                                       std::vector<Diagnostic>& diagnostics);
+
+    /// Replace the instructions of \p block, which must belong to a function,
+    /// with \p body, built as a load builds a block. \p body comes from
+    /// parseBlockBodyWithDiagnostics().
+    ///
+    /// The block keeps its name, its edges, and its own label; a leading
+    /// `name:` line in \p body replaces that label. A block the new
+    /// instructions name gets a label, as at load.
+    ///
+    /// When an instruction cannot be built, the block is unchanged, the errors
+    /// are in \p diagnostics, and the call returns CONVERT_ERROR. On success the
+    /// function's attached SSA and def-use analysis are discarded, since both
+    /// describe the old instructions.
+    static StinkyErrorCode replaceBlockBody(const ParsedBlock& body, BasicBlock& block,
+                                            GfxArchID arch, std::vector<Diagnostic>& diagnostics);
 
     /**
      * Get the PassContext associated with the last conversion.

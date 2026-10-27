@@ -118,6 +118,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
     unit/asm/InsertClusterBarrierPassTest.cpp
     unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/VerifyStinkyIRTest.cpp
     unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
@@ -154,6 +155,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
+    unit/core/DiagnosticTest.cpp
     unit/core/OptimizationRemarkTest.cpp
     unit/core/PassArgumentsTest.cpp
     unit/core/PassBuilderTest.cpp
