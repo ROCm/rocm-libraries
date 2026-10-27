@@ -490,6 +490,8 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
               SolutionSet<ContractionSolution>({serves}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
               SolutionSet<ContractionSolution>({serves, rejects}));
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING),
+              SolutionSet<ContractionSolution>({serves, rejects}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::HARDWARE_ONLY).size(), 3u);
 }
 

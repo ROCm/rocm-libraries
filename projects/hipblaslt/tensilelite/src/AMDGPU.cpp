@@ -79,9 +79,7 @@ namespace TensileLite
         if(cached != -1)
             return (cached == 1);
 
-        // assume current device is a standard cu device.
-        // The answer is built in a local and stored once, so another thread never
-        // sees a transient 1 for a device that ends up as 0.
+        // The answer is computed in a local and stored once.
         int result = 1;
 
         auto mapIter = StandardCUMap().find(processor);

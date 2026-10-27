@@ -288,9 +288,9 @@ namespace TensileLite
         size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
         // Lazily computed by isStandardCU(); -1: unset, 0:false, 1:true.
-        // Another thread can read this while it is being filled in, so it is atomic.
-        // AMDGPU is copied (it is a cache key), and std::atomic is not copyable, so a
-        // copy takes a snapshot of the value.
+        // Readers may observe this while it is published, so the store is atomic.
+        // AMDGPU is copied as a cache key. std::atomic is not copyable, so a copy
+        // snapshots the current value.
         struct LazyFlag
         {
             LazyFlag() = default;

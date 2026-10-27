@@ -255,13 +255,7 @@ namespace TensileLite
 
                     if(useSolution)
                     {
-                        if((*row.second).requiredHostWorkspaceSizePerProblem
-                           == static_cast<size_t>(-1))
-                        {
-                            (*row.second).requiredHostWorkspaceSizePerProblem
-                                = (*row.second)
-                                      .requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                        }
+                        (*row.second).ensureRequiredHostWorkspaceSize(problems[0], hardware);
                         rv.insert(row.second);
                     }
                 }

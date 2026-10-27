@@ -416,11 +416,7 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-            {
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
-            }
+            solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             return solution;
         }
 
@@ -470,8 +466,7 @@ namespace TensileLite
                                                       nop,
                                                       solution->problemType.useGateResidual,
                                                       solution->problemType.gateResidualDataTypeWhiteList);
-                solution->requiredHostWorkspaceSizePerProblem
-                    = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
+                solution->ensureRequiredHostWorkspaceSize(problem, hardware);
             }
             return solution;
         }

@@ -214,7 +214,9 @@ namespace TensileLite
          * Registered kernels, mapped or not, that match the problem as far as
          * `searchType` asks, with the filters the shipped libraries apply: the
          * problem type, hardware and software predicates for DEFAULT, the GEMM
-         * type for GEMM_TYPE_ONLY, the hardware alone for HARDWARE_ONLY.
+         * type for GEMM_TYPE_ONLY and GEMM_TYPE_ONLY_NO_RANKING, the hardware
+         * alone for HARDWARE_ONLY. The no-ranking variant does not drop local
+         * kernels; ranking rows live in ExactLogicLibrary, not here.
          */
         SolutionSet<MySolution> findAll(MyProblem const&          problem,
                                         Hardware const&           hardware,
@@ -241,6 +243,7 @@ namespace TensileLite
                     }
                     break;
                 case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
+                case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
                     match = (*solution.hardwarePredicate)(hardware)
                             && isGemmTypeSame(solution, problem);
                     break;

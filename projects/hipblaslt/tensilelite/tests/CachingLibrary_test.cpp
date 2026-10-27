@@ -309,13 +309,9 @@ namespace
     };
 } // namespace
 
-// M7: the already-returned-all bit used to be one atomic shared by all
-// threads. Thread A asks for 5 of the 10 solutions it has (correct bit:
-// retAll == false). Thread B (different problem, only 1 solution) runs a whole
-// findTopSolutions while A is still inside its call, so A used to read B's
-// "true" and cache it for A's problem. A later request by A for 10 solutions
-// then hit the early return in CachingLibrary::findTopSolutions and got 5. The
-// bit now comes back with each call's result, so B cannot reach A's cache entry.
+// Two problems share one CachingLibrary. Thread B's findTopSolutions runs
+// while thread A is still inside its own call. A's later request for every
+// solution must still return all of them.
 TEST(CachingLibraryTest, ConcurrentFindTopSolutionsDoesNotPoisonAlreadyRetAllCache)
 {
     auto sub     = std::make_shared<FlagSubLibrary>();
@@ -398,11 +394,14 @@ namespace
             return "TenSolutionSub";
         }
 
+        mutable std::atomic<int> calls{0};
+
         TopSolutionsResult<ContractionSolution>
             findTopSolutions(ContractionProblemGemm const&,
                              Hardware const&,
                              int numSolutions) const override
         {
+            calls.fetch_add(1, std::memory_order_relaxed);
             const int                           n = std::min(available, numSolutions);
             SolutionVector<ContractionSolution> out;
             for(int i = 0; i < n; i++)
@@ -412,15 +411,9 @@ namespace
     };
 } // namespace
 
-// The solutions and the already-returned-all bit for one problem were stored in
-// two separate maps with no common lock. Same problem, two numSolutions values:
-//   B (asks 20) stores its 10 solutions,
-//   A (asks 3)  stores its 3 solutions,
-//   A stores its bit (false),
-//   B stores its bit (true).
-// The entry then held 3 solutions marked already-returned-all, and a later
-// request for 10 got 3 back. The pair is now one cache entry, so a reader sees
-// either both values from one writer or neither.
+// Same problem, two request sizes. A result marked already-returned-all must
+// hold every solution. A shorter list must not replace a longer cached list,
+// so the later request for every solution is served from the cache.
 TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndFlagTogether)
 {
     const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
@@ -458,8 +451,11 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsSameProblemKeepsSolutionsAndF
         for(auto& th : threads)
             th.join();
 
+        const int callsAfterJoin = sub->calls.load();
         auto again = caching->findTopSolutions(problem, device, static_cast<int>(all));
         if(again.solutions.size() != all)
+            finalMismatches++;
+        if(sub->calls.load() != callsAfterJoin)
             finalMismatches++;
     }
 

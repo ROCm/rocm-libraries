@@ -111,6 +111,16 @@ namespace TensileLite
             add_impl(m_map, value, ks...);
         }
 
+        // Keeps the stored value when preferIncoming is false. The check and
+        // the write share this lock.
+        template <typename PreferIncoming, typename... Ks>
+        void addIfPreferred(Value const& incoming, PreferIncoming preferIncoming, Ks const&... ks)
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+
+            addIfPreferred_impl(m_map, incoming, preferIncoming, ks...);
+        }
+
     private:
         template <typename SubMap, typename K>
         Value find_impl(SubMap const& map, K const& key)
@@ -144,6 +154,27 @@ namespace TensileLite
         void add_impl(SubMap& map, Value const& value, K const& key, Ks const&... ks)
         {
             add_impl(map[key], value, ks...);
+        }
+
+        template <typename SubMap, typename PreferIncoming, typename K>
+        void addIfPreferred_impl(SubMap&          map,
+                                 Value const&     incoming,
+                                 PreferIncoming   preferIncoming,
+                                 K const&         key)
+        {
+            auto iter = map.find(key);
+            if(iter == map.end() || preferIncoming(iter->second, incoming))
+                map.insert_or_assign(key, incoming);
+        }
+
+        template <typename SubMap, typename PreferIncoming, typename K, typename... Ks>
+        void addIfPreferred_impl(SubMap&          map,
+                                 Value const&     incoming,
+                                 PreferIncoming   preferIncoming,
+                                 K const&         key,
+                                 Ks const&...     ks)
+        {
+            addIfPreferred_impl(map[key], incoming, preferIncoming, ks...);
         }
 
         Map                     m_map;
@@ -289,8 +320,14 @@ namespace TensileLite
                 solutions = std::move(sub.solutions);
                 if(solutions.size() != 0)
                 {
-                    // One add() publishes the solutions and the bit under one lock.
-                    m_caches.add(TopSolutionsEntry{solutions, sub.alreadyRetAll}, problem, amdgpu);
+                    // A shorter list must not replace a longer one for this problem.
+                    m_caches.addIfPreferred(
+                        TopSolutionsEntry{solutions, sub.alreadyRetAll},
+                        [](TopSolutionsEntry const& existing, TopSolutionsEntry const& incoming) {
+                            return incoming.solutions.size() > existing.solutions.size();
+                        },
+                        problem,
+                        amdgpu);
                 }
 
                 // can't reach the requested number, means findTop already done its best

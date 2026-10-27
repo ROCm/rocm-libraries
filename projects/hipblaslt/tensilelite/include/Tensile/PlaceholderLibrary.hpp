@@ -31,10 +31,10 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <atomic>
 #include <algorithm>
 #include <iterator>
 #include <map>
+#include <mutex>
 
 #include <tensilelitehost/export.h>
 
@@ -164,7 +164,7 @@ namespace TensileLite
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
-        mutable std::mutex                                              lazyLoadingGuard;
+        mutable std::once_flag                                          lazyLoadOnce;
         std::string                                                     filePrefix;
 
         // Where to publish an indexed shard's blob cache, keyed by file prefix,
@@ -181,18 +181,17 @@ namespace TensileLite
 
         PlaceholderLibrary() = default;
 
-        // Loads the shard on first use and returns a copy of `library` taken
-        // while lazyLoadingGuard is held. `library` is only read or written under
-        // that lock, so callers must use the returned pointer and never touch the
-        // member directly. The lock covers the load and the copy, not the search.
-        // Lock order is lazyLoadingGuard, then solutionsGuard.
+        // Loads the shard the first time it is needed and returns the published
+        // library. A caller that arrives while the load is running waits for it.
+        // After that, this is a pointer copy. The search runs on the returned
+        // pointer, not under the load.
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> loadPlaceholderLibrary() const
         {
-            std::lock_guard<std::mutex> lock(lazyLoadingGuard);
-            // If condition in case two threads got into this function
-            if(!library)
-            {
-                std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
+            std::call_once(lazyLoadOnce, [this] {
+            if(library)
+                return;
+
+            std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
@@ -222,7 +221,7 @@ namespace TensileLite
                         // Keeping this shard's own tree, so its cache is the one
                         // the leaves reference.
                         publishShardCache();
-                        return library;
+                        return;
                     }
                     // Adopting the tree the master loaded means adopting the
                     // cache the master already published; ours is dropped.
@@ -233,7 +232,7 @@ namespace TensileLite
                     if(Debug::Instance().printCodeObjectInfo())
                         std::cout << "load placeholder library " << filePrefix
                                   << " from MasterLibrary cache" << std::endl;
-                    return library;
+                    return;
                 }
 
                 publishShardCache();
@@ -253,9 +252,7 @@ namespace TensileLite
                 if(Debug::Instance().printCodeObjectInfo())
                     std::cout << "load placeholder library " << path << std::endl
                               << mLibrary->solutions.size() << " solutions loaded" << std::endl;
-
-                return library;
-            }
+            });
 
             return library;
         }
@@ -342,16 +339,14 @@ namespace TensileLite
         {
             auto lib = loadPlaceholderLibrary();
 
-            auto solutions = lib->findTopSolutions(problem, hardware, numSolutions).solutions;
+            auto result = lib->findTopSolutions(problem, hardware, numSolutions);
 
-            for(auto& solution : solutions)
+            for(auto& solution : result.solutions)
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
 
-            // can't reach the requested number, means findTop already done its best
-            const bool alreadyRetAll = (solutions.size() < numSolutions);
-            return {std::move(solutions), alreadyRetAll};
+            return result;
         }
 
         virtual SolutionVector<MySolution>

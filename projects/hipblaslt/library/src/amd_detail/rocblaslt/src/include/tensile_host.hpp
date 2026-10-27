@@ -155,10 +155,9 @@ inline bool& rocblaslt_suppress_tensile_error_messages()
 }
 
 // searchType selects how the solution library filters rows. Callers that have
-// already collected the GridBased/Prediction candidates themselves pass
-// GEMM_TYPE_ONLY_NO_RANKING so those matching libraries are not searched again.
-// This is a per-call argument on purpose: it used to be a process-global set in
-// TensileLite::Debug, which raced between concurrent calls.
+// already collected the GridBased and Prediction candidates pass
+// GEMM_TYPE_ONLY_NO_RANKING so those rows are not searched again.
+// The value applies only to this call.
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,

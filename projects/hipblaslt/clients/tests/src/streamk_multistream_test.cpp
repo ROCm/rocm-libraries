@@ -403,22 +403,9 @@ namespace
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 
-    // ROCM-32224: every handle in a process shares one static TensileHost, so
-    // threads that each own a handle (one handle per stream, the pattern the
-    // docs recommend) reach the same library objects. The races named there are
-    // H2 (the lazy-load check on a placeholder library's shared_ptr) and M7 (the
-    // findTopSolutions "returned everything" flag shared across callers, which
-    // let one thread's result decide what another cached).
-    //
-    // N threads, N handles, one non-blocking stream per handle, all calling
-    // heuristic + matmul together. Shapes differ per thread and rotate per
-    // iteration so threads miss the caching library at different times and
-    // overlap on cold entries. The result is checked, not only the status:
-    // A and B are all ones, so every element of D must equal K.
-    //
-    // Pass-on-fixed-tree guard. Grouped GEMM is not in the mix: no client test
-    // runs one, and a real run needs its own heuristic/initialize/run harness.
-    // Cold lazy library load across processes has its own host test.
+    // Four threads, each with its own handle and non-blocking stream, run
+    // heuristic selection and matmul together. Shapes differ per thread and
+    // rotate per iteration. A and B are all ones, so every element of D equals K.
     constexpr int kConcurrentThreads    = 4;
     constexpr int kConcurrentIterations = 40;
     constexpr int kConcurrentAlgos      = 4;
@@ -630,7 +617,7 @@ namespace
                     if(std::chrono::steady_clock::now() > deadline)
                     {
                         std::fprintf(stderr,
-                                     "\n[  FAILED  ] StreamKMultiStream.ConcurrentHandlesMatmul\n"
+                                     "\n[  FAILED  ] StreamKMultiStream.smoke_ConcurrentHandlesMatmul\n"
                                      "  thread %d made no progress at iteration %d of %d.\n"
                                      "  Exiting without cleanup because the queue is wedged.\n\n",
                                      w.id,
@@ -677,7 +664,7 @@ namespace
         cleanup();
     }
 
-    TEST(StreamKMultiStream, ConcurrentHandlesMatmul)
+    TEST(StreamKMultiStream, smoke_ConcurrentHandlesMatmul)
     {
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";

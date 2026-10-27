@@ -3,10 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <Tensile/AMDGPU.hpp>
@@ -261,14 +263,9 @@ namespace
     }
 } // namespace
 
-// ---------------------------------------------------------------------------
-// GEMM_TYPE_ONLY_NO_RANKING (ROCM-31982)
-//
-// The row skip used to be driven by a process-global StringSet in
-// TensileLite::Debug that the heuristic fallback installed before calling
-// getAllSolutions and cleared afterwards. It is now a per-call argument, so a
-// no-ranking search and a full search are independent.
-// ---------------------------------------------------------------------------
+// GEMM_TYPE_ONLY_NO_RANKING skips GridBasedMatching and PredictionMatching
+// rows on a standard-CU device. A full GEMM_TYPE_ONLY search on the same
+// library still returns those rows.
 
 TEST(ExactLogicLibraryTest, FindAllSolutionsGemmTypeOnlySearchesRankingRows)
 {
@@ -322,9 +319,7 @@ TEST(ExactLogicLibraryTest, FindAllSolutionsForwardsNoRankingSearchTypeToSubLibr
     EXPECT_TRUE(isGemmTypeOnlySearch(equalityRow.lastSearchType()));
 }
 
-// Interleaving the two search types on the same library must not let one leak
-// into the other. With the Debug global, a full search issued while another
-// call's window was open silently lost the ranking rows.
+// A no-ranking search and a full search on the same library stay independent.
 TEST(ExactLogicLibraryTest, FindAllSolutionsInterleavedSearchTypesAreIndependent)
 {
     auto         lib     = buildRankingRowsLibrary();
@@ -413,4 +408,31 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKSchedulin
 
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3).solutions),
               (std::vector<std::string>{"equality", "range", "prediction"}));
+}
+
+// A non-standard-CU device stays false while several threads publish the flag.
+TEST(ExactLogicLibraryTest, IsStandardCUOnNonStandardDeviceStaysFalse)
+{
+    AMDGPU                   device = makeNonStandardCuDevice();
+    std::atomic<int>         sawTrue{0};
+    std::atomic<bool>        go{false};
+    std::vector<std::thread> threads;
+    for(int i = 0; i < 8; ++i)
+    {
+        threads.emplace_back([&] {
+            while(!go.load(std::memory_order_acquire))
+                ;
+            for(int n = 0; n < 200; ++n)
+            {
+                if(device.isStandardCU())
+                    sawTrue.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    go.store(true, std::memory_order_release);
+    for(auto& th : threads)
+        th.join();
+
+    EXPECT_FALSE(device.isStandardCU());
+    EXPECT_EQ(sawTrue.load(), 0);
 }

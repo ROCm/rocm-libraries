@@ -874,10 +874,8 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
 }
 
-// H2: a cold placeholder reached from several threads at once. Every caller
-// must come back with the loaded shard's solution, so none may see the tree
-// before the loading thread has finished publishing the shard. Each round uses
-// a freshly loaded, still-cold placeholder.
+// Several threads resolve one index on a cold placeholder. Each round loads a
+// new library. Every thread must receive the solution.
 TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsAllSeeTheLoadedShard)
 {
     singleTree = true;
