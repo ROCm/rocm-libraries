@@ -124,8 +124,7 @@ try
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
-        I const bid_end = bid + std::min(batch_count_arg - bid, bid_inc);
-        I const batch_count = bid_end - bid;
+        I const batch_count = std::min(batch_count_arg - bid, bid_inc);
 
         auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
         auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid;
