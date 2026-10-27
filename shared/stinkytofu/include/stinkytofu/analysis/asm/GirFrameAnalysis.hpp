@@ -165,7 +165,7 @@ struct GirAccessOccurrence {
     int storage = 0;
 };
 
-struct STINKYTOFU_EXPORT GirFrameAnalysis {
+struct GirFrameAnalysis {
     STINKYTOFU_ANALYSIS_KEY("GirFrameAnalysis")
 
     class Result {
@@ -184,7 +184,9 @@ struct STINKYTOFU_EXPORT GirFrameAnalysis {
         const std::vector<GirFrame>& frames(const BasicBlock* block) const;
     };
 
-    static Result run(Function& function, AnalysisManager& AM);
+    // Exported per-member, not on the struct: STINKYTOFU_ANALYSIS_KEY already marks Key
+    // dllexport, which MSVC rejects inside an exported class.
+    STINKYTOFU_EXPORT static Result run(Function& function, AnalysisManager& AM);
 };
 
 struct GirFrameHazard {
@@ -268,7 +270,7 @@ struct STINKYTOFU_EXPORT GirFenceCoverage {
     }
 };
 
-struct STINKYTOFU_EXPORT GirFrameHazardAnalysis {
+struct GirFrameHazardAnalysis {
     STINKYTOFU_ANALYSIS_KEY("GirFrameHazardAnalysis")
 
     struct Result {
@@ -279,7 +281,7 @@ struct STINKYTOFU_EXPORT GirFrameHazardAnalysis {
         }
     };
 
-    static Result run(Function& function, AnalysisManager& AM);
+    STINKYTOFU_EXPORT static Result run(Function& function, AnalysisManager& AM);
 };
 
 /// Fence coverage of every cross-agent hazard under one marker plan: for hazard `h`,
