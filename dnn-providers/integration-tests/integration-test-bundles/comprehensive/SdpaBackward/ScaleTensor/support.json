@@ -1,4 +1,27 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "ap001_b2h3k3v3_72x40_d128_fp16_brw16rinf_rowpad8_sconst0p5_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap003_b2h3k3v3_56x56_d128_fp16_tlr8_bshd_srt0p5_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap007_b2h3k3v3_40x72_d128_fp16_tlr8_dobshd_sconst0p5_v0to1_tolp",
+          "ap008_b2h3k3v3_72x40_d128_bfp16_tlw9r8_dobshd_srt0p5_v0to1_tolp",
+          "ap009_b2h3k3v3_72x40_d128_fp16_tlw16_rowpad8_srt0p5_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap010_b2h3k3v3_72x40_d192_bfp16_brcausal_gradsbshd_sconst0p5_qm4to4_km4to4_dom0p25to0p25_tolu",
+          "ap014_b2h3k3v3_72x40_d128_bfp16_tlw9r8_bshd_sconst0p5_v0to1_tolp",
+          "ap015_b2h3k3v3_40x72_d128_bfp16_brw16rinf_gradsbshd_srt0p5_tolp",
+          "ap017_b2h3k3v3_72x40_d192_bfp16_none_bshd_srt0p5_tolu",
+          "ap018_b2h3k3v3_40x72_d128_fp16_brw16_dobshd_sconst0p5_v0to1_tolp",
+          "l20_b1h3k3v3_288x480_d128_bfp16_tlcausal_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

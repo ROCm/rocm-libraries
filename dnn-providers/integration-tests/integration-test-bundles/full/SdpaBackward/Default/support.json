@@ -1,4 +1,61 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "h94_b1h1k1v1_1023x1024_d128_bfp16_none_told",
+          "h95_b1h1k1v1_1024x1023_d128_fp16_none_told",
+          "m41fc_b1h32k32v32_512x512_d128_bfp16_cm_none_bshd_tolp",
+          "prbe04lt_b2h5k5v5_129x129_d128_fp16_tlcausal_x7e5c66_tolu",
+          "s03_b5h3k3v3_72x120_d128_fp16_none_told",
+          "tpd01_b2h3k3v3_40x72_d192_bfp16_none_v0to1_told",
+          "tpd02_b2h3k3v3_40x72_d192_bfp16_brcausal_v0to1_told",
+          "tpd04_b2h3k3v3_64x64_d192_bfp16_tlcausal_v0to1_tolp",
+          "tpd05_b2h3k3v3_72x40_d192_bfp16_none_v0to1_told",
+          "tpd06_b2h3k3v3_72x40_d192_bfp16_brcausal_v0to1_tolp",
+          "tpd08_b2h3k3v3_40x72_d192_fp16_tlcausal_v0to1_tolp",
+          "tpd10_b2h3k3v3_64x64_d192_fp16_none_v0to1_told",
+          "tpd12_b2h3k3v3_72x40_d192_fp16_tlcausal_v0to1_tolp",
+          "tpd14_b2h3k3v3_40x72_d128_bfp16_none_bshd_v0to1_told",
+          "tpd15_b2h3k3v3_40x72_d128_bfp16_brcausal_bshd_v0to1_told",
+          "tpd16_b2h3k3v3_40x72_d128_bfp16_brw16_bshd_v0to1_told",
+          "tpd17_b2h3k3v3_64x64_d128_bfp16_tlcausal_bshd_v0to1_tolp",
+          "tpd18_b2h3k3v3_72x40_d128_bfp16_none_bshd_v0to1_told",
+          "tpd19_b2h3k3v3_72x40_d128_bfp16_brcausal_bshd_v0to1_tolp",
+          "tpd20_b2h3k3v3_72x40_d128_bfp16_brw16_bshd_v0to1_tolp",
+          "tpd21_b2h3k3v3_40x72_d128_fp16_tlcausal_bshd_v0to1_tolp",
+          "tpd22_b2h3k3v3_40x72_d128_fp16_tlw16_bshd_v0to1_tolp",
+          "tpd23_b2h3k3v3_64x64_d128_fp16_none_bshd_v0to1_told",
+          "tpd24_b2h3k3v3_64x64_d128_fp16_tlw16_bshd_v0to1_tolp",
+          "tpd25_b2h3k3v3_72x40_d128_fp16_tlcausal_bshd_v0to1_tolp",
+          "tpd26_b2h3k3v3_72x40_d128_fp16_tlw16_bshd_v0to1_tolp",
+          "tpd27_b2h3k3v3_40x72_d192_bfp16_none_bshd_v0to1_told",
+          "tpd28_b2h3k3v3_40x72_d192_bfp16_tlcausal_bshd_v0to1_tolp",
+          "tpd29_b2h3k3v3_40x72_d192_bfp16_brcausal_bshd_v0to1_told",
+          "tpd32_b2h3k3v3_64x64_d192_bfp16_none_bshd_v0to1_told",
+          "tpd33_b2h3k3v3_64x64_d192_bfp16_tlcausal_bshd_v0to1_tolp",
+          "tpd35_b2h3k3v3_72x40_d192_bfp16_none_bshd_v0to1_told",
+          "tpd36_b2h3k3v3_72x40_d192_bfp16_tlcausal_bshd_v0to1_tolp",
+          "tpd37_b2h3k3v3_72x40_d192_bfp16_brcausal_bshd_v0to1_tolp",
+          "tpd40_b2h3k3v3_40x72_d192_fp16_none_bshd_v0to1_told",
+          "tpd41_b2h3k3v3_40x72_d192_fp16_tlcausal_bshd_v0to1_tolp",
+          "tpd42_b2h3k3v3_40x72_d192_fp16_brcausal_bshd_v0to1_told",
+          "tpd45_b2h3k3v3_64x64_d192_fp16_none_bshd_v0to1_told",
+          "tpd46_b2h3k3v3_64x64_d192_fp16_tlcausal_bshd_v0to1_tolp",
+          "tpd48_b2h3k3v3_72x40_d192_fp16_none_bshd_v0to1_tolp",
+          "tpd49_b2h3k3v3_72x40_d192_fp16_tlcausal_bshd_v0to1_tolp",
+          "tpd50_b2h3k3v3_72x40_d192_fp16_brcausal_bshd_v0to1_tolp",
+          "x06_b1h1k1v1_64x65536_d128_fp16_none_dom128to128_told",
+          "x07_b1h1k1v1_65536x1_d128_bfp16_none_tolk1",
+          "x11_b1h1k1v1_4096x4096_d128_bfp16_tlcausal_tolp"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

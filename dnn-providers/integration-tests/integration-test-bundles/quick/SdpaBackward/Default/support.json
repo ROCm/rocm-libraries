@@ -1,4 +1,63 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "c01_b2h3k3v3_40x72_d128_bfp16_none_v0to1_told",
+          "c01_b2h3k3v3_40x72_d128_fp16_none_v0to1_told",
+          "c02_b2h3k3v3_40x72_d128_bfp16_tlcausal_v0to1_tolp",
+          "c02_b2h3k3v3_40x72_d128_fp16_tlcausal_v0to1_tolp",
+          "c03_b2h3k3v3_40x72_d128_bfp16_brcausal_v0to1_told",
+          "c03_b2h3k3v3_40x72_d128_fp16_brcausal_v0to1_told",
+          "c04_b2h3k3v3_40x72_d128_bfp16_tlw16_v0to1_tolp",
+          "c04_b2h3k3v3_40x72_d128_fp16_tlw16_v0to1_tolp",
+          "c05_b2h3k3v3_40x72_d128_bfp16_brw16_v0to1_told",
+          "c05_b2h3k3v3_40x72_d128_fp16_brw16_v0to1_tolp",
+          "c06_b2h3k3v3_64x64_d128_bfp16_none_v0to1_told",
+          "c06_b2h3k3v3_64x64_d128_fp16_none_v0to1_told",
+          "c07_b2h3k3v3_64x64_d128_bfp16_tlcausal_v0to1_tolp",
+          "c07_b2h3k3v3_64x64_d128_fp16_tlcausal_v0to1_tolp",
+          "c08_b2h3k3v3_64x64_d128_bfp16_tlw16_v0to1_tolp",
+          "c08_b2h3k3v3_64x64_d128_fp16_tlw16_v0to1_tolp",
+          "c09_b2h3k3v3_72x40_d128_bfp16_none_v0to1_told",
+          "c09_b2h3k3v3_72x40_d128_fp16_none_v0to1_tolp",
+          "c10_b2h3k3v3_72x40_d128_bfp16_tlcausal_v0to1_tolp",
+          "c10_b2h3k3v3_72x40_d128_fp16_tlcausal_v0to1_tolp",
+          "c11_b2h3k3v3_72x40_d128_bfp16_brcausal_v0to1_tolp",
+          "c11_b2h3k3v3_72x40_d128_fp16_brcausal_v0to1_tolp",
+          "c12_b2h3k3v3_72x40_d128_bfp16_tlw16_v0to1_tolp",
+          "c12_b2h3k3v3_72x40_d128_fp16_tlw16_v0to1_tolp",
+          "c13_b2h3k3v3_72x40_d128_bfp16_brw16_v0to1_tolp",
+          "c13_b2h3k3v3_72x40_d128_fp16_brw16_v0to1_tolp",
+          "gl01_bfp16_none_told",
+          "h08_b2h3k3v3_1x120_d128_bfp16_none_tols",
+          "h11_b2h3k3v3_72x1_d128_bfp16_none_tolk1",
+          "h65_b1h2k2v2_72x120_d128_bfp16_brw1_tolp",
+          "h90_b1h2k2v2_72x120_d128_fp16_none_s0p05_qm4to4_km4to4_vm4to4_dom0p25to0p25_tolu",
+          "prba01_b1h2k2v2_64x64_d128_bfp16_brcausal_v0to1_tolp",
+          "prbg01_b1h2k2v2_1x1_d128_bfp16_none_tolk1",
+          "reg01_b1h1k1v1_128x128_d128_bfp16_cm_tlw33rinf_tolp",
+          "reg02a_b1h1k1v1_64x128_d128_bfp16_cm_brnone_told",
+          "reg02b_b1h1k1v1_64x128_d128_bfp16_cmbr_none_told",
+          "reg03_b1h1k1v1_64x96_d128_bfp16_cm_tlr5_tolp",
+          "reg04_b1h1k1v1_64x96_d128_bfp16_none_sunset_tolu",
+          "reg13a_b1h1k1v1_64x128_d128_bfp16_tlw2_tolp",
+          "reg13c_b1h1k1v1_64x64_d128_bfp16_tlw1_tolp",
+          "reg13d_b1h1k1v1_65x65_d128_bfp16_tlw64_tolp",
+          "reg13e_b1h1k1v1_65x65_d128_bfp16_tlw65_tolp",
+          "reg18c_b1h1k1v1_1024x1_d128_bfp16_none_tolk1",
+          "s17q_b2h3k3v3_40x72_d192_bfp16_none_told",
+          "s29q_b2h3k3v3_40x72_d128_fp16_tlw9r8_tolp",
+          "s40q_b2h3k3v3_40x72_d128_bfp16_none_bshd_told",
+          "s42q_b2h3k3v3_40x72_d128_bfp16_none_gradsbshd_told"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
