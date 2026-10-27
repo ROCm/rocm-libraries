@@ -35,10 +35,9 @@ namespace rocsparse
     // The bsrsm solve flattens a two dimensional iteration space onto grid.x: one
     // thread block per (RHS panel, block row) pair, where a panel is the group of
     // NCOLS right hand sides a single block carries. The launch grid and the
-    // kernels' grid-stride bound both derive from this count, so it is computed in
-    // 64 bit: the historical ((nrhs - 1) / NCOL + 1) * mb expression evaluated both
-    // operands as signed 32 bit and overflowed (undefined behaviour, not a defined
-    // wrap) at for instance mb = 50000 with nrhs = 700000.
+    // kernels' grid-stride bound both derive from this count, which passes
+    // INT32_MAX at for instance mb = 50000 with nrhs = 700000, so it is computed in
+    // 64 bit.
     __device__ __host__ __forceinline__ int64_t bsrsm_num_blocks(int64_t mb,
                                                                  int64_t nrhs,
                                                                  int64_t ncols)
@@ -51,18 +50,16 @@ namespace rocsparse
     // launch's block size.
     //
     // The clamped extent is then rounded DOWN to a whole number of RHS panels,
-    // which is a correctness requirement rather than a tidiness one, and the part
-    // the ticket does not mention: max_grid_x is almost never a multiple of mb,
-    // so clamping alone manufactures a ragged grid. The block owning
+    // which is a correctness requirement: max_grid_x is almost never a multiple
+    // of mb, so clamping alone gives a ragged grid. The block owning
     // (panel, block row) spins on done_array until the block rows it depends on
     // have published their results; those rows are always in the same panel and
     // always earlier in the map order, i.e. at a strictly lower flattened index.
     // Keeping grid.x a multiple of mb makes the kernels' stride a multiple of mb
     // too, which pins every block to a fixed row-map slot and keeps each dependency
-    // on a lower numbered block of the same sweep -- the dependency shape the
-    // unclamped launch had. With a stride that is not a multiple of mb a resident
-    // block can end up waiting on a block that has not been dispatched yet, and the
-    // solve hangs instead of returning (AISPARSE-669 found this in csrsm).
+    // on a lower numbered block of the same sweep. With a stride that is not a
+    // multiple of mb a resident block can end up waiting on a block that has not
+    // been dispatched yet, and the solve hangs.
     //
     // If mb alone exceeds max_grid_x the grid is max_grid_x itself, and the WIDE
     // kernels walk contiguous chunks of the flattened space instead of striding.
@@ -85,10 +82,10 @@ namespace rocsparse
     // Whether the bsrsm solve launch must take the WIDE instantiation of the
     // kernels below: the grid-stride loop and 64 bit block ids, done_array
     // offsets and X offsets. The narrow instantiation runs one block per
-    // (RHS panel, block row) pair and does all of that arithmetic in 32 bit, as
-    // the kernels did before AISPARSE-670; the 64 bit division by mb at the start
-    // of every block and the 64 bit multiply on every X access in the inner loop
-    // are measurable on the common small-nrhs solves. It is only correct when
+    // (RHS panel, block row) pair and does all of that arithmetic in 32 bit; the
+    // 64 bit division by mb at the start of every block and the 64 bit multiply
+    // on every X access in the inner loop are measurable on the common
+    // small-nrhs solves. It is only correct when
     //   - grid_x covers every pair (no clamp, so no stride). grid_x is at most
     //     the get_grid_size_x clamp, so this also keeps the flattened pair count,
     //     which bounds blockIdx.x and every done_array offset, in rocsparse_int,
@@ -126,13 +123,13 @@ namespace rocsparse
 
     // Body of ONE flattened block of the upper solve. block_id is that block's
     // position in the flattened (RHS panel, block row) space and is a parameter
-    // rather than a read of blockIdx.x, so the grid-stride loop lives in the
-    // __global__ wrapper below (the AISPARSE-666 idiom the reviewer required).
-    // ALL THREE coordinates -- row-map slot, done_array panel offset and X column
-    // -- are recovered from the same induction variable: taking one from block_id
-    // and another from blockIdx.x would pair the wrong block row with the wrong
-    // panel on every sweep after the first. WIDE selects 64 bit or 32 bit block
-    // id and offset arithmetic, see bsrsm_solve_needs_wide.
+    // rather than a read of blockIdx.x, so the grid-stride and chunk loops live in
+    // the __global__ wrapper below. ALL THREE coordinates -- row-map slot,
+    // done_array panel offset and X column -- are recovered from the same
+    // induction variable: taking one from block_id and another from blockIdx.x
+    // would pair the wrong block row with the wrong panel on every sweep after
+    // the first. WIDE selects 64 bit or 32 bit block id and offset arithmetic,
+    // see bsrsm_solve_needs_wide.
     template <uint32_t BLOCKSIZE, uint32_t NCOLS, bool SLEEP, bool WIDE, typename T>
     ROCSPARSE_DEVICE_ILF void
         bsrsm_upper_large_block_device(rocsparse::bsrsm_block_id_t<WIDE> block_id,

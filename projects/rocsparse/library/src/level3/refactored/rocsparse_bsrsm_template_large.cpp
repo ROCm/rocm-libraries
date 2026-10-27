@@ -38,11 +38,10 @@
 
 namespace rocsparse
 {
-    // wfsize * nnzb was a signed 32 bit product that overflowed at 33,554,431
-    // non-zero blocks with a 64 wide wavefront, so cast before the multiply.
-    // rocsparse::bsr_gather grid-strides over whatever the clamp leaves behind;
-    // that kernel is shared with bsrsv (AISPARSE-656, PR #11118). blockDim.x is
-    // wfsize, so that is the block size the clamp takes.
+    // wfsize * nnzb passes INT32_MAX from 33,554,432 non-zero blocks with a 64
+    // wide wavefront, so it is formed in 64 bit. rocsparse::bsr_gather
+    // grid-strides over whatever the clamp leaves. blockDim.x is wfsize, so that
+    // is the block size the clamp takes.
 #define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
         (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                        \
@@ -100,9 +99,8 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
 // One thread block per (RHS panel, block row) pair, flattened onto grid.x.
-// ((nrhs - 1) / NCOL + 1) * mb was a signed 32 bit product, so the count is now
-// formed in 64 bit and clamped to the device grid limit before it is narrowed;
-// the kernels grid-stride over whatever is left over.
+// The pair count is formed in 64 bit and clamped to the device grid limit
+// before it is narrowed; the kernels cover whatever is left over.
 //
 // bsrsm_solve_grid_size returns at most the get_grid_size_x clamp, rounded down
 // to whole RHS panels, or the clamp itself when mb alone exceeds it; the WIDE
@@ -163,10 +161,7 @@ namespace rocsparse
 
         const int narrays = (nrhs - 1) / NCOL + 1;
 
-        // Number of scalar rows. mb * block_dim was a signed 32 bit product at
-        // every use below (the bsrsm_copy_scale grid and row count, and the rows of
-        // the dense matrix descriptors passed to dnmat_switch_order). Form it once
-        // in 64 bit (AISPARSE-670).
+        // Number of scalar rows, in 64 bit.
         const int64_t m_rows = static_cast<int64_t>(mb) * block_dim;
 
         // done_array

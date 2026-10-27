@@ -61,11 +61,9 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // Grid-stride loop so a grid clamped against maxGridSize[0] still covers
-        // all m = mb * block_dim rows. blockIdx.x * BLOCKSIZE is formed in 64 bit;
-        // it used to be a 32 bit product assigned to a rocsparse_int. This kernel
-        // contains no __syncthreads() and no shared memory, so the per-thread loop
-        // bound cannot diverge at a barrier (AISPARSE-670).
+        // Grid-stride loop so a clamped grid still covers all m = mb * block_dim
+        // rows, with the row index in 64 bit. No barriers or shared memory, so a
+        // per-thread loop bound is fine.
         const int64_t stride = static_cast<int64_t>(gridDim.x) * BLOCKSIZE;
 
         for(int64_t row = static_cast<int64_t>(blockIdx.x) * BLOCKSIZE + threadIdx.x; row < m;
