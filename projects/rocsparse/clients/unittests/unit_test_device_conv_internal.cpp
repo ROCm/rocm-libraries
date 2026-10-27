@@ -1010,49 +1010,131 @@ namespace
             reject(dt, dt, i32, col_ind, ell_val);
     }
 
-    // A 3 x 3 matrix with f32 values converted to CSR and COO targets with i32 values,
-    // a pair without a conversion kernel. The conversion is rejected, and the target
-    // arrays keep their contents. CSC -> CSR has no value conversion and rejects any
-    // data type change.
+    // A 3 x 3 matrix with f32 values converted to CSR, COO and COO AoS targets with i32
+    // values, a pair without a conversion kernel. The conversion is rejected, and the
+    // target arrays keep their contents. CSC -> CSR has no value conversion and rejects
+    // any data type change.
     TEST_F(ConvInternal, SparseToSparseMixedDatatypes)
     {
         Silence                    silence;
         constexpr int64_t          m = 3, nnz = 4;
-        const std::vector<int32_t> ptr = {0, 1, 3, 4}, row = {0, 1, 1, 2}, col = {0, 0, 2, 1};
-        DevBuf<int32_t>            s_ptr(ptr), s_row(row), s_col(col);
+        const std::vector<int32_t> ptr = {0, 1, 3, 4}, row = {0, 1, 1, 2}, col = {0, 0, 2, 1},
+                                   ind = {0, 0, 1, 0, 1, 2, 2, 1};
+        DevBuf<int32_t>            s_ptr(ptr), s_row(row), s_col(col), s_ind(ind);
         DevBuf<float>              s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
-        const std::vector<int32_t> guard(m + 1, -7);
+        const std::vector<int32_t> guard(2 * nnz, -7);
         const auto                 create = [&](Spmat&             d,
                                 rocsparse_format   f,
                                 void*              p,
                                 void*              r,
                                 void*              c,
+                                void*              i,
                                 void*              v,
                                 rocsparse_datatype dt) {
-            return f == rocsparse_format_csr
-                                       ? rocsparse_create_csr_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt)
-                                   : f == rocsparse_format_csc
-                                       ? rocsparse_create_csc_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt)
-                                       : rocsparse_create_coo_descr(&d, m, m, nnz, r, c, v, i32, base0, dt);
+            switch(f)
+            {
+            case rocsparse_format_csr:
+                return rocsparse_create_csr_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt);
+            case rocsparse_format_csc:
+                return rocsparse_create_csc_descr(&d, m, m, nnz, p, c, v, i32, i32, base0, dt);
+            case rocsparse_format_coo_aos:
+                return rocsparse_create_coo_aos_descr(&d, m, m, nnz, i, v, i32, base0, dt);
+            default:
+                return rocsparse_create_coo_descr(&d, m, m, nnz, r, c, v, i32, base0, dt);
+            }
         };
         const std::pair<rocsparse_format, rocsparse_format> pairs[]
             = {{rocsparse_format_csr, rocsparse_format_csr},
                {rocsparse_format_coo, rocsparse_format_csr},
                {rocsparse_format_csr, rocsparse_format_coo},
-               {rocsparse_format_csc, rocsparse_format_csr}};
+               {rocsparse_format_csc, rocsparse_format_csr},
+               {rocsparse_format_csr, rocsparse_format_coo_aos},
+               {rocsparse_format_coo_aos, rocsparse_format_csr},
+               {rocsparse_format_coo, rocsparse_format_coo_aos},
+               {rocsparse_format_coo_aos, rocsparse_format_coo},
+               {rocsparse_format_coo_aos, rocsparse_format_coo_aos}};
         for(const auto& [sf, tf] : pairs)
         {
             SCOPED_TRACE(testing::Message() << "source " << sf << " target " << tf);
-            DevBuf<int32_t> t_ptr(guard), t_row(guard), t_col(guard), t_val(guard);
+            DevBuf<int32_t> t_ptr(guard), t_row(guard), t_col(guard), t_ind(guard), t_val(guard);
             Spmat           source, target;
-            ASSERT_EQ(create(source, sf, s_ptr, s_row, s_col, s_val, f32), st_ok);
-            ASSERT_EQ(create(target, tf, t_ptr, t_row, t_col, t_val, rocsparse_datatype_i32_r),
-                      st_ok);
+            ASSERT_EQ(create(source, sf, s_ptr, s_row, s_col, s_ind, s_val, f32), st_ok);
+            ASSERT_EQ(
+                create(target, tf, t_ptr, t_row, t_col, t_ind, t_val, rocsparse_datatype_i32_r),
+                st_ok);
             EXPECT_EQ(sparse_to_sparse(handle, source, target), rocsparse_status_not_implemented);
             EXPECT_EQ(t_ptr.read(), guard);
             EXPECT_EQ(t_row.read(), guard);
             EXPECT_EQ(t_col.read(), guard);
+            EXPECT_EQ(t_ind.read(), guard);
             EXPECT_EQ(t_val.read(), guard);
         }
+    }
+
+    // CSC -> CSR keeps the index types: an i64 column pointer into an i32 row pointer
+    // (or an i64 row index into an i32 column index) is rejected and the target keeps
+    // its contents.
+    TEST_F(ConvInternal, SparseToSparseCscToCsrIndexTypes)
+    {
+        Silence                    silence;
+        constexpr int64_t          m = 3, nnz = 4;
+        const std::vector<int32_t> guard(2 * nnz, -7);
+        DevBuf<int32_t>            p32(std::vector<int32_t>{0, 1, 3, 4}),
+            i32_ind(std::vector<int32_t>{0, 2, 1, 1});
+        DevBuf<int64_t> p64(std::vector<int64_t>{0, 1, 3, 4}),
+            i64_ind(std::vector<int64_t>{0, 2, 1, 1});
+        DevBuf<float> s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
+        const auto    i64 = rocsparse_indextype_i64;
+        struct Case
+        {
+            void*               ptr;
+            void*               ind;
+            rocsparse_indextype ptr_type, ind_type;
+        };
+        for(const Case& c : {Case{p64, i32_ind, i64, i32}, Case{p32, i64_ind, i32, i64}})
+        {
+            SCOPED_TRACE(testing::Message() << "ptr " << c.ptr_type << " ind " << c.ind_type);
+            DevBuf<int32_t> t_ptr(guard), t_col(guard);
+            DevBuf<float>   t_val(std::vector<float>(2 * nnz, -7.0f));
+            Spmat           source, target;
+            ASSERT_EQ(
+                rocsparse_create_csc_descr(
+                    &source, m, m, nnz, c.ptr, c.ind, s_val, c.ptr_type, c.ind_type, base0, f32),
+                st_ok);
+            ASSERT_EQ(rocsparse_create_csr_descr(
+                          &target, m, m, nnz, t_ptr, t_col, t_val, i32, i32, base0, f32),
+                      st_ok);
+            EXPECT_EQ(sparse_to_sparse(handle, source, target), rocsparse_status_not_implemented);
+            EXPECT_EQ(t_ptr.read(), guard);
+            EXPECT_EQ(t_col.read(), guard);
+            EXPECT_EQ(t_val.read(), std::vector<float>(2 * nnz, -7.0f));
+        }
+    }
+
+    // CSR -> CSR with a supported value conversion (f32 -> f64) into a target with a null
+    // column index array fails the pointer check before any target array is written.
+    TEST_F(ConvInternal, SparseToSparseChecksPointersFirst)
+    {
+        Silence           silence;
+        constexpr int64_t m = 3, nnz = 4;
+        DevBuf<int32_t>   s_ptr(std::vector<int32_t>{0, 1, 3, 4}),
+            s_col(std::vector<int32_t>{0, 0, 2, 1});
+        DevBuf<float>              s_val(std::vector<float>{1.0f, 2.0f, 3.0f, 4.0f});
+        const std::vector<int32_t> ptr_guard(m + 1, -7);
+        const std::vector<double>  val_guard(nnz, -7.0);
+        DevBuf<int32_t>            t_ptr(ptr_guard), t_col(std::vector<int32_t>(nnz, -7));
+        DevBuf<double>             t_val(val_guard);
+        Spmat                      source, target;
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &source, m, m, nnz, s_ptr, s_col, s_val, i32, i32, base0, f32),
+                  st_ok);
+        ASSERT_EQ(
+            rocsparse_create_csr_descr(
+                &target, m, m, nnz, t_ptr, t_col, t_val, i32, i32, base0, rocsparse_datatype_f64_r),
+            st_ok);
+        target.get()->col_data = nullptr;
+        EXPECT_EQ(sparse_to_sparse(handle, source, target), st_ptr);
+        EXPECT_EQ(t_ptr.read(), ptr_guard);
+        EXPECT_EQ(t_val.read(), val_guard);
     }
 } // namespace

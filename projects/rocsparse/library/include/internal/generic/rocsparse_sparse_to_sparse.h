@@ -93,7 +93,10 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  - \ref rocsparse_format_csc, \ref rocsparse_format_ell, \ref rocsparse_format_bsr: only from
 *    the same format.
 *
-*  Other combinations return \ref rocsparse_status_not_implemented.
+*  Other combinations return \ref rocsparse_status_not_implemented. For the conversions above
+*  that convert the values, a matrix with no values to convert (zero nonzeros) is an exception:
+*  its sparsity pattern is converted and \ref rocsparse_status_success is returned for any pair
+*  of data types.
 *
 *  \note
 *  This routine does not support batched computation.

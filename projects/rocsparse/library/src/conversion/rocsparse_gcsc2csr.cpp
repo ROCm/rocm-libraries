@@ -269,6 +269,10 @@ rocsparse_status rocsparse::spmat_csc2csr(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              source_->col_type != target_->row_type);
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              source_->row_type != target_->col_type);
     if(target_->val_data != nullptr && source_->const_val_data != nullptr)
     {
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
