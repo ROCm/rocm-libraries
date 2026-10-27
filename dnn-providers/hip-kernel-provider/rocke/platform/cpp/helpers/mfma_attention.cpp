@@ -72,10 +72,6 @@ static const char* rocke_attn_atom_dtype_to_catalog(const char* dtype_in)
         return "fp8";
     if(strcmp(dtype_in, "bf8e5m2") == 0)
         return "bf8";
-    if(strcmp(dtype_in, "fp4") == 0)
-        return "fp4";
-    if(strcmp(dtype_in, "fp6") == 0)
-        return "fp6";
     return dtype_in; /* _ATOM_DTYPE_TO_CATALOG.get(x, x) */
 }
 
