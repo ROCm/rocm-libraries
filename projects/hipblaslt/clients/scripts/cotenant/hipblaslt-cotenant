@@ -14,6 +14,12 @@ finishes or this script is interrupted.
 The hipblaslt build places hipblaslt-cotenant-kernel beside this script (in
 <build>/clients and in the installed bin/); --binary overrides it. The cotenant
 log defaults to ./cotenant.<pid>.log.
+
+--device N is a HIP device ordinal: the N-th of the devices that
+ROCR_VISIBLE_DEVICES exposes (of all GPUs when it is unset). It sets
+HIP_VISIBLE_DEVICES=N for the cotenant and the command, replacing any inherited
+value, and leaves ROCR_VISIBLE_DEVICES as it is. With ROCR_VISIBLE_DEVICES=0,3,4
+and --device 2, both run on the GPU ROCR calls 4.
 """
 
 from __future__ import annotations
@@ -49,6 +55,29 @@ def probe_cus(env: dict[str, str]) -> int | None:
         elif in_gpu and line.strip().startswith("Compute Unit:"):
             return int(fields[-1])
     return None
+
+
+def probe_rocr_devices(env: dict[str, str]) -> str | None:
+    """ROCR_VISIBLE_DEVICES that makes rocminfo's first GPU the first device
+    HIP_VISIBLE_DEVICES selects, or None to probe with the environment as it is.
+
+    HIP_VISIBLE_DEVICES holds ordinals among the devices ROCR_VISIBLE_DEVICES
+    exposes, so an ordinal names that list's entry when the list is set.
+    """
+    hip_visible = env.get("HIP_VISIBLE_DEVICES")
+    if hip_visible is None:
+        return None
+    first = hip_visible.split(",")[0].strip()
+    rocr_visible = env.get("ROCR_VISIBLE_DEVICES")
+    if rocr_visible is None or not first.isdigit():
+        return first
+    exposed = [d.strip() for d in rocr_visible.split(",") if d.strip()]
+    if int(first) >= len(exposed):
+        sys.exit(
+            f"ERROR: HIP_VISIBLE_DEVICES={hip_visible} selects device {first}, but "
+            f"ROCR_VISIBLE_DEVICES={rocr_visible} exposes {len(exposed)} device(s)."
+        )
+    return exposed[int(first)]
 
 
 def resolve_binary(explicit: str | None) -> Path:
@@ -141,7 +170,11 @@ def main() -> int:
         help="LDS-based workgroups-per-CU limit, 1–64 (default: 1); each workgroup reserves about 1/N of CU LDS",
     )
     ap.add_argument(
-        "--device", metavar="N", help="set HIP_VISIBLE_DEVICES for cotenant and command"
+        "--device",
+        metavar="N",
+        help="HIP device ordinal among the devices ROCR_VISIBLE_DEVICES exposes (all "
+        "GPUs when unset): sets HIP_VISIBLE_DEVICES=N for cotenant and command, "
+        "replacing any inherited value",
     )
     ap.add_argument(
         "--binary",
@@ -195,13 +228,13 @@ def main() -> int:
         print(f"running uncontended (no cotenant): {' '.join(command)}")
         return run_command(command, env)
 
-    # rocminfo selects via ROCR_VISIBLE_DEVICES; mirror the device the kernel
+    # rocminfo selects via ROCR_VISIBLE_DEVICES; point it at the device the kernel
     # will actually use (HIP_VISIBLE_DEVICES, from --device or the environment)
     # so the CU probe targets that GPU on heterogeneous multi-GPU hosts.
     probe_env = env.copy()
-    hip_visible = env.get("HIP_VISIBLE_DEVICES")
-    if hip_visible is not None:
-        probe_env["ROCR_VISIBLE_DEVICES"] = hip_visible
+    probe_rocr = probe_rocr_devices(env)
+    if probe_rocr is not None:
+        probe_env["ROCR_VISIBLE_DEVICES"] = probe_rocr
     total_cus = probe_cus(probe_env)
 
     if total_cus is None:

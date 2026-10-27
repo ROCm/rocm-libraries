@@ -300,7 +300,7 @@ def write_signature(out):
             for i in range(0, member.offset - last_ofs):
                 byt.append(0)
             for i in range(0, member.size):
-                byt.append(sig ^ i)
+                byt.append((sig ^ i) & 0xff)
             sig = (sig + 89) % 256
             last_ofs = member.offset + member.size
         for i in range(0, ctypes.sizeof(param['Arguments']) - last_ofs):
@@ -401,6 +401,16 @@ def instantiate(test):
     else:
       wgm_vector[0] = 0
     test['wgm_vector'] = wgm_vector
+
+    # A scalar is a one-element list; -1 (the default) is the empty list.
+    indices = test.get('solution_index_list', -1)
+    if not isinstance(indices, (list, tuple)):
+        indices = [] if indices == -1 else [indices]
+    max_len = dict(param['Arguments']._fields_)['solution_index_list']._length_
+    if len(indices) > max_len or any(int(i) < 0 for i in indices):
+        sys.exit("solution_index_list takes at most " + str(max_len) +
+                 " non-negative solution indices: " + str(test))
+    test['solution_index_list'] = [int(i) for i in indices] + [-1] * (max_len - len(indices))
 
 
     # Any Arguments fields declared as enums (a_type, b_type, etc.)

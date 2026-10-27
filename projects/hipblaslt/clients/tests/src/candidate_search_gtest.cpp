@@ -194,6 +194,80 @@ TEST(CandidateSearch_pre_checkin, SkipSlowDropsOnlyACandidateWithSlowColdLaunche
     EXPECT_EQ(host.count(entry("measured", 2)), 1);
 }
 
+// With the screen prepass, every candidate's cold launches are timed, after one untimed
+// launch, before any candidate is timed, and each is compared with the best cold time of
+// them all: the first candidate's slow cold launches drop it although nothing faster had
+// been seen when it was screened without the prepass.
+TEST(CandidateSearch_pre_checkin, ScreenPrepassComparesEveryCandidateBeforeTimingAny)
+{
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 2;
+    search.skip_slow_ratio = 0.5f;
+
+    HostSearch inOrder;
+    inOrder.cold_us   = {800, 200, 240};
+    inOrder.launch_us = {50, 300, 200};
+    EXPECT_EQ(inOrder.run(search, cpu_timing(2)).best, 0u)
+        << "without the prepass the first candidate is screened against itself";
+
+    search.screen_prepass = true;
+    HostSearch host;
+    host.cold_us   = {800, 200, 240};
+    host.launch_us = {50, 300, 200};
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 2u);
+
+    std::vector<std::string> expected;
+    for(size_t sol = 0; sol < 3; sol++)
+    {
+        expected.push_back(entry("prepare", sol));
+        for(int64_t i = 0; i < 3; i++)
+            expected.push_back(entry("cold", sol, i));
+    }
+    expected.push_back(entry("skipped", 0));
+    for(size_t sol = 1; sol < 3; sol++)
+    {
+        expected.push_back(entry("prepare", sol));
+        expected.push_back(entry("cold", sol, 0));
+        expected.push_back(entry("cold", sol, 1));
+        expected.push_back(entry("measuring", sol));
+        expected.push_back(entry("launch", sol, 0));
+        expected.push_back(entry("launch", sol, 1));
+        expected.push_back(entry("measured", sol));
+    }
+    EXPECT_EQ(host.log, expected);
+}
+
+// The screen prepass leaves each candidate's first cold launch untimed: a candidate whose
+// first launch is slow, as when its code object loads, but whose other cold launches are
+// as fast as the others' stays in the screen and can win.
+TEST(CandidateSearch_pre_checkin, ScreenPrepassLeavesTheFirstColdLaunchUntimed)
+{
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 2;
+    search.skip_slow_ratio = 0.5f;
+    search.screen_prepass  = true;
+
+    HostSearch host;
+    host.cold_us   = {100, 100, 100};
+    host.launch_us = {50, 300, 200};
+    bool loaded    = false;
+    host.on_cold   = [&](size_t sol, int32_t) {
+        if(sol == 0 && !loaded)
+        {
+            loaded = true;
+            FakeClock::now_us += 100000.0; // the code object loads
+        }
+    };
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(host.count(entry("skipped", 0)), 0);
+    EXPECT_EQ(result.best, 0u);
+}
+
 // A fatal failure while a candidate is prepared ends the search there.
 TEST(CandidateSearch_pre_checkin, AFailureWhilePreparingEndsTheSearch)
 {

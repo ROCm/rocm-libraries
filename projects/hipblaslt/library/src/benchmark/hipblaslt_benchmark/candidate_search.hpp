@@ -17,6 +17,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 // ============================================================================
 // Picking the fastest of several candidate solutions for one problem.
@@ -26,8 +27,11 @@
 // asked. With a skip-slow ratio set, the cold launches are timed too, and a candidate
 // whose cold launches take longer than the best cold time so far divided by the ratio
 // is dropped before its timed phase. The useful range is (0, 1): a ratio above 1 drops
-// every candidate, the first included. The winner is the candidate with the lowest
-// median; on a tie the earlier candidate stays.
+// every candidate, the first included. With the screen prepass, every candidate's cold
+// launches are timed before any candidate is timed, and each is compared with the best
+// cold time of them all, so the screen does not depend on the order of the candidates.
+// The winner is the candidate with the lowest median; on a tie the earlier candidate
+// stays.
 // ============================================================================
 
 namespace hipblaslt_bench
@@ -129,6 +133,11 @@ namespace hipblaslt_bench
         float   skip_slow_ratio = 0.0f; // 0 keeps every candidate
         bool    flush           = false; // flush the instruction cache after each timed launch
         int32_t flush_grid      = 0; // workgroups per flush, from flush_icache_grid
+        // With skip_slow_ratio set, screen every candidate before timing any: prepare it
+        // and time its cold launches, after one untimed launch that keeps lazy code object
+        // loading out of the time; then prepare and time only the candidates within the
+        // ratio of the best cold time of all of them.
+        bool screen_prepass = false;
     };
 
     struct SearchResult
@@ -183,7 +192,13 @@ namespace hipblaslt_bench
     // same arguments cannot take each other's place:
     //   search_callbacks().prepare(p).cold(c).launch(l).skipped(s).measuring(m).measured(d)
     //       .should_stop(t)
-    // For each candidate sol, in this order:
+    // For each candidate sol, in this order (with SearchConfig::screen_prepass, a first pass
+    // calls should_stop(), prepare(sol) and the cold launches of every candidate, its first
+    // cold launch untimed, and the screen compares each candidate with the best cold time of
+    // them all; a second pass then calls should_stop() and, for a candidate the first pass
+    // timed, skipped() if the screen drops it, else prepare(sol), its cold launches untimed
+    // and the steps below; a candidate the first pass could not prepare or time is passed
+    // over):
     //   should_stop()                        returning true ends the search
     //   prepare(sol)                         before anything else runs for sol; returning
     //                                        false skips sol
@@ -292,12 +307,75 @@ namespace hipblaslt_bench
         double                      best_gpu_time  = std::numeric_limits<double>::max();
         double                      best_warm_time = std::numeric_limits<double>::max();
 
+        // The screen prepass: each candidate's cold time, or a negative value for one
+        // that was not prepared or whose cold launches could not be timed.
+        const bool          prepass = search.skip_slow_ratio && search.screen_prepass;
+        std::vector<double> screened;
+        if(prepass)
+        {
+            screened.assign(candidates, -1.0);
+            for(size_t sol = 0; sol < candidates; sol++)
+            {
+                if(callbacks.on_should_stop())
+                {
+                    result.stopped = true;
+                    return result;
+                }
+
+                const bool failed_before = detail::aborted(should_abort);
+                auto newly_failed = [&] { return !failed_before && detail::aborted(should_abort); };
+
+                const bool prepared = detail::call_hook(callbacks.on_prepare, sol);
+                if(newly_failed())
+                {
+                    result.aborted = true;
+                    return result;
+                }
+                if(!prepared)
+                    continue;
+
+                bool cold_failed = false;
+                auto cold        = [&](int64_t i) {
+                    if(cold_failed)
+                        return;
+                    callbacks.on_cold(sol, static_cast<int32_t>(i));
+                    cold_failed = newly_failed();
+                };
+                int64_t index = 0;
+                if(search.cold_calls > 0)
+                    cold(index++);
+                double     warm_time = 0.0;
+                const bool warm_ok   = detail::time_batch<Hooks>(
+                    cold, search.cold_calls, index, timing.use_gpu_timer, events, warm_time);
+                if(newly_failed())
+                {
+                    result.aborted = true;
+                    return result;
+                }
+                if(!warm_ok)
+                    continue;
+                screened[sol]  = warm_time;
+                best_warm_time = best_warm_time < warm_time ? best_warm_time : warm_time;
+            }
+        }
+
         for(size_t sol = 0; sol < candidates; sol++)
         {
             if(callbacks.on_should_stop())
             {
                 result.stopped = true;
                 return result;
+            }
+
+            if(prepass)
+            {
+                if(screened[sol] < 0.0)
+                    continue;
+                if((screened[sol] * search.skip_slow_ratio) > best_warm_time)
+                {
+                    callbacks.on_skipped(sol, screened[sol], best_warm_time);
+                    continue;
+                }
             }
 
             const bool failed_before = detail::aborted(should_abort);
@@ -321,7 +399,7 @@ namespace hipblaslt_bench
             };
             double warm_time = 0.0;
             bool   warm_ok   = true;
-            if(search.skip_slow_ratio)
+            if(search.skip_slow_ratio && !prepass)
             {
                 int64_t index = 0;
                 warm_ok       = detail::time_batch<Hooks>(
@@ -340,7 +418,7 @@ namespace hipblaslt_bench
             if(!warm_ok)
                 continue;
 
-            if(search.skip_slow_ratio)
+            if(search.skip_slow_ratio && !prepass)
             {
                 best_warm_time = best_warm_time < warm_time ? best_warm_time : warm_time;
                 if((warm_time * search.skip_slow_ratio) > best_warm_time)

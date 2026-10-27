@@ -628,6 +628,7 @@ Arguments:
   - algo: c_uint32
   - solution_index: c_int32
   - requested_solution_num: c_int32
+  - solution_index_list: c_int32*4096
   - a_type: hipDataType
   - b_type: hipDataType
   - c_type: hipDataType
@@ -694,6 +695,7 @@ Arguments:
   - rotating: c_int32
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
+  - skip_screen_prepass: c_bool
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
   - print_solution_found: c_bool
@@ -735,6 +737,7 @@ Dictionary lists to expand:
 # cases with each of its elements.
 Lists to not expand:
   - e.g., an array argument not to be expanded
+  - solution_index_list
 
 # Defaults
 Defaults:
@@ -793,6 +796,7 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
+  solution_index_list: -1
   workspace_size: 0
   initialization: rand_int
   category: nightly
@@ -833,6 +837,7 @@ Defaults:
   rotating: 0
   use_gpu_timer: false
   skip_slow_solution_ratio: 0.0
+  skip_screen_prepass: false
   gsu_vector: 0
   wgm_vector: 0
   print_solution_found: false
