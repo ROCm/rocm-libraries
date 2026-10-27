@@ -16,6 +16,9 @@ from dispatch.sdpa import (
     SDPA_DIM_VOCABULARY,
     SDPA_FEATURES,
     SdpaBias,
+    SdpaDropout,
+    SdpaFp8,
+    SdpaPaged,
     SdpaRequest,
     SdpaTensor,
 )
@@ -160,6 +163,28 @@ def test_arch_is_canonical(arch):
     assert req.arch == "gfx950"
     cap = Capability(arches=("gfx950",), supports_features=BASE.features())
     assert cap.check(req) == (True, "ok")
+
+
+@pytest.mark.parametrize(
+    "field, empty, populated, feature",
+    [
+        ("paged", SdpaPaged(), SdpaPaged(max_seq_len_kv=8), "paged"),
+        ("fp8", SdpaFp8(), SdpaFp8(descale_q=packed((1,))), "fp8"),
+        (
+            "dropout",
+            SdpaDropout(0.0),
+            SdpaDropout(0.0, seed=packed((1,), "int64")),
+            "dropout",
+        ),
+    ],
+)
+def test_empty_group_is_absent(field, empty, populated, feature):
+    """A group with nothing set requests nothing, so a candidate that declines the
+    feature must still admit it; any populated field keeps the feature."""
+    req = replace(BASE, **{field: empty})
+    assert getattr(req, field) is None
+    assert req == BASE and req.normalized() == BASE.normalized()
+    assert feature in replace(BASE, **{field: populated}).features()
 
 
 def test_tuning_knobs_are_part_of_the_identity():

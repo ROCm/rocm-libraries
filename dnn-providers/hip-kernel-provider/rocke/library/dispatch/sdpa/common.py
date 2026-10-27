@@ -18,7 +18,9 @@ The request is normalized on construction, so one meaning has one spelling and
 - the scale has exactly one source, and ``scale`` is ``1.0`` unless that source is
   ``"value"``; a baked ``1.0`` is the default source, because hipDNN reads an
   unset scale as 1.0;
-- a bias is right-aligned to rank 4, and every size-1 bias dim has stride 0.
+- a bias is right-aligned to rank 4, and every size-1 bias dim has stride 0;
+- an empty ``SdpaPaged`` or ``SdpaFp8``, or a zero-probability ``SdpaDropout``
+  with no tensors, is ``None``.
 
 Deprecated causal flags do not exist here: :func:`dispatch.sdpa.hipdnn.from_hipdnn`
 folds them into ``(diagonal, left_bound, right_bound)`` before construction.
@@ -460,6 +462,15 @@ class SdpaRequest(OperatorRequest):
         object.__setattr__(self, "scale", float(self.scale))
         if self.scale_source == "value" and self.scale == 1.0:
             object.__setattr__(self, "scale_source", "default")
+        # A group with nothing set requests nothing; as from_hipdnn reads it, it
+        # is absent, so it reports no feature and does not split the cache key.
+        for name, empty in (
+            ("paged", SdpaPaged()),
+            ("fp8", SdpaFp8()),
+            ("dropout", SdpaDropout(0.0)),
+        ):
+            if getattr(self, name) == empty:
+                object.__setattr__(self, name, None)
 
     def _validate(self) -> None:
         """Frontend rules (``SdpaFwdNode::pre_validate_node``) plus Python-caller ones."""
