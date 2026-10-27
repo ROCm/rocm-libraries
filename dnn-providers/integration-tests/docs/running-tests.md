@@ -128,6 +128,78 @@ build/bin/hipdnn_integration_tests \
   runs anything.
 - Standard GTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`) works.
 
+### 4. Time the engine (`--benchmark`)
+
+`--benchmark` adds a performance measurement to each test. The test first
+verifies the engine output in the usual way. If the output passes, the harness
+times the same engine on the same tensors with `Graph::autotune()`, limited to
+that one engine. The C++ graph tests and the bundles both support it.
+
+A test is not timed when it skips, fails, or passes without output
+verification (a bundle at enforcement level APPLICABLE or BUILDABLE). Such a
+test prints no `[ BENCHMARK ]` line. A filter that selects only such tests
+gives a green run with no timings, so count the `[ BENCHMARK ]` lines.
+
+```bash
+build/bin/hipdnn_integration_tests \
+    --test-article build/lib/hipdnn_plugins/engines/libmiopen_plugin.so \
+    --test-engine  MIOPEN_ENGINE \
+    --gtest_filter='quick_ConvolutionFwd_Default.*' \
+    --benchmark \
+    --gtest_output=json:benchmark.json
+```
+
+Each timed test prints one line:
+
+```text
+[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE tuned=0 timing=DEVICE_ONLY samples=20 min=0.0181 ms robust=0.0184 ms mean=0.0184 ms stddev=0.0002 ms
+```
+
+- Autotune runs `--benchmark-warmup` untimed executions (default 30). Then it
+  runs `--benchmark-iterations` timed executions (default 20), with the
+  `FIXED_AVERAGE` strategy and the same stall gate, retry and statistics
+  rules as any other autotune call.
+- The GPU idles between tests, so each test starts cold. Too few warmup
+  executions make the times read high: on MI210 the quick-tier bundles read
+  4-60% slow with 1-10 warmups and settle after about 30. More timed
+  iterations do not fix this; more warmup does. Raise `--benchmark-warmup`
+  if `stddev` stays large compared with `mean`.
+- `robust` is the mean after autotune drops the slow tail: what the engine
+  usually costs. `min`, `mean` and `stddev` are over all timed samples.
+- `tuned=0` means that the engine chose its solution with its heuristics. The
+  harness sets no knobs, so this is the default. To time the solution that the
+  engine picks by benchmarking its candidates, set
+  `HIPDNN_FORCE_BENCHMARKING=1`. The line then shows `tuned=1` for engines
+  that support the `global.benchmarking` knob (MIOpen, the hip-kernel
+  ingestor). Engines without the knob, such as hipBLASLt, still show
+  `tuned=0`. The selection runs during the verification execution, so its
+  cost is not in the timed samples.
+- `timing=DEVICE_ONLY` means that the stream was stalled, so the times exclude
+  host submission overhead. `timing=UNSTALLED` means that autotune could not
+  stall the stream and re-measured without the stall gate, so the times can
+  include host time. Do not compare the two kinds.
+- The test fails with `benchmark failed: …` when autotune cannot benchmark the
+  engine, for example when an execution fails or too many timed executions
+  return no measurement.
+- `--gtest_output=json:<file>` or `xml:<file>` writes the same values as the
+  test properties `benchmark_engine`, `benchmark_tuned`, `benchmark_timing`,
+  `benchmark_samples`, `benchmark_min_ms`, `benchmark_robust_ms`,
+  `benchmark_mean_ms` and `benchmark_stddev_ms`.
+- `engine=` names the engine that ran. To compare engines, run once for each
+  `--test-engine`. Without `--test-engine`, hipDNN selects the engine.
+- To time your own graph, write it as a single-graph bundle
+  (`<dir>/MyGraph/MyGraph.json`, [format](file-formats.md)). Then pass
+  `--golden-data-dir <dir> --gtest_filter='MyGraph*'`. Without golden data, a
+  reference executor verifies the output. To convert a C++ graph test into a
+  bundle, use `--capture-bundles`.
+- Verification runs before timing. For large shapes, the CPU reference can be
+  slow. Use `--verification-mode gpu` when a GPU reference exists for the op.
+- To see the kernels that the engine launched, run the same command after
+  `rocprofv3 --kernel-trace --stats --output-format csv -d <dir> --`. In
+  `<dir>/*/*_kernel_stats.csv`, an engine kernel of a single-kernel graph has
+  1 + warmup + iterations calls. The other kernels fill the inputs or run the
+  reference.
+
 ### The build reads a copy of the bundles
 
 CMake copies `integration-test-bundles/` into `build/lib/integration-test-bundles/`
@@ -151,10 +223,13 @@ Otherwise, you test the old tree.
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
-| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph. **C++ graph tests only**; bundles ignore it (their equivalent is `enforcement_level`). |
+| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph, without executing it or comparing outputs. A bundle is taken only to its applicability rung, whatever its `enforcement_level`, and **skips** when the engine declines. Needs `--test-engine` for bundles. Support claims are still enforced; a claim is left `accepted`, never `confirmed`, because nothing was verified. |
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
+| `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
+| `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
+| `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):
@@ -164,6 +239,10 @@ The binary refuses these flag combinations (exit 1):
 - `--write-support-claims` together with `--enforce-support-claims` or `=true`.
 - `--write-support-claims` without `--test-article`, or without a bundle root
   (`--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR`).
+- `--benchmark-iterations` or `--benchmark-warmup` without `--benchmark`, or
+  `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
+- `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
+  or `--write-support-claims`. These modes do not execute the graph.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run
@@ -219,7 +298,9 @@ its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 The table shows what each CTest tier selects in the provider lanes. It applies
 to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
 bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
-pattern, and its `full` tier is `*Sdpa*`:
+pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider dense
+attention lane (see [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml))
+selects only `*_SdpaFwd_Default.*` bundles in every tier, `full` included:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
@@ -463,8 +544,11 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
   --output-on-failure`. This runs every registered lane and enforces claims. It
   does not run `dvc pull`, so golden comparisons there fall back to references and
   `hipdnn_golden_data_tests` registers nothing.
-- `.github/workflows/therock-ci-linux.yml` runs a bare `dvc pull` before
-  building, so golden data is present in those lanes.
+- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
+  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
+  default and was removed once it had gone unused; TheRock's multi-arch Linux
+  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
+  references in every CI lane today.
 
 ## Troubleshooting
 

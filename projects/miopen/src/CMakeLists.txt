@@ -207,6 +207,7 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
+    solver/conv/conv_direct_depthwise_fwd_2d.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
@@ -507,6 +508,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/hip_math_ops.hpp
         kernels/inst_wrappers.inc
         kernels/miopen_cstdint.hpp
+        kernels/miopen_initializer_list.hpp
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
@@ -550,6 +552,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv2d_depthwise_fwd.cpp
         kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
@@ -950,6 +953,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_BINARY_DIR}/include
         ${CMAKE_BINARY_DIR}/include)
 
+    # Added here because the rocm_install_targets(INCLUDE ...) call below only
+    # adds the include path as a side effect of installing. PUBLIC so in-tree
+    # consumers, such as forwarding_failure_probe, find hipdnn_forwarding.h.
+    target_include_directories(MIOpen PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
+
     # The wrapper's only dependency is the private library, so every symbol it
     # references must resolve at link time. This turns "new API added, stub
     # written, rename #define forgotten" from a runtime failure into a link
@@ -984,9 +993,21 @@ endif()
 # sub-compile only, so host code keeps UBSan. Applied as a target option on the MIOpen library
 # only, not a directory-wide add_compile_options, so it does not touch host tools, tests,
 # driver, or fin. SHELL: keeps the two tokens together and un-deduplicated.
+#
+# The same opt-out is needed at link time. These shared libraries link with --hip-link, and the
+# device toolchain otherwise inherits the host -fsanitize=undefined. Since LLVM #219973, clang then
+# links the host-side libclang_rt.ubsan_offload.a into the shared library. That archive references
+# sanitizer_common internals (e.g. __sanitizer::SanitizerToolName) that only the static
+# ubsan_standalone runtime of the executable defines and that the executable does not export, so
+# every consumer fails to load with "undefined symbol: _ZN11__sanitizer17SanitizerToolNameE".
+# The link option is per-target, not add_link_options: links without --hip-link (host tools)
+# would reject the unused -Xarch_device argument under -Werror.
 if(MIOPEN_DISABLE_DEVICE_UBSAN)
     target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+    foreach(_miopen_lib IN LISTS _MIOPEN_INSTALL_TARGETS)
+        target_link_options(${_miopen_lib} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
+    endforeach()
 endif()
 
 # Add dependency on inlined rocrand header if it was created
@@ -1195,6 +1216,13 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
+# Installs hipdnn_forwarding.h. rocm_install_targets also adds the directory to
+# the include path of every target it installs, MIOpen_private included, but
+# MIOpen does not rely on that: it gets the path from its own include above.
+set(MIOPEN_WRAPPER_HEADER_PATH)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)
+endif()
 
 rocm_install_targets(
   TARGETS ${_MIOPEN_INSTALL_TARGETS}
@@ -1202,6 +1230,7 @@ rocm_install_targets(
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
+    ${MIOPEN_WRAPPER_HEADER_PATH}
 )
 
 rocm_export_targets(

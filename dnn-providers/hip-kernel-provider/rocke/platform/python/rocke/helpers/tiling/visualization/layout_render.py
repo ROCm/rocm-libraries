@@ -1668,7 +1668,7 @@ class LogicalTileComponent(CellFieldMixin):
     addr_fn: object | None = (
         None  # (c0,c1)->addr: memory order for vectorization shade (b/c)
     )
-    # + physical-vector borders (c); None -> coord (row-major) order
+    # + physical-vector borders (c); None -> coord order (last axis fastest)
     detail_first: bool = True  # first auto-group detailed, the rest grouped
     groups: tuple = ()  # of LogicalGroup; empty -> one detailed group over all cells
     color_mode: str = "first8"  # "first8" (owner lanes 0-7 coloured) | "full"
@@ -1798,13 +1798,13 @@ class LogicalTileComponent(CellFieldMixin):
     def _vector_shade(self):
         """SHADE = transaction TIME order (§9.6): ONE shade per vectorized access, width from the descriptor
         STRIDES (``addr_fn``), CAPPED at b128 via ``vector_transactions`` -- ✗ never uncapped ``transactions``
-        or an assumed row-major order. REQUIRES ``addr_fn`` (memory order) AND ``dtype_bits`` (the b128 cap);
+        or an assumed memory order. REQUIRES ``addr_fn`` (memory order) AND ``dtype_bits`` (the b128 cap);
         a caller that has neither must pass an explicit ``shade_map`` instead of asking for a memory shade.
         """
         if self.addr_fn is None or self.dtype_bits is None:
             raise ValueError(
                 "a memory-transaction shade (mode thread_tile) needs addr_fn (memory order from the descriptor "
-                "strides) AND dtype_bits (for the b128 cap) -- refuse to assume row-major / uncapped. "
+                "strides) AND dtype_bits (for the b128 cap) -- refuse to assume a memory order / uncapped. "
                 "Pass both, or supply an explicit shade_map."
             )
         mp = {(lane, reg): coord for coord, (lane, reg) in self._owner.items()}
@@ -2877,16 +2877,6 @@ def flow_wave_mma(mma, **overrides):
     return MmaTee.from_mma(mma, **overrides)
 
 
-def _dtype_bits(name):
-    """Element bit width from a dtype tag ('f16'->16, 'bf16'->16, 'f32'->32, 'f64'->64, 'i8'->8).
-    RAISES on an untagged/unknown dtype -- a silent width default would render an inaccurate diagram.
-    """
-    digits = "".join(c for c in str(name) if c.isdigit())
-    if not digits:
-        raise ValueError(f"cannot infer dtype bits from {name!r} (no width in the tag)")
-    return int(digits)
-
-
 @dataclass
 class MmaTee:
     """Automated MMA-tee generator: composes the two components (A/B ``RegisterFileComponent`` wings +
@@ -2971,6 +2961,8 @@ class MmaTee:
         # `a_enc`/`b_enc` override to render a styled operand. C derives by flowing the supplied labels
         # through the refs.
         a_canon, b_canon, c_canon = canonical_layouts(t, mma.subtiles)
+        # The C/D fragment is drawn with the result's width (they differ only for "bf16f32").
+        a_bits, b_bits, _, d_bits = t.element_bits()
         base = dict(
             a_enc=a_canon,
             b_enc=b_canon,
@@ -2979,9 +2971,9 @@ class MmaTee:
             a_canon=a_canon,
             b_canon=b_canon,
             c_canon=c_canon,
-            a_dtype_bits=_dtype_bits(t.input_dtype),
-            b_dtype_bits=_dtype_bits(t.input_dtype),
-            c_dtype_bits=_dtype_bits(t.output_dtype),
+            a_dtype_bits=a_bits,
+            b_dtype_bits=b_bits,
+            c_dtype_bits=d_bits,
             in_dtype=t.input_dtype,
             out_dtype=t.output_dtype,
             op_id=mma.op_id,
@@ -4172,11 +4164,7 @@ def render_coalescing(
                 frameon=True,
                 borderaxespad=0.0,
             )
-    order = "row-major" if report.stride1_axis == report.dims[-1] else "col-major"
-    head = (
-        title
-        or f"{report.direction} coalescing -- {report.stride1_axis} stride-1 ({order})"
-    )
+    head = title or f"{report.direction} coalescing -- {report.stride1_axis}-contiguous"
     fig.text(0.5, 0.975, head, ha="center", va="top", fontsize=12, weight="bold")
     fig.text(
         0.5,
