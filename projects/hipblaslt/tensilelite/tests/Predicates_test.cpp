@@ -97,6 +97,18 @@ TEST(Predicates, WorkgroupMappingXCCCheck_DeviceQueryIsEvaluationOnly)
     EXPECT_NO_THROW(checked(problem));
 }
 
+TEST(Predicates, WorkgroupMappingXCCCheck_ZeroCuCountRejects)
+{
+    using namespace TensileLite;
+    // 0 % 4 == 0, so a count that was not published yet used to accept the
+    // kernel. A count of 0 is not a device the check can pass.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{4, -1}, 0u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_FALSE((*pred)(problem));
+}
+
 TEST(Predicates, WorkgroupMappingXCCCheck_38CU_XCC4_Fails)
 {
     using namespace TensileLite;

@@ -40,6 +40,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -3054,10 +3055,17 @@ namespace TensileLite
                 // evaluate them, so that path does not need a GPU. Evaluating this
                 // predicate does, unless value[0] is -1, in which case the check
                 // is skipped and no device is queried.
-                std::array<int, 2>         value{};
-                mutable size_t             cuCount = 0;
-                mutable AMDGPU::Processor  processor{};
-                mutable bool               deviceStateCaptured = false;
+                //
+                // The library object is shared by every handle. CachingLibrary
+                // evaluates predicates outside its lock, so two threads can enter
+                // here together. call_once runs the query on one thread and
+                // publishes cuCount and processor to the others. A plain flag
+                // let a second thread observe the flag before cuCount was stored
+                // and then accept the kernel, because 0 % XCC == 0.
+                std::array<int, 2>        value{};
+                mutable size_t            cuCount = 0;
+                mutable AMDGPU::Processor processor{};
+                mutable std::once_flag    deviceQueryOnce;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3086,14 +3094,14 @@ namespace TensileLite
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
                 /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
-                /// Marks the device state captured so a later evaluation does not
-                /// replace the injected count with the machine's GPU.
+                /// Completes deviceQueryOnce so a later evaluation does not replace
+                /// the injected count with the machine's GPU.
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
                     , cuCount(cuCountForTest)
                     , processor(AMDGPU::Processor::gfx942)
-                    , deviceStateCaptured(true)
                 {
+                    std::call_once(deviceQueryOnce, [] {});
                 }
 
                 static std::string Type()
@@ -3110,15 +3118,21 @@ namespace TensileLite
                     assert(pHardware != nullptr);
                     Hardware const& hardware = *pHardware;
                     AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
-                    deviceStateCaptured      = true;
+                    cuCount   = pAMDGPU->computeUnitCount;
+                    processor = pAMDGPU->processor;
                 }
 
                 void ensureDeviceState() const
                 {
-                    if(!deviceStateCaptured)
-                        captureCuCount();
+                    std::call_once(deviceQueryOnce, [this] { captureCuCount(); });
+                }
+
+                /// A count of 0 is not a device this check can accept. 0 % XCC == 0,
+                /// so running the modulo would select a kernel the predicate is
+                /// there to reject. The caller skips the solution instead.
+                bool deviceHasNoComputeUnits() const
+                {
+                    return cuCount == 0;
                 }
 
             public:
@@ -3130,6 +3144,8 @@ namespace TensileLite
                     if(value[0] == -1)
                         return true;
                     ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                        return false;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
@@ -3145,6 +3161,11 @@ namespace TensileLite
                     if(value[0] == -1)
                         return true;
                     ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                    {
+                        PredicateDebugger::printRow(stream, false, Type(), "cuCount == 0");
+                        return false;
+                    }
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
