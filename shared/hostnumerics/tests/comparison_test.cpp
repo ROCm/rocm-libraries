@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <complex>
 #include <vector>
 
 #include "hostnumerics_test_support.hpp"
@@ -11,6 +12,39 @@ TEST(Comparison, Float32ToleranceUsesWiderDifference) {
     const auto result = compare(Tensor(1.0f), Tensor(-0x1p-25f), options);
     EXPECT_FALSE(result.passed());
     EXPECT_GT(result.maxAbsoluteDifference, options.absoluteTolerance);
+}
+
+TEST(Comparison, SymmetricUnitToleranceIsStrictAndComponentwise) {
+    using namespace roc::hostnumerics;
+    ComparisonOptions options;
+    options.relativeTolerance = 0.1;
+    options.elementwiseToleranceModel = ElementwiseToleranceModel::SymmetricUnitScaled;
+    options.arithmeticPrecision = ComparisonArithmeticPrecision::Float32;
+    options.strictElementwiseTolerance = true;
+    auto boundary = options;
+    boundary.relativeTolerance = 0.5;
+
+    for (bool detailed : {false, true}) {
+        options.computeElementwiseStatistics = detailed;
+        options.computeFrobenius = detailed;
+        boundary.computeElementwiseStatistics = detailed;
+        boundary.computeFrobenius = detailed;
+        EXPECT_TRUE(compare(Tensor::scalar(ScalarType::BFloat16, 1.3125f),
+                            Tensor::scalar(ScalarType::BFloat16, 1.0f), options)
+                        .passed());
+        EXPECT_TRUE(compare(Tensor::scalar(ScalarType::BFloat16, 1.0f),
+                            Tensor::scalar(ScalarType::BFloat16, 1.3125f), options)
+                        .passed());
+        EXPECT_FALSE(compare(Tensor::scalar(ScalarType::BFloat16, 0.71875f),
+                             Tensor::scalar(ScalarType::BFloat16, 1.0f), options)
+                         .passed());
+        EXPECT_FALSE(compare(Tensor(0.0f), Tensor(1.0f), boundary).passed());
+        EXPECT_TRUE(compare(Tensor(std::complex<float>{0.09f, 0.09f}),
+                            Tensor(std::complex<float>{0.0f, 0.0f}), options)
+                        .passed());
+    }
+    boundary.strictElementwiseTolerance = false;
+    EXPECT_TRUE(compare(Tensor(0.0f), Tensor(1.0f), boundary).passed());
 }
 
 namespace hostnumerics_test {

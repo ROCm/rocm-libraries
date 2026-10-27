@@ -33,6 +33,57 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
                     if detailed:
                         self.assertEqual(report.max_absolute_difference, difference)
 
+    def test_symmetric_unit_tolerance_matches_strict_scalar_oracle(self):
+        cases = [
+            (1.3125, 1.0, 0.1),
+            (1.0, 1.3125, 0.1),
+            (0.71875, 1.0, 0.1),
+            (0.0, 1.0, 0.5),
+            (1.0, 1.0002, 0.0002),
+            (1.0, 1.001, 0.0002),
+        ]
+        for dtype, precision in (
+            (np.float32, hv.ComparisonArithmeticPrecision.Float32),
+            (np.float64, hv.ComparisonArithmeticPrecision.Float64),
+        ):
+            for observed, expected, tolerance in cases:
+                a, b, tol = dtype(observed), dtype(expected), dtype(tolerance)
+                with np.errstate(over="ignore", invalid="ignore"):
+                    difference = dtype(abs(dtype(a - b)))
+                    scale = dtype(dtype(abs(a) + abs(b)) + dtype(1))
+                    legacy = bool(a == b or difference < dtype(tol * scale))
+                for detailed in (False, True):
+                    with self.subTest(dtype=dtype, values=(a, b), detailed=detailed):
+                        options = hv.ComparisonOptions()
+                        options.relative_tolerance = tolerance
+                        options.elementwise_tolerance_model = (
+                            hv.ElementwiseToleranceModel.SymmetricUnitScaled
+                        )
+                        options.arithmetic_precision = precision
+                        options.strict_elementwise_tolerance = True
+                        options.compute_elementwise_statistics = detailed
+                        options.compute_frobenius = detailed
+                        options.max_reported_mismatches = 0
+                        report = hv.compare(
+                            hv.from_numpy(np.asarray([a], dtype=dtype)),
+                            hv.from_numpy(np.asarray([b], dtype=dtype)),
+                            options,
+                        )
+                        self.assertEqual(report.passed, legacy)
+
+        complex_observed = hv.from_numpy(np.asarray([0.09 + 0.09j], dtype=np.complex64))
+        complex_expected = hv.from_numpy(np.asarray([0.0 + 0.0j], dtype=np.complex64))
+        options = hv.ComparisonOptions()
+        options.relative_tolerance = 0.1
+        options.elementwise_tolerance_model = (
+            hv.ElementwiseToleranceModel.SymmetricUnitScaled
+        )
+        options.arithmetic_precision = hv.ComparisonArithmeticPrecision.Float32
+        options.strict_elementwise_tolerance = True
+        self.assertTrue(hv.compare(complex_observed, complex_expected, options).passed)
+        options.complex_comparison_mode = hv.ComplexComparisonMode.Magnitude
+        self.assertFalse(hv.compare(complex_observed, complex_expected, options).passed)
+
     def test_explicit_relative_norm_policy(self):
         options = hv.ComparisonOptions()
         options.all_close = False

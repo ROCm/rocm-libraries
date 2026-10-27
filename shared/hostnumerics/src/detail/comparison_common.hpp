@@ -113,26 +113,74 @@ long double integralDifference(Observed observed, Expected expected) {
            static_cast<long double>(expectedMagnitude);
 }
 
-template <typename Observed, typename Expected>
-bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptions& options) {
+template <typename Arithmetic>
+Arithmetic elementwiseTolerance(Arithmetic observedMagnitude, Arithmetic expectedMagnitude,
+                                const ComparisonOptions& options) {
+    const Arithmetic absolute = static_cast<Arithmetic>(options.absoluteTolerance);
+    const Arithmetic relative = static_cast<Arithmetic>(options.relativeTolerance);
+    if (options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled)
+        return absolute + relative * (observedMagnitude + expectedMagnitude + Arithmetic{1});
+    return absolute + relative * expectedMagnitude;
+}
+
+template <typename Arithmetic, ElementwiseToleranceModel Model, bool Strict, typename Observed,
+          typename Expected>
+bool valuesCloseFixed(Observed observed, Expected expected, const ComparisonOptions& options) {
     if (observed == expected) return true;
     if constexpr (std::is_integral_v<Observed> && std::is_integral_v<Expected>) {
+        const long double observedMagnitude = integralMagnitude(observed);
         const long double expectedMagnitude = integralMagnitude(expected);
         const long double difference = integralDifference(observed, expected);
+        const long double absolute = static_cast<long double>(options.absoluteTolerance);
+        const long double relative = static_cast<long double>(options.relativeTolerance);
         const long double tolerance =
-            options.absoluteTolerance + options.relativeTolerance * expectedMagnitude;
-        return difference <= tolerance;
+            Model == ElementwiseToleranceModel::SymmetricUnitScaled
+                ? absolute + relative * (observedMagnitude + expectedMagnitude + 1.0L)
+                : absolute + relative * expectedMagnitude;
+        return Strict ? difference < tolerance : difference <= tolerance;
     } else {
-        if (std::isnan(observed) || std::isnan(expected))
-            return options.equalNaNs && std::isnan(observed) && std::isnan(expected);
-        if (std::isinf(observed) || std::isinf(expected)) return false;
-
-        const double difference =
-            std::abs(static_cast<double>(observed) - static_cast<double>(expected));
-        const double tolerance =
-            options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
-        return difference <= tolerance;
+        const Arithmetic a = static_cast<Arithmetic>(observed);
+        const Arithmetic b = static_cast<Arithmetic>(expected);
+        if (std::isnan(a) || std::isnan(b))
+            return options.equalNaNs && std::isnan(a) && std::isnan(b);
+        if (std::isinf(a) || std::isinf(b)) return false;
+        const Arithmetic difference = std::abs(a - b);
+        const Arithmetic absolute = static_cast<Arithmetic>(options.absoluteTolerance);
+        const Arithmetic relative = static_cast<Arithmetic>(options.relativeTolerance);
+        const Arithmetic tolerance =
+            Model == ElementwiseToleranceModel::SymmetricUnitScaled
+                ? absolute + relative * (std::abs(a) + std::abs(b) + Arithmetic{1})
+                : absolute + relative * std::abs(b);
+        return Strict ? difference < tolerance : difference <= tolerance;
     }
+}
+
+template <typename Observed, typename Expected>
+bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptions& options) {
+    if (options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled) {
+        if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32)
+            return options.strictElementwiseTolerance
+                       ? valuesCloseFixed<float, ElementwiseToleranceModel::SymmetricUnitScaled,
+                                          true>(observed, expected, options)
+                       : valuesCloseFixed<float, ElementwiseToleranceModel::SymmetricUnitScaled,
+                                          false>(observed, expected, options);
+        return options.strictElementwiseTolerance
+                   ? valuesCloseFixed<double, ElementwiseToleranceModel::SymmetricUnitScaled, true>(
+                         observed, expected, options)
+                   : valuesCloseFixed<double, ElementwiseToleranceModel::SymmetricUnitScaled,
+                                      false>(observed, expected, options);
+    }
+    if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32)
+        return options.strictElementwiseTolerance
+                   ? valuesCloseFixed<float, ElementwiseToleranceModel::ExpectedScaled, true>(
+                         observed, expected, options)
+                   : valuesCloseFixed<float, ElementwiseToleranceModel::ExpectedScaled, false>(
+                         observed, expected, options);
+    return options.strictElementwiseTolerance
+               ? valuesCloseFixed<double, ElementwiseToleranceModel::ExpectedScaled, true>(
+                     observed, expected, options)
+               : valuesCloseFixed<double, ElementwiseToleranceModel::ExpectedScaled, false>(
+                     observed, expected, options);
 }
 
 struct ComponentResult {

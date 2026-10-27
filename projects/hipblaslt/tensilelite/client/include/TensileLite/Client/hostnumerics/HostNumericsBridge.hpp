@@ -262,12 +262,12 @@ namespace TensileLite::Client
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::GeluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::GeluDerivativeActivation{});
+                             roc::hostnumerics::GeluDerivativeActivation{});
         case ActivationType::DRelu:
             return gradientApplication
                        ? roc::hostnumerics::ActivationFunction(roc::hostnumerics::ReluActivation{})
                        : roc::hostnumerics::ActivationFunction(
-                           roc::hostnumerics::ReluDerivativeActivation{});
+                             roc::hostnumerics::ReluDerivativeActivation{});
         case ActivationType::Silu:
             return roc::hostnumerics::ActivationFunction(roc::hostnumerics::SiluActivation{});
         case ActivationType::Swish:
@@ -291,7 +291,9 @@ namespace TensileLite::Client
     inline roc::hostnumerics::ComparisonOptions validationComparisonOptions(rocisa::DataType type,
                                                                             double threshold)
     {
+        using roc::hostnumerics::ComparisonArithmeticPrecision;
         using roc::hostnumerics::ComparisonOptions;
+        using roc::hostnumerics::ElementwiseToleranceModel;
         using roc::hostnumerics::ScalarType;
 
         const ScalarType scalarType       = toHostNumericsScalarType(type);
@@ -341,12 +343,16 @@ namespace TensileLite::Client
             = scalarType == ScalarType::Float32 && threshold > 0.0 ? threshold : defaultTolerance;
 
         ComparisonOptions options;
-        // Preserve the scale of TensileLite's historical symmetric check while
-        // expressing it through the NumPy allclose model. Near zero the old +1
-        // term was an absolute tolerance; for similar nonzero operands its two
-        // magnitude terms correspond to roughly twice that relative tolerance.
-        options.absoluteTolerance = tolerance;
-        options.relativeTolerance = 2.0 * tolerance;
+        if(tolerance > 0.0)
+        {
+            options.relativeTolerance          = tolerance;
+            options.elementwiseToleranceModel  = ElementwiseToleranceModel::SymmetricUnitScaled;
+            options.strictElementwiseTolerance = true;
+            options.arithmeticPrecision
+                = scalarType == ScalarType::Float64 || scalarType == ScalarType::ComplexFloat64
+                      ? ComparisonArithmeticPrecision::Float64
+                      : ComparisonArithmeticPrecision::Float32;
+        }
         return options;
     }
 
