@@ -343,7 +343,7 @@ Jenkins `rocsparse-test` filters exclude `*known_bug*`. The device unit binary i
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | Yes | CI / DevOps | `clang-format`, `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
 | ASAN | Separate lane | CI / DevOps | Dedicated TheRock ASAN workflows (multi-arch / nightly) + Jenkins `asan.groovy`; not a confirmed per-PR blocking gate |
-| Code coverage | Codecov status | Component team / CI | `rocSPARSE` and `rocSPARSE-unit` project statuses fail under the 80% target in `codecov.yml`. `rocSPARSE-integration` is informational and has no target. Jenkins `codecov.groovy`. TheRock does not run this status. |
+| Code coverage | Codecov status | Component team / CI | `rocSPARSE` and `rocSPARSE-unit` project statuses fail under the 80% target in `codecov.yml`. Jenkins `codecov.groovy`. TheRock does not run this status. |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
@@ -362,7 +362,7 @@ Jenkins first runs `dvc pull -R projects/rocsparse/clients/matrices` (`pullMatri
 |---|---|
 | Trusted gate | TheRock CI `standard` category on changed projects: `quick`+`pre_checkin` on `rocsparse-test` (excluding `*known_bug*`) and both unit-test binaries via their `standard` CTest label. Jenkins `precheckin` launches both unit binaries directly |
 | Codecov project status | `rocSPARSE` and `rocSPARSE-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status, and `develop` branch protection has not been confirmed to require it. |
-| Informational | `rocSPARSE-integration` (no target); unit-test failures inside `coverage_analysis` (ignored so the upload continues); nightly `*nightly*` / comprehensive results; ASAN lane |
+| Informational | Unit-test failures inside `coverage_analysis` (ignored so the upload continues); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
 **Flaky / known-bug policy:** rocSPARSE has no `known_bugs.yaml`. A case that exposes a tracked
@@ -400,15 +400,15 @@ with flag `rocSPARSE`.
 `make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
 profiles (`rocsparse-unit-test` and `rocsparse-unit-test-device`) and the `rocsparse-test` profiles
 separately and writes `coverage-report/coverage-unit.info` and
-`coverage-report/coverage-integration.info`. Jenkins uploads them with the Codecov flags
-`rocSPARSE-unit` and `rocSPARSE-integration`, only if `coverage_split` succeeds; the combined
-`rocSPARSE` flag covers both. `make coverage_cleanup` deletes the profiles of a previous run.
+`coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
+flag `rocSPARSE-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
+local look and is not uploaded. The combined `rocSPARSE` flag is `coverage.info`, which includes
+both runs. `make coverage_cleanup` deletes the profiles of a previous run.
 
 The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocSPARSE` and
 `rocSPARSE-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
-failure when either flag is under 80%. `rocSPARSE-integration` carries forward, is informational,
-and has no target. TheRock does not run these statuses. Branch protection on `develop` has not been
-confirmed to require them.
+failure when either flag is under 80%. TheRock does not run these statuses. Branch protection on
+`develop` has not been confirmed to require them.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
@@ -423,9 +423,8 @@ confirmed to require them.
 hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
 into a single report. This is a major gap because many rocSPARSE routines dispatch to different kernels
 at runtime based on the wavefront size (32 vs. 64), so in any given coverage run the alternate branch
-(the `if` or the `else`) is never hit. That missing wavefront is why `rocSPARSE-integration` has no
-coverage target. The 80% targets on `rocSPARSE` and `rocSPARSE-unit` apply to whichever wavefront
-the coverage job ran.
+(the `if` or the `else`) is never hit. The 80% targets on `rocSPARSE` and `rocSPARSE-unit` apply to
+whichever wavefront the coverage job ran.
 
 **Scope:** measured on Linux; Windows coverage is not tracked separately.
 
