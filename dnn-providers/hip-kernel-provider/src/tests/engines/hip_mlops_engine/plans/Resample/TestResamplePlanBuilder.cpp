@@ -77,10 +77,11 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
         hipdnn_test_sdk::utilities::createValidResampleFwdGraph(), isApplicable);
 }
 
-// Bug caught: an alignment requirement added to the scalar-access Resample forward kernel, or a
-// read of the declared alignment that declines tensors declaring only their element size, with
-// and without the 4-byte max-pool index tensor.
-TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+// Bug caught: a tensor declaring less than its element size, or a non-multiple of it, accepted
+// (the kernel then loads it through a misaligned pointer), or a declaration of exactly the
+// element size or the default 16 wrongly declined, with and without the 4-byte max-pool index
+// tensor.
+TEST_F(TestResamplePlanBuilder, IsApplicableFollowsDeclaredAlignmentAgainstElementSize)
 {
     const auto isApplicable
         = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {

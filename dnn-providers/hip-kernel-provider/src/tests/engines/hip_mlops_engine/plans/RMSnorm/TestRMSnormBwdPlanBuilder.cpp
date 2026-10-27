@@ -325,11 +325,11 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
     }
 }
 
-// Bug caught: an alignment requirement added to the scalar-access RMSNorm backward kernels, or a
-// read of the declared alignment that declines tensors declaring only their element size, for
-// the single-node graph with 4-byte and 2-byte elements and for the activation-fused graph at
-// its default fp32 types.
-TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+// Bug caught: a tensor declaring less than its element size, or a non-multiple of it, accepted
+// (the kernels then load it through a misaligned pointer), or a declaration of exactly the
+// element size or the default 16 wrongly declined, for the single-node graph with 4-byte and
+// 2-byte elements and for the activation-fused graph at its default fp32 types.
+TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableFollowsDeclaredAlignmentAgainstElementSize)
 {
     const auto isApplicable
         = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {

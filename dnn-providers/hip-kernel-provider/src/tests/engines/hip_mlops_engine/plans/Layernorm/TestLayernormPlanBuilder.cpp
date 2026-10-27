@@ -133,10 +133,11 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
     }
 }
 
-// Bug caught: an alignment requirement added to the scalar-access LayerNorm kernels, or a read
-// of the declared alignment that declines tensors declaring only their element size, for both
-// the forward and the backward graph, for 4-byte and 2-byte elements.
-TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+// Bug caught: a tensor declaring less than its element size, or a non-multiple of it, accepted
+// (the kernels then load it through a misaligned pointer), or a declaration of exactly the
+// element size or the default 16 wrongly declined, for the forward and the backward graph with
+// 4-byte and 2-byte elements.
+TEST_F(TestLayernormPlanBuilder, IsApplicableFollowsDeclaredAlignmentAgainstElementSize)
 {
     const auto isApplicable
         = [this](const IGraph& graph) { return _planBuilder.isApplicable(_dummyHandle, graph); };

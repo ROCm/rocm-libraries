@@ -16,6 +16,7 @@
 #include <string>
 
 #include "RMSnormBwdPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/DeclaredAlignment.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
 
@@ -110,6 +111,15 @@ bool RMSnormBwdPlanBuilder::isApplicable(
     if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
     {
         HIPDNN_PLUGIN_LOG_INFO("RMSnormBwd plan builder does not support ragged tensors");
+        return false;
+    }
+
+    // The kernels load and store one element at a time, so each device pointer only has to be a
+    // multiple of its element size. Decline a graph that declares less than that for a tensor.
+    if(const auto uncovered = findTensorWithUncoveredElementAlignment(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("RMSnormBwd plan builder: tensor "
+                               << *uncovered << " declares an alignment below its element size");
         return false;
     }
 

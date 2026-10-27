@@ -12,6 +12,7 @@
 #include "LayernormPlanBuilder.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "device/IDevicePropertyProvider.hpp"
+#include "engines/hip_mlops_engine/plans/DeclaredAlignment.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
@@ -119,6 +120,17 @@ bool LayernormPlanBuilder::isApplicable(
         if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
         {
             HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder does not support ragged tensors");
+            return false;
+        }
+
+        // The kernels load and store one element at a time, so each device pointer only has to
+        // be a multiple of its element size. Decline a graph that declares less than that for a
+        // tensor.
+        if(const auto uncovered = findTensorWithUncoveredElementAlignment(opGraph.getTensorMap()))
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder: tensor "
+                                   << *uncovered
+                                   << " declares an alignment below its element size");
             return false;
         }
 

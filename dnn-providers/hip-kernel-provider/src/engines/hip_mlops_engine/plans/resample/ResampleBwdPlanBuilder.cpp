@@ -5,6 +5,7 @@
 
 #include "ResampleApplicabilityChecks.hpp"
 #include "ResampleBwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/DeclaredAlignment.hpp"
 
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -31,6 +32,15 @@ bool ResampleBwdPlanBuilder::isApplicable(
     if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
     {
         HIPDNN_PLUGIN_LOG_INFO("ResampleBwd plan builder does not support ragged tensors");
+        return false;
+    }
+
+    // The kernel loads and stores one element at a time, so each device pointer only has to be a
+    // multiple of its element size. Decline a graph that declares less than that for a tensor.
+    if(const auto uncovered = findTensorWithUncoveredElementAlignment(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("ResampleBwd plan builder: tensor "
+                               << *uncovered << " declares an alignment below its element size");
         return false;
     }
 

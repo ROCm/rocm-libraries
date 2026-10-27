@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 namespace hip_kernel_provider::test_utils
 {
@@ -79,12 +80,38 @@ void expectDeclaredAlignments(const void* graphBuffer, AlignmentFn&& alignmentFo
     }
 }
 
-/// Asserts that @p isApplicable accepts @p valid as built (default alignment), and still accepts
-/// it when every tensor declares only its own element size as alignment (the smallest alignment
-/// a typed buffer can have), and when every tensor declares 1 byte. For engines whose kernels
-/// only issue scalar element accesses, the declared alignment carries no requirement beyond
-/// that. The accepted baseline is what makes the later acceptances mean something: a graph
-/// that is declined for another reason cannot pass.
+/// Re-serializes a graph with the declared alignment of the tensor @p uid set to @p alignment and
+/// every other tensor left as built.
+inline flatbuffers::DetachedBuffer
+    withTensorAlignment(const void* graphBuffer, int64_t uid, int64_t alignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            tensor->alignment = alignment;
+        }
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder.Release();
+}
+
+/// Asserts how @p isApplicable follows the declared alignment of a graph whose kernels only
+/// access whole elements, so that each device pointer needs to be a multiple of its element
+/// size and nothing more:
+///  - @p valid as built (default alignment) is accepted. This baseline is what makes the later
+///    results mean something: a graph declined for another reason cannot pass.
+///  - Every tensor declared at exactly its element size is accepted (the boundary).
+///  - For each tensor with a device buffer, a declaration that is a multiple of the element size
+///    is accepted, and one below it or one that is not a multiple is declined.
+///  - Virtual tensors and pass-by-value scalars have no device pointer the backend checks, so
+///    declaring 1 byte for them is accepted.
+///  - Declaring 1 byte for every tensor is declined.
 ///
 /// @param isApplicable Callable taking `const IGraph&` and returning bool.
 template <typename IsApplicableFn>
@@ -93,27 +120,58 @@ void expectAcceptedAtMinimalAlignment(const flatbuffers::FlatBufferBuilder& vali
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
+    const auto accepts = [&isApplicable](const flatbuffers::DetachedBuffer& buffer) {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(buffer.data(),
+                                                                               buffer.size());
+        return isApplicable(graph);
+    };
     const auto elementSize = [](DataType type) { return elementSizeBytes(type); };
     const auto oneByte = [](DataType /*type*/) { return int64_t{1}; };
+    const void* validBuffer = valid.GetBufferPointer();
 
     {
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
-            valid.GetBufferPointer(), valid.GetSize());
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(validBuffer,
+                                                                                  valid.GetSize());
         EXPECT_TRUE(isApplicable(baseline)) << "the graph at default alignment must be accepted";
     }
     {
-        const auto aligned = withTensorAlignments(valid.GetBufferPointer(), elementSize);
+        const auto aligned = withTensorAlignments(validBuffer, elementSize);
         expectDeclaredAlignments(aligned.data(), elementSize);
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(aligned.data(),
-                                                                               aligned.size());
-        EXPECT_TRUE(isApplicable(graph)) << "element-size alignment was declined";
+        EXPECT_TRUE(accepts(aligned)) << "every tensor declared at its element size was declined";
     }
+
+    bool anyMultiByteElement = false;
+    const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(validBuffer);
+    for(const auto* tensor : *graph->tensors())
     {
-        const auto aligned = withTensorAlignments(valid.GetBufferPointer(), oneByte);
+        const int64_t uid = tensor->uid();
+        const int64_t bytes = elementSizeBytes(tensor->data_type());
+
+        if(tensor->virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor))
+        {
+            EXPECT_TRUE(accepts(withTensorAlignment(validBuffer, uid, 1)))
+                << "tensor uid " << uid << " has no device pointer, its alignment must not matter";
+            continue;
+        }
+
+        EXPECT_TRUE(accepts(withTensorAlignment(validBuffer, uid, 2 * bytes)))
+            << "tensor uid " << uid << " declared at twice its element size was declined";
+        if(bytes > 1)
+        {
+            anyMultiByteElement = true;
+            EXPECT_FALSE(accepts(withTensorAlignment(validBuffer, uid, bytes / 2)))
+                << "tensor uid " << uid << " declared below its element size was accepted";
+            EXPECT_FALSE(accepts(withTensorAlignment(validBuffer, uid, bytes + bytes / 2)))
+                << "tensor uid " << uid << " declared at a non-multiple of its element size"
+                << " was accepted";
+        }
+    }
+
+    ASSERT_TRUE(anyMultiByteElement) << "the graph needs a tensor with elements wider than 1 byte";
+    {
+        const auto aligned = withTensorAlignments(validBuffer, oneByte);
         expectDeclaredAlignments(aligned.data(), oneByte);
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(aligned.data(),
-                                                                               aligned.size());
-        EXPECT_TRUE(isApplicable(graph)) << "1-byte alignment was declined";
+        EXPECT_FALSE(accepts(aligned)) << "every tensor declared at 1 byte was accepted";
     }
 }
 
