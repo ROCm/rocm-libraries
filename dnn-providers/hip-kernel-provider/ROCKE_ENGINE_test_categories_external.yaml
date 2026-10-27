@@ -17,10 +17,12 @@
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
 # suites.
 #
-# These tests carry no Full*/Standard*/
-# Comprehensive* variant, so every tier runs the same coverage -- matching
-# HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
-# tiered coverage yet.
+# Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
+# runs the same coverage. The arch-domain reproducibility gate is intentionally
+# standard-tier: it probes the external LLVM toolchain across the full
+# intrinsic/architecture matrix and does not belong in quick or FFM. It is
+# registered in both build-tree and installed-artifact CTest, so developers and
+# provider CI execute the same logical gate against their respective package data.
 #
 # The pinned GPU reference entries are regex patterns, unlike the other
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -61,6 +63,8 @@ test_categories:
       - "rocke_unified_attention_scalar_lower_to_llvm"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
+      - "rocke_differential_golden_ll"
+      - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
@@ -100,6 +104,8 @@ test_categories:
       - "rocke_unified_attention_scalar_lower_to_llvm"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
+      - "rocke_differential_golden_ll"
+      - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
@@ -114,3 +120,12 @@ test_categories:
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "ffm-full"
+
+  standard:
+    description: "rocKE generated-artifact reproduction checks"
+    test_patterns:
+      - "rocke_arch_domain_reproducibility"
+    labels:
+      - "host"
+      - "toolchain"
+      - "generated-artifact"
