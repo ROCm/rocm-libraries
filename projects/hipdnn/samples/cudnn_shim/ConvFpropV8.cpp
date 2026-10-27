@@ -21,19 +21,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "V8SampleUtils.hpp"
 
@@ -47,78 +42,16 @@ constexpr int64_t X_UID = 'x';
 constexpr int64_t W_UID = 'w';
 constexpr int64_t Y_UID = 'y';
 
-struct ConvProblem
-{
-    int64_t n;
-    int64_t c;
-    int64_t h;
-    int64_t w;
-    int64_t k;
-    int64_t r;
-    int64_t s;
-    std::vector<int64_t> stride;
-    std::vector<int64_t> padding;
-    std::vector<int64_t> dilation;
-
-    std::vector<int64_t> xDims() const
-    {
-        return {n, c, h, w};
-    }
-
-    std::vector<int64_t> wDims() const
-    {
-        return {k, c, r, s};
-    }
-
-    // No v8 shape inference: the caller supplies y's dims.
-    std::vector<int64_t> yDims() const
-    {
-        const int64_t outH = (h + 2 * padding[0] - dilation[0] * (r - 1) - 1) / stride[0] + 1;
-        const int64_t outW = (w + 2 * padding[1] - dilation[1] * (s - 1) - 1) / stride[1] + 1;
-        return {n, k, outH, outW};
-    }
-};
-
-// defaults = {n, c, h, w, k}; the filter is 3x3, stride 1, padding 1, dilation 1 unless overridden.
-ConvProblem problemFrom(const Config& config, const std::array<int64_t, 5>& defaults)
-{
-    auto pick = [](const std::vector<int64_t>& values, size_t index, int64_t fallback) {
-        return values.size() > index ? values[index] : fallback;
-    };
-    return ConvProblem{pick(config.dims, 0, defaults[0]),
-                       pick(config.dims, 1, defaults[1]),
-                       pick(config.dims, 2, defaults[2]),
-                       pick(config.dims, 3, defaults[3]),
-                       pick(config.filter, 0, defaults[4]),
-                       pick(config.filter, 1, 3),
-                       pick(config.filter, 2, 3),
-                       {pick(config.stride, 0, 1), pick(config.stride, 1, 1)},
-                       {pick(config.padding, 0, 1), pick(config.padding, 1, 1)},
-                       {pick(config.dilation, 0, 1), pick(config.dilation, 1, 1)}};
-}
+using v8_sample::ConvProblem;
 
 fe::Operation
-    makeConvOp(const ConvProblem& problem, const TensorLayout& layout, cudnnDataType_t type)
+    makeFpropOp(const ConvProblem& problem, const TensorLayout& layout, cudnnDataType_t type)
 {
-    const auto tensor = [&](int64_t uid, const std::vector<int64_t>& dims) {
-        return v8_sample::makeTensor(
-            uid, dims, sdk::generateStrides(dims, layout.strideOrder), type);
-    };
-    return fe::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-        .setxDesc(tensor(X_UID, problem.xDims()))
-        .setwDesc(tensor(W_UID, problem.wDims()))
-        .setyDesc(tensor(Y_UID, problem.yDims()))
-        .setcDesc(v8_sample::makeConvDesc(problem.padding, problem.stride, problem.dilation))
-        .build();
-}
-
-fe::OperationGraph makeGraph(cudnnHandle_t handle, const fe::Operation& op)
-{
-    std::array<const fe::Operation*, 1> ops = {&op};
-    return fe::OperationGraphBuilder()
-        .setHandle(handle)
-        .setOperationGraph(static_cast<int64_t>(ops.size()), ops.data())
-        .build();
+    return v8_sample::makeConvOp(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+                                 problem,
+                                 v8_sample::makeTensor(X_UID, problem.xDims(), layout, type),
+                                 v8_sample::makeTensor(W_UID, problem.wDims(), layout, type),
+                                 v8_sample::makeTensor(Y_UID, problem.yDims(), layout, type));
 }
 
 template <typename T>
@@ -130,14 +63,12 @@ bool validateConv(const ConvProblem& problem,
 {
     sdk::Tensor<T> yRef(problem.yDims(), layout);
     hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-        x, w, yRef, problem.stride, problem.dilation, problem.padding);
+        x, w, yRef, problem.stride, problem.dilation, problem.prePadding, problem.postPadding);
 
     const auto tolerance
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropTolerance<T, T, float>(
             0.0, 1.0, 0.0, 1.0, problem.wDims());
-    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T>(tolerance, tolerance);
-    return hipdnn_test_sdk::utilities::validateAndReport<T>(
-        std::cout, "y", validator, yRef, y, tolerance, tolerance);
+    return v8_sample::matches("y", yRef, y, tolerance, tolerance);
 }
 
 // Overhead mode.
@@ -261,7 +192,7 @@ void printOverhead(const char* metric, const OverheadResult& result)
     std::cout << std::fixed << std::setprecision(1) << "OVERHEAD " << metric
               << " p10=" << result.p10 << " p50=" << result.p50 << " p90=" << result.p90
               << " shim=" << result.shim << " raw=" << result.raw << ' '
-              << (result.pass() ? "PASS" : "FAIL") << '\n';
+              << (result.pass() ? "PASS" : "OVER_BUDGET") << '\n';
 }
 
 // Two threads build a plan from the same engine config at once; both plans must then run
@@ -314,34 +245,32 @@ bool concurrentPlanBuild(cudnnHandle_t handle,
         }
         sdk::Tensor<float> y(problem.yDims(), TensorLayout::NCHW);
         y.fillWithValue(0.0f);
-        const sdk::Workspace workspace(static_cast<size_t>(plans[slot]->getWorkspaceSize()));
         v8_sample::execute(
             handle,
             *plans[slot],
             {X_UID, W_UID, Y_UID},
-            {x.memory().deviceData(), w.memory().deviceData(), y.memory().deviceData()},
-            workspace.get());
+            {x.memory().deviceData(), w.memory().deviceData(), y.memory().deviceData()});
         y.memory().markDeviceModified();
         allPassed = validateConv(problem, TensorLayout::NCHW, x, w, y) && allPassed;
     }
     return allPassed;
 }
 
-int runOverhead(cudnnHandle_t handle, const Config& config)
+int runOverhead(cudnnHandle_t handle, const v8_sample::Options& options)
 {
     if(envEnabled("HIPDNN_LOG_LEVEL") || envEnabled("CUDNN_LOGINFO_DBG")
        || envEnabled("CUDNN_FRONTEND_LOG_INFO"))
     {
         std::cout << "Skipping overhead: logging enabled\n";
         ++v8_sample::summary().skipped;
-        return v8_sample::finish(true);
+        return v8_sample::finish(options, true);
     }
 
-    const ConvProblem problem = problemFrom(config, {1, 8, 8, 8, 8});
-    const fe::Operation op = makeConvOp(problem, TensorLayout::NCHW, CUDNN_DATA_FLOAT);
+    const ConvProblem problem = v8_sample::problemFrom(options.config, {1, 8, 8, 8, 8});
+    const fe::Operation op = makeFpropOp(problem, TensorLayout::NCHW, CUDNN_DATA_FLOAT);
 
     Clock::time_point start = Clock::now();
-    fe::OperationGraph graph = makeGraph(handle, op);
+    fe::OperationGraph graph = v8_sample::makeGraph(handle, {&op});
     const double m3 = msSince(start);
 
     start = Clock::now();
@@ -350,17 +279,12 @@ int runOverhead(cudnnHandle_t handle, const Config& config)
     std::cout << "Engines for the graph: " << engineCount << '\n';
 
     start = Clock::now();
-    fe::EngineHeuristics heuristics = fe::EngineHeuristicsBuilder()
-                                          .setOperationGraph(graph)
-                                          .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-                                          .build();
-    const int64_t configCount = heuristics.getEngineConfigCount();
-    if(configCount == 0)
+    const fe::EngineConfigList configs = v8_sample::instantConfigs(graph);
+    if(configs.empty())
     {
         v8_sample::skipVariant("overhead fp32 [NCHW]");
-        return v8_sample::finish(true);
+        return v8_sample::finish(options, true);
     }
-    const fe::EngineConfigList configs = heuristics.getEngineConfig(configCount);
     const fe::ExecutionPlan plan = fe::ExecutionPlanBuilder()
                                        .setHandle(handle)
                                        .setEngineConfig(configs[0], graph.getTag())
@@ -443,14 +367,7 @@ int runOverhead(cudnnHandle_t handle, const Config& config)
 
     // PyTorch's two engine-config sources: instant heuristics, then the fallback list.
     const std::array<fe::GeneratorSource, 2> sources
-        = {[](fe::OperationGraph& opGraph) -> fe::EngineConfigList {
-               fe::EngineHeuristics instant = fe::EngineHeuristicsBuilder()
-                                                  .setOperationGraph(opGraph)
-                                                  .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-                                                  .build();
-               return instant.getEngineConfig(instant.getEngineConfigCount());
-           },
-           [](fe::OperationGraph& opGraph) -> fe::EngineConfigList {
+        = {v8_sample::instantConfigs, [](fe::OperationGraph& opGraph) -> fe::EngineConfigList {
                fe::EngineFallbackList fallback
                    = fe::EngineFallbackListBuilder()
                          .setOperationGraph(opGraph)
@@ -465,9 +382,21 @@ int runOverhead(cudnnHandle_t handle, const Config& config)
     {
         distinct.insert(candidate.getTag());
     }
+    // Each candidate may need more workspace than the plan the timing pack above was sized for.
+    int64_t timingWorkspaceSize = 0;
+    for(const fe::ExecutionPlan& candidate : candidates)
+    {
+        timingWorkspaceSize = std::max(timingWorkspaceSize, candidate.getWorkspaceSize());
+    }
+    const sdk::Workspace timingWorkspace(static_cast<size_t>(timingWorkspaceSize));
+    const fe::VariantPack timingPack = fe::VariantPackBuilder()
+                                           .setWorkspacePointer(timingWorkspace.get())
+                                           .setDataPointers(3, pointers.data())
+                                           .setUids(3, uids.data())
+                                           .build();
     const fe::executionPlans_t timed
         = fe::time_sorted_plan<fe::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
-            handle, candidates, pack);
+            handle, candidates, timingPack);
 
     const bool concurrent = concurrentPlanBuild(handle, configs[0], graph.getTag(), problem, x, w);
 
@@ -476,11 +405,18 @@ int runOverhead(cudnnHandle_t handle, const Config& config)
     std::cout << std::fixed << std::setprecision(3) << "REPORT M3=" << m3 << "ms M4=" << m4
               << "ms M5=" << m5 << "ms\n";
     std::cout << "BENCHMARK plans=" << candidates.size() << " distinct=" << distinct.size()
-              << " timed=" << timed.size() << '\n';
+              << " timed=" << timed.size() << " workspace=" << timingWorkspaceSize << '\n';
     std::cout << "CONCURRENT " << (concurrent ? "PASS" : "FAIL") << '\n';
 
     v8_sample::ranVariant();
-    return v8_sample::finish(m1.pass() && m2.pass() && concurrent);
+    // Wall-clock budgets depend on runner load, so they gate only when asked to.
+    const bool withinBudget = m1.pass() && m2.pass();
+    if(!withinBudget && !options.has("--enforce-budget"))
+    {
+        std::cout << "Overhead budget exceeded; reported only (pass --enforce-budget to gate)\n";
+    }
+    return v8_sample::finish(options,
+                             concurrent && (withinBudget || !options.has("--enforce-budget")));
 }
 
 } // namespace
@@ -493,9 +429,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running v8 convolution fprop " << variant.str()
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    const ConvProblem problem = problemFrom(config, {16, 16, 16, 16, 16});
-    const fe::Operation op = makeConvOp(problem, layout, v8_sample::cudnnTypeOf<InputType>());
-    fe::OperationGraph graph = makeGraph(handle, op);
+    const ConvProblem problem = v8_sample::problemFrom(config, {16, 16, 16, 16, 16});
+    const fe::Operation op = makeFpropOp(problem, layout, v8_sample::cudnnTypeOf<InputType>());
+    fe::OperationGraph graph = v8_sample::makeGraph(handle, {&op});
 
     std::optional<fe::ExecutionPlan> plan = v8_sample::firstPlan(handle, graph);
     if(!plan)
@@ -511,12 +447,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     w.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     y.fillWithValue(static_cast<InputType>(0.0f));
 
-    const sdk::Workspace workspace(static_cast<size_t>(plan->getWorkspaceSize()));
     v8_sample::execute(handle,
                        *plan,
                        {X_UID, W_UID, Y_UID},
-                       {x.memory().deviceData(), w.memory().deviceData(), y.memory().deviceData()},
-                       workspace.get());
+                       {x.memory().deviceData(), w.memory().deviceData(), y.memory().deviceData()});
     y.memory().markDeviceModified();
     v8_sample::ranVariant();
 
@@ -536,27 +470,15 @@ int main(int argc, char** argv)
     return v8_sample::guardedMain([argc, argv]() {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        // parseCommandLineArgs rejects unknown arguments, so --overhead is consumed here.
-        bool overhead = false;
-        std::vector<char*> args;
-        args.reserve(static_cast<size_t>(argc));
-        for(int i = 0; i < argc; ++i)
-        {
-            if(i > 0 && std::string_view(argv[i]) == "--overhead")
-            {
-                overhead = true;
-                continue;
-            }
-            args.push_back(argv[i]);
-        }
-        const Config config = parseCommandLineArgs(static_cast<int>(args.size()), args.data());
+        const v8_sample::Options options
+            = v8_sample::parseOptions(argc, argv, {"--overhead", "--enforce-budget"});
 
-        const v8_sample::CudnnHandle handle;
-        if(overhead)
+        const auto handle = v8_sample::createHandle();
+        if(options.has("--overhead"))
         {
-            return runOverhead(handle.get(), config);
+            return runOverhead(*handle, options);
         }
-        const bool allPassed = run(SampleRunner{handle.get(), config});
-        return v8_sample::finish(allPassed);
+        const bool allPassed = run(SampleRunner{*handle, options.config});
+        return v8_sample::finish(options, allPassed);
     });
 }

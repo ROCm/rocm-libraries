@@ -12,12 +12,9 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesPointwise.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
 
@@ -56,22 +53,6 @@ constexpr std::array<Activation, 2> ACTIVATIONS = {{
     {"relu", CUDNN_POINTWISE_RELU_FWD, ReferenceMode::RELU_FWD},
 }};
 
-fe::Operation pointwise(cudnnPointwiseMode_t mode,
-                        const fe::Tensor& x,
-                        const fe::Tensor* b,
-                        const fe::Tensor& y)
-{
-    const fe::PointWiseDesc desc
-        = fe::PointWiseDescBuilder().setMode(mode).setComputeType(CUDNN_DATA_FLOAT).build();
-    fe::OperationBuilder builder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
-    builder.setxDesc(x).setyDesc(y).setpwDesc(desc);
-    if(b != nullptr)
-    {
-        builder.setbDesc(*b);
-    }
-    return builder.build();
-}
-
 template <typename T>
 bool runVariant(cudnnHandle_t handle,
                 const Config& config,
@@ -107,8 +88,10 @@ bool runVariant(cudnnHandle_t handle,
                          .setcMatDesc(c)
                          .setmatmulDesc(matmul)
                          .build());
-    ops.emplace_back(pointwise(CUDNN_POINTWISE_ADD, c, &bias, biased));
-    ops.emplace_back(pointwise(activation.mode, biased, nullptr, y));
+    ops.emplace_back(
+        v8_sample::makePointwiseOp(CUDNN_POINTWISE_ADD, CUDNN_DATA_FLOAT, c, &bias, biased));
+    ops.emplace_back(
+        v8_sample::makePointwiseOp(activation.mode, CUDNN_DATA_FLOAT, biased, nullptr, y));
 
     fe::OperationGraph graph
         = fe::OperationGraphBuilder().setHandle(handle).setOperationGraph(ops).build();
@@ -124,16 +107,13 @@ bool runVariant(cudnnHandle_t handle,
     biasTensor.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f));
     yTensor.fillWithValue(static_cast<T>(0.0f));
 
-    const hipdnn_data_sdk::utilities::Workspace workspace(
-        static_cast<size_t>(plan->getWorkspaceSize()));
     v8_sample::execute(handle,
                        *plan,
                        {A_UID, B_UID, BIAS_UID, Y_UID},
                        {aTensor.memory().deviceData(),
                         bTensor.memory().deviceData(),
                         biasTensor.memory().deviceData(),
-                        yTensor.memory().deviceData()},
-                       workspace.get());
+                        yTensor.memory().deviceData()});
     yTensor.memory().markDeviceModified();
     v8_sample::ranVariant();
 
@@ -159,10 +139,7 @@ bool runVariant(cudnnHandle_t handle,
                   1.0,
                   hipdnn_test_sdk::utilities::pointwise::classifyPointwiseOp(
                       activation.referenceMode));
-        auto validator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T>(tolerance, tolerance);
-        validationPassed = hipdnn_test_sdk::utilities::validateAndReport<T>(
-            std::cout, "y", validator, yRef, yTensor, tolerance, tolerance);
+        validationPassed = v8_sample::matches("y", yRef, yTensor, tolerance, tolerance);
     }
 
     std::cout << "Completed " << variant << ".\n\n";
@@ -187,23 +164,24 @@ int main(int argc, char** argv)
     return v8_sample::guardedMain([&]() {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        const Config config = parseCommandLineArgs(argc, argv);
-        const v8_sample::CudnnHandle handle;
+        const v8_sample::Options options = v8_sample::parseOptions(argc, argv);
+        const Config& config = options.config;
+        const auto handle = v8_sample::createHandle();
 
         // Matmul has no layout, so --layout is ignored and only --dtype selects variants.
         bool allPassed = true;
         if(config.dtype.empty() || config.dtype == "fp32")
         {
-            allPassed &= runActivations<float>(handle.get(), config, "fp32");
+            allPassed &= runActivations<float>(*handle, config, "fp32");
         }
         if(config.dtype.empty() || config.dtype == "fp16")
         {
-            allPassed &= runActivations<half>(handle.get(), config, "fp16");
+            allPassed &= runActivations<half>(*handle, config, "fp16");
         }
         if(config.dtype.empty() || config.dtype == "bf16")
         {
-            allPassed &= runActivations<bfloat16>(handle.get(), config, "bf16");
+            allPassed &= runActivations<bfloat16>(*handle, config, "bf16");
         }
-        return v8_sample::finish(allPassed);
+        return v8_sample::finish(options, allPassed);
     });
 }

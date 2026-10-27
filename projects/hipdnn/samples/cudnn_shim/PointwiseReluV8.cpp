@@ -12,9 +12,6 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
@@ -52,19 +49,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     const fe::Tensor x = v8_sample::makeTensor(X_UID, xTensor.dims(), xTensor.strides(), ioType);
     const fe::Tensor y = v8_sample::makeTensor(Y_UID, yTensor.dims(), yTensor.strides(), ioType);
 
-    const fe::PointWiseDesc relu = fe::PointWiseDescBuilder()
-                                       .setMode(CUDNN_POINTWISE_RELU_FWD)
-                                       .setComputeType(CUDNN_DATA_FLOAT)
-                                       .build();
-    std::vector<fe::Operation> ops;
-    ops.emplace_back(fe::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-                         .setxDesc(x)
-                         .setyDesc(y)
-                         .setpwDesc(relu)
-                         .build());
-
-    fe::OperationGraph graph
-        = fe::OperationGraphBuilder().setHandle(handle).setOperationGraph(ops).build();
+    const fe::Operation relu
+        = v8_sample::makePointwiseOp(CUDNN_POINTWISE_RELU_FWD, CUDNN_DATA_FLOAT, x, nullptr, y);
+    fe::OperationGraph graph = v8_sample::makeGraph(handle, {&relu});
 
     std::optional<fe::ExecutionPlan> plan = v8_sample::firstPlan(handle, graph);
     if(!plan)
@@ -75,13 +62,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     xTensor.fillWithRandomValues(static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f));
     yTensor.fillWithValue(static_cast<InputType>(0.0f));
 
-    const hipdnn_data_sdk::utilities::Workspace workspace(
-        static_cast<size_t>(plan->getWorkspaceSize()));
     v8_sample::execute(handle,
                        *plan,
                        {X_UID, Y_UID},
-                       {xTensor.memory().deviceData(), yTensor.memory().deviceData()},
-                       workspace.get());
+                       {xTensor.memory().deviceData(), yTensor.memory().deviceData()});
     yTensor.memory().markDeviceModified();
     v8_sample::ranVariant();
 
@@ -93,10 +77,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, yRefTensor, xTensor);
 
         const float tolerance = hipdnn_test_sdk::utilities::pointwise::getTolerance<InputType>();
-        auto validator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-        validationPassed = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
-            std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
+        validationPassed = v8_sample::matches("y", yRefTensor, yTensor, tolerance, tolerance);
     }
 
     std::cout << "Completed " << variant.str() << ".\n\n";
@@ -108,9 +89,9 @@ int main(int argc, char** argv)
     return v8_sample::guardedMain([&]() {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        const Config config = parseCommandLineArgs(argc, argv);
-        const v8_sample::CudnnHandle handle;
+        const v8_sample::Options options = v8_sample::parseOptions(argc, argv);
+        const auto handle = v8_sample::createHandle();
 
-        return v8_sample::finish(run(SampleRunner{handle.get(), config}));
+        return v8_sample::finish(options, run(SampleRunner{*handle, options.config}));
     });
 }
