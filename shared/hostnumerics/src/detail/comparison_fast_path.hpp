@@ -233,6 +233,24 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
         return run(
             [](auto observedValue, auto expectedValue) { return observedValue == expectedValue; });
 
+    if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::FloatingPoint ||
+                  scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
+        if (options.elementwiseToleranceModel == ElementwiseToleranceModel::ExpectedScaled &&
+            options.arithmeticPrecision == ComparisonArithmeticPrecision::Float64 &&
+            !options.strictElementwiseTolerance)
+            return run([&options](auto observedValue, auto expectedValue) {
+                return valuesCloseFixed<double, ElementwiseToleranceModel::ExpectedScaled, false>(
+                    observedValue, expectedValue, options);
+            });
+        if (options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled &&
+            options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32 &&
+            options.strictElementwiseTolerance)
+            return run([&options](auto observedValue, auto expectedValue) {
+                return valuesCloseFixed<float, ElementwiseToleranceModel::SymmetricUnitScaled,
+                                        true>(observedValue, expectedValue, options);
+            });
+    }
+
     return run([&options](auto observedValue, auto expectedValue) {
         return valuesCloseFast(observedValue, expectedValue, options);
     });

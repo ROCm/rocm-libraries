@@ -199,6 +199,12 @@ absolute_difference <= absolute_tolerance
                      + relative_tolerance * abs(expected)
 ```
 
+`ElementwiseToleranceModel::SymmetricUnitScaled` instead scales the sum of both
+magnitudes plus one. `strictElementwiseTolerance` selects `<` at the boundary,
+and `arithmeticPrecision` chooses float or double evaluation. These settings
+allow product adapters to preserve their existing numerical validation rules
+without reimplementing tensor traversal or reporting.
+
 ## Block-scaled MX data
 
 MX formats store low-precision data together with one scale shared by a block
