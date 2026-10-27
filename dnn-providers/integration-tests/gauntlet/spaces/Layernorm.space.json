@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "operation": "Layernorm",
+  "description": "Layernorm forward (training phase: y plus saved mean and inverse variance) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, y, scale and bias, and mean and inverse variance that the engine and both references accept (pure, mixed io, upcast), scale and bias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. Template: quick Layernorm/Default, the topology with the full tensor set (y, mean and inv_variance outputs, scale, bias, epsilon).",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/Layernorm/Default/graph.template.json",
+  "axes": {
+    "x_dtype": {"values": ["float", "half", "bfloat16"]},
+    "y_dtype": {"values": ["float", "half", "bfloat16"]},
+    "p_dtype": {"values": ["float", "half", "bfloat16"]},
+    "layout":  {"values": ["nchw", "nhwc"]},
+    "ndim":    {"values": [4, 5]},
+    "n":       {"range": [1, 8], "boundaries": [1, 2, 8]},
+    "c":       {"range": [1, 256], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256]},
+    "d3":      {"range": [1, 8], "boundaries": [1, 2, 4]},
+    "h":       {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
+    "w":       {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
+    "k":       {"values": [1, 2, 3, 4]}
+  },
+  "derive": {
+    "s_dtype": "p_dtype",
+    "d":       "d3 if ndim == 5 else 1",
+    "kh":      "2 if ndim == 4 else 3",
+    "pc":      "c if k <= 1 else 1",
+    "pd":      "d if k <= 2 else 1",
+    "ph":      "h if k <= kh else 1",
+    "pw":      "w",
+    "sc":      "c if k >= 2 else 1",
+    "sd":      "d if k >= 3 else 1",
+    "sh":      "h if k > kh else 1",
+    "sw":      "1",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, pc, ph, pw] if ndim == 4 else [1, pc, pd, ph, pw]",
+    "dims_s":  "[n, sc, sh, sw] if ndim == 4 else [n, sc, sd, sh, sw]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "ps_w":    "1 if layout == 'nchw' else pc",
+    "ps_h":    "pw if layout == 'nchw' else pw * pc",
+    "ps_d":    "ph * pw if layout == 'nchw' else ph * pw * pc",
+    "ps_c":    "pd * ph * pw if layout == 'nchw' else 1",
+    "ps_n":    "pc * pd * ph * pw",
+    "ss_w":    "1 if layout == 'nchw' else sc",
+    "ss_h":    "sw if layout == 'nchw' else sw * sc",
+    "ss_d":    "sh * sw if layout == 'nchw' else sh * sw * sc",
+    "ss_c":    "sd * sh * sw if layout == 'nchw' else 1",
+    "ss_n":    "sc * sd * sh * sw",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
+    "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]"
+  },
+  "constraints": [
+    {"rule": "k < ndim", "reason": "the frontend always infers scale and bias with batch dim 1 (LayerNormNode.hpp:174 and :199, infer_properties_node sets scaleBiasDim[0] = 1), so axis 0 is never normalized; the quick sweeps use normalized_dim_count <= ndim - 1 and SUPPORT_MATRIX_OVERVIEW.md op-layernorm lists norm:all_dims as used by no test graph"},
+    {"rule": "(p_dtype == 'float' and (y_dtype == x_dtype or (x_dtype != 'float' and y_dtype == 'float'))) or (x_dtype != 'float' and p_dtype == x_dtype and y_dtype == x_dtype)", "reason": "scale, bias, mean and inverse variance share one dtype (LayernormApplicabilityChecks.cpp:137 checkTensorDataTypesSupported, types in LayernormApplicabilityChecks.hpp:75-79), and the CPU and GPU references register only these (x, scale/bias/stats, y) combinations: float everywhere; half or bfloat16 x with float scale/bias/stats and y equal to x or float; pure half or bfloat16 (LayernormFpropSignatureKey.hpp:107 getPlanBuilders, GpuLayernormFwdSignatureKey.hpp:108 getPlanBuilders)"},
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+  ],
+  "case": {
+    "values": {
+      "attributes": {"normalized_dim_count": "${ndim - k}"},
+      "tensors": [
+        {"uid": 0, "dims": "${dims_s}", "strides": "${stride_s}", "data_type": "${s_dtype}"},
+        {"uid": 1, "dims": "${dims_s}", "strides": "${stride_s}", "data_type": "${s_dtype}"},
+        {"uid": 2, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${y_dtype}"},
+        {"uid": 3, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${p_dtype}"},
+        {"uid": 4, "dims": [1], "strides": [1], "data_type": "float"},
+        {"uid": 5, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${p_dtype}"},
+        {"uid": 6, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${x_dtype}"}
+      ]
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}

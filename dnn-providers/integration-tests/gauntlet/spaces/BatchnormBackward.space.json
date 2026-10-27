@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "operation": "BatchnormBackward",
+  "description": "BatchNorm backward (spatial mode, saved mean and inverse variance from the forward pass) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x, dy and dx with float scale, dscale, dbias and statistics (the backward kernels use a single fp_type for x, dy and dx, BatchNormBwdSpatial.cpp:837-839, although the applicability check would accept differing io dtypes, BatchnormApplicabilityChecks.cpp:65-76), N*H*W > 1, hw and n swept around the kernel-variant thresholds (hw 60/200/512/1024/4096, n 32/64/768) and powers of two +-1. Template: quick BatchnormBackward/Variant2 (saved mean and inv-variance, the full backward tensor set; Default recomputes the statistics and sets no mean/inv-variance). The tuned input ranges of the quick sweep are copied: inv_variance 1.9..2.0 stays positive, as an rsqrt output must.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/BatchnormBackward/Variant2/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["float", "half", "bfloat16"]},
+    "layout": {"values": ["nchw", "nhwc"]},
+    "ndim":   {"values": [4, 5]},
+    "n":      {"range": [1, 1024], "boundaries": [1, 2, 3, 4, 5, 31, 32, 33, 64, 65, 768, 769]},
+    "c":      {"range": [1, 512], "boundaries": [1, 2, 3, 4, 5, 16, 17, 32, 33, 64, 65, 128, 129, 256, 257]},
+    "hw":     {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 17, 60, 61, 160, 161, 199, 200, 512, 513, 1024, 1025, 4095, 4096, 4097]},
+    "hs":     {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
+    "ds":     {"values": [1, 2, 3, 4]}
+  },
+  "derive": {
+    "h":       "hs if hw % hs == 0 else 1",
+    "d":       "ds if ndim == 5 and (hw // h) % ds == 0 else 1",
+    "w":       "hw // h // d",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, c, 1, 1] if ndim == 4 else [1, c, 1, 1, 1]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "ss_w":    "1 if layout == 'nchw' else c",
+    "stride_s": "[c, 1, ss_w, ss_w] if ndim == 4 else [c, 1, ss_w, ss_w, ss_w]",
+    "stride_p": "[c, 1, 1, 1] if ndim == 4 else [c, 1, 1, 1, 1]"
+  },
+  "constraints": [
+    {"rule": "n * hw > 1", "reason": "backward is a training-mode op, so N * spatial must be > 1 (frontend validateBatchNormTrainingSpatialDimensions via BatchnormBackwardNode.hpp:162; engine BatchnormValidator::checkBwdTensorConfigSupported passes isTraining=true to validateSpatialDimensions, BatchnormApplicabilityChecks.cpp:29,414-437)"},
+    {"rule": "n * c * hw <= 2**24", "reason": "oracle cost ceiling (RFC 0023 section 14), lower than the 2**30 normalization ceiling because the GPU graph executor has no BatchNorm backward plan (GpuReferenceGraphExecutor.hpp:189), so the scalar CPU reference (CpuFpReferenceBatchnorm.hpp:296-394, three passes per channel with an index vector per element) is the oracle; keeps the extents inside the kernel's int template parameters too (Configuration.hpp proto_config, BatchnormBwdPlan.cpp:248-253)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "float"},
+        {"uid": 1, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "float"},
+        {"uid": 2, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 4, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 5, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 6, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 7, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"}
+      ]
+    },
+    "metadata": {
+      "purpose": "probe",
+      "inputs": {
+        "7": {"kind": "free", "lo": -1.0, "hi": 1.0},
+        "3": {"kind": "free", "lo": -0.1, "hi": 0.1},
+        "6": {"kind": "free", "lo": -0.1, "hi": 0.1},
+        "5": {"kind": "free", "lo": -0.1, "hi": 0.1},
+        "4": {"kind": "free", "lo": 1.9, "hi": 2.0}
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "operation": "ResampleFwd",
+  "description": "ResampleFwd (pooling, no index output) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC packed strides, float/half/bfloat16 for x and y alike, maxpool and both avgpool modes, per-dimension window 1..5, stride 1..4 and pre/post padding 0..3 (asymmetric padding and padding of a window or more included, as long as the window fits the padded input). Template: quick ResampleFwd/Variant2, the plain tensor set (x and y, no index tensor, generate_index false, zero_pad); neg_inf_pad needs the index topology of Default and is not drawn here.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/ResampleFwd/Variant2/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["float", "half", "bfloat16"]},
+    "layout": {"values": ["nchw", "nhwc"]},
+    "ndim":   {"values": [4, 5]},
+    "mode":   {"values": ["maxpool", "avgpool_exclude_padding", "avgpool_include_padding"]},
+    "n":      {"range": [1, 8], "boundaries": [1, 2, 8]},
+    "c":      {"range": [1, 64], "boundaries": [1, 2, 3, 16, 64]},
+    "d3":     {"range": [1, 8], "boundaries": [1, 2, 3, 8]},
+    "h":      {"range": [1, 64], "boundaries": [1, 2, 3, 31, 32, 33, 64]},
+    "w":      {"range": [1, 128], "boundaries": [1, 2, 3, 63, 64, 65, 128]},
+    "win_d":  {"values": [1, 2, 3, 4, 5]},
+    "win_h":  {"values": [1, 2, 3, 4, 5]},
+    "win_w":  {"values": [1, 2, 3, 4, 5]},
+    "str_d":  {"values": [1, 2, 3, 4]},
+    "str_h":  {"values": [1, 2, 3, 4]},
+    "str_w":  {"values": [1, 2, 3, 4]},
+    "pre_d":  {"values": [0, 1, 2, 3]},
+    "pre_h":  {"values": [0, 1, 2, 3]},
+    "pre_w":  {"values": [0, 1, 2, 3]},
+    "post_d": {"values": [0, 1, 2, 3]},
+    "post_h": {"values": [0, 1, 2, 3]},
+    "post_w": {"values": [0, 1, 2, 3]}
+  },
+  "derive": {
+    "d":       "d3 if ndim == 5 else 1",
+    "od":      "(d + pre_d + post_d - win_d) // str_d + 1 if ndim == 5 else 1",
+    "oh":      "(h + pre_h + post_h - win_h) // str_h + 1",
+    "ow":      "(w + pre_w + post_w - win_w) // str_w + 1",
+    "wvol":    "(win_d if ndim == 5 else 1) * win_h * win_w",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_y":  "[n, c, oh, ow] if ndim == 4 else [n, c, od, oh, ow]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "ys_w":    "1 if layout == 'nchw' else c",
+    "ys_h":    "ow if layout == 'nchw' else ow * c",
+    "ys_d":    "oh * ow if layout == 'nchw' else oh * ow * c",
+    "ys_c":    "od * oh * ow if layout == 'nchw' else 1",
+    "ys_n":    "c * od * oh * ow",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "stride_y": "[ys_n, ys_c, ys_h, ys_w] if ndim == 4 else [ys_n, ys_c, ys_d, ys_h, ys_w]",
+    "window":   "[win_h, win_w] if ndim == 4 else [win_d, win_h, win_w]",
+    "pool_stride": "[str_h, str_w] if ndim == 4 else [str_d, str_h, str_w]",
+    "pre_pad":  "[pre_h, pre_w] if ndim == 4 else [pre_d, pre_h, pre_w]",
+    "post_pad": "[post_h, post_w] if ndim == 4 else [post_d, post_h, post_w]"
+  },
+  "constraints": [
+    {"rule": "h + pre_h + post_h >= win_h and w + pre_w + post_w >= win_w and (ndim == 4 or d + pre_d + post_d >= win_d)", "reason": "the output extent (x + pre + post - window) / stride + 1 is the one hip-kernel-provider accepts (ResamplePlanUtils.hpp:131-133 validateResampleOutputShape, ResampleApplicabilityChecks.cpp:84-97) and the frontend infers (ResampleFwdNode.hpp:116); it is defined for a window that fits the padded input only, because C++ integer division truncates toward zero and would give 1 for a window that overhangs the padded input"},
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling on the input (RFC 0023 section 14)"},
+    {"rule": "n * c * od * oh * ow * wvol <= 2**30", "reason": "GPU reference cost ceiling on the pooled work: every output element reads one window (ResampleFwd.cpp:122-169; RFC 0023 section 14)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_y}", "strides": "${stride_y}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "resample_mode": "${mode}",
+        "post_padding": "${post_pad}",
+        "pre_padding": "${pre_pad}",
+        "stride": "${pool_stride}",
+        "window": "${window}"
+      }
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}

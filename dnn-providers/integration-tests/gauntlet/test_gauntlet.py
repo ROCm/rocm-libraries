@@ -11,6 +11,7 @@ the same command line and writes the same outcome-report JSON Lines. Run with::
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -55,6 +56,30 @@ bundle_discovery = _load_by_path(
 
 def space_by_id(space_id):
     return next(s for s in SPACES if s.space_id == space_id)
+
+
+TAG_OF_DTYPE = {"float": "fp32", "half": "fp16", "bfloat16": "bfp16"}
+
+
+def input_dtype_tag(space_id, seed):
+    """The tag of the sample's input dtype, as the quick bundle case ids spell it."""
+    axes = sampler.sample(space_by_id(space_id), seed).axis_values
+    return TAG_OF_DTYPE[axes["x_dtype" if "x_dtype" in axes else "dtype"]]
+
+
+def gtest(space_id, seed):
+    """The GTest name the harness registers for a sample: the suite is the relative path of its
+    sweep directory, sanitized and joined by ``_`` (``BundleDiscovery.hpp``)."""
+    sp = space_by_id(space_id)
+    tag = input_dtype_tag(space_id, seed)
+    return f"gauntlet_{sp.operation}_{sp.name}_{tag}_cases.s{seed}"
+
+
+def sweep_dir(work, space_id, seed):
+    """The directory under the bundle root that the driver puts the sample's sweep in."""
+    sp = space_by_id(space_id)
+    tag = input_dtype_tag(space_id, seed)
+    return work / "bundles" / "gauntlet" / sp.operation / sp.name / f"{tag}_cases"
 
 
 # --------------------------------------------------------------------------
@@ -439,7 +464,18 @@ def test_row_has_sweep_json_format(space_id):
 
 def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
     assert space_lib.DEFAULT_SPACES_DIR == HERE / "spaces"
-    assert SPACE_IDS == ["RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense"]
+    assert SPACE_IDS == [
+        "Batchnorm/Default",
+        "BatchnormBackward/Default",
+        "BatchnormInference/Default",
+        "Layernorm/Default",
+        "LayernormBackward/Default",
+        "RMSNorm/Default",
+        "RMSNormBackward/Default",
+        "ResampleFwd/Default",
+        "SdpaFwd/Default",
+        "SdpaFwd/Gfx950Dense",
+    ]
     for sp in SPACES:
         assert BUNDLES not in sp.path.parents
         assert sp.template_path.name == "graph.template.json"
@@ -459,6 +495,7 @@ def test_shipped_spaces_declare_cost_ceilings():
     assert any("2**31" in r for r in rules["SdpaFwd/Default"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx950Dense"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
+    assert any("2**30" in r for r in rules["ResampleFwd/Default"])
     assert any("sq==skv" in r for r in rules["SdpaFwd/Gfx950Dense"])
 
 
@@ -768,7 +805,8 @@ def test_batch_is_written_as_a_concrete_sweep_under_the_bundle_root(run):
         == 0
     )
     sp = space_by_id("SdpaFwd/Default")
-    directory = run.work / "bundles" / "gauntlet" / "SdpaFwd" / "Default"
+    names = [gtest("SdpaFwd/Default", s) for s in (1000, 1001, 1002)]
+    directory = sweep_dir(run.work, "SdpaFwd/Default", 1000)
     assert (
         directory / "graph.template.json"
     ).read_bytes() == sp.template_path.read_bytes()
@@ -793,10 +831,7 @@ def test_batch_is_written_as_a_concrete_sweep_under_the_bundle_root(run):
     for mode in ("list", "run"):
         argv = modes[mode]
         assert argv[argv.index("--golden-data-dir") + 1] == str(run.work / "bundles")
-        assert (
-            "--gtest_filter=gauntlet_SdpaFwd_Default.s1000:gauntlet_SdpaFwd_Default.s1001:gauntlet_SdpaFwd_Default.s1002"
-            in argv
-        )
+        assert "--gtest_filter=" + ":".join(names) in argv
         assert argv[argv.index("--test-article") + 1] == "ART"
         assert argv[argv.index("--test-engine") + 1] == "ENG"
         assert argv[argv.index("--test-config") + 1] == "CFG"
@@ -808,19 +843,175 @@ def test_batch_is_written_as_a_concrete_sweep_under_the_bundle_root(run):
     assert (
         "--gtest_list_tests" not in modes["run"] and "--outcome-report" in modes["run"]
     )
-    assert {o["test"] for o in run.outcome_list} == {
-        f"gauntlet_SdpaFwd_Default.s{s}" for s in (1000, 1001, 1002)
-    }
+    assert {o["test"] for o in run.outcome_list} == set(names)
 
 
 def test_each_space_gets_its_own_batch_and_gtest_names(run):
     run.run("--samples", "1", space=None)
     names = {o["test"] for o in run.outcome_list}
-    assert names == {
-        "gauntlet_RMSNorm_Default.s1000",
-        "gauntlet_SdpaFwd_Default.s1000",
-        "gauntlet_SdpaFwd_Gfx950Dense.s1000",
+    assert names == {gtest(space_id, 1000) for space_id in SPACE_IDS}
+
+
+# --------------------------------------------------------------------------
+# A11: the engine TOML matches dtype tags, so the suite carries the input dtype
+# --------------------------------------------------------------------------
+
+HIP_MLOPS_TOML = (
+    TESTS_ROOT.parent / "hip-kernel-provider" / "config" / "HIP_MLOPS_ENGINE.toml"
+)
+
+
+@pytest.mark.parametrize(
+    "axes, expected",
+    [
+        ({"dtype": {"values": ["float"]}}, "fp32"),
+        ({"dtype": {"values": ["half"]}}, "fp16"),
+        ({"dtype": {"values": ["bfloat16"]}}, "bfp16"),
+        # mixed precision: the input's dtype, not the one of the other tensors
+        (
+            {"dtype": {"values": ["float"]}, "x_dtype": {"values": ["bfloat16"]}},
+            "bfp16",
+        ),
+        ({"dtype": {"values": ["double"]}}, "double"),
+        ({}, None),
+    ],
+)
+def test_dtype_tag_is_the_input_dtype_spelled_like_the_bundle_case_ids(
+    tmp_path, axes, expected
+):
+    # bug caught: a tag from the wrong axis, or spelled `float`/`bfloat16`, misses the TOML globs
+    base = {
+        "a": {"values": [1, 2, 3]},
+        "n": {"range": [1, 100], "boundaries": [1, 100]},
     }
+    sp = space_lib.load_space(write_space(tmp_path, axes={**base, **axes}))
+    assert fuzz.dtype_tag(sp, sampler.sample(sp, 3)) == expected
+
+
+def test_a_batch_is_split_into_one_sweep_directory_per_input_dtype(run):
+    # bug caught: one sweep directory per space gives every case the same suite, so the
+    # per-dtype TOML tolerance cannot tell a half case from a bfloat16 one
+    space_id = "RMSNorm/Default"
+    seeds = range(1000, 1024)
+    assert run.run("--samples", "24", "--batch-size", "24", space=space_id) == 0
+    expected = {}
+    for seed in seeds:
+        expected.setdefault(input_dtype_tag(space_id, seed), []).append(f"s{seed}")
+    assert len(expected) >= 2, "the seeds must draw more than one input dtype"
+    base = run.work / "bundles" / "gauntlet" / "RMSNorm" / "Default"
+    directories = sorted(base / f"{tag}_cases" for tag in expected)
+    assert sorted(p for p in base.iterdir()) == directories
+    template = space_by_id(space_id).template_path.read_bytes()
+    for tag, ids in expected.items():
+        directory = base / f"{tag}_cases"
+        rows = json.loads((directory / "sweep.json").read_text())["cases"]
+        assert [r["id"] for r in rows] == ids
+        assert (directory / "graph.template.json").read_bytes() == template
+    assert (
+        sorted(bundle_discovery.find_sweep_roots(run.work / "bundles")) == directories
+    )
+    # the harness registers suite = sanitized relative path joined by '_'; the stub does the
+    # same, and a name the driver got wrong would be absent from its listing: UNEXERCISED
+    registered = {
+        "_".join(d.relative_to(run.work / "bundles").parts) + "." + case
+        for d in directories
+        for case in expected[d.name.removesuffix("_cases")]
+    }
+    assert {o["outcome"] for o in run.outcome_list} == {"PASS"}
+    assert {o["test"] for o in run.outcome_list} == registered
+    assert registered == {gtest(space_id, seed) for seed in seeds}
+
+
+def test_a_crash_in_one_dtype_group_costs_one_case_and_the_other_groups_run(run):
+    # bug caught: crash recovery that only knows one sweep directory loses the cases
+    # that the other dtype directories of the batch still have to run
+    space_id = "RMSNorm/Default"
+    seeds = range(1000, 1012)
+    tags = {s: input_dtype_tag(space_id, s) for s in seeds}
+    assert len(set(tags.values())) >= 2
+    # the binary runs the sweep directories in path order, so a crash in the first one
+    # leaves the cases of the other directories unresolved
+    first = min(tags.values())
+    crash = next(s for s in seeds if tags[s] == first)
+    run.control(cases={f"s{crash}": "crash"})
+    assert run.run("--samples", "12", "--batch-size", "12", space=space_id) == 1
+    assert {o["case"]: o["outcome"] for o in run.outcome_list} == {
+        f"s{s}": "CRASH" if s == crash else "PASS" for s in seeds
+    }
+    runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
+    assert len(runs) == 2 and len(runs[0]) == 12
+    assert gtest(space_id, crash) not in runs[1]
+    assert any(f"_{first}_cases." not in name for name in runs[1])
+    folder = run.failure_dir(f"s{crash}", "RMSNorm_Default")
+    assert json.loads((folder / "repro.json").read_text())["gtest_name"] == gtest(
+        space_id, crash
+    )
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_suite_tag_is_the_dtype_of_the_graphs_input_tensor(run, space_id):
+    # bug caught: a space whose dtype axes are not the ones the driver reads gets a tag
+    # that disagrees with its graph, and the TOML then grades a bfloat16 case as fp32
+    sp = space_by_id(space_id)
+    f = _fuzz(run, space=space_id)
+    template = json.loads(sp.template_path.read_text())
+    for seed in range(60):
+        s = sampler.sample(sp, seed)
+        graph = bu.expand(template, s.row["values"])
+        x = next(t for t in graph["tensors"] if t["name"].lower() in ("x", "q"))
+        assert (
+            f._test_name(sp, s)
+            == f"gauntlet_{sp.operation}_{sp.name}_{TAG_OF_DTYPE[x['data_type']]}_cases.s{seed}"
+        ), (space_id, seed, s.axis_values)
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_registered_names_carry_no_token_the_name_validator_forbids(run, space_id):
+    # bug caught: a suffix such as `Fp16_cases` would fail test_name_validation if the
+    # runtime-registered gauntlet names were ever listed there (test_name_validator.py:19-24)
+    banned = ("Test", "Integration", "Gpu", "Bfp16", "Fp16", "Fp32", "Fp64")
+    sp = space_by_id(space_id)
+    f = _fuzz(run, space=space_id)
+    for seed in range(30):
+        name = f._test_name(sp, sampler.sample(sp, seed))
+        assert not [t for t in banned if t in name], name
+
+
+def _toml_rms_threshold(config, test_name, tensor):
+    """The rms threshold the harness resolves: the last [[validator_overrides]] entry whose
+    filters match the test name and whose tensors match the label wins (TestSettings.hpp
+    findValidatorOverride; both globs are fnmatch-style)."""
+    result = None
+    for entry in config.get("validator_overrides", []):
+        if any(fnmatch.fnmatchcase(test_name, g) for g in entry["filters"]) and any(
+            fnmatch.fnmatchcase(tensor, g) for g in entry["tensors"]
+        ):
+            result = entry.get("rms_threshold")
+    return result
+
+
+def test_the_hip_mlops_dtype_thresholds_reach_layernorm_backward_cases(run):
+    # bug caught (A11): the cases are named s<seed>, so `*LayernormBackward*fp16_*` never
+    # matched and every fp16 or bfloat16 case was graded at the fp32 rms threshold 1e-4
+    tomllib = pytest.importorskip("tomllib")
+    if not HIP_MLOPS_TOML.is_file():
+        pytest.skip("the hip-kernel-provider config is not in this checkout")
+    config = tomllib.loads(HIP_MLOPS_TOML.read_text(encoding="utf-8"))
+    space_id = "LayernormBackward/Default"
+    sp = space_by_id(space_id)
+    f = _fuzz(run, space=space_id)
+    template = json.loads(sp.template_path.read_text())
+    expected = {"float": 1e-4, "half": 1e-3, "bfloat16": 1e-2}
+    seen = {}
+    for seed in range(200):
+        s = sampler.sample(sp, seed)
+        graph = bu.expand(template, s.row["values"])
+        x = next(t for t in graph["tensors"] if t["name"] == "X")
+        for tensor in ("LayernormBackward_0::DSCALE", "LayernormBackward_0::DBIAS"):
+            got = _toml_rms_threshold(config, f._test_name(sp, s), tensor)
+            assert got == expected[x["data_type"]], (seed, x["data_type"], got)
+        seen[x["data_type"]] = seen.get(x["data_type"], 0) + 1
+    assert {"half", "bfloat16"} <= set(seen)
 
 
 def test_samples_are_split_into_batches_with_consecutive_seeds(run):
@@ -833,7 +1024,7 @@ def test_samples_are_split_into_batches_with_consecutive_seeds(run):
 def test_fixed_data_seed_applies_to_every_sample(run):
     run.run("--samples", "3", "--data-seed", "4021")
     rows = json.loads(
-        (run.work / "bundles/gauntlet/SdpaFwd/Default/sweep.json").read_text()
+        (sweep_dir(run.work, "SdpaFwd/Default", 1000) / "sweep.json").read_text()
     )["cases"]
     assert {r["metadata"]["seed"] for r in rows} == {4021}
     assert [r["id"] for r in rows] == ["s1000", "s1001", "s1002"]
@@ -882,18 +1073,20 @@ def test_summary_counts_every_sample_per_engine_and_space_with_reasons(run):
     )
     assert run.run("--samples", "12", "--batch-size", "5", space=None) == 1
     summary = run.summary
-    assert summary["samples"] == 36 and summary["reconciled"] is True
-    assert sum(summary["outcomes"].values()) == 36
+    spaces = len(SPACE_IDS)
+    total = 12 * spaces  # twelve samples in each space; every residue of seed % 6 twice
+    assert summary["samples"] == total and summary["reconciled"] is True
+    assert sum(summary["outcomes"].values()) == total
     assert summary["outcomes"] == {
-        "PASS": 6,
-        "DECLINED": 6,
-        "WRONG": 6,
+        "PASS": 2 * spaces,
+        "DECLINED": 2 * spaces,
+        "WRONG": 2 * spaces,
         "CRASH": 0,
-        "UNCLAIMED_PASS": 6,
-        "UNEXERCISED": 12,
+        "UNCLAIMED_PASS": 2 * spaces,
+        "UNEXERCISED": 4 * spaces,
     }
     engine = summary["engines"]["STUB_ENGINE"]
-    assert engine["samples"] == 36 and set(engine["spaces"]) == set(SPACE_IDS)
+    assert engine["samples"] == total and set(engine["spaces"]) == set(SPACE_IDS)
     for space_id in SPACE_IDS:
         sp = engine["spaces"][space_id]
         assert sp["samples"] == 12 and sum(sp["outcomes"].values()) == 12
@@ -904,9 +1097,9 @@ def test_summary_counts_every_sample_per_engine_and_space_with_reasons(run):
         assert any(r.startswith("load:") for r in sp["unexercised_reasons"])
         assert any(r == "no oracle available" for r in sp["unexercised_reasons"])
         assert len(sp["wrong"]) == 2
-    assert len(summary["findings"]) == 6
-    assert len(run.outcome_list) == 36
-    assert (run.work / "samples.jsonl").read_text().count("\n") == 36
+    assert len(summary["findings"]) == 2 * spaces
+    assert len(run.outcome_list) == total
+    assert (run.work / "samples.jsonl").read_text().count("\n") == total
 
 
 def test_summary_path_flag_and_outcome_records(run):
@@ -916,7 +1109,7 @@ def test_summary_path_flag_and_outcome_records(run):
     assert json.loads(target.read_text())["samples"] == 2
     assert not (run.work / "summary.json").exists()
     record = run.outcome_list[0]
-    assert record["test"] == "gauntlet_SdpaFwd_Default.s1000"
+    assert record["test"] == gtest("SdpaFwd/Default", 1000)
     assert record["engine"] == "STUB_ENGINE" and record["arch"] == "gfx950"
     assert (
         record["purpose"] == "probe"
@@ -958,7 +1151,7 @@ def test_crash_is_one_case_and_the_remainder_runs_again(run):
     )
     runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
     assert len(runs) == 2 and len(runs[0]) == 6
-    assert runs[1] == [f"gauntlet_SdpaFwd_Default.s{s}" for s in (1003, 1004, 1005)]
+    assert runs[1] == [gtest("SdpaFwd/Default", s) for s in (1003, 1004, 1005)]
 
 
 def test_several_crashes_in_one_batch_each_cost_one_case(run):
@@ -1004,7 +1197,7 @@ def test_case_skipped_at_load_is_unexercised_with_the_load_message(run):
     )
     assert outcomes["s1001"]["source"] == "driver"
     runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
-    assert all("gauntlet_SdpaFwd_Default.s1001" not in names for names in runs)
+    assert all(gtest("SdpaFwd/Default", 1001) not in names for names in runs)
     assert outcomes["s1000"]["outcome"] == outcomes["s1002"]["outcome"] == "PASS"
 
 
@@ -1350,7 +1543,7 @@ def test_log_tail_keeps_the_binarys_last_words(findings):
         in (findings.failure_dir("s2001") / "log_tail.txt").read_text()
     )
     assert (
-        "[ RUN      ] gauntlet_SdpaFwd_Default.s2002"
+        "[ RUN      ] " + gtest("SdpaFwd/Default", 2002)
         in (findings.failure_dir("s2002") / "log_tail.txt").read_text()
     )
 
@@ -1401,7 +1594,7 @@ def test_replay_regenerates_the_identical_sweep_row_graph_and_seed(
     repro, work, done = _replay(folder, f"replayed_{case}")
     assert done.returncode == 1, done.stdout + done.stderr
     sweep = json.loads(
-        (work / "bundles/gauntlet/SdpaFwd/Default/sweep.json").read_text()
+        (sweep_dir(work, "SdpaFwd/Default", int(case[1:])) / "sweep.json").read_text()
     )
     assert len(sweep["cases"]) == 1
     assert json.dumps(sweep["cases"][0]) == json.dumps(

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "operation": "BatchnormInference",
+  "description": "BatchNorm forward inference (spatial mode, estimated mean and inverse variance as inputs) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x with float scale, bias, mean and inv-variance, y in x's dtype or widened to float (the 'upcast' sweep cases; the inference kernel takes its output type separately, BatchNormFwdInferSpatial.cpp:8, and the reference signature keys register y in {x dtype, float} only, GpuBatchnormFwdInfSignatureKey.hpp:113-147), hw and c swept around the vector-width cut points (inCstride % 4, c % 4, % 2 in computeVectorSize, PlanUtils.hpp:69-84) and powers of two +-1. N*H*W may be 1: inference uses stored statistics (BatchnormInferenceNode.hpp:119). Template: quick BatchnormInference/Default (the only inference topology; BatchnormInferenceVarianceExt is a separate op). Neither the template nor the quick sweep sets metadata.inputs, so the harness op defaults (mean -0.1..0.1, inv_variance 0.5..1.5, FillInputs.cpp:94-95) apply.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/BatchnormInference/Default/graph.template.json",
+  "axes": {
+    "dtype":   {"values": ["float", "half", "bfloat16"]},
+    "y_float": {"values": [false, true]},
+    "layout":  {"values": ["nchw", "nhwc"]},
+    "ndim":    {"values": [4, 5]},
+    "n":       {"range": [1, 1024], "boundaries": [1, 2, 3, 4, 5, 32, 33, 64, 65, 256, 257]},
+    "c":       {"range": [1, 512], "boundaries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 64, 65, 256, 257]},
+    "hw":      {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 255, 256, 257, 1024, 1025, 4095, 4096, 4097]},
+    "hs":      {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
+    "ds":      {"values": [1, 2, 3, 4]}
+  },
+  "derive": {
+    "ydt":     "'float' if y_float else dtype",
+    "h":       "hs if hw % hs == 0 else 1",
+    "d":       "ds if ndim == 5 and (hw // h) % ds == 0 else 1",
+    "w":       "hw // h // d",
+    "dims_x":  "[n, c, h, w] if ndim == 4 else [n, c, d, h, w]",
+    "dims_p":  "[1, c, 1, 1] if ndim == 4 else [1, c, 1, 1, 1]",
+    "xs_w":    "1 if layout == 'nchw' else c",
+    "xs_h":    "w if layout == 'nchw' else w * c",
+    "xs_d":    "h * w if layout == 'nchw' else h * w * c",
+    "xs_c":    "d * h * w if layout == 'nchw' else 1",
+    "xs_n":    "c * d * h * w",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
+    "stride_p": "[c, 1, 1, 1] if ndim == 4 else [c, 1, 1, 1, 1]"
+  },
+  "constraints": [
+    {"rule": "n * c * hw <= 2**30", "reason": "GPU reference cost ceiling for normalization ops (RFC 0023 section 14); also keeps every extent inside the checkedNarrowToInt int range the inference plan requires (BatchnormFwdInferencePlan.cpp:137-158, PlanUtils.hpp:19)"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${ydt}"},
+        {"uid": 1, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 3, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 4, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"},
+        {"uid": 5, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "float"}
+      ]
+    },
+    "metadata": {"purpose": "probe"}
+  }
+}

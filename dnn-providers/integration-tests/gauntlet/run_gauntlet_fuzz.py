@@ -5,8 +5,9 @@
 Gauntlet fuzz driver (RFC 0023, section 7).
 
 Draws random legal samples from the spaces in ``spaces/``, writes each batch as a concrete
-sweep under ``<work>/bundles/gauntlet/<Op>/<Space>/`` (the template the space names, copied
-as ``graph.template.json``, plus a generated ``sweep.json``), runs the unchanged
+sweep under ``<work>/bundles/gauntlet/<Op>/<Space>/<dtype>_cases/`` (the template the space
+names, copied as ``graph.template.json``, plus a generated ``sweep.json`` holding the samples
+of that input dtype; ``dtype_tag`` says why the directory is named so), runs the unchanged
 ``hipdnn_integration_tests`` binary on it with ``--outcome-report``, and records exactly one
 outcome per sample: ``PASS``, ``DECLINED``, ``WRONG``, ``CRASH``, ``UNCLAIMED_PASS`` or
 ``UNEXERCISED``. It does not change what the binary runs.
@@ -77,6 +78,8 @@ HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
 ZERO_TESTS_MARKER = "Error: zero tests ran"
 NO_DEVICE_MARKER = "No HIP devices available"
 GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
+# The axes a space's input data type is read from, first match wins (see ``dtype_tag``).
+DTYPE_TAG_AXES = ("x_dtype", "dtype")
 POLL_SECONDS = 0.05
 MAX_PRINTED_FINDINGS = 20
 
@@ -101,6 +104,33 @@ def load_bundle_utils():
     sys.modules["bundle_utils"] = module
     spec.loader.exec_module(module)
     return module
+
+
+def dtype_tag(sp, sample):
+    """The dtype tag of a sample's input data type (``fp16``, ``bfp16``, ``fp32``), or None.
+
+    An engine's TOML config matches its tolerance, validator and skip globs against the full
+    GTest name ``<suite>.<case>`` (``TomlGuards.hpp`` ``currentTestName()``), and the quick
+    bundles carry the input dtype tag in the case id, as in ``LayernormBackward*fp16_*``.
+    Gauntlet case ids are ``s<seed>``, so the tag goes in the suite, which the harness derives
+    from the sweep directory path (``BundleDiscovery.hpp`` ``deriveSuiteName``). The tag is
+    the sample's ``x_dtype`` when its space has that axis (mixed precision keeps the other
+    tensors apart from the input) and its ``dtype`` otherwise; a space with neither has no tag.
+    Spelling is that of the bundle case ids (``bundle_utils.DTYPE_TOKEN``).
+    """
+    for axis in DTYPE_TAG_AXES:
+        if axis in sp.axes:
+            value = str(sample.axis_values[axis])
+            token = load_bundle_utils().DTYPE_TOKEN.get(value)
+            return token or re.sub(r"[^a-z0-9_]", "_", value.lower())
+    return None
+
+
+def dtype_directory(tag):
+    """The sweep directory name of a dtype tag. The TOML globs read ``fp16_*``, so the
+    directory name, which becomes part of the suite name, keeps an underscore after the tag.
+    """
+    return f"{tag}_cases"
 
 
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h|d)?")
@@ -510,16 +540,32 @@ class Fuzz:
     # -- bundles ---------------------------------------------------------
 
     def _write_bundle(self, sp, samples):
+        """One sweep directory per input dtype tag (``dtype_tag``), samples in draw order."""
         root = self.bundles / "gauntlet"
         if root.exists():
             shutil.rmtree(root)
-        out = root / sp.operation / sp.name
-        out.mkdir(parents=True)
-        shutil.copyfile(sp.template_path, out / "graph.template.json")
-        json_dump(out / "sweep.json", {"version": 1, "cases": [s.row for s in samples]})
+        groups = {}
+        for s in samples:
+            groups.setdefault(dtype_tag(sp, s), []).append(s)
+        for tag, group in groups.items():
+            out = root / sp.operation / sp.name
+            if tag is not None:
+                out = out / dtype_directory(tag)
+            out.mkdir(parents=True)
+            shutil.copyfile(sp.template_path, out / "graph.template.json")
+            json_dump(
+                out / "sweep.json", {"version": 1, "cases": [s.row for s in group]}
+            )
 
     def _test_name(self, sp, sample):
-        return f"{sp.suite_name}.{re.sub(r'[^A-Za-z0-9_]', '_', sample.case_id)}"
+        """The GTest name the harness registers: the suite of the sweep directory (the
+        sanitized path joined by ``_``, as in ``BundleDiscovery.hpp``) and the case id.
+        """
+        tag = dtype_tag(sp, sample)
+        suite = (
+            sp.suite_name if tag is None else f"{sp.suite_name}_{dtype_directory(tag)}"
+        )
+        return f"{suite}.{re.sub(r'[^A-Za-z0-9_]', '_', sample.case_id)}"
 
     # -- invoking the binary --------------------------------------------
 
@@ -1027,8 +1073,12 @@ class Fuzz:
         print(f"batch {sp.space_id} seeds {lo}..{hi}: {text}", flush=True)
 
     def _reason_key(self, reason):
-        """A reason with the work directory and case ids masked, so equal causes group."""
+        """A reason with the work directory, dtype directories and case ids masked, so equal
+        causes group."""
         text = (reason or "").replace(str(self.work), "<work>")
+        text = re.sub(
+            r"(?<![A-Za-z0-9])[a-z0-9]+_cases(?![A-Za-z0-9_])", "<dtype>_cases", text
+        )
         return re.sub(r"(?<![A-Za-z0-9_])s\d+(?![A-Za-z0-9_])", "<case>", text)[:300]
 
     def summarize(self):
