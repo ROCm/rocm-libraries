@@ -29,11 +29,13 @@ The same emitter builds both arches; the spec class
 | PV latent operand | gathered from the natural `kv_lds` tile with a row permutation the epilogue undoes | `ds_read_tr16_b64` from the natural tile, latent tiles in natural order |
 | `kv_lds` / `qr_lds` row pad | 4 bf16 | 8 bf16 (16 B-aligned rows for the 16 B reads) |
 
-The PV keeps the `16x16x16` atom: a key tile is one 16-row page. Everything
-else -- 64 heads per workgroup, the online softmax, split-KV and the combine,
-the input contract and its refusals -- is the gfx942 kernel's. The compiled
-code object was checked to contain the `v_mfma_f32_16x16x32_bf16` and
-`ds_read_b64_tr_b16` instructions.
+The PV keeps the `16x16x16` atom: a key tile is one 16-row page. The score
+read-ahead is per arch: 128 latent columns here, 64 on gfx942 with a fence
+after every k-step, where 128 spills the split kernel. Everything else -- 64
+heads per workgroup, the online softmax, split-KV and the combine, the input
+contract and its refusals -- is the gfx942 kernel's. The compiled code object
+was checked to contain the `v_mfma_f32_16x16x32_bf16` and `ds_read_b64_tr_b16`
+instructions.
 
 The prefill `absorbed_query` kernel used as an independent oracle on gfx942 has
 no gfx950 build, so on gfx950 the gate is the fp64 reference alone (the
@@ -115,13 +117,13 @@ chose a different split count on each device.
 
 ## Static resources
 
-Compiled through comgr (llvm22) and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI.
+Compiled through comgr from the llvm22 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score read-ahead is held short.
 
 | kernel | VGPR | SGPR | LDS (B) | scratch (B) |
 |---|---|---|---|---|
-| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_bf16` | 254 | 48 | 27904 | 0 |
-| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_split_bf16` | 254 | 52 | 27904 | 0 |
-| `mla_decode_combine_h64_rkv512_w4_bf16` | 26 | 30 | 0 | 0 |
-| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_bf16` | 254 | 48 | 27904 | 0 |
-| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_split_bf16` | 254 | 52 | 27904 | 0 |
-| `mla_decode_combine_h128_rkv512_w4_bf16` | 26 | 30 | 0 | 0 |
+| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_bf16` | 255 | 48 | 27904 | 0 |
+| `mla_decode_gfx950_h64_rkv512r64_k16_hw16_w4_split_bf16` | 255 | 52 | 27904 | 0 |
+| `mla_decode_combine_h64_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |
+| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_bf16` | 255 | 48 | 27904 | 0 |
+| `mla_decode_gfx950_h128_rkv512r64_k16_hw16_w4_split_bf16` | 255 | 52 | 27904 | 0 |
+| `mla_decode_combine_h128_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |

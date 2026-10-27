@@ -250,16 +250,16 @@ zeroes those rows before its PV and is gated on poisoned caches throughout.
 
 ## Static resources
 
-Compiled through comgr (llvm22) and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI.
+Compiled through comgr from the llvm22 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score loop reads four k-steps ahead, half the prefill's eight, with a fence after every k-step (`DECODE_SCORE_PREFETCH`, `DECODE_SCORE_FENCE_EVERY`).
 
 | kernel | VGPR | SGPR | LDS (B) | scratch (B) |
 |---|---|---|---|---|
 | `mla_decode_gfx942_h64_rkv512r64_k16_hw16_w4_bf16` | 256 | 49 | 27264 | 0 |
 | `mla_decode_gfx942_h64_rkv512r64_k16_hw16_w4_split_bf16` | 256 | 53 | 27264 | 0 |
-| `mla_decode_combine_h64_rkv512_w4_bf16` | 26 | 30 | 0 | 0 |
+| `mla_decode_combine_h64_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |
 | `mla_decode_gfx942_h128_rkv512r64_k16_hw16_w4_bf16` | 256 | 49 | 27264 | 0 |
 | `mla_decode_gfx942_h128_rkv512r64_k16_hw16_w4_split_bf16` | 256 | 53 | 27264 | 0 |
-| `mla_decode_combine_h128_rkv512_w4_bf16` | 26 | 30 | 0 | 0 |
+| `mla_decode_combine_h128_rkv512_w4_bf16` | 26 | 26 | 0 | 0 |
 
 ## Limits
 
