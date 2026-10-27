@@ -10,10 +10,10 @@ void testTensorConversions() {
     const Tensor convertedBFloat16 = Tensor::copyNativeValues<float>(Shape{2}, conversionSource)
                                          .copyConvertedTo(ScalarType::BFloat16);
     const Tensor convertedBack = convertedBFloat16.copyConvertedTo(ScalarType::Float32);
-    requireNear(convertedBack.loadAs<float>({0}), 1.1015625f, 0.0f,
-                "Tensor conversion did not apply BFloat16 rounding.");
-    requireNear(convertedBack.loadAs<float>({1}), -2.25f, 0.0f,
-                "Tensor conversion changed an exactly representable value.");
+    ASSERT_NEAR(convertedBack.loadAs<float>({0}), 1.1015625f, 0.0f)
+        << "Tensor conversion did not apply BFloat16 rounding.";
+    ASSERT_NEAR(convertedBack.loadAs<float>({1}), -2.25f, 0.0f)
+        << "Tensor conversion changed an exactly representable value.";
 
     const std::array<float, 6> matrixConversionSource{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
     const Tensor matrixSource =
@@ -25,16 +25,16 @@ void testTensorConversions() {
             "Tensor conversion did not preserve the requested destination layout.");
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 3; ++column)
-            requireNear(columnMajorFloat16.loadAs<float>({row, column}),
-                        matrixSource.loadAs<float>({row, column}), 0.0f,
-                        "Tensor conversion changed a logical value in a new layout.");
+            ASSERT_NEAR(columnMajorFloat16.loadAs<float>({row, column}),
+                        matrixSource.loadAs<float>({row, column}), 0.0f)
+                << "Tensor conversion changed a logical value in a new layout.";
     const Tensor roundTripMatrix = columnMajorFloat16.copyConvertedTo(
         ScalarType::Float32, Layout::contiguousLastDimensionFastest(matrixSource.shape()));
     for (size_t row = 0; row < 2; ++row)
         for (size_t column = 0; column < 3; ++column)
-            requireNear(roundTripMatrix.loadAs<float>({row, column}),
-                        matrixSource.loadAs<float>({row, column}), 0.0f,
-                        "Tensor conversion changed a value in the reverse relayout direction.");
+            ASSERT_NEAR(roundTripMatrix.loadAs<float>({row, column}),
+                        matrixSource.loadAs<float>({row, column}), 0.0f)
+                << "Tensor conversion changed a value in the reverse relayout direction.";
     requireError(
         [&] {
             (void)matrixSource.copyConvertedTo(ScalarType::Float16, Layout(Shape{2, 3}, {0, 1}, 0));
@@ -70,9 +70,9 @@ void testTensorConversions() {
     for (size_t first = 0; first < stridedShape[0]; ++first)
         for (size_t second = 0; second < stridedShape[1]; ++second)
             for (size_t third = 0; third < stridedShape[2]; ++third)
-                requireNear(stridedConverted.loadAs<float>({first, second, third}),
-                            static_cast<float>(first * 100 + second * 10 + third), 0.0f,
-                            "Tensor conversion changed an arbitrary strided-layout value.");
+                ASSERT_NEAR(stridedConverted.loadAs<float>({first, second, third}),
+                            static_cast<float>(first * 100 + second * 10 + third), 0.0f)
+                    << "Tensor conversion changed an arbitrary strided-layout value.";
 
     const Shape bulkShape{513, 513};
     std::vector<float> bulkValues(bulkShape.elementCount());
@@ -84,9 +84,9 @@ void testTensorConversions() {
         ScalarType::Float32, Layout::contiguousFirstDimensionFastest(bulkShape));
     for (size_t row : {size_t{0}, size_t{256}, size_t{512}})
         for (size_t column : {size_t{0}, size_t{257}, size_t{512}})
-            requireNear(bulkConverted.loadAs<float>({row, column}),
-                        bulkFloat16.loadAs<float>({row, column}), 0.0f,
-                        "Bulk tiled Tensor conversion changed a logical value.");
+            ASSERT_NEAR(bulkConverted.loadAs<float>({row, column}),
+                        bulkFloat16.loadAs<float>({row, column}), 0.0f)
+                << "Bulk tiled Tensor conversion changed a logical value.";
 
     const Shape emptyShape{2, 0};
     const Tensor emptyConverted =
@@ -132,32 +132,32 @@ void testTensorConversions() {
                            fp4.rawEncodedBackingStorage().begin()),
             "Same-type tensor conversion changed raw storage.");
     const Tensor fp4Float = fp4.copyConvertedTo(ScalarType::Float32);
-    requireNear(fp4Float.loadAs<float>({0}), -6.0f, 0.0f,
-                "Packed tensor conversion minimum mismatch.");
-    requireNear(fp4Float.loadAs<float>({2}), 1.5f, 0.0f,
-                "Packed tensor conversion normal mismatch.");
-    requireNear(fp4.loadAs<float>({0}), -6.0f, 0.0f, "FP4 minimum mismatch.");
-    requireNear(fp4.loadAs<float>({1}), -0.5f, 0.0f, "FP4 subnormal mismatch.");
-    requireNear(fp4.loadAs<float>({2}), 1.5f, 0.0f, "FP4 normal mismatch.");
-    requireNear(fp4.loadAs<float>({3}), 6.0f, 0.0f, "FP4 maximum mismatch.");
+    ASSERT_NEAR(fp4Float.loadAs<float>({0}), -6.0f, 0.0f)
+        << "Packed tensor conversion minimum mismatch.";
+    ASSERT_NEAR(fp4Float.loadAs<float>({2}), 1.5f, 0.0f)
+        << "Packed tensor conversion normal mismatch.";
+    ASSERT_NEAR(fp4.loadAs<float>({0}), -6.0f, 0.0f) << "FP4 minimum mismatch.";
+    ASSERT_NEAR(fp4.loadAs<float>({1}), -0.5f, 0.0f) << "FP4 subnormal mismatch.";
+    ASSERT_NEAR(fp4.loadAs<float>({2}), 1.5f, 0.0f) << "FP4 normal mismatch.";
+    ASSERT_NEAR(fp4.loadAs<float>({3}), 6.0f, 0.0f) << "FP4 maximum mismatch.";
 
     Tensor fp6(ScalarType::Float6E2M3, Shape{4});
     fp6.storeFrom({0}, -7.5f);
     fp6.storeFrom({1}, -0.125f);
     fp6.storeFrom({2}, 0.875f);
     fp6.storeFrom({3}, 7.5f);
-    requireNear(fp6.loadAs<float>({0}), -7.5f, 0.0f, "FP6 minimum mismatch.");
-    requireNear(fp6.loadAs<float>({3}), 7.5f, 0.0f, "FP6 maximum mismatch.");
+    ASSERT_NEAR(fp6.loadAs<float>({0}), -7.5f, 0.0f) << "FP6 minimum mismatch.";
+    ASSERT_NEAR(fp6.loadAs<float>({3}), 7.5f, 0.0f) << "FP6 maximum mismatch.";
 
     Tensor float16(ScalarType::Float16, Shape{2});
     float16.storeFrom({0}, 1.5f);
     float16.storeFrom({1}, -0.25f);
-    requireNear(float16.loadAs<float>({0}), 1.5f, 0.0f, "Float16 codec mismatch.");
-    requireNear(float16.loadAs<float>({1}), -0.25f, 0.0f, "Float16 codec mismatch.");
+    ASSERT_NEAR(float16.loadAs<float>({0}), 1.5f, 0.0f) << "Float16 codec mismatch.";
+    ASSERT_NEAR(float16.loadAs<float>({1}), -0.25f, 0.0f) << "Float16 codec mismatch.";
 
     Tensor bfloat16(ScalarType::BFloat16, Shape{1});
     bfloat16.storeFrom({0}, 1.25f);
-    requireNear(bfloat16.loadAs<float>({0}), 1.25f, 0.01f, "BFloat16 codec mismatch.");
+    ASSERT_NEAR(bfloat16.loadAs<float>({0}), 1.25f, 0.01f) << "BFloat16 codec mismatch.";
 
     Tensor complex(ScalarType::ComplexFloat32, Shape{1});
     complex.storeFrom({0}, std::complex<float>(2.0f, -3.0f));
@@ -166,6 +166,6 @@ void testTensorConversions() {
 
     Tensor float8(ScalarType::Float8E4M3, Shape{1});
     float8.storeFrom({0}, 1.25f);
-    requireNear(float8.loadAs<float>({0}), 1.25f, 0.0f, "Float8 codec mismatch.");
+    ASSERT_NEAR(float8.loadAs<float>({0}), 1.25f, 0.0f) << "Float8 codec mismatch.";
 }
 }  // namespace tensor_core_test
