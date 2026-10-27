@@ -2,8 +2,8 @@
   "benchmark_runs/fp32_tn.yaml": {
     "gfx950": {
       "problem_0_s_TN_Batched_Bias": {
-        "actual": 2048,
-        "expected": 4096
+        "actual": 80,
+        "expected": 160
       }
     }
   },
@@ -28,6 +28,22 @@
       "problem_0_b_TN_Batched": {
         "actual": 2,
         "expected": 2
+      }
+    }
+  },
+  "custom_xfp32.yaml": {
+    "gfx950": {
+      "problem_0": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_1": {
+        "actual": 1,
+        "expected": 1
+      },
+      "problem_2": {
+        "actual": 1,
+        "expected": 1
       }
     }
   },
@@ -277,7 +293,11 @@
   },
   "gemm/fp32_tn.yaml": {
     "gfx950": {
-      "problem_0_s_TN_Batched_Bias": 4096
+      "problem_0_s_TN_Batched_Bias": {
+        "actual": 2048,
+        "calculated": 4096,
+        "expected": 4096
+      }
     }
   },
   "gemm/gemm_bias_strided_batched_broadcast_gfx940.yaml": {
@@ -1983,24 +2003,24 @@
   "sparse/gfx94x/spmm_bf16.yaml": {
     "gfx950": {
       "problem_0_B_TN_Batched_Bias": {
-        "actual": 45,
-        "expected": 384
+        "actual": 6,
+        "expected": 32
       }
     }
   },
   "sparse/gfx94x/spmm_bf16_sb.yaml": {
     "gfx950": {
       "problem_0_B_TN_Batched_Bias": {
-        "actual": 160,
-        "expected": 384
+        "actual": 6,
+        "expected": 8
       },
       "problem_1_B_TT_Batched": {
-        "actual": 160,
-        "expected": 384
+        "actual": 2,
+        "expected": 2
       },
       "problem_2_B_TT_Batched": {
-        "actual": 160,
-        "expected": 384
+        "actual": 2,
+        "expected": 2
       }
     }
   },
@@ -2199,8 +2219,8 @@
   "sparse/gfx94x/spmm_i8bs.yaml": {
     "gfx950": {
       "problem_0_I8_TN_Batched_Bias": {
-        "actual": 45,
-        "expected": 384
+        "actual": 6,
+        "expected": 32
       }
     }
   },
@@ -2215,8 +2235,8 @@
   "sparse/gfx94x/spmm_i8hs.yaml": {
     "gfx950": {
       "problem_0_I8_TN_Batched_Bias": {
-        "actual": 45,
-        "expected": 384
+        "actual": 6,
+        "expected": 32
       }
     }
   },
@@ -2334,10 +2354,26 @@
   },
   "sparse/gfx950/bf16_gate_r.yaml": {
     "gfx950": {
-      "problem_0_B_NN_Batched_Bias": 16,
-      "problem_1_B_NT_Batched_Bias": 16,
-      "problem_2_B_NN_Batched_Bias": 16,
-      "problem_3_B_NT_Batched_Bias": 16
+      "problem_0_B_NN_Batched_Bias": {
+        "actual": 16,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_1_B_NT_Batched_Bias": {
+        "actual": 16,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_2_B_NN_Batched_Bias": {
+        "actual": 6,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_3_B_NT_Batched_Bias": {
+        "actual": 6,
+        "calculated": 16,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx950/f8_gate_r.yaml": {
@@ -2362,10 +2398,26 @@
   },
   "sparse/gfx950/fp16_gate_r.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched_Bias": 16,
-      "problem_1_H_NT_Batched_Bias": 16,
-      "problem_2_H_NN_Batched_Bias": 16,
-      "problem_3_H_NT_Batched_Bias": 16
+      "problem_0_H_NN_Batched_Bias": {
+        "actual": 16,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_1_H_NT_Batched_Bias": {
+        "actual": 16,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_2_H_NN_Batched_Bias": {
+        "actual": 6,
+        "calculated": 16,
+        "expected": 16
+      },
+      "problem_3_H_NT_Batched_Bias": {
+        "actual": 6,
+        "calculated": 16,
+        "expected": 16
+      }
     }
   },
   "sparse/gfx950/spmm_b8.yaml": {
@@ -2442,26 +2494,90 @@
   },
   "sparse/gfx950/spmm_bf16.yaml": {
     "gfx950": {
-      "problem_0_B_NN_Batched_Bias": 384,
-      "problem_1_B_NT_Batched_Bias": 384,
-      "problem_2_B_TN_Batched_Bias": 384,
-      "problem_3_B_TT_Batched_Bias": 384,
-      "problem_4_B_NN_Batched_Bias": 252,
-      "problem_5_B_NT_Batched_Bias": 168,
-      "problem_6_B_TN_Batched_Bias": 252,
-      "problem_7_B_TT_Batched_Bias": 378
+      "problem_0_B_NN_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_1_B_NT_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_2_B_TN_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_3_B_TT_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_4_B_NN_Batched_Bias": {
+        "actual": 48,
+        "calculated": 252,
+        "expected": 252
+      },
+      "problem_5_B_NT_Batched_Bias": {
+        "actual": 30,
+        "calculated": 168,
+        "expected": 168
+      },
+      "problem_6_B_TN_Batched_Bias": {
+        "actual": 48,
+        "calculated": 252,
+        "expected": 252
+      },
+      "problem_7_B_TT_Batched_Bias": {
+        "actual": 64,
+        "calculated": 378,
+        "expected": 378
+      }
     }
   },
   "sparse/gfx950/spmm_bf16_sb.yaml": {
     "gfx950": {
-      "problem_0_B_NN_Batched_Bias": 384,
-      "problem_1_B_NT_Batched_Bias": 384,
-      "problem_2_B_TN_Batched_Bias": 384,
-      "problem_3_B_TT_Batched_Bias": 384,
-      "problem_4_B_NN_Batched_Bias": 252,
-      "problem_5_B_NT_Batched_Bias": 168,
-      "problem_6_B_TN_Batched_Bias": 252,
-      "problem_7_B_TT_Batched_Bias": 378
+      "problem_0_B_NN_Batched_Bias": {
+        "actual": 160,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_1_B_NT_Batched_Bias": {
+        "actual": 160,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_2_B_TN_Batched_Bias": {
+        "actual": 160,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_3_B_TT_Batched_Bias": {
+        "actual": 160,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_4_B_NN_Batched_Bias": {
+        "actual": 224,
+        "calculated": 252,
+        "expected": 252
+      },
+      "problem_5_B_NT_Batched_Bias": {
+        "actual": 140,
+        "calculated": 168,
+        "expected": 168
+      },
+      "problem_6_B_TN_Batched_Bias": {
+        "actual": 252,
+        "calculated": 252,
+        "expected": 252
+      },
+      "problem_7_B_TT_Batched_Bias": {
+        "actual": 336,
+        "calculated": 378,
+        "expected": 378
+      }
     }
   },
   "sparse/gfx950/spmm_dtl.yaml": {
@@ -2718,14 +2834,30 @@
   },
   "sparse/gfx950/spmm_i8bs.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched_Bias": 384,
-      "problem_1_i8_NN_Batched_Bias": 336
+      "problem_0_i8_NN_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_1_i8_NN_Batched_Bias": {
+        "actual": 30,
+        "calculated": 336,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_i8hs.yaml": {
     "gfx950": {
-      "problem_0_i8_NN_Batched_Bias": 384,
-      "problem_1_i8_NN_Batched_Bias": 336
+      "problem_0_i8_NN_Batched_Bias": {
+        "actual": 45,
+        "calculated": 384,
+        "expected": 384
+      },
+      "problem_1_i8_NN_Batched_Bias": {
+        "actual": 30,
+        "calculated": 336,
+        "expected": 336
+      }
     }
   },
   "sparse/gfx950/spmm_ldstr.yaml": {
@@ -2750,26 +2882,90 @@
   },
   "sparse/gfx950/spmm_vw_lg_one.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched": 32,
-      "problem_1_H_NT_Batched": 32,
-      "problem_2_H_TN_Batched": 32,
-      "problem_3_H_TT_Batched": 32,
-      "problem_4_i8_NN_Batched": 32,
-      "problem_5_i8_NT_Batched": 32,
-      "problem_6_i8_TN_Batched": 32,
-      "problem_7_i8_TT_Batched": 32
+      "problem_0_H_NN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_1_H_NT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_3_H_TT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_4_i8_NN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_5_i8_NT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_6_i8_TN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_7_i8_TT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      }
     }
   },
   "sparse/gfx950/spmm_vw_lg_one_sb.yaml": {
     "gfx950": {
-      "problem_0_H_NN_Batched": 32,
-      "problem_1_H_NT_Batched": 32,
-      "problem_2_H_TN_Batched": 32,
-      "problem_3_H_TT_Batched": 32,
-      "problem_4_i8_NN_Batched": 32,
-      "problem_5_i8_NT_Batched": 32,
-      "problem_6_i8_TN_Batched": 32,
-      "problem_7_i8_TT_Batched": 32
+      "problem_0_H_NN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_1_H_NT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_2_H_TN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_3_H_TT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_4_i8_NN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_5_i8_NT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_6_i8_TN_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      },
+      "problem_7_i8_TT_Batched": {
+        "actual": 25,
+        "calculated": 32,
+        "expected": 32
+      }
     }
   },
   "streamk/data_parallel_static_mx32f4.yaml": {
