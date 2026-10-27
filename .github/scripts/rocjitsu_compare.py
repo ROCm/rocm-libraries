@@ -161,8 +161,12 @@ def solutions(path):
         if not {"ProblemType", "SolutionIndex", "SolutionNameMin"} <= entry.keys():
             raise ValueError(f"{path}: unknown solution/header schema")
         result.append(entry)
-    names = [s["SolutionNameMin"] for s in result]
-    if not result or len(set(names)) != len(names):
+    indices = [s["SolutionIndex"] for s in result]
+    if (
+        not result
+        or any(type(index) is not int or index < 0 for index in indices)
+        or len(set(indices)) != len(indices)
+    ):
         raise ValueError(f"{path}: empty or ambiguous solution inventory")
     return result
 
@@ -649,10 +653,16 @@ def audit_item(root, directory, item):
             else list(group_indices(group))
         )
         row = event["row"]
-        matches = [s for s in groups[group] if s["SolutionNameMin"] == row["solution"]]
+        solution_index = int(row["solution-progress"].split("/")[0])
+        matches = [
+            s
+            for s in groups[group]
+            if s["SolutionIndex"] == solution_index
+            and s["SolutionNameMin"] == row["solution"]
+        ]
         if len(matches) != 1:
             raise ValueError(
-                "client solution name does not resolve uniquely to metadata"
+                "client solution index/name does not resolve uniquely to metadata"
             )
         shapes = ini_shapes(values)
         problem_index = int(row["problem-progress"].split("/")[0])

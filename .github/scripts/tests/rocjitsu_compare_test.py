@@ -659,6 +659,30 @@ class CompareTest(unittest.TestCase):
         ):
             self.assertNotEqual(solution_digest(original), solution_digest(changed))
 
+    def test_solution_identity_uses_progress_index_when_names_collide(self):
+        self.solutions[1]["SolutionNameMin"] = self.solutions[0]["SolutionNameMin"]
+        directory, item = self.item(self.root, "colliding_names", [4], False)
+        log = directory / "call-stdout.log"
+        log.write_text(log.read_text().replace("kernel1", "kernel0"))
+        _, rows = audit_item(self.root, directory, item)
+        self.assertEqual(
+            [row["solution_sha256"] for row in rows],
+            [solution_digest(solution) for solution in self.solutions],
+        )
+
+    def test_solution_progress_index_must_match_the_recorded_name(self):
+        directory, item = self.item(self.root, "swapped_indices", [4], False)
+        log = directory / "call-stdout.log"
+        swapped = (
+            log.read_text()
+            .replace(",0/1,", ",swap/1,")
+            .replace(",1/1,", ",0/1,")
+            .replace(",swap/1,", ",1/1,")
+        )
+        log.write_text(swapped)
+        with self.assertRaisesRegex(ValueError, "solution index/name"):
+            audit_item(self.root, directory, item)
+
     def test_missing_or_duplicate_processed_rows_invalidates_sweep(self):
         for mutation in ("missing", "duplicate", "malformed", "unknown"):
             root = self.root / mutation
