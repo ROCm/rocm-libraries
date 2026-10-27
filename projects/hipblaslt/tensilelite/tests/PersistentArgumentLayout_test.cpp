@@ -965,7 +965,7 @@ TEST(PersistentArgumentLayout, ClusterParallelEligibilityAndPackedOutputContract
     EXPECT_EQ(value<uint32_t>(gemm.args, "skTiles"), 4u);
     EXPECT_EQ(value<uint32_t>(gemm.args, "SKItersPerWG"), 1025u / 4);
     EXPECT_EQ(value<uint32_t>(gemm.args, "skGrid"), 16u);
-    const auto conversion = solution.generateOutputConversionCall<true>(problem, inputs, launch, 1, 0);
+    const auto conversion = solution.generateOutputConversionCall<true>(problem, inputs, device, launch, 1, 0);
     EXPECT_EQ(value<uint32_t>(conversion.args, "gsu"), 4u);
     EXPECT_EQ(value<uint32_t>(conversion.args, "strideW1"), 257u);
     EXPECT_EQ(value<uint32_t>(conversion.args, "strideW2"), 257u * 385);
