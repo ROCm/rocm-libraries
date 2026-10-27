@@ -99,10 +99,9 @@ data_layout_t::data_layout_t(const std::vector<size_t>& lower,
     : len_axes(batch_rank < lower.size() ? lower.size() - batch_rank : 0)
     , batch_axes(batch_rank)
 {
-    if(get_batch_rank() == 0 || get_len_rank() == 0)
-        throw std::invalid_argument(
-            ROCFFT_CURRENT_FUNCTION
-            + " does not accept 0-dimensional length or batch coordinates.");
+    if(get_len_rank() == 0)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " does not accept 0-dimensional length coordinates.");
     if(lower.size() != upper.size() || lower.size() != strides.size())
         throw std::invalid_argument(
             ROCFFT_CURRENT_FUNCTION
