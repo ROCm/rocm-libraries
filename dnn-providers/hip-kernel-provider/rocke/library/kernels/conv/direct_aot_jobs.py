@@ -512,6 +512,22 @@ WGRAD_GATHER_WAVES = ((2, 1), (1, 3), (2, 3), (1, 6), (2, 2))
 WGRAD_GATHER_PREFETCH = (1, 2)
 WGRAD_GATHER_RPS = (8, 16)
 WGRAD_GATHER_BLOCKS = (256, 1024, 2048)
+# Depthwise wgrad on the batched 4x4x4 MFMA (DwWgradMfmaSpec): (4-column
+# tiles per block, images packed per tile), input rows per unit, staging
+# buffers, workgroups. Measured on gfx950 bf16 7x7 layers (ConvNeXt):
+# 16-wide tiles lead below 32 columns, 32-wide on 56x56; 7x7 images pack 2 to
+# a 20-wide or 3 to a 32-wide tile.
+WGRAD_DW_MFMA_TILES = ((4, 1), (8, 1), (5, 2), (8, 3))
+WGRAD_DW_MFMA_RPC = (7, 14, 28)
+WGRAD_DW_MFMA_PREFETCH = (1, 2)
+WGRAD_DW_MFMA_BLOCKS = (1024, 2048)
+# Grouped wgrad, 4 or 8 channels per group, on the batched 4x4x4 MFMA
+# (GroupedWgradMfmaSpec): (waves_q, wave_q4), rows per unit, staging
+# buffers, workgroups.
+WGRAD_GROUPED_MFMA_WAVES = ((4, 2), (4, 1), (2, 1), (2, 2))
+WGRAD_GROUPED_MFMA_RPC = (28, 56)
+WGRAD_GROUPED_MFMA_PREFETCH = (2, 3)
+WGRAD_GROUPED_MFMA_BLOCKS = (1024, 2048)
 
 # Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc). Its compute pass is the
 # forward kernel on the transposed problem, whose K reduction runs over the
@@ -655,6 +671,8 @@ _NONGROUPED_FILTERS = (3,)
 _WGRAD_FILTERS = (3, 5, 7)
 # Input channel counts the dense small-C gather wgrad bakes (KW * C <= 96).
 _GATHER_CHANNELS = (3, 4, 8, 16, 24, 32)
+# Channels per group (= filters per group) the 4x4x4 MFMA grouped wgrad bakes.
+_GROUPED_MFMA_CHANNELS = (4, 8)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
 # kernel bounds its rows and columns by the runtime output extents, so any
 # padding works; the rows bake the "same" padding of the symmetric dilations
@@ -903,6 +921,26 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
             for pad in _col_pads(k)
+        ),
+    ),
+    # Depthwise wgrad on the batched 4x4x4 MFMA: every depthwise filter,
+    # stride 1, C runtime (a multiple of 8).
+    "direct_wgrad_dw_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Grouped wgrad with 4 or 8 channels per group (cpg = kpg baked, groups
+    # runtime), 3x3 stride 1, on the batched 4x4x4 MFMA.
+    "direct_wgrad_grouped_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=c, kpg=c)
+            for c in _GROUPED_MFMA_CHANNELS
+            for pad in _col_pads(3)
         ),
     ),
     # Dense small-C wgrad, any stride: C is baked, K runtime.
@@ -1251,6 +1289,34 @@ def _knob_grid(
             WGRAD_DW_COLS_BLOCKS,
         ):
             yield dict(channels=c, strip=st, threads=th, target_blocks=tb)
+    elif variant == "direct_wgrad_dw_mfma":
+        for (qt, un), rpc, pf, tb in itertools.product(
+            WGRAD_DW_MFMA_TILES,
+            WGRAD_DW_MFMA_RPC,
+            WGRAD_DW_MFMA_PREFETCH,
+            WGRAD_DW_MFMA_BLOCKS,
+        ):
+            yield dict(
+                q_tiles=qt,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+                unfold_n=un,
+            )
+    elif variant == "direct_wgrad_grouped_mfma":
+        for (wq, q4), rpc, pf, tb in itertools.product(
+            WGRAD_GROUPED_MFMA_WAVES,
+            WGRAD_GROUPED_MFMA_RPC,
+            WGRAD_GROUPED_MFMA_PREFETCH,
+            WGRAD_GROUPED_MFMA_BLOCKS,
+        ):
+            yield dict(
+                waves_q=wq,
+                wave_q4=q4,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+            )
     elif variant == "direct_wgrad_gather":
         for (wk16, wk), pf, rps, tb in itertools.product(
             WGRAD_GATHER_WAVES,
@@ -1632,6 +1698,20 @@ def _dw_cols_probe_width(caps: DirectCaps, channels: int, strip: int) -> int:
     return 64
 
 
+def _dw_mfma_probe_width(caps: DirectCaps, knobs: dict) -> int:
+    """The narrowest W whose ``unfold_n`` packed images fit the depthwise
+    MFMA wgrad's column tile (W is a runtime extent, so any such width probes
+    the same binary), or 64 when none does."""
+    for w in range(1, 65):
+        wo = w + 2 * caps.PAD - caps.KH + 1
+        if wo < 1:
+            continue
+        pitch = max(wo, wo + caps.KH - 1 - caps.PAD, caps.PAD + w)
+        if knobs["unfold_n"] * pitch <= 4 * knobs["q_tiles"]:
+            return w
+    return 64
+
+
 def probe_problem(
     caps: DirectCaps,
     dtype: str = DIRECT_DTYPE,
@@ -1682,6 +1762,21 @@ def probe_problem(
             H=64,
             W=_dw_cols_probe_width(caps, knobs["channels"], knobs["strip"]),
             groups=knobs["channels"],
+            cpg=1,
+            kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_dw_mfma" and knobs.get("unfold_n", 1) > 1:
+        # Packed images: the narrowest image ``unfold_n`` of fit the tile.
+        return DirectConvProblem(
+            N=knobs["unfold_n"],
+            H=64,
+            W=_dw_mfma_probe_width(caps, knobs),
+            groups=256,
             cpg=1,
             kpg=1,
             KH=caps.KH,
@@ -1825,8 +1920,12 @@ def _caps_jobs(
     n_raw = 0
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts, the
-    # small-C depthwise wgrad's its baked channel count.
-    knob_probe = rtc_dgrad or variant == "direct_wgrad_dw_cols"
+    # small-C depthwise wgrad's its baked channel count, the depthwise MFMA
+    # wgrad's its packed images (a narrow enough image).
+    knob_probe = rtc_dgrad or variant in (
+        "direct_wgrad_dw_cols",
+        "direct_wgrad_dw_mfma",
+    )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
         n_raw += 1
