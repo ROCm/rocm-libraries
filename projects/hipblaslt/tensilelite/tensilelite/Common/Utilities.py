@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment
+from ..ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment, isStreamKSpatialCluster
 import functools
 import math
 import os
@@ -371,14 +371,14 @@ def isPow2(n):
     return n > 0 and (n & (n - 1)) == 0
 
 def persistentSpatialCluster(d):
-    """Whether DataParallel uses the spatial M/N cluster launch geometry.
+    """Whether persistent workers use spatial M/N cluster geometry.
 
-    Only this full-tile path folds hardware coordinates into tile IDs and
-    removes padded peers before the cooperative-load cluster barrier.
+    DataParallel traverses padded peer tiles; StreamK partitions
+    spatial blocks in K, with a separate peer identity for output and fixup.
     """
-    return (hasStaticAssignment(d)
-            and d.get("ClusterDim", [1, 1])[0] > 1
-            and bool(isPersistentDataParallel(d)))
+    return (isStreamKSpatialCluster(d)
+            or (isPersistentDataParallel(d) and hasStaticAssignment(d)
+                and clusterEnabled(d.get("ClusterDim", [1, 1]))))
 
 def persistentMulticast(d):
     """True when ``persistentSpatialCluster`` also issues TDM-multicast loads.
