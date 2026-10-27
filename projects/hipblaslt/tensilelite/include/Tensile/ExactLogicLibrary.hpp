@@ -255,6 +255,14 @@ namespace TensileLite
             return m_stop;
         }
 
+        /// Whether this is the first walk and it has skipped no row yet: every
+        /// row asked about is searched and only recorded, so a row below which
+        /// nothing would be returned can go unvisited (returnsNothing).
+        bool plain() const
+        {
+            return m_walk == Walk::First && m_skipped.empty();
+        }
+
         /// Sets up the next walk after one that did not return the solutions
         /// asked for; false when no rows are left.
         bool nextWalk()
@@ -420,6 +428,8 @@ namespace TensileLite
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
         std::vector<Row>          rows;
         mutable std::atomic<bool> lastFindTopRetAll = false;
+        // routeYield per route, plus one (0: not known yet).
+        mutable std::atomic<std::uint8_t> routeYields[SelectionRoute::Count]{};
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)
@@ -710,6 +720,9 @@ namespace TensileLite
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool predictionOnly = settings.usePredictionLibrary();
             const bool predictionLib  = predictionOnly || effectiveDynamic;
+            unsigned const route
+                = (predictionLib ? SelectionRoute::DropsEqualityAndRange : 0u)
+                  | (predictionOnly ? SelectionRoute::DropsGridBasedAndFreeSize : 0u);
 
             // false in case of early return;
             lastFindTopRetAll = false;
@@ -723,22 +736,31 @@ namespace TensileLite
                 if(kind == LibraryRowKind::ExperimentalStreamK && !streamK)
                     return false;
 
-                if(predictionLib
-                   && (kind == LibraryRowKind::EqualityMatching
-                       || kind == LibraryRowKind::RangeMatching))
+                if(dropsRow(kind, route))
                     return false;
 
-                // Only an explicit TENSILE_PREDICTION_LIB drops these rows; prediction
-                // implied by dynamic Stream-K scheduling still returns their solutions.
-                if(predictionOnly
-                   && (kind == LibraryRowKind::GridBasedMatching
-                       || kind == LibraryRowKind::FreeSizeMatching))
-                    return false;
+                bool const selects = TilewrightRowOrder::selects(kind);
+                // A row of another kind whose library returns nothing for the
+                // problem on this route (a CU-specific Equality bank under
+                // TENSILE_PREDICTION_LIB, or a bank without the problem's
+                // size) is passed over before its predicate. Searching it would
+                // only add records to an order that just records (plain()), so
+                // not with another order, nor while predicates print. The
+                // library is asked before the predicate has accepted the
+                // problem: an exact-key table below then reads the problem's
+                // key, which must be defined for every problem that reaches
+                // the row (MatchingTable::lacksKey).
+                if constexpr(!MyPredicate::SelectsHardware)
+                {
+                    if(!selects && !rowDebug && numSolutions > 0 && row.second != nullptr
+                       && (order == nullptr || order->plain())
+                       && row.second->returnsNothing(problem, route))
+                        return false;
+                }
 
                 if(!rowMatches(i, problem, hardware, rowDebug, deviceRows))
                     return false;
 
-                bool const selects = TilewrightRowOrder::selects(kind);
                 if(order != nullptr)
                 {
                     if(selects)
@@ -788,10 +810,86 @@ namespace TensileLite
             return rv;
         }
 
+        // Whether findTopRows drops rows of `kind` on `route` before their
+        // predicate. Only an explicit TENSILE_PREDICTION_LIB drops GridBased and
+        // FreeSize rows; prediction implied by dynamic Stream-K scheduling still
+        // returns their solutions.
+        static bool dropsRow(LibraryRowKind kind, unsigned route)
+        {
+            if((route & SelectionRoute::DropsEqualityAndRange)
+               && (kind == LibraryRowKind::EqualityMatching
+                   || kind == LibraryRowKind::RangeMatching))
+                return true;
+            return (route & SelectionRoute::DropsGridBasedAndFreeSize)
+                   && (kind == LibraryRowKind::GridBasedMatching
+                       || kind == LibraryRowKind::FreeSizeMatching);
+        }
+
+        // routeYield from the rows: Nothing when every row is dropped or leads
+        // to a library returning nothing, ExactKeys when the other rows lead
+        // only to exact-key Equality tables, else Some. A row of a kind that
+        // holds kernels, other than Equality, may return them.
+        RouteYield rowsYield(unsigned route) const
+        {
+            bool exactKeys = false;
+            for(size_t i = 0; i < rows.size(); i++)
+            {
+                auto const kind = rowKind(i);
+                if(dropsRow(kind, route))
+                    continue;
+                if(rows[i].second == nullptr
+                   || (TilewrightRowOrder::selects(kind)
+                       && kind != LibraryRowKind::EqualityMatching))
+                    return RouteYield::Some;
+                auto const yield = rows[i].second->routeYield(route);
+                if(yield == RouteYield::Some)
+                    return RouteYield::Some;
+                exactKeys = exactKeys || yield == RouteYield::ExactKeys;
+            }
+            return exactKeys ? RouteYield::ExactKeys : RouteYield::Nothing;
+        }
+
     public:
         virtual bool lastFindTopAlreadyRetAll() const override
         {
             return lastFindTopRetAll;
+        }
+
+        // The answer is kept per route. It stays true while no row is added to
+        // this library or to one below it after the first call that asks:
+        // prepareRows() allows appending rows, but a loaded library's rows do
+        // not change. A placeholder below that has not loaded yet answers Some,
+        // which stays true.
+        virtual RouteYield routeYield(unsigned route) const override
+        {
+            auto&              known = routeYields[route % SelectionRoute::Count];
+            std::uint8_t const kept  = known.load(std::memory_order_relaxed);
+            if(kept != 0)
+                return static_cast<RouteYield>(kept - 1);
+            RouteYield const yield = rowsYield(route);
+            known.store(static_cast<std::uint8_t>(static_cast<std::uint8_t>(yield) + 1),
+                        std::memory_order_relaxed);
+            return yield;
+        }
+
+        virtual bool returnsNothing(MyProblem const& problem, unsigned route) const override
+        {
+            switch(routeYield(route))
+            {
+            case RouteYield::Nothing:
+                return true;
+            case RouteYield::ExactKeys:
+                for(size_t i = 0; i < rows.size(); i++)
+                {
+                    if(dropsRow(rowKind(i), route))
+                        continue;
+                    if(rows[i].second == nullptr || !rows[i].second->returnsNothing(problem, route))
+                        return false;
+                }
+                return true;
+            default:
+                return false;
+            }
         }
 
         virtual SolutionVector<MySolution>

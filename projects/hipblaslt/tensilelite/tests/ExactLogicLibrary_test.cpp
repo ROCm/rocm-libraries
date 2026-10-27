@@ -14,8 +14,11 @@
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/Distance.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/MapLibrary.hpp>
+#include <Tensile/MatchingLibrary.hpp>
+#include <Tensile/PropertyMatching.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -922,4 +925,185 @@ TEST(ExactLogicLibraryTest, AnOrderOfManyRowsSearchesEachRowOnce)
         EXPECT_EQ(row->calls(), 2);
     EXPECT_EQ(grid->calls(), 2);
     EXPECT_EQ(table->calls(), 2);
+}
+
+namespace
+{
+    // The routes of findTopRows: tilewright off, tilewright on, and
+    // TENSILE_PREDICTION_LIB with tilewright on.
+    struct Route
+    {
+        char const*                name;
+        std::optional<std::string> tilewright;
+        std::optional<std::string> predictionLib;
+    };
+
+    std::vector<Route> const routes = {{"tilewright off", std::nullopt, std::nullopt},
+                                       {"tilewright on", "1", std::nullopt},
+                                       {"prediction library", "1", "1"}};
+
+    // True, counting its evaluations.
+    class CountingTrue : public Predicates::Predicate_CRTP<CountingTrue, ContractionProblemGemm>
+    {
+    public:
+        enum
+        {
+            HasIndex = false,
+            HasValue = false
+        };
+
+        static std::string Type()
+        {
+            return "CountingTrue";
+        }
+
+        bool operator()(ContractionProblemGemm const&) const override
+        {
+            evaluations++;
+            return true;
+        }
+
+        bool debugEval(ContractionProblemGemm const& problem, std::ostream&) const override
+        {
+            return (*this)(problem);
+        }
+
+        mutable int evaluations = 0;
+    };
+
+    // A library that answers that it returns only exact keys, and none for any
+    // problem.
+    class NoKeys : public KernelRow
+    {
+    public:
+        NoKeys()
+            : KernelRow({"no-keys"})
+        {
+        }
+
+        RouteYield routeYield(unsigned) const override
+        {
+            return RouteYield::ExactKeys;
+        }
+
+        bool returnsNothing(ContractionProblemGemm const&, unsigned) const override
+        {
+            return true;
+        }
+    };
+
+    ContractionProblemGemm gemmOf(size_t m, size_t n, size_t k)
+    {
+        auto problem = ContractionProblemGemm::GEMM(false, false, m, n, k, m, k, m, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
+    // An Equality bank keyed as TensileCreateLibrary keys one (FreeSizeA,
+    // FreeSizeB, BatchSize and BoundSize, each of index 0), holding `kernel` at
+    // the size of `problem`.
+    std::shared_ptr<ContractionProblemMatchingLibrary> bankOf(ContractionProblemGemm const& problem,
+                                                              std::shared_ptr<KernelRow>    kernel)
+    {
+        using Key   = std::array<int64_t, 4>;
+        using Table = Matching::DistanceMatchingTable<Key,
+                                                      ContractionProblemGemm,
+                                                      std::shared_ptr<ContractionLibrary>,
+                                                      std::shared_ptr<ContractionSolution>,
+                                                      Matching::Equality<Key>>;
+
+        auto freeA   = std::make_shared<Contraction::FreeSizeA>();
+        freeA->index = 0;
+        auto freeB   = std::make_shared<Contraction::FreeSizeB>();
+        freeB->index = 0;
+        auto batch   = std::make_shared<Contraction::BatchSize>();
+        batch->index = 0;
+        auto bound   = std::make_shared<Contraction::BoundSize>();
+        bound->index = 0;
+
+        auto table        = std::make_shared<Table>();
+        table->properties = {freeA, freeB, batch, bound};
+        Key const key{static_cast<int64_t>(problem.freeSizeA(0)),
+                      static_cast<int64_t>(problem.freeSizeB(0)),
+                      static_cast<int64_t>(problem.batchSize(0)),
+                      static_cast<int64_t>(problem.boundSize(0))};
+        table->table.push_back({key, std::move(kernel), 1.0});
+        auto lib   = std::make_shared<ContractionProblemMatchingLibrary>();
+        lib->table = table;
+        return lib;
+    }
+} // namespace
+
+// A row whose predicate rejects the problem is passed over on every route
+// without its library being asked anything, also when it has none.
+TEST(ExactLogicLibraryTest, ARejectedRowWithoutALibraryIsPassedOver)
+{
+    const AMDGPU                       device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    ContractionProblemSelectionLibrary lib(
+        Rows{Row(makeRowPredicate(std::make_shared<Predicates::False<ContractionProblemGemm>>()),
+                 nullptr),
+             rowOf<AnyRow>(kernels({"next"}))});
+    for(auto const& route : routes)
+    {
+        SCOPED_TRACE(route.name);
+        ScopedSetting tilewright("TENSILE_USE_TILEWRIGHT", route.tilewright);
+        ScopedSetting predictionLib("TENSILE_PREDICTION_LIB", route.predictionLib);
+        EXPECT_EQ(solutionNames(lib.findTopSolutions(gemmOf(1024, 1024, 1024), device, 1)),
+                  (Names{"next"}));
+    }
+}
+
+// The row of a CU-specific Equality bank, a row of the problem's types that
+// leads to a library of one Equality row, answers the size it holds and is
+// passed over before its predicate for any other size; the prediction library
+// drops Equality rows, so there it is always passed over.
+TEST(ExactLogicLibraryTest, AnEqualityBankRowIsPassedOverForSizesItDoesNotHold)
+{
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto const   held   = gemmOf(4096, 4096, 512);
+    auto const   other  = gemmOf(1024, 1024, 1024);
+    auto const   gate   = std::make_shared<CountingTrue>();
+    auto const   bank   = std::make_shared<ContractionProblemSelectionLibrary>(
+        Rows{rowOf<Equality>(bankOf(held, kernels({"bank"})))});
+    ContractionProblemSelectionLibrary lib(
+        Rows{Row(makeRowPredicate(gate), bank), rowOf<Predicted>(kernels({"model"}))});
+    for(auto const& route : routes)
+    {
+        SCOPED_TRACE(route.name);
+        ScopedSetting tilewright("TENSILE_USE_TILEWRIGHT", route.tilewright);
+        ScopedSetting predictionLib("TENSILE_PREDICTION_LIB", route.predictionLib);
+        bool const    prediction = route.predictionLib.has_value();
+
+        int const before = gate->evaluations;
+        EXPECT_EQ(solutionNames(lib.findTopSolutions(other, device, 1)), (Names{"model"}));
+        EXPECT_EQ(gate->evaluations, before);
+
+        EXPECT_EQ(solutionNames(lib.findTopSolutions(held, device, 1)),
+                  (Names{prediction ? "model" : "bank"}));
+        EXPECT_EQ(gate->evaluations, before + (prediction ? 0 : 1));
+    }
+}
+
+// Whether a library returns nothing never reads a row without a library: rows
+// do not change once a library answers, but one cleared afterwards makes the
+// answer "possibly something", and the row is searched again.
+TEST(ExactLogicLibraryTest, ReturnsNothingReadsNoRowWithoutALibrary)
+{
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto const   inner  = std::make_shared<ContractionProblemSelectionLibrary>(
+        Rows{Row(makeRowPredicate(std::make_shared<Predicates::False<ContractionProblemGemm>>()),
+                 std::make_shared<NoKeys>())});
+    ContractionProblemSelectionLibrary outer(
+        Rows{rowOf<AnyRow>(inner), rowOf<AnyRow>(kernels({"next"}))});
+    ScopedSetting tilewright("TENSILE_USE_TILEWRIGHT", std::nullopt);
+    ScopedSetting predictionLib("TENSILE_PREDICTION_LIB", std::nullopt);
+    auto const    problem = gemmOf(1024, 1024, 1024);
+
+    EXPECT_EQ(inner->routeYield(0), RouteYield::ExactKeys);
+    EXPECT_TRUE(inner->returnsNothing(problem, 0));
+    EXPECT_EQ(solutionNames(outer.findTopSolutions(problem, device, 1)), (Names{"next"}));
+    inner->rows[0].second = nullptr;
+    EXPECT_FALSE(inner->returnsNothing(problem, 0));
+    EXPECT_EQ(solutionNames(outer.findTopSolutions(problem, device, 1)), (Names{"next"}));
 }

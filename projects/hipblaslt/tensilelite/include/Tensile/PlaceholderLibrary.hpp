@@ -251,6 +251,9 @@ namespace TensileLite
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         mutable std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
+        // `library` once adopted, for routeYield and returnsNothing, which never
+        // load it and so must not read `library` while another thread loads it.
+        mutable std::atomic<SolutionLibrary<MyProblem, MySolution> const*> adoptedLibrary{nullptr};
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
@@ -381,6 +384,7 @@ namespace TensileLite
                 });
             }
             library = std::move(shard);
+            adoptedLibrary.store(library.get(), std::memory_order_release);
         }
 
     public:
@@ -463,6 +467,19 @@ namespace TensileLite
         virtual bool lastFindTopAlreadyRetAll() const override
         {
             return lastFindTopRetAll;
+        }
+
+        /// Some until the library is loaded: asking never loads it.
+        virtual RouteYield routeYield(unsigned route) const override
+        {
+            auto const* loaded = adoptedLibrary.load(std::memory_order_acquire);
+            return loaded != nullptr ? loaded->routeYield(route) : RouteYield::Some;
+        }
+
+        virtual bool returnsNothing(MyProblem const& problem, unsigned route) const override
+        {
+            auto const* loaded = adoptedLibrary.load(std::memory_order_acquire);
+            return loaded != nullptr && loaded->returnsNothing(problem, route);
         }
 
         virtual SolutionVector<MySolution>

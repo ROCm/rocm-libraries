@@ -107,6 +107,36 @@ namespace TensileLite
 
             virtual std::string distanceType() const = 0;
 
+            /// Whether the table returns only an entry whose key equals the
+            /// object's (Equality distance).
+            virtual bool exactKeysOnly() const
+            {
+                return false;
+            }
+
+            /// For a table that returns only exact key matches: whether no entry
+            /// has the key of `object`, so that it returns nothing for it.
+            ///
+            /// Precondition: every key property is defined for `object`: its
+            /// evaluation neither throws nor reads past the object's indices.
+            /// ExactLogicLibrary::findTopRows asks (through
+            /// SolutionLibrary::returnsNothing) before the predicates of the rows
+            /// above the table have accepted the object, so this must hold for
+            /// every object that reaches the table, not only for those the
+            /// predicates accept. It holds for the Equality tables of
+            /// TensileCreateLibrary's libraries: their keys are FreeSizeA(0),
+            /// FreeSizeB(0), BoundSize(0) and BatchSize(0), and they lie below
+            /// the ProblemMapLibrary that dispatches on the OperationIdentifier,
+            /// so a problem that reaches one has the table's operation: at
+            /// least one free index of A and of B, one bound index and one
+            /// batch index. A table keyed by a property that some object
+            /// reaching it lacks (an index beyond its tensors) must not answer
+            /// exactKeysOnly().
+            virtual bool lacksKey(Object const& object) const
+            {
+                return false;
+            }
+
             Properties properties;
         };
 
@@ -821,6 +851,22 @@ namespace TensileLite
                 if(solution)
                     solutions.push_back(solution);
                 return solutions;
+            }
+
+            virtual bool exactKeysOnly() const
+            {
+                return true;
+            }
+
+            /// The lookup of findBestKeyMatch: true when it returns nullValue
+            /// without calling the transform. Requires what
+            /// MatchingTable::lacksKey requires of `object`.
+            virtual bool lacksKey(Object const& object) const
+            {
+                Key const key  = ProblemKey::keyForProblem<Key, Object>(object, this->properties);
+                auto      comp = [](Entry const& e, Key const& key) { return e.key < key; };
+                auto      iter = std::lower_bound(table.begin(), table.end(), key, comp);
+                return iter == table.end() || !(iter->key == key);
             }
         };
 

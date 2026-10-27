@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <string>
@@ -133,6 +134,34 @@ namespace TensileLite
     using SolutionSet = std::set<std::shared_ptr<MySolution>>;
     template <typename MySolution>
     using SolutionVector = std::vector<std::shared_ptr<MySolution>>;
+
+    /**
+ * The route of a findTopSolutions call: which row kinds
+ * ExactLogicLibrary::findTopRows drops before their predicate, as bits.
+ */
+    namespace SelectionRoute
+    {
+        /// Equality and Range rows (TENSILE_PREDICTION_LIB, or dynamic Stream-K
+        /// scheduling).
+        constexpr unsigned DropsEqualityAndRange = 1;
+        /// GridBased and FreeSize rows (TENSILE_PREDICTION_LIB only).
+        constexpr unsigned DropsGridBasedAndFreeSize = 2;
+        constexpr unsigned Count                     = 4;
+    }
+
+    /// What the findTopSolutions calls of a library can return on a route,
+    /// whatever the problem (SolutionLibrary::routeYield).
+    enum class RouteYield : std::uint8_t
+    {
+        /// Solutions, possibly.
+        Some,
+        /// No solution; no row is asked about of a TilewrightRowOrder.
+        Nothing,
+        /// Only the entries of Equality tables whose key is the problem's;
+        /// only the rows of those tables are asked about of a
+        /// TilewrightRowOrder. returnsNothing tells, per problem.
+        ExactKeys,
+    };
 
     /**
  * Makes the solutions a findTopSolutions call has collected so far visible to
@@ -357,6 +386,26 @@ namespace TensileLite
         /// Whether a tilewright model ranks this library's kernels, which only
         /// a Prediction library loaded with TENSILE_USE_TILEWRIGHT can have.
         virtual bool hasTilewrightModel() const
+        {
+            return false;
+        }
+
+        /// What findTopSolutions can return on `route` (SelectionRoute bits),
+        /// whatever the problem: Some unless the library can tell more. A
+        /// library whose rows are not loaded yet answers Some.
+        virtual RouteYield routeYield(unsigned route) const
+        {
+            return RouteYield::Some;
+        }
+
+        /// Whether findTopSolutions(problem, ...) on `route` returns no
+        /// solution, asking a TilewrightRowOrder at most about Equality rows:
+        /// then an ExactLogicLibrary row that leads here need not be searched
+        /// (ExactLogicLibrary::findTopRows). False unless the library can tell
+        /// cheaply. It is asked before the predicate of that row has accepted
+        /// the problem, so it may read only what is defined for every problem
+        /// that can reach this library.
+        virtual bool returnsNothing(MyProblem const& problem, unsigned route) const
         {
             return false;
         }
