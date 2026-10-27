@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING, Any
 from rocke.core.dtypes import dtype_info
 from rocke.core.facts import stated_facts_of
 from rocke.core.ir import GPU_CHECKED_VALUE_WRITER, Value
+from rocke.core.param_facts import int_type_limits
 
 from .descriptors import TensorWindow
 from .encoding import lane_terms, register_coord_offsets
@@ -98,6 +99,7 @@ __all__ = [
     "contiguous_run",
     "element_bytes",
     "explain_bounds_checks",
+    "fits_i32",
     "global_store_width",
     "is_lds",
     "leading_rank",
@@ -519,7 +521,11 @@ def _uniform_over_every_vector(
     return True
 
 
-_I32_LO, _I32_END = -(1 << 31), 1 << 31
+def fits_i32(n: int) -> bool:
+    """Whether ``n`` is an i32 value: an element index the instructions take as an i32 is
+    sign-extended, so one outside i32 would wrap by ``2^32`` elements."""
+    least, most = int_type_limits("i32")
+    return least <= n <= most
 
 
 def _fits_index32(tensor: TensorDesc, ranges: list[Interval]) -> bool:
@@ -537,7 +543,7 @@ def _fits_index32(tensor: TensorDesc, ranges: list[Interval]) -> bool:
             return False
         least += min(lo * stride, last * stride)
         most += max(lo * stride, last * stride)
-    return _I32_LO <= least and most < _I32_END
+    return fits_i32(least) and fits_i32(most)
 
 
 # --- the layout facts and the vector width -----------------------------------------------------------

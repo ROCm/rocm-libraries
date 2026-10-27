@@ -16,7 +16,9 @@ Placement (every side proven, and every checked access before it is masked):
 - the per-lane part, which starts at 0 by construction, becomes a byte offset in 32 bits,
   zero-extended to 64 and applied as its own offset (the pointer-plus-32-bit-offset form of the
   global instructions); its largest value, plus one vector, must stay below ``2^31`` bytes;
-- the constant is a trailing element offset the instruction can fold.
+- the constant is a trailing element index the instruction can fold -- an i32, sign-extended; a
+  constant outside i32 (a tile ``2^31`` elements or more into its tensor) would wrap by ``2^32``
+  elements as that index, so it joins the per-wave part on the 64-bit pointer instead.
 
 A proven window may use in-bounds pointer arithmetic for a per-wave part proven non-negative. A
 checked window never does: its invalid lanes compute addresses too, so every part that can move an
@@ -45,7 +47,7 @@ from typing import TYPE_CHECKING
 from rocke.core.facts import stated_facts_of
 from rocke.core.ir import I64, Type, Value, VectorType
 
-from .clipping import BoundsCheckPlan, GlobalForm, element_bytes
+from .clipping import BoundsCheckPlan, GlobalForm, element_bytes, fits_i32
 from .encoding import lane_terms, register_coord_offsets
 from .tensor_transforms.emit import (
     Access,
@@ -313,41 +315,50 @@ class _Placer:
 
     def place(self, address: ElementAddress) -> tuple[Value, int]:
         """The pointer of ``address`` without its constant, and the constant as the element index
-        the instruction adds (in the masked form the constant is applied to the pointer too, and
-        the index is 0, so no in-bounds promise covers an address an invalid lane computes).
+        the instruction adds. A constant outside i32 is no such index (it would wrap): it is
+        added to the per-wave part on the 64-bit pointer, and the index is 0. In the masked form
+        the constant is applied to the pointer too, and the index is 0, so no in-bounds promise
+        covers an address an invalid lane computes.
         """
         b = self._b
         elem_bytes = address.elem_bits // 8
-        pointer = self._base(address, elem_bytes)
+        on_base = 0
+        if not self._masked and not fits_i32(address.const):
+            on_base = address.const
+        pointer = self._base(address, elem_bytes, on_base)
         if address.lane is not None:
             pointer = b.global_ptr_offset(
                 pointer, self._lane_bytes(address, elem_bytes)
             )
         if not self._masked:
-            return pointer, address.const
+            return pointer, address.const - on_base
         if address.const:
             pointer = b.global_ptr_offset(
                 pointer, b.const_i64(address.const * elem_bytes)
             )
         return pointer, 0
 
-    def _base(self, address: ElementAddress, elem_bytes: int) -> Value:
-        """``ptr`` plus every per-wave term of the address, in bytes, once per distinct set."""
+    def _base(self, address: ElementAddress, elem_bytes: int, const: int) -> Value:
+        """``ptr`` plus every per-wave term of the address and ``const`` elements, in bytes, once
+        per distinct set."""
         terms = [(term.value, term.range) for term in address.uniform]
         if address.uniform_delta is not None:
             terms.append((address.uniform_delta, address.uniform_delta_range))
-        if not terms:
+        if not terms and not const:
             return self._ptr
-        key = tuple(id(value) for value, _ in terms)
+        key = (tuple(id(value) for value, _ in terms), const)
         if key not in self._bases:
             b = self._b
             total = None
             for value, _ in terms:
                 wide = value if value.type == I64 else b.sext(value, I64)
                 total = wide if total is None else b.add(total, wide)
-            if elem_bytes != 1:
+            if total is not None and elem_bytes != 1:
                 total = b.mul(total, b.const_i64(elem_bytes))
-            non_negative = all(
+            if const:
+                const_bytes = b.const_i64(const * elem_bytes)
+                total = const_bytes if total is None else b.add(total, const_bytes)
+            non_negative = const >= 0 and all(
                 Interval.from_pair(term_range).within(0, None)
                 for _, term_range in terms
             )
@@ -391,21 +402,30 @@ def _zero(b: IRBuilder, dtype: Type, width: int) -> Callable[[], Value]:
     return lambda: b.vec_extract(b.zero_vec(dtype, 1), 0)
 
 
+def _element_index(b: IRBuilder, index: int) -> Value:
+    """The element index an instruction adds to its pointer: an i32 (``_Placer.place`` moves a
+    constant outside i32 onto the pointer, so this never fails)."""
+    assert fits_i32(index), f"element index {index} is outside i32"
+    return b.const_i32(index)
+
+
 def _load(
     b: IRBuilder, pointer: Value, index: int, dtype: Type, width: int, align: int
 ) -> Value:
     if width > 1:
-        return b.global_load_vN(pointer, b.const_i32(index), dtype, width, align=align)
-    return b.global_load(pointer, b.const_i32(index), dtype, align=align)
+        return b.global_load_vN(
+            pointer, _element_index(b, index), dtype, width, align=align
+        )
+    return b.global_load(pointer, _element_index(b, index), dtype, align=align)
 
 
 def _store(
     b: IRBuilder, pointer: Value, index: int, value: Value, width: int, align: int
 ) -> None:
     if width > 1:
-        b.global_store_vN(pointer, b.const_i32(index), value, width, align=align)
+        b.global_store_vN(pointer, _element_index(b, index), value, width, align=align)
     else:
-        b.global_store(pointer, b.const_i32(index), value, align=align)
+        b.global_store(pointer, _element_index(b, index), value, align=align)
 
 
 def _yielding_if(

@@ -503,7 +503,8 @@ of the tile forces tensor padding or a separate edge kernel. Here clipping follo
   `TK = 16` (or, for a length checked on the GPU, the `b.gpu_checked_value` call to state it in).
 - **What is emitted:** a proven window is unmasked -- one i32 element index from the pointer when
   every stride is an int and every offset fits i32, else the per-wave address on the 64-bit pointer
-  plus a 32-bit per-lane offset. A checked window keeps its vector width and masks each access by
+  plus a 32-bit per-lane offset (a constant offset outside i32 goes on the 64-bit pointer too: an
+  offset is an i32 index only when it fits i32). A checked window keeps its vector width and masks each access by
   its validity: a vector wholly valid is one wide access, a vector that may cross a bound has each
   valid element accessed alone, and an address an invalid lane computes carries no in-bounds promise.
   Every form but the one-index form does arithmetic on the 64-bit pointer, which needs a global
