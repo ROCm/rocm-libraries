@@ -968,7 +968,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeObjectServesTheDispatcherDecodeRule
     window.kvHeads = 8;
     EXPECT_TRUE(matchesKernel(window, decodeKernel(128), gfx12));
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_FALSE(matchesKernel(window, decodeKernel(128), gfx12));
 }
@@ -1030,7 +1030,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
     // A bottom-right 1024-key window: 2 splits (still merged by the merge kernel).
     GraphSpec window = decodeGraph();
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_EQ(workspaceOf(window, decodeKernel(128), gfx1201), 33024U);
     // Batch 4: 2 splits.
