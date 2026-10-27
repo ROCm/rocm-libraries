@@ -545,8 +545,8 @@ int main(int argc, char* argv[])
             return EXIT_SUCCESS;
         });
 
-    app.add_flag("--checkstride", "Check that data is not written outside of output strides")
-        ->each([&](const std::string&) { manual_params.check_output_strides = true; });
+    app.add_flag("--checkstride", "Check that data is not written outside of strides")
+        ->each([&](const std::string&) { manual_params.check_strides = true; });
 
     auto opt_token
         = app.add_option("--token", test_token, "Test token name for manual test")->default_val("");

@@ -373,7 +373,7 @@ inline void run_round_trip_inverse(Tparams&              params,
             // output buffer to a known pattern and we can check
             // that the pattern is untouched in places that
             // shouldn't have been touched.
-            if(params.check_output_strides)
+            if(params.check_strides)
             {
                 auto hip_status = hipMemset(pobuffer[i], OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
                 if(hip_status != hipSuccess)
@@ -407,7 +407,7 @@ inline void compare_round_trip_inverse(Tparams&                    params,
                                        const VectorNorms&          cpu_input_norm,
                                        size_t                      total_length)
 {
-    if(params.check_output_strides)
+    if(params.check_strides)
     {
         check_output_strides<Tparams>(gpu_output, params);
     }
@@ -509,6 +509,16 @@ inline void compare_round_trip_inverse(Tparams&                    params,
 template <class Tfloat, class Tparams>
 inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 {
+    // Don't attempt to use cached data if we're checking strides.
+    // The cached data is not guaranteed to be initialized according
+    // to what the stride-checker requires.  The inverse is fine
+    // though - stride-checker-initialized cached data can be reused
+    // for non-stride-checker cases.
+    if(params.check_strides)
+    {
+        reference_fft_data_t::clear_cache();
+    }
+
     // Call hipGetLastError to reset any errors
     // returned by previous HIP runtime API calls.
     hipError_t hip_status = hipGetLastError();
@@ -575,6 +585,24 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         pibuffer[i] = ibuffer[i].data();
     }
 
+    // If we're validating strides and this is an in-place case, init
+    // the input buffer to a known pattern and we can check that the
+    // pattern is untouched in places that shouldn't have been
+    // touched.
+    if(params.check_strides && params.placement == fft_placement_inplace)
+    {
+        for(auto& buf : ibuffer)
+        {
+            hip_status = hipMemset(buf.data(), OUTPUT_INIT_PATTERN, buf.size());
+            if(hip_status != hipSuccess)
+            {
+                std::stringstream ss;
+                ss << "hipMemset failure with error " << hip_status;
+                throw hip_runtime_error(ss.str(), hip_status);
+            }
+        }
+    }
+
     // Initialize input data buffer(s) on device
     if(!reference_results.needs_input_initialization() || is_host_generator(params.igen))
     {
@@ -632,11 +660,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 throw hip_runtime_error(ss.str(), hip_status);
             }
 
-            // If we're validating output strides, init the
-            // output buffer to a known pattern and we can check
-            // that the pattern is untouched in places that
-            // shouldn't have been touched.
-            if(params.check_output_strides)
+            // If we're validating strides on a not-in-place
+            // transform, init the output buffer to a known pattern
+            // and we can check that the pattern is untouched in
+            // places that shouldn't have been touched.
+            if(params.check_strides)
             {
                 hip_status
                     = hipMemset(obuffer_data[i].data(), OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
@@ -674,7 +702,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
 
     params.free();
 
-    if(params.check_output_strides)
+    if(params.check_strides)
     {
         check_output_strides<Tparams>(gpu_output, params);
     }
