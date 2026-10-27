@@ -186,8 +186,7 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[Cac
         return None
     try:
         if _cacheDataMatches(c, benchmarkStep):
-            # A cache written before MXScalesPacked existed predates the packed
-            # layout, so the padded default is the right reading of it.
+            # A cache that omits MXScalesPacked describes the padded layout.
             return {"CodeObjectFiles": c["CodeObjectFiles"],
                     "LibraryFile": c["LibraryFile"],
                     "MXScalesPacked": c.get("MXScalesPacked", False)}
