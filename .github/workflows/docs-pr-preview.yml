@@ -14,7 +14,8 @@
 
 name: Docs Preview
 
-on:
+# SECURITY: MEMBER/OWNER comments only; fork PRs rejected; PR code never checked out.
+on: # zizmor: ignore[dangerous-triggers]
   issue_comment:
     types: [created, edited]
 
