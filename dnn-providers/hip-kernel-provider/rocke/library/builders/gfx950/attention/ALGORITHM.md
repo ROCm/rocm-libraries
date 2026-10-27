@@ -124,7 +124,8 @@ blocks ported from CK Tile's `BlockFmhaPipelineQRKSVSAsync` are:
   round-trip. The intra-16-lane / intra-32-lane stages lower to
   `ds_swizzle_b32` SWAP mode (not `ds_bpermute`); only a cross-half (mask 32)
   stage — e.g. the split-KV reduce's wave64 fold, or the transposed scalar
-  state's alpha broadcast — uses `ds_bpermute`.
+  state's alpha broadcast — uses `ds_bpermute`. (The 3D segment kernel's
+  cross-half step is the exception: it uses `permlane32_swap`, §5.1.)
 - **`o_acc` in MFMA-accumulator distribution** (per-lane `<4×f32>` per N-tile of
   the head dim), truncated to the output dtype through an LDS-staged shuffle
   epilogue with 16-byte stores.
@@ -225,9 +226,9 @@ walking it serially leaves the device idle (long-context decode), the 3D kernel
 (`attention_tiled_3d.py`) **splits the KV sequence into segments** and gives each
 segment its own CTA, then reduces:
 
-- **Grid:** `(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)`. Each segment CTA
-  runs the §2 recurrence over only `tile_start..tile_end` of the KV sequence and
-  writes a *partial* $(m, \ell, \mathbf{o})$ to a workspace
+- **Grid:** `(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)`. Each segment workgroup
+  computes a *partial* $(m, \ell, \mathbf{o})$ over only `tile_start..tile_end` of the
+  KV sequence and writes it to a workspace
   `segm_output[total_q, num_qh, num_segments, head_size]` (plus `segm_max` and
   `segm_expsum`, all fp32).
 - **All-decode grid:** `total_num_q_blocks` is the prefill upper bound
@@ -235,9 +236,14 @@ segment its own CTA, then reduces:
   `query_start_len` for its sequence. When every sequence has one query token
   (`all_decode`) the dispatcher sets `use_decode_grid` instead: grid x is
   `num_seqs` and `seq_idx = block_id_x`. That removes the empty early-exit
-  workgroups and the search; at `BLOCK_Q == 1` (16 query heads per KV head) the
-  upper bound also put every useful workgroup on an even x, so on half of the
-  XCDs.
+  workgroups and the search. At `BLOCK_Q == 1` (`BLOCK_Q` is the query positions per
+  q-block, $16 / g$, so 1 at 16 query heads per KV head) the upper bound also put every
+  useful workgroup on an even x: it leaves a spare q-block per sequence, so sequence $s$
+  sat at $x = 2s$. Workgroups are dealt round-robin to the XCDs (the accelerator complex
+  dies, each with its own L2; eight on gfx950) by linear id, in which x varies fastest.
+  The x extent, $2\,\text{num\_seqs}$, is even, so every useful workgroup also had an
+  even linear id: only half of the XCDs received useful work, and the other half got
+  the empty workgroups.
 - **`reduce_segments`** then combines the per-segment partials into the final
   output. Because flash-attention's $(m, \ell, \mathbf{o})$ merge is associative
   (re-base each segment's accumulator to the global max, sum the denominators),
@@ -246,10 +252,12 @@ segment its own CTA, then reduces:
 
 The 3D path turns a serial KV walk into parallel segments + a cheap reduction,
 which is the only way to saturate the device on long-context single-query decode.
+How many segments a decode shape gets: [§6.1](#61-how-many-segments-the-decode-split-rule).
 
 ### 5.1 Inside the segment kernel
 
-Each segment workgroup runs the §2 recurrence on the **transposed** score matrix.
+Each segment workgroup computes its partial $(m, \ell, \mathbf{o})$ on the
+**transposed** score matrix.
 The QK MFMA computes $S^{\top} = K\,Q^{\top}$ ($K$ is the A operand, $Q^{\top}$ the
 B operand), so lane $l$ owns one query row — a (query-position, query-head) pair,
 row $l \bmod 16$ — and holds tokens $4\lfloor l/16 \rfloor + 0..3$ of each
@@ -263,9 +271,11 @@ and most of what follows comes from that layout:
   `ds_swizzle` (xor 16) and `permlane32_swap`.
 - **$P$ never goes through LDS.** The scores already sit in the layout the PV MFMA
   wants as its B operand, so the kernel computes $O^{\top} = V^{\top} P^{\top}$ with
-  $P^{\top}$ taken straight from registers. There is no $P$ tile and no LDS round
-  trip for it, and in the epilogue each lane stores its four consecutive
-  head-dimension values of its query row as one vector.
+  $P^{\top}$ taken straight from registers and $V^{\top}$ read from LDS with the
+  transposing read `ds_read_b64_tr_b16` (gfx950 only; gfx942 builds it from strided
+  loads, [§8.1 there](../../gfx942/attention/ALGORITHM.md#81-what-differs-from-gfx950)).
+  There is no $P$ tile and no LDS round trip for it, and in the epilogue each lane
+  stores its four consecutive head-dimension values of its query row as one vector.
 - **$Q^{\top}$ is read once.** $Q$ is staged in LDS once (§3); the kernel loads
   $Q^{\top}$ into registers before the KV loop, and every tile's QK MFMAs reuse it.
 - **One V slot.** K is double-buffered but V has a single LDS slot: $V(i)$ is loaded
@@ -276,22 +286,25 @@ and most of what follows comes from that layout:
   16-token blocks share one MFMA, with their $V^{\top}$ reads and $P^{\top}$ values
   listed in the same token order (the MFMA only sums over $k$, so the pairing is all
   that has to agree). An odd last block, and so any 16-token tile, uses `16x16x16`.
-- **Native `exp2`.** The segment softmax (`p` and `alpha`) and the reduce kernel's
-  rescale factors use `exp2_fast`: one native `v_exp_f32` in place of the `llvm.exp2`
-  lowering. It is the same lever the dense kernel carries
-  ([§8.1](#81-the-winning-levers-all-always-on)).
-- **Page ids a tile ahead** (paged fp16/bf16 K/V; not a consequence of the layout).
-  The next tile's page id is read during the current tile and passed as the copy's
-  `soffset` (or folded into a 64-bit buffer base for caches above 2 GiB), so no table
-  read sits in front of the K/V copies already in flight. `use_wave_page_id_load` goes
-  further and removes the per-tile table read altogether.
+- **Native `exp2`.** The segment softmax and the reduce kernel emit `llvm.amdgcn.exp2`:
+  one native `v_exp_f32` in place of the `llvm.exp2` lowering.
+- **Page ids a tile ahead** (paged fp16/bf16 K/V; not a consequence of the layout;
+  under revision, [case study §7](../../common/attention_3d_decode/CASE_STUDY.md#7-open-items)).
+  The next tile's page id is read during the current tile. Its page base (the page id
+  times the page stride in bytes, the same for the whole wave) is passed as the copy's
+  `soffset`, the scalar byte-offset operand of a buffer load, or folded into a 64-bit
+  buffer base for caches above 2 GiB. Before the series, the table read was issued
+  behind K/V copies still in flight; those async copies count on `vmcnt` too, and
+  `vmcnt` retires in issue order, so waiting for the table read also drained them.
+  `use_wave_page_id_load` goes further and removes the per-tile table read altogether.
 
 The tunable parts — K/V cache policy, K/V LDS swizzle, wave page-id window and
 multi-page KV tiles — are fields of the segment spec; see the
 [Knob reference](../../common/README.md#knob-reference) and the runbook's
 [§12.1.K2](../../../../platform/dsl_docs/optimization/optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
 The always-on parts above have no field, which is why the runbook lists them there:
-a lever sweep should not rediscover them.
+a lever sweep should not rediscover them. Per-lever outcomes, caveats and the replay
+recipe are in the [case study](../../common/attention_3d_decode/CASE_STUDY.md).
 
 ---
 
@@ -344,23 +357,49 @@ result. Four is enough because, for paged K/V, the wave page-id window
 (`use_wave_page_id_load`, on in this scope) takes the page-table load off the KV loop,
 so fewer workgroups per CU hide the rest of the latency.
 
+Notation: $w = \text{num\_seqs} \cdot \text{num\_kv\_heads}$ is the number of workgroups
+in one segment's slice of the grid (the launch has $w \cdot \text{segments}$ workgroups);
+CUs is `problem.num_cus`: the caller's value when it passes one; otherwise the registry
+dispatcher (`_resolve_num_cus` in [`common.py`](../../../dispatch/attention/common.py))
+uses the device's CU count when the device is of the requested architecture (at least
+120 on gfx950) and 120 when it is not, and a problem built directly keeps the dataclass
+default of 120; "KV tokens" is the longest sequence in the batch (`max_seqlen_k`, with
+K meaning 1024 tokens, so 8K is 8192); a page is `block_size` tokens and a tile is the
+KV tokens one loop iteration stages.
+
 The rule applies when every sequence has one query token, K/V is fp16/bf16 (paged or
 strided, with `block_size` 16), the head size is 128 (256 only with enough workgroups
 for page-sized tiles, $w \cdot 32 > \text{CUs}$), and there is no sliding window and no
-explicit `target_ctas`. With $w = \text{num\_seqs} \cdot \text{num\_kv\_heads}$
-workgroups per segment, and "KV tokens" meaning the longest sequence in the batch
-(`max_seqlen_k`):
+explicit `target_ctas`:
 
-| grid | segments | KV tile |
+| when | segments | KV tile |
 |---|---|---|
 | $w \cdot 32 > \text{CUs}$ | $\lfloor 4\,\text{CUs} / w \rfloor$, at least 2, at most 64 below 8K KV tokens and 128 from 8K | one page |
-| $w \cdot 32 \le \text{CUs}$ (64 segments would give at most two workgroups per CU) | 64; 128 from 64K KV tokens when 64 segments would give at most one workgroup per CU; at most one segment per 64-token tile ($\lfloor \text{kv} / 64 \rfloor$) | 64 tokens; paged K/V also turns the K/V LDS swizzle on (strided K/V does not) |
+| $w \cdot 32 \le \text{CUs}$ (64 segments would give at most two workgroups per CU) | 64; 128 from 64K KV tokens when also $w \cdot 64 \le \text{CUs}$ (64 segments would give at most one workgroup per CU); at most one segment per 64-token tile ($\lfloor \text{KV tokens} / 64 \rfloor$) | 64 tokens; paged K/V also turns the K/V LDS swizzle on (strided K/V does not) |
 
 In the second row each workgroup's KV loop is latency-bound, so the tile widens to 64
-tokens; the swizzle is neutral at page-sized tiles and pays at multi-page ones. Every
-other problem — fp8 K/V, sliding windows, an explicit `target_ctas`, non-decode —
-keeps the previous segment counts. The constants are tuning results: `_num_segments`
-is the source of truth and this table follows it.
+tokens; the swizzle is neutral at page-sized tiles and pays at multi-page ones. The
+64-token tile and the page-id loader are under revision
+([case study §7](../../common/attention_3d_decode/CASE_STUDY.md#7-open-items)).
+
+Worked examples on 256 CUs, both cases that the
+[split-rule test](../../../tests/test_attention_tiled_3d_decode_split.py) pins:
+
+- 1 sequence, 8 KV heads, 32K KV tokens: $w = 8$ and $w \cdot 32 = 256 \le \text{CUs}$,
+  so the second row applies: 64 segments with 64-token tiles.
+- 4 sequences, 8 KV heads, 16K KV tokens: $w = 32$ and $w \cdot 32 > \text{CUs}$, so the
+  first row applies: $\lfloor 4 \cdot 256 / 32 \rfloor = 32$ segments with one-page tiles.
+
+Every other problem — fp8 K/V, sliding windows, an explicit `target_ctas`, non-decode,
+head size 64, head size 256 with $w \cdot 32 \le \text{CUs}$, a `block_size` other than
+16 — keeps the segment count and tile it had before the series (the prefill-derived
+formula in `_num_segments`). The constants are tuning results. `_num_segments`, its
+scope helper `_gfx950_3d_decode_ctas_per_segment` and the tile helper
+`_gfx950_3d_tile_size_override`
+([`attention_unified.py`](../../../kernels/common/attention_unified.py)) are the source
+of truth, the test pins them, and this table follows them. To print the count and tile
+a given shape gets, in the scope or not, see
+[case study §2.2](../../common/attention_3d_decode/CASE_STUDY.md#22-spec-fields-and-dispatch-rules).
 
 ---
 

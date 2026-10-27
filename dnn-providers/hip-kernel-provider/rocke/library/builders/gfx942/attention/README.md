@@ -42,6 +42,7 @@ torch reference — so it runs on any box with torch + a gfx942 GPU.
 | `final_shapes_check.py` | the definitive correctness + perf check over every shape via the **production dispatcher** (`run_unified_attention_torch`), timed eager + graph against PyTorch's flash SDPA |
 | `prefill/gqa_head_fold_bench.py` | A/B for the **GQA head-fold** (`ALGORITHM.md` §6.4): the fold vs the same builder with the fold predicate forced false, over seqlens 512-16384 x `block_size` 16/32, correctness-checked per point |
 | `gqa_head_fold_case_study.md` | why the head-fold exists, the measured traffic + wall-clock evidence, and the levers that did **not** work |
+| [`../../common/attention_3d_decode/CASE_STUDY.md`](../../common/attention_3d_decode/CASE_STUDY.md) | the 3D split-KV decode series on gfx942 and gfx950: mechanisms, what ships by default, per-lever outcomes, honest losses and the replay recipe |
 | `__init__.py` | package marker + module docstring |
 
 ## Running
@@ -151,9 +152,10 @@ prefill shapes are not included.
   feeds K/V with wide 128-bit loads by default up to `head_size = 128` and with async
   DMA copies above that, because the wide feed's load/store overlap depends on the
   compiler's schedule. `HIPDNN_GFX942_3D_WKV=0` turns the wide feed off (and, at head
-  size 64 and 128, the default K/V swizzle and page-id window that follow it); unlike
-  the variables in the table below, it is read by the dispatcher, not by the harness.
-  See [`ALGORITHM.md`](ALGORITHM.md) §8.
+  size 64 and 128, the default K/V swizzle that follows it and, for page-sized tiles,
+  the page-id window); unlike the variables in the table below, it is read by the
+  dispatcher, not by the harness. See [`ALGORITHM.md`](ALGORITHM.md) §8 and the
+  [3D decode case study](../../common/attention_3d_decode/CASE_STUDY.md).
 
 ### Lever environment variables
 
