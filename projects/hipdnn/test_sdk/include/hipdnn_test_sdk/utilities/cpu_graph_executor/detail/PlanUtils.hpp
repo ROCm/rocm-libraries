@@ -40,7 +40,7 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
             std::string(planName) + ": left_bound and right_bound must be >= -1 (got left_bound="
             + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
-    // left_bound follows cuDNN: L keeps the L keys ending at the diagonal, so 0 keeps none.
+    // left_bound follows cuDNN: L keeps the L keys ending at the diagonal; 0 is rejected.
     if(leftBound == 0)
     {
         throw std::invalid_argument(std::string(planName)

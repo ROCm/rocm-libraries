@@ -472,8 +472,10 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
 }
 
 // Validates an SDPA left diagonal-band bound. hipDNN follows cuDNN: left_bound = L
-// keeps the L keys ending at the diagonal, diagonal included, so 0 keeps none and is
-// rejected, as cuDNN does. -1 is accepted as "unbounded".
+// keeps the L keys ending at the diagonal, diagonal included. 0 keeps no key at or before
+// the diagonal and is rejected: a provider's L - 1 would turn it into -1, which kernels read
+// as unbounded (cuDNN rejects it in the backward pass, and in the forward pass before
+// backend 9.10). -1 is accepted as "unbounded".
 inline Error validateSdpaLeftBound(const std::optional<int64_t>& leftBound,
                                    const std::string& nodeName)
 {

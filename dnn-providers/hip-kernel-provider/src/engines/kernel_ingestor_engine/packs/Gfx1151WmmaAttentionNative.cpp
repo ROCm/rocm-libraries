@@ -396,7 +396,7 @@ std::optional<MaskParameters> maskFor(const data_objects::SdpaAttributes& attrib
         = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     const int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    // left_bound = 0 keeps no key at or before the diagonal (cuDNN rejects it).
+    // left_bound = 0 keeps no key at or before the diagonal; hipDNN rejects it.
     if(left < UNBOUNDED || left == 0 || right < UNBOUNDED || !fitsI32(left) || !fitsI32(right))
     {
         return std::nullopt;

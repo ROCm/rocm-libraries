@@ -605,7 +605,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
 
 // The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
 // included); the kernel's window_left follows FlashAttention (keys before the
-// diagonal), so the same window binds as L - 1. left_bound = 0 keeps no key.
+// diagonal), so the same window binds as L - 1. left_bound = 0 is declined.
 TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
 {
     using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;

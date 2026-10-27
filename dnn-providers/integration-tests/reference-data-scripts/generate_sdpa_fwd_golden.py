@@ -1110,7 +1110,7 @@ def main():
         default=None,
         help="Sliding window left bound in the graph's (cuDNN) convention: L keeps the L "
         "keys ending at the diagonal, diagonal included. Written to the graph unchanged. "
-        "Positive or -1 (unbounded); 0 is rejected, as in hipDNN and cuDNN",
+        "Positive or -1 (unbounded); 0 is rejected, as hipDNN rejects it",
     )
     left.add_argument(
         "--window-left",

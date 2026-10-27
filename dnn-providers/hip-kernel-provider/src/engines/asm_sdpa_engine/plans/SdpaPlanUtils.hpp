@@ -110,8 +110,8 @@ inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ
 // the diagonal, diagonal included. The returned band holds the FlashAttention
 // window_size_left the kernels take, L - 1 (see DiagonalBand).
 //
-// Setting both booleans, a bound below -1, or left_bound = 0 (which would keep no
-// key at or before the diagonal; cuDNN rejects it) throws
+// Setting both booleans, a bound below -1, or left_bound = 0 (which keeps no key at or
+// before the diagonal, and which L - 1 would turn into "unbounded") throws
 // HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
@@ -144,7 +144,7 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
             "SDPA: left_bound must be -1 (unbounded) or >= 1; left_bound = L keeps the L keys "
-            "ending at the diagonal, so 0 keeps none");
+            "ending at the diagonal, so 0 keeps no key at or before it");
     }
 
     const int64_t windowLeft = left > 0 ? left - 1 : -1;

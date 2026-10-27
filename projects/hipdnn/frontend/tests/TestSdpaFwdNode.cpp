@@ -575,8 +575,8 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
 
-// left_bound follows cuDNN: L keeps the L keys ending at the diagonal, so 0 keeps
-// none and is rejected (as cuDNN does); -1 is unbounded.
+// left_bound follows cuDNN: L keeps the L keys ending at the diagonal; 0 is rejected and
+// -1 is unbounded.
 TEST(TestSdpaFwdNode, PreValidateChecksLeftBound)
 {
     const auto validateWithLeftBound = [](int64_t leftBound) {
