@@ -40,6 +40,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`Use hipBLASLt offline tuning <./how-to/how-to-use-hipblaslt-offline-tuning>`
     * :doc:`Use logging and heuristics <./how-to/use-logging-heuristics>`
     * :doc:`Use Stream-K with hipBLASLt <./how-to/how-to-use-streamk>`
+    * :doc:`Use FP32/FP64 fixed-point emulation <./how-to/fp-emulation>`
     * :doc:`Detect NaN in GEMM output <./how-to/how-to-detect-nan>`
     * :doc:`Use general batched GEMM <./how-to/how-to-general-batched-gemm>`
 

@@ -36,6 +36,26 @@
 #include <iostream>
 #include <vector>
 
+/********************************************************************************
+ * \brief Internal definition of the opaque hipblasLtEmulationDescriptor type.
+ * Attached to a matmul descriptor via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+ * Attaching it does not enable emulation (that is done by the compute type or
+ * the HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION env var); it only tunes settings.
+ * Use force_off (internal only) to prevent re-entry from the native-GEMM fallback.
+ *******************************************************************************/
+struct hipblasLtEmulationDescriptor
+{
+    hipblasEmulationStrategy_t             emulation_strategy   = HIPBLAS_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
+    uint32_t emulation_sv_support = 0xFFFF; /**< Special-values bitmask (bit 0 = Inf, bit 1 = NaN; 0 = none; 0xFFFF = DEFAULT = detect both). Same layout as cudaEmulationSpecialValuesSupport. */
+    int32_t  emulation_fixedpoint_mantissa_control           = 0;       /**< Stored and returned by Get; not used by the emulation yet */
+    int32_t  emulation_fixedpoint_max_mantissa_bits          = 0;       /**< 0 = inherit env var; 1..52 for FP64 (1..23 for FP32) */
+    int32_t  emulation_fixedpoint_mantissa_bit_offset        = 0;       /**< Stored and returned by Get; not used by the emulation yet */
+    int32_t* emulation_fixedpoint_mantissa_bit_count_pointer = nullptr; /**< Stored as-is and returned by Get; never dereferenced */
+    /** Internal use only: set by native_gemm_fallback to prevent recursive re-entry.
+     *  Not accessible via any public API. Must not be set from user code. */
+    bool force_off = false;
+};
+
 struct _rocblaslt_attribute
 {
     _rocblaslt_attribute() {};
@@ -387,36 +407,41 @@ struct _rocblaslt_matmul_desc
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
 #endif
 
+    /* FP64/FP32 emulation settings attached via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+     * Non-owning: the caller's hipblasLtEmulationDesc_t must outlive every matmul
+     * using this descriptor.  nullptr means "use all env-var / built-in defaults". */
+    const struct hipblasLtEmulationDescriptor* emulation_desc = nullptr;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                    = src.op_A;
-        this->op_B                    = src.op_B;
-        this->epilogue                = src.epilogue;
-        this->bias                    = src.bias;
-        this->scaleA                  = src.scaleA;
-        this->scaleB                  = src.scaleB;
-        this->scaleC                  = src.scaleC;
-        this->scaleD                  = src.scaleD;
-        this->scaleE                  = src.scaleE;
-        this->scaleAType              = src.scaleAType;
-        this->scaleBType              = src.scaleBType;
-        this->pointermode             = src.pointermode;
-        this->amaxD                   = src.amaxD;
-        this->bias_type               = src.bias_type;
-        this->e                       = src.e;
-        this->aux_type                = src.aux_type;
-        this->lde                     = src.lde;
-        this->stride_e                = src.stride_e;
-        this->compute_type            = src.compute_type;
-        this->compute_type_original   = src.compute_type_original;
-        this->compute_input_typeA     = src.compute_input_typeA;
-        this->compute_input_typeB     = src.compute_input_typeB;
-        this->scale_type              = src.scale_type;
-        this->act0                    = src.act0;
-        this->act1                    = src.act1;
-        this->sm_count_target         = src.sm_count_target;
+        this->op_A                        = src.op_A;
+        this->op_B                        = src.op_B;
+        this->epilogue                    = src.epilogue;
+        this->bias                        = src.bias;
+        this->scaleA                      = src.scaleA;
+        this->scaleB                      = src.scaleB;
+        this->scaleC                      = src.scaleC;
+        this->scaleD                      = src.scaleD;
+        this->scaleE                      = src.scaleE;
+        this->scaleAType                  = src.scaleAType;
+        this->scaleBType                  = src.scaleBType;
+        this->pointermode                 = src.pointermode;
+        this->amaxD                       = src.amaxD;
+        this->bias_type                   = src.bias_type;
+        this->e                           = src.e;
+        this->aux_type                    = src.aux_type;
+        this->lde                         = src.lde;
+        this->stride_e                    = src.stride_e;
+        this->compute_type                = src.compute_type;
+        this->compute_type_original       = src.compute_type_original;
+        this->compute_input_typeA         = src.compute_input_typeA;
+        this->compute_input_typeB         = src.compute_input_typeB;
+        this->scale_type                  = src.scale_type;
+        this->act0                        = src.act0;
+        this->act1                        = src.act1;
+        this->sm_count_target             = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
         this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
@@ -424,6 +449,7 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
+        this->emulation_desc              = src.emulation_desc;
     }
 };
 

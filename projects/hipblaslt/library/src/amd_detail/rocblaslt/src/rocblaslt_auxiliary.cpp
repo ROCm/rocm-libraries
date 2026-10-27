@@ -107,7 +107,8 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type,
     else 
     {
      
-        if(compute_type == rocblaslt_compute_f64)
+        if(compute_type == rocblaslt_compute_f64
+           || compute_type == rocblaslt_compute_f64_emulated_fixedpoint)
         {
             _set_value(alpha, (double)1.0);
             _set_value(beta,  (double)1.0);
@@ -959,6 +960,140 @@ extern "C" {
 #endif
 
 /********************************************************************************
+ * \brief Create an emulation descriptor (internal rocblaslt implementation).
+ *******************************************************************************/
+rocblaslt_status rocblaslt_emulation_desc_create(hipblasLtEmulationDesc_t* desc)
+{
+    if(desc == nullptr)
+        return rocblaslt_status_invalid_value;
+    try
+    {
+        *desc = new hipblasLtEmulationDescriptor();
+    }
+    catch(...)
+    {
+        return rocblaslt_status_memory_error;
+    }
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_destroy(hipblasLtEmulationDesc_t desc)
+{
+    delete desc; // delete nullptr is safe
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t          desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        const void*                        buf,
+                                                        size_t                             sizeInBytes)
+{
+    if(desc == nullptr || buf == nullptr)
+        return rocblaslt_status_invalid_value;
+    switch(attr)
+    {
+    case HIPBLASLT_EMULATION_DESC_STRATEGY:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            if(v < 0 || v > 2)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_strategy = static_cast<hipblasEmulationStrategy_t>(v);
+        }
+        break;
+    case HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            /* Bitmask (bit 0 = Inf, bit 1 = NaN); DEFAULT = 0xFFFF. Accept any 16-bit
+             * mask like CUDA; bits beyond Inf/NaN are ignored by the emulation. */
+            if(v < 0 || v > 0xFFFF)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_sv_support = static_cast<uint32_t>(v);
+        }
+        break;
+    /* Attributes 2, 4 and 5 are not used by the emulation yet.  Their values are
+     * stored (without range checks) so Get returns what was set, and so future
+     * use does not change the API behaviour. */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_control, buf, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_bit_offset, buf, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER:
+        /* The pointer value is stored as-is; it is never dereferenced. */
+        if(sizeInBytes < sizeof(int32_t*))
+            return rocblaslt_status_invalid_value;
+        memcpy(&desc->emulation_fixedpoint_mantissa_bit_count_pointer, buf, sizeof(int32_t*));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            if(v < 0 || v > 52)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_fixedpoint_max_mantissa_bits = v;
+        }
+        break;
+    default:
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_get_attribute(hipblasLtEmulationDesc_t          desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        void*                              buf,
+                                                        size_t                             sizeInBytes,
+                                                        size_t*                            sizeWritten)
+{
+    if(desc == nullptr || (sizeInBytes != 0 && buf == nullptr))
+        return rocblaslt_status_invalid_value;
+    const size_t required = (attr == HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER)
+                                ? sizeof(int32_t*)
+                                : sizeof(int32_t);
+    if(sizeWritten)
+        *sizeWritten = required;
+    if(sizeInBytes < required)
+        return rocblaslt_status_invalid_value;
+    switch(attr)
+    {
+    case HIPBLASLT_EMULATION_DESC_STRATEGY:
+        memcpy(buf, &desc->emulation_strategy, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT:
+        memcpy(buf, &desc->emulation_sv_support, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
+        memcpy(buf, &desc->emulation_fixedpoint_max_mantissa_bits, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_control, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_bit_offset, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER:
+        memcpy(buf, &desc->emulation_fixedpoint_mantissa_bit_count_pointer, sizeof(int32_t*));
+        break;
+    default:
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
  * It must be initialized using rocblaslt_create()
  * and the returned handle must be passed
@@ -1443,6 +1578,8 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
             case rocblaslt_compute_f32_fast_bf8:
             case rocblaslt_compute_f32_fast_f8bf8:
             case rocblaslt_compute_f32_fast_bf8f8:
+            case rocblaslt_compute_f64_emulated_fixedpoint:
+            case rocblaslt_compute_f32_emulated_fixedpoint:
                 break;
             default:
                 log_error(__func__, "invalid compute type", computeType);
@@ -1460,9 +1597,13 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
             (*matmulDesc)->compute_type          = computeType;
             (*matmulDesc)->compute_type_original = computeType;
             (*matmulDesc)->scale_type            = scaleType;
-            auto computeTypeInit                 = computeType == rocblaslt_compute_f32_fast_xf32
-                                                       ? rocblaslt_compute_f32
-                                                       : computeType;
+            /* Fixed-point emulated compute types initialize the Tensile gemm data
+             * with their native compute type (used for the non-emulated fallback). */
+            const rocblaslt_compute_type computeTypeNative
+                = fixedPointEmulationNativeComputeType(computeType);
+            auto computeTypeInit = computeTypeNative == rocblaslt_compute_f32_fast_xf32
+                                       ? rocblaslt_compute_f32
+                                       : computeTypeNative;
             auto dataType                        = HIP_R_32F;
             if(computeTypeInit == rocblaslt_compute_f64)
                 dataType = HIP_R_64F;
@@ -2039,6 +2180,21 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 }
                 break;
 #endif
+            case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+                // Stored as a non-owning pointer. The caller's hipblasLtEmulationDesc_t
+                // must outlive every matmul call that uses this descriptor.
+                if(sizeof(hipblasLtEmulationDesc_t) <= sizeInBytes)
+                {
+                    hipblasLtEmulationDesc_t emul = nullptr;
+                    memcpy(&emul, buf, sizeof(hipblasLtEmulationDesc_t));
+                    matmulDesc->emulation_desc = emul;
+                }
+                else
+                {
+                    log_error(__func__, "invalid emulation_desc buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -2468,6 +2624,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->int4_encoding_a_ext, sizeof(int32_t));
                 break;
+            case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+                if(sizeWritten) *sizeWritten = sizeof(hipblasLtEmulationDesc_t);
+                if(sizeInBytes < sizeof(hipblasLtEmulationDesc_t)) { log_error(__func__, "invalid emulation_desc buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
+                memcpy(buf, &matmulDesc->emulation_desc, sizeof(hipblasLtEmulationDesc_t));
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -2580,7 +2741,7 @@ rocblaslt_status
                     pref->search_mode);
             break;
         case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
-            pref->max_workspace_bytes = clampWorkspaceSize(__func__, *(uint64_t*)data);
+            pref->max_workspace_bytes = *(uint64_t*)data;
             log_api(__func__,
                     "matmulPref",
                     pref,
@@ -2801,6 +2962,10 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    /* Clamp the workspace limit for native kernel paths (which use 32-bit byte
+     * offsets) without affecting the unclamped pref->max_workspace_bytes that
+     * emulation callers (e.g. hipblasLtMatmulAlgoGetHeuristic) read directly. */
+    size_t native_max_ws = clampWorkspaceSize(__func__, pref->max_workspace_bytes);
     // No algorithm can take these sizes or strides; report none rather than search at all.
     if(!problemFitsKernelArgs(matD->m,
                               matD->n,
@@ -2846,7 +3011,7 @@ rocblaslt_status
             return rocblaslt_status_invalid_value;
         }
         auto prob = construct_rocblaslt_problem(
-            handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
+            handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, native_max_ws);
 
         // Invalid arguments come back with M, N and K zeroed. No algorithm applies to an empty
         // problem, and searching for one is slow and can divide by zero.
@@ -2890,7 +3055,7 @@ rocblaslt_status
                                                           matmul_desc,
                                                           heuristicResultsArray,
                                                           tuningFile.path,
-                                                          pref->max_workspace_bytes);
+                                                          native_max_ws);
             if(override_success)
                 requestedAlgoCount--;
 
@@ -2905,7 +3070,7 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      native_max_ws);
         }
 
         if(override_success)

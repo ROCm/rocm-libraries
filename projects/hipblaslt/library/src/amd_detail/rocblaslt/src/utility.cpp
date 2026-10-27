@@ -203,6 +203,10 @@ const char* rocblaslt_compute_type_to_string(rocblaslt_compute_type type)
         return "COMPUTE_32F_8F8BF";
     case rocblaslt_compute_f32_fast_bf8f8:
         return "COMPUTE_32F_8BF8F";
+    case rocblaslt_compute_f64_emulated_fixedpoint:
+        return "COMPUTE_64F_EMULATED_FIXEDPOINT";
+    case rocblaslt_compute_f32_emulated_fixedpoint:
+        return "COMPUTE_32F_EMULATED_FIXEDPOINT";
     default:
         return "Invalid";
     }
@@ -295,6 +299,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
 #endif
+    case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+        return "MATMUL_DESC_EMULATION_DESC";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:

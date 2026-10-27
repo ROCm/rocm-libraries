@@ -331,6 +331,14 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
          || (type_a == HIP_R_8I && type_b == HIP_R_8I && type_c == HIP_R_8I && type_d == HIP_R_8I))
        && compute_type == rocblaslt_compute_i32)
         status = rocblaslt_status_not_implemented;
+    /* Fixed-point emulated compute types require A/B/C/D all of the emulated
+     * data type (FP64 for 64F_EMULATED_FIXEDPOINT, FP32 for 32F_...).       */
+    if(isFixedPointEmulatedComputeType(compute_type))
+    {
+        const hipDataType et = fixedPointEmulatedComputeDataType(compute_type);
+        if(!(type_a == et && type_b == et && type_c == et && type_d == et))
+            status = rocblaslt_status_not_implemented;
+    }
     if(!strcmp(hip_datatype_to_string(type_a), hip_datatype_to_string(HIPBLASLT_DATATYPE_INVALID))
        || !strcmp(hip_datatype_to_string(type_b),
                   hip_datatype_to_string(HIPBLASLT_DATATYPE_INVALID))
@@ -735,7 +743,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
 // Assign 1 to onePtr then set set the address to dst.
 inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePtr, const void** dst)
 {
-    if(compute_type == rocblaslt_compute_f64)
+    if(compute_type == rocblaslt_compute_f64
+       || compute_type == rocblaslt_compute_f64_emulated_fixedpoint)
     {
         *((double*)onePtr) = 1.f;
         *dst               = onePtr;

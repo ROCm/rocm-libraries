@@ -189,6 +189,8 @@ constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
            : type == HIPBLAS_COMPUTE_32I           ? "i32_r"
            : type == HIPBLAS_COMPUTE_32F_FAST_16F  ? "f32_f16_r"
            : type == HIPBLAS_COMPUTE_32F_FAST_16BF ? "f32_bf16_r"
+           : type == HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT ? "f64_emulated_fixedpoint_r"
+           : type == HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT ? "f32_emulated_fixedpoint_r"
                                                    : "non-supported compute type";
 }
 
@@ -240,7 +242,9 @@ constexpr hipblasComputeType_t string_to_hipblas_computetype_assert(const std::s
     auto computetytpe = string_to_hipblas_computetype(value);
     if(computetytpe == HIPBLASLT_COMPUTE_TYPE_INVALID)
     {
-        std::cout << "The supported types are f32_r, xf32_r, f64_r, i32_r, f32_f16_r." << std::endl;
+        std::cout << "The supported types are f32_r, xf32_r, f64_r, i32_r, f32_f16_r, "
+                     "f64_emulated_fixedpoint_r, f32_emulated_fixedpoint_r."
+                  << std::endl;
         exit(1);
     }
     return computetytpe;
