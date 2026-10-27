@@ -5,10 +5,12 @@
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
+#include "plans/SdpaFwdLaunchParams.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <optional>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
@@ -229,6 +231,32 @@ static std::string getKernelTocKey(std::string coName, const std::string& archId
         }
     }
     return asm_kernels::getAsmKernelTocKey(coName);
+}
+
+// Loads the resolved kernel through the module cache (buildPlan then reuses the
+// entry) and returns the largest block it accepts. Returns std::nullopt when the
+// kernel cannot be loaded or queried here; buildPlan reports a load failure
+// itself, so isApplicable does not decline on that basis.
+static std::optional<unsigned int> tryGetKernelMaxThreadsPerBlock(hipStream_t stream,
+                                                                  const std::string& deviceString,
+                                                                  const fmha_v3_fwdConfig& config)
+{
+    try
+    {
+        const auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308Device(stream));
+        const auto kernel = SdpaFwdPlanBuilder::moduleCache().getOrLoad(
+            tocKey, deviceString, config.knl_name.c_str());
+        if(!kernel)
+        {
+            return std::nullopt;
+        }
+        return getMaxThreadsPerBlock(kernel->function());
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Could not load kernel to check its launch limit: " << e.what());
+        return std::nullopt;
+    }
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -482,6 +510,19 @@ bool SdpaFwdPlanBuilder::isApplicable(
         !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
         "Forward byte strides overflow uint32_t kernarg fields");
 
+    // Decline when the resolved kernel cannot accept the block size the plan
+    // launches with, so the graph falls through to another engine instead of
+    // failing at hipModuleLaunchKernel. Keyed on the kernel's own limit rather
+    // than the architecture, so a new architecture's table rows are covered too.
+    const auto blockDimX = fwdBlockDimX(static_cast<unsigned int>(qTensor->dims()->Get(3)),
+                                        static_cast<unsigned int>(vTensor->dims()->Get(3)));
+    const auto maxThreads
+        = tryGetKernelMaxThreadsPerBlock(handle.getStream(), deviceString, cfg_fmha_fwd.at(key));
+    HIP_KERNEL_RETURN_FALSE_IF(maxThreads.has_value() && blockDimX > *maxThreads,
+                               "Resolved kernel accepts at most " + std::to_string(*maxThreads)
+                                   + " threads per block but the launch needs "
+                                   + std::to_string(blockDimX));
+
     return true;
 }
 
@@ -709,6 +750,19 @@ void SdpaFwdPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaFwdPlanBuilder::buildPlan: failed to load kernel tocKey='" + tocKey + "' arch='"
                 + deviceString + "'");
+    }
+
+    // Backstop for isApplicable's launch-limit check: fail here with a clear
+    // reason rather than at hipModuleLaunchKernel in execute.
+    const auto blockDimX = computeFwdLaunchParams(params).blockDimX;
+    const auto maxThreads = getMaxThreadsPerBlock(kernel->function());
+    if(maxThreads.has_value() && blockDimX > *maxThreads)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: kernel tocKey='" + tocKey + "' accepts at most "
+                + std::to_string(*maxThreads) + " threads per block but the launch needs "
+                + std::to_string(blockDimX));
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));
