@@ -29,8 +29,8 @@ The translator reads a Python module, the types recorded from its parity configs
 The one command is:
 
 ```
-python -m tr.regen <module>...          # regenerate and write into the tree
-python -m tr.regen --check <module>...  # write nothing; exit 1 if stale
+python -m tr.regen <module>...            # write the files that do not exist yet
+python -m tr.regen --pretend <module>...  # list what would be written or skipped
 ```
 
 This RFC does not change the Python modules, the IR, the byte-identity gate, or any existing C++ twin. It does not make the generated C++ the only copy (see [11. Future Considerations](#11-future-considerations)).
@@ -121,19 +121,19 @@ A hole is a function no rule covers. The generated `.cpp` holds `#error "hole: <
 
 ### 4.7 Generated Files in the Tree
 
-Generated `.cpp` and `.h` files are checked in. Their first lines say `generated from library/kernels/common/<module>.py:<sha> by tr/translate.py`. They are never edited by hand: a change goes into the Python, a fill, or a rule, and then `tr.regen` runs again. `tr.regen --check` regenerates into a temporary tree and fails with the list of stale files.
+The translator writes a first draft. The `.cpp` and `.h` files are checked in, and their first lines say `first draft from library/kernels/common/<module>.py:<sha> by tr/translate.py; hand-maintained from here`. From then on they are hand code, edited like any other twin. `tr.regen` never writes over an existing source, header or support header unless it is given `--overwrite`.
 
 ## 5. Contract
 
-`python -m tr.regen [--check] [--rocke <root>] <module>...` has the following contract:
+`python -m tr.regen [--overwrite] [--pretend] [--rocke <root>] <module>...` has the following contract:
 
 - `<root>` is `.../dnn-providers/hip-kernel-provider/rocke`. The default is `ROCKE_ROOT`, else the tree the translator sits in.
 - Every module named must have a parity driver `<module>_emit` and recorded facts under `data/facts/`.
 - Modules whose generated headers the others include must be named in the same command.
 - If any function is a hole with no fill, nothing is written and the exit code is 1. The holes are listed.
 - On success the `.cpp` files go to `platform/cpp/instances/common/` and the headers to `platform/cpp/include/rocke/`.
-- On an unchanged tree the output is byte-identical to the checked-in files. Running it twice changes nothing.
-- `--check` writes nothing in the tree. Exit 0 means every generated file is current; exit 1 lists the stale files.
+- A target that already exists is skipped (`skip <path> (exists)`, exit 0). Running it twice changes nothing. `--overwrite` writes over existing files; `--pretend` writes nothing and lists what would be written or skipped.
+- When every module named already has its header in the tree, the sources are translated against those headers and none is generated; `--generated-abi` overrides that.
 - The translator does not decide correctness. The byte-identity gate does, at both LLVM flavors, with the engine built by gcc and clang with warnings as errors.
 
 ## 6. Key Design Decisions
@@ -143,7 +143,7 @@ Generated `.cpp` and `.h` files are checked in. Their first lines say `generated
 - **Types come from running the configs, not from inference.** The recorder sees the types that actually occur. Code no config reaches is a hole.
 - **Call order is structural.** A-normal form binds every emitting call to its own local in Python order, so the C argument-evaluation order cannot reorder IR.
 - **The header is generated.** Matching hand headers made every invented C shape a hole. Deriving the header from the Python removes those holes, and a new port has no hand header anyway.
-- **The generated C++ is checked in and checked for currency.** Readers, the build and CI see normal C++. `tr.regen --check` keeps it in step with the Python.
+- **The translated C++ is a first draft, checked in as hand code.** Readers, the build and CI see normal C++. The translator never writes over it; the byte-identity gate keeps it correct, as for every twin.
 - **Policy is data.** Naming, adapters, fills and recorded types are tables keyed by package, module and function name, not code paths.
 
 ### 6.1 Measured Results
@@ -165,8 +165,8 @@ On the attention backward package:
 
 1. **Code unlike the attention backward package**: The rules were built on one package. Another package may hit hole kinds no rule covers. Mitigation: `--analyze` measures the hole count before any work, and a hole is filled by hand, never guessed.
 2. **Recorded types miss a case**: A type no parity config produces is not recorded. Mitigation: unreached code is a hole, not a translation; adding a parity config is the fix, and it also strengthens the gate.
-3. **Stale generated files**: Someone edits the Python and not the C++. Mitigation: `tr.regen --check` in CI.
-4. **Hand edits to generated files**: The next regenerate overwrites them. Mitigation: the generated header line, and `--check` fails on any difference.
+3. **Stale twins**: Someone edits the Python and not the C++. Mitigation: the byte-identity gate, as for every twin.
+4. **Hand edits to translated files**: These are the normal case. `tr.regen` never writes over an existing file without `--overwrite`.
 5. **Generated code is harder to read than hand code**: A-normal form adds locals. Mitigation: clang-format, Python names kept, and the `.cpp` keeps the module's structure function by function.
 6. **Translator maintenance**: The translator is about 16k lines of Python. Mitigation: rules are data-driven and keyed by shape; a new hole kind is one rule or one fill, and the gate checks every change.
 
@@ -195,15 +195,14 @@ Per generated module, added with that module:
 
 1. Land the translator alone: `platform/tools/translator/`, prelude included. No module is generated and no existing file changes.
 2. After #14365 lands: regenerate the four attention backward modules, add their data, fills and the package adapters header, and gate.
-3. Add `tr.regen --check` for the generated modules to CI.
-4. Add a package entry for one forward module on `develop` and regenerate it. Not yet built.
-5. Use the translator for the next port, and measure its cost against the hand port. Not yet built.
+3. Add a package entry for one forward module on `develop` and regenerate it. Not yet built.
+4. Use the translator for the next port, and measure its cost against the hand port. Not yet built.
 
 ## 10. Testing Plan
 
 Translator change (any edit under `platform/tools/translator/` or to `rocke_py.hpp`):
 
-- `tr.regen --check` for every generated module: exit 0.
+- The self-test (`python -m pytest tools/translator/tests`) passes.
 - Byte-identity gate over all families the generated modules serve, at `llvm22` and `llvm20`, with the expected config count.
 - Engine build with gcc and clang, `-Wall -Wextra -Werror`.
 - `rocke_py.hpp` compiles alone with both compilers.
@@ -212,7 +211,7 @@ New generated module:
 
 - `--analyze` shows no open hole.
 - Gate as above. A low config count means the run stopped early, not that coverage is complete.
-- Running `tr.regen` twice leaves `git status` clean.
+- Running `tr.regen` a second time skips every file and leaves `git status` clean.
 
 Not yet built: unit tests for individual rules, with each rule's counterexamples as cases.
 

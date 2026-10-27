@@ -1,18 +1,25 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Regenerate C++ twins of rocKE Python modules and write them into a rocKE tree.
+"""Translate rocKE Python modules to a first draft of their C++ twins and write
+them into a rocKE tree.
 
     python -m tr.regen --rocke <root> <module>...
 
-Steps (the generated ABI; --hand-abi translates against the tree's headers):
+What it writes is a first draft: once a file is in the tree it is ordinary
+hand-maintained code, and tr.regen never writes over it unless told to.
+
+Steps:
 
 0. The code maps (sigmap.json, twin_map.json): data/maps, or $TR_MAPS. A
    copy of the translator without them mines them from the --rocke tree
    (tools/mine_maps.py) into a temporary directory.
-1. tr.abi: the generated header of every module, into a staging directory
-   (--abi-dir, else a temporary one). Skipped with --hand-abi: the C ABI is
-   the hand-written headers already in the tree.
+1. The ABI. When every module named already has its header in the --rocke
+   tree (helper_rocke.instances.common.<m>.h), the sources are translated
+   against those headers (--hand-abi) and no header is generated;
+   --generated-abi overrides that. Otherwise tr.abi writes the generated
+   header of every module into a staging directory (--abi-dir, else a
+   temporary one).
 2. tr.translate: each module's .cpp against those headers, clang-formatted.
 3. If any function is still a hole (no rule and no hand fill), list them and
    write nothing. Otherwise write <m>.cpp into
@@ -21,14 +28,16 @@ Steps (the generated ABI; --hand-abi translates against the tree's headers):
 4. Support headers: every quoted same-directory include of a written source
    (#include "rocke_py.hpp", "rocke_py_adapters.hpp") is copied from its
    master copy (tr/prelude/, else tr/packages/<package>/) into
-   platform/cpp/instances/common/, but never over an existing copy: once in
-   the tree it is hand-maintained like the sources. It is not installed.
+   platform/cpp/instances/common/. It is not installed.
 
---check writes into a temporary tree instead and compares every file it
-would write with the one in --into: exit 1 and the list of files that
-differ when the checked-in generated files are not current (a support
-header already in the tree is not compared). Temporary
-directories (maps, headers, the --check tree) are removed on exit.
+Every target that already exists in --into (source, header or support
+header) is left as it is: "skip <path> (exists)", exit 0. When every
+module's source, its header and the support headers those sources include
+already exist in --into, nothing is translated (so the ABI choice of step 1
+does not matter): the skips are listed and the exit code is 0. --overwrite
+writes over existing files; --pretend lists what would be written or
+skipped and writes nothing. Temporary directories (maps, headers) are
+removed on exit.
 
 Name every module whose generated header the others use in the same command
 (addr needs valu, counted and aux: _attention_bwd_valu _attention_bwd_counted
@@ -68,10 +77,17 @@ def main(argv=None) -> int:
         metavar="DIR",
         help="keep the generated headers here (default: a temporary directory)",
     )
-    ap.add_argument(
+    which = ap.add_mutually_exclusive_group()
+    which.add_argument(
         "--hand-abi",
         action="store_true",
-        help="translate against the tree's hand-written headers; generate none",
+        help="translate against the tree's existing headers; generate none"
+        " (the default when every module named has one)",
+    )
+    which.add_argument(
+        "--generated-abi",
+        action="store_true",
+        help="generate the headers even when the tree has them",
     )
     ap.add_argument(
         "--package",
@@ -83,9 +99,14 @@ def main(argv=None) -> int:
         help="clang-format to run (default: $CLANG_FORMAT, the venv's, or PATH)",
     )
     ap.add_argument(
-        "--check",
+        "--overwrite",
         action="store_true",
-        help="write nothing; exit 1 if the generated files in --into are not current",
+        help="write over files that already exist in --into",
+    )
+    ap.add_argument(
+        "--pretend",
+        action="store_true",
+        help="list what would be written or skipped; write nothing",
     )
     a = ap.parse_args(argv)
     scratch = []
@@ -118,12 +139,20 @@ def regen(a, scratch: list) -> int:
     rocke = rocke_root(a.rocke)
     into = a.into or rocke
     set_clang_format(a.clang_format)
+    if not a.overwrite:
+        present = existing_targets(into, a.modules, support_file)
+        if present:
+            for path in present:
+                print(f"skip    {path} (exists)")
+            print("every target exists; nothing translated (--overwrite to replace)")
+            return 0
     if not os.path.exists(os.path.join(maps_dir(), "sigmap.json")):
         mine_maps(rocke, scratch)
 
+    hand_abi = a.hand_abi or (not a.generated_abi and existing_abi(rocke, a.modules))
     abi_dir = None
     generated = []
-    if not a.hand_abi:
+    if not hand_abi:
         abi_dir = a.abi_dir
         if not abi_dir:
             abi_dir = tempfile.mkdtemp(prefix="tr_abi_")
@@ -150,6 +179,8 @@ def regen(a, scratch: list) -> int:
     if holes:
         print("holes left (fill them, see HOWTO.md); nothing written:")
         print("\n".join(holes))
+        if hand_abi and not a.hand_abi:
+            print("headers were picked automatically; try --generated-abi")
         return 1
 
     # support headers the sources include from their own directory
@@ -163,53 +194,81 @@ def regen(a, scratch: list) -> int:
                 )
             support[name] = path
 
-    dest = into
-    if a.check:
-        dest = tempfile.mkdtemp(prefix="tr_check_")
-        scratch.append(dest)
     SRC = os.path.join("platform", "cpp", "instances", "common")
     INC = os.path.join("platform", "cpp", "include", "rocke")
-    os.makedirs(os.path.join(dest, SRC), exist_ok=True)
-    os.makedirs(os.path.join(dest, INC), exist_ok=True)
-    written = []
-    for m, code in out.items():
-        open(os.path.join(dest, SRC, f"{m}.cpp"), "w").write(code)
-        written.append(os.path.join(SRC, f"{m}.cpp"))
-    for name, path in sorted(support.items()):
-        rel = os.path.join(SRC, name)
-        if os.path.exists(os.path.join(into, rel)):
-            print(f"skip    {os.path.join(into, rel)} (exists)")
-            continue
-        shutil.copy(path, os.path.join(dest, rel))
-        written.append(rel)
-    for h in generated:
-        shutil.copy(h, os.path.join(dest, INC))
-        written.append(os.path.join(INC, os.path.basename(h)))
-    if not a.check:
-        for w in written:
-            print(f"wrote   {os.path.join(into, w)}")
-        return 0
-    stale = [
-        w
-        for w in written
-        if not same_file(os.path.join(dest, w), os.path.join(into, w))
+    targets = [(os.path.join(SRC, f"{m}.cpp"), code, None) for m, code in out.items()]
+    targets += [
+        (os.path.join(SRC, name), None, path) for name, path in sorted(support.items())
     ]
-    for w in stale:
-        print(f"stale   {os.path.join(into, w)}")
-    if stale:
-        print(
-            f"{len(stale)} of {len(written)} generated files are not current; run tr.regen without --check"
-        )
-        return 1
-    print(f"current: all {len(written)} generated files")
+    targets += [(os.path.join(INC, os.path.basename(h)), None, h) for h in generated]
+    for rel, code, src in targets:
+        path = os.path.join(into, rel)
+        if os.path.exists(path) and not a.overwrite:
+            print(f"skip    {path} (exists)")
+            continue
+        if a.pretend:
+            print(f"write   {path} (pretend)")
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if src is None:
+            open(path, "w").write(code)
+        else:
+            shutil.copy(src, path)
+        print(f"wrote   {path}")
     return 0
 
 
-def same_file(a: str, b: str) -> bool:
-    if not os.path.exists(b):
+def tree_header(root: str, m: str) -> str | None:
+    """Module m's header in the tree at root (either name), or None."""
+    inc = os.path.join(root, "platform", "cpp", "include", "rocke")
+    for cand in (f"helper_rocke.instances.common.{m}.h", f"instance_{m}.h"):
+        if os.path.exists(os.path.join(inc, cand)):
+            return os.path.join(inc, cand)
+    return None
+
+
+def existing_targets(into: str, modules: list, support_file) -> list | None:
+    """Every target in --into, in write order, when all of them already
+    exist: each module's .cpp and header, and every support header those
+    sources include. None if any of them is missing (then the normal path
+    runs and writes only what is missing)."""
+    src = os.path.join(into, "platform", "cpp", "instances", "common")
+    sources, headers, support = [], [], set()
+    for m in modules:
+        cpp = os.path.join(src, f"{m}.cpp")
+        h = tree_header(into, m)
+        if not os.path.exists(cpp) or h is None:
+            return None
+        sources.append(cpp)
+        headers.append(h)
+        code = open(cpp).read()
+        for name in re.findall(r'^#include "([^"/]+)"', code, re.M):
+            if support_file(name) is not None:
+                support.add(name)
+    support_paths = [os.path.join(src, n) for n in sorted(support)]
+    if not all(os.path.exists(p) for p in support_paths):
+        return None
+    return sources + support_paths + headers
+
+
+def existing_abi(rocke: str, modules: list) -> bool:
+    """True when every module has its header in the tree (hand-written or an
+    earlier first draft: the two share one name), so the sources are
+    translated against them. Some but not all is an error: name the ABI."""
+    have = {m: h for m in modules if (h := tree_header(rocke, m)) is not None}
+    if not have:
         return False
-    with open(a, "rb") as fa, open(b, "rb") as fb:
-        return fa.read() == fb.read()
+    if len(have) < len(modules):
+        missing = " ".join(m for m in modules if m not in have)
+        sys.exit(
+            f"error: some modules have a header in the tree and {missing} not;"
+            " pass --hand-abi or --generated-abi"
+        )
+    for m in modules:
+        print(
+            f"{m}: header {have[m]} exists; using its ABI (--generated-abi to override)"
+        )
+    return True
 
 
 def mine_maps(rocke: str, scratch: list) -> None:

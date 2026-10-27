@@ -1550,7 +1550,7 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
     lines = [
         "// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.",
         "// SPDX-License-Identifier: MIT",
-        f"// generated from {rel}:{sha} by tr/translate.py; do not edit by hand.",
+        f"// first draft from {rel}:{sha} by tr/translate.py; hand-maintained from here.",
         "",
     ]
     if header:

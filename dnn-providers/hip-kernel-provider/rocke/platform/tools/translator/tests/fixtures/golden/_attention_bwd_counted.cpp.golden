@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// generated from library/kernels/common/_attention_bwd_counted.py:2347e94eb8ad by tr/translate.py; do not edit by hand.
+// first draft from library/kernels/common/_attention_bwd_counted.py:2347e94eb8ad by tr/translate.py; hand-maintained from here.
 
 #include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
 

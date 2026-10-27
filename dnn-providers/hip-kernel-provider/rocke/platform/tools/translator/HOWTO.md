@@ -8,10 +8,11 @@ function it has a rule for, uses a hand-written fill for the rest, and refuses
 to write output while any function is still a hole. The byte-identity gate
 then proves the C++ emits the same IR as the Python on every parity config.
 
-A generated source says so in its first lines
-(`generated from library/kernels/common/<module>.py:<sha> by tr/translate.py`).
-Never edit them by hand: the next regenerate overwrites them. Change the
-Python, a fill under `holes/`, or a rule in `tr/`, then regenerate.
+What the translator writes is a first draft. Its first lines say so
+(`first draft from library/kernels/common/<module>.py:<sha> by tr/translate.py;
+hand-maintained from here`). Once a file is in the tree it is ordinary hand
+code: edit it like any other twin. `tr.regen` never writes over an existing
+file unless it is given `--overwrite`.
 
 ## Layout
 
@@ -63,26 +64,26 @@ For each module this generates the header (`tr.abi`) and the `.cpp`
 (`tr.translate`), then writes the sources to
 `platform/cpp/instances/common/` and the headers to
 `platform/cpp/include/rocke/`. If any hole is left, it lists the holes and
-writes nothing (exit 1). On an unchanged tree it reproduces the checked-in
-files byte for byte.
+writes nothing (exit 1).
 
-To check that the checked-in generated files are current without writing
-anything (the suggested CI step):
-
-```
-python -m tr.regen --check _attention_bwd_addr _attention_bwd_valu _attention_bwd_counted attention_bwd_aux
-```
-
-It regenerates into a temporary tree, compares the 8 generated files with
-the checked-in ones, and exits 1 with the list of stale files on any
-difference. Temporary directories (mined maps, headers, the check tree) are
-removed on exit.
+Only files that do not exist yet are written. For every source, header or
+support header already in the tree it prints `skip <path> (exists)` and
+leaves the file alone; the exit code stays 0. `--overwrite` writes over
+existing files (review the diff: it drops any hand edit), and `--pretend`
+lists what would be written or skipped and writes nothing. Temporary
+directories (mined maps, headers) are removed on exit.
 
 - Name every module whose generated header the others use in the same command
   (addr needs valu, counted and aux, as above).
 - `--into <root>` writes into another tree. `--abi-dir <dir>` keeps the
-  generated headers. `--hand-abi` translates against the tree's hand-written
-  headers and generates none.
+  generated headers.
+- The ABI: when every module named already has its header in the tree
+  (`helper_rocke.instances.common.<module>.h`, hand-written or an earlier
+  draft), the sources are translated against those headers and no header is
+  generated (it prints `header ... exists; using its ABI`). This keeps a new
+  draft in step with existing callers. `--generated-abi` generates the
+  headers anyway; `--hand-abi` forces the tree's headers. When only some of
+  the modules have one, name the ABI with one of the two flags.
 
 ## Steps in a port
 
