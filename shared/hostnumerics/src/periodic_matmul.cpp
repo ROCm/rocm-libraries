@@ -73,12 +73,13 @@ Magnitudes magnitudes(const Tensor& tensor, bool exact) {
         return result;
     }
     const detail::RuntimeTensorReader<double> reader(tensor);
-    detail::forEachIndex(tensor.shape(), [&](std::span<const size_t> index, size_t) {
-        const double v = reader(index);
-        result.valid &= finiteF32(v) && (!exact || integral(v));
-        result.maximum = std::max(result.maximum, std::abs(v));
-        result.minimumQuantum = std::min(result.minimumQuantum, quantum(v));
-    });
+    tensor.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(tensor.shape().elementCount()), [&](size_t, std::span<const size_t> index) {
+            const double v = reader(index);
+            result.valid &= finiteF32(v) && (!exact || integral(v));
+            result.maximum = std::max(result.maximum, std::abs(v));
+            result.minimumQuantum = std::min(result.minimumQuantum, quantum(v));
+        });
     return result;
 }
 }  // namespace

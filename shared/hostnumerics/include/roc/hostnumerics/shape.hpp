@@ -102,6 +102,13 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
+    // Ascending axes: for a matrix, row-major order.
+    std::vector<size_t> indexOrderLastDimensionFastest() const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), size_t{0});
+        return order;
+    }
+
     // Convert coordinates to a logical linear index.
     //
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
@@ -128,9 +135,7 @@ class Shape {
     }
 
     size_t linearIndexLastDimensionFastest(std::span<const size_t> indices) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return linearIndex(indices, order);
+        return linearIndex(indices, indexOrderLastDimensionFastest());
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
@@ -144,19 +149,11 @@ class Shape {
     }
 
     std::vector<size_t> coordinatesLastDimensionFastest(size_t index) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return coordinates(index, order);
+        return coordinates(index, indexOrderLastDimensionFastest());
     }
 
     bool operator==(const Shape& other) const noexcept {
         return m_dimensions == other.m_dimensions;
-    }
-
-    std::vector<size_t> indexOrderLastDimensionFastest() const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), size_t{0});
-        return order;
     }
 
     // Visit flat indices and their coordinates in the original axis order.
@@ -170,17 +167,18 @@ class Shape {
     void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        const IndexRange clipped{range.start, std::min(range.end, elementCount()), range.stride};
+        const IndexRange clipped{range.start(), std::min(range.end(), elementCount()),
+                                 range.stride()};
         const size_t count = clipped.count();
         if (count == 0) return;
         std::vector<size_t> coordinates(rank());
-        computeCoordinates(range.start, order, coordinates);
+        computeCoordinates(range.start(), order, coordinates);
         for (size_t ordinal = 0; ordinal < count; ++ordinal) {
-            const size_t index = range.start + ordinal * range.stride;
-            if (range.stride != 1) computeCoordinates(index, order, coordinates);
+            const size_t index = range.start() + ordinal * range.stride();
+            if (range.stride() != 1) computeCoordinates(index, order, coordinates);
             function(index, std::span<const size_t>(coordinates));
             if (ordinal + 1 == count) break;
-            if (range.stride == 1) {
+            if (range.stride() == 1) {
                 for (size_t position = rank(); position > 0; --position) {
                     const size_t axis = order[position - 1];
                     if (++coordinates[axis] < m_dimensions[axis]) break;
@@ -202,12 +200,6 @@ class Shape {
             computeCoordinates(index, order, coordinates);
             function(index, std::span<const size_t>(coordinates));
         }
-    }
-
-    template <typename Indices, typename Function>
-    void forEachCoordinate(const Indices& indices, LastDimensionFastest,
-                           Function&& function) const {
-        forEachCoordinateLastDimensionFastest(indices, std::forward<Function>(function));
     }
 
     template <typename Indices, typename Function>
@@ -314,20 +306,4 @@ inline Shape broadcastShapes(const Shape& left, const Shape& right) {
     }
     return Shape(std::move(dimensions));
 }
-
-namespace detail {
-template <typename Function>
-void forEachIndex(const Shape& shape, Function&& function) {
-    const size_t count = shape.elementCount();
-    std::vector<size_t> indices(shape.rank(), 0);
-    for (size_t linearIndex = 0; linearIndex < count; ++linearIndex) {
-        function(std::span<const size_t>(indices), linearIndex);
-        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-            const size_t index = dimension - 1;
-            if (++indices[index] < shape.dimensions()[index]) break;
-            indices[index] = 0;
-        }
-    }
-}
-}  // namespace detail
 }  // namespace roc::hostnumerics

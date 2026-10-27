@@ -282,6 +282,7 @@ TEST(LayoutCpp, FactoriesAndExplicitOrders) {
     const Shape shape{2, 3, 5};
     const Layout rowMajor(shape, {15, 5, 1}, 0);
     EXPECT_EQ(Layout::contiguousLastDimensionFastest(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguous(shape, {0, 1, 2}), rowMajor);
     EXPECT_EQ(Layout::contiguousFirstDimensionFastest(shape), (Layout(shape, {1, 2, 6}, 0)));
     const std::array<size_t, 3> order{1, 2, 0};
     const auto checked = Layout::getContiguousLayout(shape, order);
@@ -717,9 +718,10 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(IndexRange(10, 10, 1).count(), 0);
     EXPECT_EQ(IndexRange(10, 9, 1).count(), 0);
     EXPECT_EQ(IndexRange::all(0).count(), 0);
-    IndexRange invalid(0, 0, 1);
-    invalid.stride = 0;
-    EXPECT_THROW(invalid.count(), std::runtime_error);
+    const IndexRange range(1, 7, 2);
+    EXPECT_EQ(range.start(), 1);
+    EXPECT_EQ(range.end(), 7);
+    EXPECT_EQ(range.stride(), 2);
     EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
 }
 

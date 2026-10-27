@@ -67,18 +67,20 @@ void PeriodicInitialization::fillInto(Tensor destination,
     const auto source = m_seed.rawEncodedBackingStorage();
     const auto target = destination.rawEncodedBackingStorage();
     std::vector<size_t> seedIndex(shape().rank());
-    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> index, size_t) {
-        for (size_t d = 0; d < index.size(); ++d)
-            seedIndex[d] = (logicalOrigin[d] + index[d]) % periods().dimensions()[d];
-        const auto src = detail::preparedBitOffset(
-            type(), detail::preparedElementOffset(m_seed.layout(), seedIndex));
-        const auto dst = detail::preparedBitOffset(
-            type(), detail::preparedElementOffset(destination.layout(), index));
-        if (bits % 8 == 0)
-            std::memcpy(target.data() + dst / 8, source.data() + src / 8, bits / 8);
-        else
-            detail::preparedCopyBitRange(source, src, target, dst, bits);
-    });
+    destination.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(destination.shape().elementCount()),
+        [&](size_t, std::span<const size_t> index) {
+            for (size_t d = 0; d < index.size(); ++d)
+                seedIndex[d] = (logicalOrigin[d] + index[d]) % periods().dimensions()[d];
+            const auto src = detail::preparedBitOffset(
+                type(), detail::preparedElementOffset(m_seed.layout(), seedIndex));
+            const auto dst = detail::preparedBitOffset(
+                type(), detail::preparedElementOffset(destination.layout(), index));
+            if (bits % 8 == 0)
+                std::memcpy(target.data() + dst / 8, source.data() + src / 8, bits / 8);
+            else
+                detail::preparedCopyBitRange(source, src, target, dst, bits);
+        });
 }
 
 void PeriodicInitialization::fillInto(Tensor destination) const {

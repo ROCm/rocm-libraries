@@ -114,10 +114,11 @@ bool validateIntegers(const Tensor& t, ScalarType computeType) {
     const detail::RuntimeTensorReader<double> reader(t);
     const detail::PreparedExactOutput convert(computeType);
     bool valid = true;
-    detail::forEachIndex(t.shape(), [&](std::span<const size_t> at, size_t) {
-        const double v = reader(at);
-        valid &= detail::isExactInteger(v) && convert(v) == v;
-    });
+    t.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(t.shape().elementCount()), [&](size_t, std::span<const size_t> at) {
+            const double v = reader(at);
+            valid &= detail::isExactInteger(v) && convert(v) == v;
+        });
     return valid;
 }
 // The same ordered operand scales and compute-input conversion as matmul.
@@ -135,9 +136,9 @@ std::optional<Tensor> exactOperand(const Tensor& input, const std::vector<Tensor
         value = multiply(value, scale, ScalarType::Float64, ScalarType::Float64, std::nullopt);
         const detail::RuntimeTensorReader<double> reader(value);
         bool bounded = true;
-        detail::forEachIndex(value.shape(), [&](std::span<const size_t> at, size_t) {
-            bounded &= std::abs(reader(at)) < 0x1p53;
-        });
+        value.shape().forEachCoordinateLastDimensionFastest(
+            IndexRange::all(value.shape().elementCount()),
+            [&](size_t, std::span<const size_t> at) { bounded &= std::abs(reader(at)) < 0x1p53; });
         if (!bounded || !validateIntegers(value, accumulatorType)) return std::nullopt;
     }
     if (computeType &&

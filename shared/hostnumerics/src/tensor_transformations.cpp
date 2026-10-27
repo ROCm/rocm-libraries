@@ -364,15 +364,17 @@ Tensor Tensor::copyWithZeroPadding(Shape shape) const {
 
     Tensor result(type(), std::move(shape));
     const uint16_t bits = scalarTypeInfo(type()).storageBits;
-    detail::forEachIndex(this->shape(), [&](std::span<const size_t> indices, size_t) {
-        detail::preparedCopyBitRange(
-            rawEncodedBackingStorage(),
-            detail::preparedBitOffset(type(), detail::preparedElementOffset(layout(), indices)),
-            result.rawEncodedBackingStorage(),
-            detail::preparedBitOffset(type(),
-                                      detail::preparedElementOffset(result.layout(), indices)),
-            bits);
-    });
+    this->shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(this->shape().elementCount()),
+        [&](size_t, std::span<const size_t> indices) {
+            detail::preparedCopyBitRange(
+                rawEncodedBackingStorage(),
+                detail::preparedBitOffset(type(), detail::preparedElementOffset(layout(), indices)),
+                result.rawEncodedBackingStorage(),
+                detail::preparedBitOffset(type(),
+                                          detail::preparedElementOffset(result.layout(), indices)),
+                bits);
+        });
     return result;
 }
 
@@ -395,21 +397,23 @@ Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToS
     Tensor result(type(), Shape(std::move(destinationDimensions)));
     std::vector<size_t> destinationIndices(shape().rank(), 0);
     const uint16_t bits = scalarTypeInfo(type()).storageBits;
-    detail::forEachIndex(shape(), [&](std::span<const size_t> sourceIndices, size_t) {
-        for (size_t destinationDimension = 0; destinationDimension < shape().rank();
-             ++destinationDimension)
-            destinationIndices[destinationDimension] =
-                sourceIndices[destinationToSource[destinationDimension]];
+    shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(shape().elementCount()),
+        [&](size_t, std::span<const size_t> sourceIndices) {
+            for (size_t destinationDimension = 0; destinationDimension < shape().rank();
+                 ++destinationDimension)
+                destinationIndices[destinationDimension] =
+                    sourceIndices[destinationToSource[destinationDimension]];
 
-        detail::preparedCopyBitRange(
-            rawEncodedBackingStorage(),
-            detail::preparedBitOffset(type(),
-                                      detail::preparedElementOffset(layout(), sourceIndices)),
-            result.rawEncodedBackingStorage(),
-            detail::preparedBitOffset(
-                type(), detail::preparedElementOffset(result.layout(), destinationIndices)),
-            bits);
-    });
+            detail::preparedCopyBitRange(
+                rawEncodedBackingStorage(),
+                detail::preparedBitOffset(type(),
+                                          detail::preparedElementOffset(layout(), sourceIndices)),
+                result.rawEncodedBackingStorage(),
+                detail::preparedBitOffset(
+                    type(), detail::preparedElementOffset(result.layout(), destinationIndices)),
+                bits);
+        });
     return result;
 }
 

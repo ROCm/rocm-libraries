@@ -605,8 +605,9 @@ namespace TensileLite::Client::hostnumerics
                 size_t selectedCount;
                 if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
                     selectedCount
-                        = roc::hostnumerics::IndexRange(
-                              indices.start, std::min(indices.end, *logicalCount), indices.stride)
+                        = roc::hostnumerics::IndexRange(indices.start(),
+                                                        std::min(indices.end(), *logicalCount),
+                                                        indices.stride())
                               .count();
                 else
                 {

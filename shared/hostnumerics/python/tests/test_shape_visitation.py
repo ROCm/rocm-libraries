@@ -84,13 +84,14 @@ class ShapeVisitationTests(unittest.TestCase):
         for dimensions, expected in (([], [[]]), ([0], [])):
             shape = hn.Shape(dimensions)
             self.assertEqual(
-                shape.selected_coordinates_last_dimension_fastest(
-                    hn.IndexRange.all(shape.element_count)
-                ),
-                expected,
+                shape.index_order_last_dimension_fastest(), list(range(len(dimensions)))
             )
             self.assertEqual(
-                shape.index_order_last_dimension_fastest(), list(range(len(dimensions)))
+                shape.selected_coordinates(
+                    hn.IndexRange.all(shape.element_count),
+                    shape.index_order_last_dimension_fastest(),
+                ),
+                expected,
             )
 
     def test_range_counts_and_size_t_boundaries(self):
