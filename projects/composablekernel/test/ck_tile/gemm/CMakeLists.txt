@@ -195,6 +195,11 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             foreach(test_target test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
                                 test_ck_tile_gemm_pipeline_comp_tdm_v3_longk_wmma)
                 target_compile_options(${test_target} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+                # Re-enable, for these targets only, the post-RA machine scheduler that the top-level
+                # CMakeLists turns off (-enable-post-misched=0; the later option wins). It issues the
+                # split barrier's LDS reads in bursts with progressive waits instead of a full drain
+                # before each WMMA.
+                target_compile_options(${test_target} PRIVATE "SHELL:-mllvm -enable-post-misched=1")
                 ck_tile_restrict_archs(${test_target} "^gfx125")
             endforeach()
             # Fails if a compiler change makes the comp_tdm_v3 kernels use scratch.
