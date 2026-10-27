@@ -2448,7 +2448,7 @@ void testing_local_matrix_add(Arguments argus)
 template <typename T>
 void testing_local_gershgorin(Arguments argus)
 {
-    if(argus.matrix_type != "Laplacian2D" || argus.matrix_type != "PermutedIdentity")
+    if(argus.matrix_type != "Laplacian2D" && argus.matrix_type != "PermutedIdentity")
     {
         return;
     }
@@ -2460,14 +2460,15 @@ void testing_local_gershgorin(Arguments argus)
 
     if(argus.matrix_type == "Laplacian2D")
     {
-        // For Laplacian2D, the Gershgorin bounds should be [0, 4]
+        // Interior rows have 4 on the diagonal and four -1 neighbors
         EXPECT_NEAR(lower, static_cast<T>(0), getTolerance<T>());
-        EXPECT_NEAR(upper, static_cast<T>(4), getTolerance<T>());
+        EXPECT_NEAR(upper, static_cast<T>(8), getTolerance<T>());
     }
     else if(argus.matrix_type == "PermutedIdentity")
     {
-        // For PermutedIdentity, the Gershgorin bounds should be [1, 1]
-        EXPECT_NEAR(lower, static_cast<T>(1), getTolerance<T>());
+        // gen_permuted_identity() builds a cyclic column shift, which has no diagonal
+        // entries for the tested sizes, so every disc is centered at 0 with radius 1
+        EXPECT_NEAR(lower, static_cast<T>(-1), getTolerance<T>());
         EXPECT_NEAR(upper, static_cast<T>(1), getTolerance<T>());
     }
 }
