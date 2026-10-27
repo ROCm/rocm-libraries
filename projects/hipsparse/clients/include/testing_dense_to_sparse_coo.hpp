@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_coo.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -79,17 +80,14 @@ void testing_dense_to_sparse_coo_bad_arg(const Arguments& argus)
 
     // Matrix structures
     hipsparseDnVecDescr_t matA;
-    hipsparseSpMatDescr_t matB;
 
     size_t bsize;
 
     // Create matrix structures
     verify_hipsparse_status_success(
         hipsparseCreateDnMat(&matA, m, n, ld, ddense_val, dataType, order), "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(
-            &matB, m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType),
-        "success");
+    hipsparseLocalCoo matB(
+        m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType);
 
     // denseToSparse buffer size
     verify_hipsparse_status_invalid_handle(
@@ -129,7 +127,6 @@ void testing_dense_to_sparse_coo_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseDestroyDnMat(matA), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
 
@@ -196,9 +193,7 @@ void testing_dense_to_sparse_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
 
     // Create matrices
-    hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&matB, m, n, 0, nullptr, nullptr, nullptr, typeI, idx_base, typeT));
+    hipsparseLocalCoo matB(m, n, 0, nullptr, nullptr, nullptr, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer
     size_t bufferSize;
@@ -324,7 +319,6 @@ void testing_dense_to_sparse_coo(Arguments argus)
 
     CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
 

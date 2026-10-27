@@ -31,6 +31,7 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_coo.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -85,13 +86,10 @@ void testing_spmm_batched_coo_bad_arg(const Arguments& argus)
     void*    dbuf = (void*)dbuf_managed.get();
 
     // SpMM structures
-    hipsparseSpMatDescr_t A;
     hipsparseDnMatDescr_t B, C;
 
     // Create SpMM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(&A, m, k, nnz, drow, dcol, dval, idxTypeI, idxBase, dataType),
-        "success");
+    hipsparseLocalCoo A(m, k, nnz, drow, dcol, dval, idxTypeI, idxBase, dataType);
     verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, order),
                                     "success");
     verify_hipsparse_status_success(hipsparseCreateDnMat(&C, m, n, m, dC, dataType, order),
@@ -159,7 +157,6 @@ void testing_spmm_batched_coo_bad_arg(const Arguments& argus)
         "Error: Combination of strided batch parameters is invald");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(C), "success");
 #endif
@@ -348,9 +345,8 @@ void testing_spmm_batched_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCoo(
-        &A, A_m, A_n, nnz_A, dcoo_row_ind, dcoo_col_ind, dcoo_val, typeI, idx_base, typeT));
+    hipsparseLocalCoo A(
+        A_m, A_n, nnz_A, dcoo_row_ind, dcoo_col_ind, dcoo_val, typeI, idx_base, typeT);
 
     // Create dense matrices
     hipsparseDnMatDescr_t B, C1, C2;
@@ -511,7 +507,6 @@ void testing_spmm_batched_coo(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_coo.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -73,8 +74,6 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     void*  dbuf = (void*)dbuf_managed.get();
 
     // SpSV structures
-    hipsparseSpMatDescr_t A;
-
     hipsparseSpSVDescr_t descr;
 
     verify_hipsparse_status_success(hipsparseSpSV_createDescr(&descr), "success");
@@ -82,8 +81,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
     size_t bsize;
 
     // Create SpSV structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, idxType, idxBase, dataType), "success");
+    hipsparseLocalCoo   A(m, n, nnz, drow, dcol, dval, idxType, idxBase, dataType);
     hipsparseLocalDnVec x(m, dx, dataType);
     hipsparseLocalDnVec y(m, dy, dataType);
 
@@ -153,7 +151,6 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSV_destroyDescr(descr), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
 #endif
 }
 
@@ -243,9 +240,7 @@ void testing_spsv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT));
+    hipsparseLocalCoo A(m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT);
 
     // Create dense vectors
     hipsparseLocalDnVec x(m, dx, typeT);
@@ -368,7 +363,6 @@ void testing_spsv_coo(Arguments argus)
     CHECK_HIP_ERROR(hipFree(buffer));
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
 #endif
 }
 

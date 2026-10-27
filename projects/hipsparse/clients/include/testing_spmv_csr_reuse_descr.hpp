@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -374,9 +375,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType);
 
     const std::vector<hipsparseOperation_t> ops = get_supported_operations(aType);
     std::vector<hipsparseSpMVAlg_t>         algs
@@ -440,9 +439,6 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
                                                   number_of_passes,
                                                   use_preprocess);
     }
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

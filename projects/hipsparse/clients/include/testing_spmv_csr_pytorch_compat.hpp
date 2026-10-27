@@ -40,13 +40,13 @@
  * 4. Compares against dense matmul: expected = csr.to_dense().matmul(vec)
  */
 
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 
-#include "hipsparse-float16.h"
 #include <float.h>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
@@ -419,18 +419,16 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     hipsparseLocalHandle_t handle;
 
     // Create sparse matrix descriptor
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateCsr(&matA,
-                                             m,
-                                             n,
-                                             actual_nnz,
-                                             d_crow_indices,
-                                             d_col_indices,
-                                             d_values,
-                                             HIPSPARSE_INDEX_32I,
-                                             HIPSPARSE_INDEX_32I,
-                                             HIPSPARSE_INDEX_BASE_ZERO,
-                                             hip_datatype<T>::value));
+    hipsparseLocalCsr matA(m,
+                           n,
+                           actual_nnz,
+                           d_crow_indices,
+                           d_col_indices,
+                           d_values,
+                           HIPSPARSE_INDEX_32I,
+                           HIPSPARSE_INDEX_32I,
+                           HIPSPARSE_INDEX_BASE_ZERO,
+                           hip_datatype<T>::value);
 
     // Create dense vector descriptors
     hipsparseLocalDnVec vecX(n, d_x, hip_datatype<T>::value);
@@ -505,9 +503,6 @@ inline void testing_spmv_csr_pytorch_compat(int m, int n, int target_nnz, bool u
     ASSERT_TRUE(passed) << tolerance_traits<T>::name << " SpMV mismatch: " << num_errors
                         << " errors, max_abs=" << max_abs_error << ", max_rel=" << max_rel_error;
 #endif
-
-    // Cleanup
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 }
 
 // ============================================================================

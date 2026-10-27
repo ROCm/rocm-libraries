@@ -31,6 +31,7 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_csc.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -86,15 +87,12 @@ void testing_spmm_csc_bad_arg(const Arguments& argus)
     void*    dbuf = (void*)dbuf_managed.get();
 
     // SpMM structures
-    hipsparseSpMatDescr_t A;
     hipsparseDnMatDescr_t B, C;
 
     size_t bsize;
 
     // Create SpMM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsc(&A, m, k, nnz, dptr, drow, dval, idxTypeI, idxTypeJ, idxBase, dataType),
-        "success");
+    hipsparseLocalCsc A(m, k, nnz, dptr, drow, dval, idxTypeI, idxTypeJ, idxBase, dataType);
     verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, order),
                                     "success");
     verify_hipsparse_status_success(hipsparseCreateDnMat(&C, m, n, m, dC, dataType, order),
@@ -181,7 +179,6 @@ void testing_spmm_csc_bad_arg(const Arguments& argus)
         "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroyDnMat(C), "success");
 #endif
@@ -316,9 +313,7 @@ void testing_spmm_csc(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsc(&A, A_m, A_n, nnz_A, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsc A(A_m, A_n, nnz_A, dptr, drow, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
     hipsparseDnMatDescr_t B, C1, C2;
@@ -452,7 +447,6 @@ void testing_spmm_csc(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));

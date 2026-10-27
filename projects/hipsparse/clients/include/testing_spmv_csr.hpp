@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_csr.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -86,15 +87,10 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
     Y*    dy   = (Y*)dy_managed.get();
     void* dbuf = (void*)dbuf_managed.get();
 
-    // SpMV structures
-    hipsparseSpMatDescr_t matA;
-
     size_t bsize;
 
     // Create SpMV structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, aType),
-        "success");
+    hipsparseLocalCsr   matA(m, n, nnz, dptr, dcol, dval, idxType, idxType, idxBase, aType);
     hipsparseLocalDnVec x(n, dx, xType);
     hipsparseLocalDnVec y(m, dy, yType);
 
@@ -175,9 +171,6 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
 #endif
 }
 
@@ -269,9 +262,7 @@ void testing_spmv_csr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType);
 
     // Create dense vectors
     hipsparseLocalDnVec x(x_size, dx, xType);
@@ -382,7 +373,6 @@ void testing_spmv_csr(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 
