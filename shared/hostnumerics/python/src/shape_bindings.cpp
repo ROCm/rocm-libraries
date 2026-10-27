@@ -183,7 +183,8 @@ original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 
 See linear_index for the nested-loop interpretation of order. A shape with a
 zero extent has no valid index; Shape().coordinates(0, []) returns [] for its scalar.
 )doc")
-        .def("index_order_last_dimension_fastest", &Shape::indexOrderLastDimensionFastest)
+        .def("index_order_last_dimension_fastest", &Shape::indexOrderLastDimensionFastest,
+             "Return ascending axes, the order in which the last axis changes fastest.")
         .def("selected_coordinates", &selectedCoordinates<IndexRange>, "range"_a, "order"_a,
              R"doc(
 Return owning coordinate lists for the range clipped to element_count.
@@ -197,18 +198,6 @@ Every index must be less than element_count. Bounds and the complete
 slowest-to-fastest axis permutation are checked before traversal, including
 empty work. Each coordinate list uses the original axis order.
 )doc")
-        .def(
-            "selected_coordinates_last_dimension_fastest",
-            [](const Shape& shape, const IndexRange& range) {
-                return selectedCoordinates(shape, range, shape.indexOrderLastDimensionFastest());
-            },
-            "range"_a, "Return owning coordinate lists for a range with the last axis fastest.")
-        .def(
-            "selected_coordinates_last_dimension_fastest",
-            [](const Shape& shape, const std::set<size_t>& indices) {
-                return selectedCoordinates(shape, indices, shape.indexOrderLastDimensionFastest());
-            },
-            "indices"_a, "Return owning coordinate lists for a set with the last axis fastest.")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())
