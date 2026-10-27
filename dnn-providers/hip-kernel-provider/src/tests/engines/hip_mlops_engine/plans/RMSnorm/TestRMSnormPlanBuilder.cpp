@@ -11,6 +11,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/DeclaredAlignmentGraphTestUtils.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -268,6 +269,34 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
     {
         hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
     }
+}
+
+// Bug caught: an alignment requirement added to the scalar-access RMSNorm kernel, or a read of
+// the declared alignment that declines tensors declaring only their element size, for the
+// single-node graph with 4-byte and 2-byte elements and for the activation-fused graph at its
+// default fp32 types.
+TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const auto computeType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    for(const auto inputType : {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType::HALF})
+    {
+        hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+            hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+                strides, dims, inputType, computeType),
+            isApplicable);
+    }
+    hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+        hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+            strides, dims, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, computeType),
+        isApplicable);
 }
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledActivationGraph)

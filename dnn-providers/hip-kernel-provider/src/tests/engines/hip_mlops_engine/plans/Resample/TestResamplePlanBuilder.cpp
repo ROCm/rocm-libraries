@@ -12,6 +12,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/DeclaredAlignmentGraphTestUtils.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -74,6 +75,22 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
 
     hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
         hipdnn_test_sdk::utilities::createValidResampleFwdGraph(), isApplicable);
+}
+
+// Bug caught: an alignment requirement added to the scalar-access Resample forward kernel, or a
+// read of the declared alignment that declines tensors declaring only their element size, with
+// and without the 4-byte max-pool index tensor.
+TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+        hipdnn_test_sdk::utilities::createValidResampleFwdGraph(), isApplicable);
+    hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+        hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true), isApplicable);
 }
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForNonResampleGraph)

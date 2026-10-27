@@ -22,6 +22,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/DeclaredAlignmentGraphTestUtils.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 using namespace hipdnn_test_sdk::utilities;
@@ -129,6 +130,31 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
                              hipdnn_test_sdk::utilities::createValidLayernormBwdGraph()})
     {
         hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
+}
+
+// Bug caught: an alignment requirement added to the scalar-access LayerNorm kernels, or a read
+// of the declared alignment that declines tensors declaring only their element size, for both
+// the forward and the backward graph, for 4-byte and 2-byte elements.
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForElementSizeAlignedTensors)
+{
+    const auto isApplicable
+        = [this](const IGraph& graph) { return _planBuilder.isApplicable(_dummyHandle, graph); };
+
+    const std::vector<int64_t> strides{588, 196, 14, 1};
+    const std::vector<int64_t> dims{1, 3, 14, 14};
+    const auto computeType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    for(const auto inputType : {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType::HALF})
+    {
+        hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+            hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+                strides, dims, inputType, computeType),
+            isApplicable);
+        hip_kernel_provider::test_utils::expectAcceptedAtMinimalAlignment(
+            hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+                strides, dims, true, inputType),
+            isApplicable);
     }
 }
 
