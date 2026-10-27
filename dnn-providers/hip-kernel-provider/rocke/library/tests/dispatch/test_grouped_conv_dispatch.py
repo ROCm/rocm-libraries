@@ -722,12 +722,17 @@ def test_default_pick_is_the_first_admitted_instance_in_list_order():
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile
-    just because it happens to sort earlier in the list -- direct_depthwise_tiled
+    just because it happens to sort earlier in the list -- the direct depthwise
     candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
     they are listed ahead of implicit_gemm so they win whenever both are admitted.
+    The windowed MFMA forward (direct_depthwise_win: stride 1, "same" padding,
+    channels a multiple of 8) leads; the tiled kernel takes the rest.
     """
-    req = _req(**_SHAPES[shape])
-    assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
+    kw = _SHAPES[shape]
+    req = _req(**kw)
+    windowed = kw.get("stride_h", 1) == 1 and kw.get("Y", 3) <= 9 and kw["C"] % 8 == 0
+    want = "direct_depthwise_win" if windowed else "direct_depthwise_tiled"
+    assert gc.dispatch_conv_grouped(req).spec.algorithm == want
 
 
 def test_spec_id_pins_one_instance():

@@ -28,6 +28,8 @@
 # 43: runtime channels).
 # Indices 45..48: the MFMA form with fwd (the rotated filter; 48, fwd
 # without mfma, both reject).
+# Indices 49..54: its grouped forward form (cpg = kpg = 8 / 16 / 32; 51,
+# without fwd, and 54, a block narrower than a group, both reject).
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -342,6 +344,112 @@ _WIN_FWD_CFGS = (
 )
 
 
+# The grouped forward form (cpg = kpg, fwd, MFMA; ``_cpg`` defaults to 8):
+# 49 3x3 fp16 with a partial channel block, 50 7x7 bf16 under w_fold 2; 51
+# cpg = 8 without fwd -- both engines reject. G counts groups.
+_WIN_G8_CFG_BASE = _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS)
+_WIN_G8_CFGS = (
+    (
+        2,
+        13,
+        21,
+        10,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, fwd=True, block_waves=4, w_fold=2, prefetch_rows=2, block_h=8),
+    ),
+    (
+        3,
+        14,
+        14,
+        8,
+        7,
+        7,
+        3,
+        "bf16",
+        "gfx950",
+        dict(mfma=True, fwd=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14),
+    ),
+    (
+        2,
+        13,
+        21,
+        16,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(mfma=True, block_waves=4, w_fold=1, prefetch_rows=1, block_h=8),
+    ),
+    # 52: cpg 16 (two input chunks per wave); 53: cpg 32 bf16; 54: cpg 16 in
+    # a block of 8 channels -- both reject.
+    (
+        2,
+        13,
+        21,
+        6,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            block_waves=4,
+            w_fold=2,
+            prefetch_rows=2,
+            block_h=8,
+        ),
+    ),
+    (
+        2,
+        9,
+        11,
+        4,
+        3,
+        3,
+        1,
+        "bf16",
+        "gfx950",
+        dict(
+            _cpg=32,
+            mfma=True,
+            fwd=True,
+            block_waves=8,
+            w_fold=1,
+            prefetch_rows=2,
+            block_h=9,
+        ),
+    ),
+    (
+        2,
+        13,
+        21,
+        6,
+        3,
+        3,
+        1,
+        "fp16",
+        "gfx950",
+        dict(
+            _cpg=16,
+            mfma=True,
+            fwd=True,
+            block_waves=1,
+            w_fold=1,
+            prefetch_rows=1,
+            block_h=8,
+        ),
+    ),
+)
+
+
 def _build(spec, arch):
     if isinstance(spec, DirectConv4cSpec):
         return build_direct_conv_4c(spec, arch=arch)
@@ -355,6 +463,26 @@ def _spec(idx: int):
         return _generic_spec(idx - _GENERIC_CFG_BASE)
     if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
         return _fourc_spec(idx - _FOURC_CFG_BASE)
+    if _WIN_G8_CFG_BASE <= idx < _WIN_G8_CFG_BASE + len(_WIN_G8_CFGS):
+        N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_G8_CFGS[
+            idx - _WIN_G8_CFG_BASE
+        ]
+        knobs = dict(knobs)
+        cpg = knobs.pop("_cpg", 8)
+        problem = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=G,
+            cpg=cpg,
+            kpg=cpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+        return DirectDepthwiseDgradWindowedSpec(problem=problem, **knobs), arch
     if _WIN_FWD_CFG_BASE <= idx < _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS):
         N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_FWD_CFGS[
             idx - _WIN_FWD_CFG_BASE

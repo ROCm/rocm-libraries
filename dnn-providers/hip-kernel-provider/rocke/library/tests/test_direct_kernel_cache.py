@@ -1094,8 +1094,9 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
 
 def test_capabilities_outside_the_list_are_not_served(cache):
     # The baked-channel grouped kernels cover cpg in {4, 8, 16, 32} at stride
-    # 1; anything else grouped is left to the runtime-channel LDS-halo kernel.
-    for problem in (_problem(cpg=24, kpg=24), _problem(stride=2)):
+    # 1 (and the windowed MFMA forward multiples of 8 up to 64); anything else
+    # grouped is left to the runtime-channel LDS-halo kernel.
+    for problem in (_problem(cpg=12, kpg=12), _problem(stride=2)):
         plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
         assert plans
         assert _variants(plans) == {"direct_grouped_halo"}

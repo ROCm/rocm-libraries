@@ -7476,6 +7476,8 @@ DW_DGRAD_MFMA_MAX_FRAG_VGPRS = 224
 DW_DGRAD_MFMA_MAX_PREFETCH_ROWS = 4
 # LDS per workgroup for the staged dY windows and dX rows.
 DW_DGRAD_MFMA_LDS_BUDGET = 64 * 1024
+# Widest group (cpg = kpg) the grouped forward form contracts per wave.
+DW_WIN_MAX_GROUP_CH = 64
 
 
 def _dw_mfma_passes(KW: int) -> int:
@@ -7531,7 +7533,11 @@ class DirectDepthwiseDgradWindowedSpec:
     # Read the filter rotated by 180 degrees (MFMA form only): the kernel then
     # runs the forward depthwise convolution whose dgrad ``problem`` is the
     # transpose -- dY is the forward input, dX the forward output, and PAD is
-    # ``KH - 1 - pad`` (see :func:`dw_win_fwd_problem`).
+    # ``KH - 1 - pad`` (see :func:`dw_win_fwd_problem`). A forward problem may
+    # also be grouped with ``cpg = kpg`` a multiple of 8 (at most
+    # DW_WIN_MAX_GROUP_CH): a wave's 8 output channels then contract the
+    # ``cpg / 8`` 8-channel chunks of their group, with the group's dense
+    # weights as A fragments instead of the one-hot diagonal.
     fwd: bool = False
 
     @property
@@ -7558,11 +7564,21 @@ class DirectDepthwiseDgradWindowedSpec:
     def h_tiles(self) -> int:
         return -(-self.problem.H // self.block_h)
 
+    @property
+    def grouped(self) -> bool:
+        """The grouped forward form: ``cpg = kpg``, a multiple of 8."""
+        return self.problem.cpg > 1
+
+    @property
+    def cin_chunks(self) -> int:
+        """8-channel input chunks a wave contracts (1 for depthwise)."""
+        return max(1, self.problem.cpg // DW_DGRAD_MFMA_CH)
+
     def grid(self) -> Tuple[int, int, int]:
         p = self.problem
         return (
             -(-p.W // self.tile_w),
-            -(-p.groups // self.block_ch),
+            -(-p.total_c // self.block_ch),
             self.n_tiles * self.h_tiles,
         )
 
@@ -7587,7 +7603,7 @@ class DirectDepthwiseDgradWindowedSpec:
         weights (KH x passes), the KH accumulator tiles, one row of B
         fragments and the prefetched dY rows, 4 VGPRs each."""
         p = self.problem
-        kwp = _dw_mfma_passes(p.KW)
+        kwp = _dw_mfma_passes(p.KW) * self.cin_chunks
         rows = self.prefetch_rows * self._mfma_in_passes()
         return 4 * (p.KH * kwp + p.KH + kwp + rows)
 
@@ -7613,7 +7629,12 @@ class DirectDepthwiseDgradWindowedSpec:
                 f"bh{self.block_h}",
                 f"f{self.w_fold}",
                 f"pf{self.prefetch_rows}",
-                flags={"mfma": True, "bf16": p.dtype == "bf16", "fwd": self.fwd},
+                flags={
+                    "mfma": True,
+                    "bf16": p.dtype == "bf16",
+                    "fwd": self.fwd,
+                    f"g{p.cpg}": self.grouped,
+                },
             )
         return kernel_name_join(
             self.name,
@@ -7673,8 +7694,9 @@ def _depthwise_dgrad_win_mfma_check(
             f"mfma needs block_waves <= {DW_DGRAD_MFMA_MAX_WAVES} "
             f"(got {spec.block_waves})"
         )
-    # A plan-time rule: the IR does not depend on the group count.
-    if p.groups % DW_DGRAD_MFMA_CH != 0:
+    # A plan-time rule: the IR does not depend on the group count. (A grouped
+    # forward problem has 8 channels per group, so every count is whole.)
+    if not spec.grouped and p.groups % DW_DGRAD_MFMA_CH != 0:
         return False, f"mfma needs groups % {DW_DGRAD_MFMA_CH} == 0 (got {p.groups})"
     if spec.mfma_frag_vgprs() > DW_DGRAD_MFMA_MAX_FRAG_VGPRS:
         return False, (
@@ -7690,8 +7712,20 @@ def _depthwise_dgrad_win_check(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         return False, f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
-    if p.cpg != 1 or p.kpg != 1:
+    grouped = (
+        spec.mfma
+        and spec.fwd
+        and p.cpg == p.kpg
+        and p.cpg % DW_DGRAD_MFMA_CH == 0
+        and p.cpg <= DW_WIN_MAX_GROUP_CH
+    )
+    if (p.cpg != 1 or p.kpg != 1) and not grouped:
         return False, f"requires cpg=kpg=1 (got {p.cpg}, {p.kpg})"
+    if grouped and spec.block_ch % p.cpg != 0:
+        return False, (
+            f"a block must hold whole groups (block_ch={spec.block_ch}, "
+            f"cpg={p.cpg})"
+        )
     if p.stride != 1:
         return False, f"requires stride=1 (got {p.stride})"
     why = dilation_reason(p)
@@ -7731,8 +7765,8 @@ def _depthwise_dgrad_win_check(
         )
     # A plan-time rule (the IR does not depend on it): every in-range byte
     # offset plus a sentinel must stay a valid unsigned 32-bit offset.
-    dy_bytes = p.N * p.Ho * p.Wo * p.groups * 2
-    dx_bytes = p.N * p.H * p.W * p.groups * 2
+    dy_bytes = p.N * p.Ho * p.Wo * p.total_c * 2
+    dx_bytes = p.N * p.H * p.W * p.total_c * 2
     if max(dy_bytes, dx_bytes) > DW_DGRAD_WIN_MAX_TENSOR_BYTES:
         return False, (
             f"dY/dX of {max(dy_bytes, dx_bytes)} bytes exceed the "
@@ -8145,6 +8179,12 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     p_Ho = params["p_Ho"]
     p_Wo = params["p_Wo"]
     p_G = params["p_groups"]
+    G8 = spec.grouped
+    CPG = p.cpg
+    H8 = spec.cin_chunks
+    if G8:
+        # The channel count bounding every access: cpg channels per group.
+        p_G = b.mul(p_G, b.const_i32(CPG))
 
     c0 = b.const_i32(0)
     oob_lane = b.const_i32(DW_DGRAD_WIN_OOB_LANE)
@@ -8183,10 +8223,13 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])
     d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
 
-    # One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot k.
-    w_base = b.mul(b.add(c_wave, k), b.const_i32(KH * KW * 2))
+    # One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot k. The
+    # grouped form loads the group's dense row instead: weights[r][ph][h] is
+    # W[k, ., ., 8h .. 8h+7], one 16-byte load of input chunk h at slots 0..7.
+    tap_bytes = CPG * 2
+    w_base = b.mul(b.add(c_wave, k), b.const_i32(KH * KW * tap_bytes))
     c_KW = b.const_i32(KW)
-    is_k = [b.cmp_eq(k, b.const_i32(j)) for j in range(DW_DGRAD_MFMA_CH)]
+    is_k = [] if G8 else [b.cmp_eq(k, b.const_i32(j)) for j in range(DW_DGRAD_MFMA_CH)]
     weights: List[List[Value]] = []
     for r in range(KH):
         row: List[Value] = []
@@ -8198,7 +8241,19 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
                 tap = b.add(b.const_i32((KH - 1 - r) * KW), s)
             else:
                 tap = b.sub(b.const_i32(r * KW + KW - 1), s)
-            off = b.select(ok, b.add(w_base, b.mul(tap, b.const_i32(2))), oob_lane)
+            off = b.select(
+                ok, b.add(w_base, b.mul(tap, b.const_i32(tap_bytes))), oob_lane
+            )
+            if G8:
+                row.append(
+                    [
+                        _buf_load_vN(
+                            b, p.dtype, b_rsrc, b.add(off, b.const_i32(16 * h)), c0, 4
+                        )
+                        for h in range(H8)
+                    ]
+                )
+                continue
             if p.dtype == "bf16":
                 w = b.buffer_load_bf16(b_rsrc, off, c0)
             else:
@@ -8206,6 +8261,10 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
             comps = [b.select(is_k[j], w, zero_half) for j in range(DW_DGRAD_MFMA_CH)]
             row.append(b.vec_pack(comps, io_type))
         weights.append(row)
+    if G8:
+        # The first channel of the wave's group inside the block.
+        c_cpg = b.const_i32(CPG)
+        grp_ch = b.mul(b.div(wave_ch, c_cpg), c_cpg)
 
     # Lane parts shared by the B reads and the D staging.
     c_sub = b.const_i32(SUB)
@@ -8309,6 +8368,35 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
             b.smem_store_vN(i_smem, [buf, px, ch8], v, 8)
 
     def multiply(accs: List[Value], buf: Value, rs: List[int]) -> List[Value]:
+        if G8:
+            # Input chunk h of the wave's group: its 8 channels at grp_ch + 8h.
+            xs = [
+                [
+                    b.smem_load_vN(
+                        i_smem,
+                        buf,
+                        b_px[ph],
+                        b.add(grp_ch, b.const_i32(8 * h)),
+                        dtype=io_type,
+                        n=8,
+                    )
+                    for h in range(H8)
+                ]
+                for ph in range(KWP)
+            ]
+            out = list(accs)
+            for ph in range(KWP):
+                for h in range(H8):
+                    for i, r in enumerate(rs):
+                        out[i] = _mfma(
+                            b,
+                            p.dtype,
+                            "16x16x32",
+                            weights[r][ph][h],
+                            xs[ph][h],
+                            out[i],
+                        )
+            return out
         xs = [
             b.smem_load_vN(i_smem, buf, b_px[ph], wave_ch, dtype=io_type, n=8)
             for ph in range(KWP)

@@ -142,6 +142,9 @@ DW_WIN_MFMA_PREFETCH = 2
 # The forward pass on the same Toeplitz MFMA kernel (rotated filter,
 # direct_depthwise_win): "same"-padded square filters, stride 1.
 DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
+# ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
+DW_WIN_FWD_G8_FILTERS = (3,)
+DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
 # the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
@@ -604,12 +607,18 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         ),
     ),
     # Depthwise forward on the windowed dgrad kernel's MFMA form (rotated
-    # filter over the transposed problem): stride 1, "same" padding.
+    # filter over the transposed problem): stride 1, "same" padding; and its
+    # grouped form with 8..64 channels per group.
     _DW_WIN_FWD: (
         "fwd",
         tuple(
             DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
             for k in DW_WIN_FWD_FILTERS
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_GROUP_CH
         ),
     ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
@@ -840,8 +849,18 @@ def _knob_grid(
                 prefetch_rows=DW_WIN_MFMA_PREFETCH,
             )
     elif variant == _DW_WIN_FWD:
+        # A grouped block holds whole groups: one or two per block, plus the
+        # depthwise wave counts that are whole multiples of the group.
+        waves_grid = DW_WIN_MFMA_WAVES
+        if caps is not None and caps.cpg > 1:
+            per_group = caps.cpg // 8
+            waves_grid = tuple(
+                w
+                for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
+                if w <= 8 and w % per_group == 0
+            )
         for fold, waves, bh in itertools.product(
-            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, DW_WIN_MFMA_BLOCK_H
+            DW_WIN_MFMA_FOLDS, waves_grid, DW_WIN_MFMA_BLOCK_H
         ):
             yield dict(
                 w_fold=fold,

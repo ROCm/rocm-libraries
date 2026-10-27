@@ -117,7 +117,8 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const int kwp = dw_win_passes(p->KW);
+    const int chunks = p->cpg > 1 ? p->cpg / ROCKE_DW_DGRAD_MFMA_CH : 1;
+    const int kwp = dw_win_passes(p->KW) * chunks;
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
     return 4 * (p->KH * kwp + p->KH + kwp + rows);
 }
@@ -148,10 +149,13 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
     name = spec->name != NULL ? spec->name : "direct_depthwise_dgrad_win";
+    char gtag[16] = "";
+    if(p->cpg > 1)
+        snprintf(gtag, sizeof gtag, "_g%d", p->cpg);
     if(spec->mfma)
         n = snprintf(out,
                      out_cap,
-                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s",
+                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s",
                      name,
                      p->KH,
                      p->KW,
@@ -161,7 +165,8 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      spec->w_fold,
                      spec->prefetch_rows,
                      dw_win_is_bf16(p) ? "_bf16" : "",
-                     spec->fwd ? "_fwd" : "");
+                     spec->fwd ? "_fwd" : "",
+                     gtag);
     else
         n = snprintf(out,
                      out_cap,
@@ -199,8 +204,15 @@ static bool
     } while(0)
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
         DW_WIN_FAIL("unsupported dtype '%s'; expected fp16 or bf16", dtype);
-    if(p->cpg != 1 || p->kpg != 1)
+    const bool grouped8 = spec->mfma && spec->fwd && p->cpg == p->kpg
+                          && p->cpg % ROCKE_DW_DGRAD_MFMA_CH == 0
+                          && p->cpg <= ROCKE_DW_WIN_MAX_GROUP_CH;
+    if((p->cpg != 1 || p->kpg != 1) && !grouped8)
         DW_WIN_FAIL("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+    if(grouped8 && rocke_direct_depthwise_dgrad_win_block_ch(spec) % p->cpg != 0)
+        DW_WIN_FAIL("a block must hold whole groups (block_ch=%d, cpg=%d)",
+                    rocke_direct_depthwise_dgrad_win_block_ch(spec),
+                    p->cpg);
     if(p->stride != 1)
         DW_WIN_FAIL("requires stride=1 (got %d)", p->stride);
     if(p->dil_h != 1 || p->dil_w != 1)
@@ -246,7 +258,7 @@ static bool
             DW_WIN_FAIL("mfma needs block_waves <= %d (got %d)",
                         ROCKE_DW_DGRAD_MFMA_MAX_WAVES,
                         spec->block_waves);
-        if(p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
+        if(!grouped8 && p->groups % ROCKE_DW_DGRAD_MFMA_CH != 0)
             DW_WIN_FAIL("mfma needs groups %% %d == 0 (got %d)", ROCKE_DW_DGRAD_MFMA_CH, p->groups);
         const int frag = rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(spec);
         if(frag > ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS)
@@ -259,8 +271,8 @@ static bool
                     spec->w_fold,
                     spec->prefetch_rows);
     {
-        const long long dy = (long long)p->N * Ho * Wo * p->groups * 2;
-        const long long dx = (long long)p->N * p->H * p->W * p->groups * 2;
+        const long long dy = (long long)p->N * Ho * Wo * p->groups * p->cpg * 2;
+        const long long dx = (long long)p->N * p->H * p->W * p->groups * p->cpg * 2;
         const long long mx = dy > dx ? dy : dx;
         if(mx > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
             DW_WIN_FAIL("dY/dX of %lld bytes exceed the %lld-byte sentinel addressing range",
@@ -778,6 +790,15 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* p_Ho = prm.p_Ho;
     V* p_Wo = prm.p_Wo;
     V* p_G = prm.p_groups;
+    const bool G8 = p->cpg > 1;
+    const int CPG = p->cpg;
+    const int H8 = G8 ? CPG / ROCKE_DW_DGRAD_MFMA_CH : 1;
+    if(G8)
+    {
+        /* The channel count bounding every access: cpg channels per group. */
+        V* c_ch = rocke_b_const_i32(b, CPG);
+        p_G = rocke_b_mul(b, p_G, c_ch);
+    }
 
     V* c0 = rocke_b_const_i32(b, 0);
     V* oob_lane = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_LANE);
@@ -821,17 +842,23 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* b_rsrc = rocke_b_buffer_rsrc(b, prm.Bp, prm.B_bytes);
     V* d_rsrc = rocke_b_buffer_rsrc(b, prm.D, prm.D_bytes);
 
+    /* One-hot A fragments, or (grouped form) the group's dense row
+     * W[k, ., ., 0..7] as one 16-byte load. */
+    const int tap_bytes = CPG * 2;
     V* ck = rocke_b_add(b, c_wave, k);
-    V* c_taps = rocke_b_const_i32(b, KH * KW * 2);
+    V* c_taps = rocke_b_const_i32(b, KH * KW * tap_bytes);
     V* w_base = rocke_b_mul(b, ck, c_taps);
     V* c_KW = rocke_b_const_i32(b, KW);
     V* is_k[ROCKE_DW_DGRAD_MFMA_CH];
-    for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
-    {
-        V* c = rocke_b_const_i32(b, j);
-        is_k[j] = rocke_b_cmp_eq(b, k, c);
-    }
+    if(!G8)
+        for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
+        {
+            V* c = rocke_b_const_i32(b, j);
+            is_k[j] = rocke_b_cmp_eq(b, k, c);
+        }
     std::vector<std::vector<V*>> weights(KH, std::vector<V*>(KWP));
+    std::vector<std::vector<std::vector<V*>>> gweights(
+        KH, std::vector<std::vector<V*>>(KWP, std::vector<V*>(H8)));
     for(int r = 0; r < KH; ++r)
         for(int ph = 0; ph < KWP; ++ph)
         {
@@ -854,16 +881,34 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
                 V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
                 tap = rocke_b_sub(b, cr, s);
             }
-            V* c2 = rocke_b_const_i32(b, 2);
+            V* c2 = rocke_b_const_i32(b, tap_bytes);
             V* tb = rocke_b_mul(b, tap, c2);
             V* a = rocke_b_add(b, w_base, tb);
             V* off = rocke_b_select(b, ok, a, oob_lane);
+            if(G8)
+            {
+                for(int h = 0; h < H8; ++h)
+                {
+                    V* ch = rocke_b_const_i32(b, 16 * h);
+                    V* oh = rocke_b_add(b, off, ch);
+                    gweights[r][ph][h] = dw_win_load_vN(b, bf16, b_rsrc, oh, c0, 4);
+                }
+                continue;
+            }
             V* w = dw_win_load_half(b, bf16, b_rsrc, off, c0);
             V* comps[ROCKE_DW_DGRAD_MFMA_CH];
             for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
                 comps[j] = rocke_b_select(b, is_k[j], w, zero_half);
             weights[r][ph] = rocke_b_vec_pack(b, comps, ROCKE_DW_DGRAD_MFMA_CH, io_type);
         }
+    V* grp_ch = NULL;
+    if(G8)
+    {
+        /* The first channel of the wave's group inside the block. */
+        V* c_cpg = rocke_b_const_i32(b, CPG);
+        V* gd = rocke_b_div(b, wave_ch, c_cpg);
+        grp_ch = rocke_b_mul(b, gd, c_cpg);
+    }
 
     V* c_sub = rocke_b_const_i32(b, SUB);
     V* f = rocke_b_div(b, col16, c_sub);
@@ -1046,6 +1091,28 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
             }
         };
         auto multiply = [&](const std::vector<V*>& accs) -> std::vector<V*> {
+            if(G8)
+            {
+                /* Input chunk h of the wave's group: its 8 channels at grp_ch + 8h. */
+                std::vector<std::vector<V*>> gx(KWP, std::vector<V*>(H8));
+                for(int ph = 0; ph < KWP; ++ph)
+                    for(int h = 0; h < H8; ++h)
+                    {
+                        V* c8h = rocke_b_const_i32(b, 8 * h);
+                        V* chh = rocke_b_add(b, grp_ch, c8h);
+                        V* idx[3] = {buf, b_px[ph], chh};
+                        gx[ph][h] = rocke_b_smem_load_vN(b, i_smem, idx, 3, io_type, 8);
+                    }
+                std::vector<V*> out = accs;
+                for(int ph = 0; ph < KWP; ++ph)
+                    for(int h = 0; h < H8; ++h)
+                        for(size_t i = 0; i < rs.size(); ++i)
+                            out[i] = bf16 ? rocke_b_mfma_f32_16x16x32_bf16(
+                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i])
+                                          : rocke_b_mfma_f32_16x16x32_f16(
+                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i]);
+                return out;
+            }
             std::vector<V*> xs(KWP);
             for(int ph = 0; ph < KWP; ++ph)
             {

@@ -668,6 +668,7 @@ def _verify(rt, run, out_dev, out_t, ref_out, name: str, dump_fail, u8):
 
 def _run_case(args, cache, problem, dtype: str, sel) -> int:
     import ctypes
+    import struct
 
     import numpy as np
     import torch
@@ -767,7 +768,9 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                     )
                     for step, (hsaco, meta) in zip(plan.steps, entries)
                 ]
-            except (HipError, KeyError) as e:
+            except (HipError, KeyError, struct.error) as e:
+                # struct.error: an extent or byte count past a 32-bit kernarg
+                # (a tensor over 2 GiB) -- the binary cannot address it.
                 print(f"  [skip] {spec.name}: {e}", flush=True)
                 continue
 
