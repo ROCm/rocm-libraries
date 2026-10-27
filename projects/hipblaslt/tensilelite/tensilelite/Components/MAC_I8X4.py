@@ -31,7 +31,7 @@ class MAC_I8X4_Plain(MAC):
     asmCaps = {"VOP3v_dot4_i32_i8": True}
     kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Int8x4)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("MAC_I8X4_Plain")
         module.addComment(self.commentHeader())

@@ -38,7 +38,7 @@ class FMA_I8_HPA(MAC):
                         "HighPrecisionAccumulate": True},
     }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel      = writer.states.kernel
         priority    = Component.Priority.find(writer)
         spacePerReg = writer.states.bpr

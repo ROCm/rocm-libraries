@@ -37,7 +37,7 @@ class FMA_BF16_HPA(MAC):
               "UseDotInstruction": False,
               }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("FMA_BF16_HPA")
         module.addComment(self.commentHeader())
