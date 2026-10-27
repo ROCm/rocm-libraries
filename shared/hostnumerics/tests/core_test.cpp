@@ -41,6 +41,60 @@ void PrintTo(const Shape& shape, std::ostream* output) {
 namespace {
 using namespace roc::hostnumerics;
 
+// Coordinate traversal tutorials. Run these examples with
+// --gtest_filter=CoordinateTraversalTutorial.*.
+
+TEST(CoordinateTraversalTutorial, GenerateDiagonalPattern) {
+    // For a matrix, axis 0 is the row and axis 1 is the column. The named
+    // whole-shape overload visits every position with the column changing fastest.
+    const Shape shape{3, 4};
+    std::vector<double> values;
+    values.reserve(shape.elementCount());
+
+    // A callback can take only coordinates when it does not need the flat index.
+    // The span is borrowed and reused, so compute and store the value during the call.
+    shape.forEachCoordinateLastDimensionFastest(
+        [&](std::span<const size_t> at) { values.push_back(at[0] == at[1] ? 1.0 : 0.0); });
+
+    EXPECT_EQ(values, (std::vector<double>{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0}));
+}
+
+TEST(CoordinateTraversalTutorial, GroupSelectedOutputsByBatch) {
+    // Axes are (row, column, batch). Order {2, 1, 0} makes batch slowest and row
+    // fastest, so the first eight flat indices belong to batch 0, then batch 1.
+    const Shape output{2, 4, 2};
+    const IndexRange selection(1, 14, 3);
+    std::array<std::vector<size_t>, 2> selectedByBatch;
+    std::vector<size_t> visited;
+
+    // This callback uses both the global flat index and its coordinates. Each
+    // batch's reference uses row-major indices, so project (row, column) into that
+    // local order. Store the computed indices rather than the borrowed spans.
+    const auto groupByBatch = [&](size_t index, std::span<const size_t> at) {
+        visited.push_back(index);
+        selectedByBatch[at[2]].push_back(at[0] * output[1] + at[1]);
+    };
+    output.forEachCoordinate(selection, {2, 1, 0}, groupByBatch);
+
+    // The stop is exclusive: select 1, 4, 7, 10 and 13. Their (row, column, batch)
+    // coordinates are (1,0,0), (0,2,0), (1,3,0), (0,1,1) and (1,2,1).
+    EXPECT_EQ(selection.count(), 5);
+    EXPECT_EQ(visited, (std::vector<size_t>{1, 4, 7, 10, 13}));
+    EXPECT_EQ(selectedByBatch[0], (std::vector<size_t>{4, 2, 7}));
+    EXPECT_EQ(selectedByBatch[1], (std::vector<size_t>{1, 6}));
+
+    // Use an explicit sequence when the requested positions do not form a range.
+    // Traversal preserves the sequence's order and repeated positions.
+    visited.clear();
+    for (auto& batch : selectedByBatch) batch.clear();
+    output.forEachCoordinate(std::vector<size_t>{13, 1, 13}, {2, 1, 0}, groupByBatch);
+    EXPECT_EQ(visited, (std::vector<size_t>{13, 1, 13}));
+    EXPECT_EQ(selectedByBatch[0], (std::vector<size_t>{4}));
+    EXPECT_EQ(selectedByBatch[1], (std::vector<size_t>{6, 6}));
+}
+
+// Core API checks.
+
 TEST(Core, Version) {
     EXPECT_EQ(version(), "0.1.0");
     EXPECT_EQ(scalarTypeInfo(ScalarType::Float16).storageBits, 16);
