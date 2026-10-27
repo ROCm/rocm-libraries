@@ -5718,7 +5718,7 @@ def _cached_bind(
             rt.memset(dw_ptr, 0, dw_bytes)
             _launch()
 
-    elif direction == "wgrad" and ident.two_stage:
+    elif direction == "wgrad" and ident.needs_stage2:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
         # into dW.
@@ -5750,9 +5750,10 @@ def _cached_bind(
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
-    if direction == "fwd" and ident.two_stage and not ident.split_k_cluster:
+    if direction == "fwd" and ident.needs_stage2:
         # Split-K forward: Stage 1 stores every slab element (no clearing),
         # then Stage 2 folds the slabs and casts into D. Both are its cost.
+        # The cluster form folds in-kernel and has no Stage 2.
         s2_launcher, s2_values, s2_cfg = _fwd_stage2(
             problem,
             case_dtype,

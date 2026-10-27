@@ -249,6 +249,35 @@ def test_prepared_launch_with_cluster_goes_through_launch_kernel_ex(hip):
     assert call["stream"] == _STREAM and call["extra"] is not None
 
 
+def test_launch_and_prepared_launch_share_the_cluster_launch(hip):
+    # Both paths issue the cluster launch through one helper, so they cannot
+    # drift apart (error handling, call-site name).
+    with mock.patch.object(
+        Runtime, "_launch_cluster", wraps=Runtime._launch_cluster
+    ) as shared:
+        Runtime().launch(
+            object(),
+            (4, 1, 1),
+            (64, 1, 1),
+            b"\0" * 8,
+            stream=_STREAM,
+            cluster=(4, 1, 1),
+        )
+        Runtime().prepare_launch(
+            object(),
+            (4, 1, 1),
+            (64, 1, 1),
+            b"\0" * 8,
+            stream=_STREAM,
+            cluster=(4, 1, 1),
+        )()
+    assert [c.args[-1] for c in shared.call_args_list] == [
+        "hipModuleLaunchKernel",
+        "prepare_launch",
+    ]
+    assert [c["cluster"] for c in hip.ex] == [(4, 1, 1), (4, 1, 1)]
+
+
 def test_prepared_launch_validates_the_cluster(hip):
     # A grid that is not a whole number of clusters is refused when the launch
     # is prepared, not later inside a timed loop.

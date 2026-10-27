@@ -541,7 +541,15 @@ _BREAKDOWN_AXES = (
     ("grouped", lambda i: "yes" if i.grouped else "no"),
     (
         "split-K",
-        lambda i: ("two-stage" if i.two_stage else "atomic") if i.split_k > 1 else "no",
+        lambda i: (
+            (
+                "cluster"
+                if i.split_k_cluster
+                else "two-stage" if i.needs_stage2 else "atomic"
+            )
+            if i.split_k > 1
+            else "no"
+        ),
     ),
     ("group_merge", lambda i: i.group_merge),
     (

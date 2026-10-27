@@ -115,6 +115,8 @@ class KernelIdentity:
     # split_k_cluster): the degree is baked as the (1, 1, S) cluster shape and
     # there is no Stage 2. Left out of the hash while 0, like ws_replicas.
     split_k_cluster: int = 0
+    # The binary takes the split-K workspace ABI. Whether a Stage 2 launch
+    # follows is ``needs_stage2`` (False for the cluster forward).
     two_stage: bool = False
     # Two-stage scratch slabs per group (WgradConvSpec.ws_replicas). The host
     # sizes the scratch and builds Stage 2 from it, so it has to come from the
@@ -212,6 +214,19 @@ class KernelIdentity:
     def is_direct(self) -> bool:
         """Direct-conv kernels: every capability field is baked, even a 0."""
         return self.algorithm.startswith("direct")
+
+    @property
+    def needs_stage2(self) -> bool:
+        """Whether a launch of this binary must be followed by the Stage 2
+        reduce kernel before the output is final.
+
+        ``two_stage`` alone means the binary takes the split-K workspace ABI
+        (``ws_ptr``, ``ws_bytes``, ``ks``, ``ks_count``). The cluster split-K
+        forward takes that ABI too but folds its slabs in-kernel, so it has no
+        Stage 2. Anything deciding whether to launch Stage 2 asks this, never
+        ``two_stage``.
+        """
+        return self.two_stage and not self.split_k_cluster
 
     def stable_hash(self) -> str:
         """Deterministic SHA-1 hex digest (40 chars) of the identity.

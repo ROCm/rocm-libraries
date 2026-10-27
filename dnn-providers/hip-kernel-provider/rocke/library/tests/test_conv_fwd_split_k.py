@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import ctypes
 import importlib.util
+import os
 import unittest
+from unittest import mock
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common.conv_abi import conv_arg_names
@@ -246,6 +248,26 @@ class TestClusterSplitKCache(unittest.TestCase):
             KernelIdentity.from_dict(old).stable_hash(), ident.stable_hash()
         )
 
+    def test_only_the_two_stage_form_needs_stage2(self):
+        # Both split-K forward forms take the workspace ABI (two_stage); only
+        # the two-stage one is followed by the Stage 2 reduce launch.
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        prefix = "fwd-implicit_gemm-bf16-2d-t32x32x64-w2x1-a16x16x32-v8x8x8-mem-"
+        two_stage = KernelIdentity.from_label(
+            prefix + "cshuffle-grp-sk2-2stage-wave32-gfx1250-llvm23"
+        )
+        cluster = KernelIdentity.from_label(
+            prefix + "cshuffle-grp-sk2-skc4-2stage-wave32-gfx1250-llvm23"
+        )
+        unsplit = KernelIdentity.from_label(
+            prefix + "cshuffle-grp-wave32-gfx1250-llvm23"
+        )
+        self.assertTrue(two_stage.two_stage and two_stage.needs_stage2)
+        self.assertTrue(cluster.two_stage)
+        self.assertFalse(cluster.needs_stage2)
+        self.assertFalse(unsplit.needs_stage2)
+
     def test_grid_has_one_binary_per_degree(self):
         from rocke.core.arch import ArchTarget
 
@@ -256,16 +278,19 @@ class TestClusterSplitKCache(unittest.TestCase):
         )
         from kernels.conv.kernel_identity import KernelIdentity
 
-        jobs = [
-            j
-            for j in enumerate_jobs(
-                arch="gfx1250",
-                dtype="bf16",
-                target=ArchTarget.from_gfx("gfx1250"),
-                directions=["fwd"],
-            )
-            if j.identity.split_k_cluster
-        ]
+        # Cluster jobs exist only at the flavor that lowers clusters, so the
+        # grid is enumerated there, whatever the host's own flavor is.
+        with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm23"}):
+            jobs = [
+                j
+                for j in enumerate_jobs(
+                    arch="gfx1250",
+                    dtype="bf16",
+                    target=ArchTarget.from_gfx("gfx1250"),
+                    directions=["fwd"],
+                )
+                if j.identity.split_k_cluster
+            ]
         self.assertEqual(
             len(jobs),
             len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)

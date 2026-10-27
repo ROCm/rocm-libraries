@@ -690,11 +690,23 @@ class Runtime:
         cfg, attr = Runtime._cluster_launch_config(
             grid, block, shared_bytes, stream, cluster, where
         )
+        Runtime._launch_cluster(ctypes.byref(cfg), fn, params, extra, where)
+        return (cfg, attr)
+
+    @staticmethod
+    def _launch_cluster(
+        cfg_ref: Any, fn: _HipFunctionHandle, params: Any, extra: Any, where: str
+    ) -> None:
+        """Issue a cluster launch built by :meth:`_cluster_launch_config`.
+
+        The one ``hipDrvLaunchKernelEx`` call site: :meth:`_enqueue` and the
+        callables of :meth:`prepare_launch` both go through it, so the two
+        paths cannot drift apart.
+        """
         _check(
-            _hipDrvLaunchKernelEx(ctypes.byref(cfg), fn, params, extra),
+            _hipDrvLaunchKernelEx(cfg_ref, fn, params, extra),
             f"hipDrvLaunchKernelEx({where})",
         )
-        return (cfg, attr)
 
     @staticmethod
     def _cluster_launch_config(
@@ -872,17 +884,15 @@ class Runtime:
 
         if cluster is not None:
             # Validated, device-checked and built once, like the plain path's
-            # ctypes arguments: the callable only enqueues.
+            # ctypes arguments: the callable only enqueues, through the same
+            # launch helper as :meth:`_enqueue`.
             cfg, attr = self._cluster_launch_config(
                 grid, block, shared_bytes, int(stream), cluster, "prepare_launch"
             )
             cfg_ref = ctypes.byref(cfg)
 
             def enqueue_cluster(_keep=keep + (cfg, attr)) -> None:
-                _check(
-                    _hipDrvLaunchKernelEx(cfg_ref, fn, None, extra),
-                    "hipDrvLaunchKernelEx(prepare_launch)",
-                )
+                Runtime._launch_cluster(cfg_ref, fn, None, extra, "prepare_launch")
 
             return enqueue_cluster
 
