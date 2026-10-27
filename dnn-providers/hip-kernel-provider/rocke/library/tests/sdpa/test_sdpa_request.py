@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections import Counter
 from dataclasses import fields, is_dataclass, replace
@@ -159,6 +160,28 @@ def test_arch_is_canonical(arch):
     assert req.arch == "gfx950"
     cap = Capability(arches=("gfx950",), supports_features=BASE.features())
     assert cap.check(req) == (True, "ok")
+
+
+def test_tuning_knobs_are_part_of_the_identity():
+    """A pinned configuration is ``tuning_id`` plus its knobs, as on AttentionRequest."""
+    pinned = replace(BASE, tuning_id="x@abc", tuning_knobs={"num_warps": 4, "bn": 64})
+    assert pinned.tuning_knobs == (("bn", 64), ("num_warps", 4))
+    assert pinned.normalized() != replace(BASE, tuning_id="x@abc").normalized()
+    payload = json.loads(json.dumps(pinned.normalized()))
+    assert SdpaRequest.from_normalized(payload) == pinned
+
+
+@pytest.mark.parametrize(
+    "knobs, error, match",
+    [
+        ({"bn": [64]}, TypeError, "not a JSON scalar"),
+        ([("bn", 64), ("bn", 32)], ValueError, "sets 'bn' twice"),
+        (["bn"], ValueError, "not a \\(name, value\\) pair"),
+    ],
+)
+def test_malformed_tuning_knobs_are_rejected(knobs, error, match):
+    with pytest.raises(error, match=match):
+        replace(BASE, tuning_knobs=knobs)
 
 
 @pytest.mark.parametrize("name", ["padded", "ragged", "paged"])
@@ -331,6 +354,9 @@ def test_dims_vocabulary():
         ({"implementation": "fast"}, "implementation"),
         ({"compute_dtype": "fp12"}, "compute dtype"),
         ({"mma_core_mode": "fp12"}, "mma_core_mode"),
+        # bool("false") is True: coercing would turn the flag on.
+        ({"alibi": "false"}, "alibi must be a bool"),
+        ({"padding_mask": 0}, "padding_mask must be a bool"),
     ],
 )
 def test_malformed_requests_are_rejected(overrides, match):
@@ -363,6 +389,22 @@ def test_tensor_rejects_mismatched_strides():
 def test_tensor_rejects_non_integer_metadata(kwargs, match):
     with pytest.raises(ValueError, match=match):
         SdpaTensor(**{"dtype": "fp32", "dims": (2,), "strides": (1,), **kwargs})
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"dims": (2, 0)}, "dims must be positive"),
+        ({"dims": (2, -4)}, "dims must be positive"),
+        ({"strides": (4, -1)}, "strides must be non-negative"),
+        # A truthy "false" would exempt a device buffer from the alignment check.
+        ({"by_value": "false"}, "by_value must be a bool"),
+        ({"by_value": 1}, "by_value must be a bool"),
+    ],
+)
+def test_tensor_rejects_invalid_metadata(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        SdpaTensor(**{"dtype": "fp32", "dims": (2, 4), "strides": (4, 1), **kwargs})
 
 
 @pytest.mark.parametrize(
@@ -432,6 +474,15 @@ def test_valid_but_unimplemented_is_not_an_error():
     # Every decline-only case constructs; the decline is a feature, not a raise.
     for name in ("alibi", "dropout", "paged", "block_mask", "sinks", "fp8_s_o"):
         assert CASES[name].features() - BASE.features()
+
+
+@pytest.mark.parametrize(
+    "module", ["dispatch.sdpa", "dispatch.sdpa.common", "dispatch.sdpa.hipdnn"]
+)
+def test_every_all_entry_resolves(module):
+    """A stale ``__all__`` name breaks ``from module import *``."""
+    mod = importlib.import_module(module)
+    assert [name for name in mod.__all__ if not hasattr(mod, name)] == []
 
 
 # --- Capability.check gates on the request --------------------------------------

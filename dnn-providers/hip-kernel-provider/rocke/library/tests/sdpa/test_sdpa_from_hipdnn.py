@@ -211,6 +211,23 @@ def test_both_deprecated_causal_flags_are_rejected():
         _request(attributes={"causal_mask": True, "causal_mask_bottom_right": True})
 
 
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        "alibi_mask",
+        "padding_mask",
+        "causal_mask",
+        "causal_mask_bottom_right",
+        "generate_stats",
+    ],
+)
+@pytest.mark.parametrize("value", ["false", 0, 1])
+def test_non_boolean_flags_are_rejected(attribute, value):
+    """``bool("false")`` is true, so coercing would flip the flag."""
+    with pytest.raises(ValueError, match=f"{attribute} must be a JSON boolean"):
+        _request(attributes={attribute: value})
+
+
 # --- scale: exactly one source ---------------------------------------------------
 
 
@@ -295,6 +312,13 @@ def test_runtime_by_value_scale_tensor_is_not_baked():
     assert first.scale_source == "tensor" and first.scale_tensor.by_value
     assert "scale_tensor" in first.features()
     assert first == second and first.normalized() == second.normalized()
+
+
+def test_non_boolean_pass_by_value_is_rejected():
+    """A truthy ``"false"`` would keep a compile-time constant scale unfolded."""
+    scale = _tensor(10, (1,), "float", is_runtime_pass_by_value="false", value=0.5)
+    with pytest.raises(ValueError, match="is_runtime_pass_by_value must be a JSON"):
+        _request(inputs={"scale_tensor_uid": 10}, tensors=[scale])
 
 
 def test_scale_tensor_and_value_are_exclusive():

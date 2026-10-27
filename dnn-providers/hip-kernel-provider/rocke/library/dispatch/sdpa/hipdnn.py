@@ -135,6 +135,19 @@ def _reject_unknown_keys(where: str, group: Mapping, allowed: frozenset[str]) ->
         raise ValueError(f"{where} has keys hipDNN does not write: {unknown}")
 
 
+def _flag(group: Mapping, key: str, where: str) -> bool:
+    """A JSON boolean; null or absent is hipDNN's unset (false).
+
+    ``bool()`` would read ``"false"`` or ``1`` as a different, valid flag.
+    """
+    value = group.get(key)
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ValueError(f"{where} {key} must be a JSON boolean, got {value!r}")
+    return value
+
+
 def _dtype(name: object) -> str | None:
     key = str(name).lower()
     if key not in HIPDNN_DTYPES:
@@ -175,7 +188,7 @@ def _sdpa_tensor(entry: Mapping, table: Mapping[int, Mapping]) -> SdpaTensor:
         strides=tuple(entry["strides"]),
         ragged_offset=ragged_offset,
         ragged_offset_multiplier=entry.get("ragged_offset_multiplier", 1),
-        by_value=bool(entry.get("is_runtime_pass_by_value", False)),
+        by_value=_flag(entry, "is_runtime_pass_by_value", f"tensor uid {uid}"),
         alignment=entry.get("alignment", 16),
     )
 
@@ -186,8 +199,8 @@ def _resolve_band(attrs: Mapping) -> tuple[str, int, int]:
         left_bound=attrs.get("left_bound"),
         right_bound=attrs.get("right_bound"),
         diagonal_alignment=attrs.get("diagonal_alignment"),
-        causal_mask=bool(attrs.get("causal_mask")),
-        causal_mask_bottom_right=bool(attrs.get("causal_mask_bottom_right")),
+        causal_mask=_flag(attrs, "causal_mask", "SDPA node"),
+        causal_mask_bottom_right=_flag(attrs, "causal_mask_bottom_right", "SDPA node"),
     )
 
 
@@ -269,14 +282,14 @@ def from_hipdnn(
 
     diagonal, left, right = _resolve_band(attrs)
     kwargs.update(diagonal=diagonal, left_bound=left, right_bound=right)
-    kwargs["alibi"] = bool(attrs.get("alibi_mask") or False)
+    kwargs["alibi"] = _flag(attrs, "alibi_mask", "SDPA node")
     bias = tensor(inputs, "attn_mask_tensor_uid")
     if bias is not None:
         kwargs["bias"] = SdpaBias(bias)
     kwargs["block_mask"] = tensor(inputs, "block_mask_tensor_uid")
     kwargs["sink_token"] = tensor(inputs, "sink_token_tensor_uid")
 
-    kwargs["padding_mask"] = bool(attrs.get("padding_mask") or False)
+    kwargs["padding_mask"] = _flag(attrs, "padding_mask", "SDPA node")
     kwargs["seq_len_q"] = tensor(inputs, "seq_len_q_tensor_uid")
     kwargs["seq_len_kv"] = tensor(inputs, "seq_len_kv_tensor_uid")
 
@@ -322,7 +335,7 @@ def from_hipdnn(
     # true, so either one without the other is contradictory input. Dropping it
     # would let a kernel that writes no LSE be admitted for a node that asked for it.
     stats = tensor(outputs, "stats_tensor_uid")
-    if attrs.get("generate_stats"):
+    if _flag(attrs, "generate_stats", "SDPA node"):
         if stats is None:
             raise ValueError("generate_stats is true but stats_tensor_uid is not set")
         kwargs["stats"] = stats

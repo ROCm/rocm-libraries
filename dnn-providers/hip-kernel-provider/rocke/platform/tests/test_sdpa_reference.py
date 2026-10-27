@@ -10,6 +10,7 @@ vectorised oracle against a scalar pure-python implementation.
 
 from __future__ import annotations
 
+import importlib
 import math
 import unittest
 
@@ -335,6 +336,19 @@ class TestResolveHipdnnBand(unittest.TestCase):
         diagonal, left, right = resolve_hipdnn_band(causal_mask_bottom_right=True)
         self.assertTrue(keep(1, 4, 2, 5, diagonal, left, right))
         self.assertFalse(keep(0, 4, 2, 5, diagonal, left, right))
+
+
+class TestPublicNames(unittest.TestCase):
+    def test_every_all_entry_resolves(self):
+        """A stale ``__all__`` name breaks ``from module import *``."""
+        for name in (
+            "rocke.numeric.references",
+            "rocke.numeric.sdpa_reference",
+            "rocke.numeric.sdpa_request_reference",
+        ):
+            with self.subTest(module=name):
+                mod = importlib.import_module(name)
+                self.assertEqual([n for n in mod.__all__ if not hasattr(mod, n)], [])
 
 
 class TestSdpaReference(unittest.TestCase):

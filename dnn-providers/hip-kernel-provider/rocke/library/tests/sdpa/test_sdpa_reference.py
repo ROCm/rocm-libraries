@@ -23,6 +23,7 @@ import pytest
 
 from dispatch.sdpa import SdpaBias, SdpaFp8, SdpaTensor
 from rocke.numeric.references import keep, sdpa_reference_from_request
+from rocke.numeric.sdpa_request_reference import _strided_view
 from tests.sdpa.request_cases import (
     CASES,
     bhsd,
@@ -364,6 +365,107 @@ def test_fp8_descales_are_read_through_strides():
         buffers[name] = _to_buffer(logical[name], t)
     got = sdpa_reference_from_request(req, buffers)
     np.testing.assert_array_equal(got["o"], want["o"])
+
+
+# --- malformed operands raise instead of reading the wrong elements ---------------
+
+_SEQ = packed((2, 1, 1, 1), "int32")
+_FP8 = {"dtype": "fp8_e4m3", "o": bshd(2, 4, 8, 16, "bf16")}
+
+# (id, request, tensors to override, match). Offsets are in tokens; the ragged
+# case's multiplier (H * D = 64) turns them into elements.
+MALFORMED_OPERANDS = [
+    (
+        "flat_buffer_too_short",
+        CASES["dense_bhsd"],
+        {"q": np.zeros(10)},
+        "buffer has 10",
+    ),
+    (
+        "shape_not_logical_or_flat",
+        CASES["dense_bhsd"],
+        {"q": np.zeros((3, 5))},
+        "neither the logical dims",
+    ),
+    (
+        "ragged_offset_count",
+        CASES["ragged"],
+        {"ragged_offset_q": np.array([0, 3])},
+        "B \\+ 1 = 3 entries, got 2",
+    ),
+    (
+        "ragged_length_negative",
+        CASES["ragged"],
+        {"ragged_offset_q": np.array([0, 5, 3])},
+        "\\[5, -2\\] must be in \\[0, S_max=8\\]",
+    ),
+    (
+        "ragged_length_above_extent",
+        CASES["ragged"],
+        {"ragged_offset_q": np.array([0, 9, 10])},
+        "\\[9, 1\\] must be in \\[0, S_max=8\\]",
+    ),
+    (
+        "seq_len_count",
+        make_request(seq_len_q=packed((3, 1, 1, 1), "int32")),
+        {"seq_len_q": np.array([1, 2, 3])},
+        "one length per batch \\(2\\), got 3",
+    ),
+    (
+        "seq_len_above_extent",
+        make_request(seq_len_q=_SEQ),
+        {"seq_len_q": np.array([9, 2])},
+        "\\[9, 2\\] must be in \\[0, 8\\]",
+    ),
+    (
+        "seq_len_negative",
+        make_request(seq_len_kv=_SEQ),
+        {"seq_len_kv": np.array([-1, 2])},
+        "\\[-1, 2\\] must be in \\[0, 8\\]",
+    ),
+    (
+        "descale_size",
+        make_request(fp8=SdpaFp8(descale_q=packed((3,))), **_FP8),
+        {},
+        "descale_q: must be a scalar or \\(B, H_kv, 1, 1\\)",
+    ),
+    (
+        "seq_len_above_ragged_length",
+        replace(CASES["ragged"], seq_len_q=_SEQ),
+        {
+            "q": np.zeros(7 * 64, np.float32),
+            "ragged_offset_q": np.array([0, 3, 7]),
+            "seq_len_q": np.array([4, 4]),
+        },
+        "seq_len_q \\[4, 4\\] exceeds the ragged lengths \\[3, 4\\]",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, overrides, match",
+    [row[1:] for row in MALFORMED_OPERANDS],
+    ids=[row[0] for row in MALFORMED_OPERANDS],
+)
+def test_malformed_operands_are_rejected(req, overrides, match):
+    tensors = make_tensors(req)
+    tensors.update(overrides)
+    with pytest.raises(ValueError, match=match):
+        sdpa_reference_from_request(req, tensors)
+
+
+def test_ragged_operand_without_its_offsets_is_rejected():
+    tensors = make_tensors(CASES["ragged"])
+    del tensors["ragged_offset_q"]
+    with pytest.raises(KeyError, match="needs tensors\\['ragged_offset_q'\\]"):
+        sdpa_reference_from_request(CASES["ragged"], tensors)
+
+
+def test_negative_strides_are_rejected():
+    """``SdpaTensor`` rejects these first; the oracle reads requests by attribute,
+    so a duck-typed request reaches this check."""
+    with pytest.raises(ValueError, match="negative strides \\(-1,\\)"):
+        _strided_view("q", np.zeros(8, np.float32), 0, (2,), (-1,))
 
 
 # --- PyTorch math SDPA, the hipDNN golden generator's backend --------------------

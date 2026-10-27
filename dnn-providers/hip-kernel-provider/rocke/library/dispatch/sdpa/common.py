@@ -36,6 +36,7 @@ from typing import Any, Literal, TypeAlias
 
 from rocke.core.arch import base_arch_from_target_id
 from rocke.dispatch.core import OperatorRequest
+from rocke.dispatch.tuning.identity import normalize_knobs
 
 __all__ = [
     "SDPA_ABI_VERSION",
@@ -161,6 +162,12 @@ def _as_int(value: object, what: str) -> int:
         raise ValueError(f"{what} must be an integer, got {value!r}") from None
 
 
+def _check_bool(value: object, what: str) -> None:
+    """``bool("false")`` is ``True``, so a non-bool flag is malformed, not coerced."""
+    if not isinstance(value, bool):
+        raise ValueError(f"{what} must be a bool, got {value!r}")
+
+
 @dataclass(frozen=True)
 class SdpaTensor:
     """One operand: hipDNN ``TensorAttributes`` minus the uid, name and value.
@@ -185,6 +192,7 @@ class SdpaTensor:
 
     def __post_init__(self) -> None:
         _check_dtype(self.dtype, "tensor")
+        _check_bool(self.by_value, "by_value")
         dims = tuple(_as_int(d, "tensor dims") for d in self.dims)
         strides = tuple(_as_int(s, "tensor strides") for s in self.strides)
         if len(dims) != len(strides):
@@ -429,6 +437,8 @@ class SdpaRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     tuning_id: str = "auto"
+    # The knob overrides ``tuning_id`` stands for, as sorted (name, value) pairs.
+    tuning_knobs: tuple[tuple[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         self._normalize()
@@ -444,16 +454,17 @@ class SdpaRequest(OperatorRequest):
         object.__setattr__(
             self, "right_bound", _as_int(self.right_bound, "right_bound")
         )
+        object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
         if self.scale_source != "value":
             object.__setattr__(self, "scale", 1.0)
         object.__setattr__(self, "scale", float(self.scale))
         if self.scale_source == "value" and self.scale == 1.0:
             object.__setattr__(self, "scale_source", "default")
-        object.__setattr__(self, "alibi", bool(self.alibi))
-        object.__setattr__(self, "padding_mask", bool(self.padding_mask))
 
     def _validate(self) -> None:
         """Frontend rules (``SdpaFwdNode::pre_validate_node``) plus Python-caller ones."""
+        _check_bool(self.alibi, "alibi")
+        _check_bool(self.padding_mask, "padding_mask")
         _check_dtype(self.compute_dtype, "compute")
         if self.mma_core_mode is not None:
             _check_dtype(self.mma_core_mode, "mma_core_mode")

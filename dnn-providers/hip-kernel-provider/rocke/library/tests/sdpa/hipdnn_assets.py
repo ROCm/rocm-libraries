@@ -5,13 +5,11 @@
 
 The SDPA graph template and the golden bundles live in the hipDNN part of the
 monorepo, outside rocke. The tests that read them skip when it is absent, which
-is the normal case for an installed rocke tree. Set ``ROCKE_REPO_ROOT`` to a
-monorepo checkout to run them from an installed tree.
+is the normal case for an installed rocke tree; run them from a monorepo checkout.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from rocke.assets import library_root
@@ -21,17 +19,11 @@ _SDPA_GRAPH_TEMPLATE = (
     "attention_sdpa_fwd.graph.json"
 )
 _GOLDEN_BUNDLES = "dnn-providers/integration-tests/integration-test-bundles"
-SKIP_REASON = (
-    "hipDNN sources are not next to this rocke tree (set ROCKE_REPO_ROOT to a "
-    "monorepo checkout)"
-)
+SKIP_REASON = "hipDNN sources are not next to this rocke tree (not a monorepo checkout)"
 
 
 def repo_root() -> Path | None:
     """The monorepo root holding ``projects/hipdnn``, or ``None`` outside a checkout."""
-    override = os.environ.get("ROCKE_REPO_ROOT")
-    if override:
-        return Path(override)
     for parent in library_root().resolve().parents:
         if (parent / "projects" / "hipdnn").is_dir():
             return parent
