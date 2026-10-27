@@ -39,6 +39,10 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import lse_store
+from kernels.common._split_kv_reduce import (
+    reduce_waves_per_eu,
+    reduce_weighted_segments,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -1358,8 +1362,9 @@ def build_unified_attention_reduce_tiled(
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
-    if spec.waves_per_eu is not None:
-        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    waves_per_eu = reduce_waves_per_eu(spec.waves_per_eu, NUM_SEG)
+    if waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = waves_per_eu
 
     out = b.param(
         "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
@@ -1462,31 +1467,23 @@ def build_unified_attention_reduce_tiled(
     b.sync()
 
     # ---- pass 3: per-element reduce + normalize + write ----
-    for li in range(HALFS_PER_THREAD):
-        d = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
-        acc_loop = b.scf_for_iter(
-            b.const_i32(0),
-            b.const_i32(NUM_SEG),
-            b.const_i32(1),
-            [(f"ac{li}", zero_f)],
-            iv_name=f"s_acc{li}",
-        )
-        with acc_loop as (sv, (ac,)):
-            factor = b.smem_load_vN_f32(factor_lds, sv, n=1)
-            factor_s = b.vec_extract(factor, 0)
-            idx_acc, _ = seg_acc_desc_red.offset(
-                b,
-                token=q_token,
-                head=q_head,
-                seg=sv,
-                dim=d,
-            )
-            ov = b.global_load_f32(seg_out, idx_acc)
-            b.scf_yield(b.fadd(ac, b.fmul(ov, factor_s)))
-        scalar_out_f32 = b.fmul(acc_loop.results[0], inv_l)
-        scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
-        out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
-        b.global_store(out, out_idx, scalar_out, align=2)
+    reduce_weighted_segments(
+        b,
+        head_size=HD,
+        num_segments=NUM_SEG,
+        threads=THREADS,
+        dtype=dtype,
+        tid=tid,
+        q_token=q_token,
+        q_head=q_head,
+        seg_out=seg_out,
+        out=out,
+        factor_lds=factor_lds,
+        seg_acc_desc=seg_acc_desc_red,
+        out_desc=out_desc_red,
+        inv_l=inv_l,
+        zero_f=zero_f,
+    )
 
     if spec.emit_lse:
         # Every lane holds the same butterfly-reduced overall_max/expsum, so one
