@@ -19,14 +19,16 @@
 use super::gen_isa as t;
 use crate::rir::mir::*;
 
-/// VGPRs 0..255, then SGPRs 0..127 (VCC 106-107, M0 124, EXEC 126-127).
-const NREGS: usize = 256 + 128;
+/// VGPRs 0..255, then SGPRs 0..127 (VCC 106-107, M0 124, EXEC 126-127),
+/// then AGPRs 0..255.
+const NREGS: usize = 256 + 128 + 256;
 const NONE: u8 = u8::MAX;
 const VM_MAX: u8 = 62;
 const LGKM_MAX: u8 = 14;
 
 fn reg_keys(o: &Opnd) -> std::ops::Range<usize> {
     let (start, n) = match *o {
+        Opnd::P(Phys::V(r), n) if r >= super::asm::AGPR0 => (384 + (r - super::asm::AGPR0) as usize, n as usize),
         Opnd::P(Phys::V(r), n) => (r as usize, n as usize),
         Opnd::P(Phys::S(r), n) => (256 + r as usize, n as usize),
         Opnd::P(Phys::VccLo, n) => (256 + 106, n as usize),
@@ -304,5 +306,18 @@ mod tests {
             MInst::new(Opc::GLoadD16HiB16, [v(3, 1)], [v(14, 1), saddr, v(3, 1)]).with_mods(M_SADDR),
         ];
         assert_eq!(waits(code), [(1, waitcnt_imm(0, NONE)), (3, waitcnt_imm(NONE, 0))]);
+    }
+
+    #[test]
+    fn agprs_are_not_the_sgprs_of_their_number() {
+        // s_load into s[4:5], then moves through a4 and a5: nothing
+        // outstanding; s4 itself still waits.
+        use crate::target::gfx9::gen_isa::Gfx9Op;
+        let a = |k: u16| v(super::super::asm::AGPR0 + k, 1);
+        let sload = MInst::new(Opc::SLoadB64, [s(4, 2)], [s(0, 2)]).with_imm(0);
+        let write = MInst::new(Opc::Gfx9(Gfx9Op::VAccvgprWriteB32), [a(4)], [v(1, 1)]);
+        let read = MInst::new(Opc::Gfx9(Gfx9Op::VAccvgprReadB32), [v(2, 1)], [a(5)]);
+        let use_s = MInst::new(Opc::VAddF32, [v(30, 1)], [s(4, 1), v(1, 1)]);
+        assert_eq!(waits(vec![sload, write, read, use_s]), [(3, waitcnt_imm(NONE, 0))]);
     }
 }

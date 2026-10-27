@@ -23,6 +23,8 @@
 //! assigned, `finish` gives the most accessed webs LDS slots and the rest
 //! scratch.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::mir::*;
 use super::regalloc::{self, Live};
 use crate::error::CompileError;
@@ -39,6 +41,9 @@ pub struct SpillConfig {
     pub wg_size: u32,
     /// LDS slots (dwords per work-item) that leave the occupancy unchanged.
     pub lds_slots: u32,
+    /// AGPR slots that leave the occupancy unchanged (gfx950,
+    /// `target::gfx9::spill`); spilled webs take them before LDS slots.
+    pub agpr_slots: u32,
 }
 
 /// What spilling did.
@@ -57,6 +62,8 @@ pub struct SpillStats {
     /// Spill accesses inserted (placeholders: LDS ones split per dword later).
     pub reloads: u32,
     pub stores: u32,
+    /// VGPR dwords kept in AGPRs a0 onward (gfx950).
+    pub agpr_dwords: u32,
 }
 
 /// A spilled VGPR web: its first dword slot, size, and weighted accesses.
@@ -91,6 +98,128 @@ pub(super) struct Spiller {
     spare: Vec<Vec<MInst>>,
     /// The same for the liveness analyses between rewrites.
     scratch: regalloc::LiveScratch,
+    /// What `choose` counts of each register, from the first `choose` on;
+    /// `apply` keeps it up to date.
+    regs: Option<RegStats>,
+    /// Checks `regs` against a recount at every `choose` (tests, and
+    /// `ROCKE_DIRECT_DEBUG=verifyspill`).
+    verify: bool,
+    /// Reductions run ahead of the round that may ask for them.
+    ahead: Option<Box<Ahead>>,
+    /// The units live out of each block of the function last analyzed, kept
+    /// through rounds that change them predictably (`relive`).
+    live_out: Option<regalloc::LiveOut>,
+    /// Blocks with a VGPR spill access, which reads the LDS address.
+    accessed: Vec<bool>,
+}
+
+/// What `Spiller::restore` brings back.
+pub(super) struct Checkpoint {
+    webs: usize,
+    next_slot: u32,
+    addr: Option<VRef>,
+    lanes: usize,
+    next_lane: u32,
+    temp: usize,
+    stats: SpillStats,
+    accessed: Vec<bool>,
+}
+
+/// The outcome of a reduction, or its panic.
+type Outcome = std::thread::Result<Result<(), CompileError>>;
+
+/// The outcomes of reducing SGPRs and then VGPRs (not tried after a failed
+/// SGPR step).
+pub(super) struct Reductions {
+    sgprs: Outcome,
+    vgprs: Option<Outcome>,
+}
+
+/// Reductions run ahead to `targets`: each outcome until `reduce` gives it,
+/// and the function and spiller state before them.
+struct Ahead {
+    targets: (u32, u32),
+    sgprs: Option<Outcome>,
+    vgprs: Option<Outcome>,
+    before: MFunc,
+    checkpoint: Checkpoint,
+}
+
+/// Per register: its weighted dword accesses over all operands, its
+/// weighted uses, its definitions, and the (block, index) of its definition
+/// where it has one. `apply` takes out what the instructions it replaces
+/// counted and adds what their replacements count, so this stays what a
+/// recount of the function gives.
+#[derive(Debug)]
+struct RegStats {
+    access: Vec<u64>,
+    use_cost: Vec<u64>,
+    defs: Vec<u32>,
+    def_inst: Vec<Option<(u32, u32)>>,
+}
+
+impl RegStats {
+    fn of(f: &MFunc) -> Self {
+        let nv = f.vregs.len();
+        let mut stats = RegStats { access: vec![0; nv], use_cost: vec![0; nv], defs: vec![0; nv], def_inst: vec![None; nv] };
+        for (b, block) in f.blocks.iter().enumerate() {
+            let w = weight(block.loop_depth);
+            for (k, inst) in block.insts.iter().enumerate() {
+                stats.add(inst, w);
+                stats.place(inst, b, k);
+            }
+        }
+        stats
+    }
+
+    fn grow(&mut self, nv: usize) {
+        self.access.resize(nv, 0);
+        self.use_cost.resize(nv, 0);
+        self.defs.resize(nv, 0);
+        self.def_inst.resize(nv, None);
+    }
+
+    fn add(&mut self, inst: &MInst, w: u64) {
+        for v in inst.defs.iter().chain(&inst.uses).filter_map(Opnd::vref) {
+            self.access[v.reg as usize] += w * v.n as u64;
+        }
+        for v in inst.uses.iter().filter_map(Opnd::vref) {
+            self.use_cost[v.reg as usize] += w;
+        }
+        for v in inst.defs.iter().filter_map(Opnd::vref) {
+            self.defs[v.reg as usize] += 1;
+        }
+    }
+
+    fn remove(&mut self, inst: &MInst, w: u64) {
+        for v in inst.defs.iter().chain(&inst.uses).filter_map(Opnd::vref) {
+            self.access[v.reg as usize] -= w * v.n as u64;
+        }
+        for v in inst.uses.iter().filter_map(Opnd::vref) {
+            self.use_cost[v.reg as usize] -= w;
+        }
+        for v in inst.defs.iter().filter_map(Opnd::vref) {
+            self.defs[v.reg as usize] -= 1;
+        }
+    }
+
+    /// Records that `inst` is at index `k` of block `b`.
+    fn place(&mut self, inst: &MInst, b: usize, k: usize) {
+        for v in inst.defs.iter().filter_map(Opnd::vref) {
+            self.def_inst[v.reg as usize] = Some((b as u32, k as u32));
+        }
+    }
+
+    /// Panics unless these are the counts of `recount` (definition sites
+    /// only where there is one definition).
+    fn check(&self, recount: &RegStats) {
+        assert_eq!(self.access, recount.access, "access counts");
+        assert_eq!(self.use_cost, recount.use_cost, "use counts");
+        assert_eq!(self.defs, recount.defs, "definition counts");
+        for (r, &n) in self.defs.iter().enumerate() {
+            assert!(n != 1 || self.def_inst[r] == recount.def_inst[r], "definition of {r}");
+        }
+    }
 }
 
 fn weight(depth: u32) -> u64 {
@@ -119,6 +248,37 @@ fn sub(v: VRef, off: u8, n: u8) -> VRef {
     VRef { reg: v.reg, off: v.off + off, n }
 }
 
+/// `rewrite_inst`'s mark of a register no definition is repeated for.
+const NO_REMAT: u32 = u32::MAX;
+
+/// The blocks the LDS address is live out of: it is defined first thing at
+/// entry and read by every VGPR spill access, in the blocks `accessed` marks.
+fn addr_live_out(f: &MFunc, accessed: &[bool]) -> Vec<bool> {
+    let n = f.blocks.len();
+    let succs: Vec<Vec<usize>> = (0..n).map(|b| f.successors(b)).collect();
+    let (mut live_in, mut live_out) = (vec![false; n], vec![false; n]);
+    loop {
+        let mut changed = false;
+        for b in (0..n).rev() {
+            let out = succs[b].iter().any(|&s| live_in[s]);
+            let inside = b != 0 && (accessed.get(b).copied().unwrap_or(false) || out);
+            changed |= out != live_out[b] || inside != live_in[b];
+            (live_out[b], live_in[b]) = (out, inside);
+        }
+        if !changed {
+            return live_out;
+        }
+    }
+}
+
+/// The register and spill slot of a spilled operand.
+fn spilled(o: &Opnd, slot_of: &[Option<u32>]) -> Option<(VRef, u32)> {
+    match o {
+        Opnd::R(v) if (v.reg as usize) < slot_of.len() => slot_of[v.reg as usize].map(|s| (*v, s + v.off as u32)),
+        _ => None,
+    }
+}
+
 /// Whether `inst` computes its one result purely from constants and, for
 /// a VGPR, single-definition SGPRs, so it can be repeated where those are
 /// live. Scalar candidates are moves of constants only: anything else might
@@ -141,17 +301,17 @@ fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> boo
     })
 }
 
-/// The linear index of the instruction of each use of each register, in
-/// program order, all in one table.
+/// The linear index of the instruction of each use of each register of
+/// `wanted`, in program order, all in one table (none for the others).
 struct UsePositions {
     start: Vec<u32>,
     at: Vec<u32>,
 }
 
 impl UsePositions {
-    fn new(f: &MFunc, nv: usize) -> Self {
+    fn new(f: &MFunc, nv: usize, wanted: &[bool]) -> Self {
         let uses = || f.blocks.iter().flat_map(|b| &b.insts).enumerate().flat_map(|(i, inst)| {
-            inst.uses.iter().filter_map(move |o| o.vref().map(|v| (i as u32, v.reg as usize)))
+            inst.uses.iter().filter_map(move |o| o.vref().filter(|v| wanted[v.reg as usize]).map(|v| (i as u32, v.reg as usize)))
         });
         let mut start = vec![0u32; nv + 1];
         for (_, reg) in uses() {
@@ -187,12 +347,39 @@ impl Spiller {
             stats: SpillStats::default(),
             spare: Vec::new(),
             scratch: regalloc::LiveScratch::default(),
+            regs: None,
+            verify: cfg!(test) || super::debug_flag("verifyspill"),
+            ahead: None,
+            live_out: None,
+            accessed: Vec::new(),
         }
     }
 
     /// The liveness of `f`, in the buffers of earlier analyses.
     pub(super) fn analyze(&mut self, f: &MFunc) -> Result<Live, CompileError> {
-        regalloc::analyze_reusing(f, &mut self.scratch)
+        let (live, live_out) = regalloc::analyze_with_live_out(f, &mut self.scratch)?;
+        self.live_out = Some(live_out);
+        Ok(live)
+    }
+
+    /// The liveness of `f` after a round of `apply` that spilled the units
+    /// `dropped` marks and recomputed nothing, from the units live out of each
+    /// block before it. Those change only by the dropped units and the LDS
+    /// address: the operands of every other unit keep their order within each
+    /// block, and the temporaries live within one. `None` without the units
+    /// live out before.
+    fn relive(&mut self, f: &MFunc, dropped: &[bool]) -> Option<Live> {
+        let live_out = self.live_out.take()?;
+        let addr = self.addr.map(|a| (f.vregs[..a.reg as usize].iter().map(|r| r.size as usize).sum::<usize>(), addr_live_out(f, &self.accessed)));
+        let live_out = live_out.edited(dropped, addr.as_ref().map(|(unit, out)| (*unit, out.as_slice())));
+        let live = regalloc::analyze_given(f, &live_out, &mut self.scratch);
+        if self.verify {
+            let (full, full_out) = regalloc::analyze_with_live_out(f, &mut regalloc::LiveScratch::default()).expect("analyzes");
+            assert_eq!(live_out, full_out, "units live out of each block");
+            assert!(live.same_as(&full), "live segments");
+        }
+        self.live_out = Some(live_out);
+        Some(live)
     }
 
     /// Keeps the buffers of a liveness no longer needed.
@@ -292,11 +479,119 @@ impl Spiller {
 
     /// Spills webs of `class` until at most `target` of its dwords are live
     /// at any point. `known` is the liveness of `f` if the caller has it,
-    /// and gets it back when this leaves `f` as it is.
+    /// and gets it back when this leaves `f` as it is. Reductions run ahead
+    /// (`reduce_ahead`) give their outcome when they are the ones asked for;
+    /// otherwise `f` and the spiller go back to how they were before them.
     pub(super) fn reduce(&mut self, f: &mut MFunc, class: Class, target: u32, known: &mut Option<Live>) -> Result<(), CompileError> {
+        if let Some(outcome) = self.take_ahead(f, class, target, known) {
+            return outcome;
+        }
+        self.reduce_until(f, class, target, known, None).map(drop)
+    }
+
+    /// The outcome a reduction run ahead gives `reduce(f, class, target)`,
+    /// if it is the one asked for: the next round's SGPRs and then VGPRs.
+    /// Otherwise it is undone (redoing the SGPR step already answered).
+    fn take_ahead(&mut self, f: &mut MFunc, class: Class, target: u32, known: &mut Option<Live>) -> Option<Result<(), CompileError>> {
+        let mut ahead = self.ahead.take()?;
+        let answer = match class {
+            Class::S if ahead.sgprs.is_some() && target == ahead.targets.0 => ahead.sgprs.take(),
+            Class::V if ahead.sgprs.is_none() && target == ahead.targets.1 => ahead.vgprs.take(),
+            _ => None,
+        };
+        match answer {
+            Some(Ok(Ok(()))) if class == Class::S => {
+                self.ahead = Some(ahead);
+                Some(Ok(()))
+            }
+            Some(Ok(outcome)) => Some(outcome),
+            Some(Err(panic)) => std::panic::resume_unwind(panic),
+            None => {
+                let Ahead { targets, sgprs, before, checkpoint, .. } = *ahead;
+                *f = before;
+                self.restore(checkpoint);
+                *known = None;
+                if sgprs.is_none() {
+                    if let Err(error) = self.reduce_until(f, Class::S, targets.0, known, None) {
+                        return Some(Err(error));
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// The state `restore` brings the spiller back to.
+    pub(super) fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            webs: self.webs.len(),
+            next_slot: self.next_slot,
+            addr: self.addr,
+            lanes: self.lanes.len(),
+            next_lane: self.next_lane,
+            temp: self.temp.len(),
+            stats: self.stats,
+            accessed: self.accessed.clone(),
+        }
+    }
+
+    /// Brings the spiller back to `checkpoint`, for the function as it was
+    /// then.
+    pub(super) fn restore(&mut self, checkpoint: Checkpoint) {
+        self.webs.truncate(checkpoint.webs);
+        self.next_slot = checkpoint.next_slot;
+        self.addr = checkpoint.addr;
+        self.lanes.truncate(checkpoint.lanes);
+        self.next_lane = checkpoint.next_lane;
+        self.temp.truncate(checkpoint.temp);
+        self.stats = checkpoint.stats;
+        self.accessed = checkpoint.accessed;
+        self.regs = None;
+        self.live_out = None;
+    }
+
+    /// Reduces SGPRs to `targets.0` and then VGPRs to `targets.1`, as the
+    /// next round would, before it asks (`regalloc::assign_best_meanwhile`);
+    /// `None` once `stop` ends it early. A panic is kept for that round.
+    pub(super) fn reduce_ahead(&mut self, f: &mut MFunc, targets: (u32, u32), known: &mut Option<Live>, stop: &AtomicBool) -> Option<Reductions> {
+        let mut run = |class, target| {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.reduce_until(f, class, target, known, Some(stop)))) {
+                Ok(Ok(false)) => None,
+                Ok(Ok(true)) => Some(Ok(Ok(()))),
+                Ok(Err(error)) => Some(Ok(Err(error))),
+                Err(panic) => Some(Err(panic)),
+            }
+        };
+        let sgprs = run(Class::S, targets.0)?;
+        let vgprs = match sgprs {
+            Ok(Ok(())) => Some(run(Class::V, targets.1)?),
+            _ => None,
+        };
+        Some(Reductions { sgprs, vgprs })
+    }
+
+    /// Keeps `reductions`, run ahead to `targets` from `before` (the spiller
+    /// then at `checkpoint`), for the next round.
+    pub(super) fn hold(&mut self, reductions: Reductions, targets: (u32, u32), before: MFunc, checkpoint: Checkpoint) {
+        let Reductions { sgprs, vgprs } = reductions;
+        self.ahead = Some(Box::new(Ahead { targets, sgprs: Some(sgprs), vgprs, before, checkpoint }));
+    }
+
+    /// `reduce`'s rounds: true once done, false when `stop` ended them early.
+    fn reduce_until(
+        &mut self,
+        f: &mut MFunc,
+        class: Class,
+        target: u32,
+        known: &mut Option<Live>,
+        stop: Option<&AtomicBool>,
+    ) -> Result<bool, CompileError> {
         let mut stalls = 0;
         let mut last_excess = u64::MAX;
         loop {
+            if stop.is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+                return Ok(false);
+            }
             self.temp.resize(f.vregs.len(), false);
             let mut live = match known.take() {
                 Some(live) => live,
@@ -307,11 +602,11 @@ impl Spiller {
             let Some((peak_slot, &peak)) = prof.iter().enumerate().max_by_key(|&(s, &p)| (p, std::cmp::Reverse(s)))
             else {
                 *known = Some(live);
-                return Ok(());
+                return Ok(true);
             };
             if peak <= target {
                 *known = Some(live);
-                return Ok(());
+                return Ok(true);
             }
             // Every round removes excess; rounds that do not are spilling in
             // circles around reload temporaries.
@@ -326,8 +621,25 @@ impl Spiller {
                     format!("out of {what}: {peak} dwords live and no value left to spill"),
                 ));
             }
+            let lanes = self.lanes.len();
             self.apply(f, class, &chosen);
+            // Spilling VGPR webs alone keeps the units live out of each block
+            // predictable (`relive`).
+            let predictable = class == Class::V && self.lanes.len() == lanes && chosen.iter().all(|c| matches!(c, Choice::Spill(..)));
+            let mut dropped = Vec::new();
+            if predictable {
+                dropped.resize(*live.base.last().expect("non-empty"), false);
+                for (v, _) in chosen.iter().flat_map(|c| match c {
+                    Choice::Spill(list, ..) => list.as_slice(),
+                    Choice::Remat(..) => &[],
+                }) {
+                    dropped[live.base[*v as usize]..live.base[*v as usize + 1]].iter_mut().for_each(|d| *d = true);
+                }
+            } else {
+                self.live_out = None;
+            }
             self.recycle(live);
+            *known = if predictable { self.relive(f, &dropped) } else { None };
         }
     }
 
@@ -360,54 +672,48 @@ impl Spiller {
             members[root[v].0 as usize] += 1;
         }
         // Weighted accesses per root (copies inside a web vanish), the
-        // weighted uses of each register, definitions, and use positions.
+        // weighted uses of each register, and definitions.
+        if self.verify {
+            if let Some(stats) = &self.regs {
+                stats.check(&RegStats::of(f));
+            }
+        }
+        let stats = self.regs.get_or_insert_with(|| RegStats::of(f));
         let mut cost = vec![0u64; nv];
-        let mut use_cost = vec![0u64; nv];
-        let mut defs = vec![0u32; nv];
-        let mut def_inst: Vec<Option<(u32, u32)>> = vec![None; nv];
+        for v in 0..nv {
+            cost[root[v].0 as usize] += stats.access[v];
+        }
+        for block in &f.blocks {
+            let w = weight(block.loop_depth);
+            for inst in block.insts.iter().filter(|i| i.op == Opc::Copy) {
+                if let (Opnd::R(d), Opnd::R(s)) = (inst.defs[0], inst.uses[0]) {
+                    let (rd, rs) = (root[d.reg as usize], root[s.reg as usize]);
+                    if rd.0 == rs.0 && rd.1 + d.off == rs.1 + s.off {
+                        cost[rd.0 as usize] -= w * (d.n as u64 + s.n as u64);
+                    }
+                }
+            }
+        }
+        let (use_cost, defs, def_inst) = (&stats.use_cost, &stats.defs, &stats.def_inst);
         // Units the peak instruction reads or writes stay live as temporaries.
         let mut at_peak_inst = vec![false; live.base[nv]];
         let peak_inst = (peak_slot / 2) as u32;
-        let mut idx = 0u32;
-        for (b, block) in f.blocks.iter().enumerate() {
-            let w = weight(block.loop_depth);
-            for (k, inst) in block.insts.iter().enumerate() {
-                let internal = inst.op == Opc::Copy
-                    && matches!((inst.defs[0], inst.uses[0]), (Opnd::R(d), Opnd::R(s))
-                        if root[d.reg as usize].0 == root[s.reg as usize].0
-                            && root[d.reg as usize].1 + d.off == root[s.reg as usize].1 + s.off);
-                for o in inst.defs.iter().chain(&inst.uses) {
-                    if let Opnd::R(v) = o {
-                        if !internal {
-                            cost[root[v.reg as usize].0 as usize] += w * v.n as u64;
-                        }
-                        if idx == peak_inst {
-                            let u0 = unit(v.reg, v.off as u32);
-                            at_peak_inst[u0..u0 + v.n as usize].iter_mut().for_each(|x| *x = true);
-                        }
-                    }
-                }
-                for o in &inst.defs {
-                    if let Opnd::R(v) = o {
-                        defs[v.reg as usize] += 1;
-                        def_inst[v.reg as usize] = Some((b as u32, k as u32));
-                    }
-                }
-                for o in &inst.uses {
-                    if let Opnd::R(v) = o {
-                        use_cost[v.reg as usize] += w;
-                    }
-                }
-                idx += 1;
-            }
+        let peak_block = live.first.partition_point(|&start| start <= peak_inst) - 1;
+        let at_peak = &f.blocks[peak_block].insts[(peak_inst - live.first[peak_block]) as usize];
+        for v in at_peak.defs.iter().chain(&at_peak.uses).filter_map(Opnd::vref) {
+            let u0 = unit(v.reg, v.off as u32);
+            at_peak_inst[u0..u0 + v.n as usize].iter_mut().for_each(|x| *x = true);
         }
-        let uses_at = UsePositions::new(f, nv);
         let live_at = |s: VRef, slot: u32| -> bool {
             (0..s.n as u32).all(|k| {
                 live.segs(unit(s.reg, s.off as u32 + k)).iter().any(|&(a, e)| a <= slot && slot <= e)
             })
         };
-        let mut cands: Vec<(f64, u32, bool, u32)> = Vec::new();
+        // (coverage, register, recomputed, freed); a candidate whose
+        // recomputation reads registers is settled once their use positions
+        // are known.
+        let mut cands: Vec<(u64, u32, bool, u32)> = Vec::new();
+        let mut sourced: Vec<usize> = Vec::new();
         for r in 0..nv as u32 {
             if root[r as usize].0 != r
                 || f.vregs[r as usize].class != class
@@ -430,24 +736,43 @@ impl Spiller {
                 .flat_map(|k| live.segs(unit(r, k)).iter())
                 .map(|&(s, e)| excess[e as usize + 1] - excess[s as usize])
                 .sum();
-            let remat = members[r as usize] == 1
+            let pure = members[r as usize] == 1
                 && size == 1
                 && defs[r as usize] == 1
-                && def_inst[r as usize].is_some_and(|(b, k)| {
-                    let d = &f.blocks[b as usize].insts[k as usize];
-                    pure_def(d, class, &f.vregs, &defs)
-                        && d.uses.iter().all(|o| match o {
-                            Opnd::R(s) => uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)),
-                            _ => true,
-                        })
-                });
-            // A recomputation is one instruction per use; a spill access is
-            // a memory operation per dword (priced at four) or, for SGPRs, a
-            // lane read or write (priced at two).
-            let per = if class == Class::S { 2 } else { 4 };
-            let c = if remat { use_cost[r as usize].max(1) } else { per * cost[r as usize] };
-            cands.push((coverage as f64 / (c as f64 + 1.0), r, remat, freed));
+                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs));
+            let reads = pure && def_inst[r as usize].is_some_and(|(b, k)| f.blocks[b as usize].insts[k as usize].uses.iter().any(|o| matches!(o, Opnd::R(_))));
+            if reads {
+                sourced.push(cands.len());
+            }
+            cands.push((coverage, r, pure && !reads, freed));
         }
+        // A recomputation reading registers needs them live at every use.
+        if !sourced.is_empty() {
+            let mut wanted = vec![false; nv];
+            for &c in &sourced {
+                wanted[cands[c].1 as usize] = true;
+            }
+            let uses_at = UsePositions::new(f, nv, &wanted);
+            for &c in &sourced {
+                let r = cands[c].1;
+                let (b, k) = def_inst[r as usize].expect("defined once");
+                cands[c].2 = f.blocks[b as usize].insts[k as usize].uses.iter().all(|o| match o {
+                    Opnd::R(s) => uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)),
+                    _ => true,
+                });
+            }
+        }
+        // A recomputation is one instruction per use; a spill access is
+        // a memory operation per dword (priced at four) or, for SGPRs, a
+        // lane read or write (priced at two).
+        let per = if class == Class::S { 2 } else { 4 };
+        let mut cands: Vec<(f64, u32, bool, u32)> = cands
+            .into_iter()
+            .map(|(coverage, r, remat, freed)| {
+                let c = if remat { use_cost[r as usize].max(1) } else { per * cost[r as usize] };
+                (coverage as f64 / (c as f64 + 1.0), r, remat, freed)
+            })
+            .collect();
         cands.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut covered = 0u32;
         let mut out = Vec::new();
@@ -470,9 +795,12 @@ impl Spiller {
 
     fn apply(&mut self, f: &mut MFunc, class: Class, chosen: &[Choice]) {
         let nv = f.vregs.len();
-        // Dword slot of each spilled register's dword 0.
+        let mut regs = self.regs.take();
+        // Dword slot of each spilled register's dword 0, and the definition
+        // each rematerialized register repeats (an index into `remat`).
         let mut slot_of: Vec<Option<u32>> = vec![None; nv];
-        let mut remat: Vec<Option<MInst>> = vec![None; nv];
+        let mut remat_of: Vec<u32> = vec![NO_REMAT; nv];
+        let mut remat: Vec<MInst> = Vec::new();
         for c in chosen {
             match c {
                 Choice::Spill(list, size, heat) => {
@@ -492,9 +820,13 @@ impl Spiller {
                     }
                 }
                 Choice::Remat(v, (b, k)) => {
-                    remat[*v as usize] = Some(f.blocks[*b].insts[*k].clone());
                     // Dropped below: an implicit def with no operands.
-                    f.blocks[*b].insts[*k] = MInst::new(Opc::ImplicitDef, [], []);
+                    let def = std::mem::replace(&mut f.blocks[*b].insts[*k], MInst::new(Opc::ImplicitDef, [], []));
+                    if let Some(regs) = regs.as_mut() {
+                        regs.remove(&def, weight(f.blocks[*b].loop_depth));
+                    }
+                    remat_of[*v as usize] = remat.len() as u32;
+                    remat.push(def);
                     self.stats.remat += 1;
                 }
             }
@@ -502,21 +834,29 @@ impl Spiller {
         // The LDS address and lanes go in at entry once the rematerialized
         // definitions (found by position) are gone, before the rewrite
         // takes the blocks.
+        let entry = f.blocks.first().map_or(0, |b| b.insts.len());
         if class == Class::V && chosen.iter().any(|c| matches!(c, Choice::Spill(..))) {
             self.lds_addr(f);
         }
         self.make_lanes(f);
-        let spilled = |o: &Opnd, slot_of: &[Option<u32>]| -> Option<(VRef, u32)> {
-            match o {
-                Opnd::R(v) if (v.reg as usize) < slot_of.len() => slot_of[v.reg as usize].map(|s| (*v, s + v.off as u32)),
-                _ => None,
+        let entered = f.blocks.first().map_or(0, |b| b.insts.len()) - entry;
+        if let Some(regs) = regs.as_mut() {
+            regs.grow(f.vregs.len());
+            if entered > 0 {
+                let w = weight(f.blocks[0].loop_depth);
+                for inst in &f.blocks[0].insts[..entered] {
+                    regs.add(inst, w);
+                }
             }
-        };
+        }
         let touched = |o: &Opnd| match o {
-            Opnd::R(v) => slot_of.get(v.reg as usize).is_some_and(Option::is_some) || remat.get(v.reg as usize).is_some_and(Option::is_some),
+            Opnd::R(v) => {
+                slot_of.get(v.reg as usize).is_some_and(Option::is_some) || remat_of.get(v.reg as usize).is_some_and(|&d| d != NO_REMAT)
+            }
             _ => false,
         };
         self.spare.resize_with(f.blocks.len(), Vec::new);
+        self.accessed.resize(f.blocks.len(), false);
         for b in 0..f.blocks.len() {
             // A block no spilled or recomputed register appears in, and with
             // no definition to drop, stays as it is.
@@ -525,113 +865,152 @@ impl Spiller {
                     && !inst.defs.iter().chain(&inst.uses).any(touched)
             });
             if unchanged {
+                // What went in at entry moved the entry block down.
+                if let Some(regs) = regs.as_mut().filter(|_| b == 0 && entered > 0) {
+                    for (k, inst) in f.blocks[0].insts.iter().enumerate() {
+                        regs.place(inst, 0, k);
+                    }
+                }
                 continue;
             }
+            let w = weight(f.blocks[b].loop_depth);
             let mut old = std::mem::take(&mut f.blocks[b].insts);
             let mut out = std::mem::take(&mut self.spare[b]);
             out.clear();
             out.reserve(old.len() + 16);
-            for mut inst in old.drain(..) {
-                if inst.op == Opc::ImplicitDef
-                    && (inst.defs.is_empty() || inst.defs.iter().all(|d| spilled(d, &slot_of).is_some()))
-                {
-                    continue;
-                }
-                if !inst.defs.iter().chain(&inst.uses).any(touched) {
+            for inst in old.drain(..) {
+                let dropped = inst.op == Opc::ImplicitDef
+                    && (inst.defs.is_empty() || inst.defs.iter().all(|d| spilled(d, &slot_of).is_some()));
+                if !dropped && !inst.defs.iter().chain(&inst.uses).any(touched) {
+                    if let Some(regs) = regs.as_mut() {
+                        regs.place(&inst, b, out.len());
+                    }
                     out.push(inst);
                     continue;
                 }
-                // Recompute rematerialized sources; a copy of one takes the
-                // constant or SGPR directly.
-                for u in 0..inst.uses.len() {
-                    let Opnd::R(v) = inst.uses[u] else { continue };
-                    let Some(def) = remat.get(v.reg as usize).and_then(|d| d.clone()) else { continue };
-                    if inst.op == Opc::Copy && matches!(def.op, Opc::Copy | Opc::VMovB32) {
-                        inst.uses[u] = def.uses[0];
-                        continue;
-                    }
-                    let t = self.new_temp(f, class, 1);
-                    let mut clone = def;
-                    clone.defs = [Opnd::R(t)].into();
-                    out.push(clone);
-                    inst.uses[u] = Opnd::R(t);
+                let start = out.len();
+                if let Some(regs) = regs.as_mut() {
+                    regs.remove(&inst, w);
                 }
-                let class_of = |f: &MFunc, o: &Opnd| match o {
-                    Opnd::R(v) => Some(f.vregs[v.reg as usize].class),
-                    _ => None,
-                };
-                if inst.op == Opc::Copy {
-                    let (d, s) = (inst.defs[0], inst.uses[0]);
-                    match (spilled(&d, &slot_of), spilled(&s, &slot_of)) {
-                        (Some((_, sd)), Some((_, ss))) if sd == ss => continue,
-                        (None, Some((sv, ss))) => {
-                            let Opnd::R(dv) = d else { unreachable!("a virtual register") };
-                            if class_of(f, &d) == Some(class) {
-                                self.load(f, &mut out, class, dv, ss);
-                            } else {
-                                let t = self.new_temp(f, class, sv.n);
-                                self.load(f, &mut out, class, t, ss);
-                                out.push(MInst::new(Opc::Copy, [d], [Opnd::R(t)]));
-                            }
-                            continue;
-                        }
-                        (Some((dv, sd)), None) => {
-                            let data = match s {
-                                Opnd::R(sv) if class_of(f, &s) == Some(class) => sv,
-                                _ => {
-                                    let t = self.new_temp(f, class, dv.n);
-                                    out.push(MInst::new(Opc::Copy, [Opnd::R(t)], [s]));
-                                    t
-                                }
-                            };
-                            self.store(f, &mut out, class, data, sd);
-                            continue;
-                        }
-                        (Some((dv, sd)), Some((_, ss))) => {
-                            let t = self.new_temp(f, class, dv.n);
-                            self.load(f, &mut out, class, t, ss);
-                            self.store(f, &mut out, class, t, sd);
-                            continue;
-                        }
-                        _ => {}
+                if !dropped {
+                    self.rewrite_inst(f, &mut out, class, inst, (&slot_of, &remat_of, &remat));
+                    if out[start..].iter().any(|i| i.mods & M_SPILL != 0) {
+                        self.accessed[b] = true;
                     }
                 }
-                // Reload spilled sources into temporaries and write spilled
-                // results to temporaries stored afterwards; a result tied to a
-                // source of the same range shares its temporary.
-                let mut reloaded: Vec<(u32, u8, VRef)> = Vec::new();
-                for u in 0..inst.uses.len() {
-                    if let Some((v, slot)) = spilled(&inst.uses[u], &slot_of) {
-                        let t = match reloaded.iter().find(|r| r.0 == slot && r.1 == v.n) {
-                            Some(r) => r.2,
-                            None => {
-                                let t = self.new_temp(f, class, v.n);
-                                self.load(f, &mut out, class, t, slot);
-                                reloaded.push((slot, v.n, t));
-                                t
-                            }
-                        };
-                        inst.uses[u] = Opnd::R(t);
+                if let Some(regs) = regs.as_mut() {
+                    regs.grow(f.vregs.len());
+                    for (k, new) in out[start..].iter().enumerate() {
+                        regs.add(new, w);
+                        regs.place(new, b, start + k);
                     }
-                }
-                let mut stores: Vec<(VRef, u32)> = Vec::new();
-                for d in 0..inst.defs.len() {
-                    if let Some((v, slot)) = spilled(&inst.defs[d], &slot_of) {
-                        let t = match reloaded.iter().find(|r| r.0 == slot && r.1 == v.n) {
-                            Some(r) => r.2,
-                            None => self.new_temp(f, class, v.n),
-                        };
-                        inst.defs[d] = Opnd::R(t);
-                        stores.push((t, slot));
-                    }
-                }
-                out.push(inst);
-                for (t, slot) in stores {
-                    self.store(f, &mut out, class, t, slot);
                 }
             }
             f.blocks[b].insts = out;
             self.spare[b] = old;
+        }
+        self.regs = regs;
+    }
+
+    /// Writes to `out` what replaces `inst`, which reads or writes a register
+    /// `slot_of` spills or `remat_of` recomputes (as `remat`'s definition).
+    fn rewrite_inst(
+        &mut self,
+        f: &mut MFunc,
+        out: &mut Vec<MInst>,
+        class: Class,
+        mut inst: MInst,
+        (slot_of, remat_of, remat): (&[Option<u32>], &[u32], &[MInst]),
+    ) {
+        // Recompute rematerialized sources; a copy of one takes the
+        // constant or SGPR directly.
+        for u in 0..inst.uses.len() {
+            let Opnd::R(v) = inst.uses[u] else { continue };
+            let Some(def) = remat_of.get(v.reg as usize).filter(|&&d| d != NO_REMAT).map(|&d| remat[d as usize].clone()) else {
+                continue;
+            };
+            if inst.op == Opc::Copy && matches!(def.op, Opc::Copy | Opc::VMovB32) {
+                inst.uses[u] = def.uses[0];
+                continue;
+            }
+            let t = self.new_temp(f, class, 1);
+            let mut clone = def;
+            clone.defs = [Opnd::R(t)].into();
+            out.push(clone);
+            inst.uses[u] = Opnd::R(t);
+        }
+        let class_of = |f: &MFunc, o: &Opnd| match o {
+            Opnd::R(v) => Some(f.vregs[v.reg as usize].class),
+            _ => None,
+        };
+        if inst.op == Opc::Copy {
+            let (d, s) = (inst.defs[0], inst.uses[0]);
+            match (spilled(&d, slot_of), spilled(&s, slot_of)) {
+                (Some((_, sd)), Some((_, ss))) if sd == ss => return,
+                (None, Some((sv, ss))) => {
+                    let Opnd::R(dv) = d else { unreachable!("a virtual register") };
+                    if class_of(f, &d) == Some(class) {
+                        self.load(f, out, class, dv, ss);
+                    } else {
+                        let t = self.new_temp(f, class, sv.n);
+                        self.load(f, out, class, t, ss);
+                        out.push(MInst::new(Opc::Copy, [d], [Opnd::R(t)]));
+                    }
+                    return;
+                }
+                (Some((dv, sd)), None) => {
+                    let data = match s {
+                        Opnd::R(sv) if class_of(f, &s) == Some(class) => sv,
+                        _ => {
+                            let t = self.new_temp(f, class, dv.n);
+                            out.push(MInst::new(Opc::Copy, [Opnd::R(t)], [s]));
+                            t
+                        }
+                    };
+                    self.store(f, out, class, data, sd);
+                    return;
+                }
+                (Some((dv, sd)), Some((_, ss))) => {
+                    let t = self.new_temp(f, class, dv.n);
+                    self.load(f, out, class, t, ss);
+                    self.store(f, out, class, t, sd);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        // Reload spilled sources into temporaries and write spilled
+        // results to temporaries stored afterwards; a result tied to a
+        // source of the same range shares its temporary.
+        let mut reloaded: Vec<(u32, u8, VRef)> = Vec::new();
+        for u in 0..inst.uses.len() {
+            if let Some((v, slot)) = spilled(&inst.uses[u], slot_of) {
+                let t = match reloaded.iter().find(|r| r.0 == slot && r.1 == v.n) {
+                    Some(r) => r.2,
+                    None => {
+                        let t = self.new_temp(f, class, v.n);
+                        self.load(f, out, class, t, slot);
+                        reloaded.push((slot, v.n, t));
+                        t
+                    }
+                };
+                inst.uses[u] = Opnd::R(t);
+            }
+        }
+        let mut stores: Vec<(VRef, u32)> = Vec::new();
+        for d in 0..inst.defs.len() {
+            if let Some((v, slot)) = spilled(&inst.defs[d], slot_of) {
+                let t = match reloaded.iter().find(|r| r.0 == slot && r.1 == v.n) {
+                    Some(r) => r.2,
+                    None => self.new_temp(f, class, v.n),
+                };
+                inst.defs[d] = Opnd::R(t);
+                stores.push((t, slot));
+            }
+        }
+        out.push(inst);
+        for (t, slot) in stores {
+            self.store(f, out, class, t, slot);
         }
     }
 
@@ -643,9 +1022,19 @@ impl Spiller {
         order.sort_by(|&a, &b| self.webs[b].heat.cmp(&self.webs[a].heat).then(a.cmp(&b)));
         // Per dword slot: (in LDS, LDS slot or scratch dword).
         let mut place: Vec<(bool, u32)> = vec![(false, 0); self.next_slot as usize];
+        // The hottest webs first take AGPR slots, where there are any.
+        let mut in_agpr: Vec<Option<u32>> = vec![None; self.next_slot as usize];
+        let mut agprs = 0u32;
         let (mut lds, mut scratch) = (0u32, 0u32);
         for &w in &order {
             let web = &self.webs[w];
+            if agprs + web.size <= self.cfg.agpr_slots {
+                for k in 0..web.size {
+                    in_agpr[(web.slot + k) as usize] = Some(agprs + k);
+                }
+                agprs += web.size;
+                continue;
+            }
             let in_lds = self.addr.is_some() && lds + web.size <= self.cfg.lds_slots;
             for k in 0..web.size {
                 place[(web.slot + k) as usize] = if in_lds { (true, lds + k) } else { (false, scratch + k) };
@@ -686,6 +1075,13 @@ impl Spiller {
                 let Opnd::P(Phys::V(r), n) = data else {
                     return Err(CompileError::new("ROCKE_DIRECT_INTERNAL", "spill access to a non-VGPR"));
                 };
+                if in_agpr[slot as usize].is_some() {
+                    for k in 0..n as u32 {
+                        let a = in_agpr[(slot + k) as usize].expect("a web's dwords share one placement");
+                        out.push(crate::target::gfx9::spill::agpr_move(load, r + k as u16, a));
+                    }
+                    continue;
+                }
                 let (in_lds, at) = place[slot as usize];
                 if in_lds {
                     let addr = if load { inst.uses[0] } else { inst.uses[1] };
@@ -711,6 +1107,7 @@ impl Spiller {
         }
         self.stats.lds_dwords = lds;
         self.stats.scratch_dwords = scratch;
+        self.stats.agpr_dwords = agprs;
         self.stats.lds_bytes = lds * stride;
         self.stats.scratch_bytes = scratch * 4;
         Ok(self.stats)
@@ -770,7 +1167,16 @@ pub(super) mod tests {
             for _ in 0..runs {
                 for inst in &block.insts {
                     let defs: Vec<Key> = inst.defs.iter().flat_map(keys).collect();
+                    let agpr_move = matches!(
+                        inst.op,
+                        Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VAccvgprWriteB32 | crate::target::gfx9::gen_isa::Gfx9Op::VAccvgprReadB32)
+                    );
                     match inst.op {
+                        _ if agpr_move => {
+                            for (k, v) in defs.iter().zip(read(&regs, &inst.uses[0])) {
+                                regs.insert(*k, v);
+                            }
+                        }
                         Opc::Copy | Opc::VMovB32 | Opc::SMovB32 => {
                             for (k, v) in defs.iter().zip(read(&regs, &inst.uses[0])) {
                                 regs.insert(*k, v);
@@ -924,7 +1330,7 @@ pub(super) mod tests {
             let want = effects(&f, 3);
             let mut g = f.clone();
             let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
             let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
             assert!(a.num_vgprs <= 24 && a.num_sgprs <= 20, "{a:?}");
             assert!(a.spill.lds_dwords + a.spill.scratch_dwords + a.spill.remat + a.spill.sgpr_dwords > 0);
@@ -941,6 +1347,33 @@ pub(super) mod tests {
         }
         // Every kind of spill took part.
         assert!(total.remat > 0 && total.lds_dwords > 0 && total.scratch_dwords > 0 && total.sgpr_dwords > 0, "{total:?}");
+    }
+
+    /// gfx950: the hottest webs take AGPR slots before LDS and scratch, and
+    /// the moves keep every value.
+    #[test]
+    fn spilled_webs_take_agpr_slots_first_on_gfx950() {
+        for (seed, nv, ns) in [(1, 60, 30), (2, 80, 40), (3, 120, 12)] {
+            let mut f = random_kernel(seed, nv, ns);
+            f.target = crate::target::Target::Gfx950;
+            let want = effects(&f, 3);
+            for agpr_slots in [8, 200] {
+                let mut g = f.clone();
+                let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
+                let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 4, agpr_slots };
+                let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
+                assert!(a.spill.agpr_dwords > 0 && a.spill.agpr_dwords <= agpr_slots, "{a:?}");
+                if agpr_slots == 200 {
+                    assert_eq!(a.spill.lds_dwords + a.spill.scratch_dwords, 0, "every web fits in AGPRs: {a:?}");
+                }
+                assert_eq!(effects(&g, 3), want, "seed {seed}, {agpr_slots} slots: {a:?}");
+                assert!(g.blocks.iter().flat_map(|b| &b.insts).all(|i| i.mods & M_SPILL == 0));
+                for inst in g.blocks.iter().flat_map(|b| &b.insts).filter(|i| matches!(i.op, Opc::Gfx9(_))) {
+                    let mut words = Vec::new();
+                    crate::target::gfx9::asm::encode(inst, &mut words).expect("an AGPR move encodes");
+                }
+            }
+        }
     }
 
     #[test]

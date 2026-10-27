@@ -154,7 +154,7 @@ fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, ou
     let lits = valu_lits(info.form, info.flags);
     let encoded = if info.form == Form::Writelane { 2 } else { inst.uses.len().min(3) };
     let dwords = |k: usize| sig.uses.get(k).map_or(1, |o| o.dwords);
-    let movable = |k: usize| matches!(sig.uses.get(k).map(|o| o.class), Some(Kind::Vs | Kind::Vi | Kind::V));
+    let movable = |k: usize| matches!(sig.uses.get(k).map(|o| o.class), Some(Kind::Vs | Kind::Vi | Kind::Vr | Kind::V));
     let reads = |f: &MFunc, inst: &MInst| -> Vec<(usize, Scalar)> {
         (0..encoded).filter_map(|k| scalar(f, inst, k, lits[k]).map(|s| (k, s))).collect()
     };

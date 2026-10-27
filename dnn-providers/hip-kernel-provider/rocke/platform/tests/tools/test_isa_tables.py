@@ -99,6 +99,51 @@ def test_gfx950_table_covers_only_its_rows():
     assert all(r.get("op") for r in secs["vcmp"])
 
 
+def test_gfx9_own_opcodes_are_the_opc_gfx9_family():
+    desc_text = isa_tables.Tree(CRATE).read(isa_tables.GFX950_DESCRIPTION)
+    secs = isa_tables.parse(desc_text, "gfx950.isa")
+    own = [
+        r.args[0] for r in secs["inst"] if r.kind == "inst" and r.get("opc") == "gfx9"
+    ]
+    assert "VPkMulF32" in own and "BufferInv" in own
+    gfx9 = (CRATE / isa_tables.GFX950_GEN_ISA).read_text()
+    assert "pub enum Gfx9Op {" in gfx9
+    for name in own:
+        assert f"Opc::Gfx9(Gfx9Op::{name})" in gfx9
+    # gfx11 gives the family one arm per table that matches every opcode, and
+    # its opcode rows and description name none of them.
+    gfx11 = (CRATE / isa_tables.GEN_ISA).read_text()
+    assert gfx11.count("Opc::Gfx9(_) =>") == 9
+    rows = (CRATE / isa_tables.GEN_OPCODES).read_text()
+    desc = isa_tables.Tree(CRATE).read(isa_tables.DESCRIPTION)
+    assert not any(f" {name} = (" in rows or f" {name} " in desc for name in own)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        # A gfx9-only row without opc=gfx9: no shared opcode of that name.
+        (
+            b"VPkMulF32         v_pk_mul_f32              VOP3P   0x31   opc=gfx9 ",
+            b"VPkMulF32         v_pk_mul_f32              VOP3P   0x31   ",
+        ),
+        # A shared opcode's twin marked opc=gfx9.
+        (
+            b"VAddF32           v_add_f32                 VOP2    0x1    ",
+            b"VAddF32           v_add_f32                 VOP2    0x1    opc=gfx9 ",
+        ),
+    ],
+)
+def test_gfx950_rows_name_a_shared_opcode_or_say_opc_gfx9(tmp_path, old, new):
+    crate = copy_crate(tmp_path / "crate")
+    desc = crate / isa_tables.GFX950_DESCRIPTION
+    data = desc.read_bytes()
+    assert data.count(old) == 1
+    desc.write_bytes(data.replace(old, new))
+    with pytest.raises(isa_tables.DescError, match="opc=gfx9"):
+        isa_tables.run_generate_gfx950(isa_tables.Tree(crate))
+
+
 def test_check_fails_when_a_generated_file_or_the_description_is_stale(tmp_path):
     crate = copy_crate(tmp_path / "crate")
     assert run(crate, "check") == 0

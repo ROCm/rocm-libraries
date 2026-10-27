@@ -12,7 +12,23 @@
 //! (it names the instruction and its predecessors), one where it waits more
 //! is listed for review. Exits 1 on any failure or unread instruction.
 
-use rocke_codeobj_ffi::target::gfx9::hazards::{demand, Fact, Kind, Regs, EXEC, M0, VCC};
+use rocke_codeobj_ffi::target::gfx9::gen_isa as t;
+use rocke_codeobj_ffi::target::gfx9::hazards::{demand, mfma_kind, Fact, Kind, MfmaClass, Regs, EXEC, M0, VCC};
+
+/// An MFMA's class and pass count, by its row's mnemonic; the block-scaled
+/// f8f6f4 form (no row) as the 16-pass XDL kind its fp8 formats are.
+fn mfma_of(base: &str) -> Option<(MfmaClass, u32)> {
+    if !base.starts_with("v_mfma") {
+        return None;
+    }
+    let row = t::ALL.iter().find(|&&op| t::mnemonic(op) == Some(base)).and_then(|&op| mfma_kind(op));
+    Some(row.unwrap_or((MfmaClass::Xdl, 16)))
+}
+
+/// A DOT instruction's id: equal for one opcode, never 0.
+fn dot_id(base: &str) -> u32 {
+    base.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193)) | 1
+}
 
 /// One register operand of the text, or `None` for constants and `off`.
 fn reg(token: &str) -> Option<Regs> {
@@ -119,7 +135,15 @@ fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
         f.lane_read = matches!(base, "v_readlane_b32" | "v_readfirstlane_b32");
         f.writelane = base == "v_writelane_b32";
         f.lane_select = matches!(base, "v_readlane_b32" | "v_writelane_b32");
+        f.permlane = matches!(base, "v_permlane16_swap_b32" | "v_permlane32_swap_b32");
         if ops.is_empty() || base == "v_nop" {
+            return Some(f);
+        }
+        if f.permlane {
+            // Both registers are read and written.
+            f.defs = regs_of(&ops);
+            f.uses = f.defs.clone();
+            f.src0 = ops.get(1).and_then(|o| reg(o));
             return Some(f);
         }
         let ndefs = if two_defs(base) { 2 } else { 1 };
@@ -141,6 +165,18 @@ fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
         }
         f.src0 = srcs.first().and_then(|o| reg(o));
         f.src1 = srcs.get(1).and_then(|o| reg(o));
+        f.mfma = mfma_of(base);
+        if f.mfma.is_some() {
+            f.srcab = [ops.get(1).and_then(|o| reg(o)), ops.get(2).and_then(|o| reg(o))];
+            f.srcc = ops.get(3).and_then(|o| reg(o));
+        }
+        if base.starts_with("v_dot") {
+            f.dot = dot_id(base);
+            // VOP3P DOTs read C as their fourth operand; the VOP2 dot2c ones
+            // accumulate into their destination.
+            f.srcc = if base.contains("dot2c") { f.defs.first().copied() } else { ops.get(3).and_then(|o| reg(o)) };
+        }
+        f.fma64 = matches!(base, "v_fma_f64" | "v_fmac_f64");
         return Some(f);
     }
     for (prefix, kind) in [("global_", Kind::Vmem), ("buffer_", Kind::Vmem), ("scratch_", Kind::Vmem), ("flat_", Kind::Vmem), ("ds_", Kind::Lds)] {
@@ -148,13 +184,16 @@ fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
             continue;
         }
         f.kind = kind;
+        // LDS DMA: a buffer or global load into LDS at M0 (H12), and ds_*_addtid.
+        f.m0_reader = mods.split_whitespace().any(|m| m == "lds") || mnemonic.contains("load_lds") || mnemonic.contains("_addtid");
         let returns = mods.contains("sc0") || mods.contains("glc");
         let atomic = mnemonic.contains("atomic");
         f.store = kind == Kind::Vmem && (mnemonic.contains("store") || atomic);
+        // An LDS DMA load writes no VGPR: its first operand is the address.
         let has_def = if kind == Kind::Lds {
             mnemonic.contains("read") || mnemonic.contains("load") || mnemonic.contains("bpermute") || mnemonic.contains("swizzle") || mnemonic.contains("_rtn")
         } else {
-            !f.store || (atomic && returns)
+            (!f.store || (atomic && returns)) && !f.m0_reader
         };
         let ndefs = usize::from(has_def);
         f.defs = regs_of(&ops[..ndefs.min(ops.len())]);
@@ -178,6 +217,7 @@ fn read(mnemonic: &str, rest: &str) -> Option<Fact> {
     if mnemonic.starts_with("s_") {
         let sopp = ["s_waitcnt", "s_barrier", "s_branch", "s_cbranch", "s_endpgm", "s_setprio", "s_sleep", "s_sendmsg", "s_code_end", "s_trap"];
         if sopp.iter().any(|p| mnemonic.starts_with(p)) {
+            f.m0_reader = mnemonic.starts_with("s_sendmsg");
             return Some(f);
         }
         f.kind = Kind::Salu;
@@ -223,18 +263,72 @@ fn parse(text: &str) -> (Vec<Inst>, Vec<String>) {
         };
         insts.push(Inst { addr, text: asm.to_string(), fact, branch, end: mnemonic == "s_endpgm" });
     }
+    copy_runs(&mut insts);
     (insts, unread)
+}
+
+/// LLVM expands a COPY of a VGPR tuple into AGPRs as a run of
+/// `v_accvgpr_write_b32`s, each also naming the whole source tuple
+/// (implicitly, so the text cannot show it), which its recognizer then sees
+/// read: every write of a run whose AGPRs and VGPRs both step by one, up
+/// or down, reads the run's VGPRs here. A run that was not one COPY only
+/// makes ours wait more.
+fn copy_runs(insts: &mut [Inst]) {
+    let pair = |i: &Inst| -> Option<(u16, u16)> {
+        let rest = i.text.strip_prefix("v_accvgpr_write_b32 ")?;
+        let (a, v) = rest.split_once(',')?;
+        Some((a.trim().strip_prefix('a')?.parse().ok()?, v.trim().strip_prefix('v')?.parse().ok()?))
+    };
+    let mut k = 0;
+    while k < insts.len() {
+        let Some((a0, v0)) = pair(&insts[k]) else {
+            k += 1;
+            continue;
+        };
+        let mut members = vec![k];
+        let mut dir: i32 = 0;
+        let mut j = k + 1;
+        while j < insts.len() {
+            if insts[j].fact.nop {
+                j += 1;
+                continue;
+            }
+            let Some((a, v)) = pair(&insts[j]) else { break };
+            let step = members.len() as i32;
+            let d = if dir != 0 { dir } else if a as i32 == a0 as i32 + 1 { 1 } else { -1 };
+            if a as i32 != a0 as i32 + d * step || v as i32 != v0 as i32 + d * step {
+                break;
+            }
+            dir = d;
+            members.push(j);
+            j += 1;
+        }
+        let n = members.len() as u16;
+        let tuple = Regs { start: if dir < 0 { v0 + 1 - n } else { v0 }, n };
+        for &m in &members {
+            insts[m].fact.uses = vec![tuple];
+        }
+        k = j.max(k + 1);
+    }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: hazard_corpus <report.tsv> <disassembly>...");
+        eprintln!("usage: hazard_corpus <report.tsv> <disassembly | @list>...");
         std::process::exit(2);
     }
     let mut report = String::from("kernel\taddress\tinstruction\tcomgr\tours\tverdict\tbefore\n");
     let (mut sites, mut under, mut over, mut unread_total, mut kernels) = (0, 0, 0, 0, 0);
-    for path in &args[2..] {
+    // `@list` names a file of disassembly paths, one per line.
+    let paths: Vec<String> = args[2..]
+        .iter()
+        .flat_map(|a| match a.strip_prefix('@') {
+            Some(list) => std::fs::read_to_string(list).expect("read the list").lines().filter(|l| !l.trim().is_empty()).map(|l| l.trim().to_string()).collect(),
+            None => vec![a.clone()],
+        })
+        .collect();
+    for path in &paths {
         let text = std::fs::read_to_string(path).expect("read the disassembly");
         let name = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("?").to_string();
         let (insts, unread) = parse(&text);
@@ -261,7 +355,9 @@ fn main() {
         let comgr = &comgr[..last];
         kernels += 1;
         // Blocks: split before branch targets and after branches and ends.
-        let targets: std::collections::BTreeSet<u64> = code.iter().filter_map(|i| i.branch.map(|b| b.0)).collect();
+        // A target that was an s_nop (deleted above) is the next instruction.
+        let resolve = |a: u64| code.iter().find(|i| i.addr >= a).map_or(a, |i| i.addr);
+        let targets: std::collections::BTreeSet<u64> = code.iter().filter_map(|i| i.branch.map(|b| resolve(b.0))).collect();
         let mut starts = vec![0usize];
         for (k, inst) in code.iter().enumerate() {
             if k > 0 && targets.contains(&inst.addr) && *starts.last().unwrap() != k {
@@ -281,7 +377,7 @@ fn main() {
             blocks.push(code[lo..hi].iter().map(|i| i.fact.clone()).collect());
             let last = code[hi - 1];
             if let Some((target, always)) = last.branch {
-                if let Some(t) = block_of_addr(target) {
+                if let Some(t) = block_of_addr(resolve(target)) {
                     preds[t].push(b);
                 }
                 if !always && b + 1 < nblocks {

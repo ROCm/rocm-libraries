@@ -4,7 +4,34 @@
 //! What instruction selection picks differently on gfx9 (wave64). The gfx11
 //! choices stay in `rir::isel`; it calls these where the targets differ.
 
-use crate::rir::mir::Opc;
+use super::gen_isa::Gfx9Op;
+use crate::error::CompileError;
+use crate::rir::mir::{MInst, Opc};
+
+/// A memory fence at `scope` on gfx950, as its memory model writes it
+/// outside threadgroup-split mode: `buffer_wbl2` writes L2 back at agent
+/// (sc1) and system (sc0 sc1) scope, then `s_waitcnt vmcnt(0) lgkmcnt(0)`
+/// completes every earlier access (at workgroup scope too, where the model
+/// asks only for lgkmcnt: the conservative wait); an acquire then
+/// invalidates the caches below the scope (`buffer_inv`; a workgroup shares
+/// one CU's).
+pub fn fence(scope: &str, acquire: bool) -> Result<Vec<MInst>, CompileError> {
+    let cpol = match scope {
+        "workgroup" => None,
+        "agent" => Some(2),
+        "system" => Some(3),
+        other => return Err(CompileError::new("ROCKE_DIRECT_UNSUPPORTED", format!("memory fence scope {other}"))),
+    };
+    let mut out = Vec::new();
+    if let Some(c) = cpol {
+        out.push(MInst::new(Opc::Gfx9(Gfx9Op::BufferWbl2), [], []).with_imm(c));
+    }
+    out.push(MInst::new(Opc::SWaitcntExplicit, [], []).with_imm(super::waitcnt::waitcnt_imm(0, 0)));
+    if let (true, Some(c)) = (acquire, cpol) {
+        out.push(MInst::new(Opc::Gfx9(Gfx9Op::BufferInv), [], []).with_imm(c));
+    }
+    Ok(out)
+}
 
 /// The wave64 form of the wave32 lane-mask opcode `op`: lane masks, EXEC and
 /// VCC are SGPR pairs.
@@ -135,6 +162,41 @@ mod tests {
         assert!(select(&text, Target::Gfx1151).is_ok());
         let error = select(&text, Target::Gfx950).err().expect("refused");
         assert!(error.to_string().contains("tile.permlane64 on gfx950"), "{error}");
+    }
+
+    #[test]
+    fn fences_follow_the_gfx950_memory_model() {
+        let fence = |scope: &str, ordering: &str| {
+            kernel(
+                256,
+                &format!(
+                    "    memref.global_store_typed ( %Y, %tid, %tid ) {{ align = i:4, elem_type = s:\"i32\" }}\n    \
+                     memref.fence (  ) {{ scope = s:\"{scope}\", ordering = s:\"{ordering}\" }}\n    \
+                     memref.global_store_typed ( %Y, %n, %tid ) {{ align = i:4, elem_type = s:\"i32\" }}\n"
+                ),
+            )
+        };
+        let seq = |text: &str| -> Vec<(Opc, i64)> {
+            insts(text, Target::Gfx950)
+                .into_iter()
+                .filter(|i| matches!(i.op, Opc::Gfx9(_) | Opc::SWaitcntExplicit))
+                .map(|i| (i.op, i.imm))
+                .collect()
+        };
+        let (wb, inv, wait) = (Opc::Gfx9(Gfx9Op::BufferWbl2), Opc::Gfx9(Gfx9Op::BufferInv), Opc::SWaitcntExplicit);
+        // vmcnt(0) lgkmcnt(0)
+        assert_eq!(seq(&fence("agent", "acq_rel")), [(wb, 2), (wait, 0x70), (inv, 2)]);
+        assert_eq!(seq(&fence("system", "acquire")), [(wb, 3), (wait, 0x70), (inv, 3)]);
+        assert_eq!(seq(&fence("agent", "release")), [(wb, 2), (wait, 0x70)]);
+        assert_eq!(seq(&fence("workgroup", "acq_rel")), [(wait, 0x70)]);
+        // Through the encoder; gfx1151 keeps its own invalidations.
+        let compiled = crate::rir::compile_for(&fence("agent", "acq_rel"), Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let listing = compiled.listing();
+        for wanted in ["buffer_wbl2", "buffer_inv", "s_waitcnt"] {
+            assert!(listing.contains(wanted), "{wanted} missing:\n{listing}");
+        }
+        let gfx11 = insts(&fence("agent", "acq_rel"), Target::Gfx1151);
+        assert!(gfx11.iter().any(|i| i.op == Opc::BufferGl1Inv) && !gfx11.iter().any(|i| matches!(i.op, Opc::Gfx9(_))));
     }
 
     #[test]

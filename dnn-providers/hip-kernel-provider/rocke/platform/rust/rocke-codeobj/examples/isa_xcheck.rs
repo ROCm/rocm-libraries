@@ -248,12 +248,14 @@ mod gfx950 {
     use rocke_codeobj_ffi::target::gfx9::gen_isa::{self as t, Class, Imm};
 
     use super::{s, v, words, INLINE, LITERAL};
+    use rocke_codeobj_ffi::target::gfx9::asm::AGPR0;
 
     /// `super::token`, with the 64-bit lane masks named `vcc` and `exec`.
     fn token(o: &Opnd) -> String {
         match *o {
             Opnd::P(Phys::VccLo, 2) => "vcc".into(),
             Opnd::P(Phys::ExecLo, 2) => "exec".into(),
+            Opnd::P(Phys::V(r), n) if r >= AGPR0 => format!("a{}x{n}", r - AGPR0),
             _ => super::token(o),
         }
     }
@@ -284,8 +286,19 @@ mod gfx950 {
                 specials(&mut out);
             }
             Class::X => out.push(Opnd::P(Phys::ExecLo, n)),
+            Class::Vr => {
+                // Registers only: an even pair first, then an odd one (refused),
+                // an SGPR pair and the 64-bit special registers.
+                out.extend([v(4, n), v(3, n), high(131), sgpr(6)]);
+                specials(&mut out);
+            }
             Class::Ss | Class::Vs | Class::Vi => {
                 if class == Class::Ss {
+                    out.push(sgpr(6));
+                } else if wide {
+                    // gfx950 keeps VGPR tuples at even registers: an
+                    // even tuple first, so the other slots' variants encode.
+                    out.extend([v(4, n), v(3, n), high(131)]);
                     out.push(sgpr(6));
                 } else {
                     out.extend([v(3, n), high(131)]);
@@ -298,13 +311,40 @@ mod gfx950 {
                 out.extend(LITERAL.iter().map(|&k| Opnd::Imm(k)));
             }
             Class::A => out.push(v(2, n)),
+            Class::Acc => {
+                let agpr = |k: u16| v(AGPR0 + k.min(256 - n as u16) / n as u16 * n as u16, n);
+                out.extend([agpr(2), agpr(130), agpr(255)]);
+            }
+            Class::Av | Class::Avi => {
+                // An even VGPR tuple first, an AGPR one, the highest of each,
+                // and an odd tuple (refused) when wide.
+                let even = |k: u16, bank: u16| v(bank + k.min(256 - n as u16) / n.max(2) as u16 * n.max(2) as u16, n);
+                out.extend([even(4, 0), even(8, AGPR0), even(255, 0), even(255, AGPR0)]);
+                if wide {
+                    out.push(v(5, n));
+                }
+                if class == Class::Avi {
+                    out.extend(INLINE.iter().map(|&k| Opnd::Imm(k)));
+                    out.extend(LITERAL.iter().map(|&k| Opnd::Imm(k)));
+                }
+            }
         }
         out
     }
 
-    fn imms(kind: Imm) -> Vec<i64> {
+    /// Immediate variants of `kind` for an instruction with `sources` encoded
+    /// sources (lane selects name only sources the instruction has).
+    fn imms(kind: Imm, sources: usize) -> Vec<i64> {
         match kind {
             Imm::None => vec![0],
+            // Lane selects: default, a broadcast of each source's low half, op_sel
+            // on each, a swap of source 0's halves, and all of them.
+            Imm::Pksel if sources == 3 => vec![0, 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x11, 0x77],
+            Imm::Pksel => vec![0, 0x10, 0x20, 0x01, 0x02, 0x11, 0x33],
+            Imm::Cpol => vec![0, 1, 2, 3],
+            // MFMA controls: none, cbsz:1, abid:2, blgp:3, all of them, the
+            // largest of each, and a bit past blgp (refused).
+            Imm::Mai => vec![0, 1, 2 << 3, 3 << 7, 1 | 2 << 3 | 3 << 7, 0x3ff, 1 << 10],
             Imm::Simm16 | Imm::Waitcnt | Imm::Sendmsg | Imm::Nop => vec![0, 3, 0x3f7, 0x1234],
             Imm::Label => vec![5],
             Imm::Swizzle => vec![0x41f, 0x841f],
@@ -331,6 +371,8 @@ mod gfx950 {
     fn variants(op: Opc) -> Vec<MInst> {
         let sig = t::signature(op).expect("a gfx950 row");
         let fmt = t::info(op).expect("a gfx950 row").fmt;
+        let swap = t::info(op).is_some_and(|i| i.form == t::Form::Swap);
+        let sources = sig.uses.iter().filter(|o| o.role != t::Role::Old).count();
         let defs: Vec<Vec<Opnd>> = sig.defs.iter().map(|o| choices(o.class, o.dwords, true)).collect();
         let uses: Vec<Vec<Opnd>> = sig.uses.iter().map(|o| choices(o.class, o.dwords, false)).collect();
         let pick = |di: Option<(usize, usize)>, ui: Option<(usize, usize)>| -> (Defs, Uses) {
@@ -344,9 +386,11 @@ mod gfx950 {
             }
             (d, u)
         };
-        let base_imm = imms(sig.imm)[0];
+        let base_imm = imms(sig.imm, sources)[0];
         let mut out = Vec::new();
         let mut push = |d: Defs, u: Uses, imm: i64, m: u32| {
+            // A swap reads the registers it writes.
+            let u = if swap { Uses::from(&d[..]) } else { u };
             let mut inst = MInst::new(op, d, u).with_imm(imm);
             inst.mods = m;
             if fmt == Fmt::Global && m & M_SADDR != 0 && t::info(op).is_some_and(|i| i.form != t::Form::Scratch) {
@@ -381,7 +425,7 @@ mod gfx950 {
             let (d, u) = pick(None, None);
             push(d, u, base_imm, m);
         }
-        for &imm in imms(sig.imm).iter().skip(1) {
+        for &imm in imms(sig.imm, sources).iter().skip(1) {
             let (d, u) = pick(None, None);
             push(d, u, imm, 0);
         }
@@ -397,6 +441,7 @@ mod gfx950 {
             let code = code.map_or("-".to_string(), |c| format!("{c:#04x}"));
             let name = match inst.op {
                 Opc::VCmp(_) => "VCmp".to_string(),
+                Opc::Gfx9(op) => format!("{op:?}"),
                 op => format!("{op:?}"),
             };
             println!(

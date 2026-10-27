@@ -20,7 +20,27 @@ pub mod hazards;
 pub mod isel_hooks;
 pub mod legalize;
 pub mod model;
+pub mod pack;
+pub mod rules;
+pub mod select;
+pub mod spill;
 pub mod waitcnt;
+
+/// What gfx950 does between the shared instruction selection and `legalize`:
+/// the peephole rules confirmed on gfx950 (`rules`), its own instructions
+/// (`select`, whose conversions also take the peephole's `PACK_F16`), VALU
+/// fusion under gfx9's operand rule, then packed f32 (`pack`) over what the
+/// fusion leaves. `ROCKE_DIRECT_DEBUG=nofuse` and `nopack` skip those two.
+pub fn prepare(f: &mut MFunc) {
+    rules::peephole(f);
+    select::run(f);
+    if !crate::rir::debug_flag("nofuse") {
+        crate::rir::post::fuse_valu(f);
+    }
+    if !crate::rir::debug_flag("nopack") {
+        pack::run(f);
+    }
+}
 
 /// The passes after register allocation on gfx950: pseudos become moves
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
@@ -75,6 +95,19 @@ pub fn program_resources(vgprs: u32, sgprs: u32, wg_ids: [bool; 3], scratch: boo
     ProgramResources { rsrc1, rsrc2, rsrc3, sgpr_count, vgpr_count }
 }
 
+/// `program_resources` with `agprs` AGPRs as well: they start at
+/// ACCUM_OFFSET (the VGPRs rounded up to four), and the unified count
+/// covers both, in the descriptor's VGPR granules and the metadata's
+/// `.vgpr_count`.
+pub fn program_resources_with_agprs(vgprs: u32, agprs: u32, sgprs: u32, wg_ids: [bool; 3], scratch: bool) -> ProgramResources {
+    let mut r = program_resources(vgprs, sgprs, wg_ids, scratch);
+    if agprs > 0 {
+        r.vgpr_count = vgprs.max(1).next_multiple_of(4) + agprs;
+        r.rsrc1 = r.rsrc1 & !0x3f | (r.vgpr_count.div_ceil(8) - 1);
+    }
+    r
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +137,24 @@ mod tests {
             let r = program_resources(vgprs, sgprs, ids, false);
             assert_eq!((r.rsrc1, r.rsrc2, r.rsrc3, r.sgpr_count, r.vgpr_count), (rsrc1, rsrc2, rsrc3, sgpr_count, vgprs));
         }
+    }
+
+    /// COMGR's AGPR kernels: (VGPRs, AGPRs, `.numbered_sgpr`) and the
+    /// descriptor and `.vgpr_count` they hold; with fewer VGPRs, the
+    /// accumulator offset and the unified count (whose granules COMGR
+    /// rounds up to the waves LDS allows).
+    #[test]
+    fn agprs_follow_the_accumulator_offset() {
+        let xy = [true, true, false];
+        for (vgprs, agprs, sgprs, rsrc1, vgpr_count) in [(256, 192, 100, 0x00af_0377, 448), (256, 196, 100, 0x00af_0378, 452)] {
+            let r = program_resources_with_agprs(vgprs, agprs, sgprs, xy, false);
+            assert_eq!((r.rsrc1, r.rsrc2, r.rsrc3, r.sgpr_count, r.vgpr_count), (rsrc1, 0x184, 0x3f, 106, vgpr_count));
+        }
+        for (vgprs, agprs, rsrc3, vgpr_count) in [(54, 16, 0xd, 72), (52, 16, 0xc, 68), (70, 16, 0x11, 88), (75, 16, 0x12, 92), (82, 16, 0x14, 100)] {
+            let r = program_resources_with_agprs(vgprs, agprs, 40, xy, false);
+            assert_eq!((r.rsrc3, r.vgpr_count), (rsrc3, vgpr_count));
+        }
+        assert_eq!(program_resources_with_agprs(37, 0, 18, xy, false), program_resources(37, 18, xy, false));
     }
 
     #[test]
@@ -177,14 +228,26 @@ mod tests {
         let limited = rir::compile_any_target_limited(&text, Target::Gfx950, 16).unwrap_or_else(|e| panic!("{e}"));
         let s = &limited.stats;
         assert!(s.vgprs <= 16, "{} VGPRs", s.vgprs);
-        // A one-wave workgroup at 16 VGPRs keeps eight waves per SIMD, so 32
-        // workgroups share a CU's LDS: 20 slots of 256 bytes each, then scratch.
+        // 16 VGPRs keep eight waves per SIMD, which 64 unified registers
+        // keep too: the hottest webs take the 48 AGPRs, the rest LDS.
+        assert_eq!(super::spill::agpr_slots(&crate::target::GFX950, 16, 0, 64), 48);
+        assert_eq!((s.spill.agpr_dwords, s.spill.scratch_dwords, s.waves), (48, 0, 8), "{:?}", s.spill);
+        assert!(s.spill.lds_dwords > 0, "{:?}", s.spill);
+        let listing = limited.listing();
+        for wanted in ["v_accvgpr_write_b32", "v_accvgpr_read_b32", "ds_write_b32", "ds_read_b32"] {
+            assert!(listing.contains(wanted), "{wanted} missing:\n{listing}");
+        }
+        // Past the AGPRs and the LDS: a one-wave workgroup at eight waves
+        // per SIMD leaves 32 workgroups a CU's LDS, 20 slots of 256 bytes
+        // each, then scratch.
+        let more = rir::compile_any_target_limited(&many_live(160), Target::Gfx950, 16).unwrap_or_else(|e| panic!("{e}"));
+        let s = &more.stats;
         assert_eq!(crate::target::GFX950.lds_spill_slots(0, 64, 16), 20);
-        assert_eq!(s.spill.lds_dwords, 20, "{:?}", s.spill);
+        assert_eq!((s.spill.agpr_dwords, s.spill.lds_dwords), (48, 20), "{:?}", s.spill);
         assert!(s.spill.scratch_dwords > 0, "{:?}", s.spill);
         assert_eq!((s.lds_bytes, s.spill.scratch_bytes), (20 * 256, 4 * s.spill.scratch_dwords));
-        let listing = limited.listing();
-        for wanted in ["ds_write_b32", "ds_read_b32", "scratch_store_dword", "scratch_load_dword"] {
+        let listing = more.listing();
+        for wanted in ["scratch_store_dword", "scratch_load_dword"] {
             assert!(listing.contains(wanted), "{wanted} missing:\n{listing}");
         }
         // A limit at or above what the kernel needs changes nothing.

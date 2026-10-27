@@ -114,12 +114,89 @@ fn vgpr(o: &Opnd) -> Result<u32, CompileError> {
 }
 
 /// `r`, if a VGPR tuple of `n` registers may start there: gfx90a and later
-/// keep tuples at even registers.
+/// keep tuples at even registers. AGPRs (`Phys::V(256 + k)`) go only where
+/// a form says so (`agpr`).
 fn aligned(r: u16, n: u8) -> Result<u32, CompileError> {
+    if r >= AGPR0 {
+        return Err(bad(format!("a{} where gfx950 reads or writes a VGPR", r - AGPR0)));
+    }
     if n >= 2 && r % 2 != 0 {
         return Err(bad(format!("v{r} (x{n}): gfx950 VGPR tuples start at an even register")));
     }
     Ok(r as u32)
+}
+
+/// AGPR a<k> is `Phys::V(AGPR0 + k)`: the AGPR half of gfx950's unified
+/// 512-entry register file, which gfx11 never reaches.
+pub const AGPR0: u16 = 256;
+
+/// An MFMA register operand (`mai`): its index in its bank and whether the
+/// bank is the AGPRs'.
+fn vgpr_or_agpr(o: &Opnd) -> Result<(u32, bool), CompileError> {
+    match *o {
+        Opnd::P(Phys::V(r), _) if r >= AGPR0 => Ok((agpr(o)?, true)),
+        _ => Ok((vgpr(o)?, false)),
+    }
+}
+
+/// The index k of AGPR a<k>, as the AGPR forms encode it; AGPR tuples
+/// start at even registers too.
+fn agpr(o: &Opnd) -> Result<u32, CompileError> {
+    match *o {
+        Opnd::P(Phys::V(r), n) if r >= AGPR0 && r - AGPR0 + n as u16 <= 256 => {
+            let k = r - AGPR0;
+            if n >= 2 && k % 2 != 0 {
+                return Err(bad(format!("a{k} (x{n}): gfx950 AGPR tuples start at an even register")));
+            }
+            Ok(k as u32)
+        }
+        _ => Err(bad(format!("{o:?} is not an AGPR"))),
+    }
+}
+
+/// A packed 32-bit source (`pk32`): a register pair at an even register,
+/// whose lanes the instruction's lane selects pick, or one register both
+/// lanes read (its selects must say so: op_sel clear, op_sel_hi cleared),
+/// encoded at an odd register as the high half of the pair below it.
+/// Constants are refused: which lane an inline constant feeds is not what
+/// the compiler means by them. Returns the operand code and whether it is
+/// the high half of its pair.
+fn pk32_source(o: &Opnd, broadcast: bool) -> Result<(u32, bool), CompileError> {
+    let one = o.dwords() == 1;
+    if one && !broadcast {
+        return Err(bad(format!("{o:?}: a one-dword packed 32-bit source is read by both lanes")));
+    }
+    match *o {
+        Opnd::P(Phys::V(r), _) if r % 2 == 0 => Ok((t::SRC_VGPR + aligned(r, 2)?, false)),
+        Opnd::P(Phys::V(r), 1) => Ok((t::SRC_VGPR + aligned(r - 1, 2)?, true)),
+        Opnd::P(Phys::S(r), _) if r % 2 == 0 => Ok((sgpr(r, 2)?, false)),
+        Opnd::P(Phys::S(r), 1) => Ok((sgpr(r - 1, 2)?, true)),
+        Opnd::P(Phys::VccLo, 2) => Ok((t::REG_VCC_LO, false)),
+        Opnd::P(Phys::ExecLo, 2) => Ok((t::REG_EXEC_LO, false)),
+        _ => Err(bad(format!("{o:?} is not a register pair at an even register (a packed 32-bit source)"))),
+    }
+}
+
+/// The encoded op_sel and op_sel_hi of a `pk32` instruction, and its source
+/// codes: its lane selects (`imm`), with a one-dword source at an odd
+/// register read as the high half of its pair by both lanes.
+pub(super) fn pk32_encoded(inst: &MInst) -> Result<(u32, u32, [u32; 3]), CompileError> {
+    let sel = inst.imm;
+    if !(0..=0x77).contains(&sel) || sel & 0x08 != 0 {
+        return Err(bad(format!("{}: lane selects {sel:#x}", t::mnemonic(inst.op).unwrap_or("?"))));
+    }
+    let (mut op_sel, mut op_sel_hi) = (sel as u32 & 7, !(sel as u32 >> 4) & 7);
+    let mut codes = [0u32; 3];
+    for (k, (c, o)) in codes.iter_mut().zip(&inst.uses).enumerate() {
+        let broadcast = op_sel >> k & 1 == 0 && op_sel_hi >> k & 1 == 0;
+        let (code, high) = pk32_source(o, broadcast)?;
+        *c = code;
+        if high {
+            op_sel |= 1 << k;
+            op_sel_hi |= 1 << k;
+        }
+    }
+    Ok((op_sel, op_sel_hi, codes))
 }
 
 /// A scalar a VALU instruction reads over the constant bus: an SGPR tuple by
@@ -275,8 +352,30 @@ fn dpp_control_on_gfx9(ctrl: u32) -> bool {
     matches!(ctrl, 0x000..=0x0ff | 0x101..=0x10f | 0x111..=0x11f | 0x121..=0x12f | 0x130 | 0x134 | 0x138 | 0x13c | 0x140..=0x143)
 }
 
+/// Source 2 of v_cndmask_b32 (the lane mask) and of v_addc_co_u32 /
+/// v_subb_co_u32 (the carry-in) is a 64-bit lane mask: an even SGPR pair,
+/// VCC or EXEC. The VOP3 source field also encodes inline constants,
+/// literals, VGPRs, single SGPRs, M0 and SCC, which the hardware does not
+/// read as a lane mask: such a select picks garbage. gfx950 encodes these
+/// opcodes as VOP3 only (`noshort`, VOP3B), never as the VOP2 forms that
+/// read VCC implicitly, so the mask is always this explicit operand.
+fn lane_mask_source(inst: &MInst) -> Result<(), CompileError> {
+    if !matches!(inst.op, Opc::VCndmaskB32 | Opc::VAddCoCiU32 | Opc::VSubCoCiU32) {
+        return Ok(());
+    }
+    match inst.uses.get(2) {
+        Some(Opnd::P(Phys::S(r), 2)) if r % 2 == 0 => Ok(()),
+        Some(Opnd::P(Phys::VccLo | Phys::ExecLo, 2)) => Ok(()),
+        o => Err(bad(format!(
+            "{} reads its lane mask from an even SGPR pair, VCC or EXEC, not {o:?}",
+            t::mnemonic(inst.op).unwrap_or("?")
+        ))),
+    }
+}
+
 /// Encodes one instruction into `out`.
 pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
+    lane_mask_source(inst)?;
     let op = inst.op;
     let name = || t::mnemonic(op).unwrap_or("?");
     let Some(info) = t::info(op) else {
@@ -339,6 +438,20 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             push2(out, t::EncSmem { op: code, sdata, sbase, offset: offset as u32 & 0x1f_ffff, ..Default::default() }.pack());
         }
         Fmt::Vop1 if defs.is_empty() => out.push(t::EncVop1 { op: code, ..Default::default() }.pack()),
+        Fmt::Vop1 if form == Form::Swap => {
+            // Both registers are read and written: the uses are the defs.
+            if uses != defs {
+                return Err(bad(format!("{}: the registers it swaps are its defs and its uses", name())));
+            }
+            let vdst = vgpr(nth(defs, 0)?)?;
+            let src0 = t::SRC_VGPR + vgpr(nth(defs, 1)?)?;
+            out.push(t::EncVop1 { op: code, vdst, src0 }.pack());
+        }
+        Fmt::Vop1 if form == Form::AccMov => {
+            let vdst = agpr(nth(defs, 0)?)?;
+            let src0 = t::SRC_VGPR + agpr(nth(uses, 0)?)?;
+            out.push(t::EncVop1 { op: code, vdst, src0 }.pack());
+        }
         Fmt::Vop1 if form == Form::Dpp16 => {
             let vdst = vgpr(nth(defs, 0)?)?;
             let src0 = vgpr(nth(uses, 0)?)?;
@@ -407,6 +520,100 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
         Fmt::Vopc => {
             let sdst = sdst(nth(defs, 0)?)?;
             vop3(out, vop3_code, sdst, None, uses, mods, valu_lits(form, flags), name())?;
+        }
+        Fmt::Vop3p if form == Form::Pk32 => {
+            let vdst = vgpr(nth(defs, 0)?)?;
+            if nth(defs, 0)?.dwords() != 2 {
+                return Err(bad(format!("{}: the destination is a register pair", name())));
+            }
+            // Lane selects: op_sel (source k's low lane reads its high half)
+            // and the op_sel_hi bits cleared (its high lane reads its low half).
+            let (op_sel, op_sel_hi, codes) = pk32_encoded(inst)?;
+            let [src0, src1, src2] = codes;
+            let neg = mods & (M_NEG0 | M_NEG1 | M_NEG2);
+            let words = t::EncVop3p {
+                op: code,
+                vdst,
+                neg_hi: neg,
+                op_sel,
+                op_sel_hi2: op_sel_hi >> 2,
+                op_sel_hi: op_sel_hi & 3,
+                src0,
+                src1,
+                src2,
+                neg,
+                ..Default::default()
+            };
+            push2(out, words.pack());
+        }
+        Fmt::Vop3p if form == Form::Mai => {
+            // D and C share one bank (acc_cd); A and B each name theirs (acc).
+            let (vdst, acc_cd) = vgpr_or_agpr(nth(defs, 0)?)?;
+            let (a, acc_a) = vgpr_or_agpr(nth(uses, 0)?)?;
+            let (b, acc_b) = vgpr_or_agpr(nth(uses, 1)?)?;
+            // An f64 MFMA's C constant is f64 (imm its high dword, as in f64
+            // forms), and it holds neg where blgp would be; the f8f6f4 form's
+            // cbsz and blgp name the A and B formats, which fix their sizes.
+            let f64 = matches!(t::lat(op), t::Lat::MfmaDgemm4 | t::Lat::MfmaDgemm16);
+            let src2 = match *nth(uses, 2)? {
+                Opnd::Imm(v) => t::inline_int(v)
+                    .or_else(|| if f64 { t::inline_f64(v) } else { t::inline_f32(v) })
+                    .ok_or_else(|| bad(format!("{}: C is a register or an inline constant", name())))?,
+                ref c => {
+                    let (k, acc_c) = vgpr_or_agpr(c)?;
+                    if acc_c != acc_cd {
+                        return Err(bad(format!("{}: D and C are in one bank (VGPRs or AGPRs)", name())));
+                    }
+                    t::SRC_VGPR + k
+                }
+            };
+            let ctl = inst.imm;
+            if !(0..1 << 10).contains(&ctl) {
+                return Err(bad(format!("{}: controls {ctl:#x} past cbsz, abid and blgp", name())));
+            }
+            let ctl = ctl as u32;
+            if f64 && ctl >> 7 != 0 {
+                return Err(bad(format!("{}: blgp on an f64 MFMA (those bits are neg there)", name())));
+            }
+            if op == Opc::Gfx9(t::Gfx9Op::VMfma16x16x128F8f6f4) {
+                let dwords = |format: u32| [8u8, 8, 6, 6, 4].get(format as usize).copied();
+                let (a, b) = (nth(uses, 0)?.dwords(), nth(uses, 1)?.dwords());
+                if ctl >> 3 & 15 != 0 || dwords(ctl & 7) != Some(a) || dwords(ctl >> 7 & 7) != Some(b) {
+                    return Err(bad(format!(
+                        "{}: A and B formats (cbsz {}, blgp {}) and sizes ({a}, {b} dwords) disagree, or abid is set",
+                        name(),
+                        ctl & 7,
+                        ctl >> 7 & 7
+                    )));
+                }
+            }
+            let words = t::EncVop3pMai {
+                vdst,
+                cbsz: ctl & 7,
+                abid: ctl >> 3 & 15,
+                acc_cd: u32::from(acc_cd),
+                op: code,
+                src0: t::SRC_VGPR + a,
+                src1: t::SRC_VGPR + b,
+                src2,
+                acc: u32::from(acc_a) | u32::from(acc_b) << 1,
+                blgp: ctl >> 7 & 7,
+            };
+            push2(out, words.pack());
+        }
+        Fmt::Vop3p if matches!(form, Form::AccRead | Form::AccWrite) => {
+            // The AGPR is vdst (a write) or src0 (a read, as 256 + index);
+            // op_sel_hi stays at its default, as llvm-mc writes it.
+            let (vdst, src0) = if form == Form::AccRead {
+                (vgpr(nth(defs, 0)?)?, t::SRC_VGPR + agpr(nth(uses, 0)?)?)
+            } else {
+                let (src0, lit) = src(nth(uses, 0)?, valu_lits(form, flags)[0])?;
+                if lit.is_some() {
+                    return Err(bad(format!("{}: a literal in a VOP3P encoding (gfx950 has none)", name())));
+                }
+                (agpr(nth(defs, 0)?)?, src0)
+            };
+            push2(out, t::EncVop3p { op: code, vdst, op_sel_hi2: 1, op_sel_hi: 3, src0, ..Default::default() }.pack());
         }
         Fmt::Vop3p => {
             let vdst = vgpr(nth(defs, 0)?)?;
@@ -492,6 +699,13 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             let sc0 = u32::from(mods & M_GLC != 0);
             let words = t::EncGlobal { op: code, offset: offset as u32, sc0, vdst, saddr, data, addr, ..Default::default() };
             push2(out, words.pack());
+        }
+        Fmt::Mubuf if form == Form::Nodata => {
+            if !defs.is_empty() || !uses.is_empty() || !(0..=3).contains(&inst.imm) {
+                return Err(bad(format!("{}: no operands, and a cache policy of sc0 and sc1 only", name())));
+            }
+            let (sc0, sc1) = (inst.imm as u32 & 1, inst.imm as u32 >> 1);
+            push2(out, t::EncMubuf { op: code, sc0, sc1, ..Default::default() }.pack());
         }
         Fmt::Mubuf => {
             let (vdata, rest) = if defs.is_empty() { (vgpr(nth(uses, 0)?)?, &uses[1..]) } else { (vgpr(&defs[0])?, uses) };
@@ -667,6 +881,194 @@ mod tests {
         ];
         for inst in refused {
             assert!(words(inst.clone()).is_err(), "{inst:?}");
+        }
+    }
+
+    /// The lane mask of v_cndmask_b32 and the carry-in of v_addc_co_u32 /
+    /// v_subb_co_u32: what llvm-mc -mcpu=gfx950 accepts there encodes with
+    /// its words; every other operand the source field could hold is refused.
+    #[test]
+    fn lane_masks_are_sgpr_pairs_vcc_or_exec() {
+        let (vcc, exec) = (Opnd::P(Phys::VccLo, 2), Opnd::P(Phys::ExecLo, 2));
+        let cnd = |m: Opnd| MInst::new(Opc::VCndmaskB32, [v(1, 1)], [v(2, 1), v(3, 1), m]);
+        let addc = |m: Opnd| MInst::new(Opc::VAddCoCiU32, [v(1, 1), s(6, 2)], [v(2, 1), v(3, 1), m]);
+        let subb = |m: Opnd| MInst::new(Opc::VSubCoCiU32, [v(1, 1), s(6, 2)], [v(2, 1), v(3, 1), m]);
+        let encoded: Vec<(MInst, Vec<u32>)> = vec![
+            (cnd(s(4, 2)), vec![0xd100_0001, 0x0012_0702]),
+            (cnd(vcc), vec![0xd100_0001, 0x01aa_0702]),
+            (cnd(exec), vec![0xd100_0001, 0x01fa_0702]),
+            (MInst::new(Opc::VCndmaskB32, [v(1, 1)], [Opnd::Imm(0), v(3, 1), s(100, 2)]), vec![0xd100_0001, 0x0192_0680]),
+            (addc(s(4, 2)), vec![0xd11c_0601, 0x0012_0702]),
+            (addc(vcc), vec![0xd11c_0601, 0x01aa_0702]),
+            (addc(exec), vec![0xd11c_0601, 0x01fa_0702]),
+            (subb(s(4, 2)), vec![0xd11d_0601, 0x0012_0702]),
+            (subb(vcc), vec![0xd11d_0601, 0x01aa_0702]),
+            (subb(exec), vec![0xd11d_0601, 0x01fa_0702]),
+        ];
+        for (inst, want) in encoded {
+            assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
+        }
+        let refused = [
+            // Inline constants (all lanes, no lane, an f32 constant) and a literal.
+            Opnd::Imm(u32::MAX),
+            Opnd::Imm(0),
+            Opnd::Imm(0x3f80_0000),
+            Opnd::Imm(0x1234_5678),
+            // VGPRs, a single SGPR, a pair at an odd SGPR.
+            v(4, 1),
+            v(4, 2),
+            s(4, 1),
+            s(5, 2),
+            // Half of VCC or EXEC, M0, SCC.
+            Opnd::P(Phys::VccLo, 1),
+            Opnd::P(Phys::ExecLo, 1),
+            Opnd::P(Phys::M0, 1),
+            Opnd::P(Phys::Scc, 1),
+        ];
+        for mask in refused {
+            for inst in [cnd(mask), addc(mask), subb(mask)] {
+                let err = words(inst.clone()).expect_err("a lane mask that is no SGPR pair, VCC or EXEC");
+                assert!(err.contains("lane mask"), "{inst:?}: {err}");
+            }
+        }
+        // No VOP2 form, whose lane mask is an implicit VCC, is ever chosen.
+        assert_eq!(t::info(Opc::VCndmaskB32).map(|i| (i.fmt, i.form)), Some((Fmt::Vop2, Form::Noshort)));
+        assert_eq!(t::info(Opc::VAddCoCiU32).map(|i| i.fmt), Some(Fmt::Vop3b));
+        assert_eq!(t::info(Opc::VSubCoCiU32).map(|i| i.fmt), Some(Fmt::Vop3b));
+    }
+
+    /// The gfx9 back end's own opcodes (`Opc::Gfx9`): llvm-mc -mcpu=gfx950
+    /// -show-encoding words, and what their forms refuse.
+    #[test]
+    fn gfx9_only_rows_match_llvm_mc() {
+        use t::Gfx9Op::*;
+        let g = Opc::Gfx9;
+        let cases: Vec<(MInst, Vec<u32>)> = vec![
+            // v_pk_mul_f32 v[0:1], v[2:3], v[4:5]; op_sel_hi:[0,1] and [1,0];
+            // an SGPR pair broadcast; neg_lo:[1,0] neg_hi:[1,0]
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]), vec![0xd3b1_4000, 0x1802_0902]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4000, 0x1002_0902]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x20), vec![0xd3b1_4000, 0x0802_0902]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [s(2, 2), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4000, 0x1002_0802]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_mods(M_NEG0), vec![0xd3b1_4100, 0x3802_0902]),
+            // A one-dword broadcast source: the low half of its pair at an even
+            // register; at an odd one the high half of the pair below it, read
+            // by both lanes (op_sel:[1,0] / [0,1,0] with op_sel_hi set).
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 1), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4000, 0x1002_0902]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [v(3, 1), v(4, 2)]).with_imm(0x10), vec![0xd3b1_4800, 0x1802_0902]),
+            (MInst::new(g(VPkMulF32), [v(0, 2)], [s(5, 1), v(2, 2)]).with_imm(0x10), vec![0xd3b1_4800, 0x1802_0404]),
+            (MInst::new(g(VPkFmaF32), [v(0, 2)], [v(2, 2), s(5, 1), v(6, 2)]).with_imm(0x20), vec![0xd3b0_5000, 0x1c18_0902]),
+            // v_pk_add_f32 ... op_sel:[1,0]; v_pk_fma_f32 (and op_sel_hi:[0,1,1]); v_pk_mov_b32 op_sel:[0,1]
+            (MInst::new(g(VPkAddF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x01), vec![0xd3b2_4800, 0x1802_0902]),
+            (MInst::new(g(VPkFmaF32), [v(0, 2)], [v(2, 2), v(4, 2), v(6, 2)]), vec![0xd3b0_4000, 0x1c1a_0902]),
+            (MInst::new(g(VPkFmaF32), [v(0, 2)], [v(2, 2), v(4, 2), v(6, 2)]).with_imm(0x10), vec![0xd3b0_4000, 0x141a_0902]),
+            (MInst::new(g(VPkMovB32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x02), vec![0xd3b3_5000, 0x1802_0902]),
+            // v_lshl_add_u64 v[0:1], v[2:3], 1, s[4:5] / 2, v[4:5]
+            (MInst::new(g(VLshlAddU64), [v(0, 2)], [v(2, 2), Opnd::Imm(1), s(4, 2)]), vec![0xd208_0000, 0x0011_0302]),
+            (MInst::new(g(VLshlAddU64), [v(0, 2)], [v(2, 2), Opnd::Imm(2), v(4, 2)]), vec![0xd208_0000, 0x0411_0502]),
+            // v_cvt_pk_f16_f32 v1, v0, v1; v_cvt_pk_bf16_f32 v1, 0, v1 and v1, -v0, v1
+            (MInst::new(g(VCvtPkF16F32), [v(1, 1)], [v(0, 1), v(1, 1)]), vec![0xd267_0001, 0x0002_0300]),
+            (MInst::new(g(VCvtPkBf16F32), [v(1, 1)], [Opnd::Imm(0), v(1, 1)]), vec![0xd268_0001, 0x0002_0280]),
+            (MInst::new(g(VCvtPkBf16F32), [v(1, 1)], [v(0, 1), v(1, 1)]).with_mods(M_NEG0), vec![0xd268_0001, 0x2002_0300]),
+            // v_permlane16_swap_b32 v0, v1 / v_permlane32_swap_b32 v0, v1
+            (MInst::new(g(VPermlane16SwapB32), [v(0, 1), v(1, 1)], [v(0, 1), v(1, 1)]), vec![0x7e00_b301]),
+            (MInst::new(g(VPermlane32SwapB32), [v(0, 1), v(1, 1)], [v(0, 1), v(1, 1)]), vec![0x7e00_b501]),
+            // buffer_inv sc1 / sc0 sc1; buffer_wbl2 sc1
+            (MInst::new(g(BufferInv), [], []).with_imm(2), vec![0xe0a4_8000, 0]),
+            (MInst::new(g(BufferInv), [], []).with_imm(3), vec![0xe0a4_c000, 0]),
+            (MInst::new(g(BufferWbl2), [], []).with_imm(2), vec![0xe0a0_8000, 0]),
+            // v_mov_b64 v[0:1], v[2:3] / s[2:3]
+            (MInst::new(g(VMovB64), [v(0, 2)], [v(2, 2)]), vec![0x7e00_7102]),
+            (MInst::new(g(VMovB64), [v(0, 2)], [s(2, 2)]), vec![0x7e00_7002]),
+            // v_accvgpr_read_b32 v6, a1 / v255, a255; v_accvgpr_write_b32 a3, 0 /
+            // a3, v7 / a255, v255 / a3, -1 / a3, 1.0 / a3, s5; v_accvgpr_mov_b32
+            // a2, a5 / a255, a0
+            (MInst::new(g(VAccvgprReadB32), [v(6, 1)], [v(AGPR0 + 1, 1)]), vec![0xd3d8_4006, 0x1800_0101]),
+            (MInst::new(g(VAccvgprReadB32), [v(255, 1)], [v(AGPR0 + 255, 1)]), vec![0xd3d8_40ff, 0x1800_01ff]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [Opnd::Imm(0)]), vec![0xd3d9_4003, 0x1800_0080]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [v(7, 1)]), vec![0xd3d9_4003, 0x1800_0107]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 255, 1)], [v(255, 1)]), vec![0xd3d9_40ff, 0x1800_01ff]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [Opnd::Imm(u32::MAX)]), vec![0xd3d9_4003, 0x1800_00c1]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [Opnd::Imm(0x3f80_0000)]), vec![0xd3d9_4003, 0x1800_00f2]),
+            (MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [s(5, 1)]), vec![0xd3d9_4003, 0x1800_0005]),
+            (MInst::new(g(VAccvgprMovB32), [v(AGPR0 + 2, 1)], [v(AGPR0 + 5, 1)]), vec![0x7e04_a505]),
+            (MInst::new(g(VAccvgprMovB32), [v(AGPR0 + 255, 1)], [v(AGPR0, 1)]), vec![0x7ffe_a500]),
+            // MFMAs: v_mfma_f32_16x16x32_bf16 v[0:3], v[4:7], v[8:11], v[0:3];
+            // _16x16x32_f16 a[0:3], v[4:7], v[8:11], a[0:3] / a[0:3], a[4:7],
+            // v[8:11], 0 / v[0:3], v[4:7], a[8:11], 1.0 / with cbsz:1 abid:2
+            // blgp:3; _32x32x16_f16 v[0:15], v[16:19], v[20:23], v[0:15];
+            // _16x16x4_f32 v[0:3], v4, v5, v[0:3]; v_mfma_f64_4x4x4_4b_f64
+            // v[0:1], v[2:3], v[4:5], v[0:1]; _16x16x128_f8f6f4 v[0:3], v[4:9],
+            // v[12:15], v[0:3] cbsz:2 blgp:4 (fp6 and fp4 operands)
+            (MInst::new(g(VMfma16x16x32Bf16), [v(0, 4)], [v(4, 4), v(8, 4), v(0, 4)]), vec![0xd3b5_0000, 0x0402_1104]),
+            (MInst::new(g(VMfma16x16x32F16), [v(AGPR0, 4)], [v(4, 4), v(8, 4), v(AGPR0, 4)]), vec![0xd3d4_8000, 0x0402_1104]),
+            (MInst::new(g(VMfma16x16x32F16), [v(AGPR0, 4)], [v(AGPR0 + 4, 4), v(8, 4), Opnd::Imm(0)]), vec![0xd3d4_8000, 0x0a02_1104]),
+            (MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [v(4, 4), v(AGPR0 + 8, 4), Opnd::Imm(0x3f80_0000)]), vec![0xd3d4_0000, 0x13ca_1104]),
+            (MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [v(4, 4), v(8, 4), v(0, 4)]).with_imm(0x191), vec![0xd3d4_1100, 0x6402_1104]),
+            (MInst::new(g(VMfma32x32x16F16), [v(0, 16)], [v(16, 4), v(20, 4), v(0, 16)]), vec![0xd3d5_0000, 0x0402_2910]),
+            (MInst::new(g(VMfma16x16x4F32), [v(0, 4)], [v(4, 1), v(5, 1), v(0, 4)]), vec![0xd3c5_0000, 0x0402_0b04]),
+            (MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), v(0, 2)]), vec![0xd3ef_0000, 0x0402_0902]),
+            (MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 6), v(12, 4), v(0, 4)]).with_imm(2 | 4 << 7), vec![0xd3ad_0200, 0x8402_1904]),
+        ];
+        for (inst, want) in cases {
+            assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
+        }
+        let refused = [
+            // An AGPR where a plain VALU instruction reads or writes a VGPR.
+            MInst::new(Opc::VAddF32, [v(1, 1)], [v(AGPR0 + 2, 1), v(3, 1)]),
+            MInst::new(Opc::VAddF32, [v(AGPR0 + 1, 1)], [v(2, 1), v(3, 1)]),
+            // Packed 32-bit sources: a constant, an odd pair, two scalar pairs;
+            // an odd or one-dword destination; lane selects past three sources.
+            MInst::new(g(VPkMulF32), [v(0, 2)], [Opnd::Imm(0x3f80_0000), v(4, 2)]),
+            MInst::new(g(VPkMulF32), [v(0, 2)], [v(3, 2), v(4, 2)]),
+            MInst::new(g(VPkMulF32), [v(0, 2)], [s(2, 2), s(4, 2)]),
+            MInst::new(g(VPkMulF32), [v(1, 2)], [v(2, 2), v(4, 2)]),
+            MInst::new(g(VPkMulF32), [v(0, 1)], [v(2, 2), v(4, 2)]),
+            MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]).with_imm(0x80),
+            // A one-dword source both lanes do not read alike.
+            MInst::new(g(VPkMulF32), [v(0, 2)], [v(2, 1), v(4, 2)]),
+            // A swap whose uses are not its defs.
+            MInst::new(g(VPermlane32SwapB32), [v(0, 1), v(1, 1)], [v(0, 1), v(2, 1)]),
+            // Cache control with an operand or a policy past sc0 and sc1.
+            MInst::new(g(BufferInv), [], [v(0, 1)]),
+            MInst::new(g(BufferInv), [], []).with_imm(4),
+            // AGPR moves: the AGPR and VGPR sides swapped, a literal (llvm-mc
+            // refuses `v_accvgpr_write_b32 a3, 0x1234`), an AGPR past a255.
+            MInst::new(g(VAccvgprReadB32), [v(AGPR0 + 1, 1)], [v(6, 1)]),
+            MInst::new(g(VAccvgprWriteB32), [v(6, 1)], [v(7, 1)]),
+            MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [v(AGPR0 + 4, 1)]),
+            MInst::new(g(VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [Opnd::Imm(0x1234)]),
+            MInst::new(g(VAccvgprMovB32), [v(AGPR0 + 2, 1)], [v(5, 1)]),
+            MInst::new(g(VAccvgprReadB32), [v(6, 1)], [v(AGPR0 + 256, 1)]),
+            // MFMAs: D and C in different banks, an SGPR source, an odd tuple,
+            // a literal C, controls past blgp (llvm-mc refuses the first three).
+            MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [v(4, 4), v(8, 4), v(AGPR0, 4)]),
+            MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [s(4, 4), v(8, 4), v(0, 4)]),
+            MInst::new(g(VMfma16x16x32F16), [v(1, 4)], [v(4, 4), v(8, 4), v(1, 4)]),
+            MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [v(4, 4), v(8, 4), Opnd::Imm(0x1234)]),
+            MInst::new(g(VMfma16x16x32F16), [v(0, 4)], [v(4, 4), v(8, 4), v(0, 4)]).with_imm(1 << 10),
+            // f64 MFMAs: blgp, an f32 constant as C (llvm-mc refuses both);
+            // f8f6f4: abid, a B format whose size is not B's.
+            MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), v(0, 2)]).with_imm(3 << 7),
+            MInst::new(g(VMfma4x4x4F64), [v(0, 2)], [v(2, 2), v(4, 2), Opnd::Imm(0x3e22_f983)]),
+            MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(2 << 3),
+            MInst::new(g(VMfma16x16x128F8f6f4), [v(0, 4)], [v(4, 8), v(12, 8), v(0, 4)]).with_imm(3 << 7),
+        ];
+        for inst in refused {
+            assert!(words(inst.clone()).is_err(), "{inst:?}");
+        }
+    }
+
+    /// The gfx11 encoders never take a gfx950-only opcode: it is a pseudo there.
+    #[test]
+    fn gfx9_only_opcodes_have_no_gfx11_encoding() {
+        for &op in &t::Gfx9Op::ALL {
+            let inst = MInst::new(Opc::Gfx9(op), [v(0, 2)], [v(2, 2), v(4, 2)]);
+            assert_eq!(Opc::Gfx9(op).fmt(), Fmt::Pseudo);
+            let f = MFunc { blocks: vec![MBlock { insts: vec![inst], loop_depth: 0 }], ..MFunc::default() };
+            assert!(crate::rir::asm::assemble(&f).is_err(), "{op:?}");
+            assert_eq!(Opc::Gfx9(op).name(), op.mnemonic());
+            assert_eq!(t::mnemonic(Opc::Gfx9(op)), Some(op.mnemonic()));
         }
     }
 

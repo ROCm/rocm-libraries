@@ -497,10 +497,34 @@ def load_info_gfx950(crate: Path) -> tuple[dict[str, Info], dict[int, str]]:
 
 
 def reg9(tok: str, float_text: bool = False) -> str:
-    """`reg` with gfx9's 64-bit lane masks."""
+    """`reg` with gfx9's 64-bit lane masks and AGPRs (`a<k>x<n>`)."""
     if tok in ("vcc", "exec"):
         return tok
+    m = re.fullmatch(r"a(\d+)x(\d+)", tok)
+    if m:
+        r, n = int(m.group(1)), int(m.group(2))
+        return f"a{r}" if n == 1 else f"a[{r}:{r + n - 1}]"
     return reg(tok, float_text=float_text)
+
+
+F64_INLINE_HI_TEXT = {
+    0x3FE00000: "0.5",
+    0xBFE00000: "-0.5",
+    0x3FF00000: "1.0",
+    0xBFF00000: "-1.0",
+    0x40000000: "2.0",
+    0xC0000000: "-2.0",
+    0x40100000: "4.0",
+    0xC0100000: "-4.0",
+}
+
+
+def f64_text9(tok: str) -> str:
+    """An f64 operand whose immediate is the constant's high dword (the f64
+    forms' convention): an f64 inline constant as its value."""
+    if is_imm(tok) and int(tok[1:], 16) in F64_INLINE_HI_TEXT:
+        return F64_INLINE_HI_TEXT[int(tok[1:], 16)]
+    return reg9(tok)
 
 
 def src_text9(tok: str, neg: bool, float_op: bool) -> str:
@@ -590,6 +614,11 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
     if fmt == "Vop1":
         if not d:
             return mn
+        if i.form == "swap":
+            # Both registers are read and written; the uses repeat the defs.
+            return f"{mn}_e32 {reg9(d[0])}, {reg9(d[1])}"
+        if i.form == "acc_mov":
+            return f"{mn} {reg9(d[0])}, {reg9(u[0])}"
         if i.form == "dpp16":
             return f"v_mov_b32_dpp {reg9(d[0])}, {reg9(u[0])} {dpp_text9(v.imm)}"
         if i.form == "sdwa_hi" and m & 0x10:
@@ -624,6 +653,48 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
         return f"{mn}{sfx} " + ", ".join([reg9(x) for x in d] + srcs) + opsel
     if fmt == "Vop3p":
         enc_uses = [x for x, sig in zip(u, i.uses) if sig[0] != "old"]
+        if i.form in ("acc_read", "acc_write"):
+            if m:
+                raise Unprintable("modifiers on an AGPR move")
+            return f"{mn} {reg9(d[0])}, {src_text9(u[0], False, False)}"
+        if i.form == "mai":
+            # D, A, B and C (C may be an inline constant, written as llvm-mc
+            # reads one); imm holds cbsz (2:0), abid (6:3) and blgp (9:7).
+            if m:
+                raise Unprintable("modifiers on an MFMA")
+            if v.imm >> 10:
+                raise Unprintable("MFMA controls past blgp")
+            ctl = [
+                ("cbsz", v.imm & 7),
+                ("abid", v.imm >> 3 & 15),
+                ("blgp", v.imm >> 7 & 7),
+            ]
+            tail = "".join(f" {k}:{x}" for k, x in ctl if x)
+            c = (
+                f64_text9(u[2])
+                if mn.startswith("v_mfma_f64")
+                else reg9(u[2], float_text=True)
+            )
+            ops = [reg9(d[0]), reg9(u[0]), reg9(u[1]), c]
+            return f"{mn} " + ", ".join(ops) + tail
+        if i.form == "pk32":
+            # Lane selects: op_sel in imm bits 2:0, op_sel_hi cleared in 6:4;
+            # neg negates both lanes (neg_lo and neg_hi).
+            if m & ~0x7:
+                raise Unprintable("modifier bits beyond neg")
+            n = len(enc_uses)
+            op_sel = [v.imm >> k & 1 for k in range(n)]
+            op_sel_hi = [1 - (v.imm >> (4 + k) & 1) for k in range(n)]
+            negs = [m >> k & 1 for k in range(n)]
+            tail = ""
+            if any(op_sel):
+                tail += " op_sel:[" + ",".join(map(str, op_sel)) + "]"
+            if not all(op_sel_hi):
+                tail += " op_sel_hi:[" + ",".join(map(str, op_sel_hi)) + "]"
+            if any(negs):
+                lst = ",".join(map(str, negs))
+                tail += f" neg_lo:[{lst}] neg_hi:[{lst}]"
+            return f"{mn} {reg9(d[0])}, " + ", ".join(reg9(x) for x in enc_uses) + tail
         if i.form == "mix":
             if m & ~0xE77:
                 raise Unprintable("modifier bits beyond neg, op_sel and op_sel_hi")
@@ -675,6 +746,10 @@ def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
             + mem_offset("offset", v.imm)
             + (" sc0" if m & (1 << 12) else "")
         )
+    if fmt == "Mubuf" and i.form == "nodata":
+        return (
+            mn + (" sc0" if v.imm & 1 else "") + (" sc1" if v.imm & 2 else "")
+        ).strip()
     if fmt == "Mubuf":
         vdata, rest = (reg9(d[0]), u) if d else (reg9(u[0]), u[1:])
         return (

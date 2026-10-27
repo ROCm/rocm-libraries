@@ -53,6 +53,18 @@ pub fn optimize(f: &mut MFunc) -> Stats {
     run(f, enabled)
 }
 
+/// `optimize` with only the families `allowed` keeps: the rules valid on a
+/// target that is not gfx11.
+pub fn optimize_with(f: &mut MFunc, allowed: [bool; FAMILIES.len()]) -> Stats {
+    let flags = std::env::var("ROCKE_DIRECT_DEBUG").unwrap_or_default();
+    let off = |name: &str| flags.split(',').any(|f| f.trim() == name);
+    if off("nopeephole") {
+        return Stats::default();
+    }
+    let enabled: [bool; FAMILIES.len()] = std::array::from_fn(|k| allowed[k] && !off(&format!("nopeephole_{}", FAMILIES[k])));
+    run(f, enabled)
+}
+
 fn run(f: &mut MFunc, enabled: [bool; FAMILIES.len()]) -> Stats {
     let mut stats = Stats::default();
     let succs: Vec<Vec<usize>> = (0..f.blocks.len()).map(|b| f.successors(b)).collect();

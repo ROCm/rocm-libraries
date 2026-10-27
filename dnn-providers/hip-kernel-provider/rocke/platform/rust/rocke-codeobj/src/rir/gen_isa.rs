@@ -792,6 +792,7 @@ pub fn variant(op: Opc) -> &'static str {
         Opc::PackF16 => "PackF16",
         Opc::SchedBarrier => "SchedBarrier",
         Opc::VCmp(_) => "VCmp",
+        Opc::Gfx9(_) => "Gfx9",
     }
 }
 
@@ -877,6 +878,7 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::GStoreD16HiB8 | Opc::BufferGl0Inv | Opc::BufferGl1Inv => Unit::Vmem,
         Opc::Copy | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier => Unit::Pseudo,
         Opc::VCmp(_) => Unit::Valu,
+        Opc::Gfx9(_) => Unit::Pseudo,
     }
 }
 
@@ -936,6 +938,7 @@ pub fn issue(op: Opc) -> u32 {
         Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64 | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64
         | Opc::VDivScaleF64 | Opc::VDivFmasF64 | Opc::VDivFixupF64 => 32,
         Opc::VCmp(_) => 1,
+        Opc::Gfx9(_) => 0,
     }
 }
 
@@ -1110,6 +1113,7 @@ pub fn lat(op: Opc) -> Lat {
         Opc::Copy | Opc::ImplicitDef | Opc::SchedBarrier => Lat::Pseudo,
         Opc::PackF16 => Lat::PseudoValu,
         Opc::VCmp(_) => Lat::Valu,
+        Opc::Gfx9(_) => Lat::Pseudo,
     }
 }
 
@@ -1196,6 +1200,7 @@ pub fn hazards(op: Opc) -> u32 {
         Opc::VWmmaF32F16 | Opc::VWmmaF32F16Early | Opc::VWmmaF32Bf16 | Opc::VWmmaF32Bf16Early | Opc::VWmmaI32Iu8
         | Opc::VWmmaI32Iu8Early | Opc::VWmmaI32Iu4 | Opc::VWmmaI32Iu4Early => HZ_WMMA_D | HZ_WMMA_AB,
         Opc::VCmp(_) => 0,
+        Opc::Gfx9(_) => 0,
     }
 }
 
@@ -1261,6 +1266,7 @@ pub fn vopd(op: Opc) -> Option<(u8, bool)> {
         Opc::VAndB32 => Some((18, true)),
         Opc::VAddNcU32 => Some((16, true)),
         Opc::VCmp(_) => None,
+        Opc::Gfx9(_) => None,
     }
 }
 
@@ -1318,6 +1324,7 @@ pub fn vopd_special(op: Opc) -> Option<Option<u8>> {
         | Opc::PackF16 | Opc::SchedBarrier => None,
         Opc::VFmaF32 => Some(Some(0)),
         Opc::VCmp(_) => None,
+        Opc::Gfx9(_) => None,
     }
 }
 
@@ -1414,8 +1421,9 @@ pub struct Info {
 }
 
 /// `Info` of each opcode in `ALL` order, then the compare family's
-/// fields that do not depend on its code.
-static INFO: [Info; 258] = [
+/// fields that do not depend on its code, then the gfx9 back end's own
+/// opcodes (`Opc::Gfx9`), which have no gfx11 encoding.
+static INFO: [Info; 259] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x01e, vop3: 0x01e, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1674,6 +1682,7 @@ static INFO: [Info; 258] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x20010, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x40000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Vopc, form: Form::Plain, table: true },
+    Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
 ];
 
 /// Position of an opcode in `INFO`.
@@ -1938,6 +1947,7 @@ fn index(op: Opc) -> usize {
         Opc::PackF16 => 255,
         Opc::SchedBarrier => 256,
         Opc::VCmp(_) => 257,
+        Opc::Gfx9(_) => 258,
     }
 }
 
@@ -2771,6 +2781,7 @@ pub fn signature(op: Opc) -> &'static Sig {
         Opc::PackF16 => &SIG_93,
         Opc::VCmp(c) if VCMP64.contains(&c) => &SIG_95,
         Opc::VCmp(_) => &SIG_94,
+        Opc::Gfx9(_) => &SIG_13,
     }
 }
 

@@ -18,6 +18,8 @@ mod burs;
 #[path = "gen_burs.rs"]
 #[rustfmt::skip]
 mod gen_burs;
+#[path = "div_bypass.rs"]
+mod div_bypass;
 
 fn unsupported(message: impl Into<String>) -> CompileError {
     CompileError::new("ROCKE_DIRECT_UNSUPPORTED", message)
@@ -2355,6 +2357,12 @@ impl<'a> Isel<'a> {
     /// then invalidates the caches below the scope (L0 is per CU, and a
     /// workgroup spans both CUs of a WGP).
     fn memory_fence(&mut self, scope: &str, acquire: bool) -> Result<(), CompileError> {
+        if self.t.target == Target::Gfx950 {
+            for inst in isel_hooks::fence(scope, acquire)? {
+                self.emit(inst);
+            }
+            return Ok(());
+        }
         self.gfx11_only("memory fences")?;
         let l1 = match scope {
             "agent" | "system" => true,
@@ -2847,6 +2855,7 @@ impl<'a> Isel<'a> {
             self.set(v, Val::D(out.0, out.1));
             return Ok(());
         }
+        let bypass = self.bypass64_open(a, b, uniform);
         let (ua, sa) = self.abs64(a, nonneg, uniform);
         let (ub, sb) = self.abs64(b, self.facts.nonneg(y), uniform);
         let mag = self.udivrem64(ua, ub, uniform, rem);
@@ -2860,6 +2869,7 @@ impl<'a> Isel<'a> {
             Some(s) => self.negate_if64(mag, s, uniform),
             None => mag,
         };
+        let out = self.bypass64_close(bypass, out, rem);
         self.set(v, Val::D(out.0, out.1));
         Ok(())
     }
@@ -5626,9 +5636,10 @@ mod convmem_tests {
 
     #[test]
     fn i64_division_by_a_runtime_value() {
-        // Uniform: the estimate comes back from the VALU, the rest is SALU.
+        // Uniform: the estimate comes back from the VALU, the rest is SALU
+        // (a third read-back is the 32-bit path's result, `div_bypass`).
         let uniform = insts(&i64_kernel("div", "b", false));
-        assert_eq!((count(&uniform, Opc::VRcpF32), count(&uniform, Opc::VReadfirstlaneB32)), (1, 2));
+        assert_eq!((count(&uniform, Opc::VRcpF32), count(&uniform, Opc::VReadfirstlaneB32)), (1, 3));
         assert!(count(&uniform, Opc::SMulHiU32) >= 8);
         assert_eq!(count(&uniform, Opc::VMadU64U32), 0);
         // Divergent: all VALU, with the 32x32->64 multiply-adds.

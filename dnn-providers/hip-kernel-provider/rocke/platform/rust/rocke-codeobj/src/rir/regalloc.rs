@@ -304,6 +304,11 @@ impl Live {
     pub(super) fn segs(&self, unit: usize) -> &[Seg] {
         segs_of(&self.table, &self.unit_segs[unit])
     }
+
+    /// Whether `other` has the same units, blocks and segments.
+    pub(super) fn same_as(&self, other: &Live) -> bool {
+        self.base == other.base && self.first == other.first && (0..*self.base.last().expect("non-empty")).all(|u| self.segs(u) == other.segs(u))
+    }
 }
 
 /// Units live out of each block, by backward dataflow; the units and block
@@ -480,7 +485,8 @@ fn crossing_sets(f: &MFunc, live: &Live, nunits: usize) -> (usize, Vec<Bits>, Ve
 }
 
 /// The units live out of each block, in increasing order.
-struct LiveOut {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct LiveOut {
     start: Vec<u32>,
     units: Vec<u32>,
 }
@@ -488,6 +494,24 @@ struct LiveOut {
 impl LiveOut {
     fn of(&self, block: usize) -> impl Iterator<Item = usize> + '_ {
         self.units[self.start[block] as usize..self.start[block + 1] as usize].iter().map(|&u| u as usize)
+    }
+
+    /// These sets without the units `dropped` marks and with `unit` live out
+    /// of exactly the blocks its flags mark.
+    pub(super) fn edited(&self, dropped: &[bool], unit: Option<(usize, &[bool])>) -> LiveOut {
+        let mut out = LiveOut { start: Vec::with_capacity(self.start.len()), units: Vec::with_capacity(self.units.len() + 8) };
+        out.start.push(0);
+        for b in 0..self.start.len() - 1 {
+            let at = out.units.len();
+            let kept = |&u: &usize| !dropped.get(u).copied().unwrap_or(false) && unit.is_none_or(|(x, _)| x != u);
+            out.units.extend(self.of(b).filter(kept).map(|u| u as u32));
+            if let Some((x, _)) = unit.filter(|(_, live)| live[b]) {
+                let pos = out.units[at..].partition_point(|&u| (u as usize) < x);
+                out.units.insert(at + pos, x as u32);
+            }
+            out.start.push(out.units.len() as u32);
+        }
+        out
     }
 }
 
@@ -521,7 +545,33 @@ pub(super) fn analyze(f: &MFunc) -> Result<Live, CompileError> {
 
 /// `analyze`, in the buffers of `scratch`.
 pub(super) fn analyze_reusing(f: &MFunc, scratch: &mut LiveScratch) -> Result<Live, CompileError> {
-    let (mut live, live_out) = dataflow(f)?;
+    analyze_with_live_out(f, scratch).map(|(live, _)| live)
+}
+
+/// `analyze_reusing`, with the units live out of each block.
+pub(super) fn analyze_with_live_out(f: &MFunc, scratch: &mut LiveScratch) -> Result<(Live, LiveOut), CompileError> {
+    let (live, live_out) = dataflow(f)?;
+    Ok((fill_segments(f, live, &live_out, scratch), live_out))
+}
+
+/// `analyze_reusing` of a function whose units live out of each block are
+/// `live_out`, without the dataflow (nor its checks of the operands).
+pub(super) fn analyze_given(f: &MFunc, live_out: &LiveOut, scratch: &mut LiveScratch) -> Live {
+    let nv = f.vregs.len();
+    let mut base = vec![0usize; nv + 1];
+    for i in 0..nv {
+        base[i + 1] = base[i] + f.vregs[i].size as usize;
+    }
+    let mut first = vec![0u32; f.blocks.len() + 1];
+    for b in 0..f.blocks.len() {
+        first[b + 1] = first[b] + f.blocks[b].insts.len() as u32;
+    }
+    fill_segments(f, Live { base, first, unit_segs: Vec::new(), table: Vec::new() }, live_out, scratch)
+}
+
+/// The live segments of each unit of `live` in linear slot order, given
+/// the units live out of each block.
+fn fill_segments(f: &MFunc, mut live: Live, live_out: &LiveOut, scratch: &mut LiveScratch) -> Live {
     let nunits = *live.base.last().expect("non-empty");
     let nblocks = f.blocks.len();
     // Live segments per unit, gathered as (unit, segment) and then sorted
@@ -606,7 +656,7 @@ pub(super) fn analyze_reusing(f: &MFunc, scratch: &mut LiveScratch) -> Result<Li
     }
     live.unit_segs = unit_segs;
     live.table = table;
-    Ok(live)
+    live
 }
 
 /// The most units of each register class live at one slot.
@@ -746,6 +796,17 @@ pub struct Allocation {
     pub spill: SpillStats,
     /// Only packing tuples first kept the assignment within the hardware.
     pub tight: bool,
+}
+
+impl Allocation {
+    /// The registers occupancy counts: the VGPRs and, from the next
+    /// multiple of four, the AGPRs spills took (gfx950).
+    pub fn unified_vgprs(&self) -> u32 {
+        match self.spill.agpr_dwords {
+            0 => self.num_vgprs,
+            agprs => self.num_vgprs.next_multiple_of(4) + agprs,
+        }
+    }
 }
 
 pub(super) fn find(parent: &mut [(u32, u8)], v: u32) -> (u32, u8) {
@@ -910,6 +971,9 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
     let mut spiller = super::spill::Spiller::new(f, cfg);
     let hw = Limits::for_func(f);
     let (mut target_s, mut target_v) = (limits.sgprs.min(hw.sgprs), limits.vgprs.min(hw.vgprs));
+    // The VGPR target spilling may go down to: gfx950's even-aligned tuples
+    // can fragment a small file far more than gfx11's unaligned ones.
+    let floor_v = if f.target == crate::target::Target::Gfx950 { 8 } else { 16 };
     // The liveness of `f` as it stands, while a step leaves `f` unchanged.
     let mut known = None;
     loop {
@@ -926,7 +990,7 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
         let hard = Limits { vgprs: limits.vgprs.min(hw.vgprs), sgprs: limits.sgprs.min(hw.sgprs) };
         // Fragmentation can need more registers than are live at once:
         // then spill further below the limit.
-        let assigned = assign_best(f, &live, groups, hard, hard, threads);
+        let assigned = assign_best_meanwhile(f, &live, groups, hard, threads, (&mut spiller, &mut known), (target_s, target_v.saturating_sub(2)));
         spiller.recycle(live);
         match assigned {
             Ok((phys, used, tight)) if used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs => {
@@ -939,14 +1003,64 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
                     target_s = target_s.saturating_sub(used.sgprs - hard.sgprs).max(8);
                 }
                 if used.vgprs > hard.vgprs {
-                    target_v = target_v.saturating_sub(used.vgprs - hard.vgprs).max(16);
+                    target_v = target_v.saturating_sub(used.vgprs - hard.vgprs).max(floor_v);
                 }
             }
-            Err(o) if o.class == Class::V && target_v > 16 => target_v -= o.size.clamp(2, 8),
+            Err(o) if o.class == Class::V && target_v > floor_v => target_v -= o.size.clamp(2, 8),
             Err(o) if o.class == Class::S && target_s > 8 => target_s -= o.size.clamp(1, 4),
             Err(o) => return Err(overflow_error(o)),
         }
     }
+}
+
+/// `assign_best` of `f` within `hard` for `allocate_spilling_on`. With a
+/// thread to spare on a large function, the assignment runs on another
+/// thread, over a copy of `f`, while this one already reduces `f` to `next`:
+/// the targets of the next round after an overflow by a value of one or two
+/// dwords, as most failed assignments end. The spiller keeps that reduction
+/// only if the next round asks for those targets; an assignment that fits
+/// gets `f` as it was. Either way the result is `assign_best`'s.
+fn assign_best_meanwhile(
+    f: &mut MFunc,
+    live: &Live,
+    groups: Groups,
+    hard: Limits,
+    threads: usize,
+    (spiller, known): (&mut super::spill::Spiller, &mut Option<Live>),
+    next: (u32, u32),
+) -> Result<(Vec<u32>, Used, bool), Overflow> {
+    if threads < 2 || live.slots() < 2 * PARALLEL_MIN_INSTS {
+        return assign_best(f, live, groups, hard, hard, threads);
+    }
+    let before = f.clone();
+    let checkpoint = spiller.checkpoint();
+    let stop = AtomicBool::new(false);
+    let fits = |used: &Used| used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs;
+    let (assigned, ahead) = std::thread::scope(|s| {
+        let helper = s.spawn(|| {
+            let assigned = assign_best(&before, live, groups, hard, hard, threads - 1);
+            // Outcomes after which the next round asks for other targets.
+            let elsewhere = match &assigned {
+                Ok((_, used, _)) => fits(used) || used.sgprs > hard.sgprs || used.vgprs != hard.vgprs + 2,
+                Err(o) => o.class != Class::V || o.size > 2,
+            };
+            if elsewhere {
+                stop.store(true, Ordering::Relaxed);
+            }
+            assigned
+        });
+        let ahead = spiller.reduce_ahead(f, next, known, &stop);
+        (helper.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)), ahead)
+    });
+    match ahead {
+        Some(reductions) if !matches!(&assigned, Ok((_, used, _)) if fits(used)) => spiller.hold(reductions, next, before, checkpoint),
+        _ => {
+            *f = before;
+            spiller.restore(checkpoint);
+            *known = None;
+        }
+    }
+    assigned
 }
 
 fn overflow_error(o: Overflow) -> CompileError {

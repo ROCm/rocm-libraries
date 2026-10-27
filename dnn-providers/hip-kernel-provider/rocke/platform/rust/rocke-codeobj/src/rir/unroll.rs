@@ -125,6 +125,7 @@ pub fn unroll_optimized(
     sink_invariants(kernel, &hosts);
     let mut ws = Workspace::default();
     ws.keep_lds_loads = keep_lds_loads;
+    ws.facts.merged_loads = facts.merged_loads;
     opt::sweep(kernel, &mut ws)?;
     if fold_select_offsets(kernel, &ws.facts) {
         opt::sweep(kernel, &mut ws)?;

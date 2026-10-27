@@ -110,12 +110,15 @@ fn overlap(a: Slot, b: Slot) -> bool {
 struct Spills {
     lds_base: i64,
     lds_addr: Option<u32>,
+    /// Where a reload of more than one dword may start: a multiple of this.
+    tuple_align: u32,
 }
 
 impl Spills {
     fn new(f: &MFunc, alloc: &Allocation, lds_base: u32) -> Spills {
         let lds_base = lds_base as i64;
-        Spills { lds_base, lds_addr: lds_address(f, alloc, lds_base) }
+        let tuple_align = f.target.info().vgpr_tuple_align as u32;
+        Spills { lds_base, lds_addr: lds_address(f, alloc, lds_base), tuple_align }
     }
 
     /// The slot of a spill reload or store, and whether it reloads.
@@ -344,7 +347,8 @@ fn hoist_block(insts: &mut Vec<MInst>, live_out: &Regs, num_vgprs: u32, waves: u
             }
             let dead = dead_after(insts, &access, last, live_out);
             let mut fewest = clashes(&insts[p + 1..=last], d, n, d);
-            for x in 0..num_vgprs.saturating_sub(n - 1) {
+            let step = if n > 1 { spills.tuple_align as usize } else { 1 };
+            for x in (0..num_vgprs.saturating_sub(n - 1)).step_by(step) {
                 let xs = span(x, n);
                 if meets(&xs, &busy) || !within(&xs, &dead) {
                     continue;
@@ -485,6 +489,24 @@ mod tests {
         assert_eq!(text(&run_with(insts, &[0; 4], 2)), text(&renamed));
     }
 
+    /// A renamed reload of a pair starts where the target's tuples may: the
+    /// first free pair is v[3:4] on gfx1151, v[4:5] on gfx950.
+    #[test]
+    fn renamed_pairs_keep_the_tuple_alignment() {
+        let consumed = MInst::new(Opc::DsStoreB32, [], [v(9), v(2)]);
+        let pair = |r: u16| Opnd::P(Phys::V(r), 2);
+        for (target, x) in [(crate::target::Target::Gfx1151, 3), (crate::target::Target::Gfx950, 4)] {
+            let reload64 = MInst::new(Opc::ScratchLoadB64, [pair(0)], []).with_imm(8);
+            let insts = vec![add(1, 0, 0), gather(2, 1), consumed.clone(), add(8, 1, 1), reload64, add(6, 0, 1)];
+            let mut f = MFunc { blocks: vec![MBlock { insts, loop_depth: 1 }], target, ..Default::default() };
+            let spills = Spills::new(&f, &scratch_spill(), 0);
+            hoist_block(&mut f.blocks[0].insts, &[0; 4], 16, 2, &spills);
+            let moved = MInst::new(Opc::ScratchLoadB64, [pair(x)], []).with_imm(8);
+            let want = vec![moved, add(1, 0, 0), gather(2, 1), consumed.clone(), add(8, 1, 1), add(6, x, x + 1)];
+            assert_eq!(text(&f.blocks[0].insts), text(&want), "{target:?}");
+        }
+    }
+
     /// What a reload must not pass, and readers it cannot move away from.
     #[test]
     fn reloads_stay_below_stores_to_their_slot_barriers_and_exec_changes() {
@@ -527,7 +549,7 @@ mod tests {
         for (seed, nv, ns, lds_slots) in [(1, 60, 30, 0), (2, 80, 40, 8), (3, 120, 12, 64), (4, 40, 70, 4), (5, 90, 20, 16)] {
             let f = random_kernel(seed, nv, ns);
             let want = effects(&f, 3);
-            let cfg = regalloc::SpillConfig { lds_size: 256, wg_size: 32, lds_slots };
+            let cfg = regalloc::SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
             let mut spilled = f.clone();
             let a = regalloc::allocate_spilling(&mut spilled, regalloc::Limits { vgprs: 24, sgprs: 20 }, cfg).expect("allocates");
             for waves in [1, 8] {

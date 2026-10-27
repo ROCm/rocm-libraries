@@ -252,6 +252,9 @@ pub struct KernelObjectSpec<'a> {
     pub max_flat_workgroup_size: u32,
     pub sgpr_count: u32,
     pub vgpr_count: u32,
+    /// AGPRs (gfx950), from the next multiple of four past the VGPRs: the
+    /// `.agpr_count`, the `.num_agpr` symbol, and part of `.vgpr_count`.
+    pub agpr_count: u32,
     pub rsrc1: u32,
     pub rsrc2: u32,
     pub rsrc3: u32,
@@ -311,6 +314,7 @@ fn gemm_spec<'a>(symbol: &'a str, code: &'a [u8]) -> KernelObjectSpec<'a> {
         max_flat_workgroup_size: 32,
         sgpr_count: 14,
         vgpr_count: 30,
+        agpr_count: 0,
         rsrc1: 0xe0af_0003,
         rsrc2: 0x0000_0184,
         rsrc3: 0x60,
@@ -335,7 +339,7 @@ fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
 
     if !target.wgp_mode {
         msgpack_str(&mut descriptor, ".agpr_count");
-        msgpack_uint(&mut descriptor, 0);
+        msgpack_uint(&mut descriptor, spec.agpr_count);
     }
     msgpack_str(&mut descriptor, ".args");
     msgpack_array(&mut descriptor, spec.args.len());
@@ -366,7 +370,11 @@ fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
     msgpack_str(&mut descriptor, ".uses_dynamic_stack");
     msgpack_bool(&mut descriptor, false);
     msgpack_str(&mut descriptor, ".vgpr_count");
-    msgpack_uint(&mut descriptor, spec.vgpr_count);
+    let unified = match spec.agpr_count {
+        0 => spec.vgpr_count,
+        agprs => spec.vgpr_count.next_multiple_of(4) + agprs,
+    };
+    msgpack_uint(&mut descriptor, unified);
     msgpack_str(&mut descriptor, ".vgpr_spill_count");
     msgpack_uint(&mut descriptor, spec.vgpr_spill_count);
     msgpack_str(&mut descriptor, ".wavefront_size");
@@ -470,6 +478,7 @@ fn regular_symbols(
     code_size: usize,
     num_vgpr: u32,
     private_segment_size: u32,
+    num_agpr: u32,
 ) -> Vec<u8> {
     const SHN_ABS: u16 = 0xfff1;
     let mut symbols = vec![0; 24];
@@ -482,7 +491,7 @@ fn regular_symbols(
         private_segment_size as u64,
         0,
     );
-    append_symbol(&mut symbols, strings.num_agpr, 0, 0, SHN_ABS, 0, 0);
+    append_symbol(&mut symbols, strings.num_agpr, 0, 0, SHN_ABS, num_agpr as u64, 0);
     append_symbol(&mut symbols, strings.num_vgpr, 0, 0, SHN_ABS, num_vgpr as u64, 0);
     append_symbol(&mut symbols, strings.has_dynamic_stack, 0, 0, SHN_ABS, 0, 0);
     append_symbol(&mut symbols, strings.has_recursion, 0, 0, SHN_ABS, 0, 0);
@@ -750,7 +759,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     };
 
     let dynsym = dynamic_symbols(symbol, layout.text_vaddr, layout.rodata, code.len());
-    let symtab = regular_symbols(&regular_strings, layout, code.len(), spec.vgpr_count, spec.private_segment_size);
+    let symtab = regular_symbols(&regular_strings, layout, code.len(), spec.vgpr_count, spec.private_segment_size, spec.agpr_count);
     assert_eq!(symtab.len(), SYMBOL_TABLE_SIZE);
     let rodata = kernel_descriptor(layout.text_vaddr, layout.rodata, spec);
     let dynamic = dynamic_table(layout, dynstr.len());
@@ -1178,6 +1187,7 @@ mod tests {
             max_flat_workgroup_size: 256,
             sgpr_count: r.sgpr_count,
             vgpr_count: r.vgpr_count,
+            agpr_count: 0,
             rsrc1: r.rsrc1,
             rsrc2: r.rsrc2,
             rsrc3: r.rsrc3,

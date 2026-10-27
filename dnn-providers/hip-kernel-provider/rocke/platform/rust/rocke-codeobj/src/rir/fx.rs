@@ -123,8 +123,30 @@ impl<V: Copy> ScopedTable<V> {
         None
     }
 
+    /// `get(key)`, adding `key` with `value` when it is absent: one hash
+    /// and one probe for both.
+    pub fn get_or_insert(&mut self, key: &[u32], value: V) -> Option<V> {
+        let hash = hash_words(key);
+        if !self.heads.is_empty() {
+            let mut i = self.heads[self.bucket(hash)];
+            while i != 0 {
+                let e = &self.entries[i as usize - 1];
+                if e.hash == hash && &self.words[e.start as usize..(e.start + e.len) as usize] == key {
+                    return Some(e.value);
+                }
+                i = e.next;
+            }
+        }
+        self.insert_hashed(key, hash, value);
+        None
+    }
+
     /// Adds `key`; while present, it shadows an equal key added earlier.
     pub fn insert(&mut self, key: &[u32], value: V) {
+        self.insert_hashed(key, hash_words(key), value);
+    }
+
+    fn insert_hashed(&mut self, key: &[u32], hash: u64, value: V) {
         if self.entries.len() >= self.heads.len() {
             self.bits = (self.bits + 1).max(8);
             self.heads = vec![0; 1 << self.bits];
@@ -134,7 +156,6 @@ impl<V: Copy> ScopedTable<V> {
                 self.heads[b] = i as u32 + 1;
             }
         }
-        let hash = hash_words(key);
         let b = self.bucket(hash);
         let start = self.words.len() as u32;
         self.words.extend_from_slice(key);
@@ -180,5 +201,36 @@ mod tests {
         assert_eq!(t.get(&[999, 999]), None);
         t.insert(&[2500, 2500 * 7], 7);
         assert_eq!(t.get(&[2500, 2500 * 7]), Some(7));
+    }
+
+    #[test]
+    fn get_or_insert_is_get_then_insert_when_absent() {
+        let (mut a, mut b) = (ScopedTable::default(), ScopedTable::default());
+        let mut seed = 0x9e37_79b9u64;
+        let mut next = |n: u32| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as u32 % n
+        };
+        let mut marks = Vec::new();
+        for i in 0..20000u32 {
+            let key: Vec<u32> = (0..1 + next(4)).map(|_| next(40)).collect();
+            match next(50) {
+                0 => marks.push((a.mark(), b.mark())),
+                1 => {
+                    if let Some((ma, mb)) = marks.pop() {
+                        a.truncate(ma);
+                        b.truncate(mb);
+                    }
+                }
+                _ => {
+                    let want = a.get(&key);
+                    if want.is_none() {
+                        a.insert(&key, i);
+                    }
+                    assert_eq!(b.get_or_insert(&key, i), want);
+                }
+            }
+            assert_eq!(a.get(&key), b.get(&key));
+        }
     }
 }

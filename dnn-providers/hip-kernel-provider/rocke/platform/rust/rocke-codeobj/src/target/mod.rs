@@ -59,6 +59,17 @@ impl Target {
         Err(CompileError::new("request", format!("the direct compiler does not compile for {} yet", self.name())))
     }
 
+    /// Whether this target's encoder encodes `op`. gfx950's opcode facts come
+    /// from its description (`gfx9::gen_isa`), its own opcodes (`Opc::Gfx9`)
+    /// included; gfx1151 encodes every shared opcode that is no pseudo, and
+    /// no `Opc::Gfx9` (a pseudo in the gfx11 tables).
+    pub fn encodes(self, op: crate::rir::mir::Opc) -> bool {
+        match self {
+            Target::Gfx1151 => op.fmt() != crate::rir::mir::Fmt::Pseudo,
+            Target::Gfx950 => gfx9::gen_isa::info(op).is_some_and(|i| i.table),
+        }
+    }
+
     /// The supported target named `name`, or the `request` error for an
     /// unknown or unsupported one.
     pub fn requested(name: &str) -> Result<Target, CompileError> {
@@ -158,6 +169,10 @@ impl TargetInfo {
     /// `lds_bytes` of LDS per workgroup of `workgroup_size` lanes.
     pub fn occupancy(&self, vgprs: u32, lds_bytes: u32, workgroup_size: u32) -> u32 {
         let by_vgprs = self.vgprs_per_simd / vgprs.max(1).next_multiple_of(self.vgpr_granule);
+        let by_vgprs = match self.target {
+            Target::Gfx950 => gfx9::rules::whole_workgroups(by_vgprs, workgroup_size.div_ceil(self.wave), self.simds_per_lds),
+            Target::Gfx1151 => by_vgprs,
+        };
         let by_lds = match lds_bytes {
             0 => self.max_waves,
             lds => ((self.lds_bytes_shared / lds) * workgroup_size.div_ceil(self.wave) / self.simds_per_lds).max(1),
@@ -236,6 +251,22 @@ mod tests {
         // slot's address is a 16-bit DS offset: 64 KiB, 16 slots.
         assert_eq!(t.lds_spill_slots(0, 1024, 256), 16);
         assert_eq!((GFX1151.vgpr_tuple_align, t.vgpr_tuple_align), (1, 2));
+    }
+
+    #[test]
+    fn opcodes_are_encoded_per_target() {
+        use crate::rir::mir::Opc;
+        use gfx9::gen_isa::Gfx9Op;
+        let both = |op: Opc| (Target::Gfx1151.encodes(op), Target::Gfx950.encodes(op));
+        assert_eq!(both(Opc::VAddF32), (true, true));
+        assert_eq!(both(Opc::Gfx9(Gfx9Op::VPkMulF32)), (false, true));
+        assert_eq!(both(Opc::Gfx9(Gfx9Op::BufferInv)), (false, true));
+        assert_eq!(both(Opc::VMaxminI32), (true, false));
+        assert_eq!(both(Opc::VDual), (true, false));
+        assert_eq!(both(Opc::Copy), (false, false));
+        for op in Gfx9Op::ALL {
+            assert_eq!(both(Opc::Gfx9(op)), (false, true), "{op:?}");
+        }
     }
 
     #[test]

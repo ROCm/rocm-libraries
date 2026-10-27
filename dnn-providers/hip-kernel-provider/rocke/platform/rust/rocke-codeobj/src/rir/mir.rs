@@ -137,26 +137,30 @@ pub fn dpp16_ctrl(dpp_ctrl: u32, bound_ctrl: bool) -> u32 {
 
 macro_rules! opcodes {
     ($($name:ident = ($fmt:ident, $code:expr, $mn:expr, $flags:expr)),* $(,)?) => {
+        /// `Gfx9` holds the gfx9 back end's own opcodes (rows of `isa/gfx950.isa`
+        /// with `opc=gfx9`): they have no gfx11 format or opcode (`Fmt::Pseudo`,
+        /// which the gfx11 encoders refuse), only their flags and mnemonic.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub enum Opc { $($name),*, VCmp(u8) }
+        pub enum Opc { $($name),*, VCmp(u8), Gfx9(crate::target::gfx9::gen_isa::Gfx9Op) }
 
         impl Opc {
             #[inline(always)]
             pub fn fmt(self) -> Fmt {
-                match self { $(Opc::$name => Fmt::$fmt),*, Opc::VCmp(_) => Fmt::Vopc }
+                match self { $(Opc::$name => Fmt::$fmt),*, Opc::VCmp(_) => Fmt::Vopc, Opc::Gfx9(_) => Fmt::Pseudo }
             }
             #[inline(always)]
             pub fn code(self) -> u16 {
-                match self { $(Opc::$name => $code),*, Opc::VCmp(op) => op as u16 }
+                match self { $(Opc::$name => $code),*, Opc::VCmp(op) => op as u16, Opc::Gfx9(_) => 0 }
             }
             pub fn name(self) -> String {
-                match self { $(Opc::$name => $mn.to_string()),*, Opc::VCmp(op) => vcmp_name(op) }
+                match self { $(Opc::$name => $mn.to_string()),*, Opc::VCmp(op) => vcmp_name(op), Opc::Gfx9(op) => op.mnemonic().to_string() }
             }
             #[inline(always)]
             pub fn flags(self) -> u32 {
                 match self {
                     $(Opc::$name => $flags),*,
                     Opc::VCmp(op) => F_USE_EXEC | if (op & 0xf0) == 0x50 { F_64BIT_SRC } else { 0 },
+                    Opc::Gfx9(op) => op.flags(),
                 }
             }
         }

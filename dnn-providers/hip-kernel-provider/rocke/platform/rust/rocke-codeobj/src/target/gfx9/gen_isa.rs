@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0xc96aede7fed898ec;
+pub const DESCRIPTION_DIGEST: u64 = 0xc229b04b9ffd8b3a;
 
 // ----- operand codes -----
 
@@ -464,10 +464,35 @@ impl EncMubuf {
     }
 }
 
+/// VOP3P_MAI: matrix fused multiply-add: acc_cd makes vdst and src2 AGPRs, acc the src0 and src1 bits
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EncVop3pMai {
+    pub vdst: u32,
+    pub cbsz: u32,
+    pub abid: u32,
+    pub acc_cd: u32,
+    pub op: u32,
+    pub src0: u32,
+    pub src1: u32,
+    pub src2: u32,
+    pub acc: u32,
+    pub blgp: u32,
+}
+
+impl EncVop3pMai {
+    #[inline(always)]
+    pub fn pack(&self) -> [u32; 2] {
+        [
+            0xd380_0000 | (self.vdst & 0xff) | (self.cbsz & 0x7) << 8 | (self.abid & 0xf) << 11 | (self.acc_cd & 0x1) << 15 | (self.op & 0x7f) << 16,
+            0x0000_0000 | (self.src0 & 0x1ff) | (self.src1 & 0x1ff) << 9 | (self.src2 & 0x1ff) << 18 | (self.acc & 0x3) << 27 | (self.blgp & 0x7) << 29,
+        ]
+    }
+}
+
 // ----- per-opcode facts -----
 
 /// The opcodes with a gfx950 row, in description order (the `VCmp` family excluded).
-pub const ALL: [Opc; 235] = [
+pub const ALL: [Opc; 269] = [
     Opc::SMovB32, Opc::SMovB64, Opc::SNotB32, Opc::SNotB64, Opc::SAndSaveexecB64, Opc::SAddU32,
     Opc::SSubU32, Opc::SAddI32, Opc::SSubI32, Opc::SAddcU32, Opc::SSubbU32, Opc::SLshlB32,
     Opc::SLshlB64, Opc::SLshrB32, Opc::SLshrB64, Opc::SAshrI32, Opc::SAshrI64, Opc::SLshl1AddU32,
@@ -507,7 +532,12 @@ pub const ALL: [Opc; 235] = [
     Opc::GAtomicAddF32Rtn, Opc::GLoadU8, Opc::GStoreB8, Opc::GStoreD16HiB8, Opc::BufLoadB32, Opc::BufLoadB64,
     Opc::BufLoadB128, Opc::BufStoreB16, Opc::BufStoreB32, Opc::BufStoreB64, Opc::BufStoreB128, Opc::BufLoadU16,
     Opc::BufLoadD16B16, Opc::BufLoadD16HiB16, Opc::BufStoreD16HiB16, Opc::Copy, Opc::ImplicitDef, Opc::PackF16,
-    Opc::SchedBarrier,
+    Opc::SchedBarrier, Opc::Gfx9(Gfx9Op::VPkFmaF32), Opc::Gfx9(Gfx9Op::VPkMulF32), Opc::Gfx9(Gfx9Op::VPkAddF32), Opc::Gfx9(Gfx9Op::VPkMovB32), Opc::Gfx9(Gfx9Op::VMovB64),
+    Opc::Gfx9(Gfx9Op::VLshlAddU64), Opc::Gfx9(Gfx9Op::VCvtPkF16F32), Opc::Gfx9(Gfx9Op::VCvtPkBf16F32), Opc::Gfx9(Gfx9Op::VPermlane16SwapB32), Opc::Gfx9(Gfx9Op::VPermlane32SwapB32), Opc::Gfx9(Gfx9Op::BufferInv),
+    Opc::Gfx9(Gfx9Op::BufferWbl2), Opc::Gfx9(Gfx9Op::VAccvgprReadB32), Opc::Gfx9(Gfx9Op::VAccvgprWriteB32), Opc::Gfx9(Gfx9Op::VAccvgprMovB32), Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16), Opc::Gfx9(Gfx9Op::VMfma16x16x32F16),
+    Opc::Gfx9(Gfx9Op::VMfma16x16x16F16), Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16), Opc::Gfx9(Gfx9Op::VMfma32x32x16F16), Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16), Opc::Gfx9(Gfx9Op::VMfma32x32x8F16), Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16),
+    Opc::Gfx9(Gfx9Op::VMfma4x4x4F16), Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16), Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8), Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8), Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8), Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8),
+    Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMfma16x16x4F32), Opc::Gfx9(Gfx9Op::VMfma32x32x2F32), Opc::Gfx9(Gfx9Op::VMfma16x16x4F64), Opc::Gfx9(Gfx9Op::VMfma4x4x4F64),
 ];
 
 /// gfx950 mnemonic of an opcode.
@@ -744,6 +774,40 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::ImplicitDef => Some("IMPLICIT_DEF"),
         Opc::PackF16 => Some("PACK_F16"),
         Opc::SchedBarrier => Some("SCHED_BARRIER"),
+        Opc::Gfx9(Gfx9Op::VPkFmaF32) => Some("v_pk_fma_f32"),
+        Opc::Gfx9(Gfx9Op::VPkMulF32) => Some("v_pk_mul_f32"),
+        Opc::Gfx9(Gfx9Op::VPkAddF32) => Some("v_pk_add_f32"),
+        Opc::Gfx9(Gfx9Op::VPkMovB32) => Some("v_pk_mov_b32"),
+        Opc::Gfx9(Gfx9Op::VMovB64) => Some("v_mov_b64"),
+        Opc::Gfx9(Gfx9Op::VLshlAddU64) => Some("v_lshl_add_u64"),
+        Opc::Gfx9(Gfx9Op::VCvtPkF16F32) => Some("v_cvt_pk_f16_f32"),
+        Opc::Gfx9(Gfx9Op::VCvtPkBf16F32) => Some("v_cvt_pk_bf16_f32"),
+        Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) => Some("v_permlane16_swap_b32"),
+        Opc::Gfx9(Gfx9Op::VPermlane32SwapB32) => Some("v_permlane32_swap_b32"),
+        Opc::Gfx9(Gfx9Op::BufferInv) => Some("buffer_inv"),
+        Opc::Gfx9(Gfx9Op::BufferWbl2) => Some("buffer_wbl2"),
+        Opc::Gfx9(Gfx9Op::VAccvgprReadB32) => Some("v_accvgpr_read_b32"),
+        Opc::Gfx9(Gfx9Op::VAccvgprWriteB32) => Some("v_accvgpr_write_b32"),
+        Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Some("v_accvgpr_mov_b32"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) => Some("v_mfma_f32_16x16x32_bf16"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) => Some("v_mfma_f32_16x16x32_f16"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x16F16) => Some("v_mfma_f32_16x16x16_f16"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16) => Some("v_mfma_f32_16x16x16_bf16"),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) => Some("v_mfma_f32_32x32x16_f16"),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) => Some("v_mfma_f32_32x32x16_bf16"),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) => Some("v_mfma_f32_32x32x8_f16"),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) => Some("v_mfma_f32_32x32x8_bf16"),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) => Some("v_mfma_f32_4x4x4_16b_f16"),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16) => Some("v_mfma_f32_4x4x4_16b_bf16"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8) => Some("v_mfma_f32_16x16x32_fp8_fp8"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8) => Some("v_mfma_f32_16x16x32_fp8_bf8"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) => Some("v_mfma_f32_16x16x32_bf8_fp8"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Some("v_mfma_f32_16x16x32_bf8_bf8"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Some("v_mfma_f32_16x16x128_f8f6f4"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Some("v_mfma_f32_16x16x4_f32"),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Some("v_mfma_f32_32x32x2_f32"),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Some("v_mfma_f64_16x16x4_f64"),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Some("v_mfma_f64_4x4x4_4b_f64"),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -805,7 +869,22 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::VLshrrevB64 | Opc::VAshrrevI64 | Opc::VReadlaneB32 | Opc::VWritelaneB32 | Opc::VFmaF64
         | Opc::VAddF64 | Opc::VMulF64 | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64 | Opc::VDivScaleF64
         | Opc::VDivFmasF64 | Opc::VDivFixupF64 | Opc::VPkFmaF16 | Opc::VPkAddF16 | Opc::VPkMulF16
-        | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDot2F32Bf16 => Unit::Valu,
+        | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDot2F32Bf16
+        | Opc::Gfx9(Gfx9Op::VPkFmaF32) | Opc::Gfx9(Gfx9Op::VPkMulF32) | Opc::Gfx9(Gfx9Op::VPkAddF32)
+        | Opc::Gfx9(Gfx9Op::VPkMovB32) | Opc::Gfx9(Gfx9Op::VMovB64) | Opc::Gfx9(Gfx9Op::VLshlAddU64)
+        | Opc::Gfx9(Gfx9Op::VCvtPkF16F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf16F32)
+        | Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) | Opc::Gfx9(Gfx9Op::VPermlane32SwapB32)
+        | Opc::Gfx9(Gfx9Op::VAccvgprReadB32) | Opc::Gfx9(Gfx9Op::VAccvgprWriteB32)
+        | Opc::Gfx9(Gfx9Op::VAccvgprMovB32) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) | Opc::Gfx9(Gfx9Op::VMfma16x16x16F16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16F16)
+        | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8F16)
+        | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) | Opc::Gfx9(Gfx9Op::VMfma4x4x4F16)
+        | Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) | Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) | Opc::Gfx9(Gfx9Op::VMfma32x32x2F32)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) | Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Unit::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Unit::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
@@ -820,7 +899,7 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::GAtomicAddU32Rtn | Opc::GAtomicAddF32Rtn | Opc::GLoadU8 | Opc::GStoreB8 | Opc::GStoreD16HiB8
         | Opc::BufLoadB32 | Opc::BufLoadB64 | Opc::BufLoadB128 | Opc::BufStoreB16 | Opc::BufStoreB32
         | Opc::BufStoreB64 | Opc::BufStoreB128 | Opc::BufLoadU16 | Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16
-        | Opc::BufStoreD16HiB16 => Unit::Vmem,
+        | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Unit::Vmem,
         Opc::Copy | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier => Unit::Pseudo,
         Opc::VCmp(_) => Unit::Valu,
         #[allow(unreachable_patterns)]
@@ -863,6 +942,22 @@ pub enum Lat {
     VmemLoad,
     /// vector memory store or atomic without return: vmcnt
     VmemStore,
+    /// cache control (buffer_inv, buffer_wbl2): no result and no counter the model ages; a fence waits for vmcnt(0) itself
+    Cache,
+    /// MFMA on the XDL pipe, 2 passes
+    MfmaXdl2,
+    /// MFMA on the XDL pipe, 4 passes
+    MfmaXdl4,
+    /// MFMA on the XDL pipe, 8 passes
+    MfmaXdl8,
+    /// MFMA off the XDL pipe (f32 inputs), 8 passes
+    MfmaSmfma8,
+    /// MFMA off the XDL pipe (f32 inputs), 16 passes
+    MfmaSmfma16,
+    /// f64 MFMA, 4x4 blocks (DGEMM)
+    MfmaDgemm4,
+    /// f64 MFMA, 16x16 (DGEMM)
+    MfmaDgemm16,
 }
 
 impl Lat {
@@ -880,6 +975,14 @@ impl Lat {
             Lat::Lds => 64,
             Lat::VmemLoad => 500,
             Lat::VmemStore => 8,
+            Lat::Cache => 4,
+            Lat::MfmaXdl2 => 20,
+            Lat::MfmaXdl4 => 32,
+            Lat::MfmaXdl8 => 48,
+            Lat::MfmaSmfma8 => 40,
+            Lat::MfmaSmfma16 => 72,
+            Lat::MfmaDgemm4 => 36,
+            Lat::MfmaDgemm16 => 76,
         }
     }
 
@@ -897,6 +1000,14 @@ impl Lat {
             Lat::Lds => CNT_LGKM,
             Lat::VmemLoad => CNT_VM,
             Lat::VmemStore => CNT_VM,
+            Lat::Cache => 0,
+            Lat::MfmaXdl2 => 0,
+            Lat::MfmaXdl4 => 0,
+            Lat::MfmaXdl8 => 0,
+            Lat::MfmaSmfma8 => 0,
+            Lat::MfmaSmfma16 => 0,
+            Lat::MfmaDgemm4 => 0,
+            Lat::MfmaDgemm16 => 0,
         }
     }
 }
@@ -934,7 +1045,13 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::VLshrrevB64 | Opc::VAshrrevI64 | Opc::VReadlaneB32 | Opc::VWritelaneB32 | Opc::VFmaF64
         | Opc::VAddF64 | Opc::VMulF64 | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64 | Opc::VDivScaleF64
         | Opc::VDivFmasF64 | Opc::VDivFixupF64 | Opc::VPkFmaF16 | Opc::VPkAddF16 | Opc::VPkMulF16
-        | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDot2F32Bf16 => Lat::Valu,
+        | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDot2F32Bf16
+        | Opc::Gfx9(Gfx9Op::VPkFmaF32) | Opc::Gfx9(Gfx9Op::VPkMulF32) | Opc::Gfx9(Gfx9Op::VPkAddF32)
+        | Opc::Gfx9(Gfx9Op::VPkMovB32) | Opc::Gfx9(Gfx9Op::VMovB64) | Opc::Gfx9(Gfx9Op::VLshlAddU64)
+        | Opc::Gfx9(Gfx9Op::VCvtPkF16F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf16F32)
+        | Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) | Opc::Gfx9(Gfx9Op::VPermlane32SwapB32)
+        | Opc::Gfx9(Gfx9Op::VAccvgprReadB32) | Opc::Gfx9(Gfx9Op::VAccvgprWriteB32)
+        | Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Lat::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Lat::Trans,
         Opc::DsAddU32 | Opc::DsAddF32 | Opc::DsAddRtnU32 | Opc::DsAddRtnF32 | Opc::DsStoreB32
         | Opc::DsStore2addrB32 | Opc::DsStoreB16 | Opc::DsSwizzleB32 | Opc::DsLoadB32 | Opc::DsLoadU16
@@ -952,6 +1069,19 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::BufStoreD16HiB16 => Lat::VmemStore,
         Opc::Copy | Opc::ImplicitDef | Opc::SchedBarrier => Lat::Pseudo,
         Opc::PackF16 => Lat::PseudoValu,
+        Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Lat::Cache,
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x16F16) | Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Lat::MfmaXdl4,
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Lat::MfmaXdl8,
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) | Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16) => Lat::MfmaXdl2,
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Lat::MfmaSmfma8,
+        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Lat::MfmaSmfma16,
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Lat::MfmaDgemm16,
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Lat::MfmaDgemm4,
         Opc::VCmp(_) => Lat::Valu,
         #[allow(unreachable_patterns)]
         _ => Lat::Pseudo,
@@ -1003,6 +1133,20 @@ pub enum Form {
     Ds2addr,
     /// SCRATCH (FLAT segment 1) with no address operands: the offset is in imm
     Scratch,
+    /// VOP3P on two 32-bit lanes: register sources at even registers, imm holds the lane selects, neg negates both lanes
+    Pk32,
+    /// VOP1 exchanging lanes of two VGPRs, both read and written: defs and uses are (vdst, vsrc)
+    Swap,
+    /// MUBUF cache control with no address or data: imm holds the cache policy
+    Nodata,
+    /// VOP3P v_accvgpr_read: src0 is an AGPR, encoded by its index
+    AccRead,
+    /// VOP3P v_accvgpr_write: vdst is an AGPR, encoded by its index
+    AccWrite,
+    /// VOP1 v_accvgpr_mov: vdst is an AGPR encoded by its index, src0 an AGPR encoded as 256 + index
+    AccMov,
+    /// VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls
+    Mai,
 }
 
 /// What the encoder reads of an opcode, in one load.
@@ -1022,7 +1166,7 @@ pub struct Info {
 
 /// `Info` of each opcode in `ALL` order, then the compare family's fields that do not
 /// depend on its code.
-static INFO: [Info; 236] = [
+static INFO: [Info; 270] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x004, vop3: 0x004, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1258,6 +1402,40 @@ static INFO: [Info; 236] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x20010, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x40000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
+    Info { code: 0x030, vop3: 0x030, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Pk32, table: true },
+    Info { code: 0x031, vop3: 0x031, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Pk32, table: true },
+    Info { code: 0x032, vop3: 0x032, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Pk32, table: true },
+    Info { code: 0x033, vop3: 0x033, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Pk32, table: true },
+    Info { code: 0x038, vop3: 0x178, flags: 0x02010, fmt: Fmt::Vop1, form: Form::Plain, table: true },
+    Info { code: 0x208, vop3: 0x208, flags: 0x02010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x267, vop3: 0x267, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x268, vop3: 0x268, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
+    Info { code: 0x059, vop3: 0x199, flags: 0x01010, fmt: Fmt::Vop1, form: Form::Swap, table: true },
+    Info { code: 0x05a, vop3: 0x19a, flags: 0x01010, fmt: Fmt::Vop1, form: Form::Swap, table: true },
+    Info { code: 0x029, vop3: 0x029, flags: 0x40000, fmt: Fmt::Mubuf, form: Form::Nodata, table: true },
+    Info { code: 0x028, vop3: 0x028, flags: 0x40000, fmt: Fmt::Mubuf, form: Form::Nodata, table: true },
+    Info { code: 0x058, vop3: 0x058, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::AccRead, table: true },
+    Info { code: 0x059, vop3: 0x059, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::AccWrite, table: true },
+    Info { code: 0x052, vop3: 0x192, flags: 0x00010, fmt: Fmt::Vop1, form: Form::AccMov, table: true },
+    Info { code: 0x035, vop3: 0x035, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x054, vop3: 0x054, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x04d, vop3: 0x04d, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x061, vop3: 0x061, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x055, vop3: 0x055, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x037, vop3: 0x037, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x04c, vop3: 0x04c, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x060, vop3: 0x060, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x04a, vop3: 0x04a, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x05f, vop3: 0x05f, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x073, vop3: 0x073, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x072, vop3: 0x072, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x071, vop3: 0x071, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x070, vop3: 0x070, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x02d, vop3: 0x02d, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x045, vop3: 0x045, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x044, vop3: 0x044, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x06e, vop3: 0x06e, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
+    Info { code: 0x06f, vop3: 0x06f, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Mai, table: true },
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Vopc, form: Form::Plain, table: true },
 ];
 
@@ -1500,7 +1678,41 @@ fn index(op: Opc) -> Option<usize> {
         Opc::ImplicitDef => Some(232),
         Opc::PackF16 => Some(233),
         Opc::SchedBarrier => Some(234),
-        Opc::VCmp(_) => Some(235),
+        Opc::Gfx9(Gfx9Op::VPkFmaF32) => Some(235),
+        Opc::Gfx9(Gfx9Op::VPkMulF32) => Some(236),
+        Opc::Gfx9(Gfx9Op::VPkAddF32) => Some(237),
+        Opc::Gfx9(Gfx9Op::VPkMovB32) => Some(238),
+        Opc::Gfx9(Gfx9Op::VMovB64) => Some(239),
+        Opc::Gfx9(Gfx9Op::VLshlAddU64) => Some(240),
+        Opc::Gfx9(Gfx9Op::VCvtPkF16F32) => Some(241),
+        Opc::Gfx9(Gfx9Op::VCvtPkBf16F32) => Some(242),
+        Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) => Some(243),
+        Opc::Gfx9(Gfx9Op::VPermlane32SwapB32) => Some(244),
+        Opc::Gfx9(Gfx9Op::BufferInv) => Some(245),
+        Opc::Gfx9(Gfx9Op::BufferWbl2) => Some(246),
+        Opc::Gfx9(Gfx9Op::VAccvgprReadB32) => Some(247),
+        Opc::Gfx9(Gfx9Op::VAccvgprWriteB32) => Some(248),
+        Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Some(249),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) => Some(250),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) => Some(251),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x16F16) => Some(252),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16) => Some(253),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) => Some(254),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) => Some(255),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) => Some(256),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) => Some(257),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) => Some(258),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16) => Some(259),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8) => Some(260),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8) => Some(261),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) => Some(262),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Some(263),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Some(264),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Some(265),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Some(266),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Some(267),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Some(268),
+        Opc::VCmp(_) => Some(269),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -1517,6 +1729,175 @@ pub fn info(op: Opc) -> Option<Info> {
         info.flags = op.flags();
     }
     Some(info)
+}
+
+/// The gfx9 back end's own opcodes: gfx950 instructions that are no shared
+/// opcode's twin (rows with `opc=gfx9`). `Opc::Gfx9` carries them; gfx11 has
+/// no encoding for any of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Gfx9Op {
+    /// v_pk_fma_f32
+    VPkFmaF32,
+    /// v_pk_mul_f32
+    VPkMulF32,
+    /// v_pk_add_f32
+    VPkAddF32,
+    /// v_pk_mov_b32
+    VPkMovB32,
+    /// v_mov_b64
+    VMovB64,
+    /// v_lshl_add_u64
+    VLshlAddU64,
+    /// v_cvt_pk_f16_f32
+    VCvtPkF16F32,
+    /// v_cvt_pk_bf16_f32
+    VCvtPkBf16F32,
+    /// v_permlane16_swap_b32
+    VPermlane16SwapB32,
+    /// v_permlane32_swap_b32
+    VPermlane32SwapB32,
+    /// buffer_inv
+    BufferInv,
+    /// buffer_wbl2
+    BufferWbl2,
+    /// v_accvgpr_read_b32
+    VAccvgprReadB32,
+    /// v_accvgpr_write_b32
+    VAccvgprWriteB32,
+    /// v_accvgpr_mov_b32
+    VAccvgprMovB32,
+    /// v_mfma_f32_16x16x32_bf16
+    VMfma16x16x32Bf16,
+    /// v_mfma_f32_16x16x32_f16
+    VMfma16x16x32F16,
+    /// v_mfma_f32_16x16x16_f16
+    VMfma16x16x16F16,
+    /// v_mfma_f32_16x16x16_bf16
+    VMfma16x16x16Bf16,
+    /// v_mfma_f32_32x32x16_f16
+    VMfma32x32x16F16,
+    /// v_mfma_f32_32x32x16_bf16
+    VMfma32x32x16Bf16,
+    /// v_mfma_f32_32x32x8_f16
+    VMfma32x32x8F16,
+    /// v_mfma_f32_32x32x8_bf16
+    VMfma32x32x8Bf16,
+    /// v_mfma_f32_4x4x4_16b_f16
+    VMfma4x4x4F16,
+    /// v_mfma_f32_4x4x4_16b_bf16
+    VMfma4x4x4Bf16,
+    /// v_mfma_f32_16x16x32_fp8_fp8
+    VMfma16x16x32Fp8Fp8,
+    /// v_mfma_f32_16x16x32_fp8_bf8
+    VMfma16x16x32Fp8Bf8,
+    /// v_mfma_f32_16x16x32_bf8_fp8
+    VMfma16x16x32Bf8Fp8,
+    /// v_mfma_f32_16x16x32_bf8_bf8
+    VMfma16x16x32Bf8Bf8,
+    /// v_mfma_f32_16x16x128_f8f6f4
+    VMfma16x16x128F8f6f4,
+    /// v_mfma_f32_16x16x4_f32
+    VMfma16x16x4F32,
+    /// v_mfma_f32_32x32x2_f32
+    VMfma32x32x2F32,
+    /// v_mfma_f64_16x16x4_f64
+    VMfma16x16x4F64,
+    /// v_mfma_f64_4x4x4_4b_f64
+    VMfma4x4x4F64,
+}
+
+impl Gfx9Op {
+    /// Every one of them, in description order.
+    pub const ALL: [Gfx9Op; 34] = [
+        Gfx9Op::VPkFmaF32, Gfx9Op::VPkMulF32, Gfx9Op::VPkAddF32, Gfx9Op::VPkMovB32, Gfx9Op::VMovB64,
+        Gfx9Op::VLshlAddU64, Gfx9Op::VCvtPkF16F32, Gfx9Op::VCvtPkBf16F32, Gfx9Op::VPermlane16SwapB32, Gfx9Op::VPermlane32SwapB32,
+        Gfx9Op::BufferInv, Gfx9Op::BufferWbl2, Gfx9Op::VAccvgprReadB32, Gfx9Op::VAccvgprWriteB32, Gfx9Op::VAccvgprMovB32,
+        Gfx9Op::VMfma16x16x32Bf16, Gfx9Op::VMfma16x16x32F16, Gfx9Op::VMfma16x16x16F16, Gfx9Op::VMfma16x16x16Bf16, Gfx9Op::VMfma32x32x16F16,
+        Gfx9Op::VMfma32x32x16Bf16, Gfx9Op::VMfma32x32x8F16, Gfx9Op::VMfma32x32x8Bf16, Gfx9Op::VMfma4x4x4F16, Gfx9Op::VMfma4x4x4Bf16,
+        Gfx9Op::VMfma16x16x32Fp8Fp8, Gfx9Op::VMfma16x16x32Fp8Bf8, Gfx9Op::VMfma16x16x32Bf8Fp8, Gfx9Op::VMfma16x16x32Bf8Bf8, Gfx9Op::VMfma16x16x128F8f6f4,
+        Gfx9Op::VMfma16x16x4F32, Gfx9Op::VMfma32x32x2F32, Gfx9Op::VMfma16x16x4F64, Gfx9Op::VMfma4x4x4F64,
+    ];
+
+    /// The shared flags (`Opc::flags`).
+    #[inline]
+    pub fn flags(self) -> u32 {
+        match self {
+            Gfx9Op::VPkFmaF32 => 0x00010,
+            Gfx9Op::VPkMulF32 => 0x00010,
+            Gfx9Op::VPkAddF32 => 0x00010,
+            Gfx9Op::VPkMovB32 => 0x00010,
+            Gfx9Op::VMovB64 => 0x02010,
+            Gfx9Op::VLshlAddU64 => 0x02010,
+            Gfx9Op::VCvtPkF16F32 => 0x00010,
+            Gfx9Op::VCvtPkBf16F32 => 0x00010,
+            Gfx9Op::VPermlane16SwapB32 => 0x01010,
+            Gfx9Op::VPermlane32SwapB32 => 0x01010,
+            Gfx9Op::BufferInv => 0x40000,
+            Gfx9Op::BufferWbl2 => 0x40000,
+            Gfx9Op::VAccvgprReadB32 => 0x00010,
+            Gfx9Op::VAccvgprWriteB32 => 0x00010,
+            Gfx9Op::VAccvgprMovB32 => 0x00010,
+            Gfx9Op::VMfma16x16x32Bf16 => 0x00010,
+            Gfx9Op::VMfma16x16x32F16 => 0x00010,
+            Gfx9Op::VMfma16x16x16F16 => 0x00010,
+            Gfx9Op::VMfma16x16x16Bf16 => 0x00010,
+            Gfx9Op::VMfma32x32x16F16 => 0x00010,
+            Gfx9Op::VMfma32x32x16Bf16 => 0x00010,
+            Gfx9Op::VMfma32x32x8F16 => 0x00010,
+            Gfx9Op::VMfma32x32x8Bf16 => 0x00010,
+            Gfx9Op::VMfma4x4x4F16 => 0x00010,
+            Gfx9Op::VMfma4x4x4Bf16 => 0x00010,
+            Gfx9Op::VMfma16x16x32Fp8Fp8 => 0x00010,
+            Gfx9Op::VMfma16x16x32Fp8Bf8 => 0x00010,
+            Gfx9Op::VMfma16x16x32Bf8Fp8 => 0x00010,
+            Gfx9Op::VMfma16x16x32Bf8Bf8 => 0x00010,
+            Gfx9Op::VMfma16x16x128F8f6f4 => 0x00010,
+            Gfx9Op::VMfma16x16x4F32 => 0x00010,
+            Gfx9Op::VMfma32x32x2F32 => 0x00010,
+            Gfx9Op::VMfma16x16x4F64 => 0x00010,
+            Gfx9Op::VMfma4x4x4F64 => 0x00010,
+        }
+    }
+
+    /// gfx950 mnemonic.
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            Gfx9Op::VPkFmaF32 => "v_pk_fma_f32",
+            Gfx9Op::VPkMulF32 => "v_pk_mul_f32",
+            Gfx9Op::VPkAddF32 => "v_pk_add_f32",
+            Gfx9Op::VPkMovB32 => "v_pk_mov_b32",
+            Gfx9Op::VMovB64 => "v_mov_b64",
+            Gfx9Op::VLshlAddU64 => "v_lshl_add_u64",
+            Gfx9Op::VCvtPkF16F32 => "v_cvt_pk_f16_f32",
+            Gfx9Op::VCvtPkBf16F32 => "v_cvt_pk_bf16_f32",
+            Gfx9Op::VPermlane16SwapB32 => "v_permlane16_swap_b32",
+            Gfx9Op::VPermlane32SwapB32 => "v_permlane32_swap_b32",
+            Gfx9Op::BufferInv => "buffer_inv",
+            Gfx9Op::BufferWbl2 => "buffer_wbl2",
+            Gfx9Op::VAccvgprReadB32 => "v_accvgpr_read_b32",
+            Gfx9Op::VAccvgprWriteB32 => "v_accvgpr_write_b32",
+            Gfx9Op::VAccvgprMovB32 => "v_accvgpr_mov_b32",
+            Gfx9Op::VMfma16x16x32Bf16 => "v_mfma_f32_16x16x32_bf16",
+            Gfx9Op::VMfma16x16x32F16 => "v_mfma_f32_16x16x32_f16",
+            Gfx9Op::VMfma16x16x16F16 => "v_mfma_f32_16x16x16_f16",
+            Gfx9Op::VMfma16x16x16Bf16 => "v_mfma_f32_16x16x16_bf16",
+            Gfx9Op::VMfma32x32x16F16 => "v_mfma_f32_32x32x16_f16",
+            Gfx9Op::VMfma32x32x16Bf16 => "v_mfma_f32_32x32x16_bf16",
+            Gfx9Op::VMfma32x32x8F16 => "v_mfma_f32_32x32x8_f16",
+            Gfx9Op::VMfma32x32x8Bf16 => "v_mfma_f32_32x32x8_bf16",
+            Gfx9Op::VMfma4x4x4F16 => "v_mfma_f32_4x4x4_16b_f16",
+            Gfx9Op::VMfma4x4x4Bf16 => "v_mfma_f32_4x4x4_16b_bf16",
+            Gfx9Op::VMfma16x16x32Fp8Fp8 => "v_mfma_f32_16x16x32_fp8_fp8",
+            Gfx9Op::VMfma16x16x32Fp8Bf8 => "v_mfma_f32_16x16x32_fp8_bf8",
+            Gfx9Op::VMfma16x16x32Bf8Fp8 => "v_mfma_f32_16x16x32_bf8_fp8",
+            Gfx9Op::VMfma16x16x32Bf8Bf8 => "v_mfma_f32_16x16x32_bf8_bf8",
+            Gfx9Op::VMfma16x16x128F8f6f4 => "v_mfma_f32_16x16x128_f8f6f4",
+            Gfx9Op::VMfma16x16x4F32 => "v_mfma_f32_16x16x4_f32",
+            Gfx9Op::VMfma32x32x2F32 => "v_mfma_f32_32x32x2_f32",
+            Gfx9Op::VMfma16x16x4F64 => "v_mfma_f64_16x16x4_f64",
+            Gfx9Op::VMfma4x4x4F64 => "v_mfma_f64_4x4x4_4b_f64",
+        }
+    }
 }
 
 /// Operand role: the encoding field an operand goes to.
@@ -1543,6 +1924,7 @@ pub enum Role {
     Soffset,
     Dst,
     Src,
+    Vsrc,
 }
 
 /// Operand class.
@@ -1562,6 +1944,14 @@ pub enum Class {
     Vi,
     /// any register (pseudo)
     A,
+    /// vector source that is a register: VGPR, SGPR or special register tuple, no constant
+    Vr,
+    /// AGPR tuple: AGPR a<k> is Phys::V(256 + k), the AGPR half of the unified register file
+    Acc,
+    /// VGPR or AGPR tuple
+    Av,
+    /// VGPR or AGPR tuple, or an inline constant
+    Avi,
 }
 
 /// What `MInst::imm` holds.
@@ -1593,6 +1983,12 @@ pub enum Imm {
     Off13s,
     /// 12-bit unsigned byte offset
     Off12,
+    /// lane selects of a packed 32-bit instruction: op_sel in bits 2:0, the op_sel_hi bits cleared in 6:4 (0: each lane reads its own half)
+    Pksel,
+    /// cache policy: sc0 in bit 0, sc1 in bit 1
+    Cpol,
+    /// MFMA controls: cbsz in bits 2:0, abid in bits 6:3, blgp in bits 9:7
+    Mai,
 }
 
 /// One operand of a signature: role, class and size in dwords.
@@ -2130,12 +2526,126 @@ const SIG_85: Sig = Sig {
     mods: 0x0,
 };
 const SIG_86: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src2, class: Class::Vr, dwords: 2 }],
+    imm: Imm::Pksel,
+    mods: 0x7,
+};
+const SIG_87: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }],
+    imm: Imm::Pksel,
+    mods: 0x7,
+};
+const SIG_88: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vr, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vr, dwords: 2 }],
+    imm: Imm::Pksel,
+    mods: 0x0,
+};
+const SIG_89: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_90: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src2, class: Class::Vs, dwords: 2 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_91: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }, Operand { role: Role::Vsrc, class: Class::V, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_92: Sig = Sig {
+    defs: &[],
+    uses: &[],
+    imm: Imm::Cpol,
+    mods: 0x0,
+};
+const SIG_93: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Acc, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_94: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Acc, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Vi, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_95: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Acc, dwords: 1 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Acc, dwords: 1 }],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_96: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 4 }, Operand { role: Role::Src1, class: Class::Av, dwords: 4 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_97: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_98: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 4 }, Operand { role: Role::Src1, class: Class::Av, dwords: 4 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_99: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_100: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 8 }, Operand { role: Role::Src1, class: Class::Av, dwords: 8 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_101: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 4 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 1 }, Operand { role: Role::Src1, class: Class::Av, dwords: 1 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 4 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_102: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 16 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 1 }, Operand { role: Role::Src1, class: Class::Av, dwords: 1 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 16 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_103: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 8 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 8 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_104: Sig = Sig {
+    defs: &[Operand { role: Role::Vdst, class: Class::Av, dwords: 2 }],
+    uses: &[Operand { role: Role::Src0, class: Class::Av, dwords: 2 }, Operand { role: Role::Src1, class: Class::Av, dwords: 2 }, Operand { role: Role::Src2, class: Class::Avi, dwords: 2 }],
+    imm: Imm::Mai,
+    mods: 0x0,
+};
+const SIG_105: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }],
     imm: Imm::None,
     mods: 0x7,
 };
-const SIG_87: Sig = Sig {
+const SIG_106: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 2 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 2 }],
     imm: Imm::None,
@@ -2146,8 +2656,8 @@ const SIG_87: Sig = Sig {
 #[inline]
 pub fn signature(op: Opc) -> Option<&'static Sig> {
     match op {
-        Opc::VCmp(c) if VCMP64.contains(&c) => Some(&SIG_87),
-        Opc::VCmp(_) => Some(&SIG_86),
+        Opc::VCmp(c) if VCMP64.contains(&c) => Some(&SIG_106),
+        Opc::VCmp(_) => Some(&SIG_105),
         Opc::SMovB32 | Opc::SNotB32 => Some(&SIG_0),
         Opc::SMovB64 | Opc::SNotB64 => Some(&SIG_1),
         Opc::SAndSaveexecB64 => Some(&SIG_2),
@@ -2196,7 +2706,7 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::VMadU64U32 | Opc::VMadI64I32 => Some(&SIG_34),
         Opc::VAddCoU32 | Opc::VSubCoU32 | Opc::VSubrevCoU32 => Some(&SIG_35),
         Opc::VPackB32F16 => Some(&SIG_36),
-        Opc::VLdexpF32 => Some(&SIG_37),
+        Opc::VLdexpF32 | Opc::Gfx9(Gfx9Op::VCvtPkF16F32) | Opc::Gfx9(Gfx9Op::VCvtPkBf16F32) => Some(&SIG_37),
         Opc::VLshlrevB64 | Opc::VLshrrevB64 | Opc::VAshrrevI64 => Some(&SIG_38),
         Opc::VReadlaneB32 => Some(&SIG_39),
         Opc::VWritelaneB32 => Some(&SIG_40),
@@ -2247,6 +2757,28 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16 => Some(&SIG_83),
         Opc::Copy => Some(&SIG_84),
         Opc::ImplicitDef => Some(&SIG_85),
+        Opc::Gfx9(Gfx9Op::VPkFmaF32) => Some(&SIG_86),
+        Opc::Gfx9(Gfx9Op::VPkMulF32) | Opc::Gfx9(Gfx9Op::VPkAddF32) => Some(&SIG_87),
+        Opc::Gfx9(Gfx9Op::VPkMovB32) => Some(&SIG_88),
+        Opc::Gfx9(Gfx9Op::VMovB64) => Some(&SIG_89),
+        Opc::Gfx9(Gfx9Op::VLshlAddU64) => Some(&SIG_90),
+        Opc::Gfx9(Gfx9Op::VPermlane16SwapB32) | Opc::Gfx9(Gfx9Op::VPermlane32SwapB32) => Some(&SIG_91),
+        Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2) => Some(&SIG_92),
+        Opc::Gfx9(Gfx9Op::VAccvgprReadB32) => Some(&SIG_93),
+        Opc::Gfx9(Gfx9Op::VAccvgprWriteB32) => Some(&SIG_94),
+        Opc::Gfx9(Gfx9Op::VAccvgprMovB32) => Some(&SIG_95),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf16) | Opc::Gfx9(Gfx9Op::VMfma16x16x32F16) => Some(&SIG_96),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x16F16) | Opc::Gfx9(Gfx9Op::VMfma16x16x16Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma4x4x4F16) | Opc::Gfx9(Gfx9Op::VMfma4x4x4Bf16)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Fp8Bf8)
+        | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8) | Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8) => Some(&SIG_97),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x16F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x16Bf16) => Some(&SIG_98),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x8F16) | Opc::Gfx9(Gfx9Op::VMfma32x32x8Bf16) => Some(&SIG_99),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4) => Some(&SIG_100),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F32) => Some(&SIG_101),
+        Opc::Gfx9(Gfx9Op::VMfma32x32x2F32) => Some(&SIG_102),
+        Opc::Gfx9(Gfx9Op::VMfma16x16x4F64) => Some(&SIG_103),
+        Opc::Gfx9(Gfx9Op::VMfma4x4x4F64) => Some(&SIG_104),
         #[allow(unreachable_patterns)]
         _ => None,
     }

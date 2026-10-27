@@ -58,7 +58,9 @@ pub(super) fn schedule_folding(
     threads: usize,
 ) -> Result<(Allocation, usize), Unallocated> {
     let off = func.target != Target::Gfx1151 || super::debug_flag("nofuse") || super::debug_flag("nomix");
-    if off || !func.blocks.iter().any(|b| b.insts.iter().any(|i| i.op == Opc::VCvtF32F16)) {
+    // `fold_shared_conversions` folds nothing past `MAX_INSTS`.
+    let large = func.blocks.iter().map(|b| b.insts.len()).sum::<usize>() > MAX_INSTS;
+    if off || large || !func.blocks.iter().any(|b| b.insts.iter().any(|i| i.op == Opc::VCvtF32F16)) {
         return super::schedule_with_facts(func, lds_size, wg, spill, threads);
     }
     let mut folded = func.clone();

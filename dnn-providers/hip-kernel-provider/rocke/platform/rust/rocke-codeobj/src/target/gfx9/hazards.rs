@@ -29,9 +29,40 @@
 //! LLVM keeps only the mixlo/mixhi half writes, and the older rule is the
 //! conservative one.
 //!
-//! H12 (SALU writes M0 -> LDS DMA, `s_sendmsg`, `ds_*_addtid`), H13
-//! (`s_setreg`), H14 (permlane swaps) and H16 (inline asm) have no
-//! consumer or producer among the instructions the gfx950 back end emits
+//! | H14 | VALU writes a VGPR -> v_permlane16/32_swap reads it: 2; VALU writes EXEC -> permlane swap: 4 | 2 / 4 |
+//!
+//! H14's EXEC rule is LLVM's for a v_cmpx; any VALU write of EXEC counts here,
+//! the conservative reading. H9's packed 32-bit producers forward their
+//! destination when src0's op_sel_hi bit is set (the default lanes), as the
+//! VOP3P rule above reads it.
+//!
+//! The MFMA, AGPR and DOT rules (design section 5.2; `passes` is an MFMA's
+//! pass count, its class XDL, SMFMA (the f32-input ones) or DGEMM (f64), both
+//! from its latency class; "+1" applies past two passes):
+//!
+//! | Rule | Producer -> consumer | Wait states |
+//! |---|---|---|
+//! | M1 | VALU (not an MFMA) writes EXEC -> MFMA | 4 |
+//! | M2 | VALU (not an MFMA or DOT; `v_accvgpr_write` included) writes a register -> MFMA reads it | 2 |
+//! | M3 | MFMA writes -> MFMA reads it as C | the same registers: 0, 2 after a 2-pass MFMA, 4 between f64 4x4s; a partial overlap: XDL -> XDL passes + 2, XDL -> SMFMA or DGEMM passes + 1 (+1), SMFMA -> MFMA passes, DGEMM 16x16 17, 4x4 4 |
+//! | M4 | MFMA writes -> MFMA reads it as A or B | XDL passes + 3 (+1), SMFMA passes + 2, DGEMM 16x16 19, 4x4 6 |
+//! | M5 | MFMA writes -> VALU, VMEM or LDS reads it | XDL passes + 3 (+1), SMFMA passes + 2, DGEMM 16x16 19 (VALU) / 18, 4x4 6 (VALU) / 9 |
+//! | M6 | MFMA writes -> VALU (not an MFMA) or a load writes it | XDL passes + 3 (+1), SMFMA passes + 2, DGEMM 16x16 11, 4x4 6 |
+//! | M7 | MFMA reads C -> VALU (not an MFMA) or a load writes it | passes - 1 (f64 ones too: 3 and 15) |
+//! | M8 | DOT writes -> a VALU reads or writes it (the same DOT reading it as C: none) | 3 |
+//! | M9 | DGEMM -> v_fma_f64 | 2 |
+//! | M10 | padding between neighbouring MFMAs | performance only: off |
+//!
+//! Where LLVM takes only the nearest MFMA writing the register, these take
+//! every one within reach; the SMFMA -> XDL partial overlap (none in LLVM)
+//! waits as SMFMA -> SMFMA, and M7 holds for the f64 MFMAs, which LLVM
+//! leaves out: all of it only adds wait states.
+//!
+//! | H12 | SALU writes M0 -> LDS DMA, `s_sendmsg`, `ds_*_addtid` | 1 |
+//!
+//! H12's consumers are not among the instructions the gfx950 back end emits
+//! yet (the corpus test reads them in COMGR's code); H13 (`s_setreg`) and
+//! H16 (inline asm) have no consumer or producer there either
 //! (`rules_without_instructions_on_gfx950` checks the description); H15,
 //! the 64-bit shift bug, is `fix_shift64`.
 
@@ -59,6 +90,10 @@ impl Regs {
     pub fn is_sgpr(self) -> bool {
         (256..384).contains(&self.start)
     }
+
+    pub fn is_agpr(self) -> bool {
+        self.start >= 384
+    }
 }
 
 pub const VCC: Regs = Regs { start: 256 + 106, n: 2 };
@@ -67,6 +102,7 @@ pub const EXEC: Regs = Regs { start: 256 + 126, n: 2 };
 
 pub fn regs(o: &Opnd) -> Option<Regs> {
     let (start, n) = match *o {
+        Opnd::P(Phys::V(r), n) if r >= super::asm::AGPR0 => (384 + r - super::asm::AGPR0, n as u16),
         Opnd::P(Phys::V(r), n) => (r, n as u16),
         Opnd::P(Phys::S(r), n) => (256 + r, n as u16),
         Opnd::P(Phys::VccLo, n) => (VCC.start, n as u16),
@@ -118,7 +154,105 @@ pub struct Fact {
     pub src1: Option<Regs>,
     /// Reads VCC without naming it (v_div_fmas).
     pub reads_vcc: bool,
+    /// v_permlane16/32_swap (H14).
+    pub permlane: bool,
+    /// An MFMA's class and pass count (M1 to M7, M9).
+    pub mfma: Option<(MfmaClass, u32)>,
+    /// An MFMA's or DOT's C, and an MFMA's A and B.
+    pub srcc: Option<Regs>,
+    pub srcab: [Option<Regs>; 2],
+    /// A DOT instruction, by an id its opcode alone has (M8); 0 otherwise.
+    pub dot: u32,
+    /// v_fma_f64 / v_fmac_f64 (M9).
+    pub fma64: bool,
+    /// Reads M0 where a SALU write of it needs a wait state first (H12):
+    /// LDS DMA, `s_sendmsg`, `ds_*_addtid`.
+    pub m0_reader: bool,
 }
+
+/// An MFMA's hazard class: on the XDL pipe, off it (the f32-input MFMAs),
+/// or an f64 one (DGEMM).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MfmaClass {
+    Xdl,
+    Smfma,
+    Dgemm,
+}
+
+/// The class and pass count of an MFMA, from its latency class (a DGEMM's
+/// "passes" name its shape: 4 for the 4x4 blocks, 16 for 16x16).
+pub fn mfma_kind(op: Opc) -> Option<(MfmaClass, u32)> {
+    use MfmaClass::*;
+    Some(match t::lat(op) {
+        t::Lat::MfmaXdl2 => (Xdl, 2),
+        t::Lat::MfmaXdl4 => (Xdl, 4),
+        t::Lat::MfmaXdl8 => (Xdl, 8),
+        t::Lat::MfmaSmfma8 => (Smfma, 8),
+        t::Lat::MfmaSmfma16 => (Smfma, 16),
+        t::Lat::MfmaDgemm4 => (Dgemm, 4),
+        t::Lat::MfmaDgemm16 => (Dgemm, 16),
+        _ => return None,
+    })
+}
+
+/// Wait states an MFMA of `kind` leaves before its result is read by a VALU
+/// instruction (`memory`: a VMEM or LDS one) or overwritten (M5, M6, M4's
+/// A and B for XDL and SMFMA producers).
+fn mfma_result_waits(kind: (MfmaClass, u32), memory: bool, overwrite: bool) -> u32 {
+    match kind {
+        (MfmaClass::Xdl, p) => p + 3 + u32::from(p > 2),
+        (MfmaClass::Smfma, p) => p + 2,
+        (MfmaClass::Dgemm, 4) if overwrite => 6,
+        (MfmaClass::Dgemm, 4) => if memory { 9 } else { 6 },
+        (MfmaClass::Dgemm, _) if overwrite => 11,
+        (MfmaClass::Dgemm, _) => if memory { 18 } else { 19 },
+    }
+}
+
+/// Wait states before a VALU instruction may read an MFMA's result (M5),
+/// which the scheduler counts as its latency.
+pub fn mfma_result_latency(op: Opc) -> Option<u32> {
+    mfma_kind(op).map(|k| mfma_result_waits(k, false, false))
+}
+
+/// M3: an MFMA of `consumer` class reading as C what an MFMA of `producer`
+/// kind wrote, the same registers (`full`) or overlapping them.
+fn mfma_srcc_waits(producer: (MfmaClass, u32), consumer: MfmaClass, full: bool) -> u32 {
+    use MfmaClass::*;
+    match (producer, full) {
+        ((Dgemm, 4), true) if consumer == Dgemm => 4,
+        ((_, 2), true) => 2,
+        (_, true) => 0,
+        ((Xdl, p), false) if consumer == Xdl => p + 2,
+        ((Xdl, p), false) => p + 1 + u32::from(p > 2),
+        ((Smfma, p), false) => p,
+        ((Dgemm, 4), false) => 4,
+        ((Dgemm, _), false) => 17,
+    }
+}
+
+/// M4: an MFMA reading as A or B what an MFMA of `producer` kind wrote.
+fn mfma_srcab_waits(producer: (MfmaClass, u32)) -> u32 {
+    match producer {
+        (MfmaClass::Dgemm, 4) => 6,
+        (MfmaClass::Dgemm, _) => 19,
+        kind => mfma_result_waits(kind, false, false),
+    }
+}
+
+/// Every MFMA kind, for the rules whose wait states depend on it (the
+/// 16-pass XDL kind is the block-scaled f8f6f4 form's, which the corpus
+/// test reads).
+const MFMA_KINDS: [(MfmaClass, u32); 8] = [
+    (MfmaClass::Xdl, 2),
+    (MfmaClass::Xdl, 4),
+    (MfmaClass::Xdl, 8),
+    (MfmaClass::Xdl, 16),
+    (MfmaClass::Smfma, 8),
+    (MfmaClass::Smfma, 16),
+    (MfmaClass::Dgemm, 4),
+    (MfmaClass::Dgemm, 16),
+];
 
 /// The `Fact` of one of our instructions.
 pub fn fact(inst: &MInst) -> Fact {
@@ -146,6 +280,13 @@ pub fn fact(inst: &MInst) -> Fact {
     let soffset = t::signature(op).and_then(|s| s.uses.iter().position(|o| o.role == Role::Soffset));
     let sgpr_soffset = fmt == Fmt::Mubuf && soffset.and_then(|k| inst.uses.get(k)).and_then(regs).is_some_and(|r| r.is_sgpr());
     let uses: Vec<Regs> = inst.uses.iter().filter_map(regs).collect();
+    let mfma = mfma_kind(op);
+    let dot = match op {
+        Opc::VDot2F32F16 => 1,
+        Opc::VDot2F32Bf16 => 2,
+        _ => 0,
+    };
+    let src = |k: usize| inst.uses.get(k).and_then(regs);
     Fact {
         kind,
         wait_states: if op == Opc::SNop { inst.imm as u32 + 1 } else if fmt == Fmt::Pseudo { 0 } else { 1 },
@@ -154,7 +295,9 @@ pub fn fact(inst: &MInst) -> Fact {
         dpp: form == Form::Dpp16,
         forwards_dst: matches!(op, Opc::VFmaMixloF16 | Opc::VFmaMixhiF16)
             || (fmt == Fmt::Vop3 && inst.mods & M_OPSEL_DST != 0)
-            || (fmt == Fmt::Vop3p && (form != Form::Mix || inst.mods & M_MIX_F16_0 != 0)),
+            || (fmt == Fmt::Vop3p && form == Form::Pk32 && super::asm::pk32_encoded(inst).map_or(true, |(_, hi, _)| hi & 1 != 0))
+            || (fmt == Fmt::Vop3p && !matches!(form, Form::Mix | Form::Pk32 | Form::AccRead | Form::AccWrite | Form::Mai))
+            || (form == Form::Mix && inst.mods & M_MIX_F16_0 != 0),
         div_fmas: matches!(op, Opc::VDivFmasF32 | Opc::VDivFmasF64),
         lane_read: matches!(op, Opc::VReadlaneB32 | Opc::VReadfirstlaneB32),
         writelane: op == Opc::VWritelaneB32,
@@ -167,6 +310,13 @@ pub fn fact(inst: &MInst) -> Fact {
         src1: inst.uses.get(1).and_then(regs),
         uses,
         reads_vcc: flags & F_USE_VCC != 0,
+        permlane: form == Form::Swap,
+        mfma,
+        srcc: if mfma.is_some() || dot != 0 { src(2) } else { None },
+        srcab: if mfma.is_some() { [src(0), src(1)] } else { [None, None] },
+        dot,
+        fma64: op == Opc::VFmaF64,
+        m0_reader: op == Opc::SSendmsg,
     }
 }
 
@@ -288,6 +438,12 @@ pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) ->
         }
         want(5, &valu_writes(EXEC));
     }
+    if f.permlane {
+        for &u in f.uses.iter().filter(|u| u.is_vgpr()) {
+            want(2, &valu_writes(u));
+        }
+        want(4, &valu_writes(EXEC));
+    }
     if f.div_fmas {
         want(4, &valu_writes(VCC));
     }
@@ -295,6 +451,55 @@ pub fn demand(blocks: &[Vec<Fact>], preds: &[Vec<usize>], b: usize, i: usize) ->
         if let Some(select) = f.src1.filter(|r| r.is_sgpr()) {
             want(4, &valu_writes(select));
         }
+    }
+    let legacy_valu = |p: &Fact| p.kind == Kind::Valu && p.mfma.is_none();
+    let mfma_wrote = |k: (MfmaClass, u32), r: Regs| move |p: &Fact| p.mfma == Some(k) && p.defs.first().is_some_and(|d| d.overlaps(r));
+    if let Some(kind) = f.mfma {
+        want(4, &|p: &Fact| legacy_valu(p) && p.defs.iter().any(|d| d.overlaps(EXEC)));
+        for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
+            want(2, &|p: &Fact| legacy_valu(p) && p.dot == 0 && p.defs.iter().any(|d| d.overlaps(u)));
+        }
+        for k in MFMA_KINDS {
+            if let Some(c) = f.srcc {
+                for full in [true, false] {
+                    let w = mfma_srcc_waits(k, kind.0, full);
+                    let hit = |p: &Fact| p.mfma == Some(k) && p.defs.first().is_some_and(|&d| if full { d == c } else { d.overlaps(c) && d != c });
+                    if w > 0 {
+                        want(w, &hit);
+                    }
+                }
+            }
+            for &ab in f.srcab.iter().flatten() {
+                want(mfma_srcab_waits(k), &mfma_wrote(k, ab));
+            }
+        }
+    } else if matches!(f.kind, Kind::Valu | Kind::Vmem | Kind::Lds) && since(blocks, preds, b, i, 20, &|p| p.mfma.is_some()) < 20 {
+        let memory = f.kind != Kind::Valu;
+        for k in MFMA_KINDS {
+            for &u in f.uses.iter().filter(|u| !u.is_sgpr()) {
+                want(mfma_result_waits(k, memory, false), &mfma_wrote(k, u));
+            }
+            // M6 and M7 hold for loads as for VALU writes.
+            for &d in f.defs.iter().filter(|d| !d.is_sgpr()) {
+                want(mfma_result_waits(k, false, true), &mfma_wrote(k, d));
+                want(k.1 - 1, &|p: &Fact| p.mfma == Some(k) && p.srcc.is_some_and(|c| c.overlaps(d)));
+            }
+        }
+    }
+    if f.kind == Kind::Valu && since(blocks, preds, b, i, 3, &|p| p.dot != 0) < 3 {
+        for &u in &f.uses {
+            let own_c = f.dot != 0 && f.srcc == Some(u);
+            want(3, &|p: &Fact| p.dot != 0 && !(own_c && p.dot == f.dot) && p.defs.first().is_some_and(|d| d.overlaps(u)));
+        }
+        for &d in &f.defs {
+            want(3, &|p: &Fact| p.dot != 0 && p.dot != f.dot && p.defs.first().is_some_and(|x| x.overlaps(d)));
+        }
+    }
+    if f.fma64 {
+        want(2, &|p: &Fact| p.mfma.is_some_and(|(c, _)| c == MfmaClass::Dgemm));
+    }
+    if f.m0_reader {
+        want(1, &|p: &Fact| p.kind == Kind::Salu && p.defs.iter().any(|d| d.overlaps(M0)));
     }
     need
 }
@@ -566,11 +771,154 @@ mod tests {
         assert!(fix_shift64(&mut f, 8).is_err());
     }
 
-    /// H12, H13, H14 and H16 need instructions the gfx950 back end does not
-    /// have: if a row for one appears, its rule must come with it.
+    #[test]
+    fn h14_permlane_swaps() {
+        use t::Gfx9Op::VPermlane32SwapB32;
+        let swap = MInst::new(Opc::Gfx9(VPermlane32SwapB32), [v(1, 1), v(2, 1)], [v(1, 1), v(2, 1)]);
+        // A VALU write of either swapped register: 2.
+        assert_eq!(nops(vec![valu(v(2, 1), v(3, 1), v(4, 1)), swap.clone()]), [(1, 1)]);
+        assert_eq!(nops(vec![valu(v(1, 1), v(3, 1), v(4, 1)), valu(v(9, 1), v(3, 1), v(4, 1)), swap.clone()]), [(2, 0)]);
+        // A load's write is no VALU write; an unrelated VALU none.
+        assert!(nops(vec![MInst::new(Opc::GLoadB32, [v(2, 1)], [v(6, 2)]), swap.clone()]).is_empty());
+        assert!(nops(vec![valu(v(5, 1), v(3, 1), v(4, 1)), swap.clone()]).is_empty());
+        // A VALU write of EXEC: 4.
+        let cmpx = MInst::new(Opc::VCmp(0x14), [EXEC2], [v(5, 1), v(6, 1)]);
+        assert_eq!(nops(vec![cmpx, swap]), [(1, 3)]);
+    }
+
+    #[test]
+    fn h9_packed_32_bit_lanes() {
+        use t::Gfx9Op::VPkMulF32;
+        // Default lanes (src0's op_sel_hi set) forward the destination: 1.
+        let pk = MInst::new(Opc::Gfx9(VPkMulF32), [v(0, 2)], [v(2, 2), v(4, 2)]);
+        assert_eq!(nops(vec![pk.clone(), valu(v(6, 1), v(1, 1), v(7, 1))]), [(1, 0)]);
+        assert!(nops(vec![pk.clone(), valu(v(6, 1), v(8, 1), v(7, 1))]).is_empty());
+        // src0's high lane reading its low half (op_sel_hi cleared): none, as
+        // COMGR's back-to-back broadcasts have it.
+        let bcast = pk.clone().with_imm(0x10);
+        assert!(nops(vec![bcast, valu(v(6, 1), v(1, 1), v(7, 1))]).is_empty());
+        // A one-dword src0 at an odd register is encoded with op_sel_hi set: 1.
+        let odd = MInst::new(Opc::Gfx9(VPkMulF32), [v(0, 2)], [v(3, 1), v(4, 2)]).with_imm(0x10);
+        assert_eq!(nops(vec![odd, valu(v(6, 1), v(1, 1), v(7, 1))]), [(1, 0)]);
+    }
+
+    /// Wait states before the last instruction.
+    fn waits_before_last(insts: Vec<MInst>) -> i64 {
+        let last = insts.len() - 1;
+        nops(insts).iter().filter(|(at, _)| *at == last).map(|(_, imm)| imm + 1).sum()
+    }
+
+    /// M1 to M9, one case per rule, class and pass count: the consumer
+    /// right after its producer waits the whole requirement.
+    #[test]
+    fn mfma_rules() {
+        use super::super::asm::AGPR0;
+        use t::Gfx9Op::*;
+        let a = |r: u16, n: u8| v(AGPR0 + r, n);
+        let mfma = |op: t::Gfx9Op, d: Opnd, x: Opnd, y: Opnd, c: Opnd| MInst::new(Opc::Gfx9(op), [d], [x, y, c]);
+        let xdl2 = |d: Opnd, c: Opnd| mfma(VMfma4x4x4F16, d, v(40, 2), v(42, 2), c);
+        let xdl4 = |d: Opnd, c: Opnd| mfma(VMfma16x16x32F16, d, v(40, 4), v(44, 4), c);
+        let xdl8 = |d: Opnd, c: Opnd| mfma(VMfma32x32x16F16, d, v(40, 4), v(44, 4), c);
+        let smfma8 = |d: Opnd, c: Opnd| mfma(VMfma16x16x4F32, d, v(40, 1), v(41, 1), c);
+        let smfma16 = |d: Opnd, c: Opnd| mfma(VMfma32x32x2F32, d, v(40, 1), v(41, 1), c);
+        let dgemm4 = |d: Opnd, c: Opnd| mfma(VMfma4x4x4F64, d, v(40, 2), v(42, 2), c);
+        let dgemm16 = |d: Opnd, c: Opnd| mfma(VMfma16x16x4F64, d, v(40, 2), v(42, 2), c);
+        let reads = |r: Opnd| valu(v(60, 1), r, v(61, 1));
+        let w = waits_before_last;
+        // M1: a VALU write of EXEC, then an MFMA.
+        let exec = MInst::new(Opc::VCmp(0x44), [Opnd::P(Phys::ExecLo, 2)], [v(1, 1), v(2, 1)]);
+        assert_eq!(w(vec![exec, xdl4(v(0, 4), v(0, 4))]), 4);
+        // M2: a VALU or v_accvgpr_write writes what an MFMA reads.
+        assert_eq!(w(vec![valu(v(40, 1), v(1, 1), v(2, 1)), xdl4(v(0, 4), v(0, 4))]), 2);
+        let acc_write = MInst::new(Opc::Gfx9(VAccvgprWriteB32), [a(1, 1)], [v(5, 1)]);
+        assert_eq!(w(vec![acc_write, xdl4(a(0, 4), a(0, 4))]), 2);
+        // M3, the same registers: an accumulation chain issues back to back,
+        // but 2 after a 2-pass MFMA and 4 between f64 4x4s.
+        assert_eq!(w(vec![xdl4(a(0, 4), a(0, 4)), xdl4(a(0, 4), a(0, 4))]), 0);
+        assert_eq!(w(vec![xdl8(v(0, 16), v(0, 16)), xdl8(v(0, 16), v(0, 16))]), 0);
+        assert_eq!(w(vec![xdl2(v(0, 4), v(0, 4)), xdl2(v(0, 4), v(0, 4))]), 2);
+        assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), dgemm4(v(0, 2), v(0, 2))]), 4);
+        // M3, a partial overlap.
+        assert_eq!(w(vec![xdl4(v(0, 4), v(0, 4)), xdl4(v(8, 4), v(2, 4))]), 6);
+        assert_eq!(w(vec![xdl8(v(0, 16), v(0, 16)), xdl4(v(20, 4), v(8, 4))]), 10);
+        assert_eq!(w(vec![xdl4(v(0, 4), v(0, 4)), smfma8(v(8, 4), v(2, 4))]), 6);
+        assert_eq!(w(vec![smfma8(v(0, 4), v(0, 4)), smfma8(v(8, 4), v(2, 4))]), 8);
+        assert_eq!(w(vec![dgemm16(v(0, 8), v(0, 8)), dgemm16(v(10, 8), v(4, 8))]), 17);
+        // M4: an MFMA result read as A or B.
+        let as_a = |r: Opnd| mfma(VMfma16x16x32F16, v(20, 4), r, v(44, 4), v(20, 4));
+        assert_eq!(w(vec![xdl2(v(0, 4), v(0, 4)), as_a(v(0, 4))]), 5);
+        assert_eq!(w(vec![xdl4(v(0, 4), v(0, 4)), as_a(v(0, 4))]), 8);
+        assert_eq!(w(vec![xdl8(v(0, 16), v(0, 16)), as_a(v(4, 4))]), 12);
+        assert_eq!(w(vec![smfma8(v(0, 4), v(0, 4)), as_a(v(0, 4))]), 10);
+        assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), as_a(v(0, 4))]), 6);
+        assert_eq!(w(vec![dgemm16(v(0, 8), v(0, 8)), as_a(v(4, 4))]), 19);
+        // M5: VALU (v_accvgpr_read included), VMEM and LDS readers.
+        let acc_read = MInst::new(Opc::Gfx9(VAccvgprReadB32), [v(6, 1)], [a(2, 1)]);
+        assert_eq!(w(vec![xdl4(a(0, 4), a(0, 4)), acc_read]), 8);
+        assert_eq!(w(vec![xdl2(v(0, 4), v(0, 4)), reads(v(1, 1))]), 5);
+        let store = MInst::new(Opc::GStoreB128, [], [v(20, 2), v(4, 4)]);
+        assert_eq!(w(vec![xdl8(v(0, 16), v(0, 16)), store.clone()]), 12);
+        assert_eq!(w(vec![smfma16(v(0, 16), v(0, 16)), reads(v(9, 1))]), 18);
+        assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), reads(v(1, 1))]), 6);
+        let lds = MInst::new(Opc::DsStoreB32, [], [v(20, 1), v(1, 1)]);
+        assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), lds]), 9);
+        assert_eq!(w(vec![dgemm16(v(0, 8), v(0, 8)), reads(v(7, 1))]), 19);
+        assert_eq!(w(vec![dgemm16(v(4, 8), v(4, 8)), store]), 18);
+        // M6: a VALU overwrites an MFMA result.
+        assert_eq!(w(vec![xdl4(v(0, 4), v(0, 4)), valu(v(1, 1), v(30, 1), v(31, 1))]), 8);
+        assert_eq!(w(vec![dgemm16(v(0, 8), v(10, 8)), valu(v(3, 1), v(30, 1), v(31, 1))]), 11);
+        // M7: a VALU overwrites what an MFMA reads as C.
+        assert_eq!(w(vec![xdl2(v(20, 4), v(8, 4)), valu(v(9, 1), v(30, 1), v(31, 1))]), 1);
+        assert_eq!(w(vec![xdl4(v(20, 4), v(8, 4)), valu(v(9, 1), v(30, 1), v(31, 1))]), 3);
+        assert_eq!(w(vec![xdl8(v(20, 16), v(0, 16)), valu(v(9, 1), v(50, 1), v(51, 1))]), 7);
+        assert_eq!(w(vec![dgemm16(v(20, 8), v(0, 8)), valu(v(3, 1), v(30, 1), v(31, 1))]), 15);
+        // Independent instructions fill the wait states: three of M5's eight.
+        let other = valu(v(50, 1), v(51, 1), v(52, 1));
+        assert_eq!(w(vec![xdl4(v(0, 4), v(0, 4)), other.clone(), other.clone(), other, reads(v(1, 1))]), 5);
+        // M8: a DOT result, read or overwritten by another VALU, read as A
+        // by the same DOT; the same DOT reading it as C needs only H9's
+        // wait state for a VOP3P result.
+        let dot = |d: Opnd, x: Opnd, c: Opnd| MInst::new(Opc::VDot2F32F16, [d], [x, v(11, 1), c]);
+        assert_eq!(w(vec![dot(v(1, 1), v(10, 1), v(2, 1)), reads(v(1, 1))]), 3);
+        assert_eq!(w(vec![dot(v(1, 1), v(10, 1), v(2, 1)), valu(v(1, 1), v(30, 1), v(31, 1))]), 3);
+        assert_eq!(w(vec![dot(v(1, 1), v(10, 1), v(2, 1)), dot(v(3, 1), v(1, 1), v(4, 1))]), 3);
+        assert_eq!(w(vec![dot(v(1, 1), v(10, 1), v(2, 1)), dot(v(1, 1), v(12, 1), v(1, 1))]), 1);
+        // M9: a DGEMM, then v_fma_f64.
+        let fma64 = MInst::new(Opc::VFmaF64, [v(20, 2)], [v(22, 2), v(24, 2), v(26, 2)]);
+        assert_eq!(w(vec![dgemm4(v(0, 2), v(0, 2)), fma64]), 2);
+    }
+
+    /// AGPR moves forward no destination (H9) and take H1 for an SGPR
+    /// source a VALU wrote.
+    #[test]
+    fn agpr_moves_are_plain_valu() {
+        use super::super::asm::AGPR0;
+        let write = |src: Opnd| MInst::new(Opc::Gfx9(t::Gfx9Op::VAccvgprWriteB32), [v(AGPR0 + 3, 1)], [src]);
+        let read = MInst::new(Opc::Gfx9(t::Gfx9Op::VAccvgprReadB32), [v(6, 1)], [v(AGPR0 + 3, 1)]);
+        assert!(nops(vec![write(v(5, 1)), read.clone(), valu(v(7, 1), v(6, 1), v(6, 1))]).is_empty());
+        let sgpr = MInst::new(Opc::VReadfirstlaneB32, [s(4, 1)], [v(1, 1)]);
+        assert_eq!(nops(vec![sgpr, write(s(4, 1))]), [(1, 1)]);
+    }
+
+    #[test]
+    fn agprs_are_their_own_registers() {
+        let a = regs(&v(super::super::asm::AGPR0 + 2, 4)).expect("a register");
+        assert!(a.is_agpr() && !a.is_vgpr() && !a.is_sgpr());
+        assert_eq!((a.start, a.n), (386, 4));
+        assert!(!a.overlaps(regs(&v(2, 4)).expect("v[2:5]")) && !a.overlaps(regs(&s(2, 4)).expect("s[2:5]")));
+    }
+
+    /// H12, H13 and H16 need instructions the gfx950 back end does not
+    /// have: if a row for one appears, its rule must come with it. The AGPR
+    /// moves are VALU instructions under H1 to H11 like any other, and the
+    /// MFMA and DOT rows have M1 to M9; every MFMA row has its class.
     #[test]
     fn rules_without_instructions_on_gfx950() {
-        let unruled = ["s_setreg", "s_getreg", "s_sendmsg", "permlane", "_addtid", "v_cmpx", "lds", "v_accvgpr", "mfma"];
+        let unruled = ["s_setreg", "s_getreg", "s_sendmsg", "_addtid", "v_cmpx", "lds"];
+        for op in t::ALL {
+            let name = t::mnemonic(op).unwrap_or("");
+            assert_eq!(name.starts_with("v_mfma"), mfma_kind(op).is_some(), "{name}: an MFMA row has its class");
+        }
         for op in t::ALL {
             let Some(name) = t::mnemonic(op) else { continue };
             let emitted = !matches!(op, Opc::SSendmsg);

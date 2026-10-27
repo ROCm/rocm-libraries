@@ -62,6 +62,10 @@ fn clamp_range(ty: &Type, lo: i128, hi: i128) -> Option<Range> {
 pub struct Facts {
     pub konst: Vec<Option<Konst>>,
     pub range: Vec<Option<Range>>,
+    /// A sweep that merges LDS and scalar vector loads did what one keeping
+    /// them would not: merged a load, or left one whose result type has a
+    /// full range without it (a kept load gets that range).
+    pub merged_loads: bool,
 }
 
 impl Facts {
@@ -506,10 +510,7 @@ impl<'k> Simplifier<'k> {
     /// `op`'s result becomes the available one.
     fn available(&mut self, op: &Op) -> Option<ValueId> {
         let key = self.op_key(op);
-        let existing = self.cse.get(&key);
-        if existing.is_none() {
-            self.cse.insert(&key, op.results[0]);
-        }
+        let existing = self.cse.get_or_insert(&key, op.results[0]);
         self.key = key;
         existing
     }
@@ -789,8 +790,12 @@ impl<'k> Simplifier<'k> {
             OpKind::SmemLoadVec | OpKind::LLoad if self.lds_cse => {
                 if let Some(existing) = self.available_lds_load(&op) {
                     self.rewrote = true;
+                    self.facts.merged_loads = true;
                     self.replace(op.results[0], existing);
                     return Ok(());
+                }
+                if op.results.iter().any(|&r| full_range(self.kernel.ty(r)).is_some()) {
+                    self.facts.merged_loads = true;
                 }
                 out.push(op);
                 Ok(())
@@ -3047,6 +3052,37 @@ kernel @lds_probe {
         // edge and d1 after the loop. e1 and e2 reuse d1, which dominates
         // them; w4 has another width.
         assert_eq!(loads, ["%a1", "%a4", "%a6", "%a7", "%c1l", "%d1", "%w4"]);
+    }
+
+    /// Without `merged_loads`, merging LDS loads gives the kernel and facts
+    /// of keeping them.
+    #[test]
+    fn merging_lds_loads_changes_nothing_without_merged_loads() {
+        let plain = probe(
+            "    %X : ptr<f32,global>\n",
+            "    %x : f32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"f32\" }\n    \
+             memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:\"f32\" }\n",
+        );
+        let mut merged = 0;
+        for text in [LDS_PROBE, plain.as_str()] {
+            let run = |keep: bool| {
+                let mut kernel = super::super::parse::parse(text).unwrap_or_else(|e| panic!("{e}"));
+                let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+                let facts = if keep { optimize_keeping_lds_loads(&mut kernel, &mut lds) } else { optimize(&mut kernel, &mut lds) };
+                let facts = facts.unwrap_or_else(|e| panic!("{e}"));
+                let mut offsets: Vec<(u32, u32)> = lds.iter().map(|(v, &o)| (v.0, o)).collect();
+                offsets.sort_unstable();
+                (format!("{:?}{:?}{offsets:?}", kernel.body, kernel.values), facts)
+            };
+            let ((merging, facts), (keeping, kept)) = (run(false), run(true));
+            assert!(!kept.merged_loads);
+            if facts.merged_loads {
+                merged += 1;
+                continue;
+            }
+            assert!(merging == keeping && facts.konst == kept.konst && facts.range == kept.range);
+        }
+        assert_eq!(merged, 1, "the LDS probe merges loads");
     }
 
     #[test]

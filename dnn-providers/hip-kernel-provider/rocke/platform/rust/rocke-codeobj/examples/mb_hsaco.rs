@@ -91,6 +91,7 @@ fn package(line: &str) -> Result<(String, usize), String> {
         max_flat_workgroup_size: num("wg", 1024)?,
         sgpr_count: derived.3,
         vgpr_count: derived.4,
+        agpr_count: 0,
         rsrc1: num("rsrc1", derived.0)?,
         rsrc2: num("rsrc2", derived.1)?,
         rsrc3: num("rsrc3", derived.2)?,

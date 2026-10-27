@@ -257,6 +257,8 @@ fn scalar_sources_fit(srcs: &[Opnd], vregs: &[VRegInfo]) -> bool {
 /// ...), as LLVM selects them: one instruction and one dependency fewer.
 /// f16-to-f32 conversions feeding an FMA fold into `v_fma_mix_f32`.
 pub fn fuse_valu(f: &mut MFunc) {
+    // gfx950 has its own opcodes and operand rule (`target::gfx9::rules::fuses`).
+    let gfx9 = f.target == crate::target::Target::Gfx950;
     let n = f.vregs.len();
     let (mut uses, mut defs) = (vec![0u32; n], vec![0u32; n]);
     for inst in f.blocks.iter().flat_map(|b| b.insts.iter()) {
@@ -298,6 +300,9 @@ pub fn fuse_valu(f: &mut MFunc) {
                     return None;
                 }
                 let (op, srcs) = fused_form(pi, xi, slot)?;
+                if gfx9 && !crate::target::gfx9::rules::fuses(op, &srcs, vregs) {
+                    return None;
+                }
                 let moved = insts[p + 1..x]
                     .iter()
                     .any(|k| k.op.flags() & F_DEF_EXEC != 0 || shares_vreg(&k.defs, &pi.uses));
@@ -306,7 +311,9 @@ pub fn fuse_valu(f: &mut MFunc) {
                 }
                 Some((p, MInst::new(op, xi.defs, srcs)))
             });
-            if let Some((inst, folded)) = fma_mix_form(insts, x, &def_at, (&uses, &defs), vregs) {
+            let mix = fma_mix_form(insts, x, &def_at, (&uses, &defs), vregs);
+            let mix = mix.filter(|(m, _)| !gfx9 || crate::target::gfx9::rules::fuses(m.op, &m.uses, vregs));
+            if let Some((inst, folded)) = mix {
                 insts[x] = inst;
                 for p in folded {
                     dead[p] = true;

@@ -6,7 +6,10 @@
 # Rows are the gfx950 twins of the shared opcodes (src/rir/mir.rs `Opc`, which keeps its gfx11 names):
 # mnemonic, encoding and opcode are gfx950's, from the gfx9 records of LLVM's AMDGPU TableGen sources
 # read as a specification (a gfx9 record wins over a VI one), and every encoding is checked against
-# `llvm-mc -mcpu=gfx950` by `platform/tools/isa_xcheck.py --isa gfx950`. Flags are the shared, semantic
+# `llvm-mc -mcpu=gfx950` by `platform/tools/isa_xcheck.py --isa gfx950`. Rows with `opc=gfx9` are the
+# gfx9 back end's own opcodes (`Opc::Gfx9(Gfx9Op::<variant>)`): gfx950 instructions with no shared
+# twin, which gfx11 cannot encode; the generator checks that every other row names a shared opcode.
+# Flags are the shared, semantic
 # flags of the variant (the same as in isa/gfx11.isa). Lane masks (compare results, carries, v_cndmask
 # selectors, VCC) are SGPR pairs on wave64. VOP3 encodings take no literal on gfx9, and there is no
 # null register (code 124 is M0). Shared opcodes gfx950 lacks have no row: v_mov_b16 and other true16
@@ -108,6 +111,7 @@ enc FLAT "flat memory (segment 0)" words=2 fixed=0xdc000000,0x00000000 fields=of
 enc SCRATCH "scratch memory (FLAT segment 1)" words=2 fixed=0xdc004000,0x00000000 fields=offset:0:0:13,lds:0:13:1,sc0:0:16:1,nt:0:17:1,op:0:18:7,sc1:0:25:1,addr:1:0:8,data:1:8:8,saddr:1:16:7,acc:1:23:1,vdst:1:24:8
 enc GLOBAL "global memory (FLAT segment 2)" words=2 fixed=0xdc008000,0x00000000 fields=offset:0:0:13,lds:0:13:1,sc0:0:16:1,nt:0:17:1,op:0:18:7,sc1:0:25:1,addr:1:0:8,data:1:8:8,saddr:1:16:7,acc:1:23:1,vdst:1:24:8
 enc MUBUF "buffer memory" words=2 fixed=0xe0000000,0x00000000 fields=offset:0:0:12,offen:0:12:1,idxen:0:13:1,sc0:0:14:1,sc1:0:15:1,lds:0:16:1,nt:0:17:1,op:0:18:7,vaddr:1:0:8,vdata:1:8:8,srsrc:1:16:5,acc:1:23:1,soffset:1:24:8
+enc VOP3P_MAI "matrix fused multiply-add: acc_cd makes vdst and src2 AGPRs, acc the src0 and src1 bits" words=2 fixed=0xd3800000,0x00000000 fields=vdst:0:0:8,cbsz:0:8:3,abid:0:11:4,acc_cd:0:15:1,op:0:16:7,src0:1:0:9,src1:1:9:9,src2:1:18:9,acc:1:27:2,blgp:1:29:3
 
 [opnd]
 # Operand codes and classes. There is no null register on gfx9: code 124 is M0, and 102-105 are
@@ -129,6 +133,10 @@ class vs "vector source: VGPR, SGPR, special register, inline constant, or a lit
 class vi "vector source without a literal: VGPR, SGPR or inline constant"
 class x "EXEC, named as an explicit operand"
 class a "any register (pseudo)"
+class vr "vector source that is a register: VGPR, SGPR or special register tuple, no constant"
+class acc "AGPR tuple: AGPR a<k> is Phys::V(256 + k), the AGPR half of the unified register file"
+class av "VGPR or AGPR tuple"
+class avi "VGPR or AGPR tuple, or an inline constant"
 imm simm16 "16-bit immediate field"
 imm soff21 "21-bit signed byte offset"
 imm off16 "16-bit unsigned byte offset"
@@ -141,6 +149,9 @@ imm waitcnt "gfx9 s_waitcnt: vmcnt bits 3:0 and 15:14, expcnt 6:4, lgkmcnt 11:8"
 imm sendmsg "message id"
 imm swizzle "ds_swizzle pattern"
 imm dpp16 "DPP control: bits 31:8 of the DPP word (gfx9 controls only; no fi bit)"
+imm pksel "lane selects of a packed 32-bit instruction: op_sel in bits 2:0, the op_sel_hi bits cleared in 6:4 (0: each lane reads its own half)"
+imm cpol "cache policy: sc0 in bit 0, sc1 in bit 1"
+imm mai "MFMA controls: cbsz in bits 2:0, abid in bits 6:3, blgp in bits 9:7"
 form plain "the format's general encoding"
 form noshort "a VOP2 opcode always encoded as VOP3 (its lane mask is explicit)"
 form dpp16 "VOP1 with a DPP source: imm holds bits 31:8 of the DPP word"
@@ -156,6 +167,13 @@ form f64 "VALU with f64 sources: a non-inline-integer immediate is the high dwor
 form f64_i32 "as f64, but source 1 is the 32-bit integer exponent (v_ldexp_f64)"
 form dot2 "VOP3P with 16-bit pair sources 0 and 1 (no f32 inline constants) and an f32 source 2"
 form src16 "VOP3 with 16-bit sources: no f32 inline constants"
+form pk32 "VOP3P on two 32-bit lanes: register sources at even registers, imm holds the lane selects, neg negates both lanes"
+form swap "VOP1 exchanging lanes of two VGPRs, both read and written: defs and uses are (vdst, vsrc)"
+form nodata "MUBUF cache control with no address or data: imm holds the cache policy"
+form mai "VOP3P-MAI: AGPR vdst and src2 set acc_cd, an AGPR src0 or src1 its acc bit; imm holds the MFMA controls"
+form acc_read "VOP3P v_accvgpr_read: src0 is an AGPR, encoded by its index"
+form acc_write "VOP3P v_accvgpr_write: vdst is an AGPR, encoded by its index"
+form acc_mov "VOP1 v_accvgpr_mov: vdst is an AGPR encoded by its index, src0 an AGPR encoded as 256 + index"
 
 [unit]
 # Execution units.
@@ -183,6 +201,16 @@ lat smem "scalar load: lgkmcnt, returns out of order" sched=40 delay=other wait=
 lat lds "LDS access: lgkmcnt" sched=64 delay=other wait=lgkm
 lat vmem_load "vector memory load or returning atomic: vmcnt" sched=500 delay=other wait=vm
 lat vmem_store "vector memory store or atomic without return: vmcnt" sched=8 delay=other wait=vm
+lat cache "cache control (buffer_inv, buffer_wbl2): no result and no counter the model ages; a fence waits for vmcnt(0) itself" sched=4 delay=other
+# MFMAs by hazard class and pass count (the M rules of target/gfx9/hazards.rs read them): XDL, the f32-input
+# MFMAs off the XDL pipe (SMFMA), and the f64 ones (DGEMM).
+lat mfma_xdl2 "MFMA on the XDL pipe, 2 passes" sched=20 delay=other
+lat mfma_xdl4 "MFMA on the XDL pipe, 4 passes" sched=32 delay=other
+lat mfma_xdl8 "MFMA on the XDL pipe, 8 passes" sched=48 delay=other
+lat mfma_smfma8 "MFMA off the XDL pipe (f32 inputs), 8 passes" sched=40 delay=other
+lat mfma_smfma16 "MFMA off the XDL pipe (f32 inputs), 16 passes" sched=72 delay=other
+lat mfma_dgemm4 "f64 MFMA, 4x4 blocks (DGEMM)" sched=36 delay=other
+lat mfma_dgemm16 "f64 MFMA, 16x16 (DGEMM)" sched=76 delay=other
 
 [hazard]
 # The gfx940/gfx950 hazard rules of G1_DESIGN.md section 5.1, all handled in target/gfx9/hazards.rs.
@@ -202,6 +230,16 @@ hazard h13 "s_setreg, then s_getreg or s_setreg of the same register: 2" modeled
 hazard h14 "VALU writes a VGPR, v_permlane*_swap reads it: 2; v_cmpx writes EXEC, permlane: 4" modeled=target/gfx9/hazards.rs
 hazard h15 "64-bit shift with its amount in a VGPR at 7 mod 8 and the next VGPR unused: an allocation constraint" modeled=target/gfx9/hazards.rs
 hazard h16 "inline asm: only the empty value barrier is accepted" modeled=target/gfx9/hazards.rs
+hazard m1 "VALU writes EXEC, an MFMA: 4" modeled=target/gfx9/hazards.rs
+hazard m2 "a VALU other than an MFMA writes a VGPR or AGPR, an MFMA reads it: 2" modeled=target/gfx9/hazards.rs
+hazard m3 "MFMA writes, an MFMA reads it as C: by overlap, class and passes" modeled=target/gfx9/hazards.rs
+hazard m4 "MFMA writes, an MFMA reads it as A or B: by class and passes" modeled=target/gfx9/hazards.rs
+hazard m5 "MFMA writes, a VALU, VMEM, DS or v_accvgpr_read reads it: by class and passes" modeled=target/gfx9/hazards.rs
+hazard m6 "MFMA writes, a VALU writes the same register: as m5" modeled=target/gfx9/hazards.rs
+hazard m7 "MFMA reads C, a VALU writes it: passes - 1" modeled=target/gfx9/hazards.rs
+hazard m8 "DOT writes, the same DOT reads it as A or B, or another VALU reads or writes it: 3" modeled=target/gfx9/hazards.rs
+hazard m9 "DGEMM, then v_fma_f64 or v_fmac_f64: 2" modeled=target/gfx9/hazards.rs
+hazard m10 "padding between neighbouring MFMAs: performance only, off as in LLVM" modeled=target/gfx9/hazards.rs
 
 [vcmp]
 # VOPC compares the compiler names (Opc::VCmp(code), the gfx11 code) and their gfx950 opcodes (op=).
@@ -506,4 +544,41 @@ inst   Copy              COPY                      PSEUDO  0x00   flags=0 d=dst:
 inst   ImplicitDef       IMPLICIT_DEF              PSEUDO  0x00   flags=0 d=dst:a1 unit=PSEUDO lat=pseudo note="Defines a register whose contents are never read before overwritten."
 inst   PackF16           PACK_F16                  PSEUDO  0x00   flags=VALU|EARLY d=vdst:v1 u=src0:vs1,src1:vs1 imp=use:exec unit=PSEUDO lat=pseudo_valu note="dst <- {cvt_f16(src0), cvt_f16(src1)}; dst must not overlap the sources."
 inst   SchedBarrier      SCHED_BARRIER             PSEUDO  0x00   flags=FENCE unit=PSEUDO lat=pseudo note="`tile.sched_barrier` with mask 0: a scheduling boundary that emits nothing."
+group gfx9
+inst   VPkFmaF32         v_pk_fma_f32              VOP3P   0x30   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vr2,src1:vr2,src2:vr2 imm=pksel m=neg imp=use:exec unit=VALU lat=valu form=pk32
+inst   VPkMulF32         v_pk_mul_f32              VOP3P   0x31   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vr2,src1:vr2 imm=pksel m=neg imp=use:exec unit=VALU lat=valu form=pk32
+inst   VPkAddF32         v_pk_add_f32              VOP3P   0x32   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vr2,src1:vr2 imm=pksel m=neg imp=use:exec unit=VALU lat=valu form=pk32
+inst   VPkMovB32         v_pk_mov_b32              VOP3P   0x33   opc=gfx9 flags=VALU d=vdst:v2 u=src0:vr2,src1:vr2 imm=pksel imp=use:exec unit=VALU lat=valu form=pk32
+inst   VMovB64           v_mov_b64                 VOP1    0x38   opc=gfx9 flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2 imp=use:exec unit=VALU lat=valu
+inst   VLshlAddU64       v_lshl_add_u64            VOP3    0x208  opc=gfx9 flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs1,src2:vs2 imp=use:exec unit=VALU lat=valu
+inst   VCvtPkF16F32      v_cvt_pk_f16_f32          VOP3    0x267  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VCvtPkBf16F32     v_cvt_pk_bf16_f32         VOP3    0x268  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VPermlane16SwapB32 v_permlane16_swap_b32    VOP1    0x59   opc=gfx9 flags=VALU|TIED d=vdst:v1,vsrc:v1 u=vdst:v1,vsrc:v1 imp=use:exec unit=VALU lat=valu form=swap haz=h14
+inst   VPermlane32SwapB32 v_permlane32_swap_b32    VOP1    0x5a   opc=gfx9 flags=VALU|TIED d=vdst:v1,vsrc:v1 u=vdst:v1,vsrc:v1 imp=use:exec unit=VALU lat=valu form=swap haz=h14
+inst   BufferInv         buffer_inv                MUBUF   0x29   opc=gfx9 flags=FENCE imm=cpol imp=use:exec unit=VMEM lat=cache form=nodata
+inst   BufferWbl2        buffer_wbl2               MUBUF   0x28   opc=gfx9 flags=FENCE imm=cpol imp=use:exec unit=VMEM lat=cache form=nodata
+inst   VAccvgprReadB32   v_accvgpr_read_b32        VOP3P   0x58   opc=gfx9 flags=VALU d=vdst:v1 u=src0:acc1 imp=use:exec unit=VALU lat=valu form=acc_read
+inst   VAccvgprWriteB32  v_accvgpr_write_b32       VOP3P   0x59   opc=gfx9 flags=VALU d=vdst:acc1 u=src0:vi1 imp=use:exec unit=VALU lat=valu form=acc_write
+inst   VAccvgprMovB32    v_accvgpr_mov_b32         VOP1    0x52   opc=gfx9 flags=VALU d=vdst:acc1 u=src0:acc1 imp=use:exec unit=VALU lat=valu form=acc_mov
+# The plain MFMAs (VOP3P-MAI): D and C in one bank (acc_cd), A and B in either; v_mfma_f32_16x16x128_f8f6f4's
+# A and B are 8 dwords for fp8 and bf8 (cbsz and blgp name f6 and f4 formats, which read fewer).
+inst   VMfma16x16x32Bf16 v_mfma_f32_16x16x32_bf16  VOP3P   0x35   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av4,src1:av4,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x32F16  v_mfma_f32_16x16x32_f16   VOP3P   0x54   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av4,src1:av4,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x16F16  v_mfma_f32_16x16x16_f16   VOP3P   0x4d   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x16Bf16 v_mfma_f32_16x16x16_bf16  VOP3P   0x61   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma32x32x16F16  v_mfma_f32_32x32x16_f16   VOP3P   0x55   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av4,src1:av4,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma32x32x16Bf16 v_mfma_f32_32x32x16_bf16  VOP3P   0x37   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av4,src1:av4,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma32x32x8F16   v_mfma_f32_32x32x8_f16    VOP3P   0x4c   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av2,src1:av2,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma32x32x8Bf16  v_mfma_f32_32x32x8_bf16   VOP3P   0x60   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av2,src1:av2,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma4x4x4F16     v_mfma_f32_4x4x4_16b_f16  VOP3P   0x4a   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl2 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma4x4x4Bf16    v_mfma_f32_4x4x4_16b_bf16 VOP3P   0x5f   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl2 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x32Fp8Fp8 v_mfma_f32_16x16x32_fp8_fp8 VOP3P 0x73   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x32Fp8Bf8 v_mfma_f32_16x16x32_fp8_bf8 VOP3P 0x72   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x32Bf8Fp8 v_mfma_f32_16x16x32_bf8_fp8 VOP3P 0x71   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x32Bf8Bf8 v_mfma_f32_16x16x32_bf8_bf8 VOP3P 0x70   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av2,src1:av2,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl4 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x128F8f6f4 v_mfma_f32_16x16x128_f8f6f4 VOP3P 0x2d  opc=gfx9 flags=VALU d=vdst:av4 u=src0:av8,src1:av8,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_xdl8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x4F32   v_mfma_f32_16x16x4_f32    VOP3P   0x45   opc=gfx9 flags=VALU d=vdst:av4 u=src0:av1,src1:av1,src2:avi4 imm=mai imp=use:exec unit=VALU lat=mfma_smfma8 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma32x32x2F32   v_mfma_f32_32x32x2_f32    VOP3P   0x44   opc=gfx9 flags=VALU d=vdst:av16 u=src0:av1,src1:av1,src2:avi16 imm=mai imp=use:exec unit=VALU lat=mfma_smfma16 form=mai haz=m1,m2,m3,m4,m5,m6,m7
+inst   VMfma16x16x4F64   v_mfma_f64_16x16x4_f64    VOP3P   0x6e   opc=gfx9 flags=VALU d=vdst:av8 u=src0:av2,src1:av2,src2:avi8 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm16 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
+inst   VMfma4x4x4F64     v_mfma_f64_4x4x4_4b_f64   VOP3P   0x6f   opc=gfx9 flags=VALU d=vdst:av2 u=src0:av2,src1:av2,src2:avi2 imm=mai imp=use:exec unit=VALU lat=mfma_dgemm4 form=mai haz=m1,m2,m3,m4,m5,m6,m7,m9
 family VCmp              v_cmp_*                   VOPC    code   flags=macro d=sdst:s2 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
