@@ -595,6 +595,3726 @@ Solutions:
   _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
   _WorkspaceSizePerElemC: 0
+- SolutionIndex: 4
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    grid: [TilesXY, One, Batch]
+    macrotile: [16, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 1]
+  MacroTile0: 16
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 5
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [16, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 1, value: 63}
+  - {tag: SizeLessThan, index: 1, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 2]
+  MacroTile0: 16
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 6
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [16, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x64x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 2]
+  MacroTile0: 16
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 7
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [256, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 4]
+  MacroTile0: 256
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 128
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 8
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [256, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 1, value: 15}
+  - {tag: SizeLessThan, index: 1, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [16, 1]
+  MacroTile0: 256
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 9
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [256, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x16x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [16, 1]
+  MacroTile0: 256
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 10
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [256, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MacroTile0: 256
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 256
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 11
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [256, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 1]
+  MacroTile0: 256
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 12
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [256, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x32x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 1]
+  MacroTile0: 256
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 13
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [256, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 1, value: 63}
+  - {tag: SizeLessThan, index: 1, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 2]
+  MacroTile0: 256
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 14
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [256, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 255}
+  - {tag: SizeLessThan, index: 0, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 2]
+  MacroTile0: 256
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 15
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [32, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 127}
+  - {tag: SizeLessThan, index: 1, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 4]
+  MacroTile0: 32
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 16
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 4]
+  MacroTile0: 32
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 17
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: SizeFree1}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [32, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 15}
+  - {tag: SizeLessThan, index: 1, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [2, 1]
+  MacroTile0: 32
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 18
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x16x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [2, 1]
+  MacroTile0: 32
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 19
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [32, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 255}
+  - {tag: SizeLessThan, index: 1, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 8]
+  MacroTile0: 32
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 20
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 8]
+  MacroTile0: 32
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 21
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: SizeFree1}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [32, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 1]
+  MacroTile0: 32
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 22
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 1]
+  MacroTile0: 32
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 23
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 32, 64]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2_WGM_
+    threads: [64, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 63}
+  - {tag: SizeLessThan, index: 3, value: 65}
+  DepthU: 64
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 1]
+  MIWaveTile: [1, 1]
+  MacroTile0: 32
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [32, 32, 64, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 64
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 24
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [32, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 1, value: 63}
+  - {tag: SizeLessThan, index: 1, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 2]
+  MacroTile0: 32
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 25
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [32, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 31}
+  - {tag: SizeLessThan, index: 0, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [1, 2]
+  MacroTile0: 32
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 26
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [64, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 4]
+  MacroTile0: 64
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 27
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [64, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x128x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 4]
+  MacroTile0: 64
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 28
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [64, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 1, value: 15}
+  - {tag: SizeLessThan, index: 1, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 29
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [64, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x16x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 30
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [64, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 1, value: 255}
+  - {tag: SizeLessThan, index: 1, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 8]
+  MacroTile0: 64
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 31
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [64, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x256x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 8]
+  MacroTile0: 64
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 32
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [64, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 1]
+  MacroTile0: 64
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 33
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [64, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x32x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 1]
+  MacroTile0: 64
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 8
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 34
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [64, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 2]
+  MacroTile0: 64
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 35
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [64, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 63}
+  - {tag: SizeLessThan, index: 0, value: 65}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [2, 2]
+  MacroTile0: 64
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 36
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [128, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 4]
+  MacroTile0: 128
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 37
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [128, 128, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 4]
+  MacroTile0: 128
+  MacroTile1: 128
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 64
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 38
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [128, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 1, value: 255}
+  - {tag: SizeLessThan, index: 1, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 8]
+  MacroTile0: 128
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 128
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 39
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [128, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x256x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 8]
+  MacroTile0: 128
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 128
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 40
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [128, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 1]
+  MacroTile0: 128
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 41
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [128, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x32x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 1]
+  MacroTile0: 128
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 16
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 42
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [128, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 2]
+  MacroTile0: 128
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 43
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [128, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x64x128_UR_2_WGM_
+    threads: [256, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 127}
+  - {tag: SizeLessThan, index: 0, value: 129}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 2]
+  MacroTile0: 128
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 44
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: SizeFree0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    grid: [TilesXY, One, Batch]
+    macrotile: [16, 16, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2_WGM_
+    threads: [64, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 1, value: 15}
+  - {tag: SizeLessThan, index: 1, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 1]
+  MIWaveTile: [1, 1]
+  MacroTile0: 16
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 64
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 45
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [16, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 1, value: 255}
+  - {tag: SizeLessThan, index: 1, value: 257}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 8]
+  MacroTile0: 16
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 46
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2_WGM_
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2_WGM_
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2_WGM_
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideC0}
+    - {type: int64, semantic: StrideD0}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int32, semantic: RR_QuotientTilesByBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgmMainBlock}
+    - {type: int32, semantic: RR_MagicMultipleWgm}
+    - {type: int32, semantic: RR_WorkgroupMapping}
+    - {type: int32, semantic: RR_MagicMultipleWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgm}
+    - {type: int32, semantic: RR_MagicMultipleNumTilesN}
+    - {type: uint32, semantic: RR_MagicShiftAndSignNumTilesN}
+    - {type: int64, semantic: SizeFree0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmTail}
+    - {type: uint32, semantic: RR_MagicShiftAndSignWgmMainBlock}
+    - {type: int32, semantic: RR_QuotientTilesMByWgm}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    grid: [TilesXY, One, Batch]
+    macrotile: [16, 256, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x256x128_UR_2_WGM_
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 8]
+  MacroTile0: 16
+  MacroTile1: 256
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 47
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: SizeFree1}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: int64, semantic: StrideC0}
+    - {type: address, semantic: AddressC}
+    grid: [TilesX, TilesY, Batch]
+    macrotile: [16, 32, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x32x128_UR_2
+    threads: [128, 1, 1]
+  CustomKernelSizePredicate:
+  - {tag: SizeGreaterThan, index: 0, value: 15}
+  - {tag: SizeLessThan, index: 0, value: 17}
+  - {tag: SizeGreaterThan, index: 1, value: 31}
+  - {tag: SizeLessThan, index: 1, value: 33}
+  - {tag: SizeGreaterThan, index: 3, value: 127}
+  - {tag: SizeLessThan, index: 3, value: 129}
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [1, 2]
+  MIWaveTile: [1, 1]
+  MacroTile0: 16
+  MacroTile1: 32
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 4
+  NumThreads: 128
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 48
+  KernelNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  SolutionNameMin: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  1LDSBuffer: -1
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int64, semantic: SizeSum}
+    - {type: int64, semantic: StrideC0}
+    - {type: float32, semantic: Beta}
+    - {type: float32, semantic: Alpha}
+    - {type: uint32, semantic: RR_SKNumSKTilesPerWG}
+    - {type: uint32, semantic: RR_SKNumSKTiles}
+    - {type: int32, semantic: RR_SKMagicShiftsNumTiles1}
+    - {type: int32, semantic: RR_SKMagicShiftsIters}
+    - {type: uint32, semantic: RR_SKMagicMultipleNumTiles1}
+    - {type: uint32, semantic: RR_SKMagicMultipleIters}
+    - {type: uint32, semantic: RR_SKNumTiles1}
+    - {type: uint32, semantic: RR_SKNumWGs}
+    - {type: address, semantic: AddressC}
+    - {type: int64, semantic: SizeFree1}
+    - {type: int64, semantic: StrideD0}
+    - {type: address, semantic: AddressD}
+    - {type: address, semantic: RR_SKAddressPartials}
+    - {type: int64, semantic: StrideA0}
+    - {type: address, semantic: AddressA}
+    - {type: int64, semantic: SizeFree0}
+    - {type: int64, semantic: StrideB0}
+    - {type: address, semantic: AddressB}
+    - {type: int64, semantic: StrideScaleA0}
+    - {type: address, semantic: AddressMXScaleA}
+    - {type: int64, semantic: StrideScaleB0}
+    - {type: address, semantic: AddressMXScaleB}
+    - {type: address, semantic: RR_SKAddressFlags}
+    - {type: uint32, semantic: RR_SKNumDPTilesPerWG}
+    - {type: uint32, semantic: RR_SKNumDPTiles}
+    grid: [RocRollerStreamK, One, One]
+    macrotile: [128, 64, 128]
+    name: RR_GEMM_TN_BF8_BF8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_128x64x128_UR_2
+    occupancy: 3
+    threads: [256, 1, 1]
+    workspaceSizePerElemBias: 0
+    workspaceSizePerElemC: 4
+    workspaceType: RocRollerStreamK
+  DepthU: 128
+  DirectToLdsA: false
+  DirectToLdsB: false
+  DirectToVgprA: true
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: false,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [4, 2]
+  MacroTile0: 128
+  MacroTile1: 64
+  MathClocksUnrolledLoop: 0
+  MatrixInstruction: [16, 16, 128, 1]
+  NumElementsPerBatchStore: 16
+  NumElementsPerThread: 32
+  NumThreads: 256
+  PackedC0IndicesX: []
+  PreloadKernArgs: false
+  SourceSwap: true
+  StaggerU: 0
+  StaggerUStride: -1
+  StoreVectorWidth: 1
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroupMapping: 1
+  WorkGroupMappingXCC: 8
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 4
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [64, 64, 1, 128, 64, 64, 128, 128]
@@ -625,6 +4345,96 @@ ExactLogic:
   - [3, 1000]
 - - [2560, 16384, 1, 2560, 2560, 16384, 2560, 2560]
   - [2, 1000]
+- - [128, 256, 1, 128, 128, 128, 128, 128]
+  - [38, 961.99633027522941]
+- - [256, 64, 1, 128, 256, 256, 128, 128]
+  - [13, 548.99267015706812]
+- - [64, 256, 1, 128, 64, 64, 128, 128]
+  - [30, 534.98775510204086]
+- - [32, 256, 1, 128, 32, 32, 128, 128]
+  - [19, 344.86959381680646]
+- - [256, 32, 1, 128, 256, 256, 128, 128]
+  - [11, 338.25032258064516]
+- - [128, 32, 1, 128, 128, 128, 128, 128]
+  - [40, 262.14400000000001]
+- - [32, 128, 1, 128, 32, 32, 128, 128]
+  - [15, 244.93716421396869]
+- - [256, 16, 1, 128, 256, 256, 128, 128]
+  - [8, 236.16576576576577]
+- - [16, 256, 1, 128, 16, 16, 128, 128]
+  - [45, 209.71520000000001]
+- - [64, 32, 1, 128, 64, 64, 128, 128]
+  - [32, 124.83047619047619]
+- - [32, 64, 1, 128, 32, 32, 128, 128]
+  - [24, 111.07796610169491]
+- - [32, 32, 1, 128, 32, 32, 128, 128]
+  - [21, 64.887128712871288]
+- - [16, 64, 1, 128, 16, 16, 128, 128]
+  - [5, 62.415238095238095]
+- - [64, 16, 1, 128, 64, 64, 128, 128]
+  - [28, 62.415238095238095]
+- - [16, 32, 1, 128, 16, 16, 128, 128]
+  - [47, 48.188235294117646]
+- - [32, 16, 1, 128, 32, 32, 128, 128]
+  - [17, 33.436734693877554]
+- - [32, 32, 1, 64, 32, 32, 64, 64]
+  - [23, 23.405714285714286]
+- - [16, 16, 1, 128, 16, 16, 128, 128]
+  - [44, 11.95912408759124]
+- - [256, 257, 1, 128, 256, 256, 128, 128]
+  - [10, 1089.4296103896104]
+- - [256, 129, 1, 128, 256, 256, 128, 128]
+  - [7, 743.67092198581565]
+- - [128, 257, 1, 128, 128, 128, 128, 128]
+  - [39, 738.43380281690145]
+- - [128, 129, 1, 128, 128, 128, 128, 128]
+  - [36, 659.48176100628928]
+- - [256, 65, 1, 128, 256, 256, 128, 128]
+  - [14, 504.12307692307695]
+- - [128, 130, 1, 128, 128, 128, 128, 128]
+  - [37, 476.57129871605497]
+- - [64, 257, 1, 128, 64, 64, 128, 128]
+  - [31, 433.25111042247704]
+- - [64, 129, 1, 128, 64, 64, 128, 128]
+  - [26, 359.1013698630137]
+- - [128, 65, 1, 128, 128, 128, 128, 128]
+  - [42, 329.74088050314464]
+- - [128, 66, 1, 128, 128, 128, 128, 128]
+  - [43, 310.18370063600059]
+- - [64, 130, 1, 128, 64, 64, 128, 128]
+  - [27, 275.94105263157894]
+- - [32, 257, 1, 128, 32, 32, 128, 128]
+  - [20, 263.46130653266334]
+- - [256, 33, 1, 128, 256, 256, 128, 128]
+  - [12, 258.26995073891624]
+- - [64, 65, 1, 128, 64, 64, 128, 128]
+  - [34, 172.46315789473684]
+- - [32, 129, 1, 128, 32, 32, 128, 128]
+  - [16, 156.97245508982036]
+- - [16, 257, 1, 128, 16, 16, 128, 128]
+  - [46, 152.40930232558139]
+- - [256, 17, 1, 128, 256, 256, 128, 128]
+  - [9, 151.52832369942197]
+- - [128, 33, 1, 128, 128, 128, 128, 128]
+  - [41, 144.03516483516484]
+- - [64, 66, 1, 128, 64, 64, 128, 128]
+  - [35, 142.46956521739131]
+- - [64, 33, 1, 128, 64, 64, 128, 128]
+  - [33, 97.814925373134329]
+- - [32, 65, 1, 128, 32, 32, 128, 128]
+  - [25, 85.667973856209144]
+- - [16, 65, 1, 128, 16, 16, 128, 128]
+  - [6, 47.836496350364961]
+- - [64, 17, 1, 128, 64, 64, 128, 128]
+  - [29, 44.887671232876713]
+- - [32, 33, 1, 128, 32, 32, 128, 128]
+  - [22, 41.21761006289308]
+- - [32, 17, 1, 128, 32, 32, 128, 128]
+  - [18, 28.493913043478262]
+- - [16, 33, 1, 128, 16, 16, 128, 128]
+  - [4, 22.291156462585032]
+- - [128, 67, 1, 128, 128, 128, 128, 128]
+  - [48, 354.2486486486486683]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

@@ -651,3 +651,125 @@ def test_an_unreadable_file_does_not_fail_the_corpus_check(tmp_path, vcc):
 
     files = _all_yaml(tmp_path) + [tmp_path / "aquavanjaram" / "gfx942" / "gone.yaml"]
     assert vcc.check_corpus_invariants(tmp_path, files=files) == []
+
+
+# ===========================================================================
+# rocRoller macrotile agreement
+# ===========================================================================
+
+def _write_rocroller_logic_yaml(path, *, name, macrotile, custom_kernel=True):
+    """A logic file carrying one solution, enough for the macrotile check.
+
+    The real files carry a large header and a fully derived solution state; the
+    check reads only ``Solutions[*].CustomKernel``, so that is all this writes.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "ScheduleName: schedule",
+        "ArchitectureName: gfx950",
+        "DeviceNames: [Device 75a3]",
+        "Solutions:",
+        "- SolutionIndex: 0",
+    ]
+    if custom_kernel:
+        lines += ["  CustomKernel:", f"    name: {name}"]
+        if macrotile is not None:
+            lines.append(f"    macrotile: {macrotile}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+_GOOD_RR_NAME = (
+    "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+)
+
+
+def test_a_macrotile_matching_the_kernel_name_is_accepted(tmp_path, vcc):
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml", name=_GOOD_RR_NAME, macrotile="[32, 32, 64]"
+    )
+    assert vcc.find_rocroller_macrotile_violations([f], tmp_path) == []
+
+
+def test_a_macrotile_disagreeing_with_the_kernel_name_is_reported(tmp_path, vcc):
+    # The defect this exists for: the predicates bounding M and K are derived
+    # from macrotile, so a value that does not match the captured tile bounds
+    # the kernel to the wrong sizes without failing anything else.
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml", name=_GOOD_RR_NAME, macrotile="[64, 32, 64]"
+    )
+    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
+
+    assert len(violations) == 1
+    assert "disagrees" in violations[0]
+    assert "[64, 32, 64]" in violations[0] and "[32, 32, 64]" in violations[0]
+
+
+@pytest.mark.parametrize("macrotile", [None, "[]", "[32, 32]", "[32, 0, 64]", "foo"])
+def test_an_unusable_macrotile_is_reported(tmp_path, vcc, macrotile):
+    # Absent, wrong length, non-positive, or not a list: each would leave the
+    # size predicates underived with no other signal.
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml", name=_GOOD_RR_NAME, macrotile=macrotile
+    )
+    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
+
+    assert len(violations) == 1
+    assert "expected three positive integers" in violations[0]
+
+
+def test_a_rocroller_kernel_without_a_tile_token_is_reported(tmp_path, vcc):
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml",
+        name="RR_GEMM_TN_FP8_FP8_no_tile_here",
+        macrotile="[32, 32, 64]",
+    )
+    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
+
+    assert len(violations) == 1
+    assert "_WGT_" in violations[0]
+
+
+def test_other_kernel_families_are_not_checked(tmp_path, vcc):
+    # Scoped to RR_GEMM_ because only those kernels derive size predicates from
+    # macrotile. An AITER or generated custom kernel has no such contract.
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml",
+        name="Cijk_Alik_Bljk_F8SS_MXAE8B32_BH_UserArgs_MT64x64x256",
+        macrotile=None,
+    )
+    assert vcc.find_rocroller_macrotile_violations([f], tmp_path) == []
+
+
+def test_a_solution_without_a_custom_kernel_is_not_checked(tmp_path, vcc):
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml",
+        name="unused",
+        macrotile=None,
+        custom_kernel=False,
+    )
+    assert vcc.find_rocroller_macrotile_violations([f], tmp_path) == []
+
+
+def test_an_unreadable_file_does_not_fail_the_macrotile_check(tmp_path, vcc):
+    # Same fallback contract as the sibling-DeviceNames check: a malformed or
+    # missing file is another validator's problem, not this one's.
+    assert (
+        vcc.find_rocroller_macrotile_violations(
+            [tmp_path / "gfx950" / "gone.yaml"], tmp_path
+        )
+        == []
+    )
+
+
+def test_the_aggregate_reports_macrotile_violations(tmp_path, vcc):
+    # The check has to reach callers through check_corpus_invariants, which is
+    # what TensileLogic --check-all actually runs.
+    asm_full = tmp_path / "asm_full"
+    _write_rocroller_logic_yaml(
+        asm_full / "gfx950" / "a.yaml", name=_GOOD_RR_NAME, macrotile="[64, 32, 64]"
+    )
+
+    violations = vcc.check_corpus_invariants(asm_full)
+
+    assert any("rocRoller macrotile violation" in v for v in violations)
