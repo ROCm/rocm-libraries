@@ -19,9 +19,12 @@ the gfx950 form. Two choices differ from gfx942, both fixed by the class:
   undo.
 
 The PV keeps the ``16x16x16`` atom: a key tile is one 16-row page, so a
-32-deep PV would need two pages per tile. Everything else -- heads on the
-MFMA n axis, 16 heads per wave, the lazy-rescale online softmax, split-KV and
-the arch-neutral combine -- is the gfx942 kernel's. A bring-up configuration:
+32-deep PV would need two pages per tile. The score read-ahead and its fence
+spacing are per arch (``DECODE_SCORE_PREFETCH``, ``DECODE_SCORE_FENCE_EVERY``):
+gfx942 reads less far ahead, fenced every k-step, to stay out of scratch.
+Everything else -- heads on the MFMA n axis, 16 heads per wave, the
+lazy-rescale online softmax, split-KV and the arch-neutral combine -- is the
+gfx942 kernel's. A bring-up configuration:
 the 32-head ``32x32x16`` layout, multi-page tiles and LDS DMA are tuning work.
 """
 

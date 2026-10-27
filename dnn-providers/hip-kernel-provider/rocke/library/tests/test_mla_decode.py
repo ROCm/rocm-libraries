@@ -178,6 +178,25 @@ class TestGate:
         with pytest.raises(NotImplementedError):
             build_mla_decode(MlaDecodeSpec(num_heads=128), arch="gfx950")
 
+    def test_arch_without_a_score_schedule_is_refused(self):
+        # The gate must refuse what the build cannot emit: a spec class whose
+        # arch has no DECODE_SCORE_PREFETCH / DECODE_SCORE_FENCE_EVERY entry
+        # falls through dispatch instead of reaching a KeyError inside
+        # build_mla_decode.
+        other = type("_OtherArchSpec", (MlaDecodeSpec,), {"ARCH": "gfx90a"})
+        spec = other(num_heads=64)
+        ok, why = supports_mla_decode(spec, arch="gfx90a")
+        assert not ok and "DECODE_SCORE_FENCE_EVERY" in why and "gfx90a" in why
+        with pytest.raises(NotImplementedError, match="gfx90a"):
+            build_mla_decode(spec)
+
+    def test_arch_missing_from_one_score_table_is_refused(self, monkeypatch):
+        monkeypatch.setattr(
+            "kernels.mla.mla_decode.DECODE_SCORE_FENCE_EVERY", {"gfx950": 4}
+        )
+        ok, why = supports_mla_decode(MlaDecodeSpec(num_heads=64), arch="gfx942")
+        assert not ok and "['gfx950']" in why
+
     def test_build_defaults_to_the_spec_class_arch(self):
         spec = MlaDecodeGfx950Spec(num_heads=64)
         assert build_mla_decode(spec).name == build_mla_decode_gfx950(spec).name

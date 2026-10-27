@@ -64,13 +64,19 @@ choices, so a spec can never name one arch's IR with the other's kernel name:
   tile on gfx942 (no transpose read there), ``ds_read_tr16_b64`` on gfx950,
   which hands each lane the transposed fragment directly and keeps the latent
   tiles in natural order.
+
+Two schedule constants also differ by arch: the score read-ahead and its fence
+spacing (``DECODE_SCORE_PREFETCH``, ``DECODE_SCORE_FENCE_EVERY``), keyed by
+``ARCH`` and so fixed by the class too.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import ClassVar
 
 from kernels.common.attention_arch import attention_lds_capacity_bytes
@@ -105,17 +111,30 @@ from .mla_prefill_gfx942 import (
     _shift,
 )
 
-# Decode's own schedule knobs. They start at the prefill's values -- the same
-# loop, measured there -- but are decode's to tune: a prefill retune must not
-# move decode IR.
+# Decode's own schedule knobs. Most start at the prefill's values -- the same
+# loop, measured there -- but all are decode's to tune: a prefill retune must
+# not move decode IR.
 
 #: No AGPRs: the 128-VGPR accumulator stays in the VGPR file, where the
 #: per-tile rescale does not pay an accvgpr read/write pair per register.
 DECODE_AGPR_ALLOC = (0, 0)
-#: Score k-steps whose LDS reads are issued ahead of the MFMA that uses them.
-DECODE_SCORE_PREFETCH = 8
-#: Score k-steps between scheduling fences.
-DECODE_SCORE_FENCE_EVERY = 4
+#: Score read-ahead and scheduling-fence spacing per arch, both in K = 16 score
+#: k-steps (16 latent columns each); a K = 32 k-step is two. Both arches' loops
+#: keep the 128-VGPR accumulator and the 64-VGPR absorbed query live; with no
+#: AGPRs the read-ahead buffers share what is left of the 256 VGPRs a wave gets
+#: at two workgroups per CU, and an overflow goes to scratch. gfx950 keeps the
+#: prefill's pair: eight ahead, a fence every four. gfx942 reads four ahead
+#: with a fence after every k-step: the prefill's pair spills its split kernel
+#: under a newer comgr (``TestResources`` in ``tests/test_mla_decode.py``
+#: gates it), and at four ahead only a per-step fence stays out of scratch (a
+#: fence every two or four k-steps spills). The pair is a resource choice, and
+#: the fence spacing moves the spill as much as the depth does, so retune the
+#: two together.
+DECODE_SCORE_PREFETCH: Mapping[str, int] = MappingProxyType({"gfx942": 4, "gfx950": 8})
+#: See DECODE_SCORE_PREFETCH.
+DECODE_SCORE_FENCE_EVERY: Mapping[str, int] = MappingProxyType(
+    {"gfx942": 1, "gfx950": 4}
+)
 #: PV read groups issued ahead of the MFMAs that use them.
 DECODE_PV_PREFETCH = 1
 #: Lazy rescale threshold, in log2 units: a new running max replaces the one
@@ -293,6 +312,12 @@ def supports_mla_decode(spec: MlaDecodeSpec, *, arch: str) -> tuple[bool, str]:
         return False, (
             f"{type(spec).__name__} emits the {spec.ARCH} MLA decode kernel, got "
             f"arch={arch!r}"
+        )
+    scheduled = DECODE_SCORE_PREFETCH.keys() & DECODE_SCORE_FENCE_EVERY.keys()
+    if spec.ARCH not in scheduled:
+        return False, (
+            f"no decode score schedule is set for {spec.ARCH}; DECODE_SCORE_PREFETCH "
+            f"and DECODE_SCORE_FENCE_EVERY both cover {sorted(scheduled)}"
         )
     if spec.heads_per_wave != MFMA_N:
         return False, (
@@ -505,11 +530,10 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     score_mfma = _mfma_16x16x32 if SK == 32 else _mfma_16x16x16
     TR_PV = spec.PV_TRANSPOSE_READ
     PAD = spec.lds_pad
-    # The score read-ahead and fence spacing are the prefill's, held constant
-    # in latent *columns*: a K = 32 k-step's fragments are twice as wide, and
-    # the prefill's 8-step read-ahead at that width spills.
-    SCORE_PREFETCH = DECODE_SCORE_PREFETCH * MFMA_K // SK
-    SCORE_FENCE_EVERY = max(1, DECODE_SCORE_FENCE_EVERY * MFMA_K // SK)
+    # The read-ahead and the fence spacing count K = 16 steps (latent columns):
+    # a K = 32 k-step is two.
+    SCORE_PREFETCH = DECODE_SCORE_PREFETCH[spec.ARCH] * MFMA_K // SK
+    SCORE_FENCE_EVERY = max(1, DECODE_SCORE_FENCE_EVERY[spec.ARCH] * MFMA_K // SK)
 
     K_TILES = BK // MFMA_N
     SCORE_K_ITERS = QA_COLS // SK
@@ -779,8 +803,11 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
         # ---- Sᵀ = [C | K_rope] · Qaᵀ, the wave's whole K reduction ----------
         # Software-pipelined as in the prefill (SCORE_PREFETCH): k-step
-        # kk + D's LDS reads are emitted before k-step kk's MFMA, and the fences
-        # stop the scheduler from sinking them back down.
+        # kk + D's LDS reads are emitted before k-step kk's MFMA, and a fence
+        # between a read and its MFMA keeps the scheduler from sinking the read
+        # back down to it. Keep D at least the fence spacing F: below it, the
+        # reads of each interval's last F - D k-steps share the interval with
+        # their MFMAs and the scheduler may still sink them.
         s_acc = [b.zero_vec_f32(4) for _ in range(K_TILES)]
 
         def _score_operands(kk):
