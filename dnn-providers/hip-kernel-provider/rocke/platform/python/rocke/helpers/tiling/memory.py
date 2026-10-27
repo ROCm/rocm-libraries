@@ -44,8 +44,8 @@ def cooperative_load_width(
 ) -> int | None:
     """Widest GEOMETRY-PERMITTED per-lane free-run (in elements) for a cooperative load of this operand,
     or ``None`` if none works. This is the distribution ceiling only -- the dtype / 128-bit HARDWARE ceiling
-    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible dtype at 16 B (an f32
-    8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
+    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible storage unit at 16 B (an
+    f32 8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
     be a single global access. DERIVED, and PER OPERAND -- A and B have independent free extents so may want
     different widths.
 

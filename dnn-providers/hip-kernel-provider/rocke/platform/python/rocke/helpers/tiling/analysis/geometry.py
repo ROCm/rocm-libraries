@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....core.dtypes import dtype_info
+
 _BINARY = {
     "arith.add": lambda a, b: a + b,
     "arith.sub": lambda a, b: a - b,
@@ -112,7 +114,19 @@ def _arch_wave(pipeline: Any) -> tuple[str, int]:
     return pipeline.arch, pipeline.wave_size
 
 
-def _elem_bytes(dtype_name: str) -> int:
-    from ..emit import _BYTE_WIDTH
+def _elem_bits(dtype_name: str) -> int:
+    """Bits of one element of `dtype_name` (``core.dtypes.dtype_info``) -- the width home of the
+    views."""
+    return dtype_info(dtype_name).encoded_bits
 
-    return _BYTE_WIDTH[dtype_name]
+
+def _elem_bytes(dtype_name: str) -> int:
+    """Bytes of one element of `dtype_name`, for the byte-addressed views (the LDS bank model). A
+    sub-byte element has no byte address of its own and is refused."""
+    bits = _elem_bits(dtype_name)
+    if bits % 8:
+        raise NotImplementedError(
+            f"{dtype_name} elements are {bits} bits, not a whole number of bytes -- "
+            "byte-addressed views (LDS bank model) of packed data -- TODO: not implemented yet"
+        )
+    return bits // 8

@@ -187,6 +187,10 @@ c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C (M, N), N-contigu
 a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), BF16)  # bf16 in
 c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F32)   # f32 store (no narrowing cast)
 ```
+The descriptor's dtype is the logical format; the verbs move its storage units and never read the
+pointer's element type. Pass a TF32 tensor as `PtrType(TF32)` (core's convention) and a packed
+sub-byte tensor (fp4, fp6, i4) as `PtrType(I8)`, its bytes packed low bit first; its descriptor is
+still in elements.
 
 ### LDS buffers: a flat allocation, described by its descriptor
 
@@ -211,6 +215,9 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
 - **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
   `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
+- **Packed sub-byte tensors** (fp4, fp6, i4) live in a buffer of i32 words:
+  `smem_alloc(I32, [ceil(lds_element_span(td) * bits / 32)])`, addressed by the same element index
+  converted to words. A swizzle is refused for them.
 - **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
   divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
   or batch stride that is not a multiple of the natural vector narrows the access.
@@ -370,6 +377,15 @@ a_frag = load_fragment(b, a_ptr, make_window(a_td, (m, k)), a_desc, lane)   # fr
 ```
 - dtype lives on the `Fragment` (D16); `store_fragment` casts fragment dtype -> desc dtype
   on the honest path only (identity, or f32->{f16,bf16}); anything else fails fast.
+- `dtype` is the logical format; the registers in `value` are held in `frag.storage_type`, derived
+  from it: the logical vector `vec<dtype x n>` for every arithmetic dtype, `vec<i32 x n>` for tf32
+  (it has no arithmetic), and whole i32 words `vec<i32 x n*bits/32>` for a packed sub-byte dtype
+  (fp4, fp6, i4; `n * bits` must be a multiple of 32). A logical `vec<tf32 x n>` is refused with the
+  `b.bitcast` to i32 that fixes it. A u8 fragment is held as `vec<u8 x n>` and stores, but
+  `fill_fragment` and `load_fragment` refuse it (core's `zero_vec` has no u8 form): build an I8
+  fragment and `b.bitcast` its value to `vec<u8 x n>`. The verbs move storage units: a packed
+  fragment's registers must form runs of whole 32-bit words along the tensor's stride-1 axis, and a
+  clipped packed window's bound along that axis must be whole words; both are refused otherwise.
 - `tile_desc`/`dtype` are read-only; `value` is the one writable field (re-bound each K step:
   `accumulator.value = b.mma(...)` for a single-atom tile -- wave shape == atom shape, one
   `b.mma`; a multi-atom tile goes through `TileMma`). The write and read checks are documented on
