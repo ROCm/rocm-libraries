@@ -220,16 +220,19 @@ rocm_install_targets(
   INCLUDE library/include
 )
 
-if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS)
+if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS OR ROCWMMA_BUILD_COMMUNITY_SAMPLES)
   enable_testing()
   rocm_package_setup_component(clients)
+endif()
+
+if(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community-samples PARENT clients)
 endif()
 
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
 elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
-  rocm_package_setup_component(community_samples PARENT clients)
   add_subdirectory(samples/community)
 endif()
 
@@ -256,9 +259,17 @@ if(BUILD_ADDRESS_SANITIZER)
 else()
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
 endif()
-rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
-rocm_package_add_deb_dependencies("libomp-dev")
-rocm_package_add_rpm_dependencies("libomp-devel")
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+# Client packages can be installed individually, without the clients aggregate.
+# Component-specific dependencies override the global list, so retain HIP too.
+foreach(_rocwmma_client_component clients samples tests community-samples)
+  if(_rocwmma_client_component IN_LIST ROCM_PACKAGE_COMPONENTS)
+    rocm_package_add_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+    rocm_package_add_deb_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "libomp-dev")
+    rocm_package_add_rpm_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "libomp-devel")
+  endif()
+endforeach()
+unset(_rocwmma_client_component)
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 rocm_export_targets(

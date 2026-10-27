@@ -5,6 +5,13 @@ compiles a HIP kernel, and links and runs host FP16 conversions. It does not lau
 a kernel or require an available GPU. It must fail if OpenMP dependency discovery
 or an unresolved OpenMP target is restored to the installed package.
 
+The HIP consumer defaults to the `gfx1100` compilation target before enabling
+the HIP language, so configuration does not need GPU detection. Override it
+with `CMAKE_HIP_ARCHITECTURES`; if only `GPU_TARGETS` is supplied, that value is
+used instead. `GPU_TARGETS` otherwise defaults to `CMAKE_HIP_ARCHITECTURES` so
+HIP's package targets use the same architecture. No GPU hardware is required,
+but the SDK must support the selected compilation target.
+
 From the repository root, build and install rocWMMA without clients. For example
 on Linux with ROCm under `/opt/rocm`:
 
@@ -72,3 +79,6 @@ This case requires neither the CMake HIP language nor a GPU. Unlike the first
 test, it permits rocWMMA to load LLVM's OpenMP config if its exported interface
 requires that target, so both a self-contained OpenMP-dependent package and a
 package with no OpenMP dependency can pass.
+It defaults `GPU_TARGETS` to `gfx1100` for HIP's exported device target; an
+explicit `GPU_TARGETS` overrides that default. Its source is
+`openmp/test_openmp_consumer.cpp`.

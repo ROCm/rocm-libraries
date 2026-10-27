@@ -2,6 +2,17 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21)
+
+# Compile device code without probing for a GPU; the test never launches it.
+if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    if(DEFINED GPU_TARGETS)
+        set(CMAKE_HIP_ARCHITECTURES "${GPU_TARGETS}" CACHE STRING "HIP compilation targets")
+    else()
+        set(CMAKE_HIP_ARCHITECTURES gfx1100 CACHE STRING "HIP compilation targets")
+    endif()
+endif()
+set(GPU_TARGETS "${CMAKE_HIP_ARCHITECTURES}" CACHE STRING "HIP package compilation targets")
+
 project(rocwmma_package_consumer LANGUAGES CXX HIP)
 
 # An installed rocWMMA consumer must not need either OpenMP package variant.
