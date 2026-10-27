@@ -9,7 +9,6 @@ set(core_headers
     "${CORE_INCLUDE_DIR}/layout.hpp"
     "${CORE_INCLUDE_DIR}/scalar.hpp"
     "${CORE_INCLUDE_DIR}/scalar_binary_float.hpp"
-    "${CORE_INCLUDE_DIR}/scalar_codec.hpp"
     "${CORE_INCLUDE_DIR}/scalar_storage.hpp"
     "${CORE_INCLUDE_DIR}/scalar_type.hpp"
     "${CORE_INCLUDE_DIR}/shape.hpp"
@@ -51,7 +50,7 @@ endforeach()
 file(READ "${CORE_INCLUDE_DIR}/scalar.hpp" scalar_contents)
 file(READ "${CORE_INCLUDE_DIR}/scalar_type.hpp" scalar_type_contents)
 string(APPEND scalar_contents "\n${scalar_type_contents}")
-file(READ "${CORE_INCLUDE_DIR}/scalar_codec.hpp" codec_contents)
+set(codec_contents)
 foreach(codec_header
         scalar_binary_float.hpp
         scalar_storage.hpp)
@@ -59,10 +58,6 @@ foreach(codec_header
     string(APPEND codec_contents "\n${codec_header_contents}")
 endforeach()
 file(READ "${CORE_INCLUDE_DIR}/tensor.hpp" tensor_contents)
-file(READ
-    "${CORE_INCLUDE_DIR}/tensor_transformations.hpp"
-    tensor_transformations_contents
-)
 
 string(FIND
     "${scalar_contents}"
@@ -72,23 +67,6 @@ string(FIND
 if(scalar_storage_include_position EQUAL -1)
     message(FATAL_ERROR "scalar.hpp does not include its storage template definitions.")
 endif()
-string(FIND
-    "${scalar_contents}"
-    "#include <roc/hostnumerics/scalar_codec.hpp>"
-    scalar_codec_include_position
-)
-if(NOT scalar_codec_include_position EQUAL -1)
-    message(FATAL_ERROR "scalar.hpp must not include its compatibility wrapper.")
-endif()
-string(FIND
-    "${codec_contents}"
-    "#include <roc/hostnumerics/scalar.hpp>"
-    scalar_compatibility_include_position
-)
-if(scalar_compatibility_include_position EQUAL -1)
-    message(FATAL_ERROR "scalar_codec.hpp does not preserve scalar.hpp compatibility.")
-endif()
-
 foreach(required_scalar_declaration
         "enum class ScalarCategory"
         "enum class ScalarType"
@@ -123,24 +101,6 @@ string(FIND
 if(tensor_scalar_include_position EQUAL -1)
     message(FATAL_ERROR "tensor.hpp does not preserve scalar API compatibility through scalar.hpp.")
 endif()
-string(FIND
-    "${tensor_contents}"
-    "#include <roc/hostnumerics/tensor_transformations.hpp>"
-    tensor_transformations_include_position
-)
-if(NOT tensor_transformations_include_position EQUAL -1)
-    message(FATAL_ERROR "tensor.hpp must not include its compatibility wrapper.")
-endif()
-string(FIND
-    "${tensor_transformations_contents}"
-    "#include <roc/hostnumerics/tensor.hpp>"
-    tensor_compatibility_include_position
-)
-if(tensor_compatibility_include_position EQUAL -1)
-    message(FATAL_ERROR
-        "tensor_transformations.hpp does not preserve tensor.hpp compatibility.")
-endif()
-
 foreach(forbidden_tensor_declaration
         "enum class ScalarCategory"
         "enum class ScalarType"
