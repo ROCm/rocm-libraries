@@ -37,6 +37,7 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 |---|---|---|---|
 | `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor, global or LDS (sec 3) | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip); axes in the one convention (sec 3) |
 | `make_window(tensor, origin)` / `TensorWindow.with_origin(axis, origin)` | a tile's position on a tensor: one origin per tensor axis (int or i32 IR value; negative allowed) | no | no length of its own: the valid region is the tensor's `lengths`; `with_origin` moves one axis |
+| `exit_if_tile_outside(b, origin, length)` -> i32 value | the prologue guard on a block origin: the workgroup returns unless `0 <= origin < length` (half-open; only the origin is guaranteed, not the whole tile) (sec 3) | yes (b-first) | use the value it returns, which carries the fact; `length` is the tensor's own int or length Value |
 | `check_gemm_shapes(a, b, c=None)` | build-time check that one GEMM's tensors agree on their extents (sec 3) | no (emits no IR) | reads A `(M, K)`, B `(N, K)`, C `(M, N)` positionally, batch axes first |
 | `make_tile_desc(shape=, thread_dist=, thread_tile=, ...)` | author a logical->register layout (quantity-major) | no | for MMA operands use `mma.a/b/c_desc` instead |
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
@@ -167,6 +168,35 @@ a_td = make_tensor_desc((M, K), (K, 1), F16)   # one K Value: the length and the
   length or stride.
 - **`check_gemm_shapes`** agrees two runtime extents only when they are one and the same Value; two
   `gpu_checked_value` calls give two different Values, even on one loaded value.
+
+### Block origins: `exit_if_tile_outside`
+
+A block origin such as `block_id_y * TM` is a plain i32 value; nothing in the IR says the tile starts
+inside the tensor. `exit_if_tile_outside` makes it true, once, in the kernel prologue:
+```python
+m0 = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(TM)), M)
+n0 = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(TN)), N)
+wave = b.div(b.thread_id_x(), b.const_i32(wave_size))
+c_win = make_window(c_td, (b.add(m0, b.mul(b.div(wave, b.const_i32(waves_n)), b.const_i32(warp_m))),
+                           b.add(n0, b.mul(b.mod(wave, b.const_i32(waves_n)), b.const_i32(warp_n)))))
+```
+- **What it guarantees.** Ranges are half-open (`[lo, hi)` holds `lo`, not `hi`). A workgroup whose
+  origin is outside `[0, length)` returns before doing anything, so an over-launched grid or a remap
+  that yields a negative origin touches no memory. Only the ORIGIN is guaranteed: a tile `[m0, m0 + TM)`
+  fits when `length` is a multiple of `TM` (an int, or a Value stated `multiple_of` a multiple of `TM`);
+  otherwise its upper side overhangs on the last tile and stays checked.
+- **Use the value it returns.** The fact is a range marker on the returned value (written
+  `by="exit_if_tile_outside"`); the IR range walk (`tensor_transforms`) reads it from every use, and
+  from arithmetic on it such as a wave offset added with `b.add`. The raw origin passed in carries no
+  upper end.
+- **Rules.** Call it in the kernel's top level, never inside a loop or an `if`. The origin is an i32 IR
+  value (an int origin needs no guard) and the length is the tensor's own int or length Value (one
+  with stated facts, the same Value the tensor description holds). Both must be the same for the whole
+  workgroup -- block ids, kernel parameters, constants, or a `b.readfirstlane` of a load at such an
+  index through a parameter declared `readonly=True, noalias=True` -- so every wave leaves together and
+  no barrier waits on a departed wave. A batch index is guarded the same way:
+  `g = exit_if_tile_outside(b, b.block_id_z(), G)`. State the workgroup size right after creating the
+  builder.
 
 ### `check_gemm_shapes(a, b, c=None)` -- the tensors of one GEMM agree
 

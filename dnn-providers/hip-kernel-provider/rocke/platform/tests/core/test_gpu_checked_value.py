@@ -747,7 +747,7 @@ MARKERS = {
         {"by": "someone"},
         [
             "arith.assume_range: by names no marker writer: 'someone' (one of: "
-            "gpu_checked_value)"
+            "gpu_checked_value, exit_if_tile_outside)"
         ],
     ),
     "ge_operand_type": (

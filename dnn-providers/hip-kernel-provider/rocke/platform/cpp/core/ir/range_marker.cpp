@@ -28,7 +28,7 @@ namespace
 const char* const kIntAttrs[] = {"multiple_of", "residue", "ge", "ge_plus", "lt", "lt_plus"};
 
 /* ir.ASSUME_RANGE_WRITERS: the writers a marker's `by` attr may name. */
-const char* const kWriters[] = {ROCKE_GPU_CHECKED_VALUE_WRITER};
+const char* const kWriters[] = {ROCKE_GPU_CHECKED_VALUE_WRITER, ROCKE_EXIT_IF_TILE_OUTSIDE_WRITER};
 
 /* ir._marker_end_operands: the marker's ge and lt operands, NULL for an end
  * it does not state as a Value. The one home of the operand layout. */

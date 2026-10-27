@@ -271,6 +271,11 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
  * core/ir.py::GPU_CHECKED_VALUE_WRITER). */
 #define ROCKE_GPU_CHECKED_VALUE_WRITER "gpu_checked_value"
 
+/* The `by` of the range marker the Python tiling layer's exit_if_tile_outside
+ * writes (Python core/ir.py::EXIT_IF_TILE_OUTSIDE_WRITER); no C++ builder
+ * writes it, the verifiers accept it. */
+#define ROCKE_EXIT_IF_TILE_OUTSIDE_WRITER "exit_if_tile_outside"
+
 /* Why such a kernel must not be launched from its code object alone (Python
  * core/ir.py::GPU_CHECK_UNREAD_REASON, same words). */
 #define ROCKE_GPU_CHECK_UNREAD_REASON                                      \

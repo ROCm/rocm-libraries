@@ -18,6 +18,8 @@ FRONT DOOR -- what you reach for by default:
     ``make_tensor_desc`` / ``make_window``   where a tensor sits (its lengths are the only valid
         region) + where a tile is placed on it; ``TensorWindow.with_origin`` moves a window along
         one axis (``descriptors.py``).
+    ``exit_if_tile_outside``   the prologue guard on a block origin: the workgroup ends unless
+        ``0 <= origin < length``; use the value it returns (``descriptors.py``).
     ``check_gemm_shapes``   check at build time that a GEMM's A, B (and C) agree on their extents.
     ``make_tile_desc``   author a custom (non-MMA) tile layout; for MMA operands use
         ``mma.a_desc`` / ``b_desc`` / ``c_desc``.
@@ -60,6 +62,7 @@ from .descriptors import (
     TensorWindow,
     check_gemm_shapes,
     make_tensor_desc,
+    exit_if_tile_outside,
     make_window,
 )
 from .emit import (
@@ -116,6 +119,7 @@ __all__ = [
     "TileMma",
     "make_tensor_desc",
     "make_window",
+    "exit_if_tile_outside",
     "check_gemm_shapes",
     "make_tile_desc",
     "make_fragment",

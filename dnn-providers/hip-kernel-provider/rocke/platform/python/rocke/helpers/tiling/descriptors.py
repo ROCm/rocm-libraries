@@ -10,9 +10,11 @@ mapping, then composes them: cuBLASLt `cublasLtMatrixLayout_t`, cuTENSOR
 `tile_distribution`. Unlike the C-API handles, ours is a TRANSPARENT value object -- the point
 of this layer is that you can read it.
 
-This module is the MEMORY side of the surface -- it is pure data (no IRBuilder, no dtype
-casting). It says WHERE a tensor sits and WHERE a tile is placed on it; the IR verbs in
-:mod:`rocke.helpers.tiling.emit` turn a window into actual loads/stores.
+This module is the MEMORY side of the surface. Its value objects are pure data (no IRBuilder, no
+dtype casting): they say WHERE a tensor sits and WHERE a tile is placed on it; the IR verbs in
+:mod:`rocke.helpers.tiling.emit` turn a window into actual loads/stores. The one function here that
+emits IR is :func:`exit_if_tile_outside`, which makes a block origin's place inside its tensor true
+in the kernel prologue.
 
 - :class:`TensorDesc` -- the pure, ptr-free memory layout (lengths + strides + dtype). A length or a
   stride is a compile-time int or an i32 ``Value`` whose facts are stated: a kernel parameter
@@ -20,6 +22,8 @@ casting). It says WHERE a tensor sits and WHERE a tile is placed on it; the IR v
   through ``KernelLauncher.from_artifact``) or a Value ``b.gpu_checked_value`` returned (checked on
   the GPU). The facts are read with
   ``rocke.core.facts.stated_facts_of``; nothing here restates them.
+- :func:`exit_if_tile_outside` -- ends a workgroup whose block origin lies outside its tensor, and
+  returns the origin carrying that fact.
 - :class:`TensorWindow` -- a `TensorDesc` positioned at an `origin` (no length of its own: the
   valid region is the tensor's): the 'where' handed to load/store.
 
@@ -43,18 +47,32 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from rocke.core.facts import has_stated_facts, stated_facts_of
-from rocke.core.ir import GPU_CHECKED_VALUE_WRITER, I32, Value, marker_facts
+from rocke.core.ir import (
+    EXIT_IF_TILE_OUTSIDE_WRITER,
+    GPU_CHECKED_VALUE_WRITER,
+    I32,
+    Value,
+    marker_facts,
+)
 from rocke.core.param_facts import LOWER_WORDS
 from rocke.core.value_sources import ASSUME_RANGE_OP, value_text
 
-from .tensor_transforms.walk import wave_uniform
+from .tensor_transforms.emit import emit_bound_check
+from .tensor_transforms.walk import (
+    leaf_varying_within_workgroup,
+    split_coordinate,
+    wave_uniform,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from rocke.core.ir import IRBuilder
+
 __all__ = [
     "TensorDesc",
     "make_tensor_desc",
+    "exit_if_tile_outside",
     "TensorWindow",
     "make_window",
     "check_gemm_shapes",
@@ -183,17 +201,7 @@ def _check_length(axis: int, length: Any) -> None:
     """A length is a positive compile-time int, or a runtime Value stated ``>= 0`` with an upper
     bound."""
     if isinstance(length, Value):
-        facts = _check_runtime_extent("lengths", axis, length)
-        if facts.lower is None or facts.lower < 0:
-            raise ValueError(
-                f"TensorDesc lengths[{axis}] is {value_text(length)}, which could be negative "
-                f"({_lower_text(length, facts.lower)}).\nFix: {_fix_text(length, 'ge=0')}"
-            )
-        if facts.upper is None:
-            raise ValueError(
-                f"TensorDesc lengths[{axis}] is {value_text(length)}, which has no upper bound: "
-                "state le= or lt=, the tightest bound it can reach"
-            )
+        _check_runtime_length(f"TensorDesc lengths[{axis}]", length)
         return
     if not (_is_compile_time_integer(length) and length > 0):
         raise ValueError(
@@ -205,12 +213,12 @@ def _check_length(axis: int, length: Any) -> None:
 def _check_stride(axis: int, stride: Any) -> None:
     """A stride is a compile-time int, or a runtime Value stated ``>= 1``."""
     if isinstance(stride, Value):
-        facts = _check_runtime_extent("strides", axis, stride)
+        where = f"TensorDesc strides[{axis}] is {value_text(stride)}"
+        facts = _check_runtime_extent(where, stride)
         if facts.lower is None or facts.lower < 1:
             raise ValueError(
-                f"TensorDesc strides[{axis}] is {value_text(stride)}, which could be below 1 "
-                f"({_lower_text(stride, facts.lower)}).\nFix: {_fix_text(stride, 'ge=1')}, or "
-                "ge= a length it is at least"
+                f"{where}, which could be below 1 ({_lower_text(stride, facts.lower)}).\n"
+                f"Fix: {_fix_text(stride, 'ge=1')}, or ge= a length it is at least"
             )
         return
     if not _is_compile_time_integer(stride):
@@ -220,10 +228,25 @@ def _check_stride(axis: int, stride: Any) -> None:
         )
 
 
-def _check_runtime_extent(name: str, axis: int, value: Value):
+def _check_runtime_length(name: str, length: Value) -> None:
+    """A runtime length is stated ``>= 0`` with an upper bound, the number every range proof over
+    it reads. ``name`` opens each message (``TensorDesc lengths[0]``)."""
+    where = f"{name} is {value_text(length)}"
+    facts = _check_runtime_extent(where, length)
+    if facts.lower is None or facts.lower < 0:
+        raise ValueError(
+            f"{where}, which could be negative ({_lower_text(length, facts.lower)}).\n"
+            f"Fix: {_fix_text(length, 'ge=0')}"
+        )
+    if facts.upper is None:
+        raise ValueError(
+            f"{where}, which has no upper bound: state le= or lt=, the tightest bound it can reach"
+        )
+
+
+def _check_runtime_extent(where: str, value: Value):
     """The stated facts of a runtime length or stride, after the rules both share: an i32 Value,
-    with stated facts, the same for the whole wave."""
-    where = f"TensorDesc {name}[{axis}] is {value_text(value)}"
+    with stated facts, the same for the whole wave. ``where`` opens each message."""
     if value.type != I32:
         raise TypeError(
             f"{where}, a {value.type.name} Value -- a runtime length or stride is an i32 Value"
@@ -284,6 +307,116 @@ def _check_contiguous_axis(strides: tuple[Any, ...]) -> None:
         f"TensorDesc strides[{runtime_axes[-1]}] is a runtime value on the stride-1 axis -- the "
         "contiguous axis must have the compile-time stride 1"
     )
+
+
+def exit_if_tile_outside(b: IRBuilder, origin: Value, length: int | Value) -> Value:
+    """End the workgroup unless ``0 <= origin < length``, and return ``origin`` carrying that fact.
+
+    Ranges are half-open: ``[lo, hi)`` holds ``lo`` and not ``hi``. A tile of extent ``TM`` at
+    origin ``m0`` covers rows ``[m0, m0 + TM)``. The guard guarantees only the ORIGIN,
+    ``0 <= m0 < length``; whether the whole tile fits follows from the origin's multiple-of fact,
+    which the IR range walk reads from how ``origin`` was computed. With ``length`` a multiple of
+    the tile (an int, or a Value stated ``multiple_of`` a multiple of it) the origin walks to
+    ``[0, length - TM + 1)`` and the whole tile is inside; otherwise to ``[0, length)`` snapped to
+    the multiple-of fact, and the tile's upper side stays checked::
+
+        m0 = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(TM)), M)
+        c_win = make_window(c_td, (b.add(m0, wave_offset), n0))   # use m0, not the raw product
+
+    Use the returned value everywhere: the fact is attached to it (a range marker written
+    ``by="exit_if_tile_outside"``), and the raw ``origin`` passed in does not carry it. A batch
+    index is guarded the same way (``g = exit_if_tile_outside(b, b.block_id_z(), G)``), and
+    per-wave offsets are added to the returned value.
+
+    ``length`` is the tensor's own length: a positive int, or an i32 Value with stated facts (a
+    kernel parameter or a Value ``b.gpu_checked_value`` returned) -- the same Value the tensor
+    description holds, so the walk's end is that very length.
+
+    Emitted at the call: one bound check of the RAW origin (an unsigned compare: a negative origin
+    reads as a large one), a branch to an early return when it fails, then the marker. A side the
+    IR already proves emits nothing. Call it in the kernel prologue -- never inside a loop or an
+    ``if`` -- on an i32 ``origin`` and a ``length`` that are the same for the whole workgroup
+    (block ids, kernel parameters, constants), so every wave of a workgroup leaves together and no
+    barrier waits on a departed wave. An over-launched grid is then safe on the device whatever
+    the host launched.
+    """
+    origin_value = _guard_origin(origin)
+    _check_guard_length(length)
+    # The early return must leave the kernel, not a loop body or one branch of an if.
+    if not b.at_kernel_top_level:
+        raise ValueError(
+            "exit_if_tile_outside emits an early exit and must be called in the kernel prologue "
+            "-- it was called inside a loop or an if"
+        )
+    if split_coordinate(b, origin_value).lane is not None:
+        raise ValueError(
+            f"exit_if_tile_outside: origin {origin_value.name} has a per-lane part (it depends on "
+            "gpu.thread_id or a per-lane load) -- the guard ends the whole workgroup, so the "
+            "origin must be the same for every lane; add per-wave offsets to the value it returns"
+        )
+    leaf = leaf_varying_within_workgroup(b, origin_value)
+    if leaf is not None:
+        raise ValueError(
+            f"exit_if_tile_outside: origin {origin_value.name} can differ between the waves of a "
+            f"workgroup (it depends on {_leaf_text(leaf)}) -- the guard ends whole workgroups; "
+            "compute it from block ids, kernel parameters and constants, and add per-wave "
+            "offsets to the value it returns"
+        )
+    if isinstance(length, Value):
+        leaf = leaf_varying_within_workgroup(b, length)
+        if leaf is not None:
+            raise ValueError(
+                f"exit_if_tile_outside: length {value_text(length)} can differ between the waves "
+                f"of a workgroup (it depends on {_leaf_text(leaf)}) -- the guard ends whole "
+                "workgroups, so every wave must test the same length; compute it from block ids, "
+                "kernel parameters and constants, or load it through a kernel parameter declared "
+                "readonly=True and noalias=True, at a workgroup-uniform index"
+            )
+    inside = emit_bound_check(b, origin_value, 0, length)
+    if inside is not None:
+        with b.scf_if(b.lnot(inside)):
+            b.ret()
+    # The marker is private to its checked callers; the origin was checked just above. Its
+    # multiple-of fact is left to the walk (multiple_of=1 keeps the origin's own).
+    end = length if isinstance(length, Value) else int(length)
+    return b._assume_range(origin_value, ge=0, lt=end, by=EXIT_IF_TILE_OUTSIDE_WRITER)
+
+
+def _guard_origin(origin: Any) -> Value:
+    """The guard's origin as an IR value. An i32 type check is the IR range walk's."""
+    if _is_compile_time_integer(origin):
+        raise TypeError(
+            f"exit_if_tile_outside takes the origin as an i32 IR value -- got the int {origin}; "
+            "a build-time origin needs no guard, pass it to make_window directly"
+        )
+    if isinstance(origin, Value):
+        return origin
+    raise TypeError(
+        f"exit_if_tile_outside takes the origin as an i32 IR value -- got a "
+        f"{type(origin).__name__}"
+    )
+
+
+def _check_guard_length(length: Any) -> None:
+    """A guard's length is a tensor length: a positive int or an i32 Value with stated facts."""
+    if isinstance(length, Value):
+        _check_runtime_length("exit_if_tile_outside: length", length)
+        return
+    if not _is_compile_time_integer(length):
+        raise TypeError(
+            "exit_if_tile_outside takes the length as an int or an i32 Value with stated facts "
+            f"-- got a {type(length).__name__}"
+        )
+    if length < 1:
+        raise ValueError(
+            f"exit_if_tile_outside: length {length} is below 1 -- a tensor length is positive "
+            "(the tensor's own length, as passed to make_tensor_desc)"
+        )
+
+
+def _leaf_text(leaf: Value) -> str:
+    """A leaf of the IR range walk as an error names it: the value and the op that made it."""
+    return leaf.name if leaf.op is None else f"{leaf.name} ({leaf.op.name})"
 
 
 # The kinds of value a window origin may be, named in the origin type error.
