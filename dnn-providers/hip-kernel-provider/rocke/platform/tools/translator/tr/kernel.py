@@ -16,7 +16,7 @@ import re
 import os
 
 from . import ctypes as T
-from .env import REPO, maps_dir
+from .env import data_dir, maps_dir
 
 # builder typestate that Python keeps on the IRBuilder and C passes explicitly
 STATE = {"fence": T.STR, "seq_guards": "int*"}
@@ -26,7 +26,7 @@ STATE = {"fence": T.STR, "seq_guards": "int*"}
 
 
 def load_facts(modname: str) -> dict:
-    p = os.path.join(REPO, "data", "facts", f"{modname}.json")
+    p = os.path.join(data_dir(), "facts", f"{modname}.json")
     return json.load(open(p)) if os.path.exists(p) else {"funcs": {}, "attrs": {}}
 
 

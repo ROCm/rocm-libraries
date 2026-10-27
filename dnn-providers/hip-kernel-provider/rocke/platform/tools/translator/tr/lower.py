@@ -21,10 +21,12 @@ import functools
 import itertools
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 
 from . import ctypes as T
 from .env import Env
+from .factkeys import code_keys, first_line, src_hash
 from .family import family_of, kind_const, kind_type, union_fields, union_kind
 from .package import PKG
 from .host import HOST_VALUE, host_builders
@@ -302,6 +304,13 @@ class Module:
 
         self.facts = load_facts(modname)
         self.qualname = qualnames(self.tree)
+        # facts keys and source stamps come from the unrenamed source
+        self.fact_keys = {
+            (k.split("#")[0], first_line(n)): (k, n)
+            for k, n in code_keys(ast.parse(self.src))
+            if isinstance(n, ast.FunctionDef)
+        }
+        self.stale_warned: set[str] = set()
         self.tmap = None  # set by translate (needs the class maps)
         self.dispatchers: dict[str, list[str]] = (
             {}
@@ -461,9 +470,22 @@ class Module:
         funcs = self.facts.get("funcs", {})
         f = None
         if q:
-            # a decorated function's code starts at its first decorator
-            first = min([fn.lineno] + [d.lineno for d in fn.decorator_list])
-            f = funcs.get(f"{q}@{first}") or funcs.get(f"{q}@{fn.lineno}")
+            key, node = self.fact_keys.get((q, first_line(fn)), (q, None))
+            f = funcs.get(key)
+            if f is None:
+                # facts recorded before the qualname keys: qualname@co_firstlineno
+                f = funcs.get(f"{q}@{first_line(fn)}") or funcs.get(f"{q}@{fn.lineno}")
+            elif (
+                node is not None
+                and f.get("src")
+                and key not in self.stale_warned
+                and f["src"] != src_hash(node)
+            ):
+                self.stale_warned.add(key)
+                print(
+                    f"warning: facts stale for {self.modname}.{key}; re-run tr.record",
+                    file=sys.stderr,
+                )
         if f and any(n in CPP_KEYWORDS for n in f.get("params", {})):
             # parameters renamed like C++ keywords (signed -> signed_)
             f = dict(

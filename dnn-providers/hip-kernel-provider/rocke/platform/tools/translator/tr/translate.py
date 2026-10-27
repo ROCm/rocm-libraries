@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 from . import ctypes as T
-from .env import REPO, ROCKE_HELP, Env, maps_dir, rocke_root
+from .env import ROCKE_HELP, Env, holes_dir, library_dir, maps_dir, rocke_root
 from .family import kind_const
 from .host import HOST_VALUE, IR_KIND, host_builders, kind_tags
 from .lower import (
@@ -54,7 +54,7 @@ class Result:
 
 
 def module_path(rocke: str, modname: str) -> str:
-    return os.path.join(rocke, "library", "kernels", "common", modname + ".py")
+    return os.path.join(library_dir(rocke), "kernels", "common", modname + ".py")
 
 
 def own_header(env: Env, modname: str) -> str | None:
@@ -1056,7 +1056,7 @@ def derived_default(env: Env, mod: Module, header: str) -> dict[str, list[str]]:
 
 
 def load_fill(modname: str, fname: str) -> list[str] | None:
-    p = os.path.join(REPO, "holes", modname, fname + ".cpp")
+    p = os.path.join(holes_dir(), modname, fname + ".cpp")
     if os.path.exists(p):
         return open(p).read().rstrip("\n").splitlines()
     return None
@@ -1546,7 +1546,7 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
         if re.search(rf"\b{dname}\(", used_text):
             internals.append(dlines)
     sha = hashlib.sha256(mod.src.encode()).hexdigest()[:12]
-    rel = os.path.relpath(path, rocke)
+    rel = os.path.join("library", os.path.relpath(path, library_dir(rocke)))
     lines = [
         "// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.",
         "// SPDX-License-Identifier: MIT",

@@ -27,10 +27,27 @@ from .package import PKG  # noqa: E402
 ROCKE_HELP = "rocKE root (the directory holding platform/ and library/); default: $ROCKE_ROOT, else the tree tr/ sits in"
 
 
+def data_dir() -> str:
+    """Per-module data (facts/, abi/, maps/): $TR_DATA, else data/ here."""
+    return os.environ.get("TR_DATA") or os.path.join(REPO, "data")
+
+
+def holes_dir() -> str:
+    """Hand fills (holes/<module>/): $TR_HOLES, else holes/ here."""
+    return os.environ.get("TR_HOLES") or os.path.join(REPO, "holes")
+
+
+def library_dir(rocke: str) -> str:
+    """The Python library the modules are read and imported from (it holds
+    kernels/common/): $TR_LIBRARY, else <rocke>/library. The self-test points
+    it at pinned fixture modules."""
+    return os.environ.get("TR_LIBRARY") or os.path.join(rocke, "library")
+
+
 def maps_dir() -> str:
     """The code maps tools/mine_maps.py mines from a rocKE tree (sigmap.json,
-    twin_map.json): $TR_MAPS, else data/maps."""
-    return os.environ.get("TR_MAPS") or os.path.join(REPO, "data", "maps")
+    twin_map.json): $TR_MAPS, else <data>/maps."""
+    return os.environ.get("TR_MAPS") or os.path.join(data_dir(), "maps")
 
 
 def enclosing_rocke() -> str | None:
@@ -276,7 +293,7 @@ class PyModules:
     def __init__(self, rocke: str):
         for p in (
             os.path.join(rocke, "platform", "python"),
-            os.path.join(rocke, "library"),
+            library_dir(rocke),
         ):
             if p not in sys.path:
                 sys.path.insert(0, p)

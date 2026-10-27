@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from .env import REPO
+from .env import data_dir
 from .package import PKG
 
 CTORS = ("__init__", "__post_init__")
@@ -142,7 +142,7 @@ def package_families(kernels_dir: str) -> dict[str, Family]:
     """class name -> its family, over every module of the package in kernels_dir."""
     out: dict[str, Family] = {}
     peers = {}
-    p = os.path.join(REPO, "data", "abi", "peers.json")
+    p = os.path.join(data_dir(), "abi", "peers.json")
     if os.path.exists(p):
         peers = json.load(open(p))
     for f in sorted(os.listdir(kernels_dir)):

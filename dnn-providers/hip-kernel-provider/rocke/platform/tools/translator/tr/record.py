@@ -8,8 +8,10 @@ boundaries; no source rewriting).
 usage: python -m tr.record <emit_module> <module> [<module> ...] [--rocke DIR] [--out FILE]
 
 Writes data/facts/<first module>.json:
-  funcs: "<qualname>@<firstlineno>" -> {params: {name: [tags]}, return: [tags], calls: n}
-         (a closure also has cells: {free variable: [tags]}, the values it captured)
+  funcs: "<qualname>" -> {params: {name: [tags]}, return: [tags], calls: n, src: hash}
+         (a closure also has cells: {free variable: [tags]}, the values it captured;
+         keys and the src stamp are described in tr/factkeys.py; functions of
+         the other modules are keyed "<module>:<qualname>")
   attrs: "<class>" -> {attr: [tags]} (instance attributes when __init__ returns)
   configs / built / rejected
 A tag is a type name; containers carry their element tags: "list[Value]",
@@ -26,11 +28,13 @@ import collections
 import contextlib
 import importlib
 import json
+import ast
 import os
 import sys
 import time
 
-from .env import REPO, ROCKE_HELP, rocke_root
+from .env import ROCKE_HELP, data_dir, library_dir, rocke_root
+from .factkeys import code_keys, first_line, src_hash
 
 
 def tag(v, depth=0) -> str:
@@ -96,6 +100,8 @@ def merge_facts(old: dict, new: dict) -> dict:
                 cs[n] = tags(cs.get(n, []), t)
             if cs:
                 m["cells"] = cs
+            if v.get("src"):
+                m["src"] = v["src"]  # the newer recording's source
         out[sec] = merged
     attrs = {c: dict(d) for c, d in old.get("attrs", {}).items()}
     for c, d in new.get("attrs", {}).items():
@@ -103,6 +109,48 @@ def merge_facts(old: dict, new: dict) -> dict:
             attrs.setdefault(c, {})[k] = tags(attrs.get(c, {}).get(k, []), t)
     out["attrs"] = attrs
     return out
+
+
+class Keys:
+    """Facts key and source stamp of each code object the profiler sees.
+    Functions of a module other than the first carry "<module>:" in front,
+    so equal qualnames in two recorded modules stay apart."""
+
+    def __init__(self, prefix: dict[str, str]):
+        self.prefix = prefix  # source file -> key prefix
+        self.by_code: dict = {}
+        self.files: dict[str, dict] = {}
+        self.src: dict[str, str] = {}
+
+    def __call__(self, co) -> str:
+        key = self.by_code.get(co)
+        if key is None:
+            index = self.files.get(co.co_filename)
+            if index is None:
+                index = self.files[co.co_filename] = self._index(co.co_filename)
+            key, src = index.get(
+                (co.co_qualname, co.co_firstlineno),
+                (f"{co.co_qualname}@{co.co_firstlineno}", None),
+            )
+            key = self.prefix.get(co.co_filename, "") + key
+            if src is not None:
+                self.src[key] = src
+            self.by_code[co] = key
+        return key
+
+    @staticmethod
+    def _index(path: str) -> dict:
+        """(co_qualname, co_firstlineno) -> (key, src) over one source file."""
+        try:
+            tree = ast.parse(open(path).read())
+        except (OSError, SyntaxError, ValueError):
+            return {}
+        out = {}
+        for key, node in code_keys(tree):
+            q = key.split("#")[0]
+            # two code objects on one line with one qualname: the first one wins
+            out.setdefault((q, first_line(node)), (key, src_hash(node)))
+        return out
 
 
 def main(argv=None) -> int:
@@ -118,7 +166,7 @@ def main(argv=None) -> int:
     )
     a = ap.parse_args(argv)
     a.rocke = rocke_root(a.rocke)
-    for p in ("platform/python", "library", "library/tests/parity"):
+    for p in ("platform/python", library_dir(a.rocke), "library/tests/parity"):
         full = os.path.join(a.rocke, p)
         if full not in sys.path:
             sys.path.insert(0, full)
@@ -133,6 +181,7 @@ def main(argv=None) -> int:
     calls = collections.Counter()
     attrs = collections.defaultdict(lambda: collections.defaultdict(set))
     names = {}
+    keyof = Keys({f: f"{m}:" for f, m in targets.items() if m != a.modules[0]})
 
     driver_file = []  # the emit module's file, once imported
     driver_keys = set()
@@ -155,12 +204,12 @@ def main(argv=None) -> int:
                     and co.co_filename == driver_file[0]
                 ):
                     return
-            key = f"{co.co_qualname}@{co.co_firstlineno}"
+            key = keyof(co)
             if event == "call":
                 driver_keys.add(key)
             elif key not in driver_keys:
                 return
-        key = f"{co.co_qualname}@{co.co_firstlineno}"
+        key = keyof(co)
         if event == "call":
             names[key] = co.co_varnames[: co.co_argcount + co.co_kwonlyargcount]
             calls[key] += 1
@@ -272,6 +321,7 @@ def main(argv=None) -> int:
                 if cells.get(k)
                 else {}
             )
+            | ({"src": keyof.src[k]} if k in keyof.src else {})
             for k in sorted(calls)
             if k not in driver_keys
         },
@@ -289,7 +339,7 @@ def main(argv=None) -> int:
             for c, d in sorted(attrs.items())
         },
     }
-    path = a.out or os.path.join(REPO, "data", "facts", f"{a.modules[0]}.json")
+    path = a.out or os.path.join(data_dir(), "facts", f"{a.modules[0]}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if a.merge and os.path.exists(path):
         out = merge_facts(json.load(open(path)), out)

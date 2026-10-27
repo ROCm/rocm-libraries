@@ -24,9 +24,10 @@ Python, a fill under `holes/`, or a rule in `tr/`, then regenerate.
 | `designs/generated_abi.md` | The rules that turn a Python module into its C header. |
 | `designs/tagged_values.md` | A value that can be one of several classes becomes one tagged C struct with generated dispatch. |
 | `designs/host_clones.md` | Code that runs on host ints and on IR values is generated once per value kind. |
-| `data/facts/<module>.json` | Types recorded from the parity configs (`tr.record`). Added with each generated module. |
+| `data/facts/<module>.json` | Types recorded from the parity configs (`tr.record`), keyed by function qualname. Added with each generated module. |
 | `data/abi/<module>.names.json` | Generated names that keep an existing spelling. Added with each generated module. |
 | `holes/<module>/` | Hand fills (`<function>.cpp`) and C-only struct fields (`<Class>.fields`). Added with each generated module. |
+| `tests/` | The self-test (pytest) and its fixture root: pinned modules, their data and the goldens. |
 
 ## Setup
 
@@ -38,6 +39,9 @@ Python, a fill under `holes/`, or a rule in `tr/`, then regenerate.
   directory sits in. `<root>` is `.../dnn-providers/hip-kernel-provider/rocke`.
 - clang-format: `--clang-format <exe>`, else `CLANG_FORMAT`, else the one
   installed next to the running Python, else `clang-format` on PATH.
+- Data: `TR_DATA` replaces `data/` (facts, names, maps), `TR_HOLES` replaces
+  `holes/`, and `TR_LIBRARY` replaces the tree's `library/` as the place the
+  Python modules are read and imported from. The self-test sets all three.
 - Code maps (`sigmap.json`, `twin_map.json`): `TR_MAPS`, else `data/maps`.
   Neither is checked in here, so `tr.regen` mines them from the tree first
   (`tools/mine_maps.py`, a few seconds).
@@ -85,7 +89,13 @@ removed on exit.
 1. Record types. The translator types unannotated code from a recording of
    the parity configs:
    `python -m tr.record <module>_emit <module>` writes
-   `data/facts/<module>.json`.
+   `data/facts/<module>.json`. Functions are keyed by qualname, so moving code
+   around does not lose the types. Each entry also stamps the function's
+   source; when a body changes after the recording, the translator prints
+   `facts stale for <module>.<function>; re-run tr.record` and translates as
+   before. Re-record after any change to the Python that a warning names.
+   A facts file keyed the older way (`<qualname>@<line>`) is still read;
+   `python -m tr.rekey <module>` converts it while its lines still match.
 2. Look before writing:
    `python -m tr.translate <module> --abi <dir> --analyze` lists each function
    as `translated`, `filled` or `hole`, with the reason and the Python line.
@@ -110,6 +120,28 @@ A hole is a function with no translation rule. The generated `.cpp` then holds
 
 Fills and the hand routines in `tr/adapters.py` and the prelude are data
 keyed by module and function name.
+
+## The self-test
+
+From `platform/`, before and after any change under `tools/translator/`:
+
+```
+python -m pytest tools/translator/tests
+```
+
+It translates pinned copies of the attention backward `valu` and `counted`
+modules (with `addr`'s header) from `tests/fixtures/` and compares the
+headers and sources with `tests/fixtures/golden/`, checks that two runs are
+byte-identical, and checks the facts keys and stale warnings. It needs the
+pinned clang-format (it skips without it), no GPU and no build, and takes
+about 15 seconds. No CMake target or CI lane runs it. A change that is meant
+to alter the output updates the goldens explicitly:
+
+```
+python -m pytest tools/translator/tests --update-goldens
+```
+
+then review the golden diff with the change.
 
 ## The gate
 

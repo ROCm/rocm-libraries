@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass, field
 
 from . import ctypes as T
-from .env import REPO, ROCKE_HELP, Env, maps_dir, rocke_root
+from .env import ROCKE_HELP, Env, data_dir, holes_dir, maps_dir, rocke_root
 from .family import family_of, kind_const, kind_type, stem
 from .host import (
     closure_fields,
@@ -972,7 +972,7 @@ class Abi:
         hand callers' duck-typed peers, e.g. a buffer resource a dispatching
         method fill reads. Appended after the Python fields, so subclasses
         still start with the base's full layout; zero means "not set"."""
-        p = os.path.join(REPO, "holes", self.mod.modname, f"{cls}.fields")
+        p = os.path.join(holes_dir(), self.mod.modname, f"{cls}.fields")
         if not os.path.exists(p):
             return []
         return [x.rstrip() for x in open(p).read().splitlines() if x.strip()]
@@ -1003,7 +1003,7 @@ class Abi:
     def rename(self):
         """data/abi/<module>.names.json: generated name -> the name to keep
         (an existing ABI's spelling). Applied to every C identifier."""
-        p = os.path.join(REPO, "data", "abi", f"{self.mod.modname}.names.json")
+        p = os.path.join(data_dir(), "abi", f"{self.mod.modname}.names.json")
         if not os.path.exists(p):
             return
         names = json.load(open(p))

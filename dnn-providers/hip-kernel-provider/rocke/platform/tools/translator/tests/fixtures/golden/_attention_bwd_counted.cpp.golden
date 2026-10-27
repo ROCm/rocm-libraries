@@ -1,0 +1,381 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+// generated from library/kernels/common/_attention_bwd_counted.py:2347e94eb8ad by tr/translate.py; do not edit by hand.
+
+#include "rocke/helper_rocke.instances.common._attention_bwd_counted.h"
+
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <algorithm>
+#include <array>
+#include <string>
+#include <vector>
+
+#include "rocke/error.hpp"
+#include "rocke/helper_rocke.instances.common._attention_bwd_addr.h"
+#include "rocke/ir_internal.h"
+#include "rocke/rocke_py.hpp"
+#include "rocke/rocke_py_adapters.hpp"
+
+const char* const ROCKE_ATTN_BWD_COUNTED_ISSUES[ROCKE_ATTN_BWD_COUNTED_N_ISSUES]
+    = {"early", "late"};
+
+namespace
+{
+
+/* py: flat (_attention_bwd_counted.py:173) */
+std::vector<rocke_value_t*> py_StagedStep_flat(const rocke_attn_bwd_staged_step_t* self)
+{
+    std::vector<rocke_value_t*> list_1
+        = std::vector<rocke_value_t*>(self->stats, self->stats + self->n_stats);
+    std::vector<rocke_value_t*> list_2
+        = std::vector<rocke_value_t*>(self->qdo, self->qdo + self->n_qdo);
+    std::vector<rocke_value_t*> cat_3(list_1.begin(), list_1.end());
+    cat_3.insert(cat_3.end(), list_2.begin(), list_2.end());
+    return cat_3;
+}
+
+/* py: from_flat (_attention_bwd_counted.py:177) */
+rocke_attn_bwd_staged_step_t py_StagedStep_from_flat(const std::vector<rocke_value_t*>& values,
+                                                     int n_stats)
+{
+    std::vector<rocke_value_t*> vals = std::vector<rocke_value_t*>(values.begin(), values.end());
+    const auto& seq_2 = py::slice(vals, 0, n_stats);
+    py::tuple<rocke_value_t*> tuple_3 = py::tuple<rocke_value_t*>(seq_2.begin(), seq_2.end());
+    const auto& seq_4 = py::slice(vals, n_stats, py::len(vals));
+    py::tuple<rocke_value_t*> tuple_5 = py::tuple<rocke_value_t*>(seq_4.begin(), seq_4.end());
+    return rocke_attn_bwd_staged_step_t{.stats = py::own_copy<rocke_value_t*>(tuple_3),
+                                        .n_stats = (int)py::len(tuple_3),
+                                        .cap_stats = (int)py::len(tuple_3),
+                                        .qdo = py::own_copy<rocke_value_t*>(tuple_5),
+                                        .n_qdo = (int)py::len(tuple_5),
+                                        .cap_qdo = (int)py::len(tuple_5)};
+}
+
+/* py: __init__ (_attention_bwd_counted.py:193) */
+void py_CountedWaits___init__(rocke_attn_bwd_counted_waits_t* self, int n_atomics)
+{
+    if(!((0 <= n_atomics) && (n_atomics <= ROCKE_ATTN_BWD_COUNTED_VMCNT_MAX)))
+    {
+        throw ckc::ValueError(
+            py::str(n_atomics)
+            + std::string(" dQ atomics per wave and step exceed the vmcnt field (63)"));
+    }
+    self->n_atomics = n_atomics;
+    self->since_load = n_atomics;
+    self->issued = 0;
+    self->n_waits = 0;
+}
+
+/* py: step_entry (_attention_bwd_counted.py:204) */
+void py_CountedWaits_step_entry(rocke_attn_bwd_counted_waits_t* self)
+{
+    self->since_load = self->n_atomics;
+    self->issued = 0;
+    self->n_waits = 0;
+}
+
+/* py: loads (_attention_bwd_counted.py:209) */
+void py_CountedWaits_loads(rocke_attn_bwd_counted_waits_t* self)
+{
+    self->since_load = 0;
+}
+
+/* py: atomics (_attention_bwd_counted.py:212) */
+void py_CountedWaits_atomics(rocke_attn_bwd_counted_waits_t* self, int n)
+{
+    self->since_load = (int)((int64_t)self->since_load + n);
+    self->issued = (int)((int64_t)self->issued + n);
+}
+
+/* py: end_step (_attention_bwd_counted.py:216) */
+void py_CountedWaits_end_step(const rocke_attn_bwd_counted_waits_t* self)
+{
+    if(self->issued != self->n_atomics)
+    {
+        throw ckc::ValueError(std::string("the q step issued ") + py::str(self->issued)
+                              + " dQ atomics, the count model assumes " + py::str(self->n_atomics));
+    }
+}
+
+/* py: barrier (_attention_bwd_counted.py:224) */
+void py_CountedWaits_barrier(rocke_attn_bwd_counted_waits_t* self,
+                             rocke_ir_builder_t* b,
+                             const char* fence)
+{
+    int n = self->since_load;
+    py::opush(self->waits, self->n_waits, self->cap_waits, n);
+    rocke_b_s_waitcnt(b, n, 0, -1);
+    rocke_b_s_barrier_bare_fence(b, fence);
+}
+
+/* py: tile_chunks (_attention_bwd_counted.py:103) */
+std::vector<rocke_attn_bwd_tile_chunk_t> py_tile_chunks(
+    rocke_ir_builder_t* b, int rows, int cols, rocke_value_t* tid, int threads, int vec)
+{
+    int64_t per_row = py::floordiv(cols, vec);
+    int64_t total = (rows * per_row);
+    std::vector<rocke_attn_bwd_tile_chunk_t> out;
+    const int rounds_1 = rocke_attn_bwd_deal_chunks_count(b, total, threads);
+    for(int round_2 = 0; round_2 < rounds_1; ++round_2)
+    {
+        bool tail{};
+        rocke_value_t* chunk
+            = rocke_attn_bwd_deal_chunks_round(b, tid, total, threads, round_2, &tail);
+        rocke_value_t* sel_5{};
+        if(tail)
+        {
+            rocke_value_t* const_i32_6 = rocke_b_const_i32(b, (total - 1));
+            rocke_value_t* smin_7 = rocke_b_smin(b, chunk, const_i32_6);
+            sel_5 = smin_7;
+        }
+        else
+        {
+            sel_5 = chunk;
+        }
+        rocke_value_t* src = sel_5;
+        rocke_attn_bwd_tuple_v_v_t chunk_coords_8
+            = rocke_attn_bwd_chunk_coords(b, src, (int)per_row, vec);
+        rocke_value_t* r = chunk_coords_8.f0;
+        rocke_value_t* c = chunk_coords_8.f1;
+        out.push_back(rocke_attn_bwd_tile_chunk_t{
+            .row = r, .col = c, .guard = ((tail) ? chunk : nullptr), .total = (int)total});
+    }
+    return out;
+}
+
+/* py: issue_tile_loads (_attention_bwd_counted.py:118) */
+std::vector<rocke_value_t*>
+    py_issue_tile_loads([[maybe_unused]] rocke_ir_builder_t* b,
+                        const std::vector<rocke_attn_bwd_tile_loader_t>& loads,
+                        const std::vector<rocke_attn_bwd_tile_chunk_t>& chunks)
+{
+    std::vector<rocke_value_t*> lst_1;
+    for(rocke_attn_bwd_tile_loader_t const& load : loads)
+    {
+        for(rocke_attn_bwd_tile_chunk_t const& ch : chunks)
+        {
+            rocke_value_t* call_2 = load.fn(load.ctx, ch.row, ch.col);
+            lst_1.push_back(call_2);
+        }
+    }
+    return lst_1;
+}
+
+/* py: store_tile (_attention_bwd_counted.py:128) */
+void py_store_tile(rocke_ir_builder_t* b,
+                   const std::vector<rocke_attn_bwd_tile_view_t>& views,
+                   const std::vector<rocke_attn_bwd_tile_chunk_t>& chunks,
+                   const std::vector<rocke_value_t*>& values,
+                   int vec)
+{
+    if(py::len(values) != (py::len(views) * py::len(chunks)))
+    {
+        throw ckc::ValueError(std::string("staged values do not match the tile chunks"));
+    }
+    py::iter<rocke_value_t*> it = py::iter<rocke_value_t*>(values);
+    for(const rocke_attn_bwd_tile_view_t& view : views)
+    {
+        for(const rocke_attn_bwd_tile_chunk_t& ch : chunks)
+        {
+            rocke_value_t* val = it.next();
+            if(ch.guard == nullptr)
+            {
+                view.store(view.ctx, b, ch.row, ch.col, val, vec);
+            }
+            else
+            {
+                rocke_value_t* const_i32_1 = rocke_b_const_i32(b, ch.total);
+                rocke_value_t* cmp_lt_2 = rocke_b_cmp_lt(b, ch.guard, const_i32_1);
+                rocke_if_t if_3 = rocke_b_scf_if(b, cmp_lt_2);
+                rocke_b_region_enter(b, if_3.then_region);
+                {
+                    view.store(view.ctx, b, ch.row, ch.col, val, vec);
+                }
+                rocke_b_region_leave(b);
+            }
+        }
+    }
+}
+
+/* py: zero_like (_attention_bwd_counted.py:151) */
+std::vector<rocke_value_t*> py_zero_like(rocke_ir_builder_t* b,
+                                         const std::vector<const rocke_type_t*>& types)
+{
+    std::vector<rocke_value_t*> out;
+    for(const rocke_type_t* t : types)
+    {
+        if(rocke_type_eq(t, rocke_f32()))
+        {
+            rocke_value_t* const_f32_1 = rocke_b_const_f32(b, 0.0);
+            out.push_back(const_f32_1);
+        }
+        else if(t->kind == ROCKE_TYPE_VECTOR)
+        {
+            rocke_value_t* zero_vec_2 = rocke_b_zero_vec(b, t->elem, t->count);
+            out.push_back(zero_vec_2);
+        }
+        else
+        {
+            throw ckc::ValueError(std::string("no zero for staged type ") + py::str(t));
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+bool rocke_attn_bwd_staged_step_flat(const rocke_attn_bwd_staged_step_t* self,
+                                     rocke_value_t*** out,
+                                     int* n_out)
+{
+    const auto res_ = py_StagedStep_flat(self);
+    py_adapt::own_out(res_, out, [](const auto& x) { return (rocke_value_t*)x; });
+    *n_out = (int)res_.size();
+    return true;
+}
+
+rocke_attn_bwd_staged_step_t
+    rocke_attn_bwd_staged_step_from_flat(rocke_value_t* const* values, int n_values, int n_stats)
+{
+    const std::vector<rocke_value_t*> values_v(values, values + n_values);
+    return py_StagedStep_from_flat(values_v, n_stats);
+}
+
+bool rocke_attn_bwd_counted_waits_init(rocke_attn_bwd_counted_waits_t* self,
+                                       int n_atomics,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    return py_adapt::with_reason<bool>(reason, reason_cap, false, [&]() -> bool {
+        memset(self, 0, sizeof(*self));
+        py_CountedWaits___init__(self, n_atomics);
+        return true;
+    });
+}
+
+void rocke_attn_bwd_counted_waits_step_entry(rocke_attn_bwd_counted_waits_t* self)
+{
+    py_CountedWaits_step_entry(self);
+}
+
+void rocke_attn_bwd_counted_waits_loads(rocke_attn_bwd_counted_waits_t* self)
+{
+    py_CountedWaits_loads(self);
+}
+
+void rocke_attn_bwd_counted_waits_atomics(rocke_attn_bwd_counted_waits_t* self, int n)
+{
+    py_CountedWaits_atomics(self, n);
+}
+
+bool rocke_attn_bwd_counted_waits_end_step(const rocke_attn_bwd_counted_waits_t* self,
+                                           char* reason,
+                                           size_t reason_cap)
+{
+    return py_adapt::with_reason<bool>(reason, reason_cap, false, [&]() -> bool {
+        py_CountedWaits_end_step(self);
+        return true;
+    });
+}
+
+bool rocke_attn_bwd_counted_waits_barrier(rocke_attn_bwd_counted_waits_t* self,
+                                          rocke_ir_builder_t* b,
+                                          const char* fence)
+{
+    return py_adapt::on_builder<bool>(b, false, [&]() -> bool {
+        py_CountedWaits_barrier(self, b, fence);
+        return rocke_ir_builder_ok(b);
+    });
+}
+
+bool rocke_attn_bwd_tile_chunks(rocke_ir_builder_t* b,
+                                int rows,
+                                int cols,
+                                rocke_value_t* tid,
+                                int threads,
+                                int vec,
+                                rocke_attn_bwd_tile_chunk_t** out,
+                                int* n_out)
+{
+    return py_adapt::on_builder<bool>(b, false, [&]() -> bool {
+        const auto res_ = py_tile_chunks(b, rows, cols, tid, threads, vec);
+        py_adapt::own_out(res_, out, [](const auto& x) { return (rocke_attn_bwd_tile_chunk_t)x; });
+        *n_out = (int)res_.size();
+        return rocke_ir_builder_ok(b);
+    });
+}
+
+bool rocke_attn_bwd_issue_tile_loads(rocke_ir_builder_t* b,
+                                     const rocke_attn_bwd_tile_loader_t* loads,
+                                     int n_loads,
+                                     const rocke_attn_bwd_tile_chunk_t* chunks,
+                                     int n_chunks,
+                                     rocke_value_t*** out,
+                                     int* n_out)
+{
+    return py_adapt::on_builder<bool>(b, false, [&]() -> bool {
+        const std::vector<rocke_attn_bwd_tile_loader_t> loads_v(loads, loads + n_loads);
+        const std::vector<rocke_attn_bwd_tile_chunk_t> chunks_v(chunks, chunks + n_chunks);
+        const auto res_ = py_issue_tile_loads(b, loads_v, chunks_v);
+        py_adapt::own_out(res_, out, [](const auto& x) { return (rocke_value_t*)x; });
+        *n_out = (int)res_.size();
+        return rocke_ir_builder_ok(b);
+    });
+}
+
+bool rocke_attn_bwd_store_tile(rocke_ir_builder_t* b,
+                               const rocke_attn_bwd_tile_view_t* views,
+                               int n_views,
+                               const rocke_attn_bwd_tile_chunk_t* chunks,
+                               int n_chunks,
+                               rocke_value_t* const* values,
+                               int n_values,
+                               int vec)
+{
+    return py_adapt::on_builder<bool>(b, false, [&]() -> bool {
+        const std::vector<rocke_attn_bwd_tile_view_t> views_v(views, views + n_views);
+        const std::vector<rocke_attn_bwd_tile_chunk_t> chunks_v(chunks, chunks + n_chunks);
+        const std::vector<rocke_value_t*> values_v(values, values + n_values);
+        py_store_tile(b, views_v, chunks_v, values_v, vec);
+        return rocke_ir_builder_ok(b);
+    });
+}
+
+bool rocke_attn_bwd_zero_like(rocke_ir_builder_t* b,
+                              const rocke_type_t* const* types,
+                              int n_types,
+                              rocke_value_t*** out,
+                              int* n_out)
+{
+    return py_adapt::on_builder<bool>(b, false, [&]() -> bool {
+        const std::vector<const rocke_type_t*> types_v(types, types + n_types);
+        const auto res_ = py_zero_like(b, types_v);
+        py_adapt::own_out(res_, out, [](const auto& x) { return (rocke_value_t*)x; });
+        *n_out = (int)res_.size();
+        return rocke_ir_builder_ok(b);
+    });
+}
+
+void rocke_attn_bwd_staged_step_free(rocke_attn_bwd_staged_step_t* self)
+{
+    free(self->stats);
+    self->stats = NULL;
+    self->n_stats = 0;
+    self->cap_stats = 0;
+    free(self->qdo);
+    self->qdo = NULL;
+    self->n_qdo = 0;
+    self->cap_qdo = 0;
+}
+
+void rocke_attn_bwd_counted_waits_free(rocke_attn_bwd_counted_waits_t* self)
+{
+    free(self->waits);
+    self->waits = NULL;
+    self->n_waits = 0;
+    self->cap_waits = 0;
+}
