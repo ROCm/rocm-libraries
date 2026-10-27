@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 # Fail when hipblaslt-rocroller-selection's compiler dependency files name
-# rocRoller's headers or libfmt. The ranker compiles from rocroller_enums.hpp,
-# so a green build that opened /opt/rocm is not enough. The sources under
-# rocroller/ do not match rocRoller/.
+# rocRoller's headers or libfmt. The ranker describes a kernel with hipDataType
+# and hipBLASLt's scaling format, so a green build that opened /opt/rocm is not
+# enough. The sources under rocroller/ do not match rocRoller/.
 # Usage: check_rocroller_selection_deps.sh <hipblaslt-rocroller-selection.dir>
 
 set -euo pipefail

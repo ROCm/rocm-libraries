@@ -14,7 +14,6 @@ target_sources(hipblaslt-rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/parameter_selection.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime_args_selection.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_enum_conformance.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/solution_cache.cpp"
 )
@@ -29,8 +28,8 @@ else()
 endif()
 target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common)
 # This is the only target whose sources are built against rocRoller's headers.
-# kernel_type.hpp and analytical_utils.hpp include them when this definition
-# is set. The ranker does not define it, and takes rocroller_enums.hpp.
+# rocroller_interop.hpp is included only from those sources. The ranker does
+# not define this macro and does not include rocRoller.
 target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
 target_include_directories(hipblaslt-rocroller
     PRIVATE

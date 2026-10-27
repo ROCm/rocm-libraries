@@ -90,19 +90,25 @@ std::string getKernelName(const std::string& baseName, bool nonTemporalA, bool n
 // Need to specify the KernelType and SolutionIndexParameters
 void preloadCustomKernels(SolutionCache& cache)
 {
+    // The pre-swizzled 32-block E8M0 scaling format: the preSwizzleTile and
+    // preTile below are what genKernelType derives from it, so a problem that
+    // asks for that format produces a KernelType equal to this one and finds
+    // these kernels in the cache.
+    using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+
     KernelType mxfp4Kernel;
-    mxfp4Kernel.typeA                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeB                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeC                     = rocRoller::DataType::BFloat16;
-    mxfp4Kernel.typeD                     = rocRoller::DataType::BFloat16;
+    mxfp4Kernel.typeA                     = HIP_R_4F_E2M1;
+    mxfp4Kernel.typeB                     = HIP_R_4F_E2M1;
+    mxfp4Kernel.typeC                     = HIP_R_16BF;
+    mxfp4Kernel.typeD                     = HIP_R_16BF;
     mxfp4Kernel.transA                    = true;
     mxfp4Kernel.transB                    = false;
-    mxfp4Kernel.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
+    mxfp4Kernel.scaleTypeA.format         = ScalingFormat::Block_32_UE8M0_32_8_EXT;
     mxfp4Kernel.scaleTypeA.blockRowSize   = 32;
     mxfp4Kernel.scaleTypeA.blockColSize   = 1;
     mxfp4Kernel.scaleTypeA.preSwizzleTile = {32, 8, 4};
     mxfp4Kernel.scaleTypeA.preTile        = {32, 8};
-    mxfp4Kernel.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+    mxfp4Kernel.scaleTypeB.format         = ScalingFormat::Block_32_UE8M0_32_8_EXT;
     mxfp4Kernel.scaleTypeB.blockRowSize   = 1;
     mxfp4Kernel.scaleTypeB.blockColSize   = 32;
     mxfp4Kernel.scaleTypeB.preSwizzleTile = {32, 8, 4};

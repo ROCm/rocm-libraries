@@ -10,6 +10,7 @@
 #include "gemm.hpp"
 #include "kernel_type.hpp"
 #include "parameter_selection.hpp"
+#include "rocroller_interop.hpp"
 #include "runtime_args_selection.hpp"
 #include "solution_cache.hpp"
 #include "solution_selection.hpp"
@@ -369,17 +370,18 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = normalizeOperandType(prob.scale_type);
+    if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
+        std::cerr << "rocRoller only supports F32 as scale type not "
+                  << hipblaslt::hip2RocRollerType(scale_type) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
-    if(kernelType.typeAcc != rocRoller::DataType::Float)
+    if(kernelType.typeAcc != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 accumulation, not " << kernelType.typeAcc
-                  << std::endl;
+        std::cerr << "rocRoller only supports F32 accumulation, not "
+                  << hipblaslt::hip2RocRollerType(kernelType.typeAcc) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 

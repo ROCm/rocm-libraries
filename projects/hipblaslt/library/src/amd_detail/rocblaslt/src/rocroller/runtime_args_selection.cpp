@@ -3,6 +3,7 @@
 
 #include "analytical_utils.hpp"
 #include "gemm.hpp"
+#include "rocroller_interop.hpp"
 #include "runtime_args_selection.hpp"
 
 #include "origami/streamk.hpp"
@@ -14,18 +15,18 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
 
     const origami::grid_selection_t DEFAULT_DYNAMIC_MODE = origami::grid_selection_t::k_split_aware;
 
-    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
-    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
-    size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeAcc).elementBytes;
+    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(hipblaslt::hip2RocRollerType(gemm->params->kernelType.typeA)).elementBits;
+    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(hipblaslt::hip2RocRollerType(gemm->params->kernelType.typeB)).elementBits;
+    size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(hipblaslt::hip2RocRollerType(gemm->params->kernelType.typeAcc)).elementBytes;
 
     origami::problem_t origami_problem = {
         .size = {prob.m, prob.n, prob.k},
         .batch = prob.batch_count,
         // 0 = use all CUs;
         .num_cus = static_cast<size_t>(prob.sm_count_target),
-        .a_dtype = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA),
-        .b_dtype = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB),
-        .mi_dtype = rocroller_type_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? gemm->params->kernelType.typeB : gemm->params->kernelType.typeA),
+        .a_dtype = hipDataType_to_analytical_type(gemm->params->kernelType.typeA),
+        .b_dtype = hipDataType_to_analytical_type(gemm->params->kernelType.typeB),
+        .mi_dtype = hipDataType_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? gemm->params->kernelType.typeB : gemm->params->kernelType.typeA),
     };
     origami::config_t origami_config = {
         .mt = {
