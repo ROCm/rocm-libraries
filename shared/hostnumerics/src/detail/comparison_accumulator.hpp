@@ -28,8 +28,7 @@ class ComparisonAccumulator {
         const long double expectedMagnitude = integralMagnitude(expected);
         const long double difference = integralDifference(observed, expected);
         const long double tolerance =
-            static_cast<long double>(m_options.absoluteTolerance) +
-            static_cast<long double>(m_options.relativeTolerance) * expectedMagnitude;
+            elementwiseTolerance(observedMagnitude, expectedMagnitude, m_options);
 
         ComponentResult component;
         component.difference = static_cast<double>(difference);
@@ -38,7 +37,9 @@ class ComparisonAccumulator {
             expectedMagnitude == 0.0L
                 ? (difference == 0.0L ? 0.0 : std::numeric_limits<double>::infinity())
                 : static_cast<double>(difference / expectedMagnitude);
-        component.close = integralValuesEqual(observed, expected) || difference <= tolerance;
+        component.close = integralValuesEqual(observed, expected) ||
+                          (m_options.strictElementwiseTolerance ? difference < tolerance
+                                                                : difference <= tolerance);
         const ExactRealEvidence exactEvidence{
             component,
             observedMagnitude,

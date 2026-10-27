@@ -32,6 +32,18 @@ enum class ComplexComparisonMode {
     Magnitude,
 };
 
+enum class ElementwiseToleranceModel {
+    /// absoluteTolerance + relativeTolerance * |expected|.
+    ExpectedScaled,
+    /// absoluteTolerance + relativeTolerance * (|observed| + |expected| + 1).
+    SymmetricUnitScaled,
+};
+
+enum class ComparisonArithmeticPrecision {
+    Float32,
+    Float64,
+};
+
 /// Configures three independent comparison criteria plus optional evidence and reporting.
 ///
 /// For each finite real component, let
@@ -39,19 +51,18 @@ enum class ComplexComparisonMode {
 ///   difference = |observed - expected|
 ///   tolerance = absoluteTolerance + relativeTolerance * |expected|
 ///
-/// A finite component passes when `difference <= tolerance`. Signed zeros compare equal. NaNs pass
-/// only when both values are NaN and `equalNaNs` is true. Infinities pass only when they are equal.
-/// This is NumPy's asymmetric real-valued `isclose` rule: expected is the reference value.
+/// A finite component passes when `difference <= tolerance` by default. Signed zeros compare equal.
+/// NaNs pass only when both values are NaN and `equalNaNs` is true. Infinities pass only when they
+/// are equal. The default is NumPy's asymmetric real-valued `isclose` rule: expected is the
+/// reference value. `SymmetricUnitScaled` instead uses
+/// `absoluteTolerance + relativeTolerance * (|observed| + |expected| + 1)`; callers can select
+/// strict inequality and float arithmetic to reproduce comparison rules evaluated in float.
 ///
-/// In `ComplexComparisonMode::Magnitude`, the finite-value rule instead uses
-///
-///   difference = |observed - expected|
-///   tolerance = absoluteTolerance + relativeTolerance * |expected|
-///
-/// where each absolute value is a complex magnitude. This is NumPy's finite complex `isclose`
-/// formula when the symmetric term is zero and the comparison is non-strict. Magnitude mode
-/// decodes both complex components to double before evaluating the formula, so storage-type
-/// rounding at a tolerance boundary can differ from NumPy. A complex value containing any NaN is
+/// In `ComplexComparisonMode::Magnitude`, difference and the values used by the selected tolerance
+/// model are complex magnitudes. The default model is NumPy's finite complex `isclose` formula.
+/// Magnitude mode decodes components to double for reporting and evaluates pass/fail in the
+/// selected arithmetic precision, so storage-type rounding at a boundary can differ from NumPy.
+/// A complex value containing any NaN is
 /// one logical NaN; when `equalNaNs` is true, two such values match before signed-zero and infinity
 /// classification. Non-NaN infinities match only when both complex components are exactly equal.
 ///
@@ -69,6 +80,10 @@ struct ComparisonOptions {
     bool allClose = true;
     double absoluteTolerance = 0.0;
     double relativeTolerance = 0.0;
+    ElementwiseToleranceModel elementwiseToleranceModel = ElementwiseToleranceModel::ExpectedScaled;
+    /// Floating comparisons use this arithmetic; integer differences retain exact integer values.
+    ComparisonArithmeticPrecision arithmeticPrecision = ComparisonArithmeticPrecision::Float64;
+    bool strictElementwiseTolerance = false;
     bool equalNaNs = false;
     /// Preserve IEEE 0/0 = NaN instead of defining an exact zero norm ratio as zero.
     bool zeroExpectedNormIsNaN = false;

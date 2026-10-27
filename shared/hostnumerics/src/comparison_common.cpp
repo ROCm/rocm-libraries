@@ -51,11 +51,15 @@ ComponentResult compareComponent(double observed, double expected,
     }
 
     result.difference = std::abs(observed - expected);
-    result.tolerance = options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
+    if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32)
+        result.tolerance = elementwiseTolerance(static_cast<float>(std::abs(observed)),
+                                                static_cast<float>(std::abs(expected)), options);
+    else
+        result.tolerance = elementwiseTolerance(std::abs(observed), std::abs(expected), options);
     result.relativeDifference =
         expected == 0.0 ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
                         : result.difference / std::abs(expected);
-    result.close = result.difference <= result.tolerance;
+    result.close = valuesCloseFast(observed, expected, options);
     return result;
 }
 
@@ -94,12 +98,35 @@ ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
     const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
     result.difference =
         std::hypot(observed.real - expected.real, observed.imaginary - expected.imaginary);
-    result.tolerance = options.absoluteTolerance + options.relativeTolerance * expectedMagnitude;
     result.relativeDifference =
         expectedMagnitude == 0.0
             ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
             : result.difference / expectedMagnitude;
-    result.close = result.difference <= result.tolerance;
+    if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32) {
+        const float observedReal = static_cast<float>(observed.real);
+        const float observedImaginary = static_cast<float>(observed.imaginary);
+        const float expectedReal = static_cast<float>(expected.real);
+        const float expectedImaginary = static_cast<float>(expected.imaginary);
+        const float observedMagnitude =
+            options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled
+                ? std::hypot(observedReal, observedImaginary)
+                : 0.0f;
+        const float comparedDifference =
+            std::hypot(observedReal - expectedReal, observedImaginary - expectedImaginary);
+        const float tolerance = elementwiseTolerance(
+            observedMagnitude, std::hypot(expectedReal, expectedImaginary), options);
+        result.tolerance = tolerance;
+        result.close = options.strictElementwiseTolerance ? comparedDifference < tolerance
+                                                          : comparedDifference <= tolerance;
+    } else {
+        const double observedMagnitude =
+            options.elementwiseToleranceModel == ElementwiseToleranceModel::SymmetricUnitScaled
+                ? std::hypot(observed.real, observed.imaginary)
+                : 0.0;
+        result.tolerance = elementwiseTolerance(observedMagnitude, expectedMagnitude, options);
+        result.close = options.strictElementwiseTolerance ? result.difference < result.tolerance
+                                                          : result.difference <= result.tolerance;
+    }
     return result;
 }
 

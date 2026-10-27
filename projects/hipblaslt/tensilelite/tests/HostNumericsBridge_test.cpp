@@ -6,6 +6,7 @@
 #include <Tensile/DataTypes.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -61,6 +62,50 @@ TEST(HostNumericsComparisonAdapter, PreservesFloatOnlyPositiveThresholdOverride)
     EXPECT_FALSE(productValuesClose<double>(rocisa::DataType::Double, 1.0, 1.02, 0.1));
     EXPECT_THROW(TensileLite::Client::validationComparisonOptions(rocisa::DataType::None, -1.0),
                  std::runtime_error);
+}
+
+TEST(HostNumericsComparisonAdapter, UsesStrictSymmetricTolerance)
+{
+    using TensileLite::BFloat16;
+    const auto bfloat16Close = [](float observed, float expected) {
+        return productValuesClose<BFloat16>(
+            rocisa::DataType::BFloat16, BFloat16(observed), BFloat16(expected));
+    };
+    EXPECT_TRUE(bfloat16Close(1.3125f, 1.0f));
+    EXPECT_TRUE(bfloat16Close(1.0f, 1.3125f));
+    EXPECT_FALSE(bfloat16Close(0.71875f, 1.0f));
+    EXPECT_FALSE(bfloat16Close(1.0f, 0.71875f));
+
+    EXPECT_FALSE(productValuesClose<float>(rocisa::DataType::Float, 0.0f, 1.0f, 0.5));
+    EXPECT_TRUE(productValuesClose<float>(rocisa::DataType::Float, 1.0f, 1.0002f));
+    EXPECT_FALSE(productValuesClose<float>(rocisa::DataType::Float, 1.0f, 1.001f));
+}
+
+TEST(HostNumericsComparisonAdapter, MatchesBFloat16ScalarRuleAcrossBoundaryValues)
+{
+    using TensileLite::BFloat16;
+    const std::array<float, 8> values{0.0f,
+                                      0.71875f,
+                                      1.0f,
+                                      1.3125f,
+                                      -1.0f,
+                                      -1.3125f,
+                                      std::numeric_limits<float>::infinity(),
+                                      std::numeric_limits<float>::quiet_NaN()};
+    for(float observed : values)
+        for(float expected : values)
+        {
+            const BFloat16 encodedObserved(observed);
+            const BFloat16 encodedExpected(expected);
+            const float    a = static_cast<float>(encodedObserved);
+            const float    b = static_cast<float>(encodedExpected);
+            const bool     legacy
+                = a == b || std::fabs(a - b) < 0.1f * (std::fabs(a) + std::fabs(b) + 1.0f);
+            EXPECT_EQ(productValuesClose<BFloat16>(
+                          rocisa::DataType::BFloat16, encodedObserved, encodedExpected),
+                      legacy)
+                << "observed=" << observed << ", expected=" << expected;
+        }
 }
 
 TEST(HostNumericsComparisonAdapter, UsesTensileLowPrecisionConversions)

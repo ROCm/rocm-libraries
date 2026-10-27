@@ -25,11 +25,22 @@ void registerComparisonBindings(nb::module_& module) {
         .value("Componentwise", ComplexComparisonMode::Componentwise)
         .value("Magnitude", ComplexComparisonMode::Magnitude);
 
+    nb::enum_<ElementwiseToleranceModel>(module, "ElementwiseToleranceModel")
+        .value("ExpectedScaled", ElementwiseToleranceModel::ExpectedScaled)
+        .value("SymmetricUnitScaled", ElementwiseToleranceModel::SymmetricUnitScaled);
+
+    nb::enum_<ComparisonArithmeticPrecision>(module, "ComparisonArithmeticPrecision")
+        .value("Float32", ComparisonArithmeticPrecision::Float32)
+        .value("Float64", ComparisonArithmeticPrecision::Float64);
+
     nb::class_<ComparisonOptions>(module, "ComparisonOptions")
         .def(nb::init<>())
         .def_rw("all_close", &ComparisonOptions::allClose)
         .def_rw("absolute_tolerance", &ComparisonOptions::absoluteTolerance)
         .def_rw("relative_tolerance", &ComparisonOptions::relativeTolerance)
+        .def_rw("elementwise_tolerance_model", &ComparisonOptions::elementwiseToleranceModel)
+        .def_rw("arithmetic_precision", &ComparisonOptions::arithmeticPrecision)
+        .def_rw("strict_elementwise_tolerance", &ComparisonOptions::strictElementwiseTolerance)
         .def_rw("equal_nans", &ComparisonOptions::equalNaNs)
         .def_rw("zero_expected_norm_is_nan", &ComparisonOptions::zeroExpectedNormIsNaN)
         .def_rw("non_finite_values_invalidate_relative_norms",
