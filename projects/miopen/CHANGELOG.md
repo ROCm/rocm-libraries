@@ -22,6 +22,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   served for it. That kernel returned a weight gradient with a relative error of about 0.306.
   The problem now uses the next recorded solver, `GemmWrwUniversal`.
 
+### Added
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
+
+### Removed
+* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
+* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+
 ### Optimized
 * [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
   Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
@@ -30,7 +39,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
-
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
