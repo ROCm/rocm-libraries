@@ -48,6 +48,11 @@ set(BASE_ARCHITECTURES)
 #    select the legacy SDWA code path (no true16) for gfx1030.
 #  - gfx1010/gfx1011/gfx1012 (RDNA1) remain excluded: they lack the packed dot
 #    instructions (v_dot2c_f32_f16, v_dot4c_i32_i8) the ExtOp generators rely on.
+#
+# gfx1030 is a selectable target (-DGPU_TARGETS=gfx1030) but is kept out of the
+# default "all" build, like the other legacy architectures above: its Tensile
+# library has to be compiled from source and it is not an architecture the
+# packaged hipBLASLt is tested against.
 if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For device address sanitizer builds, "all" is just the architectures that
     # support xnack+.
@@ -66,7 +71,6 @@ else()
         "gfx90a"
         "gfx942"
         "gfx950"
-        "gfx1030"
         "gfx1100"
         "gfx1101"
         "gfx1103"
