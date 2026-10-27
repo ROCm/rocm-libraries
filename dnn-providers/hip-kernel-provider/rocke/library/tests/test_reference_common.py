@@ -426,10 +426,11 @@ def test_archive_cannot_be_unpacked_as_another_operation(tmp_path):
 
 def test_python_api_rejects_invalid_operation_before_writing(tmp_path):
     bundle, lock = _fixture(tmp_path, "conv")
-    archive = tmp_path / "bad.tar.gz"
+    archive = tmp_path / "missing/bad.tar.gz"
     with pytest.raises(ValueError, match="unsupported reference operation"):
         pack(bundle, archive, lock, operation="../escape")
-    assert not archive.exists()
+    # Not even the archive's directory is created.
+    assert not archive.parent.exists()
 
 
 def test_archive_is_reproducible_and_has_no_host_metadata(tmp_path, operation):
@@ -447,6 +448,16 @@ def test_archive_is_reproducible_and_has_no_host_metadata(tmp_path, operation):
     unpack(first, output, lock, operation=operation)
     unpack(first, output, lock, operation=operation)
     validate_bundle(output, lock, operation=operation)
+    assert (output / "payload/kernel.hsaco").read_bytes() == b"host archive fixture"
+
+
+def test_pack_creates_the_archive_directory(tmp_path, operation):
+    """A processor's first variant has no reference_bundles/<op>/<arch>/ yet."""
+    bundle, lock = _fixture(tmp_path, operation)
+    archive = tmp_path / f"reference_bundles/{operation}/gfx942/family.tar.gz"
+    pack(bundle, archive, lock, operation=operation)
+    output = tmp_path / "staged"
+    unpack(archive, output, lock, operation=operation)
     assert (output / "payload/kernel.hsaco").read_bytes() == b"host archive fixture"
 
 

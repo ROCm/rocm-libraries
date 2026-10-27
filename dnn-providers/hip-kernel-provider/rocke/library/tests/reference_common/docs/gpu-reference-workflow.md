@@ -400,10 +400,10 @@ controls all execute.
 After reviewing the qualification evidence, copy the candidate
 `qualification-lock.json` to
 `library/tests/<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json`.
-Then pack against that reviewed lock:
+Then pack against that reviewed lock. For a processor's first variant, `pack`
+creates the archive's directory:
 
 ```bash
-mkdir -p "library/tests/reference_bundles/$REFERENCE_OPERATION/$REFERENCE_ARCH"
 python library/tests/reference_common/artifact.py pack \
   --operation "$REFERENCE_OPERATION" --variant "$REFERENCE_VARIANT" \
   --bundle "$REFERENCE_WORK/bundle" \

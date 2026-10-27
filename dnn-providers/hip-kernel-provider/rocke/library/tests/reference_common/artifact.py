@@ -186,8 +186,13 @@ def pack(
     operation: str,
     variant: str | None = None,
 ) -> None:
-    """Create a reproducible archive without host paths, users, or timestamps."""
+    """Create a reproducible archive without host paths, users, or timestamps.
+
+    A processor's first variant has no archive directory yet, so a bundle that
+    validates creates it; one that does not writes nothing.
+    """
     validate_bundle(bundle, lock, operation=operation, variant=variant)
+    archive.parent.mkdir(parents=True, exist_ok=True)
     with archive.open("wb") as raw:
         with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as zipped:
             with tarfile.open(
