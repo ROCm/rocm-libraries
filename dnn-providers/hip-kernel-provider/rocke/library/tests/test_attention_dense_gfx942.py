@@ -337,6 +337,7 @@ _PRIVATE_PERTURBATIONS = {
     "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
+    "kv_prefetch": (True,),  # conflict-free-V bases only
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -1221,6 +1222,11 @@ _CONTRACT_GRID = [
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
     dict(sliding_window=128, window_wave_skip=True),  # accepted
     dict(window_wave_skip=True),  # REJECTED: needs a sliding window
+    dict(kv_prefetch=True),  # accepted
+    dict(kv_prefetch=True, causal_diag_split=True),  # accepted
+    dict(sliding_window=128, kv_prefetch=True),  # REJECTED: loop starts past tile 0
+    dict(kv_segments=4, kv_prefetch=True),  # REJECTED: loop starts past tile 0
+    dict(head_size=64, kv_prefetch=True),  # REJECTED: needs conflict-free V
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
@@ -1989,8 +1995,17 @@ _CODEGEN_KNOB_DEFAULTS = {
     "pv_priority": 0,
     "pv_sched_fence_mask": None,
     "causal_diag_split": False,
+    "kv_prefetch": False,
 }
-_CODEGEN_KNOB_TOKENS = ("_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit")
+_CODEGEN_KNOB_TOKENS = (
+    "_iglpm",
+    "_pvkmaj",
+    "_osw",
+    "_prio",
+    "_fence",
+    "_dsplit",
+    "_kvpf",
+)
 
 
 def _mfma_calls(ir: str) -> int:
@@ -2029,6 +2044,7 @@ def test_codegen_knobs_are_keyword_only_with_shipped_defaults():
         ),
         (dict(pv_sched_fence_mask=0x108), "_fence108", None),
         (dict(causal_diag_split=True), "_dsplit", None),
+        (dict(kv_prefetch=True), "_kvpf", None),
     ],
     ids=lambda v: v if isinstance(v, str) else None,
 )

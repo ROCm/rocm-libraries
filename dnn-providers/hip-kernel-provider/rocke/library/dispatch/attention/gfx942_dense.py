@@ -181,6 +181,10 @@ def _make_spec(
         and not req.use_sinks
         and not req.emit_lse
     )
+    # The same bf16 D128 causal cohort stages the next K/V tile in VGPRs while the
+    # current one computes (measured ahead on every bf16 D128 shape on the 304-CU
+    # part; fp16 at 2048 query rows or fewer is behind).
+    kv_prefetch = diag_split
     kv_segments = 1
     if bottom_right and not ragged:
         # Chunked prefill: the unmasked body loop skips the mask on every tile
@@ -234,6 +238,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
+        kv_prefetch=kv_prefetch,
     )
 
 

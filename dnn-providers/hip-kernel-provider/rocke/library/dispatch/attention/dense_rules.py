@@ -144,6 +144,11 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "kv_segments": lambda s: _kv_segments_in_scope(s),
             "window_wave_skip": lambda s: bool(s.causal)
             and int(s.sliding_window) > 0,
+            # Register-staged next-tile prefetch: conflict-free-V path with a KV
+            # loop that starts at tile 0.
+            "kv_prefetch": lambda s: s.resolved_use_cfvst()
+            and int(s.sliding_window) == 0
+            and int(s.kv_segments) == 1,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,

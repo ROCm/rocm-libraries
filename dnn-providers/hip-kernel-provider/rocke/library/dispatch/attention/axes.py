@@ -188,7 +188,14 @@ DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
 # Axes whose values are relative to the base spec (request or policy derived),
 # so a choice may equal a dataclass default; the base-equal choice is pruned.
 DENSE_BASE_RELATIVE_KNOBS = frozenset(
-    {"num_persistent", "persistent", "block_m", "block_n", "causal_diag_split"}
+    {
+        "num_persistent",
+        "persistent",
+        "block_m",
+        "block_n",
+        "causal_diag_split",
+        "kv_prefetch",
+    }
 )
 
 _DENSE_LDS_PADS = (0, 8, 16, 24, 32)
@@ -320,6 +327,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("causal_diag_split", (True, False)),
     _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
     _values("window_wave_skip", False, (True,)),
+    _choices_axis("kv_prefetch", (True, False)),
 )
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
