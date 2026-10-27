@@ -114,7 +114,7 @@ def derive(toolchain):
     defaultSolution.update(saved_ds)
 
 
-_WMMA_MI = [16, 16, 16, 1, 1, 2, 2, 2, 2]
+_MI16_64x64 = [16, 16, 16, 1, 1, 2, 2, 2, 2]
 
 
 @pytest.mark.parametrize(
@@ -134,12 +134,12 @@ _WMMA_MI = [16, 16, 16, 1, 1, 2, 2, 2, 2]
     ],
 )
 def test_wmma_k_major_auto_pad_is_one_b128(derive, arch, dataType, transA, transB, lrvw, padA, padB):
-    sol = derive(arch, dataType, transA, transB, lrvw, _WMMA_MI, 32)
+    sol = derive(arch, dataType, transA, transB, lrvw, _MI16_64x64, 32)
     assert sol.get("Valid") is True
     assert (sol["LdsPadA"], sol["LdsPadB"]) == (padA, padB)
 
 
 def test_mfma_mi16_b128_doubling_is_unchanged(derive):
-    sol = derive("gfx942", "H", True, False, 8, _WMMA_MI, 64)
+    sol = derive("gfx942", "H", True, False, 8, _MI16_64x64, 64)
     assert sol.get("Valid") is True
     assert (sol["LdsPadA"], sol["LdsPadB"]) == (16, 16)
