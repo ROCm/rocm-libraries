@@ -285,7 +285,7 @@ class StateValues:
   lrvwUnrollMetadata: int                = 0 # For Sparse Metadat
 
   numMfmaPerIter: int                    = 0
-  SubTileIdx: int                       = 0
+  SubTileIdx: int                        = 0
   subtileLdsSwizzle: bool                = False
   subtileIterateModeA: bool              = False
   subtileIterateModeB: bool              = False
@@ -350,7 +350,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprPersistentConsts: int                 = -1
+  startVgprPersistentConsts: int         = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
   startVgprInfCheck: int                 = -1
@@ -400,7 +400,7 @@ class StateValues:
   numStoreSgprInstExt: int               = 0 # For pose-loop kernel args
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
-  numSgprPersistent: int                    = 0
+  numSgprPersistent: int                 = 0
   tileProcessing: TileProcessingSettings               = field(default_factory=TileProcessingSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
@@ -12191,9 +12191,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")
 
-    if isPersistentDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
+    if not kernel["ProblemType"]["GroupedGemm"]:
       for tensor in ("D", "C", "A", "B"):
         _reg("uint64", "BatchOffset" + tensor)
+
+    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+      _reg("uint32", "RNDSeed")
 
   def _getKernelSource(self, kernel: Solution):
     """
