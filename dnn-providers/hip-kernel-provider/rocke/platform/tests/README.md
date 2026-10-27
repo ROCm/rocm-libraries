@@ -272,6 +272,14 @@ other native tests and does not require a pytest executable-discovery fixture.
 `core/test_optimization_barrier.py` checks the Python builder and serialized LLVM
 output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
 verification; committed golden entries anchor the existing configurations.
+The same pair has a `hip` mode with eight tensor-scale epilogue cases:
+gfx950/gfx1250 × FP16/BF16 output × absent/empty clobber. The native
+`rocke_optimization_barrier_emit` executable builds these independently through
+the C API. `core/test_optimization_barrier.py` compares its HIP bytes with the
+Python emitter and checks for the pure tied-VGPR barrier. `tests/run_all.py`
+discovers the executable through CTest; installed `rocke_pytest` supplies its
+relocated path through `ROCKE_OPTIMIZATION_BARRIER_EMIT`. A direct pytest run
+must set that variable to the built executable to run these comparisons.
 `instances/test_optimization_barrier_numeric.py` compiles through COMGR and
 checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
 NVFP4 also exercises native HIP-source lowering of the pure tied-VGPR

@@ -144,6 +144,11 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
 # binaries; add a new pair in both places.
 NATIVE_PARITY_TESTS = (
+    (
+        "ROCKE_OPTIMIZATION_BARRIER_EMIT",
+        "rocke_optimization_barrier_emit",
+        "native optimization-barrier HIP parity",
+    ),
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
     (

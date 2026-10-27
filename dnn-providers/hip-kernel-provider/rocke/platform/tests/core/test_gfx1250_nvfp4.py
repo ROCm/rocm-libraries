@@ -348,26 +348,27 @@ def test_launcher_tensor_factor_argument_bytes(tensor_scales):
     import struct
     from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
 
+    # ABI-byte test double; device operations and launch geometry are outside this test.
     class Runtime:
         def __init__(self):
             self.pointers = []
             self.freed = []
 
-        def alloc(self, size):
+        def alloc(self, _size):
             pointer = 4096 * (len(self.pointers) + 1)
             self.pointers.append(pointer)
             return pointer
 
-        def memcpy_h2d(self, *args):
+        def memcpy_h2d(self, *_args):
             pass
 
-        def launch(self, fn, grid, block, args):
+        def launch(self, _fn, _grid, _block, args):
             self.args = args
 
         def sync(self):
             pass
 
-        def memcpy_d2h(self, destination, pointer, size):
+        def memcpy_d2h(self, destination, _pointer, size):
             ctypes.memset(destination, 0, size)
 
         def free(self, pointer):
@@ -402,10 +403,10 @@ def test_launcher_rejects_invalid_tensor_factors_before_allocation(enabled, fact
     from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
 
     class Runtime:
-        def alloc(self, size):
+        def alloc(self, _size):
             pytest.fail("invalid factors reached GPU allocation")
 
-        def launch(self, *args):
+        def launch(self, *_args):
             pytest.fail("invalid factors reached GPU launch")
 
     spec = replace(

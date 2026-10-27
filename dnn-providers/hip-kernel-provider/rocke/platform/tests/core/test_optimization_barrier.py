@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Value barriers preserve types and survive serialization through both engines."""
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from rocke.core.ir import (
@@ -23,6 +28,33 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+
+@pytest.mark.parametrize("idx", range(8))
+def test_hip_barrier_paired_emitters(idx):
+    """Independent builders must agree on the FP32 barrier before output conversion."""
+    executable = os.environ.get("ROCKE_OPTIMIZATION_BARRIER_EMIT")
+    if not executable:
+        pytest.skip("set ROCKE_OPTIMIZATION_BARRIER_EMIT to the built barrier emitter")
+    native = Path(executable).resolve()
+    assert native.is_file(), f"barrier emitter is not a file: {native}"
+    python = (
+        Path(__file__).resolve().parents[1]
+        / "instances/parity/optimization_barrier_emit.py"
+    )
+    c_hip = subprocess.run(
+        [str(native), str(idx), "hip"], check=True, capture_output=True, timeout=30
+    ).stdout
+    p_hip = subprocess.run(
+        [sys.executable, str(python), str(idx), "hip"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    ).stdout
+    assert c_hip == p_hip
+    assert b'asm ("" : "=v"' in c_hip
+    assert b"asm volatile" not in c_hip
+    assert b"factor_a * factor_b" in c_hip
 
 
 @pytest.mark.parametrize(

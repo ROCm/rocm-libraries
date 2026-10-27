@@ -558,6 +558,7 @@ if(ROCKE_INSTALL_TESTS)
           "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
           "ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
       foreach(_rocke_native_parity
+              "ROCKE_OPTIMIZATION_BARRIER_EMIT=rocke_optimization_barrier_emit"
               "ROCKE_STORAGE_TEST=rocke_storage"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
