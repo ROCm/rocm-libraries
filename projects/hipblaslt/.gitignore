@@ -66,3 +66,8 @@ cmake_install.cmake
 
 # CMake user presets
 CMakeUserPresets.json
+
+# Temporaries the tilewright training pipeline's deploy writes next to the
+# models of a Tilewright directory; an interrupted deploy can leave them behind.
+library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/*/*/Tilewright/.*.tmp
+library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/*/*/Tilewright/.*.bak

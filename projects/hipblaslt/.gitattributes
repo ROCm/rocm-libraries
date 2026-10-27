@@ -1,0 +1,2 @@
+# tilewright models (Tensile/Logic/asm_full/*/*/Tilewright) are binary files.
+*.tilewright.bin binary
