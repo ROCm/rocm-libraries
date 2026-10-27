@@ -156,8 +156,9 @@ class Shape {
         return m_dimensions == other.m_dimensions;
     }
 
-    // Visit flat indices and their coordinates in the original axis order.
-    // Order must list every axis once, from slowest to fastest. Both overloads
+    // Visit each selected flat index with its coordinates, which use the original
+    // axis numbering. Order must list every axis once, from slowest to fastest,
+    // and defines how flat indices map to coordinates. Both overloads
     // validate inputs before callbacks, including empty work. The coordinate span
     // is borrowed and reused; it remains valid only during the callback. Callback
     // exceptions propagate. No flat-index list is allocated.
