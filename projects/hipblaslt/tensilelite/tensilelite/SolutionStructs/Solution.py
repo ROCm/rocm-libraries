@@ -39,7 +39,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     print1, print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    clusterEnabled, streamKCluster, streamKMulticast, \
+                    streamKCluster, streamKMulticast, \
                     streamK2DCluster, deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
@@ -50,6 +50,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason, \
+                                       dcpClusterRejectReason, dcpThinSideAndAxis, \
                                        decoupledThickGateRelaxation, \
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
@@ -3388,8 +3389,6 @@ class Solution(collections.abc.Mapping):
                % (tdmFuse, state["TDMInst"]))
         return
       if tdmFuse in (2, 3):
-        owner = "A" if tdmFuse == 2 else "B"
-        other = "B" if tdmFuse == 2 else "A"
         if state["NumWaves"] != 4:
           reject(state, printRejectionReason,
                  "TDMFuse=%d requires NumWaves=4 for its 2/1/1 split; got %d"
@@ -3408,15 +3407,11 @@ class Solution(collections.abc.Mapping):
                  "TDMFuse=%d does not support sparse metadata" % tdmFuse)
           return
         decoupled, blkA, blkB = decouplePGRBlocks(state)
-        if decoupled and blkA != blkB:
-          # Only the scale laid into the other side's LDS blocks conflicts.
-          conflicting = next(mx for mx in ("MXSA", "MXSB") if dcpLdsSide(mx) != owner)
+        if decoupled and blkA != blkB and state["HalfPLR"]:
+          # The K tail after a wrapped main loop computes wrong results.
           reject(state, printRejectionReason,
-                 "TDMFuse=%d requires an equal decoupled pair (PGRA=%d, PGRB=%d -> %d and %d "
-                 "LDS blocks): %s rides %s's descriptor set but follows %s's LDS block count. "
-                 "Use TDMFuse=0 or 1, or an equal pair"
-                 % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
-                    blkA, blkB, conflicting, owner, other))
+                 "TDMFuse=%d requires HalfPLR=0 at a divergent pair (HalfPLR=%d)"
+                 % (tdmFuse, state["HalfPLR"]))
           return
       if tdmFuse == 1:
         if state["NumWaves"] <= 1:
@@ -3435,15 +3430,6 @@ class Solution(collections.abc.Mapping):
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
                  "TDMFuse=1 does not support sparse metadata")
-          return
-        decoupled, blkA, blkB = decouplePGRBlocks(state)
-        if state["HalfPLR"] and decoupled and blkA != blkB:
-          # The late-fill pass moves one set's advance out of HalfPLR's end-of-loop mask.
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
-                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
-                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
-                    state["PrefetchGlobalReadB"], blkA, blkB))
           return
       # Catch a row declined by a precondition no arm checks (TDMSplit).
       if not tdmGroupingAccepted(state):
@@ -6151,12 +6137,6 @@ class Solution(collections.abc.Mapping):
     # Divergent block counts take the owner-grouped LDS layout; equal counts keep
     # legacy's, which makes them byte-identical kernels.
     dcpDivergent = decouplePGR and numLdsBlkA != numLdsBlkB
-    if clusterEnabled(state["ClusterDim"]) and dcpDivergent:
-      reject(state, printRejectionReason,
-             "PrefetchGlobalReadA/B: ClusterDim != [1, 1] is incompatible with "
-             "divergent LDS block counts (A=%u, B=%u); use an equal pair"
-             % (numLdsBlkA, numLdsBlkB))
-      return
     if decouplePGR:
       if not tdmBothTensors(state):
         reject(state, printRejectionReason,
@@ -6200,6 +6180,12 @@ class Solution(collections.abc.Mapping):
                  "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) give the two "
                  "groups different strides, so the persistent tail cannot normalize LDS to "
                  "buffer 0" % (numLdsBlkA, numLdsBlkB))
+          return
+        dcpClusterReject = dcpClusterRejectReason(state)
+        if dcpClusterReject:
+          reject(state, printRejectionReason,
+                 "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) at ClusterDim=%s: %s"
+                 % (numLdsBlkA, numLdsBlkB, state["ClusterDim"], dcpClusterReject))
           return
         dcpUnsupported = divergentPairUnsupportedReason(state)
         if dcpUnsupported:
@@ -6309,38 +6295,60 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
       return ldsNumBytesAB
 
-    def setLdsOffsetsDecoupled(ldsNumBytesB):
+    def setLdsOffsetsDecoupled(ldsNumBytesB, seg=None):
       # nBlkA x [A|MXSA] with stride blkA, then nBlkB x [MXSB|B] with stride blkB.
+      # At TDMFuse 2/3 one compare against the set owner's second copy swaps the whole set,
+      # so the set's scales sit after the owner: [A|MXSA|MXSB] or [B|MXSA|MXSB].
+      # Segment interleave (seg) puts the single-buffered tensor's two components
+      # around the first double-buffered block and supplies every base.
       # Sparse is rejected for decoupled PGR, so there is no metadata segment.
       # Packed, with no power-of-two round-up: legacy padded for the xor swap.
       nBlkA = numLdsBlkA
       nBlkB = numLdsBlkB
-      spanA = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"] + state["LdsNumElementsAlignedMXSA"]
+      rider = next((mx for mx in ("MXSA", "MXSB") if dcpLdsSide(mx, state) != dcpLdsSide(mx)), None)
+      groupB = {None: ("MXSB", "B"), "MXSB": ("B",), "MXSA": ("B", "MXSA", "MXSB")}[rider]
+      sizeB = {"MXSA": state["LdsNumElementsAlignedMXSA"], "MXSB": state["LdsNumElementsAlignedMXSB"],
+               "B": ldsNumBytesAlignedB}
+      spanA = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
+      for _tc in ("MXSA", "MXSB"):
+        if _tc not in groupB:
+          state["LdsOffset" + _tc] = spanA
+          spanA += state["LdsNumElementsAligned" + _tc]
       blkA = spanA
       baseB = nBlkA * blkA
-      offBinB = state["LdsNumElementsAlignedMXSB"]
-      blkB = offBinB + ldsNumBytesAlignedB
-      state["LdsOffsetMXSB"] = baseB
-      state["LdsOffsetB"] = baseB + offBinB
+      blkB = 0
+      for _tc in groupB:
+        state["LdsOffset" + _tc] = baseB + blkB
+        blkB += sizeB[_tc]
+      # Tail uses the unaligned B size where B ends the block, matching the legacy total's convention.
+      endB = blkB - (ldsNumBytesAlignedB - ldsNumBytesB if groupB[-1] == "B" else 0)
+      if seg:
+        for _tc in ("A", "MXSA", "MXSB", "B"):
+          state["LdsOffset" + _tc] = seg["ldsBase" + _tc]
+        if nBlkA > 1:
+          blkA = seg["dcpThickStride"]
+        else:
+          blkB = seg["dcpThickStride"]
       state["LdsOffsetBlkA"] = blkA
       state["LdsOffsetBlkB"] = blkB
       # No metadata segment: drop the legacy offset pointing into the A group.
       state.pop("LdsOffsetMetadata", None)
       # A one-block group has no valid second base; omit the key so misuse fails.
-      for _key, _base, _stride, _copies in (
-          ("LdsOffsetMXSA_Blk",     state["LdsOffsetMXSA"],     blkA, nBlkA),
-          ("LdsOffsetMXSB_Blk",     state["LdsOffsetMXSB"],     blkB, nBlkB),
-          ("LdsOffsetB_Blk",        state["LdsOffsetB"],        blkB, nBlkB)):
+      for _tc in ("MXSA", "MXSB", "B"):
+        _stride, _copies = (blkA, nBlkA) if dcpLdsSide(_tc, state) == "A" else (blkB, nBlkB)
         if _copies >= 2:
-          state[_key] = _base + _stride
+          state["LdsOffset%s_Blk" % _tc] = state["LdsOffset" + _tc] + _stride
         else:
-          state.pop(_key, None)
+          state.pop("LdsOffset%s_Blk" % _tc, None)
       # LdsOffsetA_Blk stays legacy's whole-block swap stride for the consumers
       # that still read it; telling the two groups apart needs LdsOffsetBlkA/B.
       state["LdsOffsetA_Blk"] = blkB if nBlkB > 1 else blkA
-      # Tail uses the unaligned B size, matching the legacy total's convention.
-      lastB = baseB + (nBlkB - 1) * blkB + offBinB + ldsNumBytesB
-      return max(lastB, nBlkA * blkA)
+      lastB = state["LdsOffset" + groupB[0]] + (nBlkB - 1) * blkB + endB
+      lastA = state["LdsOffsetA"] + (nBlkA - 1) * blkA + spanA
+      if seg:
+        # The double-buffered tensor's second block is the last region.
+        return lastA if nBlkA > 1 else lastB
+      return max(lastB, lastA)
 
     state["ldsNumBytesA"] = ldsNumBytesA
     state["ldsNumBytesB"] = ldsNumBytesB
@@ -6354,7 +6362,13 @@ class Solution(collections.abc.Mapping):
     state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
     state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
     _oneLdsBufAtEval = state["1LDSBuffer"]   # may still be -1 (auto) here; resolved to 0/1 below
-    _segRes = segIntEval(state)
+    _segDivergent = None
+    if dcpDivergent:
+      _thinTc = dcpThinSideAndAxis(state)[0]
+      _thickSpan = state["LdsNumElementsAlignedA"] + state["LdsNumElementsAlignedMXSA"] if _thinTc == "B" \
+        else state["LdsNumElementsAlignedMXSB"] + ldsNumBytesAlignedB
+      _segDivergent = (_thinTc, _thickSpan)
+    _segRes = segIntEval(state, _segDivergent)
     _segApplicable = _segRes["applicable"]                   # resolved to LDSSegmentInterleave 0/1 below
     state["LDSSegInterleaveOffsets"] = _segRes["offsets"]    # consumed by emit sites when applied
     _segAligned = _segRes["applicable"] and _segRes["aligned"]
@@ -6362,11 +6376,7 @@ class Solution(collections.abc.Mapping):
     # Keep dcpDivergent local: serializing it would change every solution's key set.
     # KernelWriterAssembly._dcpDivergent re-derives it from PGRA/PGRB.
     if dcpDivergent:
-      # Segment interleave is not combined with the owner-grouped layout yet.
-      _segApplicable = False
-      _segAligned = False
-      _segReason = "not supported with PrefetchGlobalReadA/B"
-      ldsNumBytesAB = setLdsOffsetsDecoupled(ldsNumBytesB)
+      ldsNumBytesAB = setLdsOffsetsDecoupled(ldsNumBytesB, _segRes["offsets"] if _segApplicable else None)
       # Packed layout has no power-of-two swap stride, so force StoreSwapAddr.
       state["StoreSwapAddr"] = True
     elif state["PrefetchGlobalRead"]:
@@ -6439,7 +6449,8 @@ class Solution(collections.abc.Mapping):
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
-    _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
+    # A divergent pair cannot defer: setLdsOffsetsDecoupled has already fixed its offsets.
+    _segDeferForBuf = not dcpDivergent and _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:
       # 1 = applied, 0 = not; split vs bcontig is read from the offsets, not this value.
       state["LDSSegmentInterleave"] = 1 if _segApplicable else 0

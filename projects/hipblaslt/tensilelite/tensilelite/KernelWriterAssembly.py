@@ -2469,6 +2469,8 @@ class KernelWriterAssembly(KernelWriter):
         msg = "decoupled PGR thick-wait not covered in the emitted assembly"
       elif self.states.overflowedResources == 12:
         msg = "tail LDS reset has one block stride and a divergent pair has two"
+      elif self.states.overflowedResources == 13:
+        msg = "decoupled-PGR cluster handshake missing or broken"
       else:
         msg = "unknown"
 
@@ -12636,7 +12638,7 @@ class KernelWriterAssembly(KernelWriter):
   def _tdmDecoupledBlocks(self, kernel, tc):
     """(number of LDS copies, stride) for one tensor under the decoupled layout."""
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
-    if dcpLdsSide(tc) == "A":
+    if dcpLdsSide(tc, kernel) == "A":
       return numLdsBlkA, kernel["LdsOffsetBlkA"]
     return numLdsBlkB, kernel["LdsOffsetBlkB"]
 
