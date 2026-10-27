@@ -394,12 +394,14 @@ template <typename Generator>
     requires(std::is_invocable_v<Generator&, std::span<const size_t>, size_t> ||
              std::is_invocable_v<Generator&, std::span<const size_t>>)
 void generate(Tensor destination, Generator&& generator, const ScalarConversionOptions& options) {
-    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t index) {
-        if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
-            destination.storeFrom(indices, generator(indices, index), options);
-        else
-            destination.storeFrom(indices, generator(indices), options);
-    });
+    destination.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(destination.shape().elementCount()),
+        [&](size_t linearIndex, std::span<const size_t> indices) {
+            if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
+                destination.storeFrom(indices, generator(indices, linearIndex), options);
+            else
+                destination.storeFrom(indices, generator(indices), options);
+        });
 }
 
 void generate(Tensor destination, const GenerationRecipe& recipe);
