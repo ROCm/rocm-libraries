@@ -137,7 +137,8 @@ namespace TensileLite
              * plus `tiles` tiles cut into `split` parts; grid is the workgroups the
              * dynamic grid policy launches. A part is itersPerWI iterations, and on
              * kernels with uneven parts the first parts take one K unit more (see
-             * partIterRange()).
+             * partIterRange()). parallel (every tile split): PostGSU sums the parts
+             * with gsu = split.
              */
             struct KernelArguments
             {
@@ -147,6 +148,7 @@ namespace TensileLite
                 uint32_t split      = 0;
                 uint32_t itersPerWI = 0;
                 uint32_t grid       = 0;
+                bool     parallel   = false;
 
                 // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
                 // flags) the kernel indexes: one per part of every split tile.
@@ -174,10 +176,13 @@ namespace TensileLite
                 size_t workspaceBytes   = 0;
                 size_t partialTileBytes = 0;
 
-                // Policy. allowSplit false keeps every tile whole unless the debug
-                // overrides ask otherwise; uniform summation order ignores overrides
-                // that split only some tiles (see isRowUniform).
+                // Policy. allowSplit: the kernel can fix split tiles up by last arrival;
+                // allowParallel: it can reduce them in parallel (PostGSU kernel). With
+                // neither, every tile stays whole unless the debug overrides ask
+                // otherwise; uniform summation order ignores overrides that split only
+                // some tiles (see isRowUniform).
                 bool allowSplit            = true;
+                bool allowParallel         = false;
                 bool uniformSummationOrder = false;
                 // InternalArgsSupport::dynamicUnevenParts: the kernel decodes parts
                 // of unequal length, so a tile splits into exactly the parts asked
@@ -196,14 +201,22 @@ namespace TensileLite
             // Split factors origami grid_k_split_aware tries for tree reduction, largest first.
             static constexpr size_t SplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
 
+            // origami select_reduction's MaxTilesForParallel and MinItersForParallel.
+            static constexpr size_t ParallelCUsPerTile = 4;
+            static constexpr size_t ParallelMinIters   = 64;
+
             /**
              * Choose the dynamic StreamK work decomposition.
              *
-             * Fewer tiles than splitCUs are each cut into the largest of
-             * SplitFactors parts with tiles*split <= splitCUs, at least
-             * MinItersPerWI iterations per part and partials that fit
-             * flagSlots and the workspace; otherwise every tile is whole. The debug
-             * overrides replace this rule, within the same workspace and flag limits.
+             * Fewer tiles than splitCUs are split. With allowParallel, at most
+             * splitCUs / ParallelCUsPerTile tiles of at least ParallelMinIters
+             * iterations are each cut into
+             * min(splitCUs / tiles, itersPerTile / MinItersPerWI) parts that fit the
+             * workspace, summed by PostGSU (parallel). Otherwise each tile is cut into
+             * the largest SplitFactors entry with tiles*split <= splitCUs, at least
+             * MinItersPerWI iterations per part and partials that fit flagSlots and the
+             * workspace, or kept whole. Debug overrides replace the rule within the same
+             * limits (parallel only when they split every tile).
              */
             TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
 
@@ -239,9 +252,9 @@ namespace TensileLite
             TENSILELITEHOST_EXPORT static size_t maxGrid(AMDGPU const& gpu, int cuOccupancy);
 
             // Whether tiles that all split alike keep uniform summation order. The
-            // fixup adds the parts in part order from the raw accumulator bits;
-            // atomic partials add in arrival order, and 16-bit compute types under
-            // HPA widen the partial.
+            // fixup and PostGSU add the parts in part order from the raw accumulator
+            // bits; atomic partials add in arrival order, and 16-bit compute types
+            // under HPA widen the partial.
             TENSILELITEHOST_EXPORT static bool
                 keepsSummationOrder(ContractionSolution const& solution);
 
@@ -311,6 +324,10 @@ namespace TensileLite
             static constexpr uint32_t MagicAddBit              = 1u << 31; // magicNumberAlg2's "add" indicator
             static constexpr uint32_t HybridModeBit            = 1u << 30; // set: dynamic work queue; clear: static
             static constexpr uint32_t UniformSummationOrderBit = 1u << 29;
+            // Hybrid's dynamic sub-mode: bit 29 selects the parallel reduction. It
+            // shares UniformSummationOrderBit's position because only the static
+            // sub-mode reads that one.
+            static constexpr uint32_t DynamicParallelReductionBit = UniformSummationOrderBit;
 
             static constexpr uint32_t TileReservedMask
                 = MagicAddBit | HybridModeBit | UniformSummationOrderBit;
@@ -617,8 +634,9 @@ namespace TensileLite
         // immediately after getPersistentGridImpl(). For SK3 and SK5-static, where the
         // two start from the same getSKReduction() answer, that keeps query and
         // launch agreed on the reduction and so on the workspace. SK4 and
-        // SK5-dynamic are pinned to tree at the launch sites only; see
-        // requiredWorkspaceSize() for why the resulting divergence is bounded.
+        // SK5-dynamic run tree at the launch sites unless the dynamic split chose
+        // parallel (Hybrid); see requiredWorkspaceSize() for why the resulting
+        // divergence is bounded.
         //
         // Unconditional, not uniform-summation-order enforcement: F < 2 is
         // unlaunchable for parallel whatever the mode, and solve() still throws

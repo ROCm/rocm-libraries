@@ -360,10 +360,17 @@ namespace TensileLite
         constexpr size_t      defaultSplit = 2;
         const KernelArguments allWhole     = splitTiles(0, defaultSplit);
 
-        // The partials a split needs must fit the workspace and the flag region.
-        auto partialsFit = [&](size_t skTiles, size_t split) {
+        // Parallel reduction needs every tile split into at least two parts.
+        auto parallelFor = [&](KernelArguments const& d) {
+            return in.allowParallel && d.tiles > 0 && d.tiles == in.totalTiles && d.split >= 2;
+        };
+
+        // The partials a split needs must fit the workspace and, for the
+        // arrival fixup, the flag region.
+        auto partialsFit = [&](size_t skTiles, size_t split, bool parallel) {
             const size_t slots = skTiles * split;
-            return slots <= in.flagSlots && slots * in.partialTileBytes <= in.workspaceBytes;
+            return (parallel || slots <= in.flagSlots)
+                   && slots * in.partialTileBytes <= in.workspaceBytes;
         };
 
         // Debug overrides replace the policy below. Uniform summation order
@@ -375,24 +382,48 @@ namespace TensileLite
         {
             const size_t skTiles
                 = std::min(in.totalTiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
-            const KernelArguments d
+            KernelArguments d
                 = splitTiles(skTiles, in.overrideSplit > -1 ? in.overrideSplit : defaultSplit);
-            const bool overrideApplies = !in.uniformSummationOrder || d.tiles == 0
-                                         || (isRowUniform(d, in.totalTiles) && in.allowSplit);
+            d.parallel = parallelFor(d);
+            const bool overrideApplies
+                = !in.uniformSummationOrder || d.tiles == 0
+                  || (isRowUniform(d, in.totalTiles) && (in.allowSplit || d.parallel));
             if(overrideApplies)
-                return (d.tiles == 0 || partialsFit(d.tiles, d.split)) ? d : allWhole;
+                return (d.tiles == 0 || partialsFit(d.tiles, d.split, d.parallel)) ? d : allWhole;
         }
 
-        if(!in.allowSplit || in.totalTiles == 0 || in.splitCUs == 0 || in.totalTiles >= in.splitCUs)
+        if((!in.allowSplit && !in.allowParallel) || in.totalTiles == 0 || in.splitCUs == 0
+           || in.totalTiles >= in.splitCUs)
             return allWhole;
 
-        // Largest factor that fits (origami grid_k_split_aware).
+        // Parallel with origami's thresholds (select_reduction for the tile and
+        // iteration bounds, grid_k_split_aware for the split) applied to
+        // splitCUs, not origami's full grid selection; the split is shrunk to
+        // the workspace.
+        if(in.allowParallel && in.totalTiles <= in.splitCUs / ParallelCUsPerTile
+           && itersPerTile >= ParallelMinIters)
+        {
+            size_t split = std::min(in.splitCUs / in.totalTiles, itersPerTile / MinItersPerWI);
+            if(in.partialTileBytes > 0)
+                split = std::min(split, in.workspaceBytes / (in.totalTiles * in.partialTileBytes));
+            if(split >= 2)
+            {
+                KernelArguments d = splitTiles(in.totalTiles, split);
+                d.parallel        = parallelFor(d);
+                if(d.parallel && partialsFit(d.tiles, d.split, true))
+                    return d;
+            }
+        }
+        if(!in.allowSplit)
+            return allWhole;
+
+        // Arrival fixup: largest factor that fits (origami grid_k_split_aware).
         for(const size_t split : SplitFactors)
         {
             if(in.totalTiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
                 continue;
             const KernelArguments d = splitTiles(in.totalTiles, split);
-            if(d.split >= 2 && partialsFit(d.tiles, d.split))
+            if(d.split >= 2 && partialsFit(d.tiles, d.split, false))
                 return d;
         }
         return allWhole;
