@@ -95,6 +95,49 @@ namespace
         expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
     }
 
+    // FP4 x FP4 is the one pairing the preswizzled path accepts in any layout, so the
+    // non-TN scale generation can only be reached through it.
+    void expect_preswizzled_fp4_error(const Arguments& arg, const char* expected)
+    {
+        try
+        {
+            testing_matmul_with_bias(arg,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_32F,
+                                     HIP_R_32F,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_4F_E2M1,
+                                     HIP_R_32F,
+                                     HIP_R_32F);
+            FAIL() << "Expected " << expected;
+        }
+        catch(const std::runtime_error& error)
+        {
+            EXPECT_STREQ(error.what(), expected);
+        }
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_partial_k_block_when_k_runs_along_columns)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'N'; // A is M-contiguous, so K runs along its columns
+        arg.transB              = 'N';
+        arg.M[0]                = 64;
+        arg.N[0]                = 64;
+        arg.K[0]                = 33;
+        arg.lda[0]              = 64;
+        arg.ldb[0]              = 33;
+        arg.ldc[0] = arg.ldd[0] = 64;
+        arg.fast_check          = 0;
+        // M = 64 emits 66 scales, which divide by kBlocks = 2 and so satisfy the grid
+        // check, while the reference indexes a 64 by 2 grid. The shape itself is refused.
+        expect_preswizzled_fp4_error(
+            arg, "GFX950 scales with K along the columns require K to be a multiple of 32, got 33");
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_padded_lda)
     {
         Arguments arg{};
