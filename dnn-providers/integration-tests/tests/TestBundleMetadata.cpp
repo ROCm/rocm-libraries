@@ -798,4 +798,147 @@ TEST(TestParseBundleMetadataJson, ThrowsOnNonNumericInputsKey)
     }
 }
 
+// ---------------------------------------------------------------------------
+// inputs: fill recipes are validated when the metadata is parsed
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json metadataWithInputs(const std::string& inputsJson)
+{
+    auto json = nlohmann::json::parse(R"({"format_version": 1})");
+    json["inputs"] = nlohmann::json::parse(inputsJson);
+    return json;
+}
+
+// What parseBundleMetadataJson says about `json`, or "" when it parses.
+std::string parseError(const nlohmann::json& json)
+{
+    try
+    {
+        parseBundleMetadataJson(json, "case_0");
+    }
+    catch(const BundleMetadataError& e)
+    {
+        return e.what();
+    }
+    return {};
+}
+
+bool mentions(const std::string& text, const std::string& part)
+{
+    return text.find(part) != std::string::npos;
+}
+
+// Every fill kind, plus entries carrying fields their kind does not read, as a space renders
+// them, and a seed-only entry.
+constexpr const char* K_ALL_KINDS_INPUTS = R"({
+    "0": {"kind": "free", "lo": -1, "hi": 1, "value": 0},
+    "1": {"kind": "fixed", "value": 0.5, "lo": 0, "hi": 0},
+    "2": {"kind": "nonzero", "lo": -2, "hi": 2},
+    "3": {"kind": "zeros", "lo": -1, "hi": 1, "value": 0, "scale": 1},
+    "4": {"kind": "large", "scale": 100},
+    "5": {"kind": "subnormal"},
+    "6": {"kind": "special", "special": "nan", "fraction": 0.25, "lo": -1, "hi": 1},
+    "7": {"kind": "special", "special": "-inf", "fraction": 1},
+    "8": {"kind": "free", "lo": -3, "hi": 3, "seed": 17},
+    "9": {"seed": 5}
+})";
+
+} // namespace
+
+// Bug caught: a typo in a recipe (unknown kind, wrong field type, an unordered range, a
+// missing required field) was only found when the harness ran the case, inside the gtest
+// factory; it must instead fail the metadata parse, naming the uid and the field.
+TEST(TestParseBundleMetadataJson, RejectsMalformedInputRecipesNamingUidAndField)
+{
+    struct Case
+    {
+        const char* inputs;
+        const char* uid;
+        const char* field;
+    };
+    const Case cases[] = {
+        {R"({"3": {"kind": "constant"}})", "uid 3", "\"kind\""},
+        {R"({"3": {"kind": "non_zero"}})", "uid 3", "non_zero"},
+        {R"({"3": {"kind": 4}})", "uid 3", "\"kind\""},
+        {R"({"3": {"kind": "free", "lo": "x"}})", "uid 3", "\"lo\""},
+        {R"({"3": {"kind": "fixed", "value": null}})", "uid 3", "\"value\""},
+        {R"({"3": {"kind": "free", "seed": -1}})", "uid 3", "\"seed\""},
+        {R"({"4": {"kind": "nonzero", "lo": 2, "hi": -2}})", "uid 4", "lo <= hi"},
+        {R"({"5": {"kind": "large"}})", "uid 5", "\"scale\""},
+        {R"({"5": {"kind": "large", "scale": 0}})", "uid 5", "\"scale\""},
+        {R"({"6": {"kind": "special", "fraction": 0.5}})", "uid 6", "\"special\""},
+        {R"({"6": {"kind": "special", "special": "bogus", "fraction": 0.5}})",
+         "uid 6",
+         "\"special\""},
+        {R"({"6": {"kind": "special", "special": "nan"}})", "uid 6", "\"fraction\""},
+        {R"({"6": {"kind": "special", "special": "nan", "fraction": 2}})", "uid 6", "\"fraction\""},
+        {R"({"6": "free"})", "uid 6", "JSON object"},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.inputs);
+        const auto message = parseError(metadataWithInputs(c.inputs));
+        ASSERT_FALSE(message.empty()) << "the malformed recipe parsed";
+        EXPECT_TRUE(mentions(message, c.uid)) << message;
+        EXPECT_TRUE(mentions(message, c.field)) << message;
+    }
+}
+
+// A bad entry beside good ones still fails the whole parse: the case must not run with some of
+// its overrides silently missing.
+TEST(TestParseBundleMetadataJson, OneMalformedRecipeAmongValidOnesFailsTheParse)
+{
+    const auto message = parseError(metadataWithInputs(
+        R"({"1": {"kind": "zeros"}, "2": {"kind": "large", "scale": 8}, "9": {"kind": "typo"}})"));
+
+    ASSERT_FALSE(message.empty());
+    EXPECT_TRUE(mentions(message, "uid 9")) << message;
+}
+
+// Every kind, in the form a space renders it (extra fields included), parses, and the parsed
+// map is the input JSON unchanged: validation must not rewrite or drop an entry.
+TEST(TestParseBundleMetadataJson, ValidMixOfEveryFillKindParsesUnchanged)
+{
+    const auto json = metadataWithInputs(K_ALL_KINDS_INPUTS);
+
+    const auto meta = parseBundleMetadataJson(json, "case_0");
+
+    ASSERT_TRUE(meta.inputs.has_value());
+    ASSERT_EQ(meta.inputs->size(), json.at("inputs").size());
+    for(const auto& [key, spec] : json.at("inputs").items())
+    {
+        SCOPED_TRACE(key);
+        EXPECT_EQ(meta.inputs->at(std::stoll(key)), spec);
+    }
+}
+
+// The same two outcomes through the file reader: a malformed recipe in a .meta.json is a
+// BundleMetadataError naming the uid and field (so a FailedLoad), a valid mix loads unchanged.
+TEST(TestLoadBundleMetadata, MalformedInputRecipeThrowsAndValidMixLoads)
+{
+    const TempBundle bad(R"({"format_version": 1, "inputs": {"2": {"kind": "large"}}})");
+    try
+    {
+        loadBundleMetadata(bad.bundleJsonPath());
+        FAIL() << "expected BundleMetadataError";
+    }
+    catch(const BundleMetadataError& e)
+    {
+        EXPECT_TRUE(mentions(e.what(), "uid 2")) << e.what();
+        EXPECT_TRUE(mentions(e.what(), "\"scale\"")) << e.what();
+    }
+
+    const TempBundle good(std::string(R"({"format_version": 1, "inputs": )") + K_ALL_KINDS_INPUTS
+                          + "}");
+    const auto meta = loadBundleMetadata(good.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    ASSERT_TRUE(meta->inputs.has_value());
+    EXPECT_EQ(meta->inputs->size(), 10u);
+    EXPECT_EQ(meta->inputs->at(4), nlohmann::json::parse(R"({"kind": "large", "scale": 100})"));
+}
+
 // NOLINTEND(readability-identifier-naming)

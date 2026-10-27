@@ -84,9 +84,11 @@ public:
     }
 
     /// Starts a FREE fill of `tensor` on the device and returns true, or returns false
-    /// and leaves the tensor untouched when it is too small to be worth it or of a
-    /// type rocRAND does not fill. The fill is left in flight: nothing may read the
-    /// tensor until waitForFills() returns. Throws DeviceInputError if the device
+    /// and leaves the tensor untouched when the recipe is of any other kind (the nonzero,
+    /// zeros, large, subnormal and special kinds are always filled on the host, since
+    /// rocRAND cannot generate them), when the tensor is too small to be worth it, or when
+    /// it is of a type rocRAND does not fill. The fill is left in flight: nothing may read
+    /// the tensor until waitForFills() returns. Throws DeviceInputError if the device
     /// work fails.
     bool tryFill(hipdnn_data_sdk::utilities::ITensor& tensor,
                  const FillRecipe& recipe,

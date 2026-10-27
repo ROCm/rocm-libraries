@@ -20,6 +20,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "harness/input-init/InputFillRecipes.hpp"
+
 namespace hipdnn_integration_tests
 {
 
@@ -356,6 +358,17 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
                 throw BundleMetadataError(message);
             }
             inputMap[uid] = val;
+        }
+        // The same strict parse the harness applies, run here so a recipe that cannot load is a
+        // BundleMetadataError (a failed load of this one case) and not a throw inside the test
+        // factory.
+        try
+        {
+            InputFillRecipes{}.loadFromJson(inputMap, where);
+        }
+        catch(const FillRecipeError& e)
+        {
+            throw BundleMetadataError(e.what());
         }
         meta.inputs = std::move(inputMap);
     }

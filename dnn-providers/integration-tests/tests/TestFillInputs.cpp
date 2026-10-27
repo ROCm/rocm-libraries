@@ -3,17 +3,25 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <ostream>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
@@ -38,7 +46,14 @@ static void PrintTo(const FillRecipe& f, std::ostream* os)
         *os << "FIXED(" << f.value << ")";
         return;
     }
-    *os << "FREE[" << f.lo << ", " << f.hi << "]";
+    if(f.kind == FillRecipe::Kind::FREE)
+    {
+        *os << "FREE[" << f.lo << ", " << f.hi << "]";
+        return;
+    }
+    *os << InputFillRecipes::kindToString(f.kind) << "(lo=" << f.lo << ", hi=" << f.hi
+        << ", scale=" << f.scale << ", special=" << static_cast<int>(f.special)
+        << ", fraction=" << f.fraction << ")";
 }
 
 } // namespace hipdnn_integration_tests
@@ -659,6 +674,234 @@ hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, i
     return dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>&>(*inputs.at(uid));
 }
 
+// ── Domain fills: nonzero, zeros, large, subnormal, special ──────────────────
+
+namespace types = hipdnn_data_sdk::types;
+
+template <typename T>
+DataType dataTypeOf()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return DataType::FLOAT;
+    }
+    else if constexpr(std::is_same_v<T, double>)
+    {
+        return DataType::DOUBLE;
+    }
+    else if constexpr(std::is_same_v<T, types::half>)
+    {
+        return DataType::HALF;
+    }
+    else if constexpr(std::is_same_v<T, types::bfloat16>)
+    {
+        return DataType::BFLOAT16;
+    }
+    else if constexpr(std::is_same_v<T, types::fp8_e4m3>)
+    {
+        return DataType::FP8_E4M3;
+    }
+    else if constexpr(std::is_same_v<T, types::fp8_e5m2>)
+    {
+        return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, types::fp8_e4m3_fnuz>)
+    {
+        return DataType::FP8_E4M3_FNUZ;
+    }
+    else if constexpr(std::is_same_v<T, types::fp8_e5m2_fnuz>)
+    {
+        return DataType::FP8_E5M2_FNUZ;
+    }
+    else if constexpr(std::is_same_v<T, types::fp8_e8m0>)
+    {
+        return DataType::FP8_E8M0;
+    }
+    else if constexpr(std::is_same_v<T, types::fp4_e2m1>)
+    {
+        return DataType::FP4_E2M1;
+    }
+    else if constexpr(std::is_same_v<T, types::fp6_e2m3>)
+    {
+        return DataType::FP6_E2M3;
+    }
+    else if constexpr(std::is_same_v<T, types::fp6_e3m2>)
+    {
+        return DataType::FP6_E3M2;
+    }
+    else if constexpr(std::is_same_v<T, std::int8_t>)
+    {
+        return DataType::INT8;
+    }
+    else if constexpr(std::is_same_v<T, std::uint8_t>)
+    {
+        return DataType::UINT8;
+    }
+    else if constexpr(std::is_same_v<T, std::int32_t>)
+    {
+        return DataType::INT32;
+    }
+    else if constexpr(std::is_same_v<T, std::int64_t>)
+    {
+        return DataType::INT64;
+    }
+    else
+    {
+        static_assert(std::is_same_v<T, bool>, "no DataType for this element type");
+        return DataType::BOOLEAN;
+    }
+}
+
+template <typename T>
+double asDouble(T v)
+{
+    if constexpr(std::is_same_v<T, double> || std::is_integral_v<T>)
+    {
+        return static_cast<double>(v);
+    }
+    else
+    {
+        return static_cast<double>(static_cast<float>(v));
+    }
+}
+
+template <typename T>
+struct SingleFill
+{
+    FillResult result;
+    std::vector<T> values;
+};
+
+// Fills one rows x cols input of element type T through fillInputs() with `recipe` and
+// per-tensor `seed`, on the host. The tensor starts at 1.0 so an element a fill never
+// writes shows up as a 1.0 where no kind produces one. `values` holds the elements in
+// row-major order when the fill was accepted.
+template <typename T>
+SingleFill<T> fillSingle(const FillRecipe& recipe,
+                         unsigned int seed = 7,
+                         int64_t rows = 64,
+                         int64_t cols = 64)
+{
+    const std::vector<int64_t> dims = {rows, cols};
+    const std::vector<int64_t> strides = {cols, 1};
+    const auto gr = buildMatmulGraph(dataTypeOf<T>(), dims, strides);
+    const std::vector<int64_t> ownedUids = {1};
+    auto inputs = makeTensorsFromGraph(gr, ownedUids);
+    inputs.at(1)->fillTensorWithValue(1.0f);
+
+    InputFillRecipes recipes;
+    recipes.set(1, recipe).setSeed(1, seed);
+
+    SingleFill<T> out;
+    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    if(out.result.filled)
+    {
+        const auto* data = static_cast<const T*>(inputs.at(1)->rawHostData());
+        out.values.assign(data, data + inputs.at(1)->elementCount());
+    }
+    return out;
+}
+
+template <typename T>
+bool sameBytes(const std::vector<T>& a, const std::vector<T>& b)
+{
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+}
+
+// Whether `v` is subnormal in its own type, decided from the encoding where the type is a
+// plain IEEE one rather than from the limits the fill itself consults.
+template <typename T>
+bool isSubnormalValue(T v)
+{
+    if constexpr(std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        return std::fpclassify(v) == FP_SUBNORMAL;
+    }
+    else if constexpr(std::is_same_v<T, types::half>)
+    {
+        return (v.data & 0x7C00U) == 0U && (v.data & 0x03FFU) != 0U;
+    }
+    else if constexpr(std::is_same_v<T, types::bfloat16>)
+    {
+        return (v.data & 0x7F80U) == 0U && (v.data & 0x007FU) != 0U;
+    }
+    else
+    {
+        const double magnitude = std::fabs(asDouble(v));
+        return magnitude > 0.0 && magnitude < asDouble(std::numeric_limits<T>::min());
+    }
+}
+
+// Asserts the fill of `recipe` for T is refused, naming uid 1 and `inReason`.
+template <typename T>
+void expectUnsupported(const FillRecipe& recipe, const std::string& inReason)
+{
+    const auto filled = fillSingle<T>(recipe);
+    EXPECT_FALSE(filled.result.filled);
+    EXPECT_EQ(filled.result.deviceFilled, 0u);
+    EXPECT_NE(filled.result.reason.find("uid 1"), std::string::npos) << filled.result.reason;
+    EXPECT_NE(filled.result.reason.find(inReason), std::string::npos) << filled.result.reason;
+}
+
+// Fills a T input with the subnormal kind and checks the distinct magnitudes drawn are
+// exactly `expected`: the type's whole subnormal set, and nothing outside it.
+template <typename T>
+void expectSubnormalMagnitudes(const std::set<double>& expected)
+{
+    SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
+    const auto filled = fillSingle<T>(FillRecipe::subnormal());
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    std::set<double> magnitudes;
+    for(const T v : filled.values)
+    {
+        magnitudes.insert(std::fabs(asDouble(v)));
+    }
+    EXPECT_EQ(magnitudes, expected);
+}
+
+// Fills a bit-packed tensor and an unpacked one of the same shape and strides with the same
+// recipe and seed, and checks every packed code equals the unpacked element at that slot.
+// The packed codes are decoded here, LSB first, independently of the fill's packing.
+template <typename T, typename PackedT>
+void expectPackedMatchesUnpacked(const FillRecipe& recipe, std::size_t bitsPerElement)
+{
+    SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
+    const std::vector<int64_t> dims = {4, 8};
+    const std::vector<std::vector<int64_t>> layouts = {{8, 1}, {1, 4}};
+    for(const auto& strides : layouts)
+    {
+        SCOPED_TRACE("strides " + std::to_string(strides[0]) + "," + std::to_string(strides[1]));
+        const auto gr = buildMatmulGraph(dataTypeOf<T>(), dims, strides);
+        const std::vector<int64_t> ownedUids = {1};
+
+        auto unpacked = makeTensorsFromGraph(gr, ownedUids);
+        InputTensorMap packed;
+        packed[1] = std::make_shared<PackedT>(dims, strides);
+
+        InputFillRecipes unpackedRecipes;
+        unpackedRecipes.set(1, recipe).setSeed(1, 11);
+        InputFillRecipes packedRecipes;
+        packedRecipes.set(1, recipe).setSeed(1, 11);
+        ASSERT_TRUE(fillInputs(*gr.graph, unpacked, ownedUids, unpackedRecipes, nullptr).filled);
+        ASSERT_TRUE(fillInputs(*gr.graph, packed, ownedUids, packedRecipes, nullptr).filled);
+
+        const auto* values = static_cast<const T*>(unpacked.at(1)->rawHostData());
+        const auto* bytes = static_cast<const std::uint8_t*>(packed.at(1)->rawHostData());
+        const unsigned mask = (1U << bitsPerElement) - 1U;
+        for(std::size_t slot = 0; slot < 32; ++slot)
+        {
+            unsigned code = 0;
+            for(std::size_t bit = 0; bit < bitsPerElement; ++bit)
+            {
+                const std::size_t position = slot * bitsPerElement + bit;
+                code |= ((static_cast<unsigned>(bytes[position / 8]) >> (position % 8)) & 1U)
+                        << bit;
+            }
+            EXPECT_EQ(code, static_cast<unsigned>(values[slot].data) & mask) << "slot " << slot;
+        }
+    }
+}
+
 } // namespace
 
 // ── Test cases ──────────────────────────────────────────────────────────────
@@ -1023,4 +1266,597 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
+// ── Domain fills ────────────────────────────────────────────────────────────
+
+template <typename T>
+class TestFillInputsDomain : public ::testing::Test
+{
+};
+
+using DomainTypes = ::testing::Types<float,
+                                     double,
+                                     hipdnn_data_sdk::types::half,
+                                     hipdnn_data_sdk::types::bfloat16,
+                                     hipdnn_data_sdk::types::fp8_e4m3,
+                                     hipdnn_data_sdk::types::fp8_e5m2>;
+TYPED_TEST_SUITE(TestFillInputsDomain, DomainTypes);
+
+// A seed that is ignored, or a generator reading state it never set, gives the same bytes
+// for every seed or different bytes for the same one.
+TYPED_TEST(TestFillInputsDomain, EveryKindIsDeterministicPerSeed)
+{
+    using T = TypeParam;
+    const std::vector<FillRecipe> recipes
+        = {FillRecipe::nonzero(-1.0f, 1.0f),
+           FillRecipe::large(64.0f),
+           FillRecipe::subnormal(),
+           FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.25f)};
+
+    for(const auto& recipe : recipes)
+    {
+        SCOPED_TRACE(InputFillRecipes::kindToString(recipe.kind));
+        const auto first = fillSingle<T>(recipe, 7);
+        const auto again = fillSingle<T>(recipe, 7);
+        const auto other = fillSingle<T>(recipe, 8);
+        ASSERT_TRUE(first.result.filled) << first.result.reason;
+        ASSERT_TRUE(again.result.filled) << again.result.reason;
+        ASSERT_TRUE(other.result.filled) << other.result.reason;
+
+        EXPECT_TRUE(sameBytes(first.values, again.values));
+        EXPECT_FALSE(sameBytes(first.values, other.values));
+    }
+}
+
+// An element that rounds to zero in a narrow type (a half below 2^-25, an fp8 below half its
+// smallest subnormal) is a zero, so a nonzero fill that only tested the float draw would
+// leave zeros in the tensor. The range is 1.5 smallest subnormals wide, so a third of the
+// draws round to zero and the redraw has to catch them.
+TYPED_TEST(TestFillInputsDomain, NonzeroNeverYieldsZeroAfterRoundingToTheDataType)
+{
+    using T = TypeParam;
+    const double smallest = asDouble(std::numeric_limits<T>::denorm_min());
+    const float reach
+        = std::max(static_cast<float>(1.5 * smallest), std::numeric_limits<float>::denorm_min());
+
+    const auto filled = fillSingle<T>(FillRecipe::nonzero(-reach, reach));
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+
+    std::size_t atSmallest = 0;
+    for(const T v : filled.values)
+    {
+        const double d = asDouble(v);
+        ASSERT_NE(d, 0.0);
+        atSmallest += std::fabs(d) == smallest ? 1U : 0U;
+    }
+    // Where the range is a normal float, rounding really did reach the smallest subnormal, so
+    // the redraw path ran.
+    if(smallest > 1e-30)
+    {
+        EXPECT_GT(atSmallest, 0u);
+    }
+}
+
+// A range whose every value rounds to zero in the type cannot be made nonzero; drawing
+// forever, or returning zeros, hides it.
+TYPED_TEST(TestFillInputsDomain, NonzeroOverARangeThatRoundsToZeroIsUnsupported)
+{
+    using T = TypeParam;
+    const double smallest = asDouble(std::numeric_limits<T>::denorm_min());
+    const auto reach = static_cast<float>(0.25 * smallest);
+
+    expectUnsupported<T>(FillRecipe::nonzero(-reach, reach), "\"nonzero\"");
+    expectUnsupported<T>(FillRecipe::nonzero(0.0f, 0.0f), "\"nonzero\"");
+}
+
+// A subnormal produced by rounding a tiny float flushes to zero or rounds up to the smallest
+// normal in a narrow type; every element must be a real subnormal of its own type.
+TYPED_TEST(TestFillInputsDomain, SubnormalFillsEveryElementBelowTheSmallestNormal)
+{
+    using T = TypeParam;
+    const auto filled = fillSingle<T>(FillRecipe::subnormal());
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+
+    std::set<double> distinct;
+    std::size_t negatives = 0;
+    for(const T v : filled.values)
+    {
+        ASSERT_TRUE(isSubnormalValue(v)) << asDouble(v);
+        distinct.insert(asDouble(v));
+        negatives += asDouble(v) < 0.0 ? 1U : 0U;
+    }
+    // Both signs, and many subnormal codes where the type has many.
+    EXPECT_GT(negatives, 0u);
+    EXPECT_LT(negatives, filled.values.size());
+    EXPECT_GT(distinct.size(), std::numeric_limits<T>::digits > 6 ? 100u : 4u);
+}
+
+// A large fill beyond what the type can hold must clamp to its largest finite value, not
+// overflow to infinity or NaN; and the magnitudes must sit in the upper half [top/2, top].
+TYPED_TEST(TestFillInputsDomain, LargeStaysWithinTheScaleAndTheTypesMaximum)
+{
+    using T = TypeParam;
+    const double maxFinite = asDouble(std::numeric_limits<T>::max());
+    // 1/128 covers the rounding of a bound that is not itself representable.
+    constexpr double slack = 1.0 / 128.0;
+
+    for(const float scale : {64.0f, 1e30f})
+    {
+        SCOPED_TRACE(scale);
+        const double top = std::min(static_cast<double>(scale), maxFinite);
+        const auto filled = fillSingle<T>(FillRecipe::large(scale));
+        ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+
+        std::size_t negatives = 0;
+        for(const T v : filled.values)
+        {
+            const double d = asDouble(v);
+            ASSERT_TRUE(std::isfinite(d)) << d;
+            EXPECT_LE(std::fabs(d), maxFinite);
+            EXPECT_LE(std::fabs(d), top * (1.0 + slack));
+            EXPECT_GE(std::fabs(d), 0.5 * top * (1.0 - slack));
+            negatives += d < 0.0 ? 1U : 0U;
+        }
+        EXPECT_GT(negatives, 0u);
+        EXPECT_LT(negatives, filled.values.size());
+    }
+}
+
+// A fraction of 0.25 of 4096 elements is exactly 1024 non-finite, at positions fixed by the
+// seed and spread over the tensor; the rest are the free draw inside [lo, hi]. A per-element
+// coin flip, or a planted value leaking into the free share, breaks the count.
+TYPED_TEST(TestFillInputsDomain, SpecialPlantsExactlyTheRequestedShareAtSeededPositions)
+{
+    using T = TypeParam;
+    const auto recipe = FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.25f);
+
+    const auto filled = fillSingle<T>(recipe, 7);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    std::set<std::size_t> positions;
+    for(std::size_t i = 0; i < filled.values.size(); ++i)
+    {
+        const double d = asDouble(filled.values[i]);
+        if(std::isnan(d))
+        {
+            positions.insert(i);
+        }
+        else
+        {
+            ASSERT_TRUE(std::isfinite(d)) << "index " << i;
+            EXPECT_GE(d, -1.0) << "index " << i;
+            EXPECT_LE(d, 1.0) << "index " << i;
+        }
+    }
+    EXPECT_EQ(positions.size(), 1024u);
+
+    // Spread: neither half of the tensor holds nearly all of them.
+    const auto inFirstHalf = static_cast<std::size_t>(
+        std::count_if(positions.begin(), positions.end(), [&](std::size_t p) { return p < 2048; }));
+    EXPECT_GT(inFirstHalf, 400u);
+    EXPECT_LT(inFirstHalf, 624u);
+
+    // The positions are a function of the seed.
+    const auto again = fillSingle<T>(recipe, 7);
+    const auto other = fillSingle<T>(recipe, 8);
+    ASSERT_TRUE(again.result.filled);
+    ASSERT_TRUE(other.result.filled);
+    const auto nanPositions = [](const std::vector<T>& values) {
+        std::set<std::size_t> result;
+        for(std::size_t i = 0; i < values.size(); ++i)
+        {
+            if(std::isnan(asDouble(values[i])))
+            {
+                result.insert(i);
+            }
+        }
+        return result;
+    };
+    EXPECT_EQ(nanPositions(again.values), positions);
+    EXPECT_NE(nanPositions(other.values), positions);
+}
+
+// An all-zero fill that skipped elements, or wrote something near zero, would leave a
+// normalization's variance test unexercised; every element, including strided ones, is zero.
+TYPED_TEST(TestFillInputsDomain, ZerosFillsEveryElementWithZero)
+{
+    using T = TypeParam;
+    const auto filled = fillSingle<T>(FillRecipe::zeros());
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    for(const T v : filled.values)
+    {
+        ASSERT_EQ(asDouble(v), 0.0);
+    }
+}
+
+// The sign of an infinity is the recipe's: +inf must not come out as -inf or NaN.
+TYPED_TEST(TestFillInputsDomain, SpecialInfinitiesKeepTheirSign)
+{
+    using T = TypeParam;
+    if constexpr(std::numeric_limits<T>::has_infinity)
+    {
+        for(const auto special :
+            {FillRecipe::SpecialValue::POS_INF, FillRecipe::SpecialValue::NEG_INF})
+        {
+            const bool positive = special == FillRecipe::SpecialValue::POS_INF;
+            const auto filled = fillSingle<T>(FillRecipe::nonFinite(special, 0.5f));
+            ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+            std::size_t planted = 0;
+            for(const T v : filled.values)
+            {
+                const double d = asDouble(v);
+                if(std::isinf(d))
+                {
+                    EXPECT_EQ(d > 0.0, positive);
+                    ++planted;
+                }
+                else
+                {
+                    EXPECT_TRUE(std::isfinite(d));
+                }
+            }
+            EXPECT_EQ(planted, filled.values.size() / 2);
+        }
+    }
+    else
+    {
+        GTEST_SKIP() << "this data type has no infinity";
+    }
+}
+
+// ── Domain fills: data types the kinds cannot or can only partly use ──────────────────────
+
+// A fraction of 1 is every element, 0 is none, and a positive fraction too small to round to
+// one element still plants one: a "special" case must not silently be a plain FREE one.
+TEST(TestFillInputs, SpecialFractionBoundsAndTheMinimumOfOne)
+{
+    const auto nan = FillRecipe::SpecialValue::QUIET_NAN;
+    const auto countNan = [](const SingleFill<float>& filled) {
+        return std::count_if(
+            filled.values.begin(), filled.values.end(), [](float v) { return std::isnan(v); });
+    };
+
+    const auto all = fillSingle<float>(FillRecipe::nonFinite(nan, 1.0f), 7, 4, 4);
+    const auto none = fillSingle<float>(FillRecipe::nonFinite(nan, 0.0f), 7, 4, 4);
+    const auto tiny = fillSingle<float>(FillRecipe::nonFinite(nan, 0.001f), 7, 4, 4);
+    ASSERT_TRUE(all.result.filled && none.result.filled && tiny.result.filled);
+    EXPECT_EQ(countNan(all), 16);
+    EXPECT_EQ(countNan(none), 0);
+    EXPECT_EQ(countNan(tiny), 1);
+}
+
+// The free share of a special fill honors [lo, hi]; using the default range instead would put
+// values outside it.
+TEST(TestFillInputs, SpecialFreeShareFollowsTheRecipeRange)
+{
+    const auto filled = fillSingle<float>(
+        FillRecipe::nonFinite(FillRecipe::SpecialValue::POS_INF, 0.25f, 10.0f, 20.0f));
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    for(const float v : filled.values)
+    {
+        if(!std::isinf(v))
+        {
+            ASSERT_GE(v, 10.0f);
+            ASSERT_LE(v, 20.0f);
+        }
+    }
+}
+
+// A value the type cannot hold must be refused, not stored as something else: e4m3 has one
+// NaN and no infinity, the sub-byte floats have neither, e8m0 has a NaN only, and an integer
+// has no non-finite value at all.
+TEST(TestFillInputs, SpecialOnATypeWithoutTheValueIsUnsupported)
+{
+    const auto nan = FillRecipe::SpecialValue::QUIET_NAN;
+    const auto inf = FillRecipe::SpecialValue::POS_INF;
+    const auto negInf = FillRecipe::SpecialValue::NEG_INF;
+
+    expectUnsupported<types::fp8_e4m3>(FillRecipe::nonFinite(inf, 0.25f), "on fp8_e4m3");
+    expectUnsupported<types::fp8_e4m3>(FillRecipe::nonFinite(negInf, 0.25f), "on fp8_e4m3");
+    expectUnsupported<types::fp8_e4m3_fnuz>(FillRecipe::nonFinite(inf, 0.25f), "on fp8_e4m3_fnuz");
+    expectUnsupported<types::fp8_e5m2_fnuz>(FillRecipe::nonFinite(inf, 0.25f), "on fp8_e5m2_fnuz");
+    expectUnsupported<types::fp8_e8m0>(FillRecipe::nonFinite(inf, 0.25f), "on fp8_e8m0");
+    expectUnsupported<types::fp4_e2m1>(FillRecipe::nonFinite(nan, 0.25f), "on fp4_e2m1");
+    expectUnsupported<types::fp4_e2m1>(FillRecipe::nonFinite(inf, 0.25f), "on fp4_e2m1");
+    expectUnsupported<types::fp6_e2m3>(FillRecipe::nonFinite(nan, 0.25f), "on fp6_e2m3");
+    expectUnsupported<types::fp6_e3m2>(FillRecipe::nonFinite(inf, 0.25f), "on fp6_e3m2");
+    expectUnsupported<std::int32_t>(FillRecipe::nonFinite(nan, 0.25f), "on int32");
+}
+
+// e4m3's single NaN encoding is the value planted, and the types that do have infinity take
+// it: the refusals above must not have spread to the supported combinations.
+TEST(TestFillInputs, SpecialOnTypesThatHoldTheValueIsAccepted)
+{
+    const auto nan = FillRecipe::SpecialValue::QUIET_NAN;
+
+    const auto e4m3 = fillSingle<types::fp8_e4m3>(FillRecipe::nonFinite(nan, 0.5f));
+    ASSERT_TRUE(e4m3.result.filled) << e4m3.result.reason;
+    EXPECT_EQ(std::count_if(e4m3.values.begin(),
+                            e4m3.values.end(),
+                            [](types::fp8_e4m3 v) { return std::isnan(asDouble(v)); }),
+              2048);
+
+    const auto e5m2 = fillSingle<types::fp8_e5m2>(
+        FillRecipe::nonFinite(FillRecipe::SpecialValue::NEG_INF, 0.5f));
+    ASSERT_TRUE(e5m2.result.filled) << e5m2.result.reason;
+    EXPECT_EQ(std::count_if(
+                  e5m2.values.begin(),
+                  e5m2.values.end(),
+                  [](types::fp8_e5m2 v) { return asDouble(v) < 0.0 && std::isinf(asDouble(v)); }),
+              2048);
+
+    const auto e8m0 = fillSingle<types::fp8_e8m0>(FillRecipe::nonFinite(nan, 0.5f, 0.5f, 2.0f));
+    ASSERT_TRUE(e8m0.result.filled) << e8m0.result.reason;
+    EXPECT_EQ(std::count_if(e8m0.values.begin(),
+                            e8m0.values.end(),
+                            [](types::fp8_e8m0 v) { return std::isnan(asDouble(v)); }),
+              2048);
+}
+
+// Integers and e8m0 have no subnormal values; "every element is subnormal" has no answer there,
+// so the fill is refused rather than writing zeros or the smallest value.
+TEST(TestFillInputs, SubnormalOnATypeWithoutSubnormalsIsUnsupported)
+{
+    expectUnsupported<std::int32_t>(FillRecipe::subnormal(), "\"subnormal\" on int32");
+    expectUnsupported<std::int8_t>(FillRecipe::subnormal(), "\"subnormal\" on int8");
+    expectUnsupported<std::uint8_t>(FillRecipe::subnormal(), "\"subnormal\" on uint8");
+    expectUnsupported<std::int64_t>(FillRecipe::subnormal(), "\"subnormal\" on int64");
+    expectUnsupported<types::fp8_e8m0>(FillRecipe::subnormal(), "\"subnormal\" on fp8_e8m0");
+}
+
+// The narrow floats have only a handful of subnormals; the fill must draw those and no value
+// outside them (not zero, not the smallest normal), and reach each one. Expected sets are
+// k * 2^-n from the formats' definitions: fp4 e2m1 0.5; fp6 e2m3 k/8, k = 1..7; fp6 e3m2 k/16,
+// k = 1..3; fp8 e4m3 k * 2^-9, k = 1..7; fp8 e5m2 k * 2^-16, k = 1..3.
+TEST(TestFillInputs, SubnormalOnNarrowFormatsDrawsExactlyTheirSubnormalValues)
+{
+    expectSubnormalMagnitudes<types::fp4_e2m1>({0.5});
+    expectSubnormalMagnitudes<types::fp6_e2m3>({0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875});
+    expectSubnormalMagnitudes<types::fp6_e3m2>({0.0625, 0.125, 0.1875});
+    expectSubnormalMagnitudes<types::fp8_e4m3>({std::ldexp(1.0, -9),
+                                                std::ldexp(2.0, -9),
+                                                std::ldexp(3.0, -9),
+                                                std::ldexp(4.0, -9),
+                                                std::ldexp(5.0, -9),
+                                                std::ldexp(6.0, -9),
+                                                std::ldexp(7.0, -9)});
+    expectSubnormalMagnitudes<types::fp8_e5m2>(
+        {std::ldexp(1.0, -16), std::ldexp(2.0, -16), std::ldexp(3.0, -16)});
+}
+
+// e8m0 holds only powers of two, so it has no zero to fill with.
+TEST(TestFillInputs, ZerosOnATypeWithoutZeroIsUnsupported)
+{
+    expectUnsupported<types::fp8_e8m0>(FillRecipe::zeros(), "\"zeros\" on fp8_e8m0");
+}
+
+// Zeros and the fixed kind work on every element type, including those with no typed generator
+// (bool), through ITensor; the other kinds there are refused, not silently FREE.
+TEST(TestFillInputs, ElementTypesWithoutAGeneratorTakeOnlyZeros)
+{
+    const auto zeros = fillSingle<bool>(FillRecipe::zeros());
+    ASSERT_TRUE(zeros.result.filled) << zeros.result.reason;
+    EXPECT_EQ(std::count(zeros.values.begin(), zeros.values.end(), true), 0);
+
+    expectUnsupported<bool>(FillRecipe::nonzero(-1.0f, 1.0f), "no host generator");
+    expectUnsupported<bool>(FillRecipe::large(10.0f), "no host generator");
+}
+
+// An integer nonzero fill draws from the integers of [lo, hi] without zero: [-1, 1] is
+// {-1, 1}, both reached. Truncating a float draw would give mostly zero.
+TEST(TestFillInputs, NonzeroOnIntegersSkipsZero)
+{
+    const auto filled = fillSingle<std::int8_t>(FillRecipe::nonzero(-1.0f, 1.0f));
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    const std::set<std::int8_t> seen(filled.values.begin(), filled.values.end());
+    EXPECT_EQ(seen, (std::set<std::int8_t>{-1, 1}));
+
+    const auto positive = fillSingle<std::uint8_t>(FillRecipe::nonzero(-3.0f, 3.0f));
+    ASSERT_TRUE(positive.result.filled) << positive.result.reason;
+    const std::set<std::uint8_t> positiveSeen(positive.values.begin(), positive.values.end());
+    EXPECT_EQ(positiveSeen, (std::set<std::uint8_t>{1, 2, 3}));
+
+    expectUnsupported<std::int32_t>(FillRecipe::nonzero(0.0f, 0.0f), "no nonzero integer");
+    expectUnsupported<std::int32_t>(FillRecipe::nonzero(0.2f, 0.8f), "no nonzero integer");
+}
+
+// An integer large fill is in [ceil(top / 2), top] with top at most the type's maximum: an
+// int8 scale of 1000 is [64, 127], a uint8 scale of 300 is [128, 255], and a scale below 1 has
+// no integer.
+TEST(TestFillInputs, LargeOnIntegersClampsToTheTypeMaximum)
+{
+    const auto wide = fillSingle<std::int8_t>(FillRecipe::large(1000.0f));
+    ASSERT_TRUE(wide.result.filled) << wide.result.reason;
+    for(const std::int8_t v : wide.values)
+    {
+        ASSERT_GE(std::abs(static_cast<int>(v)), 64);
+        ASSERT_LE(std::abs(static_cast<int>(v)), 127);
+    }
+
+    const auto unsignedWide = fillSingle<std::uint8_t>(FillRecipe::large(300.0f));
+    ASSERT_TRUE(unsignedWide.result.filled) << unsignedWide.result.reason;
+    for(const std::uint8_t v : unsignedWide.values)
+    {
+        ASSERT_GE(v, 128);
+    }
+
+    expectUnsupported<std::int32_t>(FillRecipe::large(0.5f), "scale >= 1");
+}
+
+// "At most the type's maximum" with a literal: half's is 65504, e4m3's 448. A scale beyond
+// them is clamped, so every element is finite, and the draw reaches the upper end.
+TEST(TestFillInputs, LargeBeyondTheTypeMaximumClampsToIt)
+{
+    const auto narrow = fillSingle<types::half>(FillRecipe::large(1e30f));
+    ASSERT_TRUE(narrow.result.filled) << narrow.result.reason;
+    double widest = 0.0;
+    for(const auto v : narrow.values)
+    {
+        const double d = std::fabs(asDouble(v));
+        ASSERT_TRUE(std::isfinite(d));
+        ASSERT_GE(d, 32752.0);
+        ASSERT_LE(d, 65504.0);
+        widest = std::max(widest, d);
+    }
+    EXPECT_GT(widest, 60000.0);
+
+    const auto e4m3 = fillSingle<types::fp8_e4m3>(FillRecipe::large(1e30f));
+    ASSERT_TRUE(e4m3.result.filled) << e4m3.result.reason;
+    for(const auto v : e4m3.values)
+    {
+        const double d = std::fabs(asDouble(v));
+        ASSERT_TRUE(std::isfinite(d));
+        ASSERT_GE(d, 224.0);
+        ASSERT_LE(d, 448.0);
+    }
+}
+
+// Unusable parameters set programmatically (parsing rejects them in JSON) are refused by the
+// fill itself: a zero or NaN scale, a fraction outside [0, 1], an unordered range.
+TEST(TestFillInputs, UnusableRecipeParametersAreUnsupported)
+{
+    expectUnsupported<float>(FillRecipe::large(0.0f), "\"large\"");
+    expectUnsupported<float>(FillRecipe::large(std::numeric_limits<float>::quiet_NaN()),
+                             "\"large\"");
+    expectUnsupported<float>(FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 1.5f),
+                             "\"special\"");
+    expectUnsupported<float>(FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, -0.1f),
+                             "\"special\"");
+    expectUnsupported<float>(FillRecipe::nonzero(1.0f, -1.0f), "\"nonzero\"");
+}
+
+// Sub-byte graphs are filled once unpacked and once bit-packed and the two must hold the same
+// values; a packed fill that diverged would compare a different input on each side. Checked
+// for a row-major and a column-major dense layout, where the packed slot of a coordinate
+// differs from its logical index.
+TEST(TestFillInputs, PackedSubByteTensorsHoldTheSameValuesAsUnpackedOnes)
+{
+    using hipdnn_data_sdk::utilities::PackedFp4Tensor;
+    using hipdnn_data_sdk::utilities::PackedFp6Tensor;
+
+    const std::vector<FillRecipe> recipes = {FillRecipe::nonzero(-1.0f, 1.0f),
+                                             FillRecipe::zeros(),
+                                             FillRecipe::large(100.0f),
+                                             FillRecipe::subnormal()};
+    for(const auto& recipe : recipes)
+    {
+        SCOPED_TRACE(InputFillRecipes::kindToString(recipe.kind));
+        expectPackedMatchesUnpacked<types::fp4_e2m1, PackedFp4Tensor>(recipe, 4);
+        expectPackedMatchesUnpacked<types::fp6_e2m3, PackedFp6Tensor<types::fp6_e2m3>>(recipe, 6);
+        expectPackedMatchesUnpacked<types::fp6_e3m2, PackedFp6Tensor<types::fp6_e3m2>>(recipe, 6);
+    }
+}
+
+// A packed tensor of a type that cannot hold the kind is refused like its unpacked twin.
+TEST(TestFillInputs, PackedSubByteTensorOfAnUnsupportedKindIsRefused)
+{
+    const std::vector<int64_t> dims = {4, 8};
+    const std::vector<int64_t> strides = {8, 1};
+    const auto gr = buildMatmulGraph(DataType::FP4_E2M1, dims, strides);
+    InputTensorMap packed;
+    packed[1] = std::make_shared<hipdnn_data_sdk::utilities::PackedFp4Tensor>(dims, strides);
+    InputFillRecipes recipes;
+    recipes.setNonFinite(1, FillRecipe::SpecialValue::QUIET_NAN, 0.25f);
+
+    const auto result = fillInputs(*gr.graph, packed, {1}, recipes, nullptr);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("fp4_e2m1"), std::string::npos) << result.reason;
+}
+
+// ── Domain fills: the device and the existing kinds ─────────────────────────────────────────
+
+// rocRAND can only draw uniform floats, so every non-FREE kind must come out of the host
+// generator even for a tensor large enough to be sent to the device; a decline that failed
+// would put the new kinds through a path that cannot make them (or, with no device, throw). The
+// bytes must be the ones a host-only fill makes. Runs without a device: a decline never
+// reaches HIP.
+TEST(TestFillInputs, DeviceFillerDeclinesEveryNewKindAndTheHostFillsIt)
+{
+    const std::vector<int64_t> dims = {256, 256};
+    const std::vector<int64_t> strides = {256, 1};
+    ASSERT_GE(256u * 256u, DeviceInputFiller::minElements());
+
+    const std::vector<FillRecipe> recipes
+        = {FillRecipe::nonzero(-1.0f, 1.0f),
+           FillRecipe::zeros(),
+           FillRecipe::large(64.0f),
+           FillRecipe::subnormal(),
+           FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.25f)};
+    for(const auto& recipe : recipes)
+    {
+        SCOPED_TRACE(InputFillRecipes::kindToString(recipe.kind));
+        const auto gr = buildMatmulGraph(DataType::FLOAT, dims, strides);
+        const std::vector<int64_t> ownedUids = {1};
+        auto hostInputs = makeTensorsFromGraph(gr, ownedUids);
+        auto deviceInputs = makeTensorsFromGraph(gr, ownedUids);
+        InputFillRecipes hostRecipes;
+        hostRecipes.set(1, recipe).setSeed(1, 5);
+        InputFillRecipes deviceRecipes;
+        deviceRecipes.set(1, recipe).setSeed(1, 5);
+
+        DeviceInputFiller device;
+        EXPECT_FALSE(device.tryFill(*deviceInputs.at(1), recipe, 5));
+
+        const auto hostResult = fillInputs(*gr.graph, hostInputs, ownedUids, hostRecipes, nullptr);
+        const auto deviceResult
+            = fillInputs(*gr.graph, deviceInputs, ownedUids, deviceRecipes, &device);
+        ASSERT_TRUE(hostResult.filled) << hostResult.reason;
+        ASSERT_TRUE(deviceResult.filled) << deviceResult.reason;
+        EXPECT_EQ(deviceResult.deviceFilled, 0u);
+
+        auto& expected = *hostInputs.at(1);
+        auto& actual = *deviceInputs.at(1);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace());
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0);
+    }
+}
+
+// FREE goes through the tensor's own draw, not the typed generators: its bytes for a given seed
+// are what recorded runs and the device-off reproduction rely on.
+TEST(TestFillInputs, FreeFillStillMatchesTheTensorsOwnRandomFill)
+{
+    const auto filled = fillSingle<float>(FillRecipe::free(-2.0f, 3.0f), 9);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+
+    const std::vector<int64_t> dims = {64, 64};
+    const std::vector<int64_t> strides = {64, 1};
+    hipdnn_data_sdk::utilities::Tensor<float> direct(dims, strides);
+    direct.fillTensorWithRandomValues(-2.0f, 3.0f, 9);
+    const auto* data = static_cast<const float*>(direct.rawHostData());
+    const std::vector<float> expected(data, data + direct.elementCount());
+
+    EXPECT_TRUE(sameBytes(filled.values, expected));
+}
+
+// The block-scale normalization reads the operand's range through recipeMagnitude(); each new
+// kind must report the largest finite magnitude it can produce, or the scale it derives is
+// off. For an x of e5m2 (every kind is supported there): zeros and subnormal are ~0, so the
+// scale stays at [0.5, 2]; large(8) peaks at 8, nonzero(-4, 4) and special's range at 4 and 2.
+TEST(TestFillInputs, OperandRecipeKindsFeedTheScaleNormalization)
+{
+    struct Case
+    {
+        FillRecipe x;
+        FillRecipe scale;
+    };
+    const std::vector<Case> cases = {
+        {FillRecipe::zeros(), FillRecipe::free(0.5f, 2.0f)},
+        {FillRecipe::subnormal(), FillRecipe::free(0.5f, 2.0f)},
+        {FillRecipe::large(8.0f), FillRecipe::free(0.0625f, 0.25f)},
+        {FillRecipe::nonzero(-4.0f, 4.0f), FillRecipe::free(0.125f, 0.5f)},
+        {FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.1f, -2.0f, 2.0f),
+         FillRecipe::free(0.25f, 1.0f)},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(InputFillRecipes::kindToString(c.x.kind));
+        InputFillRecipes overrides;
+        overrides.set(1, c.x);
+        const auto recipes = fillBlockScaleDequantizeMatmul(DataType::FP8_E5M2, overrides);
+        EXPECT_EQ(recipes.fill(2), c.scale);
+    }
+}
 // NOLINTEND(readability-identifier-naming)
