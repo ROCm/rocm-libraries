@@ -6,7 +6,8 @@
 CPU: the spec validators and the AOT grid. GPU (gfx1250): patch sizes with and
 without an uncovered border, padded GEMM columns, several patch-row blocks;
 3x3 stride 1 / 2 and 7x7 stride 2 small-C stems with image edges -- checked
-numerically against torch's dgrad.
+numerically against torch's dgrad, both hand-built and as the AOT cache's
+binaries (every shipped knob of the 7x7 stem and of the /14 patch embedding).
 
 Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
@@ -311,7 +312,41 @@ class TestStemEngines(unittest.TestCase):
 # problem, uncovered border). The 16x16 patch embedding covers 224 of 230 rows
 # and 231 columns, so its plans add the border-zeroing workgroups.
 _STEM_ARCH = "gfx1250"
-_CACHED_CASES = (
+# Shapes whose capability takes every shipped knob of its cell (no plan drops
+# out on tile efficiency), so each AOT binary of the cell runs: the ResNet-style
+# 7x7 / stride 2 / pad 3 stem, and the /14 patch embedding with every shipped
+# r_blk (2, 7, 14). None of the images is a whole number of tiles, so the edge
+# workgroups are partial, and the /14 images leave an uncovered border (210 of
+# 213 rows, 420 of 425 columns; 182 of 187, 406 of 409). A /14 image only a few
+# patches across (e.g. 60x58, 4x4 patches) gets no plan: every shipped tile is
+# under the 0.5 tile-efficiency floor there.
+_EVERY_KNOB_CASES = (
+    (
+        "direct_dgrad_smallc_wmma",
+        "bf16",
+        dict(N=2, H=58, W=62, KH=7, S=2, PAD=3),
+        False,
+    ),
+    (
+        "direct_dgrad_smallc_wmma",
+        "fp16",
+        dict(N=1, H=57, W=63, KH=7, S=2, PAD=3),
+        False,
+    ),
+    (
+        "direct_dgrad_patch_wmma",
+        "bf16",
+        dict(N=2, H=213, W=425, K=64, KH=14, S=14),
+        True,
+    ),
+    (
+        "direct_dgrad_patch_wmma",
+        "fp16",
+        dict(N=2, H=187, W=409, K=64, KH=14, S=14),
+        True,
+    ),
+)
+_CACHED_CASES = _EVERY_KNOB_CASES + (
     (
         "direct_dgrad_patch_wmma",
         "bf16",
@@ -363,6 +398,41 @@ class TestStemCachedPlans(unittest.TestCase):
     and each plan binds the kernel's own kernarg order, the grid (patch
     border workgroups included) and the block of its knobs. The cache holds
     placeholder binaries; ``TestStemGpu.test_cached_plans`` runs real ones."""
+
+    def test_every_shipped_knob(self):
+        """Each ``_EVERY_KNOB_CASES`` shape gets a plan from every AOT job of
+        its cell, so the GPU test runs every shipped binary of the 7x7 stem
+        and of the /14 patch embedding (all three r_blk)."""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from benchmarks.common.kernel_cache import KernelCache
+
+        for variant, dtype, pkw, _ in _EVERY_KNOB_CASES:
+            p = _problem(dtype=dtype, **pkw)
+            with self.subTest(
+                variant=variant, problem=pkw
+            ), tempfile.TemporaryDirectory() as tmp:
+                cache = KernelCache(Path(tmp), _STEM_ARCH)
+                jobs = _cached_jobs(variant, p)
+                for job in jobs:
+                    cache.put(
+                        job.identity,
+                        b"placeholder",
+                        {"kernel_name": job.identity.label()},
+                    )
+                plans, rejected = _cached_plans(cache, variant, p)
+                self.assertEqual(
+                    sorted(pl.identity.knobs for pl in plans),
+                    sorted(job.identity.knobs for job in jobs),
+                    rejected,
+                )
+                if variant == "direct_dgrad_patch_wmma":
+                    self.assertEqual(
+                        {json.loads(pl.identity.knobs)["r_blk"] for pl in plans},
+                        {2, 7, 14},
+                    )
 
     def test_cached_plans(self):
         import json
