@@ -155,8 +155,9 @@ def _check_indices(window, tile):
 
 
 def test_padded_k_contiguous_index_is_row_times_row_stride_plus_column() -> None:
-    # A (rows, K) buffer whose rows are padded to 24 elements: element (row, col) is at row*24 + col.
-    td = make_tensor_desc((32, 32), (24, 1), F16)
+    # A (rows, K) buffer of 24-element rows padded to a stride of 32: element (row, col) is at
+    # row*32 + col.
+    td = make_tensor_desc((32, 24), (32, 1), F16)
     _check_indices(make_window(td, (16, 8)), _TILE_RUN_AXIS1)
 
 

@@ -42,6 +42,7 @@ the A, B and C of one GEMM agree on their extents in that reading.
 
 from __future__ import annotations
 
+import math
 import numbers
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -54,7 +55,7 @@ from rocke.core.ir import (
     Value,
     marker_facts,
 )
-from rocke.core.param_facts import LOWER_WORDS
+from rocke.core.param_facts import LOWER_WORDS, int_type_limits
 from rocke.core.value_sources import ASSUME_RANGE_OP, value_text
 
 from .tensor_transforms.emit import emit_bound_check
@@ -77,6 +78,9 @@ __all__ = [
     "make_window",
     "check_gemm_shapes",
 ]
+
+# The largest value an i32 holds: the farthest a runtime stride with no stated upper bound reaches.
+_I32_MAX = int_type_limits("i32")[1]
 
 
 @dataclass(frozen=True)
@@ -185,6 +189,70 @@ class TensorDesc:
             begin=tuple(self.begin[i] for i in order),
         )
 
+    def _strides_injective(self) -> bool:
+        """Whether the strides are proven to keep every two positions inside the lengths on
+        different elements. ``False`` means only that no proof was found; a proven overlap is
+        :meth:`_aliasing_positions`'s question.
+
+        The rule is a mixed radix. Some order of the axes must exist in which each axis's stride
+        is larger than the farthest element the axes before it reach together, ``sum((length -
+        1) * |stride|)``. Then the last axis on which two positions differ moves the element
+        further than all the earlier axes can move it back. Each step is proven one of three
+        ways:
+
+        - from ints and the stated facts of runtime lengths and strides;
+        - packed: the previous axis has stride 1 and this stride is the same Value as the
+          previous axis's length (``(M, K), (K, 1)``);
+        - a packed product: this stride is the Value ``gpu_checked_value`` returned for the
+          previous axis's length times its stride (an int or the same Value).
+
+        An axis of length 1 positions nothing and is left out. The begin offset of a slice moves
+        every element alike and is not read.
+        """
+        varying = [
+            axis
+            for axis, length in enumerate(self.lengths)
+            if _largest_length(length) > 1
+        ]
+        return _chain_exists(self, varying, previous=None, reach=0)
+
+    def _aliasing_positions(self) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
+        """Two positions inside the lengths that reach the same element at every launch the
+        stated facts allow, or ``None`` when no such pair is proven.
+
+        Proven pairs come from one axis or two: an int stride 0 on an axis that holds at least two
+        positions, or two axes ``a`` and ``b`` whose int strides meet, ``i * |s_a| == j * |s_b|``
+        with ``i`` and ``j`` the smallest such steps (``|s_b| / g`` and ``|s_a| / g``, ``g`` their
+        greatest common divisor), both inside the lengths the axes are guaranteed to hold; two axes
+        whose strides are the same runtime Value meet after one step each. A runtime length holds
+        at least its stated lower bound. Any other overlap is not proven here.
+        """
+        rank = self.rank
+        least = [_least_length(length) for length in self.lengths]
+
+        def position(steps: dict[int, int]) -> tuple[int, ...]:
+            return tuple(steps.get(axis, 0) for axis in range(rank))
+
+        for axis, stride in enumerate(self.strides):
+            if least[axis] >= 2 and _is_compile_time_integer(stride) and stride == 0:
+                return position({}), position({axis: 1})
+        for a in range(rank):
+            for b in range(a + 1, rank):
+                if least[a] < 2 or least[b] < 2:
+                    continue
+                sa, sb = self.strides[a], self.strides[b]
+                if isinstance(sa, Value) or isinstance(sb, Value):
+                    if sa is sb:
+                        return position({a: 1}), position({b: 1})
+                    continue
+                g = math.gcd(sa, sb)
+                i, j = abs(sb) // g, abs(sa) // g
+                if i < least[a] and j < least[b]:
+                    if (sa > 0) == (sb > 0):
+                        return position({a: i}), position({b: j})
+                    return position({}), position({a: i, b: j})
+        return None
+
 
 def make_tensor_desc(
     lengths: tuple[int | Value, ...],
@@ -198,6 +266,114 @@ def make_tensor_desc(
     least 0 and a stated upper bound; a runtime stride a stated lower bound of at least 1.
     """
     return TensorDesc(tuple(lengths), tuple(strides), dtype)
+
+
+def _largest_length(length: int | Value) -> int:
+    """The most positions an axis can hold: an int length, or a runtime length's stated upper
+    bound (always stated: a tensor refuses a length without one)."""
+    if isinstance(length, Value):
+        return stated_facts_of(length).upper
+    return length
+
+
+def _least_length(length: int | Value) -> int:
+    """The fewest positions an axis holds at any launch the facts allow."""
+    if isinstance(length, Value):
+        return stated_facts_of(length).lower
+    return length
+
+
+def _smallest_step(stride: int | Value) -> int:
+    """The least distance one step along an axis moves the element: ``|stride|`` for an int, a
+    runtime stride's stated lower bound (at least 1)."""
+    if isinstance(stride, Value):
+        return stated_facts_of(stride).lower
+    return abs(stride)
+
+
+def _largest_step(stride: int | Value) -> int:
+    """The most distance one step along an axis moves the element: a runtime stride with no
+    stated upper bound reaches the i32 limit."""
+    if isinstance(stride, Value):
+        upper = stated_facts_of(stride).upper
+        return _I32_MAX if upper is None else upper
+    return abs(stride)
+
+
+def _chain_exists(
+    tensor: TensorDesc, remaining: list[int], previous: int | None, reach: int
+) -> bool:
+    """Whether the ``remaining`` axes can follow ``previous`` in a mixed-radix order (see
+    :meth:`TensorDesc._strides_injective`). ``reach`` bounds the farthest element the axes placed
+    so far reach together. Every order is tried: the first axis that clears ``reach`` is not
+    always the one the rest of the order needs (strides 1, 4, 8 over lengths 4, 2, 3 fit only in
+    that order)."""
+    if not remaining:
+        return True
+    for axis in remaining:
+        if not _clears(tensor, axis, previous, reach):
+            continue
+        span = (_largest_length(tensor.lengths[axis]) - 1) * _largest_step(
+            tensor.strides[axis]
+        )
+        rest = [other for other in remaining if other != axis]
+        if _chain_exists(tensor, rest, axis, reach + span):
+            return True
+    return False
+
+
+def _clears(tensor: TensorDesc, axis: int, previous: int | None, reach: int) -> bool:
+    """Whether one step along ``axis`` moves past every element the axes placed so far reach:
+    by the numbers, or because its stride is the previous axis's whole packed extent."""
+    stride = tensor.strides[axis]
+    if _smallest_step(stride) > reach:
+        return True
+    if previous is None:
+        return False
+    return _is_packed_extent(stride, tensor.lengths[previous], tensor.strides[previous])
+
+
+def _is_packed_extent(
+    stride: int | Value, length: int | Value, inner_stride: int | Value
+) -> bool:
+    """Whether ``stride`` is provably ``length * inner_stride`` with ``length`` a runtime length:
+    the same Value when ``inner_stride`` is 1, else the Value ``gpu_checked_value`` returned for
+    the product of ``length`` and the inner stride (an int constant or the same runtime stride).
+
+    The axes placed so far, up to the previous one, reach less than ``length * inner_stride``
+    elements (``length - 1`` steps of the previous axis plus less than one step for the axes
+    before it), so a stride of that product clears them whatever the runtime length. The product
+    is accepted only when it cannot wrap in i32, so the checked value is the true product.
+    """
+    if not (isinstance(stride, Value) and isinstance(length, Value)):
+        return False
+    packed_row = _is_compile_time_integer(inner_stride) and inner_stride == 1
+    if packed_row and stride is length:
+        return True
+    if _largest_length(length) * _largest_step(inner_stride) > _I32_MAX:
+        return False
+    marker = stride.op
+    if marker is None or marker.name != ASSUME_RANGE_OP:
+        return False
+    product = marker.operands[0].op
+    if product is None or product.name != "arith.mul":
+        return False
+    # The other factor of the product, matched by identity (the length Value itself).
+    first, second = product.operands
+    if first is length:
+        other = second
+    elif second is length:
+        other = first
+    else:
+        return False
+    if isinstance(inner_stride, Value):
+        return other is inner_stride
+    return (
+        other.op is not None
+        and other.op.name == "arith.constant"
+        and other.op.attrs.get("value") == inner_stride
+        and inner_stride >= 1
+    )
 
 
 def _check_length(axis: int, length: Any) -> None:

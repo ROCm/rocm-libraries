@@ -99,6 +99,12 @@ a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A (M,
 - `dtype` is the element type of memory; `load_fragment` reads it, `store_fragment` casts to it.
 - `strides` ARE the data layout -- one generic verb serves A/B/C; the operand difference is
   entirely the strides + the layout, never the verb.
+- **A store never goes through a view that provably overlaps itself.** `store_fragment` refuses, at
+  build, a tensor whose strides provably map two positions to one element (a stride 0, rows longer
+  than their int stride, a sliding-window view), naming the two positions: two lanes would race on
+  that element. Loading through such a view is fine. A view the build can decide neither way -- a
+  runtime row stride over a runtime row length with no stated relation between them -- is trusted,
+  as CK and CUTLASS trust their strides.
 
 ### One axis convention
 

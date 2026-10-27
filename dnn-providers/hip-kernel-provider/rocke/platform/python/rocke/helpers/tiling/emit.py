@@ -249,6 +249,22 @@ def _address(
     return address
 
 
+def _refuse_proven_overlap(tensor: TensorDesc) -> None:
+    """Refuse a store through ``tensor`` when two of its positions provably reach one element.
+    A view proven not to alias, or one the proofs cannot decide, passes."""
+    if tensor._strides_injective():
+        return
+    overlap = tensor._aliasing_positions()
+    if overlap is None:
+        return
+    first, second = overlap
+    raise ValueError(
+        f"store_fragment: positions {first} and {second} of the tensor reach the same element "
+        "-- a store through an aliasing view races; store through a view whose positions are "
+        "all different elements"
+    )
+
+
 def _check_lds_buffer(
     verb: str,
     buffer: Any,
@@ -648,10 +664,19 @@ def store_fragment(
     :func:`load_fragment` (unclipped). A rank-t fragment covers the window's last t axes, as in
     :func:`load_fragment`. `coherency` is reserved: any value but its default 0 is refused
     (``NotImplementedError``).
+
+    A store through a view whose strides provably map two positions to one element (a stride 0,
+    rows longer than their int stride, a sliding-window view) is refused at build: two lanes would
+    race on that element. A view the build can decide neither way (a runtime row stride over a
+    runtime row length with no stated relation between them) is trusted, as the caller describes
+    it. Loading through any view is fine.
     """
     _refuse_coherency("store_fragment", coherency)
     tile_desc = fragment.tile_desc
     check_tile_rank("store_fragment", window, tile_desc)
+    if is_lds(ptr):
+        window.tensor._require_static_for_lds("store_fragment")
+    _refuse_proven_overlap(window.tensor)
     out_dtype = window.tensor.dtype
 
     def element(register: int) -> Any:
@@ -660,7 +685,6 @@ def store_fragment(
         )
 
     if is_lds(ptr):
-        window.tensor._require_static_for_lds("store_fragment")
         # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}). A
         # custom swizzle relocates whole units of its granularity (vw_elems) -> the access is
         # capped and range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
