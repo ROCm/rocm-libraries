@@ -124,23 +124,6 @@ namespace hipsparse_test
         }
     }
 
-    struct handle_struct
-    {
-        hipsparseHandle_t handle = nullptr;
-        handle_struct()
-        {
-            throw_if_hipsparse_error(hipsparseCreate(&handle), "hipsparseCreate");
-        }
-
-        ~handle_struct()
-        {
-            if(handle != nullptr)
-            {
-                log_if_hipsparse_error(hipsparseDestroy(handle), "hipsparseDestroy");
-            }
-        }
-    };
-
     struct descr_struct
     {
         hipsparseMatDescr_t descr = nullptr;
@@ -409,7 +392,7 @@ namespace hipsparse_test
     // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
     // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
     // clang-format off
-#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
     // clang-format on
     struct spgeam_struct
     {
