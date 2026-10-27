@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <memory>
@@ -44,6 +45,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "HostValidationHooks.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -868,6 +870,107 @@ protected:
     }
 };
 
+/// A candidate that enqueues GPU work, so the default timer and stall gate measure it, and
+/// also writes @p image into the host buffer bound to @p uid on every execute().
+class WritingGpuPlan : public FakePlan
+{
+public:
+    WritingGpuPlan(int64_t uid, std::vector<uint8_t> image)
+        : FakePlan(/*workspaceSize=*/64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true)
+        , _uid(uid)
+        , _image(std::move(image))
+    {
+    }
+
+    void execute(const BenchmarkTestHandle& handle,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 void* workspace = nullptr) const override
+    {
+        FakePlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+        void* output = detail::findDeviceBuffer(deviceBuffers, numDeviceBuffers, _uid);
+        if(output != nullptr)
+        {
+            std::memcpy(output, _image.data(), _image.size());
+        }
+    }
+
+private:
+    int64_t _uid;
+    std::vector<uint8_t> _image;
+};
+
+std::vector<uint8_t> floatImage(float value)
+{
+    const std::array<float, 4> values{value, value, value, value};
+    std::vector<uint8_t> bytes(sizeof(values));
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+    return bytes;
+}
+
+struct ValidatedSweep
+{
+    std::vector<WinnerRecord> records;
+    HookCounters hooks;
+    int rejectedArms = 0;
+};
+
+/// One validated comparison with the default timer over three candidates; the first writes a
+/// wrong output. A nonzero @p failFromArm fails that stall-gate arm and every later one.
+ValidatedSweep runValidatedSweep(int failFromArm)
+{
+    constexpr int64_t OUTPUT_UID = 1;
+    constexpr size_t OUTPUT_BYTES = 4 * sizeof(float);
+
+    gStreamWaitFaults = {};
+    gStreamWaitFaults.enabled = true;
+    gStreamWaitFaults.failFromArm = failFromArm;
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(1), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(9.0F))});
+    candidates.push_back(
+        {testId(2), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(1.0F))});
+    candidates.push_back(
+        {testId(3), std::make_unique<WritingGpuPlan>(OUTPUT_UID, floatImage(1.0F))});
+
+    ValidatedSweep sweep;
+    BenchmarkValidation validation;
+    validation.outputs
+        = {{OUTPUT_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, OUTPUT_BYTES}};
+    validation.hooks = hostValidationHooks(sweep.hooks);
+    validation.record
+        = [&sweep](WinnerRecord record) { sweep.records.push_back(std::move(record)); };
+
+    std::vector<uint8_t> output(OUTPUT_BYTES, 0x00);
+    const std::array<hipdnnPluginDeviceBuffer_t, 1> buffers{{{OUTPUT_UID, output.data()}}};
+    const BenchmarkTestHandle handle;
+    {
+        const TestBenchmarkPlan plan(std::move(candidates),
+                                     handle,
+                                     TestBenchmarkPlan::Timer{},
+                                     {},
+                                     "stalled-validation",
+                                     "device-0",
+                                     std::move(validation));
+        plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+    }
+    sweep.rejectedArms = gStreamWaitFaults.rejectedArms;
+    return sweep;
+}
+
+std::vector<DescriptorId> sortedKernelIds(const WinnerRecord& record)
+{
+    std::vector<DescriptorId> ids;
+    ids.reserve(record.entries.size());
+    for(const auto& entry : record.entries)
+    {
+        ids.push_back(entry.kernelId);
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
 TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
 {
     int device = 0;
@@ -978,6 +1081,46 @@ TEST_F(TestIngestorHipTimerFaults, NegativeStalledReadingsRestartTheComparisonUn
               BENCHMARK_WARMUP_RUNS + 1 + MAX_NEGATIVE_SAMPLE_RETRIES + SAMPLING_LAUNCHES
                   + firstDelegated);
     EXPECT_EQ(secondRaw->launchCount(), SAMPLING_LAUNCHES + 1 - firstDelegated);
+}
+
+TEST_F(TestIngestorHipTimerFaults, AStalledRestartWithValidationCountsOnlyTheSettledPassVotes)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    const auto unrestarted = runValidatedSweep(/*failFromArm=*/0);
+    ASSERT_EQ(unrestarted.rejectedArms, 0);
+    // The first candidate finishes stalled; the second one's first arm fails, after its fill
+    // and snapshot, so the discarded pass ran both hooks twice and never reached the third.
+    const auto restarted = runValidatedSweep(BENCHMARK_ITERATIONS + 1);
+    ASSERT_EQ(restarted.rejectedArms, 1) << "the stalled pass was not restarted";
+
+    EXPECT_EQ(unrestarted.hooks.fills, 3);
+    EXPECT_EQ(unrestarted.hooks.snapshots, 3);
+    EXPECT_EQ(restarted.hooks.fills, 2 + 3);
+    EXPECT_EQ(restarted.hooks.snapshots, 2 + 3);
+
+    ASSERT_EQ(unrestarted.records.size(), 1U);
+    ASSERT_EQ(restarted.records.size(), 1U);
+    const auto& expected = unrestarted.records.front();
+    const auto& actual = restarted.records.front();
+    EXPECT_EQ(sortedKernelIds(expected), (std::vector<DescriptorId>{testId(2), testId(3)}));
+    EXPECT_EQ(sortedKernelIds(actual), sortedKernelIds(expected));
+    ASSERT_TRUE(expected.validated.has_value());
+    ASSERT_TRUE(actual.validated.has_value());
+    // The digest counts the wrong candidate once: a discarded pass's votes must not survive.
+    std::vector<KernelTriple> catalog{{testId(1), DescriptorId{}, DescriptorId{}},
+                                      {testId(2), DescriptorId{}, DescriptorId{}},
+                                      {testId(3), DescriptorId{}, DescriptorId{}}};
+    EXPECT_EQ(*expected.validated, catalogDigest(std::move(catalog)));
+    EXPECT_EQ(*actual.validated, *expected.validated);
 }
 #endif
 

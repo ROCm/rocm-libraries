@@ -246,21 +246,9 @@ int main(int argc, char** argv)
     // Never overrides a value the caller set. Fail the process when the resolved root
     // holds no descriptor, which is otherwise indistinguishable from a run on a device
     // the descriptors do not cover.
-    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
+    if(!hip_kernel_provider::testing::pointAtDescriptorSet(HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR))
     {
-        const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
-            HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR);
-        const auto unusable
-            = hip_kernel_provider::testing::describeUnusableDescriptorRoot(descriptors);
-        if(!unusable.empty())
-        {
-            std::cerr << unusable
-                      << ". Build the descriptor staging targets, or set "
-                         "HIPDNN_DESCRIPTOR_DIR to a root that holds them.\n";
-            return 1;
-        }
-
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", descriptors.string().c_str());
+        return 1;
     }
 #endif
 

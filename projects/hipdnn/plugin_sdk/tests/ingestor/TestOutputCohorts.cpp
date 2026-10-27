@@ -119,6 +119,26 @@ TEST(TestIngestorOutputCohorts, OnlyCohortFoundersRetainTheirImages)
     EXPECT_EQ(cohorts.retainedBytes(), 2 * IMAGE_BYTES);
 }
 
+TEST(TestIngestorOutputCohorts, AFounderDropsTheImagesOfOutputsNoDtypeCanCompare)
+{
+    constexpr size_t FLOAT_IMAGE_BYTES = 2 * sizeof(float);
+    OutputCohorts cohorts({floatSpec(1, 2), {2, DataType::FP8_E4M3, 16}});
+    const std::vector<uint8_t> fp8Image(16, 0x01);
+
+    OutputImages first;
+    first.push_back(floatBytes({1.0F, 2.0F}));
+    first.push_back(fp8Image);
+    cohorts.submit(0, std::move(first));
+    EXPECT_EQ(cohorts.retainedBytes(), FLOAT_IMAGE_BYTES) << "the fp8 image is not kept";
+
+    OutputImages second;
+    second.push_back(floatBytes({9.0F, 9.0F}));
+    second.push_back(fp8Image);
+    cohorts.submit(1, std::move(second));
+    EXPECT_EQ(cohorts.cohortCount(), 2U);
+    EXPECT_EQ(cohorts.retainedBytes(), 2 * FLOAT_IMAGE_BYTES);
+}
+
 TEST(TestIngestorOutputCohorts, AStrictMajorityBeatsTheHeuristicFirstCohort)
 {
     const auto wrong = floatBytes({9.0F, 9.0F});
@@ -144,6 +164,28 @@ TEST(TestIngestorOutputCohorts, AStrictMajorityBeatsTheHeuristicFirstCohort)
     EXPECT_THAT(decision.failed[0].reason, HasSubstr("output 1[0]"));
 }
 
+TEST(TestIngestorOutputCohorts, APluralityThatIsNotAMajorityLosesToTheCohortOfTheFirstCandidate)
+{
+    const auto a = floatBytes({1.0F});
+    const auto b = floatBytes({5.0F});
+    const auto c = floatBytes({9.0F});
+    OutputCohorts cohorts({floatSpec(1, 1)});
+    submitOne(cohorts, 0, a);
+    submitOne(cohorts, 1, b);
+    submitOne(cohorts, 2, b);
+    submitOne(cohorts, 3, c);
+
+    const auto decision = cohorts.decide();
+    EXPECT_EQ(decision.cohorts, 3U);
+    EXPECT_EQ(decision.verdict, Verdict::HEURISTIC_TIEBREAK) << "2 of 4 is not a strict majority";
+    EXPECT_THAT(decision.passing, ElementsAre(0U));
+    EXPECT_EQ(decision.passingFounder, 0U);
+    ASSERT_EQ(decision.failed.size(), 3U);
+    EXPECT_EQ(decision.failed[0].index, 1U);
+    EXPECT_EQ(decision.failed[1].index, 2U);
+    EXPECT_EQ(decision.failed[2].index, 3U);
+}
+
 TEST(TestIngestorOutputCohorts, ATieBreakPicksTheLowestTouchedIndexWhenIndexZeroIsUntouched)
 {
     OutputCohorts cohorts({floatSpec(1, 2)});
@@ -160,6 +202,20 @@ TEST(TestIngestorOutputCohorts, ATieBreakPicksTheLowestTouchedIndexWhenIndexZero
     EXPECT_TRUE(decision.failed[0].untouched);
     EXPECT_EQ(decision.failed[1].index, 2U);
     EXPECT_FALSE(decision.failed[1].untouched);
+}
+
+TEST(TestIngestorOutputCohorts, AnUntouchedCandidateIsItsOwnCohortFounder)
+{
+    OutputCohorts cohorts({floatSpec(1, 2)});
+    submitOne(cohorts, 0, floatBytes({1.0F, 2.0F}));
+    submitOne(cohorts, 1, floatBytes({1.0F, 2.0F}));
+    submitOne(cohorts, 2, fillImage(DataType::FLOAT, 2 * sizeof(float)));
+
+    const auto decision = cohorts.decide();
+    ASSERT_EQ(decision.failed.size(), 1U);
+    EXPECT_TRUE(decision.failed[0].untouched);
+    EXPECT_EQ(decision.failed[0].index, 2U);
+    EXPECT_EQ(decision.failed[0].cohortFounder, 2U);
 }
 
 TEST(TestIngestorOutputCohorts, EqualSizedCohortsKeepTheFirstOne)

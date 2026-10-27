@@ -29,6 +29,8 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "HostValidationHooks.hpp"
+
 /**
  * @file TestBenchmarkPlanValidation.cpp
  * @brief Unit tests for BenchmarkPlan's output validation: which candidates may win, what is
@@ -40,10 +42,11 @@ namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
-using hipdnn_plugin_sdk::output_agreement::fillByte;
 using hipdnn_plugin_sdk::output_agreement::firstDisagreement;
 using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer;
+using hipdnn_plugin_sdk::ingestor::testing::HookCounters;
+using hipdnn_plugin_sdk::ingestor::testing::hostValidationHooks;
 using hipdnn_test_sdk::utilities::SharedLogRecorder;
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
@@ -191,58 +194,6 @@ private:
     mutable int _launches = 0;
 };
 
-/// How many times the host hooks ran, and an optional scripted snapshot failure.
-struct HookCounters
-{
-    int fills = 0;
-    int snapshots = 0;
-    /// 1-based snapshot call that reports a failed copy; 0 never fails.
-    int failSnapshotAtCall = 0;
-};
-
-BenchmarkValidationHooks hostHooks(HookCounters& counters)
-{
-    BenchmarkValidationHooks hooks;
-    hooks.fill = [&counters](hipStream_t,
-                             const hipdnnPluginDeviceBuffer_t* buffers,
-                             uint32_t count,
-                             const std::vector<OutputBufferSpec>& specs) {
-        ++counters.fills;
-        for(const auto& spec : specs)
-        {
-            void* ptr = findDeviceBuffer(buffers, count, spec.uid);
-            if(ptr != nullptr)
-            {
-                std::memset(ptr, fillByte(spec.dataType), spec.byteSize);
-            }
-        }
-    };
-    hooks.snapshot = [&counters](hipStream_t,
-                                 const hipdnnPluginDeviceBuffer_t* buffers,
-                                 uint32_t count,
-                                 const std::vector<OutputBufferSpec>& specs,
-                                 OutputImages& images) {
-        ++counters.snapshots;
-        if(counters.snapshots == counters.failSnapshotAtCall)
-        {
-            return false;
-        }
-        images.assign(specs.size(), {});
-        for(size_t i = 0; i < specs.size(); ++i)
-        {
-            const void* ptr = findDeviceBuffer(buffers, count, specs[i].uid);
-            if(ptr == nullptr)
-            {
-                return false;
-            }
-            images[i].resize(specs[i].byteSize);
-            std::memcpy(images[i].data(), ptr, specs[i].byteSize);
-        }
-        return true;
-    };
-    return hooks;
-}
-
 /// A timer returning a fixed duration per plan and forwarding the real execute(), so launches
 /// still accrue. A plan absent from @p durations cannot be timed, which scores it unusable.
 ValidationPlan::Timer makeTimer(std::map<const PlanInterface*, double> durations)
@@ -322,7 +273,7 @@ public:
             BenchmarkValidation configured;
             configured.outputs = _outputs;
             configured.inputUids = _inputUids;
-            configured.hooks = hostHooks(hooks);
+            configured.hooks = hostValidationHooks(hooks);
             configured.record
                 = [this](WinnerRecord record) { records.push_back(std::move(record)); };
             validation = std::move(configured);
@@ -878,6 +829,37 @@ TEST(TestIngestorBenchmarkPlanValidation, ANullOutputPointerSkipsValidation)
     expectSkippedWithAWarning(scenario, recorder, "null");
 }
 
+/// Two float outputs, so a check that stops after the first one is caught.
+constexpr int64_t SECOND_OUTPUT_UID = 3;
+
+std::vector<OutputBufferSpec> twoFloatOutputs()
+{
+    return {{OUTPUT_UID, DataType::FLOAT, FOUR_FLOATS},
+            {SECOND_OUTPUT_UID, DataType::FLOAT, FOUR_FLOATS}};
+}
+
+TEST(TestIngestorBenchmarkPlanValidation, ANullSecondOutputPointerSkipsValidation)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    Scenario scenario(twoFloatOutputs());
+    scenario.nullBuffer(SECOND_OUTPUT_UID);
+    addFastWrongSlowCorrect(scenario);
+    expectSkippedWithAWarning(scenario, recorder, "null");
+}
+
+TEST(TestIngestorBenchmarkPlanValidation,
+     ASecondOutputAliasingAnInputSkipsValidationAndLeavesTheInputUnfilled)
+{
+    constexpr int64_t INPUT_UID = 2;
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    Scenario scenario(twoFloatOutputs(), {INPUT_UID});
+    scenario.addBuffer(INPUT_UID, FOUR_FLOATS);
+    scenario.aliasBuffer(INPUT_UID, SECOND_OUTPUT_UID);
+    addFastWrongSlowCorrect(scenario);
+    expectSkippedWithAWarning(scenario, recorder, "alias");
+    EXPECT_THAT(scenario.bufferBytes(SECOND_OUTPUT_UID), ::testing::Each(0x00));
+}
+
 TEST(TestIngestorBenchmarkPlanValidation, AnEmptyOutputListSkipsValidation)
 {
     auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
@@ -980,6 +962,29 @@ TEST(TestIngestorBenchmarkPlanValidation,
     EXPECT_EQ(entryIds(record), (std::vector<DescriptorId>{idOf(0x11), idOf(0x12)}));
     EXPECT_EQ(*record.validated, digestOf({0x11, 0x12}))
         << "a failed copy is not a failed validation: outside the digest";
+}
+
+TEST(TestIngestorBenchmarkPlanValidation, AShortSnapshotScoresTheCandidateUnusableAndItDoesNotVote)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    Scenario scenario(floatOutput());
+    scenario.addCandidate(0x10, {{OUTPUT_UID, wrongImage()}}, 3.0);
+    scenario.addCandidate(0x11, {{OUTPUT_UID, correctImage()}}, 4.0);
+    scenario.addCandidate(0x12, {{OUTPUT_UID, correctImage()}}, 5.0);
+    // The hook reports success for the first candidate but returns no image for it.
+    scenario.hooks.shortSnapshotAtCall = 1;
+    scenario.build(true);
+    scenario.execute();
+
+    EXPECT_EQ(scenario.winner(), 1U);
+    EXPECT_EQ(failedReasonOf(recorder, idOf(0x10)),
+              std::optional<std::string>{"validation-copy-failed"})
+        << recorder.getRecordedLogsAsString();
+    ASSERT_TRUE(hasOneValidatedRecord(scenario));
+    const auto& record = scenario.records.front();
+    EXPECT_EQ(entryIds(record), (std::vector<DescriptorId>{idOf(0x11), idOf(0x12)}));
+    EXPECT_EQ(*record.validated, digestOf({0x11, 0x12}))
+        << "an unvoted candidate is outside the digest, so it cannot have been classified";
 }
 
 TEST(TestIngestorBenchmarkPlanValidation, AThrowingWarmupDoesNotVote)

@@ -534,8 +534,9 @@ void graphBindings(nb::module_& m)
              "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
              "built with build_plans(BuildPlanPolicy.ALL), sized with "
              "get_autotune_workspace_size(). The winning plan is left active, so a "
-             "following execute() uses it, and get_plan_name() reports it. Raises "
-             "RuntimeError if autotuning fails.\n"
+             "following execute() uses it, and get_plan_name() reports it. The winning "
+             "plan executes last, so the caller's buffers hold its output. Raises "
+             "RuntimeError if autotuning fails, including a failure of that final run.\n"
              "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
              "argument exists for cuDNN signature compatibility and is ignored, so calling "
              "this method covers them.")
@@ -598,7 +599,9 @@ void graphBindings(nb::module_& m)
              "The cached order is keyed on this graph's serialized content and the "
              "handle's device. Returns a (results, cache_write_outcome) tuple: the "
              "per-engine AutotuneResult list and the AutotuneCacheWriteOutcome reporting "
-             "whether that write happened. Raises RuntimeError if the sweep fails.")
+             "whether that write happened. The winning plan executes last, so the "
+             "caller's buffers hold its output. Raises RuntimeError if the sweep fails, "
+             "including a failure of that final run.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,

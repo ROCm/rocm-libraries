@@ -653,7 +653,9 @@ public:
 private:
     /// Orders @p catalog by the record for @p context's graph and device and attaches that
     /// record, when the record fully covers @p catalog; false, leaving @p catalog untouched,
-    /// otherwise.
+    /// otherwise. A kernel a validated record leaves out (it failed validation) stays in the
+    /// catalog, after the record's order: enumeration, knobs and workspace must not change
+    /// when another caller's plan build serves the record. Selection drops it (`recordRanks`).
     ///
     /// @p catalogKey is the catalog key built from @p context. Its graph content is the
     /// winner key's too, so reusing it spares a second verified copy and hash of the graph.
@@ -689,6 +691,15 @@ private:
         HIPDNN_PLUGIN_LOG_INFO("ingestor: ordered " << ordered->size()
                                                     << " catalog entries from a benchmarked "
                                                        "record; heuristic ranking skipped");
+        // Same set, record order first: only the order may depend on the record.
+        const std::unordered_set<const KernelDefinition*> ranked(ordered->begin(), ordered->end());
+        for(const auto* kernel : entries)
+        {
+            if(ranked.find(kernel) == ranked.end())
+            {
+                ordered->push_back(kernel);
+            }
+        }
         catalog.entries = std::move(*ordered);
         catalog.measuredRecord = std::make_shared<const WinnerRecord>(std::move(*record));
         catalog.isSorted = true;

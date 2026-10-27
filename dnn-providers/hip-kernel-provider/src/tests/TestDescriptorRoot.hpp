@@ -6,6 +6,7 @@ SPDX-License-Identifier: MIT
 #pragma once
 
 #include <filesystem>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -72,6 +73,30 @@ inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& r
     }
 
     return "the descriptor root '" + root.string() + "' holds no descriptor JSON";
+}
+
+/// Points HIPDNN_DESCRIPTOR_DIR at the descriptor set @p relativeDir names, unless the
+/// caller already named a root. Returns false, after printing the reason to stderr, when
+/// the resolved root holds no descriptor; a test main() fails the process on false.
+inline bool pointAtDescriptorSet(const char* relativeDir)
+{
+    if(!hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
+    {
+        return true;
+    }
+
+    const auto descriptors = descriptorSetRoot(relativeDir);
+    const auto unusable = describeUnusableDescriptorRoot(descriptors);
+    if(!unusable.empty())
+    {
+        std::cerr << unusable
+                  << ". Build the descriptor staging targets, or set "
+                     "HIPDNN_DESCRIPTOR_DIR to a root that holds them.\n";
+        return false;
+    }
+
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", descriptors.string().c_str());
+    return true;
 }
 
 #ifdef HIPKERNELPROVIDER_UNIT_KPACK_RELDIR

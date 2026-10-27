@@ -42,8 +42,8 @@ using CatalogDigest = uint64_t;
 /// The outcome of one benchmark. `entries` holds every usable candidate in benchmarked
 /// order, best first. A failed candidate is never stored, neither ranked last nor listed,
 /// so a known-broken kernel is never served as a fallback; a validated record carries
-/// coverage in `validated`, the digest of the whole classified catalog. nullopt marks a
-/// legacy or unvalidated record.
+/// coverage in `validated`, the digest of the candidates the sweep classified (ranked or
+/// excluded by validation). nullopt marks a legacy or unvalidated record.
 struct WinnerRecord
 {
     std::vector<RankedEntry> entries;
@@ -104,7 +104,7 @@ inline CatalogDigest catalogDigest(const std::vector<const KernelDefinition*>& k
 /// Exactly 16 lowercase hex digits, zero padded.
 inline std::string digestToHex(CatalogDigest digest)
 {
-    static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+    static constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
     std::string text(16, '0');
     for(size_t i = 16; i-- > 0; digest >>= 4)
     {
@@ -127,15 +127,15 @@ inline std::optional<CatalogDigest> digestFromHex(std::string_view text)
         uint64_t nibble = 0;
         if(c >= '0' && c <= '9')
         {
-            nibble = static_cast<uint64_t>(c - '0');
+            nibble = static_cast<uint64_t>(c) - '0';
         }
         else if(c >= 'a' && c <= 'f')
         {
-            nibble = static_cast<uint64_t>(c - 'a' + 10);
+            nibble = static_cast<uint64_t>(c) - 'a' + 10U;
         }
         else if(c >= 'A' && c <= 'F')
         {
-            nibble = static_cast<uint64_t>(c - 'A' + 10);
+            nibble = static_cast<uint64_t>(c) - 'A' + 10U;
         }
         else
         {
@@ -209,6 +209,17 @@ inline bool recordCovers(const WinnerRecord& record,
             return entry.kernelId == kernel->kernelId;
         });
     });
+}
+
+/// Whether @p record ranks @p kernel, matched by the full `(kernelId, packId, dispatchId)`
+/// triple as `orderByRecord` matches.
+inline bool recordRanks(const WinnerRecord& record, const KernelDefinition& kernel)
+{
+    return std::any_of(
+        record.entries.begin(), record.entries.end(), [&kernel](const RankedEntry& entry) {
+            return entry.kernelId == kernel.kernelId && entry.packId == kernel.packId
+                   && entry.dispatchId == kernel.dispatchId;
+        });
 }
 
 /// Reorders @p kernels into @p record's ranked order, dropping any kernel the record

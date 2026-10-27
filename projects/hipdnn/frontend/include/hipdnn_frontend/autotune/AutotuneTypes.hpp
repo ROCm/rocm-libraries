@@ -309,9 +309,6 @@ using AutotuneRankingFn = std::function<void(std::vector<AutotuneResult>&)>;
  * convergence parameters, workspace limits, engine filtering, and
  * custom ranking behavior.
  *
- * autotune() executes the winner last, so on success the caller's output buffers hold the
- * winner's output; a failure of that final run is returned.
- *
  * @code{.cpp}
  * AutotuneConfig config;
  * config.mode = TuneMode::EXHAUSTIVE;

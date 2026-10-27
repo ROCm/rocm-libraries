@@ -54,7 +54,9 @@ constexpr int MAX_NEGATIVE_SAMPLE_RETRIES = 2;
 
 // With zero iterations, the reduction would report its DBL_MAX seed as a real time.
 static_assert(BENCHMARK_ITERATIONS > 0, "benchmarking must time at least one iteration");
-static_assert(BENCHMARK_WARMUP_RUNS >= 0);
+// Validation snapshots each candidate's output after its warmup runs; with none, every
+// candidate would read as having left its output untouched.
+static_assert(BENCHMARK_WARMUP_RUNS >= 1, "output validation needs a warmup run");
 
 namespace detail
 {

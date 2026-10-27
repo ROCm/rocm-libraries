@@ -7,7 +7,6 @@
 #include <array>
 #include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -49,7 +48,9 @@
 #include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
+#include "HostValidationHooks.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 #include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
@@ -3076,57 +3077,6 @@ private:
     mutable std::map<int64_t, int> _launches;
 };
 
-/// How often the host stand-ins for the device hooks ran.
-struct ValidationHookCounters
-{
-    int fills = 0;
-    int snapshots = 0;
-};
-
-/// Host memset and memcpy in place of the device operations; the buffers are host memory.
-BenchmarkValidationHooks hostValidationHooks(ValidationHookCounters& counters)
-{
-    BenchmarkValidationHooks hooks;
-    hooks.fill = [&counters](hipStream_t,
-                             const hipdnnPluginDeviceBuffer_t* buffers,
-                             uint32_t count,
-                             const std::vector<OutputBufferSpec>& specs) {
-        ++counters.fills;
-        for(const auto& spec : specs)
-        {
-            void* ptr
-                = hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer(buffers, count, spec.uid);
-            if(ptr != nullptr)
-            {
-                std::memset(ptr,
-                            hipdnn_plugin_sdk::output_agreement::fillByte(spec.dataType),
-                            spec.byteSize);
-            }
-        }
-    };
-    hooks.snapshot = [&counters](hipStream_t,
-                                 const hipdnnPluginDeviceBuffer_t* buffers,
-                                 uint32_t count,
-                                 const std::vector<OutputBufferSpec>& specs,
-                                 OutputImages& images) {
-        ++counters.snapshots;
-        images.assign(specs.size(), {});
-        for(size_t i = 0; i < specs.size(); ++i)
-        {
-            const void* ptr = hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer(
-                buffers, count, specs[i].uid);
-            if(ptr == nullptr)
-            {
-                return false;
-            }
-            images[i].resize(specs[i].byteSize);
-            std::memcpy(images[i].data(), ptr, specs[i].byteSize);
-        }
-        return true;
-    };
-    return hooks;
-}
-
 /// The input and output buffers of one execute, in host memory. The output can be made to
 /// share the input's memory.
 class HostBuffers
@@ -3210,47 +3160,6 @@ private:
 };
 
 using ValidationBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, ValidationContext>;
-
-/// A private HIPDNN_CACHE_DIR for one test, with the disable switch cleared, so the winner shard
-/// the builder writes can be read back as text.
-class ScopedShardDir
-{
-public:
-    ScopedShardDir()
-        : _path(std::filesystem::temp_directory_path()
-                / ("hipdnn_builder_validation_" + uniqueDirectoryName()))
-        , _cacheDir("HIPDNN_CACHE_DIR", _path.string())
-        , _cacheDisabled("HIPDNN_DISABLE_CACHE")
-    {
-        std::filesystem::create_directories(_path);
-    }
-
-    ScopedShardDir(const ScopedShardDir&) = delete;
-    ScopedShardDir& operator=(const ScopedShardDir&) = delete;
-    ScopedShardDir(ScopedShardDir&&) = delete;
-    ScopedShardDir& operator=(ScopedShardDir&&) = delete;
-
-    ~ScopedShardDir()
-    {
-        std::error_code ignored;
-        std::filesystem::remove_all(_path, ignored);
-    }
-
-private:
-    /// A steady-clock reading separates concurrent processes, the counter separates two
-    /// directories of one process.
-    static std::string uniqueDirectoryName()
-    {
-        static std::atomic<uint64_t> s_counter{0};
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        return std::to_string(static_cast<uint64_t>(stamp)) + "_"
-               + std::to_string(s_counter.fetch_add(1));
-    }
-
-    std::filesystem::path _path;
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDir;
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDisabled;
-};
 
 std::vector<std::string> fileLines(const std::filesystem::path& path)
 {
@@ -3465,20 +3374,23 @@ protected:
     const ScopedConstantScore _constantScore;
     ScriptedWritingHandler _handler;
     const ScopedDispatchRegistration<TestHandle> _dispatch{"test.dispatch", _handler};
-    ValidationHookCounters _hookCounters;
+    HookCounters _hookCounters;
     const ContentCarryingTestGraph _graph{validationGraphSpec()};
     const TestHandle _handle;
     const TestDeviceResolver _resolver;
     const EngineDescriptor _engine = makeEngineWithKnobs({BLOCK_SIZE});
 
 private:
-    // Each guard clears its variable for the test and restores it after; the shard directory
+    // Each guard clears its variable for the test and restores it after; the cache directory
     // goes first so the winner cache the managers open lives in it.
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarking{
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _validateEnvironment{
         hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME};
-    ScopedShardDir _shardDir;
+    hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
+        "builder-validation", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDisabled{
+        "HIPDNN_DISABLE_CACHE"};
 };
 
 TEST_F(TestIngestorGenericPlanBuilderValidation,
@@ -3838,6 +3750,79 @@ TEST_F(TestIngestorGenericPlanBuilderValidation,
     build(nextBuilder, /*benchmarking=*/true, second);
     EXPECT_FALSE(second.servedWithoutBenchmark());
     EXPECT_TRUE(anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_INFO), {"does not fully cover"}));
+
+    // Once the third kernel builds, the sweep covers it and supersedes the partial record.
+    ASSERT_EQ(shardLines(engineName).size(), 2U) << "the version line and the partial record";
+    script(2, correctImage(2));
+    const auto rebenchmarkProcess = manager(engineName);
+    const ValidationBuilder rebenchmarkBuilder(
+        _engine, *rebenchmarkProcess, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    ValidationContext third;
+    build(rebenchmarkBuilder, /*benchmarking=*/true, third);
+    ASSERT_FALSE(third.servedWithoutBenchmark());
+    HostBuffers thirdBuffers;
+    execute(third, thirdBuffers);
+    EXPECT_EQ(shardLines(engineName).size(), 3U)
+        << "the stale record is superseded by an appended line, not adopted";
+
+    const auto servingProcess = manager(engineName);
+    const ValidationBuilder servingBuilder(
+        _engine, *servingProcess, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    ValidationContext fourth;
+    build(servingBuilder, /*benchmarking=*/true, fourth);
+    ASSERT_TRUE(fourth.servedWithoutBenchmark());
+    EXPECT_EQ(fourth.servedBlockSize(), KERNEL_BLOCKS[2]) << "the superseding record's winner";
+    const auto superseding = servingProcess->winnerFor(winnerKey());
+    ASSERT_TRUE(superseding.has_value());
+    EXPECT_EQ(superseding->validated, std::optional<CatalogDigest>(fullDigest));
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, APinnedKernelThatFailedValidationIsNeverServed)
+{
+    validateEnvironment(true);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    const std::string engineName = "test:ValidationPinnedExcluded";
+    {
+        // Kernel 0 failed validation: it is in the digest but the record does not rank it.
+        const auto earlier = manager(engineName);
+        earlier->recordWinner(
+            winnerKey(),
+            WinnerRecord{entriesFor(*earlier, {1, 2}), std::optional(catalogDigestOf(*earlier))},
+            WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto stateManager = manager(engineName);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(_handle, _graph, engineConfig, settings);
+
+    // A pin on a ranked kernel is served, which shows the record answers this graph.
+    settings.ingestorSettings.knobFilter = {{BLOCK_SIZE, KERNEL_BLOCKS[1]}};
+    ValidationContext ranked;
+    ranked.setExecutionSettings(settings);
+    builder.buildPlan(_handle, _graph, engineConfig, ranked);
+    ASSERT_TRUE(ranked.servedWithoutBenchmark());
+    EXPECT_EQ(ranked.servedBlockSize(), KERNEL_BLOCKS[1]);
+
+    settings.ingestorSettings.knobFilter = {{BLOCK_SIZE, KERNEL_BLOCKS[0]}};
+    ValidationContext excluded;
+    excluded.setExecutionSettings(settings);
+    try
+    {
+        builder.buildPlan(_handle, _graph, engineConfig, excluded);
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(ex.getMessage().find(BLOCK_SIZE), std::string::npos);
+    }
 }
 
 TEST_F(TestIngestorGenericPlanBuilderValidation, AliasedBuffersThroughTheBuilderSkipValidation)

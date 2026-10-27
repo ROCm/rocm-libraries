@@ -102,7 +102,9 @@ namespace detail
 namespace agreement = hipdnn_plugin_sdk::output_agreement;
 
 /// The flatbuffers dtype the shared output_agreement rules read. A frontend type with no
-/// flatbuffers counterpart maps to UNSET, which the rules never decode.
+/// flatbuffers counterpart maps to UNSET, which the rules never decode. Twin of
+/// `frontendToSdkDataType` in hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp (test-only,
+/// not linkable from this tool); change them together.
 inline agreement::DataType toSdkDataType(hipdnn_frontend::DataType dataType)
 {
     using hipdnn_frontend::DataType;

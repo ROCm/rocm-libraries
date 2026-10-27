@@ -99,6 +99,7 @@ class OperandsEmitter:
         }
         self._validate_work_annotations()
         self._validate_output_annotations()
+        self._validate_members_write_a_tensor()
 
     @staticmethod
     def has_attribute(field, key):
@@ -270,6 +271,23 @@ class OperandsEmitter:
                         "tensor reference; only a tensor can be written"
                     )
 
+    def _validate_members_write_a_tensor(self):
+        """Reject a node type with no `output_tensor` field.
+
+        A node that writes nothing would be invisible to `forEachOutputTensor`, and a
+        member added without the annotation would silently skip output handling.
+        """
+        for _, member in self.members:
+            if not any(
+                self.has_attribute(field, OUTPUT_ATTRIBUTE)
+                for field in self.fields_of(member)
+            ):
+                raise SystemExit(
+                    f"ERROR: '{short_name(self.union['name'])}' member "
+                    f"'{short_name(member['name'])}' has no {OUTPUT_ATTRIBUTE} field: "
+                    "every node type must declare the tensors it writes"
+                )
+
     def emit(self):
         lines = []
         w = lines.append
@@ -435,12 +453,8 @@ class OperandsEmitter:
     def emit_member(self, w, member):
         short = short_name(member["name"])
         operands = self.operands[member["name"]]
-        if operands:
-            w("template <typename V>")
-            w(f"void visit(const {short}& op, V& visitor)")
-        else:
-            w("template <typename V>")
-            w(f"void visit(const {short}&, V&)")
+        w("template <typename V>")
+        w(f"void visit(const {short}& op, V& visitor)")
         w("{")
         for operand in operands:
             self.emit_operand(w, operand)
@@ -474,10 +488,7 @@ class OperandsEmitter:
         short = short_name(member["name"])
         outputs = [o for o in self.operands[member["name"]] if o.output]
         w("template <typename F>")
-        if outputs:
-            w(f"void forEachOutputTensor(const {short}& op, F& fn)")
-        else:
-            w(f"void forEachOutputTensor(const {short}&, F&)")
+        w(f"void forEachOutputTensor(const {short}& op, F& fn)")
         w("{")
         for operand in outputs:
             self.emit_tensor_call(w, operand, lambda role, uid: f"fn({role}, {uid})")

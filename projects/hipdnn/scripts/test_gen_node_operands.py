@@ -23,6 +23,11 @@ def output(entry):
     return entry
 
 
+def writes(index):
+    """A required output tensor reference, so a member satisfies the output rule."""
+    return output(field("y_tensor_uid", "Long", index, uid=True))
+
+
 def node_schema(members, tensor_fields=None):
     """A root with a `Tensor` domain, a `Node` holding an `Attrs` union of @p members.
 
@@ -81,9 +86,9 @@ class TestEveryMemberIsVisited(unittest.TestCase):
     def test_each_union_member_gets_a_visitor_and_a_dispatch_case(self):
         # A member without a case would publish nothing and report "unknown type".
         members = [
-            ("Alpha", [field("x_tensor_uid", "Long", 0, uid=True)]),
-            ("Beta", [field("y_tensor_uid", "Long", 0, uid=True)]),
-            ("Gamma", [field("mode", "Byte", 0)]),
+            ("Alpha", [field("x_tensor_uid", "Long", 0, uid=True), writes(1)]),
+            ("Beta", [field("z_tensor_uid", "Long", 0, uid=True), writes(1)]),
+            ("Gamma", [field("mode", "Byte", 0), writes(1)]),
         ]
         header = emit(members)
         for name, _ in members:
@@ -92,18 +97,13 @@ class TestEveryMemberIsVisited(unittest.TestCase):
             self.assertIn(f"node.attributes_as_{name}()", header)
         self.assertNotIn("case Attrs::NONE:", header)
 
-    def test_a_member_with_no_operands_still_compiles(self):
-        # -Wunused-parameter is an error in this project.
-        header = emit([("Empty", [field("label", "String", 0)])])
-        self.assertIn("void visit(const Empty&, V&)", header)
-
     def test_dispatch_pins_the_last_union_member_at_compile_time(self):
         # A header generated before a member was added must fail to compile against the
         # new schema, whose MAX moves, instead of reaching `default: return false`.
         header = emit(
             [
-                ("Alpha", [field("x_tensor_uid", "Long", 0, uid=True)]),
-                ("Beta", [field("mode", "Byte", 0)]),
+                ("Alpha", [field("x_tensor_uid", "Long", 0, uid=True), writes(1)]),
+                ("Beta", [field("mode", "Byte", 0), writes(1)]),
             ]
         )
         dispatch = header[header.index("bool visit(const Node& node") :]
@@ -130,6 +130,7 @@ class TestTensorOperands(unittest.TestCase):
                                 optional=True,
                             )
                         ),
+                        writes(2),
                     ],
                 )
             ]
@@ -145,7 +146,12 @@ class TestTensorOperands(unittest.TestCase):
             [
                 (
                     "Custom",
-                    [field("input_tensor_uids", "Vector", 0, element="Long", uid=True)],
+                    [
+                        field(
+                            "input_tensor_uids", "Vector", 0, element="Long", uid=True
+                        ),
+                        writes(1),
+                    ],
                 )
             ]
         )
@@ -164,6 +170,7 @@ class TestTensorOperands(unittest.TestCase):
                     [
                         field("axis_tensor_uid", "Long", 0, optional=True),
                         field("in_0_tensor_uid", "Long", 1, uid=True),
+                        writes(2),
                     ],
                 )
             ]
@@ -178,7 +185,7 @@ class TestTensorOperands(unittest.TestCase):
 
     def test_the_tensor_table_annotation_becomes_a_predicate(self):
         header = emit(
-            [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])],
+            [("Op", [field("x_tensor_uid", "Long", 0, uid=True), writes(1)])],
             tensor_fields=[
                 work(
                     field(
@@ -197,7 +204,7 @@ class TestTensorOperands(unittest.TestCase):
         )
 
     def test_an_unannotated_tensor_table_is_never_data_dependent(self):
-        header = emit([("Op", [field("x_tensor_uid", "Long", 0, uid=True)])])
+        header = emit([("Op", [writes(0)])])
         self.assertIn("inline bool workDataDependent(const Tensor&)", header)
 
 
@@ -281,9 +288,9 @@ class TestOutputOperands(unittest.TestCase):
         self.assertIn('detail::IndexedRole role("output", index);', visitor)
         self.assertIn("fn(role.view(), ", visitor)
 
-    def test_a_member_without_outputs_reports_none(self):
-        header = emit([("Op", [field("x_tensor_uid", "Long", 0, uid=True)])])
-        self.assertNotIn("fn(", output_body(header, "Op"))
+    def test_a_member_without_outputs_is_rejected(self):
+        with self.assertRaisesRegex(SystemExit, "'Op'.*output_tensor"):
+            emit([("Op", [field("x_tensor_uid", "Long", 0, uid=True)])])
 
     def test_the_entry_point_guards_against_a_stale_header(self):
         header = emit([("Op", [output(field("y_tensor_uid", "Long", 0, uid=True))])])
@@ -316,6 +323,7 @@ class TestAttributeOperands(unittest.TestCase):
                             field("payload", "Vector", 7, element="UByte"),
                             field("labels", "Vector", 8, element="String"),
                             field("old", "Int", 9, deprecated=True),
+                            writes(10),
                         ],
                     )
                 ]
@@ -365,7 +373,7 @@ class TestRejectedSchemas(unittest.TestCase):
             emit([("Op", [work(field("size", "Long", 0))])])
 
     def test_work_data_dependent_outside_the_visited_tables_is_rejected(self):
-        members = [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])]
+        members = [("Op", [writes(0)])]
         document = node_schema(members)
         document["objects"].append(
             table(f"{NS}.Other", [work(field("y_tensor_uid", "Long", 0, uid=True))])
@@ -383,6 +391,7 @@ class TestRejectedSchemas(unittest.TestCase):
                         [
                             field("x_tensor_uid", "Long", 0, uid=True),
                             field("x", "Long", 1),
+                            writes(2),
                         ],
                     )
                 ]
@@ -390,7 +399,7 @@ class TestRejectedSchemas(unittest.TestCase):
 
     def test_a_vector_without_an_element_rule_is_rejected(self):
         with self.assertRaises(SystemExit):
-            emit([("Op", [field("flags", "Vector", 0, element="Bool")])])
+            emit([("Op", [field("flags", "Vector", 0, element="Bool"), writes(1)])])
 
     def test_output_tensor_requires_a_tensor_reference(self):
         with self.assertRaises(SystemExit):
@@ -399,12 +408,12 @@ class TestRejectedSchemas(unittest.TestCase):
     def test_output_tensor_on_the_tensor_table_is_rejected(self):
         with self.assertRaises(SystemExit):
             emit(
-                [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])],
+                [("Op", [writes(0)])],
                 tensor_fields=[output(field("ragged_tensor_uid", "Long", 1, uid=True))],
             )
 
     def test_output_tensor_outside_the_node_union_is_rejected(self):
-        members = [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])]
+        members = [("Op", [writes(0)])]
         document = node_schema(members)
         document["objects"].append(
             table(f"{NS}.Other", [output(field("y_tensor_uid", "Long", 0, uid=True))])

@@ -2210,10 +2210,12 @@ the engine's UED revision, and the ranking metric. The ranked order is stored wi
 (`Catalog::isSorted` in `Catalog.hpp`). The persistent cache stores benchmarked winners, under
 `<cacheRoot>/ingestor-winners/<data SDK version>/<engine>/<UHD id>/<engine revision>-<model hash>/<arch>/winners.jsonl`
 (`WinnerCacheFile.hpp`). A record measured with `HIPDNN_VALIDATE_BENCHMARKING` on carries a
-`validated` marker, the digest of the whole classified catalog, and lists only the kernels that passed
-validation; a kernel that failed is never recorded. The digest covers the failed kernels, so a validated
-record is served when its digest equals the applicable catalog's digest, even though its entries name
-only the passing kernels. A record without the marker is not served while the mode is on, and the graph
+`validated` marker, the digest of the benchmarked candidate set (the knob-filtered, buildable candidates the
+sweep ranked or excluded), and lists only the kernels that passed validation; a kernel that failed is never
+recorded. The digest covers the failed kernels, so a validated record is served when its digest equals the
+full applicable catalog's digest, even though its entries name only the passing kernels. A sweep run with a
+knob pinned, a candidate dropped at plan build, one with no usable time, or one whose output copy failed
+leaves a record that is not served, and that graph benchmarks again in each process while validation is on. A record without the marker is not served while the mode is on, and the graph
 benchmarks again and appends a validated record that supersedes it. Not yet built: a persistent cache of model rankings.
 
 - **Load on demand, and never before applicability.** Descriptor discovery parses each UHD's JSON with

@@ -2,10 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-
-#include <string>
+#include <hipdnn_data_sdk/utilities/EnvBool.hpp>
 
 namespace hipdnn_backend::heuristics::config
 {
@@ -15,12 +12,8 @@ namespace hipdnn_backend::heuristics::config
 /// only a recognized truthy value disables it.
 inline bool exactCacheDisabled()
 {
-    static constexpr const char* ENV_VAR = "HIPDNN_DISABLE_EXACT_ENGINE_CACHE";
-    const std::string normalized = hipdnn_data_sdk::utilities::toLower(
-        hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv(ENV_VAR, "")));
-
-    return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes"
-           || normalized == "enable" || normalized == "enabled";
+    return hipdnn_data_sdk::utilities::readBoolEnv("HIPDNN_DISABLE_EXACT_ENGINE_CACHE")
+        .value.value_or(false);
 }
 
 } // namespace hipdnn_backend::heuristics::config

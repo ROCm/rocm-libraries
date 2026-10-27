@@ -256,6 +256,20 @@ TEST(TestIngestorOutputSpecs, ATensorWithAnUnknownExtentOrTypeHasNoByteSize)
     EXPECT_FALSE(byteSizeOf({1, DataType::UNSET, {4, 4}, {4, 1}}).has_value()) << "unset type";
     EXPECT_FALSE(byteSizeOf({1, DataType::FLOAT, {4, 4}, {1}}).has_value())
         << "dims and strides of different ranks";
+    EXPECT_FALSE(byteSizeOf({1, DataType::FLOAT, {4, 4}, {4, -1}}).has_value())
+        << "negative stride";
+    EXPECT_FALSE(byteSizeOf({1, DataType::FLOAT, {1}, {-1}}).has_value())
+        << "negative stride on an extent of one";
+    EXPECT_FALSE(byteSizeOf({1, DataType::FLOAT, {INT64_MAX, 2}, {4, 1}}).has_value())
+        << "a span that overflows 64 bits";
+    EXPECT_FALSE(byteSizeOf({1, DataType::FLOAT, {INT64_MAX}, {1}}).has_value())
+        << "a span that fits but whose bit count overflows";
+}
+
+TEST(TestIngestorOutputSpecs, ABroadcastStrideOfZeroAddsNoSpan)
+{
+    EXPECT_EQ(byteSizeOf({1, DataType::FLOAT, {4, 4}, {0, 1}}), std::optional<size_t>(4 * 4));
+    EXPECT_EQ(byteSizeOf({1, DataType::FLOAT, {4}, {0}}), std::optional<size_t>(FLOAT_BYTES));
 }
 
 TEST(TestIngestorOutputSpecs, AnOutputWithoutAByteSizeIsDroppedWithAWarning)

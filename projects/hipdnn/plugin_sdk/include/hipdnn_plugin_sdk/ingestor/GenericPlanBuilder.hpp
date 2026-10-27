@@ -368,18 +368,18 @@ public:
         const auto context
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
-        // Only a validating sweep may trust a record, and only a validated one: a record from a
-        // sweep that checked nothing could rank a wrong kernel first.
-        const auto policy = settings.benchmarkingEnabled && settings.validateBenchmarking
-                                ? RecordPolicy::VALIDATED_ONLY
-                                : RecordPolicy::ANY;
+        // Only a validated record may answer a validating sweep. "Validated" means resolved with
+        // validation on: a resolve whose check was skipped or inconclusive is recorded validated
+        // too, so such a record can still rank a kernel no comparison has checked.
+        const auto policy = recordPolicyFor(settings);
         const auto catalog = _stateManager.sortedCatalog(context, policy);
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
         }
 
-        const auto filtered = applyConstraints(catalog, settings, context);
+        auto filtered = applyConstraints(catalog, settings, context);
+        dropUnranked(filtered, catalog);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
@@ -596,7 +596,7 @@ public:
                 std::move(specs.inputUids),
                 _validationHooks,
                 [&stateManager = _stateManager, winnerKey = *winnerKey, cause](
-                    WinnerRecord validated) {
+                    const WinnerRecord& validated) {
                     stateManager.recordWinner(winnerKey, validated, cause);
                 }};
         }
@@ -834,9 +834,10 @@ public:
         const auto context = contextFor(handle, graph, metric.name);
         // One snapshot: the catalog carries the record that ordered it, so a winner-cache
         // eviction cannot split plan build and this prediction.
-        auto catalog = _stateManager.measuredCatalog(context);
-        const auto filtered
-            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        const auto policy = recordPolicyFor(executionSettings.ingestorSettings);
+        auto catalog = _stateManager.measuredCatalog(context, policy);
+        auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        dropUnranked(filtered, catalog);
         std::string modelId;
         // The full catalog decides the order source and ranking; `filtered` only limits what
         // the answer may name, so a pin changes neither (RFC 0019 §9.2, §5 steps 8-9).
@@ -1079,6 +1080,33 @@ private:
             ranking.push_back({entry.kernelId, value});
         }
         return ranking;
+    }
+
+    /// The record policy plan build and prediction both apply: a validating sweep trusts only
+    /// a validated record.
+    static RecordPolicy recordPolicyFor(const IngestorSettings& settings)
+    {
+        return settings.benchmarkingEnabled && settings.validateBenchmarking
+                   ? RecordPolicy::VALIDATED_ONLY
+                   : RecordPolicy::ANY;
+    }
+
+    /// Drops from @p kernels each kernel @p catalog's record does not rank. A validated record
+    /// leaves out the kernels that failed validation, and the catalog keeps them so enumeration,
+    /// knobs and workspace do not depend on winner state; selection must never choose one.
+    static void dropUnranked(std::vector<const KernelDefinition*>& kernels, const Catalog& catalog)
+    {
+        if(catalog.measuredRecord == nullptr)
+        {
+            return;
+        }
+        const auto& record = *catalog.measuredRecord;
+        kernels.erase(std::remove_if(kernels.begin(),
+                                     kernels.end(),
+                                     [&record](const KernelDefinition* kernel) {
+                                         return !recordRanks(record, *kernel);
+                                     }),
+                      kernels.end());
     }
 
     std::vector<const KernelDefinition*> applyConstraints(const Catalog& catalog,

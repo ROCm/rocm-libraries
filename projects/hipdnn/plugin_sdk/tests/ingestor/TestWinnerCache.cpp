@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -1333,6 +1334,9 @@ TEST(TestIngestorWinnerCache, ADigestRoundTripsThroughSixteenLowercaseHexDigits)
         SCOPED_TRACE(digestToHex(digest));
         EXPECT_EQ(digestFromHex(digestToHex(digest)), std::optional<CatalogDigest>{digest});
     }
+    EXPECT_EQ(digestFromHex("B9668265A337C8F7"),
+              std::optional<CatalogDigest>{0xb9668265a337c8f7ULL})
+        << "upper-case digits must decode too";
 }
 
 TEST(TestIngestorWinnerCache, AMalformedHexDigestIsRejected)
@@ -2064,7 +2068,7 @@ TEST(TestIngestorWinnerCache, AnOldReaderThatIgnoresTheMarkerDoesNotCoverACatalo
 }
 
 TEST(TestIngestorWinnerCacheStateManager,
-     AValidatedRecordCoveringTheDigestIsServedInEntryOrderWithoutTheFailedKernel)
+     AValidatedRecordOrdersTheCatalogAndKeepsTheFailedKernelUnranked)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const TestGraph graph(makeGraphId(0xF1));
@@ -2087,9 +2091,44 @@ TEST(TestIngestorWinnerCacheStateManager,
         const auto served = manager->sortedCatalog(context, policy);
 
         ASSERT_NE(served.measuredRecord, nullptr);
-        EXPECT_EQ(idsOf(served.entries), (std::vector<DescriptorId>{catalog.front()->kernelId}))
-            << "the failed kernel must not appear in the served catalog";
+        EXPECT_EQ(idsOf(served.entries),
+                  (std::vector<DescriptorId>{catalog.front()->kernelId, catalog.back()->kernelId}))
+            << "the record's order comes first and the failed kernel stays in the catalog";
+        EXPECT_TRUE(recordRanks(*served.measuredRecord, *catalog.front()));
+        EXPECT_FALSE(recordRanks(*served.measuredRecord, *catalog.back()))
+            << "the failed kernel must stay unranked, so plan build never chooses it";
     }
+}
+
+TEST(TestIngestorWinnerCacheStateManager, ServingAValidatedRecordLeavesEnumerationUnchanged)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF6));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto manager = makeStateManager();
+
+    const auto enumerated = idsOf(manager->enumerableCatalog(context).entries);
+    const auto unsorted = idsOf(manager->unsortedCatalog(context).entries);
+    const auto heuristic = manager->sortedDefinitions(context);
+    ASSERT_EQ(heuristic.size(), 2U) << "the fixture engine must offer one kernel to fail";
+    manager->recordWinner(key,
+                          validatedOver(heuristic, {entryFor(*heuristic.front(), 1.0)}),
+                          WinnerWriteCause::FRESH_MISS);
+
+    // Another caller's plan build serves the record and caches the catalog it ordered.
+    ASSERT_NE(manager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY).measuredRecord,
+              nullptr);
+
+    EXPECT_EQ(idsOf(manager->enumerableCatalog(context).entries), enumerated)
+        << "a page walk must not change when a validated record is served";
+    auto unsortedAfter = idsOf(manager->unsortedCatalog(context).entries);
+    auto unsortedBefore = unsorted;
+    std::sort(unsortedAfter.begin(), unsortedAfter.end());
+    std::sort(unsortedBefore.begin(), unsortedBefore.end());
+    EXPECT_EQ(unsortedAfter, unsortedBefore)
+        << "knobs and workspace read the same kernel set before and after the serve";
 }
 
 TEST(TestIngestorWinnerCacheStateManager, ALegacyRecordIsAMissUnderValidatedOnlyAndServedUnderAny)
@@ -2203,7 +2242,9 @@ TEST(TestIngestorWinnerCacheStateManager,
 
     const auto served = manager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY);
     ASSERT_NE(served.measuredRecord, nullptr);
-    EXPECT_EQ(idsOf(served.entries), (std::vector<DescriptorId>{heuristic.front()->kernelId}));
+    EXPECT_EQ(idsOf(served.entries),
+              (std::vector<DescriptorId>{heuristic.front()->kernelId, heuristic.back()->kernelId}));
+    EXPECT_FALSE(recordRanks(*served.measuredRecord, *heuristic.back()));
 }
 
 TEST(TestIngestorWinnerCacheStateManager, AValidatedFreshMissAppendsOverALegacyDiskLine)

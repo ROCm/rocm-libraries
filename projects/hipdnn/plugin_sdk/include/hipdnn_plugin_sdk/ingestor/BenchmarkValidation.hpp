@@ -108,25 +108,34 @@ inline BenchmarkValidationHooks hipValidationHooks()
         {
             return false;
         }
+        // Resolve and size every image before the first copy is enqueued, so nothing returns
+        // or throws while a copy into `images` is in flight.
+        std::vector<void*> sources(specs.size(), nullptr);
         images.assign(specs.size(), {});
         for(size_t i = 0; i < specs.size(); ++i)
         {
-            void* ptr = detail::findDeviceBuffer(buffers, count, specs[i].uid);
-            if(ptr == nullptr)
+            sources[i] = detail::findDeviceBuffer(buffers, count, specs[i].uid);
+            if(sources[i] == nullptr)
             {
                 return false;
             }
             images[i].resize(specs[i].byteSize);
-            if(specs[i].byteSize != 0
-               && hipMemcpyAsync(
-                      images[i].data(), ptr, specs[i].byteSize, hipMemcpyDeviceToHost, stream)
-                      != hipSuccess)
-            {
-                return false;
-            }
         }
-        // The copies are stream-ordered to a pageable host buffer; drain before the caller reads.
-        return hipStreamSynchronize(stream) == hipSuccess;
+        bool copied = true;
+        for(size_t i = 0; i < specs.size() && copied; ++i)
+        {
+            copied = specs[i].byteSize == 0
+                     || hipMemcpyAsync(images[i].data(),
+                                       sources[i],
+                                       specs[i].byteSize,
+                                       hipMemcpyDeviceToHost,
+                                       stream)
+                            == hipSuccess;
+        }
+        // The copies are stream-ordered to a pageable host buffer. Drain on every path: the
+        // caller reads the images on success and destroys them on failure.
+        const bool drained = hipStreamSynchronize(stream) == hipSuccess;
+        return copied && drained;
     };
     return hooks;
 }

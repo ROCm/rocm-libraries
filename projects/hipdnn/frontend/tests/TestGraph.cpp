@@ -146,6 +146,13 @@ public:
         _compiledPlans.push_back(std::move(plan));
     }
 
+    /// The sentinel execution-plan handle injectValidCompiledPlan() installs for an engine.
+    static hipdnnBackendDescriptor_t compiledPlanHandle(int64_t engineId)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
+    }
+
     /// Inject a compiled plan with valid descriptors (backed by a fake raw
     /// pointer) and an explicit barred flag. Used to drive the compiled-plan
     /// autotune path past the descriptor-validity check without running the
@@ -160,12 +167,10 @@ public:
         // used to make the descriptors test as "valid" past the validity check.
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         auto engineConfigHandle = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE0 + engineId);
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        auto executionPlanHandle = reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
         plan.engineConfigDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(engineConfigHandle);
         plan.executionPlanDesc
-            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlanHandle);
+            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(compiledPlanHandle(engineId));
         _compiledPlans.push_back(std::move(plan));
     }
 
@@ -12926,13 +12931,6 @@ struct WinnerLastRecorder
     }
 };
 
-hipdnnBackendDescriptor_t injectedPlanHandle(int64_t engineId)
-{
-    // Mirrors GraphTestUtils::injectValidCompiledPlan().
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
-}
-
 std::unordered_map<int64_t, void*> winnerLastVariantPack()
 {
     return {{1, reinterpret_cast<void*>(0x1)},
@@ -12957,9 +12955,9 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
     graph.injectValidCompiledPlan(/*engineId=*/3, /*workspaceSize=*/0, /*barred=*/false);
 
     WinnerLastRecorder recorder;
-    recorder.elapsedMsByPlan = {{injectedPlanHandle(1), 1.0f},
-                                {injectedPlanHandle(2), 2.0f},
-                                {injectedPlanHandle(3), 3.0f}};
+    recorder.elapsedMsByPlan = {{GraphTestUtils::compiledPlanHandle(1), 1.0f},
+                                {GraphTestUtils::compiledPlanHandle(2), 2.0f},
+                                {GraphTestUtils::compiledPlanHandle(3), 3.0f}};
     recorder.install(*_mockBackend);
 
     AutotuneConfig config;
@@ -12974,8 +12972,11 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
     // Plan index 0 is the fastest, so it wins; every plan was timed once, then the winner ran
     // once more.
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
-    const std::vector<hipdnnBackendDescriptor_t> expectedCalls = {
-        injectedPlanHandle(1), injectedPlanHandle(2), injectedPlanHandle(3), injectedPlanHandle(1)};
+    const std::vector<hipdnnBackendDescriptor_t> expectedCalls
+        = {GraphTestUtils::compiledPlanHandle(1),
+           GraphTestUtils::compiledPlanHandle(2),
+           GraphTestUtils::compiledPlanHandle(3),
+           GraphTestUtils::compiledPlanHandle(1)};
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
 }
 
@@ -12995,9 +12996,9 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     // Plan index 2 is the fastest; the three timed executes (calls 0-2) succeed and only the
     // winner's final execute (call 3) fails.
     WinnerLastRecorder recorder;
-    recorder.elapsedMsByPlan = {{injectedPlanHandle(1), 3.0f},
-                                {injectedPlanHandle(2), 2.0f},
-                                {injectedPlanHandle(3), 1.0f}};
+    recorder.elapsedMsByPlan = {{GraphTestUtils::compiledPlanHandle(1), 3.0f},
+                                {GraphTestUtils::compiledPlanHandle(2), 2.0f},
+                                {GraphTestUtils::compiledPlanHandle(3), 1.0f}};
     recorder.failCallIndex = 3;
     recorder.install(*_mockBackend);
 
@@ -13019,7 +13020,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     std::filesystem::remove(storagePath);
 
     ASSERT_EQ(recorder.executedPlans.size(), 4u);
-    EXPECT_EQ(recorder.executedPlans.back(), injectedPlanHandle(3));
+    EXPECT_EQ(recorder.executedPlans.back(), GraphTestUtils::compiledPlanHandle(3));
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_NE(result.get_message().find("Execute failed."), std::string::npos)
@@ -13150,7 +13151,8 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerAfterAStalledRestartPass)
 
     // Plan index 0 is the fastest.
     WinnerLastRecorder recorder;
-    recorder.elapsedMsByPlan = {{injectedPlanHandle(-2), 1.0f}, {injectedPlanHandle(-3), 2.0f}};
+    recorder.elapsedMsByPlan = {{GraphTestUtils::compiledPlanHandle(-2), 1.0f},
+                                {GraphTestUtils::compiledPlanHandle(-3), 2.0f}};
     recorder.install(*_mockBackend);
 
     int stallArmCount = 0;
@@ -13212,12 +13214,13 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerAfterAStalledRestartPass)
 
     // Stalled pass: the first candidate's first iteration only. Unstalled pass: both candidates
     // twice. Then the winner's final execute.
-    const std::vector<hipdnnBackendDescriptor_t> expectedCalls = {injectedPlanHandle(-2),
-                                                                  injectedPlanHandle(-2),
-                                                                  injectedPlanHandle(-2),
-                                                                  injectedPlanHandle(-3),
-                                                                  injectedPlanHandle(-3),
-                                                                  injectedPlanHandle(-2)};
+    const std::vector<hipdnnBackendDescriptor_t> expectedCalls
+        = {GraphTestUtils::compiledPlanHandle(-2),
+           GraphTestUtils::compiledPlanHandle(-2),
+           GraphTestUtils::compiledPlanHandle(-2),
+           GraphTestUtils::compiledPlanHandle(-3),
+           GraphTestUtils::compiledPlanHandle(-3),
+           GraphTestUtils::compiledPlanHandle(-2)};
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
 }
 
@@ -13291,6 +13294,88 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
     const std::vector<hipdnnBackendDescriptor_t> expectedCalls
         = {compiledPlanHandles[0], compiledPlanHandles[1], compiledPlanHandles[0]};
     EXPECT_EQ(recorder.executedPlans, expectedCalls);
+}
+
+// A failed final winner execute fails the sweep and must not persist a winner whose output
+// the caller never received.
+TEST_F(TestGraph, ExhaustiveSweepReturnsTheErrorOfAFailedFinalWinnerExecuteAndCachesNothing)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectPlanSpec(81, /*workspaceSize=*/256);
+    graph.injectPlanSpec(82, /*workspaceSize=*/256);
+
+    std::vector<hipdnnBackendDescriptor_t> compiledPlanHandles;
+    ON_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillByDefault([&](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+            const auto address = 0xF100 + compiledPlanHandles.size();
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            *descriptor = reinterpret_cast<hipdnnBackendDescriptor_t>(address);
+            compiledPlanHandles.push_back(*descriptor);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          hipdnnBackendAttributeName_t,
+                          hipdnnBackendAttributeType_t,
+                          int64_t,
+                          int64_t*,
+                          void* out) {
+            *static_cast<int64_t*>(out) = 256;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The two timed executes (calls 0-1) succeed; only the winner's final execute (call 2)
+    // fails.
+    WinnerLastRecorder recorder;
+    recorder.failCallIndex = 2;
+    recorder.install(*_mockBackend);
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<float*>(out)
+                = recorder.executedPlans.back() == compiledPlanHandles.front() ? 1.0f : 2.0f;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
+    config.warmupIterations = 0;
+
+    const auto storagePath
+        = std::filesystem::temp_directory_path() / "hipdnn_sweep_failed_final_winner_execute.json";
+    std::filesystem::remove(storagePath);
+    AutotuneStorageConfig storageConfig;
+    storageConfig.filePath = storagePath;
+
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotuneExhaustiveSweep(_handle,
+                                                winnerLastVariantPack(),
+                                                workspace,
+                                                int64_t{1024},
+                                                config,
+                                                storageConfig,
+                                                &results);
+    const bool storageWritten = std::filesystem::exists(storagePath);
+    std::filesystem::remove(storagePath);
+
+    ASSERT_EQ(recorder.executedPlans.size(), 3u);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(storageWritten);
 }
 
 namespace

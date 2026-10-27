@@ -40,7 +40,8 @@ enum class NumericKind
 };
 
 /// Only types whose decode is exact are listed; a wrong decode would report disagreement for
-/// correct kernels. Packed, sub-byte and FP8 types are NONE.
+/// correct kernels. INT64 decodes to double, so it is exact up to 2^53 in magnitude. Packed,
+/// sub-byte and FP8 types are NONE.
 inline NumericKind numericKind(DataType dataType)
 {
     switch(dataType)
@@ -89,7 +90,7 @@ inline size_t elementBytes(DataType dataType)
 }
 
 /// Relative tolerance two correct kernels may differ by. Non-zero because differing
-/// reduction orders change the last bits; integers are exact.
+/// reduction orders change the last bits; integers compare by equality (INT64 up to 2^53).
 inline double agreementTolerance(NumericKind kind)
 {
     switch(kind)
@@ -159,6 +160,7 @@ inline double decodeBfloat16At(const uint8_t* bytes)
     return static_cast<double>(hipdnn_data_sdk::types::detail::bfloat16_bits_to_float(value));
 }
 
+/// Exact up to 2^53 in magnitude; larger values round to the nearest double.
 inline double decodeInt64At(const uint8_t* bytes)
 {
     int64_t value = 0;

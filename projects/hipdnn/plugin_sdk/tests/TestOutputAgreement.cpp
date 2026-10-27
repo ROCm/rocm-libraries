@@ -443,10 +443,28 @@ TEST(TestOutputAgreement, IntegerKindsAreExact)
               "");
 }
 
+TEST(TestOutputAgreement, AnIntegerDisagreementReportsTheDifferingElementAndBothValues)
+{
+    const auto left = imageOf<int32_t>({5, 6});
+    const auto right = imageOf<int32_t>({5, 7});
+
+    EXPECT_EQ(firstDisagreement("o", DataType::INT32, left, right).rfind("o[1]: ", 0), 0U);
+    const auto found = firstDisagreementAt(DataType::INT32, left, right);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->index, 1U);
+    EXPECT_EQ(found->left, 6.0);
+    EXPECT_EQ(found->right, 7.0);
+}
+
 TEST(TestOutputAgreement, ImagesOfDifferentSizeAreNotCompared)
 {
+    // Each pair agrees on the shorter image's elements, so only the size guard stops a
+    // comparison in either direction.
     EXPECT_EQ(firstDisagreement(
-                  "o", DataType::FLOAT, imageOf<float>({1.0F}), imageOf<float>({1.0F, 2.0F})),
+                  "o", DataType::FLOAT, imageOf<float>({1.0F, 2.0F}), imageOf<float>({9.0F})),
+              "");
+    EXPECT_EQ(firstDisagreement(
+                  "o", DataType::FLOAT, imageOf<float>({9.0F}), imageOf<float>({1.0F, 2.0F})),
               "");
 }
 
@@ -473,6 +491,18 @@ TEST(TestOutputAgreement, TheScaleCoversBothImages)
     EXPECT_EQ(firstDisagreement("o", DataType::FLOAT, left, right).rfind("o[1]: ", 0), 0U)
         << "index 0 must agree under the pair's scale; index 1 is the real difference";
     EXPECT_EQ(firstDisagreement("o", DataType::FLOAT, left, rightSmall).rfind("o[0]: ", 0), 0U);
+}
+
+TEST(TestOutputAgreement, TheScaleCoversTheLeftImageToo)
+{
+    // The mirror of TheScaleCoversBothImages: the dominant magnitude sits in the left image.
+    const auto left = imageOf<float>({1e-3F + 1e-6F, 1e3F});
+    const auto right = imageOf<float>({1e-3F, 1e-3F});
+    const auto leftSmall = imageOf<float>({1e-3F + 1e-6F, 1e-3F});
+
+    EXPECT_EQ(firstDisagreement("o", DataType::FLOAT, left, right).rfind("o[1]: ", 0), 0U)
+        << "index 0 must agree under the pair's scale; index 1 is the real difference";
+    EXPECT_EQ(firstDisagreement("o", DataType::FLOAT, leftSmall, right).rfind("o[0]: ", 0), 0U);
 }
 
 TEST(TestOutputAgreement, TheScaleIgnoresNonFiniteElements)

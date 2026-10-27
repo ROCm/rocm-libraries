@@ -26,6 +26,8 @@ struct Catalog
     bool isSorted = false;
     /// The benchmarked record that ordered `entries`, or null when the heuristic did (or
     /// nothing has yet); while null, a later measured order still replaces the heuristic one.
+    /// `entries` keeps every applicable kernel: a kernel a validated record leaves out follows
+    /// the record's order, and plan build and prediction drop it.
     /// Carried here so plan build and configuration prediction read one snapshot even after
     /// the winner cache evicts the record. Immutable, so safe to share across threads.
     std::shared_ptr<const WinnerRecord> measuredRecord;

@@ -12,6 +12,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -52,8 +53,8 @@ constexpr const char* WRONG_KERNEL_ID = "a3a1df80-9fbd-442c-af8d-c809d41330bd";
 /// Chosen so that a + b and a - b differ, and so that both are exact in float.
 constexpr float INPUT_A = 3.0f;
 constexpr float INPUT_B = 1.5f;
-constexpr float SUM = INPUT_A + INPUT_B;
-constexpr float DIFFERENCE = INPUT_A - INPUT_B;
+constexpr float EXPECTED_SUM = INPUT_A + INPUT_B;
+constexpr float EXPECTED_DIFFERENCE = INPUT_A - INPUT_B;
 
 /// The harness is parameterized on a case type this binary does not use.
 struct NoCase
@@ -168,11 +169,12 @@ protected:
         int64_t workspaceSize = 0;
         result = graph->get_workspace_size(workspaceSize);
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        void* workspace = nullptr;
-        if(workspaceSize > 0)
+        if(workspaceSize < 0)
         {
-            EXPECT_EQ(hipMalloc(&workspace, static_cast<size_t>(workspaceSize)), hipSuccess);
+            ADD_FAILURE() << "negative workspace size " << workspaceSize;
+            return {};
         }
+        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
         const DeviceScalar a(INPUT_A);
         const DeviceScalar b(INPUT_B);
@@ -183,16 +185,12 @@ protected:
         {
             std::unordered_map<int64_t, void*> variantPack{
                 {1, a.get()}, {2, b.get()}, {3, c.get()}};
-            result = graph->execute(_handle, variantPack, workspace);
+            result = graph->execute(_handle, variantPack, workspace.get());
             EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
             EXPECT_EQ(hipStreamSynchronize(stream()), hipSuccess);
             outputs.push_back(c.read());
         }
 
-        if(workspace != nullptr)
-        {
-            static_cast<void>(hipFree(workspace));
-        }
         return outputs;
     }
 };
@@ -212,12 +210,12 @@ TEST_F(IntegrationValidateBenchmarking, TheWrongKernelIsExcludedWhenValidationIs
     const auto outputs = buildAndExecuteTwice();
 
     ASSERT_EQ(outputs.size(), 2U) << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(outputs[0], SUM) << "the first execute served a kernel whose output is not a + b. "
-                                  "Captured logs:\n"
-                               << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(outputs[1], SUM) << "the second execute served a kernel whose output is not a + b. "
-                                  "Captured logs:\n"
-                               << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(outputs[0], EXPECTED_SUM) << "the first execute served a kernel whose output is "
+                                           "not a + b. Captured logs:\n"
+                                        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(outputs[1], EXPECTED_SUM) << "the second execute served a kernel whose output is "
+                                           "not a + b. Captured logs:\n"
+                                        << recorder.getRecordedLogsAsString();
 
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, WRONG_KERNEL_ID))
         << "no WARN names the wrong kernel '" << WRONG_KERNEL_ID << "'. Captured logs:\n"
@@ -247,11 +245,12 @@ TEST_F(IntegrationValidateBenchmarking, DISABLED_TheWrongKernelWinsWhenValidatio
     const auto outputs = buildAndExecuteTwice();
 
     ASSERT_EQ(outputs.size(), 2U) << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(outputs[0], DIFFERENCE)
+    EXPECT_EQ(outputs[0], EXPECTED_DIFFERENCE)
         << "the fastest kernel is not the fixture's wrong one, so the mode-on case proves "
            "nothing. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(outputs[1], DIFFERENCE) << "Captured logs:\n" << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(outputs[1], EXPECTED_DIFFERENCE) << "Captured logs:\n"
+                                               << recorder.getRecordedLogsAsString();
 }
 
 } // namespace hip_kernel_provider::validation_tests
