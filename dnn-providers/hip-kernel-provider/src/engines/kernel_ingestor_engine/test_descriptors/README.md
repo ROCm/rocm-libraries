@@ -3,7 +3,8 @@
 Authored descriptor sets for the hip-kernel-provider test suites. The build packs each set
 into one of two discovery roots. The unit binary reads the `unit` root. The integration
 binary reads the `integration` root. The two roots stay disjoint. The unit binary also reads
-its own copy of `archive_fixture/`, which stages beside the two roots.
+its own copy of `archive_fixture/`, which stages beside the two roots. The validation binary
+reads only `validation_fixture/`, which also stages beside the two roots.
 
 Every set is a top-level folder here, and every one is packed whole.
 
@@ -13,8 +14,9 @@ Every set is a top-level folder here, and every one is packed whole.
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
 | `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/`, `unit_archive_fixture/` | both binaries |
+| `validation_fixture/` | `pointwise/` | `hip` | `validation_fixture/` | the validation binary |
 
-The packer runs six times over these four sets. `shared/` and `archive_fixture/` feed both
+The packer runs seven times over these five sets. `shared/` and `archive_fixture/` feed both
 binaries, and each other folder feeds one binary. Every descriptor in these sets applies to
 each packed architecture. Each set therefore stages one architecture folder for each packed
 architecture.
@@ -110,3 +112,30 @@ Two rules follow for a test author:
 
 - Name the engine id when you assert which engine served a graph.
 - Do not assert the size of the applicable-engine list for a pointwise ADD/f32 graph.
+
+## `validation_fixture/`
+
+Descriptors in the `hip` dialect for the engine `hipkernel:validation_pointwise`, which the
+validation binary (`hip_kernel_provider_validation_tests`) uses to test output validation of
+benchmark candidates. Its catalog holds three kernels, each a `.ukd.json` file with a fixed
+id, all built from `pointwise/ValidationPointwiseAdd.cpp` with different build defines:
+
+| Kernel | `block_size` | Result | Spin |
+|---|---|---|---|
+| `validation_pointwise_add.correct_a` | 256 | `c = a + b` | at least 1 ms |
+| `validation_pointwise_add.correct_b` | 128 | `c = a + b` | at least 1 ms |
+| `validation_pointwise_add.wrong` | 64 | `c = a - b` | none |
+
+The engine ranks by `block_size`, so the wrong kernel is last in the heuristic order. It is
+also the fastest candidate, because the correct kernels spin first. A benchmark that
+compares nothing but time therefore picks the wrong kernel, and a benchmark that validates
+the outputs must exclude it. The spin is a `volatile` counter loop with no architecture
+builtin, so the set packs for every architecture the other sets pack for.
+
+The set stages outside the `unit` and `integration` roots, so neither of those binaries
+discovers the wrong kernel. Keep the descriptors in the `pointwise/` child folder, and use
+fresh ids for any descriptor you add: ids must not collide with another set.
+
+The fixture shares the matcher symbols of `hipkernel:Pointwise`, so it claims a pointwise
+ADD/f32 graph the same way. The validation binary loads no other descriptor tree, and its
+cases pin the engine by name.

@@ -3,6 +3,7 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
@@ -16,5 +17,5 @@ table MoeGroupedMatmulBwdAttributes {
     first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);
 
     // Required output tensor UID
-    dweight_tensor_uid:            long (cache_uid);
+    dweight_tensor_uid:            long (cache_uid, output_tensor);
 }

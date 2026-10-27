@@ -3,10 +3,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -49,7 +51,7 @@ TEST(TestIngestorWinnerCache, ARecordCoveringEveryCandidateIsCovered)
 {
     const auto first = definitionFor(0x01);
     const auto second = definitionFor(0x02);
-    const WinnerRecord record{entryFor(second, 1.0), entryFor(first, 2.0)};
+    const WinnerRecord record{{entryFor(second, 1.0), entryFor(first, 2.0)}, std::nullopt};
 
     EXPECT_TRUE(recordCovers(record, {&first, &second}));
 }
@@ -58,7 +60,7 @@ TEST(TestIngestorWinnerCache, ARecordMissingACandidateIsNotCovered)
 {
     const auto first = definitionFor(0x01);
     const auto second = definitionFor(0x02);
-    const WinnerRecord record{entryFor(first, 2.0)};
+    const WinnerRecord record{{entryFor(first, 2.0)}, std::nullopt};
 
     EXPECT_FALSE(recordCovers(record, {&first, &second}));
 }
@@ -69,14 +71,14 @@ TEST(TestIngestorWinnerCache, ARecordWiderThanTheCandidateSetStillCoversIt)
 {
     const auto first = definitionFor(0x01);
     const auto second = definitionFor(0x02);
-    const WinnerRecord record{entryFor(first, 1.0), entryFor(second, 2.0)};
+    const WinnerRecord record{{entryFor(first, 1.0), entryFor(second, 2.0)}, std::nullopt};
 
     EXPECT_TRUE(recordCovers(record, {&first}));
 }
 
 TEST(TestIngestorWinnerCache, AnEmptyCandidateSetIsVacuouslyCovered)
 {
-    EXPECT_TRUE(recordCovers(WinnerRecord{entryFor(definitionFor(0x01), 1.0)}, {}));
+    EXPECT_TRUE(recordCovers(WinnerRecord{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt}, {}));
 }
 
 TEST(TestIngestorWinnerCache, AnEmptyRecordCoversNothing)
@@ -89,7 +91,7 @@ TEST(TestIngestorWinnerCache, OrderByRecordPutsCandidatesIntoMeasuredOrder)
 {
     const auto slow = definitionFor(0x01);
     const auto fast = definitionFor(0x02);
-    const WinnerRecord record{entryFor(fast, 0.5), entryFor(slow, 5.0)};
+    const WinnerRecord record{{entryFor(fast, 0.5), entryFor(slow, 5.0)}, std::nullopt};
 
     const auto ordered = orderByRecord(record, {&slow, &fast});
 
@@ -103,7 +105,7 @@ TEST(TestIngestorWinnerCache, OrderByRecordPutsCandidatesIntoMeasuredOrder)
 TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhosePackNoLongerAgrees)
 {
     const auto current = definitionFor(0x01, 0xA1);
-    const WinnerRecord record{entryFor(definitionFor(0x01, 0xB2), 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x01, 0xB2), 1.0)}, std::nullopt};
 
     EXPECT_TRUE(orderByRecord(record, {&current}).empty())
         << "a kernel id that now resolves to a different pack is a different kernel";
@@ -112,7 +114,7 @@ TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhosePackNoLongerAgrees)
 TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhoseDispatchNoLongerAgrees)
 {
     const auto current = definitionFor(0x01, 0xF0, 0xD1);
-    const WinnerRecord record{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0)}, std::nullopt};
 
     EXPECT_TRUE(orderByRecord(record, {&current}).empty());
 }
@@ -120,7 +122,8 @@ TEST(TestIngestorWinnerCache, OrderByRecordSkipsAnEntryWhoseDispatchNoLongerAgre
 TEST(TestIngestorWinnerCache, OrderByRecordDropsRecordEntriesAbsentFromTheCandidates)
 {
     const auto present = definitionFor(0x01);
-    const WinnerRecord record{entryFor(definitionFor(0x02), 0.5), entryFor(present, 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x02), 0.5), entryFor(present, 1.0)},
+                              std::nullopt};
 
     const auto ordered = orderByRecord(record, {&present});
 
@@ -135,8 +138,8 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroPack
 {
     const auto staleRankZero = definitionFor(0x01, 0xA1);
     const auto validRankOne = definitionFor(0x02);
-    const WinnerRecord record{entryFor(definitionFor(0x01, 0xB2), 1.0),
-                              entryFor(validRankOne, 2.0)};
+    const WinnerRecord record{
+        {entryFor(definitionFor(0x01, 0xB2), 1.0), entryFor(validRankOne, 2.0)}, std::nullopt};
 
     const auto ordered = orderByRecord(record, {&staleRankZero, &validRankOne});
 
@@ -150,8 +153,9 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroDisp
 {
     const auto staleRankZero = definitionFor(0x01, 0xF0, 0xD1);
     const auto validRankOne = definitionFor(0x02);
-    const WinnerRecord record{entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0),
-                              entryFor(validRankOne, 2.0)};
+    const WinnerRecord record{
+        {entryFor(definitionFor(0x01, 0xF0, 0xD2), 1.0), entryFor(validRankOne, 2.0)},
+        std::nullopt};
 
     const auto ordered = orderByRecord(record, {&staleRankZero, &validRankOne});
 
@@ -229,7 +233,7 @@ TEST(TestIngestorWinnerCacheStateManager, TheWinnerCacheHoldsNoMoreEntriesThanIt
     // No engine name, so nothing reaches disk: this is purely about the in-memory bound.
     const auto manager = makeIdentifiedStateManager(EngineIdentity{}, CAPACITY);
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt};
 
     for(int index = 0; index < static_cast<int>(CAPACITY) * 3; ++index)
     {
@@ -247,7 +251,7 @@ TEST(TestIngestorWinnerCacheStateManager, ALookupSavesARankingFromEvictionAndAnI
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto stillUsed = keyForIndex(graph, 0);
     const auto idle = keyForIndex(graph, 1);
-    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt};
 
     manager->recordWinner(stillUsed, record, WinnerWriteCause::FRESH_MISS);
     manager->recordWinner(idle, record, WinnerWriteCause::FRESH_MISS);
@@ -270,18 +274,20 @@ TEST(TestIngestorWinnerCacheStateManager, RecordingTheSameKeyTwiceReplacesRather
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto key = keyForIndex(graph, 7);
 
-    manager->recordWinner(
-        key, WinnerRecord{entryFor(definitionFor(0x01), 5.0)}, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key,
+                          WinnerRecord{{entryFor(definitionFor(0x01), 5.0)}, std::nullopt},
+                          WinnerWriteCause::FRESH_MISS);
     manager->recordWinner(
         key,
-        WinnerRecord{entryFor(definitionFor(0x02), 1.0), entryFor(definitionFor(0x03), 2.0)},
+        WinnerRecord{{entryFor(definitionFor(0x02), 1.0), entryFor(definitionFor(0x03), 2.0)},
+                     std::nullopt},
         WinnerWriteCause::FRESH_MISS);
 
     EXPECT_EQ(manager->winnerCacheSize(), 1U);
     const auto stored = manager->winnerFor(key);
     ASSERT_TRUE(stored.has_value());
-    ASSERT_EQ(stored->size(), 2U) << "the later, wider sweep must win";
-    EXPECT_EQ(stored->front().kernelId, testId(0x02));
+    ASSERT_EQ(stored->entries.size(), 2U) << "the later, wider sweep must win";
+    EXPECT_EQ(stored->entries.front().kernelId, testId(0x02));
 }
 
 TEST(TestIngestorWinnerCacheStateManager, AnEmptyRecordIsNotStored)
@@ -307,7 +313,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
     // A valid record is present first, so the assertion below distinguishes "the
     // unusable-key record was rejected" from "recordWinner() does nothing at all".
     manager->recordWinner(keyForIndex(validGraph, 0),
-                          WinnerRecord{entryFor(definitionFor(0x01), 1.0)},
+                          WinnerRecord{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt},
                           WinnerWriteCause::FRESH_MISS);
     ASSERT_EQ(manager->winnerCacheSize(), 1U);
 
@@ -364,8 +370,9 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
     const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
     ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
 
-    manager->recordWinner(
-        key, WinnerRecord{entryFor(definitionFor(0x01), 1.0)}, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key,
+                          WinnerRecord{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt},
+                          WinnerWriteCause::FRESH_MISS);
 
     EXPECT_EQ(manager->winnerCacheSize(), 1U)
         << "an unkeyable graph never matches on lookup, so the entry would be unreachable";
@@ -398,7 +405,7 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
     double time = 1.0;
     for(auto entry = catalog.rbegin(); entry != catalog.rend(); ++entry)
     {
-        record.push_back(entryFor(**entry, time));
+        record.entries.push_back(entryFor(**entry, time));
         time += 1.0;
     }
 
@@ -460,7 +467,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordAdoptedAfterTheCatalogWasAlread
     double time = 1.0;
     for(auto entry = heuristicOrder.rbegin(); entry != heuristicOrder.rend(); ++entry)
     {
-        reversed.push_back(entryFor(**entry, time));
+        reversed.entries.push_back(entryFor(**entry, time));
         time += 1.0;
     }
     manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
@@ -495,7 +502,7 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
     // Record only the LAST candidate, so coverage fails.
     const auto manager = makeStateManager();
     manager->recordWinner(WinnerKey{GraphContentKey{graph}, DeviceKey{properties}},
-                          WinnerRecord{entryFor(*heuristicOrder.back(), 0.1)},
+                          WinnerRecord{{entryFor(*heuristicOrder.back(), 0.1)}, std::nullopt},
                           WinnerWriteCause::FRESH_MISS);
 
     const auto ordered = manager->sortedDefinitions(context);
@@ -512,7 +519,7 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEn
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const WinnerRecord record{entryFor(definitionFor(0x01), 1.0)};
+    const WinnerRecord record{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt};
 
     constexpr int THREADS = 8;
     constexpr int PER_THREAD = 250;
@@ -559,10 +566,11 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
 
     // Two records of different lengths and contents. A torn read would show a length or
     // an id belonging to neither.
-    const WinnerRecord shortRecord{entryFor(definitionFor(0x01), 1.0)};
-    const WinnerRecord longRecord{entryFor(definitionFor(0x02), 1.0),
-                                  entryFor(definitionFor(0x03), 2.0),
-                                  entryFor(definitionFor(0x04), 3.0)};
+    const WinnerRecord shortRecord{{entryFor(definitionFor(0x01), 1.0)}, std::nullopt};
+    const WinnerRecord longRecord{{entryFor(definitionFor(0x02), 1.0),
+                                   entryFor(definitionFor(0x03), 2.0),
+                                   entryFor(definitionFor(0x04), 3.0)},
+                                  std::nullopt};
     manager->recordWinner(contended, shortRecord, WinnerWriteCause::FRESH_MISS);
 
     std::atomic<bool> torn{false};
@@ -594,9 +602,11 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
                 }
                 reads.fetch_add(1, std::memory_order_relaxed);
 
-                const bool isShort = seen->size() == 1 && seen->front().kernelId == testId(0x01);
-                const bool isLong = seen->size() == 3 && seen->front().kernelId == testId(0x02)
-                                    && seen->back().kernelId == testId(0x04);
+                const bool isShort
+                    = seen->entries.size() == 1 && seen->entries.front().kernelId == testId(0x01);
+                const bool isLong = seen->entries.size() == 3
+                                    && seen->entries.front().kernelId == testId(0x02)
+                                    && seen->entries.back().kernelId == testId(0x04);
                 if(!isShort && !isLong)
                 {
                     torn = true;
@@ -708,7 +718,7 @@ WinnerKey keyFor(const ContentCarryingTestGraph& graph, const DeviceProperties& 
 /// A ranking a manager can record, distinct per @p kernel so two records do not alias.
 WinnerRecord recordFor(uint8_t kernel, double timeMs)
 {
-    return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
+    return WinnerRecord{{entryFor(definitionFor(kernel), timeMs)}, std::nullopt};
 }
 
 /// UUID text is already a plain path component, so it reaches the shard path verbatim.
@@ -734,8 +744,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
 
     ASSERT_TRUE(served.has_value())
         << "a fresh manager did not read back the record the previous one wrote";
-    ASSERT_EQ(served->size(), 1U);
-    EXPECT_EQ(served->front().kernelId, testId(0x11));
+    ASSERT_EQ(served->entries.size(), 1U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x11));
 }
 
 /// RFC 0019 §9.2: a retrained model keeps its UHD id, so the content hash must separate it.
@@ -765,7 +775,7 @@ TEST(TestIngestorWinnerCacheStateManager, ANewModelDoesNotInheritTheOldModelsPer
     // The original identity still reads its record, so the miss above is invalidation.
     const auto rereader = makeIdentifiedStateManager(trained);
     ASSERT_TRUE(rereader->winnerFor(key).has_value());
-    EXPECT_EQ(rereader->winnerFor(key)->front().kernelId, testId(0x21));
+    EXPECT_EQ(rereader->winnerFor(key)->entries.front().kernelId, testId(0x21));
 }
 
 /// With no content identity, later weights are indistinguishable, so the disk cache is
@@ -905,8 +915,8 @@ TEST(TestIngestorWinnerCacheStateManager, TwoDevicesOnOneArchShareAShardAndStayD
     const auto forMoreUnits = reader->winnerFor(keyFor(graph, moreUnits));
     ASSERT_TRUE(forFewerUnits.has_value());
     ASSERT_TRUE(forMoreUnits.has_value());
-    EXPECT_EQ(forFewerUnits->front().kernelId, testId(0x21));
-    EXPECT_EQ(forMoreUnits->front().kernelId, testId(0x22));
+    EXPECT_EQ(forFewerUnits->entries.front().kernelId, testId(0x21));
+    EXPECT_EQ(forMoreUnits->entries.front().kernelId, testId(0x22));
 }
 
 /// A shard written by a different build is declined rather than misread, and says so once.
@@ -975,13 +985,13 @@ TEST(TestIngestorWinnerCacheStateManager, AMalformedLineCostsOnlyItself)
     const auto reader = makeNamedStateManager("test:MalformedLine");
     const auto served = reader->winnerFor(key);
     ASSERT_TRUE(served.has_value()) << "the good line before the garbage one must still load";
-    EXPECT_EQ(served->front().kernelId, testId(0x31));
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x31));
 
     const auto servedAfterGarbage = reader->winnerFor(laterKey);
     ASSERT_TRUE(servedAfterGarbage.has_value())
         << "the good line AFTER the garbage one must still load -- an implementation "
            "that aborts on the first bad line loses it";
-    EXPECT_EQ(servedAfterGarbage->front().kernelId, testId(0x32));
+    EXPECT_EQ(servedAfterGarbage->entries.front().kernelId, testId(0x32));
 }
 
 /// A record line missing the per-line format-version field is a foreign or pre-upgrade
@@ -1159,7 +1169,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLive
     const auto served = makeNamedStateManager("test:MemoryIdentity")->winnerFor(liveKey);
     ASSERT_TRUE(served.has_value())
         << "a persisted record must be found again by the device that measured it";
-    EXPECT_EQ(served->front().kernelId, testId(0x41));
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x41));
 
     // A board of the same arch and CU count with different HBM must miss.
     auto otherBoard = suffixedDeviceProperties();
@@ -1232,6 +1242,220 @@ TEST(TestIngestorWinnerCache, ALineMissingAnyDeviceFieldIsDeclined)
     }
 }
 
+/// Triples whose digest the golden vectors below pin. Each id is its seed byte repeated 16
+/// times (testId), so the raw UUID bytes are easy to follow in the reference script.
+KernelTriple tripleFor(uint8_t kernel, uint8_t pack, uint8_t dispatch)
+{
+    return KernelTriple{testId(kernel), testId(pack), testId(dispatch)};
+}
+
+/// Golden vectors from an independent reference (a throwaway python script, not committed):
+///   def fnv(b):
+///       h = 0xcbf29ce484222325
+///       for x in b:
+///           h ^= x
+///           h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+///       return h
+///   def digest(triples):  # triples: (kernel, pack, dispatch) seed bytes
+///       cat = sorted(bytes([k]) * 16 + bytes([p]) * 16 + bytes([d]) * 16 for k, p, d in triples)
+///       return fnv(len(triples).to_bytes(8, "little") + b"".join(cat))
+///   digest([(1, 2, 3), (1, 2, 2)]) == 0xb9668265a337c8f7   (input order differs from sorted order)
+///   digest([(1, 2, 3)])            == 0x5139afd8a42ec564
+///   digest([])                     == 0xa8c7f832281a39c5   (the count alone: eight zero bytes)
+TEST(TestIngestorWinnerCache, TheCatalogDigestMatchesTheIndependentReference)
+{
+    EXPECT_EQ(catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3), tripleFor(1, 2, 2)}),
+              0xb9668265a337c8f7ULL);
+    EXPECT_EQ(catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3)}), 0x5139afd8a42ec564ULL);
+    EXPECT_EQ(catalogDigest(std::vector<KernelTriple>{}), 0xa8c7f832281a39c5ULL);
+}
+
+TEST(TestIngestorWinnerCache, TheCatalogDigestOfKernelsEqualsTheDigestOfTheirTriples)
+{
+    const auto first = definitionFor(1, 2, 3);
+    const auto second = definitionFor(1, 2, 2);
+
+    const auto digest = catalogDigest(std::vector<const KernelDefinition*>{&first, &second});
+
+    EXPECT_EQ(digest,
+              catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3), tripleFor(1, 2, 2)}));
+    EXPECT_EQ(digest, 0xb9668265a337c8f7ULL);
+}
+
+TEST(TestIngestorWinnerCache, TheCatalogDigestChangesWhenAnyOneIdOfATripleChanges)
+{
+    const auto base
+        = catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3), tripleFor(4, 5, 6)});
+
+    EXPECT_NE(base,
+              catalogDigest(std::vector<KernelTriple>{tripleFor(9, 2, 3), tripleFor(4, 5, 6)}))
+        << "a different kernelId must change the digest";
+    EXPECT_NE(base,
+              catalogDigest(std::vector<KernelTriple>{tripleFor(1, 9, 3), tripleFor(4, 5, 6)}))
+        << "a different packId must change the digest";
+    EXPECT_NE(base,
+              catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 9), tripleFor(4, 5, 6)}))
+        << "a different dispatchId must change the digest";
+    EXPECT_NE(base, catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3)}))
+        << "a catalog without a kernel must not share the digest of the larger one";
+}
+
+TEST(TestIngestorWinnerCache, TheCatalogDigestDoesNotDependOnTheOrderOfTheTriples)
+{
+    const std::vector<KernelTriple> forward{
+        tripleFor(1, 2, 3), tripleFor(1, 2, 2), tripleFor(7, 7, 7)};
+    const std::vector<KernelTriple> backward{forward[2], forward[1], forward[0]};
+    const std::vector<KernelTriple> shuffled{forward[1], forward[2], forward[0]};
+
+    const auto expected = catalogDigest(forward);
+    EXPECT_EQ(catalogDigest(backward), expected);
+    EXPECT_EQ(catalogDigest(shuffled), expected);
+    EXPECT_EQ(catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 3), tripleFor(1, 2, 2)}),
+              0xb9668265a337c8f7ULL)
+        << "the order-independent digest must equal the sorted-order reference";
+    EXPECT_EQ(catalogDigest(std::vector<KernelTriple>{tripleFor(1, 2, 2), tripleFor(1, 2, 3)}),
+              0xb9668265a337c8f7ULL);
+}
+
+TEST(TestIngestorWinnerCache, ADigestRoundTripsThroughSixteenLowercaseHexDigits)
+{
+    EXPECT_EQ(digestToHex(0), "0000000000000000");
+    EXPECT_EQ(digestToHex(0xab), "00000000000000ab");
+    EXPECT_EQ(digestToHex(0xb9668265a337c8f7ULL), "b9668265a337c8f7");
+    EXPECT_EQ(digestToHex(0xffffffffffffffffULL), "ffffffffffffffff");
+
+    for(const CatalogDigest digest : {CatalogDigest{0},
+                                      CatalogDigest{1},
+                                      CatalogDigest{0xab},
+                                      CatalogDigest{0xb9668265a337c8f7ULL},
+                                      CatalogDigest{0xffffffffffffffffULL}})
+    {
+        SCOPED_TRACE(digestToHex(digest));
+        EXPECT_EQ(digestFromHex(digestToHex(digest)), std::optional<CatalogDigest>{digest});
+    }
+}
+
+TEST(TestIngestorWinnerCache, AMalformedHexDigestIsRejected)
+{
+    for(const char* text : {"",
+                            "abc",
+                            "b9668265a337c8f",
+                            "b9668265a337c8f70",
+                            "zzzzzzzzzzzzzzzz",
+                            "b9668265a337c8g7",
+                            " b9668265a337c8f",
+                            "0xb9668265a337c8f"})
+    {
+        SCOPED_TRACE(text);
+        EXPECT_FALSE(digestFromHex(text).has_value());
+    }
+}
+
+/// The line encoded for @p key and @p record, as JSON, so a test can edit one field.
+nlohmann::json encodedLine(const WinnerKey& key, const WinnerRecord& record)
+{
+    return nlohmann::json::parse(encodeWinnerRecordLine(key, record));
+}
+
+TEST(TestIngestorWinnerCache, AValidatedRecordRoundTripsThroughTheCodec)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    auto record = recordFor(0x11, 1.5);
+    record.validated = 0xb9668265a337c8f7ULL;
+
+    const auto decoded = decodeWinnerRecordLine(encodeWinnerRecordLine(key, record));
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->first, key);
+    ASSERT_EQ(decoded->second.entries.size(), 1U);
+    EXPECT_EQ(decoded->second.entries.front().kernelId, testId(0x11));
+    EXPECT_EQ(decoded->second.validated, std::optional<CatalogDigest>{0xb9668265a337c8f7ULL});
+}
+
+TEST(TestIngestorWinnerCache, AValidatedRecordIsWrittenWithItsDigestAsHexUnderTheValidatedKey)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto record = recordFor(0x11, 1.5);
+    record.validated = 0xab;
+
+    const auto line = encodedLine(keyFor(graph, suffixedDeviceProperties()), record);
+
+    ASSERT_TRUE(line.contains("validated"));
+    EXPECT_EQ(line["validated"], "00000000000000ab");
+    EXPECT_EQ(line["v"], 2) << "the line format version must not change";
+}
+
+TEST(TestIngestorWinnerCache, ALineWithoutTheValidatedKeyDecodesAsALegacyRecord)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    auto line = encodedLine(key, recordFor(0x11, 1.5));
+    line.erase("validated");
+
+    const auto decoded = decodeWinnerRecordLine(line.dump());
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->second.entries.size(), 1U);
+    EXPECT_FALSE(decoded->second.validated.has_value());
+}
+
+TEST(TestIngestorWinnerCache, AnUnvalidatedRecordIsEncodedExactlyAsTheBaseEncoderWroteIt)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    const auto legacy = recordFor(0x11, 1.5);
+    auto validated = legacy;
+    validated.validated = 0xab;
+
+    const auto legacyText = encodeWinnerRecordLine(key, legacy);
+    auto validatedLine = encodedLine(key, validated);
+    validatedLine.erase("validated");
+
+    EXPECT_EQ(legacyText.find("validated"), std::string::npos);
+    EXPECT_EQ(legacyText, validatedLine.dump())
+        << "the validated key must be the only addition to the legacy encoding";
+    const auto parsed = nlohmann::json::parse(legacyText);
+    EXPECT_EQ(parsed.size(), 4U) << "a legacy line carries v, graph, device and entries only";
+}
+
+TEST(TestIngestorWinnerCache, ALineWithAMalformedValidatedKeyIsSkipped)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto record = recordFor(0x11, 1.5);
+    record.validated = 0xab;
+    const auto good = encodedLine(keyFor(graph, suffixedDeviceProperties()), record);
+    ASSERT_TRUE(decodeWinnerRecordLine(good.dump()).has_value());
+
+    for(const nlohmann::json& malformed : {nlohmann::json("abc"),
+                                           nlohmann::json("00000000000000abc"),
+                                           nlohmann::json("zzzzzzzzzzzzzzzz"),
+                                           nlohmann::json(171),
+                                           nlohmann::json(nullptr),
+                                           nlohmann::json::array()})
+    {
+        SCOPED_TRACE(malformed.dump());
+        auto line = good;
+        line["validated"] = malformed;
+        EXPECT_FALSE(decodeWinnerRecordLine(line.dump()).has_value())
+            << "a line whose validated marker cannot be trusted must not decode as legacy";
+    }
+}
+
+TEST(TestIngestorWinnerCache, UnknownExtraKeysOnALineAreStillIgnored)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto record = recordFor(0x11, 1.5);
+    record.validated = 0xab;
+    auto line = encodedLine(keyFor(graph, suffixedDeviceProperties()), record);
+    line["added_by_a_future_writer"] = "anything";
+
+    const auto decoded = decodeWinnerRecordLine(line.dump());
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->second.validated, std::optional<CatalogDigest>{0xab});
+}
+
 /// Shard A_old, B, C, A_new at capacity 2: eviction may cost a miss, but A_old must never be
 /// served over A_new.
 TEST(TestIngestorWinnerCacheStateManager, AnEvictedNewerLineNeverLetsAnOlderDuplicateBack)
@@ -1259,9 +1483,9 @@ TEST(TestIngestorWinnerCacheStateManager, AnEvictedNewerLineNeverLetsAnOlderDupl
 
     const auto served = makeIdentifiedStateManager(engine, 2)->winnerFor(keyA);
     ASSERT_TRUE(served.has_value()) << "the shard's newest lines must be the resident ones";
-    EXPECT_NE(served->front().kernelId, testId(0x71))
+    EXPECT_NE(served->entries.front().kernelId, testId(0x71))
         << "the superseded first line for A was served over the last one";
-    EXPECT_EQ(served->front().kernelId, testId(0x74));
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x74));
 }
 
 /// A manager built without an engine name has no shard path to compose, so it neither
@@ -1405,8 +1629,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentRecordWinnerOnOneKeyAppendsE
     const auto freshManager = makeNamedStateManager("test:ConcurrentRecordWinner");
     const auto served = freshManager->winnerFor(sharedKey);
     ASSERT_TRUE(served.has_value());
-    ASSERT_EQ(served->size(), 1U);
-    EXPECT_EQ(served->front().kernelId, testId(0x71));
+    ASSERT_EQ(served->entries.size(), 1U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x71));
 }
 
 /// B1.3 -- refresh semantics for A1: a superseding record widens the shard rather than
@@ -1426,13 +1650,15 @@ TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWin
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
 
-    const WinnerRecord threeKernelRecord{entryFor(definitionFor(0x81), 1.0),
-                                         entryFor(definitionFor(0x82), 2.0),
-                                         entryFor(definitionFor(0x83), 3.0)};
-    const WinnerRecord fourKernelRecord{entryFor(definitionFor(0x81), 1.1),
-                                        entryFor(definitionFor(0x82), 2.1),
-                                        entryFor(definitionFor(0x83), 3.1),
-                                        entryFor(definitionFor(0x84), 4.1)};
+    const WinnerRecord threeKernelRecord{{entryFor(definitionFor(0x81), 1.0),
+                                          entryFor(definitionFor(0x82), 2.0),
+                                          entryFor(definitionFor(0x83), 3.0)},
+                                         std::nullopt};
+    const WinnerRecord fourKernelRecord{{entryFor(definitionFor(0x81), 1.1),
+                                         entryFor(definitionFor(0x82), 2.1),
+                                         entryFor(definitionFor(0x83), 3.1),
+                                         entryFor(definitionFor(0x84), 4.1)},
+                                        std::nullopt};
 
     {
         const auto writer = makeNamedStateManager("test:SupersedingRecord");
@@ -1456,8 +1682,8 @@ TEST(TestIngestorWinnerCacheStateManager, ASupersedingRecordWidensTheShardAndWin
     const auto reader = makeNamedStateManager("test:SupersedingRecord");
     const auto served = reader->winnerFor(key);
     ASSERT_TRUE(served.has_value());
-    EXPECT_EQ(served->size(), 4U) << "winnerFor() must return the 4-entry (last-written) "
-                                     "record, not the earlier 3-entry one";
+    EXPECT_EQ(served->entries.size(), 4U) << "winnerFor() must return the 4-entry (last-written) "
+                                             "record, not the earlier 3-entry one";
 }
 
 /// B1.3 -- writing the SAME ranking twice adopts the on-disk copy both times and never
@@ -1474,8 +1700,8 @@ TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsN
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
-    const WinnerRecord record{entryFor(definitionFor(0x91), 1.0),
-                              entryFor(definitionFor(0x92), 2.0)};
+    const WinnerRecord record{
+        {entryFor(definitionFor(0x91), 1.0), entryFor(definitionFor(0x92), 2.0)}, std::nullopt};
 
     const auto manager = makeNamedStateManager("test:IdenticalRecordTwice");
     manager->recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
@@ -1483,7 +1709,8 @@ TEST(TestIngestorWinnerCacheStateManager, WritingTheIdenticalRecordTwiceAppendsN
     // key, regardless of ranked-id content -- it never compares rankings.
     manager->recordWinner(
         key,
-        WinnerRecord{entryFor(definitionFor(0x91), 9.0), entryFor(definitionFor(0x92), 9.0)},
+        WinnerRecord{{entryFor(definitionFor(0x91), 9.0), entryFor(definitionFor(0x92), 9.0)},
+                     std::nullopt},
         WinnerWriteCause::FRESH_MISS);
 
     const auto path = winnerCacheShardPath({"test:IdenticalRecordTwice"}, properties.gcnArchName);
@@ -1535,9 +1762,9 @@ TEST(TestIngestorWinnerCacheStateManager, TheValueStoredInMemoryAfterAdoptionIsT
 
     const auto inMemory = second->winnerFor(key);
     ASSERT_TRUE(inMemory.has_value());
-    ASSERT_EQ(inMemory->size(), 1U);
-    EXPECT_EQ(inMemory->front().kernelId, testId(0xA1));
-    EXPECT_DOUBLE_EQ(inMemory->front().timeMs, 1.0)
+    ASSERT_EQ(inMemory->entries.size(), 1U);
+    EXPECT_EQ(inMemory->entries.front().kernelId, testId(0xA1));
+    EXPECT_DOUBLE_EQ(inMemory->entries.front().timeMs, 1.0)
         << "_winnerCache must hold the ON-DISK record writeBackToShard() returned on "
            "adoption, not the caller's own argument re-stored under its own timeMs";
 }
@@ -1556,8 +1783,8 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
 
-    const WinnerRecord firstRecord{entryFor(definitionFor(0xB1), 1.0)};
-    const WinnerRecord secondRecord{entryFor(definitionFor(0xB2), 1.0)};
+    const WinnerRecord firstRecord{{entryFor(definitionFor(0xB1), 1.0)}, std::nullopt};
+    const WinnerRecord secondRecord{{entryFor(definitionFor(0xB2), 1.0)}, std::nullopt};
 
     {
         const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
@@ -1576,8 +1803,9 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
     // a last-match scan guarantees.
     {
         const auto writer = makeNamedStateManager("test:TwoLinesLastWins");
-        writer->recordWinner(
-            key, WinnerRecord{entryFor(definitionFor(0xB2), 9.0)}, WinnerWriteCause::FRESH_MISS);
+        writer->recordWinner(key,
+                             WinnerRecord{{entryFor(definitionFor(0xB2), 9.0)}, std::nullopt},
+                             WinnerWriteCause::FRESH_MISS);
     }
 
     const auto path = winnerCacheShardPath({"test:TwoLinesLastWins"}, properties.gcnArchName);
@@ -1595,10 +1823,10 @@ TEST(TestIngestorWinnerCacheStateManager, TwoLinesOneKeyComparesAgainstTheLastLi
     const auto reader = makeNamedStateManager("test:TwoLinesLastWins");
     const auto served = reader->winnerFor(key);
     ASSERT_TRUE(served.has_value());
-    ASSERT_EQ(served->size(), 1U);
-    EXPECT_EQ(served->front().kernelId, testId(0xB2))
+    ASSERT_EQ(served->entries.size(), 1U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0xB2))
         << "a first-match scan would have adopted the stale 0xB1 line instead";
-    EXPECT_DOUBLE_EQ(served->front().timeMs, 1.0)
+    EXPECT_DOUBLE_EQ(served->entries.front().timeMs, 1.0)
         << "adopting must return line 2's on-disk value (timeMs 1.0), not the third "
            "write's own argument (timeMs 9.0)";
 }
@@ -1621,10 +1849,10 @@ TEST(TestIngestorWinnerCacheStateManager, ANoisyReorderOnAFreshMissDoesNotGrowTh
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
 
-    const WinnerRecord firstOrder{entryFor(definitionFor(0xC1), 1.0),
-                                  entryFor(definitionFor(0xC2), 2.0)};
-    const WinnerRecord reorderedIds{entryFor(definitionFor(0xC2), 3.0),
-                                    entryFor(definitionFor(0xC1), 4.0)};
+    const WinnerRecord firstOrder{
+        {entryFor(definitionFor(0xC1), 1.0), entryFor(definitionFor(0xC2), 2.0)}, std::nullopt};
+    const WinnerRecord reorderedIds{
+        {entryFor(definitionFor(0xC2), 3.0), entryFor(definitionFor(0xC1), 4.0)}, std::nullopt};
 
     const auto manager = makeNamedStateManager("test:NoisyReorderFreshMiss");
     manager->recordWinner(key, firstOrder, WinnerWriteCause::FRESH_MISS);
@@ -1645,8 +1873,8 @@ TEST(TestIngestorWinnerCacheStateManager, ANoisyReorderOnAFreshMissDoesNotGrowTh
 
     const auto served = manager->winnerFor(key);
     ASSERT_TRUE(served.has_value());
-    ASSERT_EQ(served->size(), 2U);
-    EXPECT_EQ(served->front().kernelId, testId(0xC1))
+    ASSERT_EQ(served->entries.size(), 2U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0xC1))
         << "the adopted ranking must be the FIRST-written one";
 }
 
@@ -1665,8 +1893,8 @@ TEST(TestIngestorWinnerCacheStateManager, ACoverageRebenchmarkAppendsEvenWhenThe
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
 
-    const WinnerRecord record{entryFor(definitionFor(0xD1), 1.0),
-                              entryFor(definitionFor(0xD2), 2.0)};
+    const WinnerRecord record{
+        {entryFor(definitionFor(0xD1), 1.0), entryFor(definitionFor(0xD2), 2.0)}, std::nullopt};
 
     const auto manager = makeNamedStateManager("test:CoverageRebenchmarkUnchanged");
     manager->recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
@@ -1685,6 +1913,411 @@ TEST(TestIngestorWinnerCacheStateManager, ACoverageRebenchmarkAppendsEvenWhenThe
     ASSERT_EQ(rawLines.size(), 3U)
         << "version line plus two record lines; a coverage re-benchmark must append even "
            "when the ranking it measured is unchanged from the shard's";
+}
+
+// ---------------------------------------------------------------------------
+// Serve rules: legacy versus validated records under each RecordPolicy
+// ---------------------------------------------------------------------------
+
+std::vector<DescriptorId> idsOf(const std::vector<const KernelDefinition*>& kernels)
+{
+    std::vector<DescriptorId> ids;
+    ids.reserve(kernels.size());
+    for(const auto* kernel : kernels)
+    {
+        ids.push_back(kernel->kernelId);
+    }
+    return ids;
+}
+
+std::vector<std::string> shardLines(const std::filesystem::path& path)
+{
+    std::ifstream shardFile(path);
+    std::vector<std::string> lines;
+    for(std::string line; std::getline(shardFile, line);)
+    {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+/// A validated record over @p catalog: its digest is the catalog's, its entries are
+/// @p entries (the candidates that passed, best first).
+WinnerRecord validatedOver(const std::vector<const KernelDefinition*>& catalog,
+                           std::vector<RankedEntry> entries)
+{
+    return WinnerRecord{std::move(entries), catalogDigest(catalog)};
+}
+
+constexpr std::array POLICIES{RecordPolicy::ANY, RecordPolicy::VALIDATED_ONLY};
+
+TEST(TestIngestorWinnerCache, ALegacyRecordIsServedUnderAnyAndDeclinedUnderValidatedOnly)
+{
+    const auto first = definitionFor(0x01);
+    const auto second = definitionFor(0x02);
+    const WinnerRecord legacy{{entryFor(second, 1.0), entryFor(first, 2.0)}, std::nullopt};
+    const std::vector<const KernelDefinition*> kernels{&first, &second};
+
+    const auto byDefault = orderIfFullyCovered(legacy, kernels);
+    const auto underAny = orderIfFullyCovered(legacy, kernels, RecordPolicy::ANY);
+
+    ASSERT_TRUE(byDefault.has_value());
+    ASSERT_TRUE(underAny.has_value());
+    EXPECT_EQ(idsOf(*underAny), (std::vector<DescriptorId>{second.kernelId, first.kernelId}));
+    EXPECT_EQ(idsOf(*byDefault), idsOf(*underAny)) << "the default policy must be ANY";
+    EXPECT_FALSE(orderIfFullyCovered(legacy, kernels, RecordPolicy::VALIDATED_ONLY).has_value())
+        << "a record nobody validated must not be served when validation is required";
+}
+
+// The failed kernel is simply absent from the entries; the digest, taken over the whole
+// catalog, is what says it was classified rather than forgotten.
+TEST(TestIngestorWinnerCache, AValidatedRecordCoveringTheDigestIsServedUnderBothPolicies)
+{
+    const auto first = definitionFor(0x01);
+    const auto second = definitionFor(0x02);
+    const auto failed = definitionFor(0x03);
+    const std::vector<const KernelDefinition*> kernels{&first, &second, &failed};
+    const auto record = validatedOver(kernels, {entryFor(second, 1.0), entryFor(first, 2.0)});
+
+    for(const auto policy : POLICIES)
+    {
+        SCOPED_TRACE(policy == RecordPolicy::ANY ? "ANY" : "VALIDATED_ONLY");
+        const auto ordered = orderIfFullyCovered(record, kernels, policy);
+        ASSERT_TRUE(ordered.has_value());
+        EXPECT_EQ(idsOf(*ordered), (std::vector<DescriptorId>{second.kernelId, first.kernelId}))
+            << "entries order, without the kernel that failed validation";
+    }
+}
+
+TEST(TestIngestorWinnerCache, ADigestMismatchStaysPartial)
+{
+    const auto first = definitionFor(0x01);
+    const auto second = definitionFor(0x02);
+    const auto third = definitionFor(0x03);
+    const auto movedSecond = definitionFor(0x02, 0xF1);
+
+    for(const auto policy : POLICIES)
+    {
+        SCOPED_TRACE(policy == RecordPolicy::ANY ? "ANY" : "VALIDATED_ONLY");
+
+        // The catalog gained a kernel after the record was measured.
+        const auto narrowRecord
+            = validatedOver({&first, &second}, {entryFor(first, 1.0), entryFor(second, 2.0)});
+        EXPECT_FALSE(orderIfFullyCovered(narrowRecord, {&first, &second, &third}, policy));
+
+        // A pack was replaced: the id survives, the triple does not.
+        EXPECT_FALSE(orderIfFullyCovered(narrowRecord, {&first, &movedSecond}, policy));
+
+        // A knob-narrowed run measured a wider catalog than the one now asking; the entries
+        // cover it, but the digest says the classification was over something else.
+        const auto wideRecord = validatedOver({&first, &second, &third},
+                                              {entryFor(first, 1.0), entryFor(second, 2.0)});
+        EXPECT_FALSE(orderIfFullyCovered(wideRecord, {&first, &second}, policy));
+    }
+}
+
+TEST(TestIngestorWinnerCache, AValidatedRecordWhoseEntryMatchesNoCatalogKernelIsDeclined)
+{
+    const auto first = definitionFor(0x01);
+    const auto second = definitionFor(0x02);
+    const auto stranger = definitionFor(0x09);
+    const auto stalePack = definitionFor(0x02, 0xB2);
+    const std::vector<const KernelDefinition*> kernels{&first, &second};
+
+    for(const auto policy : POLICIES)
+    {
+        SCOPED_TRACE(policy == RecordPolicy::ANY ? "ANY" : "VALIDATED_ONLY");
+
+        // The digest agrees with the catalog, yet an entry names a kernel the catalog lacks.
+        const auto foreign = validatedOver(
+            kernels, {entryFor(stranger, 0.5), entryFor(first, 1.0), entryFor(second, 2.0)});
+        EXPECT_FALSE(orderIfFullyCovered(foreign, kernels, policy));
+
+        // An entry's id matches but its pack is not the catalog's.
+        const auto stale = validatedOver(kernels, {entryFor(first, 1.0), entryFor(stalePack, 2.0)});
+        EXPECT_FALSE(orderIfFullyCovered(stale, kernels, policy));
+    }
+}
+
+// An old binary ignores the unknown `validated` key and applies the legacy rule to the
+// entries, which omit the failed kernel; that rule then sees a partial record.
+TEST(TestIngestorWinnerCache, AnOldReaderThatIgnoresTheMarkerDoesNotCoverACatalogWithAFailedKernel)
+{
+    const auto first = definitionFor(0x01);
+    const auto second = definitionFor(0x02);
+    const auto failed = definitionFor(0x03);
+    const std::vector<const KernelDefinition*> kernels{&first, &second, &failed};
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    const auto record = validatedOver(kernels, {entryFor(second, 1.0), entryFor(first, 2.0)});
+
+    auto line = encodedLine(key, record);
+    ASSERT_TRUE(line.contains("validated"));
+    line.erase("validated");
+    const auto oldReaderView = decodeWinnerRecordLine(line.dump());
+
+    ASSERT_TRUE(oldReaderView.has_value());
+    EXPECT_FALSE(oldReaderView->second.validated.has_value());
+    EXPECT_FALSE(recordCovers(oldReaderView->second, kernels));
+    EXPECT_FALSE(orderIfFullyCovered(oldReaderView->second, kernels, RecordPolicy::ANY).has_value())
+        << "an old reader must re-benchmark rather than serve the failed kernel";
+}
+
+TEST(TestIngestorWinnerCacheStateManager,
+     AValidatedRecordCoveringTheDigestIsServedInEntryOrderWithoutTheFailedKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto reference = makeStateManager();
+    const auto catalog = reference->sortedDefinitions(context);
+    ASSERT_EQ(catalog.size(), 2U) << "the fixture engine must offer one kernel to fail";
+
+    // catalog.back() failed validation: it is in the digest but not in the entries.
+    const auto record = validatedOver(catalog, {entryFor(*catalog.front(), 1.0)});
+
+    for(const auto policy : POLICIES)
+    {
+        SCOPED_TRACE(policy == RecordPolicy::ANY ? "ANY" : "VALIDATED_ONLY");
+        const auto manager = makeStateManager();
+        manager->recordWinner(key, record, WinnerWriteCause::FRESH_MISS);
+
+        const auto served = manager->sortedCatalog(context, policy);
+
+        ASSERT_NE(served.measuredRecord, nullptr);
+        EXPECT_EQ(idsOf(served.entries), (std::vector<DescriptorId>{catalog.front()->kernelId}))
+            << "the failed kernel must not appear in the served catalog";
+    }
+}
+
+TEST(TestIngestorWinnerCacheStateManager, ALegacyRecordIsAMissUnderValidatedOnlyAndServedUnderAny)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF2));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto reference = makeStateManager();
+    const auto heuristic = reference->sortedDefinitions(context);
+    ASSERT_EQ(heuristic.size(), 2U);
+    const WinnerRecord legacy{{entryFor(*heuristic.back(), 1.0), entryFor(*heuristic.front(), 2.0)},
+                              std::nullopt};
+
+    const auto underAnyManager = makeStateManager();
+    underAnyManager->recordWinner(key, legacy, WinnerWriteCause::FRESH_MISS);
+    const auto underAny = underAnyManager->sortedCatalog(context, RecordPolicy::ANY);
+    EXPECT_NE(underAny.measuredRecord, nullptr);
+    EXPECT_EQ(idsOf(underAny.entries),
+              (std::vector<DescriptorId>{heuristic.back()->kernelId, heuristic.front()->kernelId}));
+
+    const auto underValidatedManager = makeStateManager();
+    underValidatedManager->recordWinner(key, legacy, WinnerWriteCause::FRESH_MISS);
+    const auto underValidated
+        = underValidatedManager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY);
+    EXPECT_EQ(underValidated.measuredRecord, nullptr);
+    EXPECT_EQ(idsOf(underValidated.entries), idsOf(heuristic))
+        << "a legacy record under VALIDATED_ONLY must leave the record-free heuristic order";
+}
+
+TEST(TestIngestorWinnerCacheStateManager, ALegacyAdoptedCatalogDoesNotPoisonAValidatedOnlyLookup)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF3));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto manager = makeStateManager();
+
+    const auto heuristic = manager->sortedDefinitions(context);
+    ASSERT_EQ(heuristic.size(), 2U);
+    const std::vector<DescriptorId> measured{heuristic.back()->kernelId,
+                                             heuristic.front()->kernelId};
+    manager->recordWinner(
+        key,
+        WinnerRecord{{entryFor(*heuristic.back(), 1.0), entryFor(*heuristic.front(), 2.0)},
+                     std::nullopt},
+        WinnerWriteCause::FRESH_MISS);
+
+    // An ANY lookup adopts the legacy record and caches the catalog in measured order.
+    ASSERT_EQ(idsOf(manager->sortedCatalog(context, RecordPolicy::ANY).entries), measured);
+
+    const auto validatedOnly = manager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY);
+    EXPECT_EQ(idsOf(validatedOnly.entries), idsOf(heuristic))
+        << "the cached legacy order must not leak";
+    EXPECT_EQ(validatedOnly.measuredRecord, nullptr);
+    EXPECT_EQ(manager->measuredCatalog(context, RecordPolicy::VALIDATED_ONLY).measuredRecord,
+              nullptr);
+
+    EXPECT_EQ(idsOf(manager->sortedCatalog(context, RecordPolicy::ANY).entries), measured)
+        << "a VALIDATED_ONLY lookup must not discard the cached measured order";
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AValidatedOnlyLookupDoesNotHideALegacyOrderFromALaterAny)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF4));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto manager = makeStateManager();
+
+    const auto heuristic = manager->sortedDefinitions(context);
+    ASSERT_EQ(heuristic.size(), 2U);
+    manager->recordWinner(
+        key,
+        WinnerRecord{{entryFor(*heuristic.back(), 1.0), entryFor(*heuristic.front(), 2.0)},
+                     std::nullopt},
+        WinnerWriteCause::FRESH_MISS);
+
+    EXPECT_EQ(idsOf(manager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY).entries),
+              idsOf(heuristic));
+    EXPECT_EQ(idsOf(manager->sortedCatalog(context, RecordPolicy::ANY).entries),
+              (std::vector<DescriptorId>{heuristic.back()->kernelId, heuristic.front()->kernelId}));
+}
+
+TEST(TestIngestorWinnerCacheStateManager,
+     AValidatedRecordWrittenAfterALegacyAdoptionIsServedUnderValidatedOnly)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0xF5));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
+    const auto manager = makeStateManager();
+
+    const auto heuristic = manager->sortedDefinitions(context);
+    ASSERT_EQ(heuristic.size(), 2U);
+    manager->recordWinner(
+        key,
+        WinnerRecord{{entryFor(*heuristic.back(), 1.0), entryFor(*heuristic.front(), 2.0)},
+                     std::nullopt},
+        WinnerWriteCause::FRESH_MISS);
+    ASSERT_NE(manager->sortedCatalog(context, RecordPolicy::ANY).measuredRecord, nullptr);
+
+    // The re-measurement under validation: heuristic.back() failed, front() passed.
+    manager->recordWinner(key,
+                          validatedOver(heuristic, {entryFor(*heuristic.front(), 1.0)}),
+                          WinnerWriteCause::COVERAGE_REBENCHMARK);
+
+    const auto served = manager->sortedCatalog(context, RecordPolicy::VALIDATED_ONLY);
+    ASSERT_NE(served.measuredRecord, nullptr);
+    EXPECT_EQ(idsOf(served.entries), (std::vector<DescriptorId>{heuristic.front()->kernelId}));
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AValidatedFreshMissAppendsOverALegacyDiskLine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("validated_over_legacy");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    auto validated = recordFor(0x22, 1.0);
+    validated.validated = 0xab;
+
+    const auto manager = makeNamedStateManager("test:ValidatedOverLegacy");
+    manager->recordWinner(key, recordFor(0x21, 1.0), WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key, validated, WinnerWriteCause::FRESH_MISS);
+
+    const auto lines
+        = shardLines(winnerCacheShardPath({"test:ValidatedOverLegacy"}, properties.gcnArchName));
+    ASSERT_EQ(lines.size(), 3U) << "version line, the legacy line, and the superseding "
+                                   "validated line";
+    EXPECT_NE(lines.back().find("\"validated\""), std::string::npos);
+    const auto served = manager->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    EXPECT_EQ(served->validated, std::optional<CatalogDigest>{0xab});
+}
+
+TEST(TestIngestorWinnerCacheStateManager, EveryOtherFreshMissStillAdoptsTheDiskLine)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    auto validated = recordFor(0x32, 1.0);
+    validated.validated = 0xab;
+    auto otherValidated = recordFor(0x33, 1.0);
+    otherValidated.validated = 0xcd;
+    const auto legacy = recordFor(0x31, 1.0);
+
+    struct Case
+    {
+        const char* engine;
+        WinnerRecord first;
+        WinnerRecord second;
+    };
+    const std::array cases{Case{"test:AdoptLegacyOverLegacy", legacy, recordFor(0x34, 2.0)},
+                           Case{"test:AdoptLegacyOverValidated", validated, legacy},
+                           Case{"test:AdoptValidatedOverValidated", validated, otherValidated}};
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.engine);
+        const ScopedCacheDir cacheDir(std::string("adopt_") + (c.engine + 5));
+        const auto manager = makeNamedStateManager(c.engine);
+        manager->recordWinner(key, c.first, WinnerWriteCause::FRESH_MISS);
+        manager->recordWinner(key, c.second, WinnerWriteCause::FRESH_MISS);
+
+        EXPECT_EQ(shardLines(winnerCacheShardPath({c.engine}, properties.gcnArchName)).size(), 2U)
+            << "version line plus the one adopted record line";
+        const auto served = manager->winnerFor(key);
+        ASSERT_TRUE(served.has_value());
+        EXPECT_EQ(served->validated, c.first.validated);
+    }
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AValidatedCoverageRebenchmarkAlwaysAppends)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("validated_rebenchmark");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    auto validated = recordFor(0x42, 1.0);
+    validated.validated = 0xab;
+
+    const auto manager = makeNamedStateManager("test:ValidatedRebenchmark");
+    manager->recordWinner(key, validated, WinnerWriteCause::FRESH_MISS);
+    manager->recordWinner(key, validated, WinnerWriteCause::COVERAGE_REBENCHMARK);
+
+    EXPECT_EQ(
+        shardLines(winnerCacheShardPath({"test:ValidatedRebenchmark"}, properties.gcnArchName))
+            .size(),
+        3U);
+}
+
+TEST(TestIngestorWinnerCacheStateManager, AValidatedRecordSurvivesALaterShardReload)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("validated_reload");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    auto validated = recordFor(0x52, 1.0);
+    validated.validated = 0xb9668265a337c8f7ULL;
+
+    {
+        const auto writer = makeNamedStateManager("test:ValidatedReload");
+        writer->recordWinner(key, recordFor(0x51, 1.0), WinnerWriteCause::FRESH_MISS);
+        writer->recordWinner(key, validated, WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto reader = makeNamedStateManager("test:ValidatedReload");
+    const auto served = reader->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    EXPECT_EQ(served->validated, validated.validated);
+    ASSERT_EQ(served->entries.size(), 1U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x52));
+
+    const auto lines
+        = shardLines(winnerCacheShardPath({"test:ValidatedReload"}, properties.gcnArchName));
+    ASSERT_EQ(lines.size(), 3U);
+    const auto legacyLine = nlohmann::json::parse(lines[1]);
+    const auto validatedLine = nlohmann::json::parse(lines[2]);
+    EXPECT_EQ(validatedLine["v"], 2);
+    EXPECT_EQ(validatedLine["graph"], legacyLine["graph"]) << "the key must not change";
+    EXPECT_EQ(validatedLine["device"], legacyLine["device"]) << "the key must not change";
 }
 
 /// The pair below is driven by ctest, not gtest: the writer runs in one process, exits,
@@ -1715,7 +2348,7 @@ TEST(TestIngestorWinnerCacheStateManager, AColdManagerOrdersACatalogFromTheShard
         double timeMs = 1.0;
         for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
         {
-            record.push_back(entryFor(**kernel, timeMs));
+            record.entries.push_back(entryFor(**kernel, timeMs));
             reversedIds.push_back((*kernel)->kernelId);
             timeMs += 1.0;
         }
@@ -1777,9 +2410,9 @@ TEST(TestIngestorWinnerCacheCrossProcess, DISABLED_ReaderServesTheRecordTheWrite
 
     ASSERT_TRUE(served.has_value())
         << "a record written by a separate process was not served in this one";
-    ASSERT_EQ(served->size(), 1U);
-    EXPECT_EQ(served->front().kernelId, testId(0x51));
-    EXPECT_DOUBLE_EQ(served->front().timeMs, 4.25);
+    ASSERT_EQ(served->entries.size(), 1U);
+    EXPECT_EQ(served->entries.front().kernelId, testId(0x51));
+    EXPECT_DOUBLE_EQ(served->entries.front().timeMs, 4.25);
 }
 
 } // namespace

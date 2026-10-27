@@ -2118,6 +2118,17 @@ private:
         }
         setActivePlanState(winnerPlanIndex, detail::ActivePlanFinalization::FINALIZED);
 
+        // --- Run the winner last ---
+        // The timed sweep leaves the last timed plan's output in the caller's buffers.
+        // Executing the winner after the sweep (and after any stalled restart) makes those
+        // buffers hold the winner's output on success.
+        auto winnerExecErr = detail::executeWithPlan(
+            handle, *_compiledPlans[winnerPlanIndex].executionPlanDesc, variantPackDesc);
+        if(winnerExecErr.is_bad())
+        {
+            return winnerExecErr;
+        }
+
         // --- Persist results ---
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         if(!storageConfig.filePath.empty())
@@ -3892,6 +3903,11 @@ public:
      * Ranks plans by performance and sets the winner as the active plan.
      * Optionally persists results to a JSON config file.
      *
+     * The winner executes last, after every timed pass, so on success the caller's output
+     * buffers hold the winner's output. A failure of that final run is returned as the
+     * error of this call; the winner then stays the active plan, no results are persisted,
+     * and @c results is not filled.
+     *
      * Requires build_operation_graph() and at least one add_engine_*() call
      * or a prior build_plans(BuildPlanPolicy::ALL) call.
      *
@@ -3974,6 +3990,9 @@ public:
      * Filters plans whose compiled workspace exceeds @c workspaceSize
      * before benchmarking. Filtered plans appear in @c results (if requested)
      * with succeeded=false and an explanatory errorMessage.
+     *
+     * As with the overload above, the winner executes last, so on success the caller's
+     * output buffers hold the winner's output; a failure of that final run is returned.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4114,6 +4133,9 @@ public:
      * graph, so recording them keeps a permanently broken engine from making later
      * lookups reject the entry. A cache-write failure is logged and does not fail this
      * call.
+     *
+     * The winner executes last, so on success the caller's output buffers hold the
+     * winner's output. A failure of that final run is returned, and nothing is cached.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers

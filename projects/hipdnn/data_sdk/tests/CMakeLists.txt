@@ -32,6 +32,7 @@ add_executable(
     utilities/TestAllocators.cpp
     utilities/TestCacheRoot.cpp
     utilities/TestEngineNames.cpp
+    utilities/TestEnvBool.cpp
     utilities/TestFloats.cpp
     utilities/TestLineStore.cpp
     utilities/TestMigratableMemory.cpp

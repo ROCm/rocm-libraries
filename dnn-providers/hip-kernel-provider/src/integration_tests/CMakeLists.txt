@@ -183,6 +183,67 @@ if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
         "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
 endif()
 
+# The validation binary: output validation of benchmark candidates against the
+# validation_fixture descriptor set, whose engine carries a deliberately wrong kernel. It is
+# a binary of its own because the descriptor catalog is discovered once per process, and
+# this one must see only that set: the integration binary would meet the wrong kernel in
+# every case that resolves an engine, and this binary would not meet the shipped ones.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_executable(
+        hip_kernel_provider_validation_tests
+        validation/main.cpp
+        validation/IntegrationValidateBenchmarking.cpp
+    )
+
+    target_compile_options(hip_kernel_provider_validation_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
+    # The plugin is loaded from the build tree by the path relative to the test binary, as
+    # for the integration binary.
+    target_compile_definitions(
+        hip_kernel_provider_validation_tests
+        PRIVATE
+            PLUGIN_PATH="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/hip_kernel_provider"
+            # The offset from the binary to the staged validation_fixture set, which main()
+            # applies when the environment names no set. Like the integration binary's, it
+            # holds in the install tree too, and carries no machine-specific path.
+            HIPKERNELPROVIDER_TEST_SET_VALIDATION_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_VALIDATION_FIXTURE}"
+    )
+
+    target_include_directories(hip_kernel_provider_validation_tests PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/../../include
+        # The shared descriptor-root resolver lives with the unit tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests
+    )
+
+    target_link_libraries(
+        hip_kernel_provider_validation_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+    )
+
+    add_dependencies(hip_kernel_provider_validation_tests hip_kernel_provider)
+    if(TARGET hkp_packaging_validation_fixture)
+        add_dependencies(hip_kernel_provider_validation_tests hkp_packaging_validation_fixture)
+    endif()
+
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_validation_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_VALIDATION_FIXTURE_BUILD_DIR}
+        PACK_NAMES validation_fixture
+    )
+
+    clang_tidy_check(hip_kernel_provider_validation_tests)
+
+    # Registered like hip_kernel_provider_integration_tests, so ENVIRONMENT is forwarded to
+    # add_integration_test_target() for the same reason (see the comment above that call),
+    # and the merged environment is published to the parent scope for the tiered suites
+    # created in ../CMakeLists.txt.
+    add_integration_test_target(hip_kernel_provider_validation_tests ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS slow)
+    if(DEFINED hip_kernel_provider_validation_tests_TEST_ENVIRONMENT)
+        set(hip_kernel_provider_validation_tests_TEST_ENVIRONMENT
+            "${hip_kernel_provider_validation_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+    endif()
+endif()
+
 # Register the cross-provider ASM SDPA gpu-reference integration test target. In
 # standalone provider builds the harness may not already be in scope, so try to
 # import it first.

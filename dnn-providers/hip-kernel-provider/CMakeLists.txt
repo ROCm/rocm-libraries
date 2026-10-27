@@ -326,7 +326,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Two test descriptor roots, one per test binary. The unit root holds two packed
     # subtrees and the integration root holds three. A sixth packed subtree, the unit
     # binary's copy of archive_fixture, stages beside the two roots and not inside the unit
-    # root, so the unit engine does not discover it. All six are wired in
+    # root, so the unit engine does not discover it. A seventh, the validation binary's
+    # validation_fixture, stages beside them in the same way. All seven are wired in
     # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
@@ -426,6 +427,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR "unit_archive_fixture")
     set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
+
+    # The validation binary's own descriptor set: one engine whose catalog holds a
+    # deliberately wrong kernel. It stages beside the two roots and not inside either, so
+    # neither the unit nor the integration engine discovers the wrong kernel, and the
+    # validation binary discovers nothing else.
+    set(HIPKERNELPROVIDER_TEST_SET_VALIDATION_FIXTURE "validation_fixture")
+    set(HIPKERNELPROVIDER_VALIDATION_FIXTURE_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_VALIDATION_FIXTURE}")
 
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR

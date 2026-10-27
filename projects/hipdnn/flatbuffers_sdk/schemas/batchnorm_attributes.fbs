@@ -1,8 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -15,9 +16,9 @@ table BatchnormAttributes {
     prev_running_mean_tensor_uid: long = null (cache_uid);
     prev_running_variance_tensor_uid: long = null (cache_uid);
     momentum_tensor_uid: long = null (cache_uid);
-    y_tensor_uid: long (cache_uid);
-    mean_tensor_uid: long = null (cache_uid);
-    inv_variance_tensor_uid: long = null (cache_uid);
-    next_running_mean_tensor_uid: long = null (cache_uid);
-    next_running_variance_tensor_uid: long = null (cache_uid);
+    y_tensor_uid: long (cache_uid, output_tensor);
+    mean_tensor_uid: long = null (cache_uid, output_tensor);
+    inv_variance_tensor_uid: long = null (cache_uid, output_tensor);
+    next_running_mean_tensor_uid: long = null (cache_uid, output_tensor);
+    next_running_variance_tensor_uid: long = null (cache_uid, output_tensor);
 }

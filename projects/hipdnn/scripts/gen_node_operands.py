@@ -4,7 +4,7 @@
 """Generate node_operands_generated.h, a per-node-type operand visitor, from graph.fbs.
 
 What a field is comes from the compiled schema's ``cache_uid`` and
-``work_data_dependent`` annotations, never from its name. Run manually, from the
+``work_data_dependent`` and ``output_tensor`` annotations, never from its name. Run manually, from the
 flatbuffers_sdk build target, or via the ``node-operands-hipdnn`` pre-commit hook.
 """
 
@@ -28,6 +28,10 @@ from gen_cache_key import (
 # On a `cache_uid` field: the referenced tensor's contents decide how much work the
 # node does. Meaningless on anything that is not a tensor reference.
 WORK_ATTRIBUTE = "work_data_dependent"
+
+# On a `cache_uid` field: the node writes the referenced tensor. Meaningless on anything
+# that is not a tensor reference, and never reported for the tensor table.
+OUTPUT_ATTRIBUTE = "output_tensor"
 
 SCHEMA_FILE = "graph.fbs"
 ROOT_TABLE = "hipdnn_flatbuffers_sdk.data_objects.Graph"
@@ -55,12 +59,13 @@ class Operand:
     SCALAR = "scalar"
     ELEMENTS = "elements"
 
-    def __init__(self, kind, field, name, cpp_type=None, work=False):
+    def __init__(self, kind, field, name, cpp_type=None, work=False, output=False):
         self.kind = kind
         self.field = field
         self.name = name
         self.cpp_type = cpp_type
         self.work = work
+        self.output = output
 
     @property
     def accessor(self):
@@ -93,6 +98,7 @@ class OperandsEmitter:
             member["name"]: self.operands_of(member) for _, member in self.members
         }
         self._validate_work_annotations()
+        self._validate_output_annotations()
 
     @staticmethod
     def has_attribute(field, key):
@@ -163,7 +169,14 @@ class OperandsEmitter:
         name = field["name"]
         where = f"'{owner}.{name}'"
         work = self.has_attribute(field, WORK_ATTRIBUTE)
+        output = self.has_attribute(field, OUTPUT_ATTRIBUTE)
 
+        if output and work:
+            raise SystemExit(
+                f"ERROR: {OUTPUT_ATTRIBUTE} and {WORK_ATTRIBUTE} on {where} are "
+                "mutually exclusive: a written tensor's prior contents cannot decide "
+                "the work"
+            )
         if self.has_attribute(field, UID_ATTRIBUTE):
             integer = (
                 ftype.get("element") if base == "Vector" else base
@@ -173,7 +186,14 @@ class OperandsEmitter:
                     f"ERROR: {UID_ATTRIBUTE} on {where} requires an integer scalar or a "
                     "vector of integers"
                 )
-            return Operand(Operand.TENSOR, field, self.role(name), work=work)
+            return Operand(
+                Operand.TENSOR, field, self.role(name), work=work, output=output
+            )
+        if output:
+            raise SystemExit(
+                f"ERROR: {OUTPUT_ATTRIBUTE} on {where} requires a {UID_ATTRIBUTE} "
+                "tensor reference; only a tensor can be written"
+            )
         if work:
             raise SystemExit(
                 f"ERROR: {WORK_ATTRIBUTE} on {where} requires a {UID_ATTRIBUTE} tensor "
@@ -231,6 +251,25 @@ class OperandsEmitter:
                         "data-dependent"
                     )
 
+    def _validate_output_annotations(self):
+        """Reject `output_tensor` where `forEachOutputTensor` would never report it."""
+        reported = {member["name"] for _, member in self.members}
+        for obj in self.schema["objects"]:
+            for field in self.fields_of(obj):
+                if not self.has_attribute(field, OUTPUT_ATTRIBUTE):
+                    continue
+                where = f"'{short_name(obj['name'])}.{field['name']}'"
+                if obj["name"] not in reported:
+                    raise SystemExit(
+                        f"ERROR: {OUTPUT_ATTRIBUTE} on {where} is never reported: only "
+                        f"'{short_name(self.union['name'])}' members are visited"
+                    )
+                if not self.has_attribute(field, UID_ATTRIBUTE):
+                    raise SystemExit(
+                        f"ERROR: {OUTPUT_ATTRIBUTE} on {where} requires a {UID_ATTRIBUTE} "
+                        "tensor reference; only a tensor can be written"
+                    )
+
     def emit(self):
         lines = []
         w = lines.append
@@ -240,7 +279,10 @@ class OperandsEmitter:
         self.emit_tensor_predicate(w)
         for _, member in self.members:
             self.emit_member(w, member)
+        for _, member in self.members:
+            self.emit_output_member(w, member)
         self.emit_entry(w)
+        self.emit_output_entry(w)
         w(f"}} // namespace {namespace}")
         return "\n".join(lines) + "\n"
 
@@ -281,6 +323,17 @@ class OperandsEmitter:
         w(
             "//     for every element of a numeric vector attribute (e.g. conv 'stride')."
         )
+        w("//")
+        w(
+            "// forEachOutputTensor(node, fn) calls fn(std::string_view role, int64_t uid) for"
+        )
+        w(
+            f"// every '{OUTPUT_ATTRIBUTE}' field present (a tensor the node writes), with the"
+        )
+        w(
+            "// role and uid rules of visitor.tensor and in schema declaration order. visit()"
+        )
+        w("// is unchanged and reports every tensor, written or read.")
         w("//")
         w(
             "// Strings, nested tables and structs, unions and byte vectors (opaque payloads)"
@@ -395,34 +448,51 @@ class OperandsEmitter:
         w("")
 
     @staticmethod
+    def emit_tensor_call(w, operand, call):
+        """One tensor operand; @p call(role, uid) renders the call that reports it."""
+        get = f"op.{operand.accessor}()"
+        name = f'std::string_view("{operand.name}")'
+        if operand.vector:
+            w(f"    if(const auto* uids = {get})")
+            w("    {")
+            w("        for(uint32_t index = 0; index < uids->size(); ++index)")
+            w("        {")
+            w(f'            const detail::IndexedRole role("{operand.name}", index);')
+            uid = "static_cast<int64_t>(uids->Get(index))"
+            w(f"            {call('role.view()', uid)};")
+            w("        }")
+            w("    }")
+        elif operand.optional:
+            w(f"    if(const auto uid = {get}; uid.has_value())")
+            w("    {")
+            w(f"        {call(name, 'static_cast<int64_t>(*uid)')};")
+            w("    }")
+        else:
+            w(f"    {call(name, f'static_cast<int64_t>({get})')};")
+
+    def emit_output_member(self, w, member):
+        short = short_name(member["name"])
+        outputs = [o for o in self.operands[member["name"]] if o.output]
+        w("template <typename F>")
+        if outputs:
+            w(f"void forEachOutputTensor(const {short}& op, F& fn)")
+        else:
+            w(f"void forEachOutputTensor(const {short}&, F&)")
+        w("{")
+        for operand in outputs:
+            self.emit_tensor_call(w, operand, lambda role, uid: f"fn({role}, {uid})")
+        w("}")
+        w("")
+
+    @staticmethod
     def emit_operand(w, operand):
         get = f"op.{operand.accessor}()"
         name = f'std::string_view("{operand.name}")'
         if operand.kind == Operand.TENSOR:
             work = "true" if operand.work else "false"
-            if operand.vector:
-                w(f"    if(const auto* uids = {get})")
-                w("    {")
-                w("        for(uint32_t index = 0; index < uids->size(); ++index)")
-                w("        {")
-                w(
-                    f'            const detail::IndexedRole role("{operand.name}", index);'
-                )
-                w(
-                    "            visitor.tensor(role.view(), "
-                    f"static_cast<int64_t>(uids->Get(index)), {work});"
-                )
-                w("        }")
-                w("    }")
-            elif operand.optional:
-                w(f"    if(const auto uid = {get}; uid.has_value())")
-                w("    {")
-                w(
-                    f"        visitor.tensor({name}, static_cast<int64_t>(*uid), {work});"
-                )
-                w("    }")
-            else:
-                w(f"    visitor.tensor({name}, static_cast<int64_t>({get}), {work});")
+            OperandsEmitter.emit_tensor_call(
+                w, operand, lambda role, uid: f"visitor.tensor({role}, {uid}, {work})"
+            )
         elif operand.kind == Operand.SCALAR:
             if operand.optional:
                 w(f"    if(const auto value = {get}; value.has_value())")
@@ -447,6 +517,46 @@ class OperandsEmitter:
             )
             w("        }")
             w("    }")
+
+    def emit_output_entry(self, w):
+        union = short_name(self.union["name"])
+        node = short_name(self.node_name)
+        last = max(self.union["values"], key=lambda value: value["value"])["name"]
+        w(
+            f"/// Reports the tensors @p node writes ('{OUTPUT_ATTRIBUTE}' fields). Returns false,"
+        )
+        w(
+            "/// calling nothing, when the node has no attributes or a type this header predates."
+        )
+        w("template <typename F>")
+        w(f"bool forEachOutputTensor(const {node}& node, F&& fn)")
+        w("{")
+        w(
+            f"    // Fails when {union} gains a member this header has no case for: rerun"
+        )
+        w("    // scripts/gen_node_operands.py.")
+        w(f"    static_assert({union}::MAX == {union}::{last},")
+        w(
+            f'                  "{HEADER_NAME} is stale: rerun scripts/gen_node_operands.py");'
+        )
+        w(f"    switch(node.{self.union_field}_type())")
+        w("    {")
+        for tag, _ in self.members:
+            w(f"    case {union}::{tag}:")
+            w(
+                f"        if(const auto* op = node.{self.union_field}_as_{tag}(); "
+                "op != nullptr)"
+            )
+            w("        {")
+            w("            forEachOutputTensor(*op, fn);")
+            w("            return true;")
+            w("        }")
+            w("        return false;")
+        w("    default:")
+        w("        return false;")
+        w("    }")
+        w("}")
+        w("")
 
     def emit_entry(self, w):
         union = short_name(self.union["name"])

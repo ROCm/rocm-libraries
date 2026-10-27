@@ -1,8 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -11,7 +12,7 @@ table RMSNormBackwardAttributes {
     x_tensor_uid: long (cache_uid);
     scale_tensor_uid: long (cache_uid);
     inv_rms_tensor_uid: long (cache_uid);
-    dx_tensor_uid: long (cache_uid);
-    dscale_tensor_uid: long (cache_uid);
-    dbias_tensor_uid: long = null (cache_uid);
+    dx_tensor_uid: long (cache_uid, output_tensor);
+    dscale_tensor_uid: long (cache_uid, output_tensor);
+    dbias_tensor_uid: long = null (cache_uid, output_tensor);
 }

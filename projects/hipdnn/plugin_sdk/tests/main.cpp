@@ -19,6 +19,11 @@ int main(int argc, char** argv)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter forceBenchmarkingGuard(
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
 
+    // Same reasoning for HIPDNN_VALIDATE_BENCHMARKING: an inherited value would switch
+    // winner validation on for every plan the tests build.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter validateBenchmarkingGuard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME);
+
     // Initialize test logging infrastructure to forward logs to std::cerr based
     // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
     // NOTE: Logs are not routed to the backend as this is an SDK unit test harness.

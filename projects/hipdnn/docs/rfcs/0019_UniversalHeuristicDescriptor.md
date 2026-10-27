@@ -1613,6 +1613,10 @@ tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, 
   `token_index` — is not annotated. A node with an annotated operand present publishes
   `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
   it, so a misplaced one cannot compile and silently mark nothing.
+- **Written tensors come from a schema annotation too.** A `(cache_uid)` field annotated `output_tensor`
+  references a tensor the node writes, and the generated `forEachOutputTensor` reports it. The kernel
+  ingestor's benchmark validation reads it to find the buffers to check; a field left unannotated is not
+  checked. Like `work_data_dependent`, it changes neither the cache key nor the published features.
 
 ### 6.8 The Work Model
 
@@ -2205,7 +2209,12 @@ The engine's `KernelIngestorStateManager` holds an LRU catalog cache
 the engine's UED revision, and the ranking metric. The ranked order is stored with the catalog
 (`Catalog::isSorted` in `Catalog.hpp`). The persistent cache stores benchmarked winners, under
 `<cacheRoot>/ingestor-winners/<data SDK version>/<engine>/<UHD id>/<engine revision>-<model hash>/<arch>/winners.jsonl`
-(`WinnerCacheFile.hpp`). Not yet built: a persistent cache of model rankings.
+(`WinnerCacheFile.hpp`). A record measured with `HIPDNN_VALIDATE_BENCHMARKING` on carries a
+`validated` marker, the digest of the whole classified catalog, and lists only the kernels that passed
+validation; a kernel that failed is never recorded. The digest covers the failed kernels, so a validated
+record is served when its digest equals the applicable catalog's digest, even though its entries name
+only the passing kernels. A record without the marker is not served while the mode is on, and the graph
+benchmarks again and appends a validated record that supersedes it. Not yet built: a persistent cache of model rankings.
 
 - **Load on demand, and never before applicability.** Descriptor discovery parses each UHD's JSON with
   the rest of its descriptor set; it builds no model and evaluates nothing. Two rules govern loading

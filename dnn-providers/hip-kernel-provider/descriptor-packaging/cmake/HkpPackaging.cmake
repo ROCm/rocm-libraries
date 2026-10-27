@@ -1670,7 +1670,7 @@ function(hkp_add_packaging)
     _hkp_resolve_production_root(_source_root)
 
     # One list for every root, so "every root is wired to rocKE identically" holds in
-    # both modes rather than at six sites that have to agree.
+    # both modes rather than at seven sites that have to agree.
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         _hkp_resolve_rocke_args(_rocke_resolved_args _rocke_comgr_lib)
         set(_root_args ENABLE_ROCKE ON ${_rocke_resolved_args})
@@ -1697,6 +1697,7 @@ function(hkp_add_packaging)
     # Test descriptors, one pack per authored set. The shared root is packed into both
     # test roots, so both test binaries see the same authored descriptors; the two need
     # distinct NAMEs. The archive_fixture set is also packed twice, once for each binary.
+    # The validation_fixture set is packed once, for the validation binary.
     set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
@@ -1763,6 +1764,19 @@ function(hkp_add_packaging)
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The validation binary's set. It stages outside both roots so that neither the unit
+    # nor the integration engine discovers its deliberately wrong kernel, and it packs for
+    # every arch the other test sets pack for.
+    _hkp_wire_root(
+        NAME validation_fixture
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_VALIDATION_FIXTURE}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_VALIDATION_FIXTURE_BUILD_DIR}"
         PACK_JOBS 1
         ${_root_args})
 

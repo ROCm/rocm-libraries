@@ -184,6 +184,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     set(DNN_PROVIDER_TEST_RUN_DEPENDS hip_kernel_provider_tests hip_kernel_provider_integration_tests)
+    # Exists only in an ingestor build; the check target builds it before ctest runs its suites.
+    if(TARGET hip_kernel_provider_validation_tests)
+        list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS hip_kernel_provider_validation_tests)
+    endif()
     if(TARGET hipdnn_integration_tests)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS hip_kernel_provider hipdnn_integration_tests)
     endif()
@@ -208,7 +212,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 # Tests are defined with relative paths to work in the installed location.
 ]=]
         )
-        # The GTest YAML applies to both test binaries; each call appends its category suites
+        # The GTest YAML applies to all three test binaries; each call appends its category suites
         # (e.g. hip_kernel_provider_tests_quick_suite, hip_kernel_provider_integration_tests_quick_suite)
         # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
         # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
@@ -237,6 +241,21 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
+        # The validation binary exists only in an ingestor build, while categorization is on
+        # whenever the YAMLs exist and apply_test_category_labels() does not check that its
+        # target exists: an unguarded call would register tier suites for a binary that is
+        # not built. The YAML excludes *DISABLED*, which holds the timing-dependent
+        # DISABLED_TheWrongKernelWinsWhenValidationIsOff out of every tier.
+        if(TARGET hip_kernel_provider_validation_tests)
+            apply_test_category_labels(
+                hip_kernel_provider_validation_tests
+                "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+                "${PROJECT_BINARY_DIR}/staging"
+                "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                ENVIRONMENT ${hip_kernel_provider_validation_tests_TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            )
+        endif()
     endif()
 
     set(_external_category_args "")

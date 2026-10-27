@@ -57,6 +57,13 @@ attribute "cache_uid_key";
 // dropout seed) is not data-dependent.
 attribute "work_data_dependent";
 
+// On a `cache_uid` field: the node WRITES the referenced tensor. The annotation is per
+// schema field, so one tensor role can be an output in one node schema and an input in
+// another (batchnorm `mean` is an output of BatchnormAttributes and an input of the
+// inference and backward schemas). Reported by `forEachOutputTensor`
+// (node_operands_generated.h). Has no effect on the cache key or on flatc's output.
+attribute "output_tensor";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 union NodeAttributes {

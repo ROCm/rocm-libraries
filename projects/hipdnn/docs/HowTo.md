@@ -156,6 +156,11 @@ shape, decide how much work the node does (valid lengths, page tables, routing o
 `node-operands-hipdnn` pre-commit hook regenerates the header. See
 [Operand Features](./AddingNewOperations.md#operand-features).
 
+Annotate a `(cache_uid)` field `output_tensor` when the node writes that tensor. With
+`HIPDNN_VALIDATE_BENCHMARKING` on, the kernel ingestor checks each benchmarked kernel's output
+before it can enter the winner cache, and it finds those outputs through this annotation. See
+[Output tensors](./AddingNewOperations.md#output-tensors).
+
 ### Environment Variables and Logging
 
 Runtime behavior (plugin search paths, logging, heuristics, caching, and benchmarking) is controlled with environment variables. See [Environment Configuration](./Environment.md) for the full list.

@@ -6,8 +6,7 @@
 #include <optional>
 #include <string>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/EnvBool.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -19,37 +18,39 @@ static constexpr const char* WORKSPACE_SIZE_LIMIT_KNOB_NAME = "global.workspace_
 /// Not gated on HIPDNN_ENABLE_KERNEL_INGESTOR: MIOpen consumes it in flag-off builds too.
 static constexpr const char* FORCE_BENCHMARKING_ENV_NAME = "HIPDNN_FORCE_BENCHMARKING";
 
-/// Reads and parses HIPDNN_FORCE_BENCHMARKING per call, never cached. Normalizes with
-/// toLower(trim(...)) and matches a literal set, following
-/// hipdnn_data_sdk::logging::detail::stringToSeverity(). Unset, empty, whitespace-only,
-/// or any unrecognized value returns std::nullopt.
+/// Reads and parses HIPDNN_FORCE_BENCHMARKING per call, never cached, with the token ladder
+/// of hipdnn_data_sdk::utilities::parseBoolToken(). Unset, empty, whitespace-only, or any
+/// unrecognized value returns std::nullopt.
 ///
 /// Unset and empty are indistinguishable -- getEnv() yields "" for both -- and are
 /// silent. Any other value that fails to parse logs a WARN naming the variable and the
 /// value.
 inline std::optional<bool> benchmarkingOverrideFromEnv()
 {
-    const auto raw = hipdnn_data_sdk::utilities::getEnv(FORCE_BENCHMARKING_ENV_NAME);
-    const std::string normalized
-        = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(raw));
+    const auto parsed = hipdnn_data_sdk::utilities::readBoolEnv(FORCE_BENCHMARKING_ENV_NAME);
+    if(parsed.unrecognized)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("ignoring unrecognized value for " << FORCE_BENCHMARKING_ENV_NAME
+                                                                  << ": '" << parsed.raw << "'");
+    }
+    return parsed.value;
+}
 
-    if(raw.empty())
-    {
-        return std::nullopt;
-    }
-    if(normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes"
-       || normalized == "enable" || normalized == "enabled")
-    {
-        return true;
-    }
-    if(normalized == "0" || normalized == "false" || normalized == "off" || normalized == "no"
-       || normalized == "disable" || normalized == "disabled")
-    {
-        return false;
-    }
+/// Opt-in switch for validating each benchmark candidate's output before a winner is
+/// accepted. Not gated on HIPDNN_ENABLE_KERNEL_INGESTOR, like the override above.
+static constexpr const char* VALIDATE_BENCHMARKING_ENV_NAME = "HIPDNN_VALIDATE_BENCHMARKING";
 
-    HIPDNN_PLUGIN_LOG_WARN("ignoring unrecognized value for " << FORCE_BENCHMARKING_ENV_NAME
-                                                              << ": '" << raw << "'");
-    return std::nullopt;
+/// Reads HIPDNN_VALIDATE_BENCHMARKING per call, never cached, with the token ladder of
+/// hipdnn_data_sdk::utilities::parseBoolToken(). Unset and empty return false silently; an
+/// unrecognized value logs a WARN naming the variable and the value and returns false.
+inline bool validateBenchmarkingFromEnv()
+{
+    const auto parsed = hipdnn_data_sdk::utilities::readBoolEnv(VALIDATE_BENCHMARKING_ENV_NAME);
+    if(parsed.unrecognized)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("ignoring unrecognized value for " << VALIDATE_BENCHMARKING_ENV_NAME
+                                                                  << ": '" << parsed.raw << "'");
+    }
+    return parsed.value.value_or(false);
 }
 }

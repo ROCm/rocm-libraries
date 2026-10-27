@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "4e4c4e83-b1fa-45db-8b27-4ccb1bd6b762",
+  "name": "validation pointwise dispatch",
+  "dispatch_symbol": "hipkernel.pointwise.dispatch"
+}

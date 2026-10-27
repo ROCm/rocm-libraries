@@ -18,6 +18,11 @@ def work(entry):
     return entry
 
 
+def output(entry):
+    entry["attributes"].append({"key": "output_tensor"})
+    return entry
+
+
 def node_schema(members, tensor_fields=None):
     """A root with a `Tensor` domain, a `Node` holding an `Attrs` union of @p members.
 
@@ -196,6 +201,103 @@ class TestTensorOperands(unittest.TestCase):
         self.assertIn("inline bool workDataDependent(const Tensor&)", header)
 
 
+def output_body(header, member):
+    """The emitted forEachOutputTensor body for @p member."""
+    match = re.search(
+        rf"void forEachOutputTensor\(const {member}&[^)]*\)\n\{{\n(.*?)\n\}}\n",
+        header,
+        re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"no output visitor emitted for {member}")
+    return match.group(1)
+
+
+class TestOutputOperands(unittest.TestCase):
+    def test_only_output_tensor_fields_are_reported(self):
+        header = emit(
+            [
+                (
+                    "Op",
+                    [
+                        field("x_tensor_uid", "Long", 0, uid=True),
+                        output(field("y_tensor_uid", "Long", 1, uid=True)),
+                        field("n", "Long", 2),
+                    ],
+                )
+            ]
+        )
+        visitor = output_body(header, "Op")
+        self.assertIn('fn(std::string_view("y"), ', visitor)
+        self.assertNotIn('"x"', visitor)
+        self.assertNotIn('"n"', visitor)
+
+    def test_outputs_are_reported_in_declaration_order(self):
+        header = emit(
+            [
+                (
+                    "Op",
+                    [
+                        output(field("b_tensor_uid", "Long", 0, uid=True)),
+                        output(field("a_tensor_uid", "Long", 1, uid=True)),
+                    ],
+                )
+            ]
+        )
+        visitor = output_body(header, "Op")
+        self.assertLess(visitor.index('"b"'), visitor.index('"a"'))
+
+    def test_an_optional_output_is_skipped_when_absent(self):
+        header = emit(
+            [
+                (
+                    "Op",
+                    [output(field("s_tensor_uid", "Long", 0, uid=True, optional=True))],
+                )
+            ]
+        )
+        self.assertIn("uid.has_value()", output_body(header, "Op"))
+
+    def test_an_output_uid_vector_reports_one_indexed_role_per_element(self):
+        header = emit(
+            [
+                (
+                    "Custom",
+                    [
+                        output(
+                            field(
+                                "output_tensor_uids",
+                                "Vector",
+                                0,
+                                element="Long",
+                                uid=True,
+                            )
+                        )
+                    ],
+                )
+            ]
+        )
+        visitor = output_body(header, "Custom")
+        self.assertIn('detail::IndexedRole role("output", index);', visitor)
+        self.assertIn("fn(role.view(), ", visitor)
+
+    def test_a_member_without_outputs_reports_none(self):
+        header = emit([("Op", [field("x_tensor_uid", "Long", 0, uid=True)])])
+        self.assertNotIn("fn(", output_body(header, "Op"))
+
+    def test_the_entry_point_guards_against_a_stale_header(self):
+        header = emit([("Op", [output(field("y_tensor_uid", "Long", 0, uid=True))])])
+        self.assertIn("bool forEachOutputTensor(const Node& node, F&& fn)", header)
+        self.assertEqual(header.count("static_assert(Attrs::MAX == Attrs::Op,"), 2)
+
+    def test_the_visitor_signature_is_unchanged_by_an_output_annotation(self):
+        header = emit([("Op", [output(field("y_tensor_uid", "Long", 0, uid=True))])])
+        self.assertRegex(
+            body(header, "Op"),
+            r'visitor\.tensor\(std::string_view\("y"\), [^;]*, false\);',
+        )
+
+
 class TestAttributeOperands(unittest.TestCase):
     def setUp(self):
         self.visitor = body(
@@ -289,6 +391,30 @@ class TestRejectedSchemas(unittest.TestCase):
     def test_a_vector_without_an_element_rule_is_rejected(self):
         with self.assertRaises(SystemExit):
             emit([("Op", [field("flags", "Vector", 0, element="Bool")])])
+
+    def test_output_tensor_requires_a_tensor_reference(self):
+        with self.assertRaises(SystemExit):
+            emit([("Op", [output(field("size", "Long", 0))])])
+
+    def test_output_tensor_on_the_tensor_table_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            emit(
+                [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])],
+                tensor_fields=[output(field("ragged_tensor_uid", "Long", 1, uid=True))],
+            )
+
+    def test_output_tensor_outside_the_node_union_is_rejected(self):
+        members = [("Op", [field("x_tensor_uid", "Long", 0, uid=True)])]
+        document = node_schema(members)
+        document["objects"].append(
+            table(f"{NS}.Other", [output(field("y_tensor_uid", "Long", 0, uid=True))])
+        )
+        with self.assertRaises(SystemExit):
+            OperandsEmitter(document, f"{NS}.Root", f"{NS}.Node")
+
+    def test_output_tensor_together_with_work_data_dependent_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            emit([("Op", [output(work(field("y_tensor_uid", "Long", 0, uid=True)))])])
 
 
 if __name__ == "__main__":

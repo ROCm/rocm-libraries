@@ -10,6 +10,7 @@ This document describes the environment variables and runtime configuration opti
   - [Kernel Ingestor Descriptors](#kernel-ingestor-descriptors)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
+    - [HIPDNN_VALIDATE_BENCHMARKING](#hipdnn_validate_benchmarking)
   - [Engine Applicability Threading](#engine-applicability-threading)
   - [Caching](#caching)
   - [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)
@@ -288,7 +289,52 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - For MIOpen convolution, forcing benchmarking on makes plans without `global.workspace_size_limit` use the maximum workspace MIOpen reports, which can be far larger than the default.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
-- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that. `Graph::autotune()` also runs its winner last, after every timed pass, so on success the buffers you passed hold the winner's output.
+- `HIPDNN_VALIDATE_BENCHMARKING` (below) adds an output check to the same sampling.
+
+#### HIPDNN_VALIDATE_BENCHMARKING
+
+An opt-in, process-wide switch that makes benchmarking check every candidate kernel's output before that candidate may win. Without it, benchmarking ranks candidates by time alone, so a fast kernel that writes wrong values, or writes nothing, can be selected and cached. It applies to the generic kernel ingestor engine; MIOpen's own benchmarking does not consult it.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Off. Benchmarking ranks by time alone (the default)    |
+| `1`, `true`, `on`, `yes`, `enable`, `enabled` | Validate candidate outputs during benchmarking |
+| `0`, `false`, `off`, `no`, `disable`, `disabled` | Off |
+
+Values are case-insensitive and tolerant of surrounding whitespace, with the same token set as `HIPDNN_FORCE_BENCHMARKING`. The variable is read on every plan build, never cached, so a change takes effect without a restart. A value not in the table counts as off and logs a warning naming the variable and the value. The empty string is indistinguishable from unset and is silently off.
+
+The variable does nothing by itself. It takes effect only when a kernel ingestor benchmarking comparison runs: a plan built with `global.benchmarking=1`, a plain `hipdnnExecute()` with `HIPDNN_FORCE_BENCHMARKING=1`, or the priming plans of `Graph::autotune()` in EXHAUSTIVE mode. With benchmarking off it is a no-op: no extra launches, allocations, or copies.
+
+**Example:**
+```bash
+# Benchmark, and refuse to let a kernel with a wrong or missing output win
+export HIPDNN_FORCE_BENCHMARKING=1
+export HIPDNN_VALIDATE_BENCHMARKING=1
+```
+
+**Validation rules:**
+- Before each candidate runs, hipDNN fills every output buffer the graph's nodes write with a NaN pattern per data type: `0xFF` bytes for float, double, half, bfloat16 and FP8 E4M3, E5M2 and E8M0, and `0x80` for FP8 E4M3 FNUZ and E5M2 FNUZ, whose only NaN is `0x80`. After the candidate's warmup run, the outputs are copied to the host. A candidate whose output with a NaN encoding still holds the fill in every byte never wrote it ("untouched"); it joins no cohort and cannot win.
+- Candidates that wrote their outputs are grouped into cohorts by agreement with the cohort's first candidate, element by element, within a per-dtype relative tolerance: `1e-12` for double, `1e-5` for float, `2e-2` for half, `6e-2` for bfloat16, plus an absolute term of one ulp at the output's own magnitude. A NaN or infinity agrees with the same kind at the same position. Integer and boolean outputs must be equal.
+- A cohort holding more than half of the candidates that wrote their outputs passes (strict majority). With no strict majority, the cohort containing the best heuristic-ranked such candidate (the lowest candidate index) passes. Every other candidate is excluded from the winner election, and a warning names it and the first disagreement.
+- A single candidate that wrote its outputs passes as "unverified": there is nothing to compare it with. Untouched candidates still fail.
+- A candidate whose timing is unusable still votes, because its output was captured before timing. Timing decides only which passing candidate wins. When candidates pass but none has a usable time, the lowest-index passing candidate is served, an error is logged, and nothing is recorded.
+- When no candidate passes, benchmarking serves the heuristic's first candidate, logs an error, and records nothing.
+- Limits by data type. Integer and boolean outputs are compared exactly, and have no untouched rule because they have no NaN pattern. FP8 outputs get only the untouched check; their values are not compared. FP4, FP6 and INT4 outputs get neither check. A warning names every output that skips a check.
+- Validation is skipped for the whole comparison, with a warning, when the graph has no output tensors it can check, when an output has a null device pointer, or when an output shares memory with an input (the fill would destroy that input). The comparison then ranks by time alone, as with the mode off, and the result is recorded as validated.
+- Output tensors are identified through the `output_tensor` attribute on the node schema fields that name them (see [Adding a New Operation](./AddingNewOperations.md#output-tensors)). A node type that marks none has its outputs skipped.
+
+**Notes:**
+- Validation writes to the buffers you passed in, before and during sampling. A graph that reads its output before writing it (for example a beta-accumulate operation), or whose output is also an input held in the same buffer, is out of scope: the fill destroys the accumulated contents, and the aliasing case is skipped as above.
+- The agreement tolerance compares candidates with each other at run time. It is a different thing from the tolerance an offline test uses to compare a kernel against a reference implementation, and the two are not meant to match.
+- A legitimate output that is entirely NaN is indistinguishable from an untouched one. Every candidate then fails, the no-pass fallback applies, and nothing is recorded, so that graph benchmarks again in every process with the mode on.
+- Sampling still executes each candidate against your buffers; the winner still runs last.
+
+**Winner cache:**
+- A result measured with validation on is stored as a validated record: it lists only the passing kernels, with their times, and carries a digest of the whole applicable catalog. A kernel that failed validation is never recorded, in process or on disk. The digest, not the list, stands for coverage: a validated record is served when its digest equals the digest of the catalog applicable to the graph and every listed kernel still resolves, so the excluded kernels count as classified rather than unmeasured and are not benchmarked again.
+- A cache hit never validates. With the mode on, only a validated record is served. A record written without validation (by an earlier hipDNN build or by a run with the mode off) is not served: the graph benchmarks again, with validation, and the validated record is appended to the shard and supersedes it. The shard grows by one line per supersession.
+- With the mode off, the validated mark is ignored, and a validated record is served like any other covering record.
+- A binary that predates this variable reads a validated line as an ordinary record. Because the line lists only the passing kernels, that binary finds it does not cover the catalog and benchmarks again instead of serving an excluded kernel.
 
 ### Engine Applicability Threading
 
@@ -354,7 +400,7 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`. The engine directory name is a filesystem-safe form of the engine name. The architecture name is used as is, so `gfx942` appears as `gfx942`.
 - Deleting the cache root at any time is safe on Linux and Windows. hipDNN recreates it on the next write, and a run in progress keeps working.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
-- The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
+- The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked. A record measured without validation is superseded by an appended line when `HIPDNN_VALIDATE_BENCHMARKING` is on; see [HIPDNN_VALIDATE_BENCHMARKING](#hipdnn_validate_benchmarking).
 - A lookup in the ingestor winner cache can create a file. A read miss still leaves an empty shard file, stamped with the version, behind. A lookup in the autotune ranking cache creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
 
 #### HIPDNN_DISABLE_CACHE

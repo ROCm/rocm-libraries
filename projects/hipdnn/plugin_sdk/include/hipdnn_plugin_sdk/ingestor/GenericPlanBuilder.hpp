@@ -34,9 +34,11 @@
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BenchmarkValidation.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/OutputSpecs.hpp>
 #include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
@@ -91,6 +93,9 @@ struct IngestorSettings
 {
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
+    /// Whether a benchmark sweep checks each candidate's output before it may win; read from
+    /// HIPDNN_VALIDATE_BENCHMARKING and meaningful only while `benchmarkingEnabled`.
+    bool validateBenchmarking = false;
     std::optional<int64_t> workspaceLimit;
 };
 
@@ -117,15 +122,18 @@ public:
     /// References (@p engine, @p deviceResolver) are owned by the engine, which
     /// outlives its builder. @p timer overrides BenchmarkPlan's default HIP-event
     /// timer; tests inject a deterministic one so the real write-back factory below is
-    /// exercised without a device.
+    /// exercised without a device. @p validationHooks are the device operations a validating
+    /// sweep uses; the default touches HIP only when invoked.
     GenericPlanBuilder(const EngineDescriptor& engine,
                        const KernelIngestorStateManager<THandle>& stateManager,
                        const IDeviceResolver<THandle>& deviceResolver,
-                       typename BenchmarkPlan<THandle>::Timer timer = {})
+                       typename BenchmarkPlan<THandle>::Timer timer = {},
+                       BenchmarkValidationHooks validationHooks = hipValidationHooks())
         : _engine(engine)
         , _stateManager(stateManager)
         , _deviceResolver(deviceResolver)
         , _timer(std::move(timer))
+        , _validationHooks(std::move(validationHooks))
     {
     }
 
@@ -346,6 +354,7 @@ public:
         settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
         settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
+        settings.validateBenchmarking = validateBenchmarkingFromEnv();
     }
 
     /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
@@ -359,7 +368,12 @@ public:
         const auto context
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
-        const auto catalog = _stateManager.sortedCatalog(context);
+        // Only a validating sweep may trust a record, and only a validated one: a record from a
+        // sweep that checked nothing could rank a wrong kernel first.
+        const auto policy = settings.benchmarkingEnabled && settings.validateBenchmarking
+                                ? RecordPolicy::VALIDATED_ONLY
+                                : RecordPolicy::ANY;
+        const auto catalog = _stateManager.sortedCatalog(context, policy);
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
@@ -388,12 +402,12 @@ public:
 
                     // The record is the catalog's own snapshot, so this holds even after the
                     // winner cache evicts its copy.
-                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                           << _engine.name << "' served kernel "
-                                           << toString(filtered[rank]->kernelId) << " at rank "
-                                           << rank << " from a benchmarked record of "
-                                           << catalog.measuredRecord->size() << " entry(s) for "
-                                           << filtered.size() << " candidate(s)");
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' served kernel " << toString(filtered[rank]->kernelId)
+                        << " at rank " << rank << " from a benchmarked record of "
+                        << catalog.measuredRecord->entries.size() << " entry(s) for "
+                        << filtered.size() << " candidate(s)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -445,8 +459,11 @@ public:
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: engine '"
                 << _engine.name << "' has a benchmarked record that does not fully cover its "
-                << catalog.entries.size() << " applicable kernel(s); re-benchmarking "
-                << filtered.size() << " candidate(s)");
+                << catalog.entries.size() << " applicable kernel(s)"
+                << (policy == RecordPolicy::VALIDATED_ONLY && !record->validated.has_value()
+                        ? " (unvalidated record)"
+                        : "")
+                << "; re-benchmarking " << filtered.size() << " candidate(s)");
         }
 
         if(!settings.benchmarkingEnabled)
@@ -569,15 +586,31 @@ public:
                                ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                : WinnerWriteCause::FRESH_MISS;
 
+        // Validation replaces the ranking callback with one that receives the validated record.
+        std::optional<BenchmarkValidation> validation;
+        if(settings.validateBenchmarking)
+        {
+            auto specs = outputSpecsFor(opGraph);
+            validation = BenchmarkValidation{
+                std::move(specs.outputs),
+                std::move(specs.inputUids),
+                _validationHooks,
+                [&stateManager = _stateManager, winnerKey = *winnerKey, cause](
+                    WinnerRecord validated) {
+                    stateManager.recordWinner(winnerKey, validated, cause);
+                }};
+        }
+
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
             [&stateManager = _stateManager, winnerKey = std::move(*winnerKey), cause](
                 const std::vector<RankedEntry>& ranking) {
-                stateManager.recordWinner(winnerKey, ranking, cause);
+                stateManager.recordWinner(winnerKey, WinnerRecord{ranking, std::nullopt}, cause);
             },
             std::move(benchmarkId),
-            std::move(deviceId)));
+            std::move(deviceId),
+            std::move(validation)));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -1023,7 +1056,7 @@ private:
 
         std::vector<ScoredKernel> ranking;
         ranking.reserve(filtered.size());
-        for(const auto& entry : record)
+        for(const auto& entry : record.entries)
         {
             const bool admitted = std::any_of(
                 filtered.begin(), filtered.end(), [&entry](const KernelDefinition* kernel) {
@@ -1129,14 +1162,16 @@ private:
                           const THandle& handle,
                           typename BenchmarkPlan<THandle>::RecordRankingFn recordRanking,
                           std::string benchmarkId,
-                          std::string deviceId) const
+                          std::string deviceId,
+                          std::optional<BenchmarkValidation> validation) const
     {
         return std::make_unique<BenchmarkPlan<THandle>>(std::move(candidates),
                                                         handle,
                                                         _timer,
                                                         std::move(recordRanking),
                                                         std::move(benchmarkId),
-                                                        std::move(deviceId));
+                                                        std::move(deviceId),
+                                                        std::move(validation));
     }
 
     /// An arch-independent pack (empty `arch` list, itself legal) passes `archSupports`
@@ -1298,6 +1333,7 @@ private:
     const KernelIngestorStateManager<THandle>& _stateManager;
     const IDeviceResolver<THandle>& _deviceResolver;
     typename BenchmarkPlan<THandle>::Timer _timer;
+    BenchmarkValidationHooks _validationHooks;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

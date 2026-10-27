@@ -431,7 +431,8 @@ public:
     ///
     /// A benchmarked record covering the whole catalog supplies a measured order and
     /// `rank()` is never called; otherwise the heuristic orders it.
-    Catalog sortedCatalog(const MatchContext& context) const
+    Catalog sortedCatalog(const MatchContext& context,
+                          RecordPolicy policy = RecordPolicy::ANY) const
     {
         // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
         // and device ordinal, not arch, so without this an unresolved-arch context would
@@ -443,7 +444,7 @@ public:
         }
 
         const auto key = cacheKey(context);
-        Catalog catalog = measuredCatalogFor(context, key);
+        Catalog catalog = measuredCatalogFor(context, key, policy);
         if(catalog.isSorted)
         {
             return catalog;
@@ -451,7 +452,17 @@ public:
 
         catalog.entries = _heuristic->rank(catalog, context);
         catalog.isSorted = true;
-        if(key.has_value())
+        // A catalog cached in a legacy record's order is kept for `ANY` callers; the
+        // heuristic order computed for this refusing lookup must not replace it.
+        const bool keepsCachedMeasuredOrder
+            = key.has_value() && policy == RecordPolicy::VALIDATED_ONLY
+              && _catalogCache
+                     .visit(*key,
+                            [policy](const Catalog& cached) {
+                                return measuredOrderRefused(cached, policy);
+                            })
+                     .value_or(false);
+        if(key.has_value() && !keepsCachedMeasuredOrder)
         {
             // put, not putIfAbsent: sorted is strictly better than whatever is cached.
             _catalogCache.put(*key, catalog);
@@ -465,7 +476,8 @@ public:
     /// Shared by plan build and configuration prediction so they agree that measurement
     /// outranks estimate (RFC 0019 §5 step 9). An adopted record is cached with its order, so
     /// later callers do not depend on the winner cache still holding it.
-    Catalog measuredCatalog(const MatchContext& context) const
+    Catalog measuredCatalog(const MatchContext& context,
+                            RecordPolicy policy = RecordPolicy::ANY) const
     {
         // Same guard as sortedCatalog: an unresolved device must not cache under a key a
         // later, resolved call for this device reuses.
@@ -473,7 +485,7 @@ public:
         {
             return catalogFor(context);
         }
-        return measuredCatalogFor(context, cacheKey(context));
+        return measuredCatalogFor(context, cacheKey(context), policy);
     }
 
     /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
@@ -492,7 +504,7 @@ public:
     void
         recordWinner(const WinnerKey& key, const WinnerRecord& record, WinnerWriteCause cause) const
     {
-        if(record.empty())
+        if(record.entries.empty())
         {
             // An all-unusable sweep has nothing to record; an empty record would read
             // as a covered hit for the empty candidate set.
@@ -649,7 +661,8 @@ private:
     /// each other either.
     bool adoptCoveringRecord(Catalog& catalog,
                              const MatchContext& context,
-                             const std::optional<CatalogKey>& catalogKey) const
+                             const std::optional<CatalogKey>& catalogKey,
+                             RecordPolicy policy) const
     {
         const auto& entries = catalog.entries;
         // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
@@ -668,7 +681,7 @@ private:
             return false;
         }
 
-        auto ordered = orderIfFullyCovered(*record, entries);
+        auto ordered = orderIfFullyCovered(*record, entries, policy);
         if(!ordered.has_value())
         {
             return false;
@@ -684,12 +697,26 @@ private:
 
     /// measuredCatalog() for a caller that already built @p key from @p context.
     Catalog measuredCatalogFor(const MatchContext& context,
-                               const std::optional<CatalogKey>& key) const
+                               const std::optional<CatalogKey>& key,
+                               RecordPolicy policy) const
     {
         Catalog catalog = catalogFor(context, key);
+        if(measuredOrderRefused(catalog, policy))
+        {
+            // An earlier `ANY` lookup cached this catalog in a legacy record's order. That
+            // entry stays for `ANY` callers; this lookup starts from the unordered catalog
+            // and may only adopt a record `policy` accepts.
+            Catalog unordered = buildCatalog(context);
+            if(adoptCoveringRecord(unordered, context, key, policy) && key.has_value())
+            {
+                // put, not putIfAbsent: a validated order replaces the legacy one.
+                _catalogCache.put(*key, unordered);
+            }
+            return unordered;
+        }
         // A heuristic order is provisional (a sweep can postdate it), so look up a record
         // even when already sorted. An unresolved device's empty catalog is never covered.
-        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context, key))
+        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context, key, policy))
         {
             if(key.has_value())
             {
@@ -698,6 +725,13 @@ private:
             }
         }
         return catalog;
+    }
+
+    /// Whether @p catalog is ordered by a record @p policy would not have served.
+    static bool measuredOrderRefused(const Catalog& catalog, RecordPolicy policy)
+    {
+        return policy == RecordPolicy::VALIDATED_ONLY && catalog.measuredRecord != nullptr
+               && !catalog.measuredRecord->validated.has_value();
     }
 
     /// One memoized full-catalog calibrated ranking, with the id of the model that produced it.
@@ -1428,7 +1462,8 @@ private:
     /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
     /// @p cause's rule, as one critical section under the shard's own lock (mirrors
     /// `LineStoreLockHelper.cpp`). A fresh miss adopts any existing on-disk record for
-    /// @p key as-is and appends nothing; a coverage-triggered re-benchmark always appends
+    /// @p key as-is and appends nothing, unless @p record is validated and the existing last
+    /// line is legacy, which it appends over; a coverage-triggered re-benchmark always appends
     /// @p record, superseding the old entry under the reader's last-line-wins merge. The
     /// file lock is used rather than `_winnerCacheMutex`, because the racing writer may
     /// be another process.
@@ -1493,12 +1528,18 @@ private:
             }
         }
 
-        if(onDiskWinner != nullptr && cause == WinnerWriteCause::FRESH_MISS)
+        // A validated record supersedes a legacy last line even on a fresh miss: the legacy
+        // line serves only `ANY` readers, so adopting it would leave the validated
+        // measurement unrecorded and the key re-benchmarking on every validated run.
+        const bool supersedesLegacy = record.validated.has_value() && onDiskWinner != nullptr
+                                      && !onDiskWinner->validated.has_value();
+        if(onDiskWinner != nullptr && cause == WinnerWriteCause::FRESH_MISS && !supersedesLegacy)
         {
             // Presence, not equality. Two writers racing the same fresh key measure the same
             // candidates and rank them the same way up to noise, so comparing rankings let both
             // append and the shard kept two lines for one graph. A re-benchmark forced by a record
-            // that no longer covers the candidate set is the only writer that supersedes.
+            // that no longer covers the candidate set, or a validated record over a legacy line,
+            // are the only writers that supersede.
             hipdnn_data_sdk::utilities::unlockLineStore(*shard);
             return *onDiskWinner;
         }

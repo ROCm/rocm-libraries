@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "4c739ef0-658c-43a8-af77-e6fcd870dbaf",
+  "name": "hipkernel:validation_pointwise",
+  "graph_match": {
+    "native": "hipkernel.pointwise.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "cc2a9ef5-6211-4c97-a29d-7c146fee3a91"
+  },
+  "metadata": "3b1954e0-233a-4e50-b516-9196ca619c5b",
+  "knobs": [
+    "block_size"
+  ]
+}

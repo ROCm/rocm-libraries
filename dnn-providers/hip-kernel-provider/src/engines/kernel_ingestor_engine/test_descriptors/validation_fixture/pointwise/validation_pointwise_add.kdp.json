@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "017e8ceb-dc4b-4f1b-ab22-65fe8455923e",
+  "name": "hipkernel:validation_pointwise_add",
+  "arch": [],
+  "matchers": [
+    "6a243dfc-d7e4-48de-849d-735c1b5c77b1",
+    "ee7f8043-b19a-4ce1-bee0-9b05b9908f1d"
+  ],
+  "engine": "4c739ef0-658c-43a8-af77-e6fcd870dbaf",
+  "dispatch": "4e4c4e83-b1fa-45db-8b27-4ccb1bd6b762",
+  "kernelDescriptors": [
+    "b66cd1b0-efc9-4341-a8a6-e5e296f5ae76",
+    "b8fc38ea-fc66-4802-94cc-85ad90450cf8",
+    "a3a1df80-9fbd-442c-af8d-c809d41330bd"
+  ]
+}

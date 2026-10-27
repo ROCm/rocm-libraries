@@ -5,6 +5,7 @@ include "data_types.fbs";
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
@@ -27,7 +28,7 @@ table SdpaAttributes {
     v_tensor_uid:             long (cache_uid);
 
     // Required output tensor UID
-    o_tensor_uid:             long (cache_uid);
+    o_tensor_uid:             long (cache_uid, output_tensor);
 
     // Optional input tensor UIDs
     // Not work_data_dependent: the bias is added to every score whatever its values, so
@@ -60,14 +61,14 @@ table SdpaAttributes {
     scale_o_tensor_uid:       long = null (cache_uid);
 
     // Optional output tensor UIDs
-    stats_tensor_uid:         long = null (cache_uid);
-    max_tensor_uid:           long = null (cache_uid);  // Logit max (Max)
-    sum_exp_tensor_uid:       long = null (cache_uid);  // Score sum exp (Sum_exp)
-    rng_dump_tensor_uid:      long = null (cache_uid);  // RNG dump for dropout debugging
+    stats_tensor_uid:         long = null (cache_uid, output_tensor);
+    max_tensor_uid:           long = null (cache_uid, output_tensor);  // Logit max (Max)
+    sum_exp_tensor_uid:       long = null (cache_uid, output_tensor);  // Score sum exp (Sum_exp)
+    rng_dump_tensor_uid:      long = null (cache_uid, output_tensor);  // RNG dump for dropout debugging
 
     // FP8-specific output tensor UIDs
-    amax_s_tensor_uid:        long = null (cache_uid);  // Absolute max for attention scores
-    amax_o_tensor_uid:        long = null (cache_uid);  // Absolute max for output tensor
+    amax_s_tensor_uid:        long = null (cache_uid, output_tensor);  // Absolute max for attention scores
+    amax_o_tensor_uid:        long = null (cache_uid, output_tensor);  // Absolute max for output tensor
 
     // Boolean flags
     generate_stats:           bool = null;

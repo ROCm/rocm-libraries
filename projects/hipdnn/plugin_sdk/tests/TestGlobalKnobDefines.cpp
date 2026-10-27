@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 /**
@@ -143,6 +144,7 @@ TEST(TestGlobalKnobDefines, KnobAndEnvironmentNamesAreStable)
     EXPECT_STREQ(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "global.benchmarking");
     EXPECT_STREQ(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, "global.workspace_size_limit");
     EXPECT_STREQ(hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "HIPDNN_FORCE_BENCHMARKING");
+    EXPECT_STREQ(hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "HIPDNN_VALIDATE_BENCHMARKING");
 }
 
 /// An unset variable is the default path every non-benchmarking run takes.
@@ -163,6 +165,68 @@ TEST(TestGlobalKnobDefines, TheOverrideIsReReadOnEveryCall)
 
     guard.setValue("0");
     EXPECT_EQ(hipdnn_plugin_sdk::benchmarkingOverrideFromEnv(), std::optional<bool>(false));
+}
+
+/// Unset is the default path every run without the opt-in takes.
+TEST(TestGlobalKnobDefines, UnsetValidationSwitchIsOff)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME);
+
+    EXPECT_FALSE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv());
+}
+
+TEST(TestGlobalKnobDefines, ValidationSwitchFollowsTheSharedTokenLadder)
+{
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "1");
+
+    for(const char* token : {"1", "true", "ON", " Yes ", "enable", "Enabled"})
+    {
+        guard.setValue(token);
+        EXPECT_TRUE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv()) << token;
+    }
+    for(const char* token : {"0", "false", "OFF", " No ", "disable", "Disabled", ""})
+    {
+        guard.setValue(token);
+        EXPECT_FALSE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv()) << "'" << token << "'";
+    }
+}
+
+/// Read per call, never cached, so a value set after the first read still takes effect.
+TEST(TestGlobalKnobDefines, TheValidationSwitchIsReReadOnEveryCall)
+{
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "on");
+    ASSERT_TRUE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv());
+
+    guard.setValue("off");
+    EXPECT_FALSE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv());
+}
+
+/// A typo must not silently enable validation, and it must not be silent either.
+TEST(TestGlobalKnobDefines, AnUnrecognizedValidationValueWarnsAndIsOff)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "sometimes");
+
+    EXPECT_FALSE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "HIPDNN_VALIDATE_BENCHMARKING"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "sometimes"));
+}
+
+/// Unset and empty are silent; only a non-empty unrecognized value warns.
+TEST(TestGlobalKnobDefines, AnEmptyValidationValueDoesNotWarn)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME, "");
+
+    EXPECT_FALSE(hipdnn_plugin_sdk::validateBenchmarkingFromEnv());
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "HIPDNN_VALIDATE_BENCHMARKING"));
 }
 
 } // namespace

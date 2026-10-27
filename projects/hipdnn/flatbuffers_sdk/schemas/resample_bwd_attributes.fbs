@@ -3,15 +3,16 @@
 
 include "resample_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 table ResampleBwdAttributes {
     // Input/Output tensor UIDs
     dy_tensor_uid: long (cache_uid);         // Gradient of output tensor
-    dx_tensor_uid: long (cache_uid);         // Gradient of input tensor (result)
+    dx_tensor_uid: long (cache_uid, output_tensor);         // Gradient of input tensor (result)
     index_tensor_uid: long = null (cache_uid); // Optional index tensor (from forward max resample)
 
     // Resample parameters (N-dimensional support)

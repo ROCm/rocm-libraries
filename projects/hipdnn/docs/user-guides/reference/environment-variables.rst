@@ -148,6 +148,11 @@ A comma-separated list of engine names or IDs, as printed by ``hipdnn_list_engin
 
 Overrides the ``global.benchmarking`` knob for the whole process. ``1``, ``true``, ``on``, ``yes``, ``enable``, and ``enabled`` turn benchmarking on. Recognized false values turn it off. Unrecognized values log a warning and are ignored.
 
+``HIPDNN_VALIDATE_BENCHMARKING``
+--------------------------------
+
+Makes kernel ingestor benchmarking check each candidate's output before the candidate may win. A candidate that leaves its output unwritten, or whose output disagrees with the passing cohort of candidates that wrote theirs, cannot win and is never recorded in the winner cache. ``1``, ``true``, ``on``, ``yes``, ``enable``, and ``enabled`` turn validation on. Recognized false values and an unset variable leave it off. Unrecognized values log a warning and count as off. The variable is read on every plan build and has no effect while benchmarking is off. It is off by default.
+
 ``HIPDNN_CACHE_DIR``
 --------------------
 

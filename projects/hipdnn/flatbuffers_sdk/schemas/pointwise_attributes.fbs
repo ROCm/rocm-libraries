@@ -3,8 +3,9 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -69,7 +70,7 @@ table PointwiseAttributes {
     in_0_tensor_uid: long (cache_uid);
     in_1_tensor_uid: long = null (cache_uid);
     in_2_tensor_uid: long = null (cache_uid);
-    out_0_tensor_uid: long (cache_uid);
+    out_0_tensor_uid: long (cache_uid, output_tensor);
     swish_beta: float = null;
     elu_alpha: float = null;
     softplus_beta: float = null;

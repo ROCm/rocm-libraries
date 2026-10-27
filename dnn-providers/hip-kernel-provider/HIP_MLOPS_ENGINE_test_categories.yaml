@@ -4,8 +4,9 @@
 # hip-kernel-provider Test Categories Configuration
 # Aligned with Test Filter Standardization (RFC0010).
 #
-# hip-kernel-provider has two GTest binaries (hip_kernel_provider_tests and
-# hip_kernel_provider_integration_tests) that share this YAML. CI can invoke the
+# hip-kernel-provider has three GTest binaries (hip_kernel_provider_tests,
+# hip_kernel_provider_integration_tests and hip_kernel_provider_validation_tests)
+# that share this YAML. CI can invoke the
 # generated CTest file without a label filter, so each enabled category becomes
 # a separate binary execution. Because the tiers are cumulative (see below),
 # invoking multiple tiers in one run re-executes the lower-tier tests; select a
@@ -26,8 +27,12 @@
 # GTest prefix, so all four tiers below run the same coverage until a suite
 # adopts one of those prefixes (matching miopen-provider's convention).
 #
-# These categories apply to hip_kernel_provider_tests and
-# hip_kernel_provider_integration_tests. The external hipdnn_integration_tests
+# These categories apply to hip_kernel_provider_tests,
+# hip_kernel_provider_integration_tests and hip_kernel_provider_validation_tests.
+# Every tier excludes *DISABLED*, which keeps the timing-dependent
+# DISABLED_TheWrongKernelWinsWhenValidationIsOff case of the validation binary out
+# of CI; it runs only with --gtest_also_run_disabled_tests. The external
+# hipdnn_integration_tests
 # suite (run against HIP_MLOPS_ENGINE) uses
 # HIP_MLOPS_ENGINE_test_categories_integration.yaml because it has different
 # GTest naming conventions.

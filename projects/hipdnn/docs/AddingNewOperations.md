@@ -14,6 +14,7 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 - [cuDNN Parity Rules](#cudnn-parity-rules)
 - [Cache-Key Annotations](#cache-key-annotations)
 - [Operand Features](#operand-features)
+  - [Output tensors](#output-tensors)
 - [Work Model (FLOPs)](#work-model-flops)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
@@ -100,7 +101,7 @@ Copy-paste this into your PR description.
 - [ ] Schema added to the `_hipdnn_flatbuffers_sdk_schemas` list in `flatbuffers_sdk/CMakeLists.txt`
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
-- [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not), plus `work_data_dependent` where the tensor's contents decide the work; `cachekey_generated.h` and `node_operands_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations) and [Operand Features](#operand-features)
+- [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not), plus `work_data_dependent` where the tensor's contents decide the work, and `output_tensor` on every field the node writes; `cachekey_generated.h` and `node_operands_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations) and [Operand Features](#operand-features)
 - [ ] Work model: `nodeFlops` overload and `logicalFlops` case added in `EngineFeatures.hpp` with an entry in `EveryNodeTypeHasDeclaredWorkOrNoCountingConvention`, or the op listed in `NO_COUNTING_CONVENTION` with a reason — see [Work Model (FLOPs)](#work-model-flops)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
@@ -239,6 +240,22 @@ off an operand read densely whatever its values (an additive bias, dropout seed,
 pre-commit hook on any schema change. Its `visit()` asserts at compile time that its last case
 is `NodeAttributes::MAX`, so a header left stale by a new node type fails to compile; rerun
 `scripts/gen_node_operands.py`.
+
+### Output tensors
+
+Mark a `(cache_uid)` field `output_tensor` when the node **writes** the referenced tensor.
+`forEachOutputTensor` in `node_operands_generated.h` reports those fields, and the kernel
+ingestor uses them to find the buffers to fill and read back when `HIPDNN_VALIDATE_BENCHMARKING`
+is on (see [Environment Configuration](./Environment.md#hipdnn_validate_benchmarking)). A written
+tensor field without the annotation is not checked, and a graph in which no node marks any
+output has validation skipped with a warning.
+
+The annotation is per schema field: one tensor role can be an output in one node schema and an input in
+another (batchnorm `mean` is an output of `BatchnormAttributes` and an input of the inference
+and backward schemas). Declare `attribute "output_tensor";` in each `.fbs` file that uses it, as
+for the other annotations. The annotation changes neither the cache key nor `flatc`'s output, and
+`gen_node_operands.py` rejects it on a field that is not a `(cache_uid)` tensor reference of a
+`NodeAttributes` member.
 
 ## Work Model (FLOPs)
 

@@ -15,6 +15,11 @@
 //   visitor.element(std::string_view name, size_t index, int64_t | double)
 //     for every element of a numeric vector attribute (e.g. conv 'stride').
 //
+// forEachOutputTensor(node, fn) calls fn(std::string_view role, int64_t uid) for
+// every 'output_tensor' field present (a tensor the node writes), with the
+// role and uid rules of visitor.tensor and in schema declaration order. visit()
+// is unchanged and reports every tensor, written or read.
+//
 // Strings, nested tables and structs, unions and byte vectors (opaque payloads)
 // are not visited. Operands are reported in schema declaration order. Reads the
 // caller's buffer in place: no UnPack, no allocation, no reflection. Every
@@ -890,6 +895,251 @@ void visit(const KdaAttributes& op, V& visitor)
     visitor.scalar(std::string_view("overwrite_initial_state"), static_cast<bool>(op.overwrite_initial_state()));
 }
 
+template <typename F>
+void forEachOutputTensor(const BatchnormInferenceAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const PointwiseAttributes& op, F& fn)
+{
+    fn(std::string_view("out_0"), static_cast<int64_t>(op.out_0_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const BatchnormBackwardAttributes& op, F& fn)
+{
+    fn(std::string_view("dx"), static_cast<int64_t>(op.dx_tensor_uid()));
+    fn(std::string_view("dscale"), static_cast<int64_t>(op.dscale_tensor_uid()));
+    fn(std::string_view("dbias"), static_cast<int64_t>(op.dbias_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const BatchnormAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+    if(const auto uid = op.mean_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("mean"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.inv_variance_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("inv_variance"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.next_running_mean_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("next_running_mean"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.next_running_variance_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("next_running_variance"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const ConvolutionFwdAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const ConvolutionBwdAttributes& op, F& fn)
+{
+    fn(std::string_view("dx"), static_cast<int64_t>(op.dx_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const ConvolutionWrwAttributes& op, F& fn)
+{
+    fn(std::string_view("dw"), static_cast<int64_t>(op.dw_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const BatchnormInferenceAttributesVarianceExt& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const MatmulAttributes& op, F& fn)
+{
+    fn(std::string_view("c"), static_cast<int64_t>(op.c_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const RMSNormAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+    if(const auto uid = op.inv_rms_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("inv_rms"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const LayernormAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+    if(const auto uid = op.mean_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("mean"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.inv_variance_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("inv_variance"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const SdpaAttributes& op, F& fn)
+{
+    fn(std::string_view("o"), static_cast<int64_t>(op.o_tensor_uid()));
+    if(const auto uid = op.stats_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("stats"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.max_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("max"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.sum_exp_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("sum_exp"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.rng_dump_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("rng_dump"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.amax_s_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("amax_s"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.amax_o_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("amax_o"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const BlockScaleDequantizeAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const BlockScaleQuantizeAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+    fn(std::string_view("scale"), static_cast<int64_t>(op.scale_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const SdpaBackwardAttributes& op, F& fn)
+{
+    fn(std::string_view("dq"), static_cast<int64_t>(op.dq_tensor_uid()));
+    fn(std::string_view("dk"), static_cast<int64_t>(op.dk_tensor_uid()));
+    fn(std::string_view("dv"), static_cast<int64_t>(op.dv_tensor_uid()));
+    if(const auto uid = op.dbias_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("dbias"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const CustomOpAttributes& op, F& fn)
+{
+    if(const auto* uids = op.output_tensor_uids())
+    {
+        for(uint32_t index = 0; index < uids->size(); ++index)
+        {
+            const detail::IndexedRole role("output", index);
+            fn(role.view(), static_cast<int64_t>(uids->Get(index)));
+        }
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const RMSNormBackwardAttributes& op, F& fn)
+{
+    fn(std::string_view("dx"), static_cast<int64_t>(op.dx_tensor_uid()));
+    fn(std::string_view("dscale"), static_cast<int64_t>(op.dscale_tensor_uid()));
+    if(const auto uid = op.dbias_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("dbias"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const ReductionAttributes& op, F& fn)
+{
+    fn(std::string_view("out"), static_cast<int64_t>(op.out_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const ResampleFwdAttributes& op, F& fn)
+{
+    fn(std::string_view("y"), static_cast<int64_t>(op.y_tensor_uid()));
+    if(const auto uid = op.index_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("index"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const LayernormBackwardAttributes& op, F& fn)
+{
+    fn(std::string_view("dx"), static_cast<int64_t>(op.dx_tensor_uid()));
+    fn(std::string_view("dscale"), static_cast<int64_t>(op.dscale_tensor_uid()));
+    fn(std::string_view("dbias"), static_cast<int64_t>(op.dbias_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const ResampleBwdAttributes& op, F& fn)
+{
+    fn(std::string_view("dx"), static_cast<int64_t>(op.dx_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const MoeGroupedMatmulAttributes& op, F& fn)
+{
+    fn(std::string_view("output"), static_cast<int64_t>(op.output_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const MoeGroupedMatmulBwdAttributes& op, F& fn)
+{
+    fn(std::string_view("dweight"), static_cast<int64_t>(op.dweight_tensor_uid()));
+}
+
+template <typename F>
+void forEachOutputTensor(const GdnAttributes& op, F& fn)
+{
+    fn(std::string_view("o"), static_cast<int64_t>(op.o_tensor_uid()));
+    if(const auto uid = op.final_state_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("final_state"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.state_checkpoints_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("state_checkpoints"), static_cast<int64_t>(*uid));
+    }
+}
+
+template <typename F>
+void forEachOutputTensor(const KdaAttributes& op, F& fn)
+{
+    fn(std::string_view("o"), static_cast<int64_t>(op.o_tensor_uid()));
+    if(const auto uid = op.final_state_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("final_state"), static_cast<int64_t>(*uid));
+    }
+    if(const auto uid = op.state_checkpoints_tensor_uid(); uid.has_value())
+    {
+        fn(std::string_view("state_checkpoints"), static_cast<int64_t>(*uid));
+    }
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -1073,6 +1323,197 @@ bool visit(const Node& node, V&& visitor)
         if(const auto* op = node.attributes_as_KdaAttributes(); op != nullptr)
         {
             visit(*op, visitor);
+            return true;
+        }
+        return false;
+    default:
+        return false;
+    }
+}
+
+/// Reports the tensors @p node writes ('output_tensor' fields). Returns false,
+/// calling nothing, when the node has no attributes or a type this header predates.
+template <typename F>
+bool forEachOutputTensor(const Node& node, F&& fn)
+{
+    // Fails when NodeAttributes gains a member this header has no case for: rerun
+    // scripts/gen_node_operands.py.
+    static_assert(NodeAttributes::MAX == NodeAttributes::KdaAttributes,
+                  "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
+    switch(node.attributes_type())
+    {
+    case NodeAttributes::BatchnormInferenceAttributes:
+        if(const auto* op = node.attributes_as_BatchnormInferenceAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::PointwiseAttributes:
+        if(const auto* op = node.attributes_as_PointwiseAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::BatchnormBackwardAttributes:
+        if(const auto* op = node.attributes_as_BatchnormBackwardAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::BatchnormAttributes:
+        if(const auto* op = node.attributes_as_BatchnormAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ConvolutionFwdAttributes:
+        if(const auto* op = node.attributes_as_ConvolutionFwdAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ConvolutionBwdAttributes:
+        if(const auto* op = node.attributes_as_ConvolutionBwdAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ConvolutionWrwAttributes:
+        if(const auto* op = node.attributes_as_ConvolutionWrwAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+        if(const auto* op = node.attributes_as_BatchnormInferenceAttributesVarianceExt(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::MatmulAttributes:
+        if(const auto* op = node.attributes_as_MatmulAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::RMSNormAttributes:
+        if(const auto* op = node.attributes_as_RMSNormAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::LayernormAttributes:
+        if(const auto* op = node.attributes_as_LayernormAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::SdpaAttributes:
+        if(const auto* op = node.attributes_as_SdpaAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::BlockScaleDequantizeAttributes:
+        if(const auto* op = node.attributes_as_BlockScaleDequantizeAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::BlockScaleQuantizeAttributes:
+        if(const auto* op = node.attributes_as_BlockScaleQuantizeAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::SdpaBackwardAttributes:
+        if(const auto* op = node.attributes_as_SdpaBackwardAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::CustomOpAttributes:
+        if(const auto* op = node.attributes_as_CustomOpAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::RMSNormBackwardAttributes:
+        if(const auto* op = node.attributes_as_RMSNormBackwardAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ReductionAttributes:
+        if(const auto* op = node.attributes_as_ReductionAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ResampleFwdAttributes:
+        if(const auto* op = node.attributes_as_ResampleFwdAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::LayernormBackwardAttributes:
+        if(const auto* op = node.attributes_as_LayernormBackwardAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::ResampleBwdAttributes:
+        if(const auto* op = node.attributes_as_ResampleBwdAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::MoeGroupedMatmulAttributes:
+        if(const auto* op = node.attributes_as_MoeGroupedMatmulAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        if(const auto* op = node.attributes_as_MoeGroupedMatmulBwdAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::GdnAttributes:
+        if(const auto* op = node.attributes_as_GdnAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
+            return true;
+        }
+        return false;
+    case NodeAttributes::KdaAttributes:
+        if(const auto* op = node.attributes_as_KdaAttributes(); op != nullptr)
+        {
+            forEachOutputTensor(*op, fn);
             return true;
         }
         return false;

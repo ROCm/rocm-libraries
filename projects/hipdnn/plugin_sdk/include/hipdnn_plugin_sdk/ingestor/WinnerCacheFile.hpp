@@ -59,6 +59,7 @@ constexpr const char* WINNER_LINE_KERNEL_ID_FIELD = "kernel_id";
 constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
 constexpr const char* WINNER_LINE_DISPATCH_ID_FIELD = "dispatch_id";
 constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
+constexpr const char* WINNER_LINE_VALIDATED_FIELD = "validated";
 constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
 /// Bump when a record line's fields keep their shape but a meaning underneath one of them
 /// changes (decode would still succeed, just on a different interpretation than what was
@@ -236,8 +237,9 @@ inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
 
 /// Encodes @p key and @p record as one JSON-Lines record: `key.graph` via
 /// `GraphContentKey::toJson()`, every field of `key.device` as plain JSON, and @p record as an
-/// array of ranked entries. `DescriptorId`s use the same UUID text format as
-/// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
+/// array of ranked entries, plus a `validated` key (the digest as hex) only when the record is
+/// validated. `DescriptorId`s use the same UUID text format as `DescriptorLoader.hpp`
+/// (`formatUuid`/`parseUuid`).
 inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
 {
     // Structured binding so growing DeviceProperties stops this compiling until the codec
@@ -260,7 +262,7 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
     device[detail::WINNER_LINE_SHARED_MEM_PER_BLOCK_FIELD] = sharedMemPerBlock;
 
     nlohmann::json entries = nlohmann::json::array();
-    for(const auto& entry : record)
+    for(const auto& entry : record.entries)
     {
         nlohmann::json entryJson;
         entryJson[detail::WINNER_LINE_KERNEL_ID_FIELD] = toString(entry.kernelId);
@@ -275,6 +277,10 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
     line[detail::WINNER_LINE_GRAPH_FIELD] = key.graph.toJson();
     line[detail::WINNER_LINE_DEVICE_FIELD] = std::move(device);
     line[detail::WINNER_LINE_ENTRIES_FIELD] = std::move(entries);
+    if(record.validated.has_value())
+    {
+        line[detail::WINNER_LINE_VALIDATED_FIELD] = digestToHex(*record.validated);
+    }
     return line.dump();
 }
 
@@ -358,7 +364,7 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         }
 
         WinnerRecord record;
-        record.reserve(entriesField->size());
+        record.entries.reserve(entriesField->size());
         for(const auto& entryJson : *entriesField)
         {
             RankedEntry entry;
@@ -369,7 +375,23 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
             entry.dispatchId = hipdnn_flatbuffers_sdk::utilities::parseUuid(
                 entryJson.at(detail::WINNER_LINE_DISPATCH_ID_FIELD).get<std::string>());
             entry.timeMs = entryJson.at(detail::WINNER_LINE_TIME_MS_FIELD).get<double>();
-            record.push_back(entry);
+            record.entries.push_back(entry);
+        }
+
+        // Absent = a legacy record. Present but not a 16-hex-digit string: the marker cannot
+        // be trusted, and dropping it would serve the line as legacy, so the line is skipped.
+        if(const auto validatedField = json.find(detail::WINNER_LINE_VALIDATED_FIELD);
+           validatedField != json.end())
+        {
+            if(!validatedField->is_string())
+            {
+                return std::nullopt;
+            }
+            record.validated = digestFromHex(validatedField->get<std::string>());
+            if(!record.validated.has_value())
+            {
+                return std::nullopt;
+            }
         }
 
         return std::make_pair(WinnerKey{std::move(*graph), DeviceKey{std::move(properties)}},

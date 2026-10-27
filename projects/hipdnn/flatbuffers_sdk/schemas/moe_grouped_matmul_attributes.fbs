@@ -3,6 +3,7 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
@@ -29,7 +30,7 @@ table MoeGroupedMatmulAttributes {
     token_ks_tensor_uid:           long = null (cache_uid);
 
     // Required output tensor UID
-    output_tensor_uid:             long (cache_uid);
+    output_tensor_uid:             long (cache_uid, output_tensor);
 
     // Routing attributes
     mode: MoeGroupedMatmulMode = NONE;

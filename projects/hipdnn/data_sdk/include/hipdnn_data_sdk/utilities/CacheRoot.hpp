@@ -12,6 +12,7 @@
 #endif
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/CacheRootDefaults.h>
+#include <hipdnn_data_sdk/utilities/EnvBool.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <string>
@@ -21,15 +22,13 @@
 namespace hipdnn_data_sdk::utilities
 {
 
-/// True if `HIPDNN_DISABLE_CACHE` is set to a recognized truthy value, matching the token
-/// set `HIPDNN_FORCE_BENCHMARKING` accepts (case-insensitive, whitespace-trimmed). Unset,
-/// empty, or any other value is treated as not-disabled, so a typo fails open rather than
+/// True if `HIPDNN_DISABLE_CACHE` is set to a recognized truthy value, per the token ladder
+/// of readBoolEnv() (case-insensitive, whitespace-trimmed). Unset, empty, or any other
+/// value is treated as not-disabled, so a typo fails open rather than
 /// silently disabling the cache.
 inline bool cacheDisabledByEnv()
 {
-    const std::string normalized = toLower(trim(getEnv("HIPDNN_DISABLE_CACHE")));
-    return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes"
-           || normalized == "enable" || normalized == "enabled";
+    return readBoolEnv("HIPDNN_DISABLE_CACHE").value.value_or(false);
 }
 
 #if defined(_WIN32)

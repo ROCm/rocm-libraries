@@ -31,7 +31,9 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BenchmarkValidation.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/OutputCohorts.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -129,17 +131,21 @@ public:
     ///        exporter can group one sweep's rows; empty means unidentified.
     /// @param deviceIdentity Opaque device identity, echoed the same way and omitted when
     ///        empty. Rows group by (benchmark, device), matching the winner cache key.
+    /// @param validation Present means validation mode is on, even with no outputs to check;
+    ///        nullopt means off.
     BenchmarkPlan(std::vector<Candidate> candidates,
                   const THandle& handle,
                   Timer timer = {},
                   RecordRankingFn recordRanking = {},
                   std::string benchmarkId = {},
-                  std::string deviceIdentity = {})
+                  std::string deviceIdentity = {},
+                  std::optional<BenchmarkValidation> validation = std::nullopt)
         : _candidates(std::move(candidates))
         , _timer(std::move(timer))
         , _recordRanking(std::move(recordRanking))
         , _benchmarkId(std::move(benchmarkId))
         , _deviceIdentity(std::move(deviceIdentity))
+        , _validation(std::move(validation))
     {
         if(_candidates.empty())
         {
@@ -363,6 +369,25 @@ private:
         }
         auto defaultTimer = makeDefaultTimer(defaultEvents, defaultGate);
 
+        // Validation: skipped for the whole comparison when the buffers cannot be checked.
+        // A skipped resolve still votes (with no images), so it is recorded as inconclusive.
+        const bool validating = _validation.has_value();
+        bool captureOutputs = false;
+        if(validating)
+        {
+            if(const auto skipReason = validationSkipReason(deviceBuffers, numDeviceBuffers))
+            {
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: output validation skipped: " << *skipReason);
+            }
+            else
+            {
+                captureOutputs = true;
+                warnOutputsNotValueCompared();
+            }
+        }
+        // Rebuilt at the start of every pass, so a discarded stalled pass never votes.
+        std::optional<OutputCohorts> cohorts;
+
         // Keep every usable time, so a later knob filter that excludes the winner can
         // still serve the runner-up.
         std::vector<std::pair<double, size_t>> ranked;
@@ -379,6 +404,11 @@ private:
         {
             ranked.clear();
             outcomes.clear();
+            if(validating)
+            {
+                cohorts.emplace(captureOutputs ? _validation->outputs
+                                               : std::vector<OutputBufferSpec>{});
+            }
             bool restartUnstalled = false;
             for(size_t index = 0; index < _candidates.size(); ++index)
             {
@@ -388,7 +418,9 @@ private:
                                                numDeviceBuffers,
                                                workspace,
                                                defaultTimer,
-                                               stalled);
+                                               stalled,
+                                               cohorts.has_value() ? &*cohorts : nullptr,
+                                               captureOutputs);
                 if(stalled && outcome.restartUnstalled)
                 {
                     // Candidates after this index stay unsampled in this pass.
@@ -436,7 +468,11 @@ private:
         });
 
         size_t best = 0;
-        if(ranked.empty())
+        if(cohorts.has_value())
+        {
+            best = chooseValidated(*cohorts, ranked);
+        }
+        else if(ranked.empty())
         {
             HIPDNN_PLUGIN_LOG_ERROR("ingestor: benchmarking found no usable candidate among "
                                     << _candidates.size() << " kernel(s); defaulting to "
@@ -469,6 +505,141 @@ private:
         return best;
     }
 
+    /// Why validation cannot run on these buffers, or nullopt when it can: nothing to check, an
+    /// output the caller did not bind, or an output sharing memory with an input (the fill would
+    /// destroy the input).
+    std::optional<std::string> validationSkipReason(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                    uint32_t numDeviceBuffers) const
+    {
+        if(_validation->outputs.empty())
+        {
+            return "no output tensors to check";
+        }
+        for(const auto& spec : _validation->outputs)
+        {
+            const void* output
+                = detail::findDeviceBuffer(deviceBuffers, numDeviceBuffers, spec.uid);
+            if(output == nullptr)
+            {
+                return "output " + std::to_string(spec.uid) + " has a null device pointer";
+            }
+            for(const int64_t inputUid : _validation->inputUids)
+            {
+                if(detail::findDeviceBuffer(deviceBuffers, numDeviceBuffers, inputUid) == output)
+                {
+                    return "output " + std::to_string(spec.uid) + " aliases input "
+                           + std::to_string(inputUid);
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    /// One WARN listing every output no dtype decode covers, and which check still applies to it.
+    void warnOutputsNotValueCompared() const
+    {
+        std::string listing;
+        for(const auto& spec : _validation->outputs)
+        {
+            if(output_agreement::numericKind(spec.dataType) != output_agreement::NumericKind::NONE)
+            {
+                continue;
+            }
+            listing += listing.empty() ? "" : "; ";
+            listing
+                += "output " + std::to_string(spec.uid) + " (" + EnumNameDataType(spec.dataType)
+                   + "): value comparison skipped, "
+                   + (output_agreement::hasNaNEncoding(spec.dataType) ? "untouched check applied"
+                                                                      : "neither check applied");
+        }
+        if(!listing.empty())
+        {
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: output validation: " << listing);
+        }
+    }
+
+    /// Elects the winner under validation and records it. @p ranked is every timed candidate,
+    /// fastest first. A failed candidate is never served: with no passing candidate candidate 0
+    /// is delegated to, with passing candidates but no usable time the lowest-index passing one
+    /// is, and neither case records anything.
+    size_t chooseValidated(const OutputCohorts& cohorts,
+                           const std::vector<std::pair<double, size_t>>& ranked) const
+    {
+        const auto decision = cohorts.decide();
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: output validation "
+                               << verdictName(decision.verdict) << ": " << decision.computing
+                               << " computing candidate(s), " << decision.cohorts << " cohort(s), "
+                               << decision.passing.size() << " passing of " << _candidates.size());
+        for(const auto& failure : decision.failed)
+        {
+            std::string message = "ingestor: benchmarking candidate '"
+                                  + toString(_candidates[failure.index].kernelId)
+                                  + "' excluded from the winner election: " + failure.reason;
+            if(failure.cohortFounder != failure.index)
+            {
+                message += " (its cohort founder is '"
+                           + toString(_candidates[failure.cohortFounder].kernelId) + "')";
+            }
+            HIPDNN_PLUGIN_LOG_WARN(message);
+        }
+
+        if(decision.passing.empty())
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: benchmarking found no candidate whose output "
+                                    "passed validation among "
+                                    << _candidates.size() << " kernel(s); defaulting to "
+                                    << toString(_candidates.front().kernelId));
+            return 0;
+        }
+
+        std::vector<std::pair<double, size_t>> passingRanked;
+        for(const auto& entry : ranked)
+        {
+            if(std::binary_search(decision.passing.begin(), decision.passing.end(), entry.second))
+            {
+                passingRanked.push_back(entry);
+            }
+        }
+        if(passingRanked.empty())
+        {
+            const size_t served = decision.passing.front();
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: benchmarking found no usable timing among the "
+                                    << decision.passing.size()
+                                    << " candidate(s) that passed validation; serving "
+                                    << toString(_candidates[served].kernelId));
+            return served;
+        }
+
+        const size_t best = passingRanked.front().second;
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: benchmarking selected kernel "
+                               << toString(_candidates[best].kernelId) << " in "
+                               << passingRanked.front().first << " ms among " << _candidates.size()
+                               << " candidate(s)");
+
+        if(_validation->record)
+        {
+            WinnerRecord record;
+            record.entries.reserve(passingRanked.size());
+            std::vector<KernelTriple> triples;
+            triples.reserve(passingRanked.size() + decision.failed.size());
+            for(const auto& [timeMs, index] : passingRanked)
+            {
+                const auto& candidate = _candidates[index];
+                record.entries.push_back(RankedEntry{
+                    candidate.kernelId, candidate.packId, candidate.dispatchId, timeMs});
+                triples.push_back({candidate.kernelId, candidate.packId, candidate.dispatchId});
+            }
+            for(const auto& failure : decision.failed)
+            {
+                const auto& candidate = _candidates[failure.index];
+                triples.push_back({candidate.kernelId, candidate.packId, candidate.dispatchId});
+            }
+            record.validated = catalogDigest(std::move(triples));
+            _validation->record(std::move(record));
+        }
+        return best;
+    }
+
     /// Times BENCHMARK_ITERATIONS executes after BENCHMARK_WARMUP_RUNS untimed ones and
     /// ranks by robustMean(), so an occasionally lucky kernel cannot win on one fast
     /// sample.
@@ -494,11 +665,19 @@ private:
                                   uint32_t numDeviceBuffers,
                                   void* workspace,
                                   DefaultTimer& timer,
-                                  bool stalled) const
+                                  bool stalled,
+                                  OutputCohorts* cohorts,
+                                  bool captureOutputs) const
     {
         const auto& candidate = _candidates[index];
         try
         {
+            if(captureOutputs)
+            {
+                _validation->hooks.fill(
+                    handle.getStream(), deviceBuffers, numDeviceBuffers, _validation->outputs);
+            }
+
             for(int warmup = 0; warmup < BENCHMARK_WARMUP_RUNS; ++warmup)
             {
                 candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
@@ -512,6 +691,29 @@ private:
                                        << toString(candidate.kernelId)
                                        << "' failed to drain its warmup runs; scored unusable");
                 return {std::nullopt, "warmup-not-drained", false};
+            }
+
+            // Every candidate whose warmup ran votes, whatever its timing turns out to be. A
+            // failed copy leaves it without a vote and unusable. The default timer has drained
+            // the stream above; the snapshot hook synchronizes it for an injected timer.
+            if(cohorts != nullptr)
+            {
+                OutputImages images;
+                if(captureOutputs
+                   && (!_validation->hooks.snapshot(handle.getStream(),
+                                                    deviceBuffers,
+                                                    numDeviceBuffers,
+                                                    _validation->outputs,
+                                                    images)
+                       || images.size() != _validation->outputs.size()))
+                {
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
+                                           << toString(candidate.kernelId)
+                                           << "' failed to copy its output for validation; "
+                                              "scored unusable");
+                    return {std::nullopt, "validation-copy-failed", false};
+                }
+                cohorts->submit(index, std::move(images));
             }
 
             std::vector<double> samples;
@@ -705,6 +907,7 @@ private:
     RecordRankingFn _recordRanking;
     std::string _benchmarkId;
     std::string _deviceIdentity;
+    std::optional<BenchmarkValidation> _validation;
     size_t _workspaceBytes = 0;
     mutable std::atomic<size_t> _chosen{NOT_RESOLVED};
     mutable std::mutex _mutex;

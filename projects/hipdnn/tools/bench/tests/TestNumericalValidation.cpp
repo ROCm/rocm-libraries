@@ -460,12 +460,13 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     const auto halfImage = hipdnn_bench::detail::inputFillImage(
         DataType::HALF, ELEMENTS * sizeof(uint16_t), seed, OUTPUT_UID);
     ASSERT_EQ(halfImage.size(), ELEMENTS * sizeof(uint16_t));
+    namespace agreement = hipdnn_plugin_sdk::output_agreement;
+    const auto sdkFloat = hipdnn_bench::detail::toSdkDataType(DataType::FLOAT);
+    const auto sdkHalf = hipdnn_bench::detail::toSdkDataType(DataType::HALF);
     for(size_t index = 0; index < ELEMENTS; ++index)
     {
-        const double single
-            = std::abs(hipdnn_bench::detail::decodeElement(image, index, DataType::FLOAT));
-        const double half
-            = std::abs(hipdnn_bench::detail::decodeElement(halfImage, index, DataType::HALF));
+        const double single = std::abs(agreement::decodeElement(sdkFloat, image, index));
+        const double half = std::abs(agreement::decodeElement(sdkHalf, halfImage, index));
         EXPECT_TRUE(single == 1.0 || single == 2.0) << "element " << index << " is " << single;
         EXPECT_TRUE(half == 1.0 || half == 2.0) << "element " << index << " is " << half;
     }
@@ -569,10 +570,11 @@ std::string perElementDisagreement(const std::string& name,
                                    const std::vector<uint8_t>& reference,
                                    const std::vector<uint8_t>& candidate)
 {
-    namespace detail = hipdnn_bench::detail;
-    const auto kind = detail::numericKind(dataType);
+    namespace agreement = hipdnn_plugin_sdk::output_agreement;
+    const auto sdkType = hipdnn_bench::detail::toSdkDataType(dataType);
+    const auto kind = agreement::numericKind(sdkType);
     const auto width = static_cast<size_t>(hipdnn_bench::elementBits(dataType) / 8);
-    if(kind == detail::NumericKind::NONE || width == 0 || reference.size() != candidate.size())
+    if(kind == agreement::NumericKind::NONE || width == 0 || reference.size() != candidate.size())
     {
         return {};
     }
@@ -580,8 +582,8 @@ std::string perElementDisagreement(const std::string& name,
     double scale = 0.0;
     for(size_t index = 0; index < count; ++index)
     {
-        const double left = detail::decodeElement(reference, index, dataType);
-        const double right = detail::decodeElement(candidate, index, dataType);
+        const double left = agreement::decodeElement(sdkType, reference, index);
+        const double right = agreement::decodeElement(sdkType, candidate, index);
         if(std::isfinite(left))
         {
             scale = std::max(scale, std::abs(left));
@@ -591,12 +593,12 @@ std::string perElementDisagreement(const std::string& name,
             scale = std::max(scale, std::abs(right));
         }
     }
-    const double relative = detail::agreementTolerance(kind);
-    const double absolute = detail::agreementFloor(kind) * scale;
+    const double relative = agreement::agreementTolerance(kind);
+    const double absolute = agreement::agreementFloor(kind) * scale;
     for(size_t index = 0; index < count; ++index)
     {
-        const double left = detail::decodeElement(reference, index, dataType);
-        const double right = detail::decodeElement(candidate, index, dataType);
+        const double left = agreement::decodeElement(sdkType, reference, index);
+        const double right = agreement::decodeElement(sdkType, candidate, index);
         const bool bothNonFinite = !std::isfinite(left) && !std::isfinite(right);
         const bool sameNonFinite = bothNonFinite && !(left < right) && !(right < left)
                                    && std::isnan(left) == std::isnan(right);

@@ -646,15 +646,15 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
         for(const KernelDefinition* kernel :
             manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
         {
-            record.push_back({kernel->kernelId,
-                              kernel->packId,
-                              kernel->dispatchId,
-                              kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+            record.entries.push_back({kernel->kernelId,
+                                      kernel->packId,
+                                      kernel->dispatchId,
+                                      kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
         }
-        std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.timeMs < rhs.timeMs;
-        });
-        ASSERT_EQ(record.size(), 2U);
+        std::sort(record.entries.begin(),
+                  record.entries.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
+        ASSERT_EQ(record.entries.size(), 2U);
         manager.recordWinner(
             WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
                       DeviceKey{properties}},
@@ -769,15 +769,15 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
     for(const KernelDefinition* kernel :
         manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
     {
-        record.push_back({kernel->kernelId,
-                          kernel->packId,
-                          kernel->dispatchId,
-                          kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+        record.entries.push_back({kernel->kernelId,
+                                  kernel->packId,
+                                  kernel->dispatchId,
+                                  kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
     }
-    std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+    std::sort(record.entries.begin(), record.entries.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    ASSERT_EQ(record.size(), 2U);
+    ASSERT_EQ(record.entries.size(), 2U);
     manager.recordWinner(keyFor(graph), record, WinnerWriteCause::FRESH_MISS);
 
     const auto buffer = configWithMetric("tflops");

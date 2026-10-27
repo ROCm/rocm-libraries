@@ -4,10 +4,16 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -27,9 +33,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/OutputAgreement.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BenchmarkValidation.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -38,6 +46,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -1510,11 +1519,11 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     for(const KernelDefinition* kernel : catalog)
     {
         const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
-        record.push_back(rankedEntryFor(*kernel, blockSize == 256 ? 0.1 : 9.0));
+        record.entries.push_back(rankedEntryFor(*kernel, blockSize == 256 ? 0.1 : 9.0));
     }
-    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    std::stable_sort(record.entries.begin(),
+                     record.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
@@ -1547,7 +1556,8 @@ TEST(TestIngestorGenericPlanBuilder, OrderingFromARecordReadsGraphBytesOnlyForTh
     WinnerRecord record;
     for(const KernelDefinition* kernel : catalog)
     {
-        record.push_back(rankedEntryFor(*kernel, 1.0 + static_cast<double>(record.size())));
+        record.entries.push_back(
+            rankedEntryFor(*kernel, 1.0 + static_cast<double>(record.entries.size())));
     }
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
@@ -1592,7 +1602,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
     double time = 1.0;
     for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
     {
-        record.push_back(rankedEntryFor(**kernel, time));
+        record.entries.push_back(rankedEntryFor(**kernel, time));
         time += 1.0;
     }
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
@@ -1631,17 +1641,17 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     WinnerRecord record;
     for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        record.push_back(
+        record.entries.push_back(
             rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
     }
-    ASSERT_EQ(record.size(), 3U);
+    ASSERT_EQ(record.entries.size(), 3U);
 
     // A prior wider run's leftover entry for a kernel this engine does not admit. Must
     // be skipped without failing coverage.
-    record.push_back(RankedEntry{testId(0xAA), testId(0xF0), testId(0xD0), 0.05});
-    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    record.entries.push_back(RankedEntry{testId(0xAA), testId(0xF0), testId(0xD0), 0.05});
+    std::stable_sort(record.entries.begin(),
+                     record.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
@@ -1682,10 +1692,10 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(*kernel, 0.1));
+            record.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
-    ASSERT_EQ(record.size(), 1U);
+    ASSERT_EQ(record.entries.size(), 1U);
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
@@ -1724,7 +1734,7 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
     {
         auto entry = rankedEntryFor(*kernel, 0.1);
         entry.packId = testId(0xEE);
-        record.push_back(entry);
+        record.entries.push_back(entry);
     }
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
@@ -1773,11 +1783,11 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
         {
             entry.packId = testId(0xEE);
         }
-        record.push_back(entry);
+        record.entries.push_back(entry);
     }
-    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    std::stable_sort(record.entries.begin(),
+                     record.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -1828,12 +1838,12 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     WinnerRecord record;
     for(const KernelDefinition* kernel : catalog)
     {
-        record.push_back(
+        record.entries.push_back(
             rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
-    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    std::stable_sort(record.entries.begin(),
+                     record.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
@@ -1879,12 +1889,12 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelIsMalformedRethro
     WinnerRecord record;
     for(const KernelDefinition* kernel : catalog)
     {
-        record.push_back(
+        record.entries.push_back(
             rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
-    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    std::stable_sort(record.entries.begin(),
+                     record.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
@@ -1936,7 +1946,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(*kernel, 0.1));
+            record.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
@@ -1981,7 +1991,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(*kernel, 0.1));
+            record.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(
@@ -2025,10 +2035,10 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(*kernel, 0.1));
+            narrow.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
-    ASSERT_EQ(narrow.size(), 1U);
+    ASSERT_EQ(narrow.entries.size(), 1U);
     manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on.
@@ -2078,17 +2088,18 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarro
         const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
         if(blockSize == 128)
         {
-            partial.push_back(rankedEntryFor(*kernel, 0.1));
+            partial.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     for(const KernelDefinition* kernel : catalog)
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 64)
         {
-            partial.push_back(rankedEntryFor(*kernel, 9.0));
+            partial.entries.push_back(rankedEntryFor(*kernel, 9.0));
         }
     }
-    ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
+    ASSERT_EQ(partial.entries.size(), 2U)
+        << "the record must cover the narrowed set and nothing more";
     manager->recordWinner(winnerKeyFor(graph, properties), partial, WinnerWriteCause::FRESH_MISS);
 
     flatbuffers::FlatBufferBuilder wideBuilder;
@@ -2146,12 +2157,12 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     WinnerRecord ranking;
     for(const KernelDefinition* kernel : catalog)
     {
-        ranking.push_back(
+        ranking.entries.push_back(
             rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
     }
-    std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeMs < rhs.timeMs;
-    });
+    std::stable_sort(ranking.entries.begin(),
+                     ranking.entries.end(),
+                     [](const auto& lhs, const auto& rhs) { return lhs.timeMs < rhs.timeMs; });
     manager->recordWinner(winnerKeyFor(graph, properties), ranking, WinnerWriteCause::FRESH_MISS);
 
     // The post-priming plan: benchmarking still ON, exactly as autotune leaves it.
@@ -2416,13 +2427,13 @@ TEST(TestIngestorGenericPlanBuilder, SamplingWritesTheRankingBackThroughTheBuild
     const auto stored = manager->winnerFor(winnerKeyFor(graph, properties));
     ASSERT_TRUE(stored.has_value())
         << "the callback buildPlan captured must have written the ranking back";
-    ASSERT_EQ(stored->size(), 3U) << "every usable candidate belongs in the record";
+    ASSERT_EQ(stored->entries.size(), 3U) << "every usable candidate belongs in the record";
     // Rank 0 must be the LAST candidate in catalog order (the deterministic sampler's
     // fastest), the opposite of the heuristic front. Compared against ids directly, not
     // sortedDefinitions, which now returns the record's own order.
-    EXPECT_EQ(stored->front().kernelId, testId(0x72))
+    EXPECT_EQ(stored->entries.front().kernelId, testId(0x72))
         << "the fastest sampled candidate must rank first, not the heuristic front";
-    EXPECT_EQ(stored->back().kernelId, testId(0x70)) << "and the slowest must rank last";
+    EXPECT_EQ(stored->entries.back().kernelId, testId(0x70)) << "and the slowest must rank last";
 }
 
 /// A ranking sampled under one numbering must be served for the same graph numbered
@@ -2477,7 +2488,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForA
     const auto stored = manager->winnerFor(winnerKeyFor(renumbered, properties));
     ASSERT_TRUE(stored.has_value())
         << "the renumbered graph must find the record the sampled graph wrote";
-    EXPECT_EQ(stored->front().kernelId, testId(0x72))
+    EXPECT_EQ(stored->entries.front().kernelId, testId(0x72))
         << "and it must be the sampled ranking, not the heuristic order";
 
     // The served path: the record orders the catalog for the renumbered graph, so its
@@ -2518,10 +2529,10 @@ TEST(TestIngestorGenericPlanBuilder,
     {
         if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(*kernel, 0.1));
+            narrow.entries.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
-    ASSERT_EQ(narrow.size(), 1U);
+    ASSERT_EQ(narrow.entries.size(), 1U);
     manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on, so sampling produces real
@@ -2547,7 +2558,7 @@ TEST(TestIngestorGenericPlanBuilder,
     EXPECT_TRUE(recordCovers(*stored, catalog))
         << "the post-run record must cover every kernel in the wide filtered set, not "
            "just kernel_128 the narrow record held";
-    EXPECT_EQ(stored->size(), 3U)
+    EXPECT_EQ(stored->entries.size(), 3U)
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
@@ -2938,6 +2949,926 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
                 << "the ranker reads " << names[slot] << " differently";
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Output validation through the builder, end to end
+// ---------------------------------------------------------------------------
+
+constexpr int64_t VALIDATION_INPUT_UID = 1;
+constexpr int64_t VALIDATION_OUTPUT_UID = 2;
+constexpr size_t VALIDATION_ELEMENTS = 4;
+using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+constexpr size_t VALIDATION_OUTPUT_BYTES = VALIDATION_ELEMENTS * sizeof(float);
+
+/// The three kernels of the validation catalog in heuristic order, identified by block size
+/// (which is also the workspace size the keyed timer reads): index 0 is ranked first.
+constexpr std::array<int64_t, 3> KERNEL_BLOCKS = {64, 128, 256};
+
+DescriptorId validationKernelId(size_t index)
+{
+    return testId(static_cast<uint8_t>(0x70 + index));
+}
+
+std::vector<uint8_t> floatImage(std::initializer_list<float> values)
+{
+    std::vector<uint8_t> bytes(values.size() * sizeof(float));
+    size_t offset = 0;
+    for(const float value : values)
+    {
+        std::memcpy(bytes.data() + offset, &value, sizeof(float));
+        offset += sizeof(float);
+    }
+    return bytes;
+}
+
+/// What a correct kernel writes. @p variant moves one element by a single ulp, which the float
+/// tolerance accepts but a byte compare does not, so a buffer tells which correct kernel wrote it.
+std::vector<uint8_t> correctImage(size_t variant = 0)
+{
+    return floatImage({1.0F + static_cast<float>(variant) * 1.0e-7F, 2.0F, 3.0F, 4.0F});
+}
+
+std::vector<uint8_t> wrongImage()
+{
+    return floatImage({9.0F, 9.0F, 9.0F, 9.0F});
+}
+
+class ScriptedPrepared : public PreparedDispatch
+{
+public:
+    explicit ScriptedPrepared(int64_t size)
+        : blockSize(size)
+    {
+    }
+
+    int64_t blockSize;
+};
+
+/// Stands in for a real dispatch: a launch writes the scripted bytes into the buffer bound to
+/// the output uid, so what a kernel "computes" is visible through the plan the builder hands
+/// out. The workspace size is the kernel's block size.
+class ScriptedWritingHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    struct Behavior
+    {
+        /// Written to the output buffer on every launch; nullopt writes nothing.
+        std::optional<std::vector<uint8_t>> output;
+        /// False makes prepare() decline, so the kernel cannot become a candidate.
+        bool buildable = true;
+    };
+
+    void script(int64_t blockSize, Behavior behavior)
+    {
+        _behaviors[blockSize] = std::move(behavior);
+    }
+
+    int launches(int64_t blockSize) const
+    {
+        const auto found = _launches.find(blockSize);
+        return found == _launches.end() ? 0 : found->second;
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        const auto found = _behaviors.find(blockSize);
+        if(found != _behaviors.end() && !found->second.buildable)
+        {
+            return nullptr;
+        }
+        return std::make_unique<ScriptedPrepared>(blockSize);
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& prepared,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const auto blockSize = static_cast<const ScriptedPrepared&>(prepared).blockSize;
+        ++_launches[blockSize];
+        const auto found = _behaviors.find(blockSize);
+        if(found == _behaviors.end() || !found->second.output.has_value())
+        {
+            return;
+        }
+        void* output = hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer(
+            deviceBuffers, numDeviceBuffers, VALIDATION_OUTPUT_UID);
+        if(output != nullptr)
+        {
+            std::memcpy(output, found->second.output->data(), found->second.output->size());
+        }
+    }
+
+private:
+    std::map<int64_t, Behavior> _behaviors;
+    mutable std::map<int64_t, int> _launches;
+};
+
+/// How often the host stand-ins for the device hooks ran.
+struct ValidationHookCounters
+{
+    int fills = 0;
+    int snapshots = 0;
+};
+
+/// Host memset and memcpy in place of the device operations; the buffers are host memory.
+BenchmarkValidationHooks hostValidationHooks(ValidationHookCounters& counters)
+{
+    BenchmarkValidationHooks hooks;
+    hooks.fill = [&counters](hipStream_t,
+                             const hipdnnPluginDeviceBuffer_t* buffers,
+                             uint32_t count,
+                             const std::vector<OutputBufferSpec>& specs) {
+        ++counters.fills;
+        for(const auto& spec : specs)
+        {
+            void* ptr
+                = hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer(buffers, count, spec.uid);
+            if(ptr != nullptr)
+            {
+                std::memset(ptr,
+                            hipdnn_plugin_sdk::output_agreement::fillByte(spec.dataType),
+                            spec.byteSize);
+            }
+        }
+    };
+    hooks.snapshot = [&counters](hipStream_t,
+                                 const hipdnnPluginDeviceBuffer_t* buffers,
+                                 uint32_t count,
+                                 const std::vector<OutputBufferSpec>& specs,
+                                 OutputImages& images) {
+        ++counters.snapshots;
+        images.assign(specs.size(), {});
+        for(size_t i = 0; i < specs.size(); ++i)
+        {
+            const void* ptr = hipdnn_plugin_sdk::ingestor::detail::findDeviceBuffer(
+                buffers, count, specs[i].uid);
+            if(ptr == nullptr)
+            {
+                return false;
+            }
+            images[i].resize(specs[i].byteSize);
+            std::memcpy(images[i].data(), ptr, specs[i].byteSize);
+        }
+        return true;
+    };
+    return hooks;
+}
+
+/// The input and output buffers of one execute, in host memory. The output can be made to
+/// share the input's memory.
+class HostBuffers
+{
+public:
+    HostBuffers()
+        : _input(VALIDATION_OUTPUT_BYTES, 0x00)
+        , _output(VALIDATION_OUTPUT_BYTES, 0x00)
+    {
+    }
+
+    void aliasOutputToInput()
+    {
+        _aliased = true;
+    }
+
+    const std::vector<uint8_t>& output() const
+    {
+        return _aliased ? _input : _output;
+    }
+
+    std::array<hipdnnPluginDeviceBuffer_t, 2> bindings()
+    {
+        return {{{VALIDATION_INPUT_UID, _input.data()},
+                 {VALIDATION_OUTPUT_UID, _aliased ? _input.data() : _output.data()}}};
+    }
+
+private:
+    std::vector<uint8_t> _input;
+    std::vector<uint8_t> _output;
+    bool _aliased = false;
+};
+
+/// Keeps the IPlan buildPlan() hands out, and which kind it was: a GenericPlan is a plan served
+/// from a stored record or the heuristic, anything else is a benchmark sweep.
+struct ValidationContext
+{
+    void setExecutionSettings(const KnobFilterSettings& settings)
+    {
+        _settings = settings;
+    }
+
+    const KnobFilterSettings& executionSettings() const
+    {
+        return _settings;
+    }
+
+    void setPlan(std::unique_ptr<GenericPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+        _servedWithoutBenchmark = true;
+    }
+
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
+    {
+        _plan = std::move(plan);
+        _servedWithoutBenchmark = false;
+    }
+
+    bool servedWithoutBenchmark() const
+    {
+        return _servedWithoutBenchmark;
+    }
+
+    const hipdnn_plugin_sdk::IPlan<TestHandle>& plan() const
+    {
+        return *_plan;
+    }
+
+    /// The block size of the kernel a non-benchmark plan serves.
+    int64_t servedBlockSize() const
+    {
+        return static_cast<const GenericPlan<TestHandle>&>(*_plan).kernel().getIntMetadata(
+            BLOCK_SIZE);
+    }
+
+private:
+    KnobFilterSettings _settings;
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
+    bool _servedWithoutBenchmark = false;
+};
+
+using ValidationBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, ValidationContext>;
+
+/// A private HIPDNN_CACHE_DIR for one test, with the disable switch cleared, so the winner shard
+/// the builder writes can be read back as text.
+class ScopedShardDir
+{
+public:
+    ScopedShardDir()
+        : _path(std::filesystem::temp_directory_path()
+                / ("hipdnn_builder_validation_" + uniqueDirectoryName()))
+        , _cacheDir("HIPDNN_CACHE_DIR", _path.string())
+        , _cacheDisabled("HIPDNN_DISABLE_CACHE")
+    {
+        std::filesystem::create_directories(_path);
+    }
+
+    ScopedShardDir(const ScopedShardDir&) = delete;
+    ScopedShardDir& operator=(const ScopedShardDir&) = delete;
+    ScopedShardDir(ScopedShardDir&&) = delete;
+    ScopedShardDir& operator=(ScopedShardDir&&) = delete;
+
+    ~ScopedShardDir()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(_path, ignored);
+    }
+
+private:
+    /// A steady-clock reading separates concurrent processes, the counter separates two
+    /// directories of one process.
+    static std::string uniqueDirectoryName()
+    {
+        static std::atomic<uint64_t> s_counter{0};
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        return std::to_string(static_cast<uint64_t>(stamp)) + "_"
+               + std::to_string(s_counter.fetch_add(1));
+    }
+
+    std::filesystem::path _path;
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDir;
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _cacheDisabled;
+};
+
+std::vector<std::string> fileLines(const std::filesystem::path& path)
+{
+    std::vector<std::string> lines;
+    std::ifstream stream(path);
+    for(std::string line; std::getline(stream, line);)
+    {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+std::vector<DescriptorId> entryIdsOf(const WinnerRecord& record)
+{
+    std::vector<DescriptorId> ids;
+    ids.reserve(record.entries.size());
+    for(const auto& entry : record.entries)
+    {
+        ids.push_back(entry.kernelId);
+    }
+    return ids;
+}
+
+std::vector<std::string> logsAt(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
+                                hipdnnSeverity_t severity)
+{
+    std::vector<std::string> messages;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        if(recorded.severity == severity)
+        {
+            messages.push_back(recorded.message);
+        }
+    }
+    return messages;
+}
+
+/// True when one message contains every needle.
+bool anyLogContainsAll(const std::vector<std::string>& messages,
+                       std::initializer_list<std::string> needles)
+{
+    return std::any_of(messages.begin(), messages.end(), [&needles](const std::string& message) {
+        return std::all_of(needles.begin(), needles.end(), [&message](const std::string& needle) {
+            return message.find(needle) != std::string::npos;
+        });
+    });
+}
+
+/// One pointwise node reading the input uid and writing the output uid.
+ContentCarryingTestGraph::Spec validationGraphSpec()
+{
+    ContentCarryingTestGraph::Spec spec;
+    spec.name = "validation_graph";
+    const std::vector<int64_t> dims{static_cast<int64_t>(VALIDATION_ELEMENTS)};
+    const std::vector<int64_t> strides{1};
+    spec.tensors = {
+        ContentCarryingTestGraph::TensorSpec{VALIDATION_INPUT_UID, DataType::FLOAT, dims, strides},
+        ContentCarryingTestGraph::TensorSpec{
+            VALIDATION_OUTPUT_UID, DataType::FLOAT, dims, strides}};
+    spec.nodes[0].in0TensorUid = VALIDATION_INPUT_UID;
+    spec.nodes[0].out0TensorUid = VALIDATION_OUTPUT_UID;
+    return spec;
+}
+
+/// The kernels the validation tests build: a graph with one pointwise node, an engine of up to
+/// three kernels whose launches write scripted bytes, host buffers and host hooks, a private
+/// winner cache directory, and the environment switch under the test's control.
+class TestIngestorGenericPlanBuilderValidation : public ::testing::Test
+{
+protected:
+    /// HIPDNN_VALIDATE_BENCHMARKING on or off for the rest of the test.
+    void validateEnvironment(bool on)
+    {
+        _validateEnvironment.setValue(on ? "1" : "0");
+    }
+
+    void script(size_t kernelIndex,
+                std::optional<std::vector<uint8_t>> output,
+                bool buildable = true)
+    {
+        _handler.script(KERNEL_BLOCKS[kernelIndex],
+                        ScriptedWritingHandler::Behavior{std::move(output), buildable});
+    }
+
+    /// Milliseconds per kernel, in catalog order; a kernel without an entry cannot be timed.
+    static BenchmarkPlan<TestHandle>::Timer timesMs(std::initializer_list<double> perKernel)
+    {
+        std::unordered_map<size_t, double> byWorkspace;
+        size_t index = 0;
+        for(const double time : perKernel)
+        {
+            byWorkspace[static_cast<size_t>(KERNEL_BLOCKS[index++])] = time;
+        }
+        return makeWorkspaceKeyedTimer(std::move(byWorkspace));
+    }
+
+    BenchmarkValidationHooks hooks()
+    {
+        return hostValidationHooks(_hookCounters);
+    }
+
+    /// A state manager over the first @p kernelCount kernels whose winner shard is named by
+    /// @p engineName. Two managers of one name share a shard, as two processes would.
+    static std::unique_ptr<StateManager> manager(const std::string& engineName,
+                                                 size_t kernelCount = 3)
+    {
+        KernelDescriptorPack pack;
+        pack.id = PACK_ID;
+        pack.name = "test pack";
+        pack.engineId = ENGINE_ID;
+        pack.dispatchId = DISPATCH_ID;
+        const std::vector<KernelDescriptor> kernels
+            = {makeKernel(validationKernelId(0), "kernel_64", 64, "FLOAT", /*priority=*/30),
+               makeKernel(validationKernelId(1), "kernel_128", 128, "FLOAT", /*priority=*/20),
+               makeKernel(validationKernelId(2), "kernel_256", 256, "FLOAT", /*priority=*/10)};
+        pack.kernels.assign(kernels.begin(),
+                            kernels.begin() + static_cast<std::ptrdiff_t>(kernelCount));
+
+        ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+        return std::make_unique<StateManager>(
+            makeSchema(),
+            std::vector<MatchDescriptor>{},
+            std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+            std::vector<KernelDescriptorPack>{std::move(pack)},
+            std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
+            "test.graph",
+            "engine 'validation'",
+            StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
+            EngineIdentity{engineName});
+    }
+
+    static std::filesystem::path shardPath(const std::string& engineName)
+    {
+        return winnerCacheShardPath(EngineIdentity{engineName}, testDeviceProperties().gcnArchName);
+    }
+
+    static std::vector<std::string> shardLines(const std::string& engineName)
+    {
+        return fileLines(shardPath(engineName));
+    }
+
+    static std::string shardText(const std::string& engineName)
+    {
+        std::string text;
+        for(const auto& line : shardLines(engineName))
+        {
+            text += line + "\n";
+        }
+        return text;
+    }
+
+    /// Digest of the kernels @p manager admits for the graph, before anything is recorded.
+    CatalogDigest catalogDigestOf(const StateManager& stateManager) const
+    {
+        return catalogDigest(
+            stateManager.unsortedDefinitions(MatchContext{_graph, 0, testDeviceProperties()}));
+    }
+
+    WinnerKey winnerKey() const
+    {
+        return winnerKeyFor(_graph, testDeviceProperties());
+    }
+
+    /// Ranked entries for the kernels at @p order (indexes into KERNEL_BLOCKS), best first.
+    std::vector<RankedEntry> entriesFor(const StateManager& stateManager,
+                                        std::initializer_list<size_t> order) const
+    {
+        const auto catalog = catalogFor(stateManager, _graph, testDeviceProperties());
+        std::vector<RankedEntry> entries;
+        for(const size_t index : order)
+        {
+            const auto kernel = std::find_if(
+                catalog.begin(), catalog.end(), [index](const KernelDefinition* candidate) {
+                    return candidate->kernelId == validationKernelId(index);
+                });
+            if(kernel == catalog.end())
+            {
+                ADD_FAILURE() << "kernel " << index << " is not in the catalog";
+                continue;
+            }
+            entries.push_back(rankedEntryFor(**kernel, 1.0 + static_cast<double>(entries.size())));
+        }
+        return entries;
+    }
+
+    /// initializeExecutionSettings() and buildPlan(), benchmarking requested through its knob
+    /// or left off.
+    void
+        build(const ValidationBuilder& builder, bool benchmarking, ValidationContext& context) const
+    {
+        flatbuffers::FlatBufferBuilder fbb;
+        const auto engineConfig
+            = benchmarking
+                  ? makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1)
+                  : makeEmptyEngineConfig(fbb);
+        KnobFilterSettings settings;
+        builder.initializeExecutionSettings(_handle, _graph, engineConfig, settings);
+        context.setExecutionSettings(settings);
+        builder.buildPlan(_handle, _graph, engineConfig, context);
+    }
+
+    /// One execute() of the built plan over @p buffers, which a benchmark plan resolves on.
+    void execute(const ValidationContext& context, HostBuffers& buffers) const
+    {
+        auto bindings = buffers.bindings();
+        std::vector<std::byte> workspace(context.plan().getWorkspaceSize(_handle));
+        context.plan().execute(
+            _handle, bindings.data(), static_cast<uint32_t>(bindings.size()), workspace.data());
+    }
+
+    const ScopedSymbols _symbols{"test.graph", acceptGraph, "test.kernel", countingFloatKernels};
+    const ScopedConstantScore _constantScore;
+    ScriptedWritingHandler _handler;
+    const ScopedDispatchRegistration<TestHandle> _dispatch{"test.dispatch", _handler};
+    ValidationHookCounters _hookCounters;
+    const ContentCarryingTestGraph _graph{validationGraphSpec()};
+    const TestHandle _handle;
+    const TestDeviceResolver _resolver;
+    const EngineDescriptor _engine = makeEngineWithKnobs({BLOCK_SIZE});
+
+private:
+    // Each guard clears its variable for the test and restores it after; the shard directory
+    // goes first so the winner cache the managers open lives in it.
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarking{
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _validateEnvironment{
+        hipdnn_plugin_sdk::VALIDATE_BENCHMARKING_ENV_NAME};
+    ScopedShardDir _shardDir;
+};
+
+TEST_F(TestIngestorGenericPlanBuilderValidation,
+       InitializeExecutionSettingsReadsTheValidateBenchmarkingEnvironment)
+{
+    const auto stateManager = manager("test:ValidationSettings");
+    const ValidationBuilder builder(_engine, *stateManager, _resolver);
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+
+    KnobFilterSettings unset;
+    builder.initializeExecutionSettings(_handle, _graph, engineConfig, unset);
+    EXPECT_FALSE(unset.ingestorSettings.validateBenchmarking);
+
+    validateEnvironment(true);
+    KnobFilterSettings on;
+    builder.initializeExecutionSettings(_handle, _graph, engineConfig, on);
+    EXPECT_TRUE(on.ingestorSettings.validateBenchmarking);
+
+    validateEnvironment(false);
+    KnobFilterSettings off;
+    builder.initializeExecutionSettings(_handle, _graph, engineConfig, off);
+    EXPECT_FALSE(off.ingestorSettings.validateBenchmarking);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, ModeOffPassesNoValidationAndCallsNoHooks)
+{
+    validateEnvironment(false);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, wrongImage());
+    const auto stateManager = manager("test:ValidationModeOff");
+    // The wrong kernel is the fastest, which is what mode off lets win.
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    ASSERT_FALSE(context.servedWithoutBenchmark());
+    HostBuffers buffers;
+    execute(context, buffers);
+
+    EXPECT_EQ(_hookCounters.fills, 0);
+    EXPECT_EQ(_hookCounters.snapshots, 0);
+    EXPECT_EQ(buffers.output(), wrongImage()) << "the fastest candidate wins without validation";
+    // One warmup launch per candidate and one launch of the winner; validation adds none.
+    EXPECT_EQ(_handler.launches(KERNEL_BLOCKS[0]), BENCHMARK_WARMUP_RUNS);
+    EXPECT_EQ(_handler.launches(KERNEL_BLOCKS[1]), BENCHMARK_WARMUP_RUNS);
+    EXPECT_EQ(_handler.launches(KERNEL_BLOCKS[2]), BENCHMARK_WARMUP_RUNS + 1);
+    const auto stored = stateManager->winnerFor(winnerKey());
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_FALSE(stored->validated.has_value()) << "a record written without validation is legacy";
+    EXPECT_EQ(stored->entries.size(), 3U);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, ValidateBenchmarkingWithBenchmarkingOffIsANoOp)
+{
+    validateEnvironment(true);
+
+    // No record: the heuristic front is served.
+    const auto plainManager = manager("test:ValidationBenchmarkingOffPlain");
+    const ValidationBuilder plainBuilder(_engine, *plainManager, _resolver, timesMs({}), hooks());
+    ValidationContext heuristic;
+    build(plainBuilder, /*benchmarking=*/false, heuristic);
+    ASSERT_TRUE(heuristic.servedWithoutBenchmark());
+    EXPECT_EQ(heuristic.servedBlockSize(), KERNEL_BLOCKS[0]);
+
+    // A legacy record is still served: the variable only matters while benchmarking.
+    const auto stateManager = manager("test:ValidationBenchmarkingOff");
+    const ValidationBuilder builder(_engine, *stateManager, _resolver, timesMs({}), hooks());
+    stateManager->recordWinner(winnerKey(),
+                               WinnerRecord{entriesFor(*stateManager, {2, 1, 0}), std::nullopt},
+                               WinnerWriteCause::FRESH_MISS);
+    ValidationContext recorded;
+    build(builder, /*benchmarking=*/false, recorded);
+
+    ASSERT_TRUE(recorded.servedWithoutBenchmark());
+    EXPECT_EQ(recorded.servedBlockSize(), KERNEL_BLOCKS[2]);
+    EXPECT_EQ(_hookCounters.fills, 0);
+    EXPECT_EQ(_hookCounters.snapshots, 0);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, ACacheHitNeverValidates)
+{
+    validateEnvironment(true);
+    const auto stateManager = manager("test:ValidationCacheHit");
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    const WinnerRecord validated{entriesFor(*stateManager, {1, 0, 2}),
+                                 catalogDigestOf(*stateManager)};
+    stateManager->recordWinner(winnerKey(), validated, WinnerWriteCause::FRESH_MISS);
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+
+    ASSERT_TRUE(context.servedWithoutBenchmark());
+    EXPECT_EQ(context.servedBlockSize(), KERNEL_BLOCKS[1]);
+    EXPECT_EQ(_hookCounters.fills, 0);
+    EXPECT_EQ(_hookCounters.snapshots, 0);
+    EXPECT_EQ(_handler.launches(KERNEL_BLOCKS[0]) + _handler.launches(KERNEL_BLOCKS[1])
+                  + _handler.launches(KERNEL_BLOCKS[2]),
+              0);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation,
+       ModeOnBenchmarkRecordsOnlyPassingKernelsInProcessAndOnDisk)
+{
+    validateEnvironment(true);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, wrongImage());
+    const std::string engineName = "test:ValidationRecords";
+    const auto stateManager = manager(engineName);
+    const auto expectedDigest = catalogDigestOf(*stateManager);
+    // The wrong kernel is the fastest, so only validation keeps it from winning.
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    ASSERT_FALSE(context.servedWithoutBenchmark());
+    HostBuffers buffers;
+    execute(context, buffers);
+
+    EXPECT_EQ(buffers.output(), correctImage(1)) << "the fastest passing kernel wins";
+    const auto stored = stateManager->winnerFor(winnerKey());
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(entryIdsOf(*stored),
+              (std::vector<DescriptorId>{validationKernelId(1), validationKernelId(0)}))
+        << "only passing kernels are recorded, fastest first";
+    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest))
+        << "the digest covers every candidate, the failed one included";
+    const auto shard = shardText(engineName);
+    EXPECT_EQ(shard.find(toString(validationKernelId(2))), std::string::npos)
+        << "the failed kernel never reaches the disk";
+    EXPECT_NE(shard.find("\"validated\""), std::string::npos);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation,
+       AnUntouchedKernelIsInTheDigestSoTheNextBuilderServes)
+{
+    validateEnvironment(true);
+    // The heuristic-first kernel is the fastest and writes nothing.
+    script(0, std::nullopt);
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    const std::string engineName = "test:ValidationUntouched";
+    const auto stateManager = manager(engineName);
+    const auto expectedDigest = catalogDigestOf(*stateManager);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({1.0, 2.0, 3.0}), hooks());
+
+    ValidationContext first;
+    build(builder, /*benchmarking=*/true, first);
+    ASSERT_FALSE(first.servedWithoutBenchmark());
+    HostBuffers buffers;
+    execute(first, buffers);
+
+    EXPECT_EQ(buffers.output(), correctImage(1));
+    const auto stored = stateManager->winnerFor(winnerKey());
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(entryIdsOf(*stored),
+              (std::vector<DescriptorId>{validationKernelId(1), validationKernelId(2)}));
+    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest));
+
+    // A later process reads the shard and serves the record without sweeping again.
+    const auto nextProcess = manager(engineName);
+    const ValidationBuilder nextBuilder(
+        _engine, *nextProcess, _resolver, timesMs({1.0, 2.0, 3.0}), hooks());
+    ValidationContext second;
+    build(nextBuilder, /*benchmarking=*/true, second);
+
+    ASSERT_TRUE(second.servedWithoutBenchmark());
+    EXPECT_EQ(second.servedBlockSize(), KERNEL_BLOCKS[1]);
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, ALegacyRecordUnderModeOnReBenchmarksOnceThenServes)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    validateEnvironment(true);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    const std::string engineName = "test:ValidationLegacy";
+    {
+        // An earlier run, or an older binary, left a record that covers the whole catalog.
+        const auto earlier = manager(engineName);
+        earlier->recordWinner(winnerKey(),
+                              WinnerRecord{entriesFor(*earlier, {0, 1, 2}), std::nullopt},
+                              WinnerWriteCause::FRESH_MISS);
+    }
+    ASSERT_EQ(shardLines(engineName).size(), 2U) << "the version line and the legacy record";
+
+    const auto stateManager = manager(engineName);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+
+    ASSERT_FALSE(context.servedWithoutBenchmark()) << "an unvalidated record is not served";
+    EXPECT_TRUE(anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_INFO),
+                                  {"does not fully cover", "unvalidated record"}));
+    HostBuffers buffers;
+    execute(context, buffers);
+    EXPECT_EQ(shardLines(engineName).size(), 3U) << "exactly one line is appended";
+
+    const auto nextProcess = manager(engineName);
+    const ValidationBuilder nextBuilder(
+        _engine, *nextProcess, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+    ValidationContext second;
+    build(nextBuilder, /*benchmarking=*/true, second);
+    ASSERT_TRUE(second.servedWithoutBenchmark());
+    EXPECT_EQ(second.servedBlockSize(), KERNEL_BLOCKS[2]) << "the re-benchmarked winner";
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, NoPassingCandidateThroughTheBuilderRecordsNothing)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    validateEnvironment(true);
+    // No kernel writes anything, so every output is still the fill pattern.
+    script(0, std::nullopt);
+    script(1, std::nullopt);
+    script(2, std::nullopt);
+    const std::string engineName = "test:ValidationNoPass";
+    const auto stateManager = manager(engineName);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    HostBuffers buffers;
+    execute(context, buffers);
+
+    EXPECT_EQ(stateManager->winnerCacheSize(), 0U);
+    EXPECT_FALSE(stateManager->winnerFor(winnerKey()).has_value());
+    EXPECT_LE(shardLines(engineName).size(), 1U) << "no record line is written";
+    EXPECT_TRUE(
+        anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_ERROR), {toString(validationKernelId(0))}))
+        << "the error names the kernel that is served instead";
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation,
+       AllTimingUnusableThroughTheBuilderServesAPassingCandidateAndRecordsNothing)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    validateEnvironment(true);
+    script(0, wrongImage());
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    const std::string engineName = "test:ValidationNoTiming";
+    const auto stateManager = manager(engineName);
+    // The timer reports nothing for any kernel.
+    const ValidationBuilder builder(_engine, *stateManager, _resolver, timesMs({}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    HostBuffers buffers;
+    execute(context, buffers);
+
+    EXPECT_EQ(buffers.output(), correctImage(1))
+        << "the first passing candidate is served, never the wrong heuristic-first one";
+    EXPECT_EQ(stateManager->winnerCacheSize(), 0U);
+    EXPECT_LE(shardLines(engineName).size(), 1U) << "no record line is written";
+    EXPECT_FALSE(logsAt(recorder, HIPDNN_SEV_ERROR).empty());
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, TheTwoCandidateCaseThroughTheBuilder)
+{
+    script(0, correctImage(0));
+    script(1, wrongImage());
+    // The correct kernel is heuristic-first and slower; the wrong one is faster.
+    for(const bool validationOn : {true, false})
+    {
+        SCOPED_TRACE(validationOn ? "validation on" : "validation off");
+        validateEnvironment(validationOn);
+        const auto stateManager
+            = manager(validationOn ? "test:ValidationTwoOn" : "test:ValidationTwoOff", 2);
+        const ValidationBuilder builder(
+            _engine, *stateManager, _resolver, timesMs({5.0, 2.0}), hooks());
+
+        ValidationContext context;
+        build(builder, /*benchmarking=*/true, context);
+        HostBuffers buffers;
+        execute(context, buffers);
+
+        EXPECT_EQ(buffers.output(), validationOn ? correctImage(0) : wrongImage());
+    }
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, TheMajorityCaseThroughTheBuilder)
+{
+    // The wrong kernel is heuristic-first and the fastest; two correct kernels are behind it.
+    script(0, wrongImage());
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    for(const bool validationOn : {true, false})
+    {
+        SCOPED_TRACE(validationOn ? "validation on" : "validation off");
+        validateEnvironment(validationOn);
+        const auto stateManager
+            = manager(validationOn ? "test:ValidationMajorityOn" : "test:ValidationMajorityOff");
+        const ValidationBuilder builder(
+            _engine, *stateManager, _resolver, timesMs({1.0, 2.0, 3.0}), hooks());
+
+        ValidationContext context;
+        build(builder, /*benchmarking=*/true, context);
+        HostBuffers buffers;
+        execute(context, buffers);
+
+        EXPECT_EQ(buffers.output(), validationOn ? correctImage(1) : wrongImage());
+    }
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation,
+       AnUnbuildableCandidateIsOutsideTheDigestSoTheRecordStaysPartial)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    validateEnvironment(true);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, correctImage(2), /*buildable=*/false);
+    const std::string engineName = "test:ValidationUnbuildable";
+    const auto stateManager = manager(engineName);
+    const auto fullDigest = catalogDigestOf(*stateManager);
+    std::vector<const KernelDefinition*> buildable;
+    for(const KernelDefinition* kernel : catalogFor(*stateManager, _graph, testDeviceProperties()))
+    {
+        if(kernel->getIntMetadata(BLOCK_SIZE) != KERNEL_BLOCKS[2])
+        {
+            buildable.push_back(kernel);
+        }
+    }
+    ASSERT_EQ(buildable.size(), 2U);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({2.0, 1.0}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    HostBuffers buffers;
+    execute(context, buffers);
+
+    const auto stored = stateManager->winnerFor(winnerKey());
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(catalogDigest(buildable)))
+        << "the digest covers the two candidates that were swept";
+    EXPECT_NE(stored->validated, std::optional<CatalogDigest>(fullDigest));
+
+    // The record does not cover the unbuildable kernel, so the next process sweeps again.
+    const auto nextProcess = manager(engineName);
+    const ValidationBuilder nextBuilder(
+        _engine, *nextProcess, _resolver, timesMs({2.0, 1.0}), hooks());
+    ValidationContext second;
+    build(nextBuilder, /*benchmarking=*/true, second);
+    EXPECT_FALSE(second.servedWithoutBenchmark());
+    EXPECT_TRUE(anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_INFO), {"does not fully cover"}));
+}
+
+TEST_F(TestIngestorGenericPlanBuilderValidation, AliasedBuffersThroughTheBuilderSkipValidation)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    validateEnvironment(true);
+    script(0, correctImage(0));
+    script(1, correctImage(1));
+    script(2, correctImage(2));
+    const std::string engineName = "test:ValidationAliased";
+    const auto stateManager = manager(engineName);
+    const auto expectedDigest = catalogDigestOf(*stateManager);
+    const ValidationBuilder builder(
+        _engine, *stateManager, _resolver, timesMs({3.0, 2.0, 1.0}), hooks());
+
+    ValidationContext context;
+    build(builder, /*benchmarking=*/true, context);
+    HostBuffers buffers;
+    buffers.aliasOutputToInput();
+    execute(context, buffers);
+
+    // Filling the output would have destroyed the input it shares memory with.
+    EXPECT_EQ(_hookCounters.fills, 0);
+    EXPECT_EQ(_hookCounters.snapshots, 0);
+    EXPECT_TRUE(anyLogContainsAll(logsAt(recorder, HIPDNN_SEV_WARN), {"aliases input"}));
+    const auto stored = stateManager->winnerFor(winnerKey());
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(stored->validated, std::optional<CatalogDigest>(expectedDigest))
+        << "an inconclusive resolve is still recorded as validated";
+    EXPECT_EQ(stored->entries.size(), 3U);
 }
 
 } // namespace

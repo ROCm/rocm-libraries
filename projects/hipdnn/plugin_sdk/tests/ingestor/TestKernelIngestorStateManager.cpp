@@ -492,10 +492,11 @@ TEST(TestKernelIngestorStateManager, AWinnerRecordNamingAShadowedKernelFallsBack
     ASSERT_EQ(baseline.entries.size(), 2U);
     ASSERT_EQ(baseline.measuredRecord, nullptr);
 
-    const WinnerRecord record{
-        RankedEntry{testId(0x93), anywhere.id, DISPATCH_ID, 0.1},
-        RankedEntry{testId(0x96), anywhere.id, DISPATCH_ID, 0.2},
-    };
+    const WinnerRecord record{{
+                                  RankedEntry{testId(0x93), anywhere.id, DISPATCH_ID, 0.1},
+                                  RankedEntry{testId(0x96), anywhere.id, DISPATCH_ID, 0.2},
+                              },
+                              std::nullopt};
     manager.recordWinner(
         WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
                   DeviceKey{properties}},

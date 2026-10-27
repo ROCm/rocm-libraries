@@ -3,8 +3,9 @@
 
 include "linear_attention_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -36,11 +37,11 @@ table KdaAttributes {
     state_indices_tensor_uid: long = null (cache_uid);  // [N], state pool rows
 
     // Required output tensor UID
-    o_tensor_uid: long (cache_uid);
+    o_tensor_uid: long (cache_uid, output_tensor);
 
     // Optional output tensor UIDs
-    final_state_tensor_uid:       long = null (cache_uid);
-    state_checkpoints_tensor_uid: long = null (cache_uid);  // [C, HO, V, K]
+    final_state_tensor_uid:       long = null (cache_uid, output_tensor);
+    state_checkpoints_tensor_uid: long = null (cache_uid, output_tensor);  // [C, HO, V, K]
 
     // Scalar attributes
     scale:                     float = null;  // absent: 1/sqrt(K)

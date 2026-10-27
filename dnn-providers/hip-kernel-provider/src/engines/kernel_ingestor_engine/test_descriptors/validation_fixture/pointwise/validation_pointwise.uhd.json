@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "cc2a9ef5-6211-4c97-a29d-7c146fee3a91",
+  "name": "validation pointwise selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.pointwise.score"
+  }
+}

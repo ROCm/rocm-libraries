@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "id": "b66cd1b0-efc9-4341-a8a6-e5e296f5ae76",
+  "name": "validation_pointwise_add.correct_a",
+  "kernel_source": {
+    "kind": "hip",
+    "source": "ValidationPointwiseAdd.cpp",
+    "entry": "ValidationPointwiseAdd",
+    "build": {
+      "defines": {
+        "HIP_PLUGIN_POINTWISE_TYPE": "float",
+        "HIP_PLUGIN_POINTWISE_BLOCK_SIZE": 256,
+        "HIP_PLUGIN_SPIN_CYCLES": 16384,
+        "HIP_PLUGIN_VALIDATION_WRONG": 0
+      }
+    }
+  },
+  "metadata": {
+    "block_size": 256,
+    "dtype": "FLOAT",
+    "operation": "ADD"
+  },
+  "priority": 0,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "4c739ef0-658c-43a8-af77-e6fcd870dbaf",
+          "kmd_id": "3b1954e0-233a-4e50-b516-9196ca619c5b",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "block_size",
+            "dtype",
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

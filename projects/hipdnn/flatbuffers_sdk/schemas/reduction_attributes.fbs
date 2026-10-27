@@ -3,8 +3,9 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -24,6 +25,6 @@ enum ReductionMode : byte {
 table ReductionAttributes {
     mode: ReductionMode;
     in_tensor_uid: long (cache_uid);
-    out_tensor_uid: long (cache_uid);
+    out_tensor_uid: long (cache_uid, output_tensor);
     is_deterministic: bool = false;
 }

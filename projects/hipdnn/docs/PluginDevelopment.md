@@ -426,6 +426,8 @@ The frontend sizes its workspace estimate for an engine that exposes `global.ben
 
 A provider implementing `global.benchmarking` by hand rather than through the ingestor must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` as the ingestor and MIOpen do: consulted *outside* any config-validity branch and composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express force-off, because a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` could not override a knob-enabled run.
 
+The ingestor can also check each candidate's output during that comparison: with `HIPDNN_VALIDATE_BENCHMARKING` on (read per plan build through `hipdnn_plugin_sdk::validateBenchmarkingFromEnv()`, and consulted only while benchmarking is on), a candidate that leaves its output unwritten or disagrees with the cohort of agreeing candidates cannot win, and its identity is never stored in the winner record. The nodes' written tensors come from the `output_tensor` attribute in the flatbuffer schemas, so an operation added to the ingestor's graphs must mark them (see [Adding a New Operation](./AddingNewOperations.md#output-tensors)). A provider implementing `global.benchmarking` by hand is not covered by this variable. See [`HIPDNN_VALIDATE_BENCHMARKING`](./Environment.md#hipdnn_validate_benchmarking) for the rules.
+
 #### Deprecating Knobs
 
 When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.

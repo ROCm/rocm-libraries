@@ -5,6 +5,7 @@ include "sdpa_attributes.fbs";
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "output_tensor";
 attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
@@ -19,9 +20,9 @@ table SdpaBackwardAttributes {
     stats_tensor_uid:          long (cache_uid);
 
     // Required output tensor UIDs
-    dq_tensor_uid:             long (cache_uid);
-    dk_tensor_uid:             long (cache_uid);
-    dv_tensor_uid:             long (cache_uid);
+    dq_tensor_uid:             long (cache_uid, output_tensor);
+    dk_tensor_uid:             long (cache_uid, output_tensor);
+    dv_tensor_uid:             long (cache_uid, output_tensor);
 
     // Optional input tensor UIDs
     scale_tensor_uid:          long = null (cache_uid);  // Attention scale tensor (Attn_scale)
@@ -37,7 +38,7 @@ table SdpaBackwardAttributes {
     dropout_scale_inv_tensor_uid: long = null (cache_uid);
 
     // Optional output tensor UIDs
-    dbias_tensor_uid:          long = null (cache_uid);  // Gradient of additive attention bias
+    dbias_tensor_uid:          long = null (cache_uid, output_tensor);  // Gradient of additive attention bias
 
     // Boolean flags
     alibi_mask:                bool = false;

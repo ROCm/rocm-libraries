@@ -5,16 +5,13 @@
 
 #include <hipdnn_bench/VariantPackBuilder.hpp>
 
-#include <hipdnn_data_sdk/types/Bfloat16.hpp>
-#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_plugin_sdk/OutputAgreement.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
-#include <limits>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -102,127 +99,62 @@ inline const char* verdictText(NumericalVerdict verdict)
 namespace detail
 {
 
-/// How an element of a dtype is read as a number.
-enum class NumericKind
-{
-    NONE, ///< Not decodable here; a tensor of this type is skipped, never assumed equal.
-    SIGNED_INTEGER,
-    UNSIGNED_INTEGER,
-    FLOAT16,
-    BFLOAT16,
-    FLOAT32,
-    FLOAT64
-};
+namespace agreement = hipdnn_plugin_sdk::output_agreement;
 
-/// Only types whose decode is exact are listed; a wrong decode would report mismatches for
-/// correct kernels. Packed, sub-byte and complex types are UNKNOWN.
-inline NumericKind numericKind(hipdnn_frontend::DataType dataType)
+/// The flatbuffers dtype the shared output_agreement rules read. A frontend type with no
+/// flatbuffers counterpart maps to UNSET, which the rules never decode.
+inline agreement::DataType toSdkDataType(hipdnn_frontend::DataType dataType)
 {
     using hipdnn_frontend::DataType;
+    using SdkDataType = agreement::DataType;
     switch(dataType)
     {
-    case DataType::DOUBLE:
-        return NumericKind::FLOAT64;
     case DataType::FLOAT:
-        return NumericKind::FLOAT32;
+        return SdkDataType::FLOAT;
+    case DataType::DOUBLE:
+        return SdkDataType::DOUBLE;
     case DataType::HALF:
-        return NumericKind::FLOAT16;
+        return SdkDataType::HALF;
     case DataType::BFLOAT16:
-        return NumericKind::BFLOAT16;
+        return SdkDataType::BFLOAT16;
     case DataType::INT8:
+        return SdkDataType::INT8;
     case DataType::INT32:
+        return SdkDataType::INT32;
     case DataType::INT64:
-        return NumericKind::SIGNED_INTEGER;
+        return SdkDataType::INT64;
     case DataType::UINT8:
+        return SdkDataType::UINT8;
     case DataType::BOOLEAN:
-        return NumericKind::UNSIGNED_INTEGER;
+        return SdkDataType::BOOLEAN;
+    case DataType::FP8_E4M3:
+        return SdkDataType::FP8_E4M3;
+    case DataType::FP8_E5M2:
+        return SdkDataType::FP8_E5M2;
+    case DataType::FP8_E8M0:
+        return SdkDataType::FP8_E8M0;
+    case DataType::FP8_E4M3_FNUZ:
+        return SdkDataType::FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return SdkDataType::FP8_E5M2_FNUZ;
+    case DataType::FP4_E2M1:
+        return SdkDataType::FP4_E2M1;
+    case DataType::FP6_E2M3:
+        return SdkDataType::FP6_E2M3;
+    case DataType::FP6_E3M2:
+        return SdkDataType::FP6_E3M2;
+    case DataType::INT4:
+        return SdkDataType::INT4;
     default:
-        return NumericKind::NONE;
+        return SdkDataType::UNSET;
     }
 }
 
-/// One element's bytes -> double, per storage type. Separate functions so decodeElement() and
-/// firstDisagreement()'s per-type loops share one decode rather than keeping two that could
-/// drift: a decode that differed between them would make the mismatch detail name an element
-/// the comparison never flagged.
-inline double decodeDoubleAt(const uint8_t* bytes)
+/// True when the cross-check can read @p dataType as numbers; a tensor of any other type is
+/// skipped, never assumed equal.
+inline bool decodable(hipdnn_frontend::DataType dataType)
 {
-    double value = 0.0;
-    std::memcpy(&value, bytes, sizeof(value));
-    return value;
-}
-
-inline double decodeFloatAt(const uint8_t* bytes)
-{
-    float value = 0.0F;
-    std::memcpy(&value, bytes, sizeof(value));
-    return static_cast<double>(value);
-}
-
-inline double decodeHalfAt(const uint8_t* bytes)
-{
-    uint16_t value = 0;
-    std::memcpy(&value, bytes, sizeof(value));
-    return static_cast<double>(hipdnn_data_sdk::types::detail::half_bits_to_float(value));
-}
-
-inline double decodeBfloat16At(const uint8_t* bytes)
-{
-    uint16_t value = 0;
-    std::memcpy(&value, bytes, sizeof(value));
-    return static_cast<double>(hipdnn_data_sdk::types::detail::bfloat16_bits_to_float(value));
-}
-
-inline double decodeInt64At(const uint8_t* bytes)
-{
-    int64_t value = 0;
-    std::memcpy(&value, bytes, sizeof(value));
-    return static_cast<double>(value);
-}
-
-inline double decodeInt32At(const uint8_t* bytes)
-{
-    int32_t value = 0;
-    std::memcpy(&value, bytes, sizeof(value));
-    return static_cast<double>(value);
-}
-
-inline double decodeInt8At(const uint8_t* bytes)
-{
-    return static_cast<double>(static_cast<int8_t>(*bytes));
-}
-
-inline double decodeByteAt(const uint8_t* bytes)
-{
-    return static_cast<double>(*bytes); // UINT8, BOOLEAN
-}
-
-/// Element @p index of @p image, which the caller has already bounds-checked.
-inline double decodeElement(const std::vector<uint8_t>& image,
-                            size_t index,
-                            hipdnn_frontend::DataType dataType)
-{
-    using hipdnn_frontend::DataType;
-    const auto* bytes = image.data() + index * static_cast<size_t>(elementBits(dataType) / 8);
-    switch(dataType)
-    {
-    case DataType::DOUBLE:
-        return decodeDoubleAt(bytes);
-    case DataType::FLOAT:
-        return decodeFloatAt(bytes);
-    case DataType::HALF:
-        return decodeHalfAt(bytes);
-    case DataType::BFLOAT16:
-        return decodeBfloat16At(bytes);
-    case DataType::INT64:
-        return decodeInt64At(bytes);
-    case DataType::INT32:
-        return decodeInt32At(bytes);
-    case DataType::INT8:
-        return decodeInt8At(bytes);
-    default:
-        return decodeByteAt(bytes);
-    }
+    return agreement::numericKind(toSdkDataType(dataType)) != agreement::NumericKind::NONE;
 }
 
 /// @brief One value of the input fill: (-1)^negative * 2^exponent, exponent 0 or 1.
@@ -388,150 +320,27 @@ inline uint64_t graphFillSeed(const std::vector<uint8_t>& graphBytes)
     return hash;
 }
 
-/// Relative tolerance two correct kernels may differ by (the `rtol` of firstDisagreement()).
-///
-/// Non-zero because differing reduction orders change the last bits. Integers are exact.
-inline double agreementTolerance(NumericKind kind)
-{
-    switch(kind)
-    {
-    case NumericKind::FLOAT64:
-        return 1e-12;
-    case NumericKind::FLOAT32:
-        return 1e-5;
-    case NumericKind::FLOAT16:
-        return 2e-2; // 10 mantissa bits
-    case NumericKind::BFLOAT16:
-        return 6e-2; // 7 mantissa bits
-    default:
-        return 0.0;
-    }
-}
-
-/// The absolute term's coefficient: 2^-mantissa bits, so `agreementFloor(kind) * scale` is
-/// one ulp at the tensor's own magnitude.
-inline double agreementFloor(NumericKind kind)
-{
-    switch(kind)
-    {
-    case NumericKind::FLOAT64:
-        return 0x1p-52; // 52 mantissa bits
-    case NumericKind::FLOAT32:
-        return 0x1p-23;
-    case NumericKind::FLOAT16:
-        return 0x1p-10;
-    case NumericKind::BFLOAT16:
-        return 0x1p-7;
-    default:
-        return 0.0; // integers are exact; their bar is equality
-    }
-}
-
-/// firstDisagreement() over one storage type's @p decode: where two images of the same
-/// tensor first differ, or empty when they agree.
-///
-/// Per element, `|a - b| <= rtol * max(|a|, |b|) + atol` with atol one ulp at the tensor's
-/// magnitude: the relative term judges each element against itself, and atol tolerates
-/// near-zero elements that are cancellation residue. Templated on the decoder so the type is
-/// chosen once per tensor, not once per element.
-template <typename Decode>
-std::string firstDisagreementDecoded(const std::string& name,
-                                     NumericKind kind,
-                                     size_t width,
-                                     const std::vector<uint8_t>& reference,
-                                     const std::vector<uint8_t>& candidate,
-                                     Decode decode)
-{
-    const size_t count = reference.size() / width;
-    const uint8_t* referenceBytes = reference.data();
-    const uint8_t* candidateBytes = candidate.data();
-
-    // The tensor's magnitude, used only by the absolute term.
-    double scale = 0.0;
-    for(size_t index = 0; index < count; ++index)
-    {
-        const double left = decode(referenceBytes + (index * width));
-        const double right = decode(candidateBytes + (index * width));
-        if(std::isfinite(left))
-        {
-            scale = std::max(scale, std::abs(left));
-        }
-        if(std::isfinite(right))
-        {
-            scale = std::max(scale, std::abs(right));
-        }
-    }
-    const double relative = agreementTolerance(kind);
-    const double absolute = agreementFloor(kind) * scale;
-
-    for(size_t index = 0; index < count; ++index)
-    {
-        const double left = decode(referenceBytes + (index * width));
-        const double right = decode(candidateBytes + (index * width));
-        // Decide non-finite cases before the magnitude test: `NaN > threshold` is false.
-        const bool bothNonFinite = !std::isfinite(left) && !std::isfinite(right);
-        const bool sameNonFinite = bothNonFinite && !(left < right) && !(right < left)
-                                   && std::isnan(left) == std::isnan(right);
-        if(sameNonFinite)
-        {
-            continue;
-        }
-        const double threshold = (relative * std::max(std::abs(left), std::abs(right))) + absolute;
-        if(!std::isfinite(left) || !std::isfinite(right) || std::abs(left - right) > threshold)
-        {
-            std::ostringstream detail;
-            detail.precision(3);
-            detail << "tensor '" << name << "' element " << index << " is " << std::scientific
-                   << right << " against the catalog's " << left << ", outside a tolerance of "
-                   << threshold;
-            return detail.str();
-        }
-    }
-    return {};
-}
-
-/// Where two images of the same tensor first differ, or empty when they agree -- the rule
-/// documented on firstDisagreementDecoded(). Two all-zero images agree: they are identical,
-/// and identical is not a difference.
+/// Where two images of the same tensor first differ, named for the row, or empty when they
+/// agree. The rule is output_agreement::firstDisagreementAt(); two all-zero images agree:
+/// they are identical, and identical is not a difference.
 inline std::string firstDisagreement(const std::string& name,
                                      hipdnn_frontend::DataType dataType,
                                      const std::vector<uint8_t>& reference,
                                      const std::vector<uint8_t>& candidate)
 {
-    using hipdnn_frontend::DataType;
-    const auto kind = numericKind(dataType);
-    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
-    if(kind == NumericKind::NONE || width == 0 || reference.size() != candidate.size())
-    {
-        return {}; // Not comparable; the caller counts it as skipped rather than as agreement.
-    }
-    // Identical bytes decode to identical values, and the rule passes an element equal to
-    // itself -- a finite one is within any threshold, and a NaN or infinity meets its own
-    // twin in the same-non-finite case -- so the decode cannot disagree where this agrees.
-    // It is the common case for a catalog whose candidates share a reduction order.
-    if(reference == candidate)
+    // Not comparable: the caller counts it as skipped rather than as agreement.
+    const auto found
+        = agreement::firstDisagreementAt(toSdkDataType(dataType), reference, candidate);
+    if(!found)
     {
         return {};
     }
-    switch(dataType)
-    {
-    case DataType::DOUBLE:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeDoubleAt);
-    case DataType::FLOAT:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeFloatAt);
-    case DataType::HALF:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeHalfAt);
-    case DataType::BFLOAT16:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeBfloat16At);
-    case DataType::INT64:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt64At);
-    case DataType::INT32:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt32At);
-    case DataType::INT8:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt8At);
-    default:
-        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeByteAt);
-    }
+    std::ostringstream detailText;
+    detailText.precision(3);
+    detailText << "tensor '" << name << "' element " << found->index << " is " << std::scientific
+               << found->right << " against the catalog's " << found->left
+               << ", outside a tolerance of " << found->tolerance;
+    return detailText.str();
 }
 
 /// True when every comparable tensor of @p candidate is still the zero fill it was
@@ -542,7 +351,7 @@ inline bool leftOutputUntouched(const CandidateOutput& candidate,
     for(const auto& [uid, tensor] : tensors)
     {
         const auto image = candidate.images.find(uid);
-        if(numericKind(tensor.dataType) == NumericKind::NONE || image == candidate.images.end())
+        if(!decodable(tensor.dataType) || image == candidate.images.end())
         {
             continue;
         }
@@ -564,22 +373,18 @@ inline std::string firstNonFinite(const CandidateOutput& candidate,
     for(const auto& [uid, tensor] : tensors)
     {
         const auto image = candidate.images.find(uid);
-        const auto width = static_cast<size_t>(elementBits(tensor.dataType) / 8);
-        if(numericKind(tensor.dataType) == NumericKind::NONE || width == 0
-           || image == candidate.images.end())
+        if(!decodable(tensor.dataType) || image == candidate.images.end())
         {
             continue;
         }
-        const size_t count = image->second.size() / width;
-        for(size_t index = 0; index < count; ++index)
+        const auto found
+            = agreement::firstNonFiniteAt(toSdkDataType(tensor.dataType), image->second);
+        if(found)
         {
-            const double value = decodeElement(image->second, index, tensor.dataType);
-            if(!std::isfinite(value))
-            {
-                std::ostringstream detail;
-                detail << "tensor '" << tensor.name << "' element " << index << " is " << value;
-                return detail.str();
-            }
+            std::ostringstream detailText;
+            detailText << "tensor '" << tensor.name << "' element " << found->index << " is "
+                       << found->value;
+            return detailText.str();
         }
     }
     return {};
@@ -614,7 +419,7 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
     size_t comparable = 0;
     for(const auto& [uid, tensor] : tensors)
     {
-        if(numericKind(tensor.dataType) != NumericKind::NONE && candidate.images.count(uid) != 0)
+        if(decodable(tensor.dataType) && candidate.images.count(uid) != 0)
         {
             ++comparable;
         }

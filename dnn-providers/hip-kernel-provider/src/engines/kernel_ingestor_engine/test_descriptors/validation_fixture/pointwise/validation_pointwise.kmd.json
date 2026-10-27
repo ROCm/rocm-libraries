@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "3b1954e0-233a-4e50-b516-9196ca619c5b",
+  "name": "validation pointwise variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}
