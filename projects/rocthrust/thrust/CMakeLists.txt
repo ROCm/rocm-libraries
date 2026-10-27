@@ -70,12 +70,8 @@ rocm_install(
 )
 
 # Export targets; generates find_dependency() for each PACKAGE in rocthrust-config.cmake
-set(ROCTHRUST_EXPORT_DEPENDS_ARGS)
-if(ROCTHRUST_EXPORT_DEPENDS)
-  set(ROCTHRUST_EXPORT_DEPENDS_ARGS DEPENDS ${ROCTHRUST_EXPORT_DEPENDS})
-endif()
 rocm_export_targets(
   TARGETS roc::rocthrust
-  ${ROCTHRUST_EXPORT_DEPENDS_ARGS}
+  DEPENDS ${ROCTHRUST_EXPORT_DEPENDS}
   NAMESPACE roc::
 )
