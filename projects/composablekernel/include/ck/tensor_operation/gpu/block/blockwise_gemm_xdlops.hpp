@@ -499,7 +499,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
 // It's using MRepeat as inner loop and not NRepeat to get consistent behavior and
 // register usage between RDNA and CDNA (on RDNA the NRepeat is halved,
 // while MRepeat stays the same for 16x16 wave tile)
-// It also avoids registers dependency and delays in wmma instructions issuing
+// It also avoids registers dependency and delays in matrix instructions issuing
 // observed when KRepeat is inner loop
 template <index_t BlockSize,
           typename FloatA,
@@ -730,7 +730,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             constexpr auto m0 = Number<knm[Number<2>{}] * MInner>{};
 
             // Preload next A/B
-            // (we don't wait for them in this step so we have wmma cycles to hide latency)
+            // (we don't wait for them in this step so we have compute cycles to hide latency)
             constexpr bool IsLastMN =
                 m0 == MRepeat - MInner && n0 == NRepeat - NInner && k + 1 < KRepeat;
             constexpr bool IsLoadAStep = (m0 != MRepeat - MInner) || IsLastMN;
@@ -759,7 +759,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             wait_dscnt(Number<a_ds_cnt + b_ds_cnt>{});
             __builtin_amdgcn_sched_barrier(0);
 
-            // Wmma step consumes subtiles MInner/NInner
+            // Compute step consumes subtiles MInner/NInner
             static_ford<Sequence<NInner, MInner>>{}([&](auto n1m1) {
                 constexpr auto n1 = Number<n1m1[Number<0>{}]>{};
                 constexpr auto m1 = Number<n1m1[Number<1>{}]>{};
