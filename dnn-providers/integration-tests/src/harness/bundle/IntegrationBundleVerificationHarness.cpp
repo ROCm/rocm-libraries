@@ -584,12 +584,23 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
                                                          ReferenceExecutorType type)
 {
     const std::string label = refLabel(type);
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = type == ReferenceExecutorType::GPU ? "gpu" : "cpu";
+        _referenceBenchmarks.push_back(std::move(result));
+    }
     // Still null in the catch below if creating the executor is what threw.
     IReferenceGraphExecutor* executor = nullptr;
     try
     {
-        executor = &_deps.referenceExecutors->get(type);
-        if(executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+        bool applicable = false;
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            executor = &_deps.referenceExecutors->get(type);
+            applicable
+                = executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+        });
+        if(applicable)
         {
             return ResolvedReference{type, executor};
         }
@@ -598,6 +609,10 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
     catch(const ReferenceCapabilityError& e)
     {
         chain.declined(label + " (not applicable: " + e.what() + ")");
+    }
+    catch(const ReferenceBenchmarkError&)
+    {
+        throw;
     }
     catch(const std::exception& e)
     {
@@ -610,6 +625,10 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         error.append(" ").append(detail);
         referenceErrored(chain, std::move(entry), std::move(error));
     }
+    if(_deps.policy.benchmarkReference && _referenceBenchmarks.back().status == "pending")
+    {
+        _referenceBenchmarks.back().status = "declined";
+    }
     return std::nullopt;
 }
 
@@ -617,6 +636,10 @@ void IntegrationBundleVerificationHarness::referenceErrored(OracleChain& chain,
                                                             std::string entry,
                                                             std::string error)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = "error";
+    }
     recordRefError(error);
     chain.tried.push_back({std::move(entry), std::move(error)});
 }
@@ -758,10 +781,18 @@ VerificationOutcome
             return outcome;
         }
         case RefStatus::CAPABILITY_MISS:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = "declined";
+            }
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;
         case RefStatus::RUNTIME_ERROR:
         {
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = "error";
+            }
             // "the next reference", not a name: the next candidate has not been probed
             // yet and may turn out not to be applicable.
             std::string context;
@@ -785,6 +816,10 @@ VerificationOutcome
             break;
         }
         case RefStatus::HARNESS_ERROR:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = "error";
+            }
             // Not the reference's fault, so it neither falls through to the next one nor
             // goes in the reference-error report.
             return VerificationOutcome::failed(VerificationDepth::EXECUTED,
@@ -892,7 +927,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     // instead of quietly dropping it from the run.
     try
     {
-        _inputs = _bundle->loadTensors();
+        _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
     }
     catch(const std::exception& e)
     {
@@ -1102,6 +1137,19 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRa
 
 // ---- engine + reference runs -----------------------------------------------
 
+void IntegrationBundleVerificationHarness::measureReference(double ReferenceBenchmarkResult::*phase,
+                                                            const std::function<void()>& work)
+{
+    if(_deps.policy.benchmarkReference)
+    {
+        _deps.referenceTimer.measure(_referenceBenchmarks.back().*phase, work);
+    }
+    else
+    {
+        work();
+    }
+}
+
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -1234,34 +1282,48 @@ IntegrationBundleVerificationHarness::RefRunResult
     // to an executor that wants device memory — or the reverse — is a silent crash,
     // not an error, and the executor is the one that knows which it needs.
     bool useDevice = false;
+    std::optional<std::string> harnessError;
 
     // isApplicable() already said yes in probeReference(); execute() can
     // still throw a ReferenceCapabilityError for what that check could not see.
     try
     {
         IReferenceGraphExecutor& executor = *ref.executor;
-        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
-        refOutputs = allocateSentinelOutputs(useDevice);
-        // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
-        if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
-        {
-            bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
-        }
         VariantPack variantPack;
-        try
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+            refOutputs = allocateSentinelOutputs(useDevice);
+            // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
+            if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper());
+               dump.has_value())
+            {
+                bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
+            }
+            try
+            {
+                variantPack = buildVariantPack(refOutputs, useDevice);
+            }
+            catch(const std::invalid_argument& e)
+            {
+                // The variant pack is the harness's, so a fault in it is never the reference's.
+                harnessError = e.what();
+            }
+        });
+        if(harnessError.has_value())
         {
-            variantPack = buildVariantPack(refOutputs, useDevice);
+            return {RefStatus::HARNESS_ERROR, *harnessError};
         }
-        catch(const std::invalid_argument& e)
-        {
-            // The variant pack is the harness's, so a fault in it is never the reference's.
-            return {RefStatus::HARNESS_ERROR, e.what()};
-        }
-        executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        });
     }
     catch(const ReferenceCapabilityError& e)
     {
         return {RefStatus::CAPABILITY_MISS, e.what()};
+    }
+    catch(const ReferenceBenchmarkError& e)
+    {
+        return {RefStatus::HARNESS_ERROR, e.what()};
     }
     catch(const detail::DeviceOutputError& e)
     {
@@ -1379,6 +1441,14 @@ void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& sessi
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = "golden";
+        _referenceBenchmarks.push_back(std::move(result));
+        measureReference(&ReferenceBenchmarkResult::executeMs,
+                         [&] { _bundle->loadGoldenOutputs(_inputs); });
+    }
     return compareAgainst(
         engineOutputs,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_inputs.at(uid); },
@@ -1403,6 +1473,26 @@ VerificationOutcome
                                                          Verifier verifier)
 {
     auto wrapper = _bundle->graphWrapper();
+    const auto validationSite = resolveValidationSite(_deps.policy.validator, site);
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().validator
+            = validationSite == ValidationSite::DEVICE ? "gpu" : "cpu";
+        measureReference(&ReferenceBenchmarkResult::materializeMs, [&] {
+            for(const auto uid : _bundle->outputTensorUids)
+            {
+                auto& expected = expectedFor(uid);
+                if(validationSite == ValidationSite::DEVICE)
+                {
+                    static_cast<void>(expected.rawDeviceData());
+                }
+                else
+                {
+                    static_cast<void>(expected.rawHostData());
+                }
+            }
+        });
+    }
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
@@ -1462,7 +1552,7 @@ VerificationOutcome
         engineOutputs,
         expectedFor,
         toleranceFor,
-        resolveValidationSite(_deps.policy.validator, site),
+        validationSite,
         "Bundle: " + _bundlePath.string() + inputFillNote(),
         liveRows,
         resolveValidationSite(_deps.policy.validator, ValidationSite::HOST));
@@ -1474,6 +1564,10 @@ VerificationOutcome
         ADD_FAILURE() << mismatch.report;
     }
 
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = mismatches.empty() ? "verified" : "mismatch";
+    }
     return comparisonOutcome(mismatches.empty(), verifier);
 }
 

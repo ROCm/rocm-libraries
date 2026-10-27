@@ -140,6 +140,7 @@ struct HarnessPolicy
 
     /// Set by --benchmark: time each verified graph with these settings.
     std::optional<BenchmarkSettings> benchmark;
+    bool benchmarkReference = false;
 
     /// Set by --graph-capture: capture each verified graph and replay it with these
     /// settings.

@@ -168,6 +168,7 @@ struct TestConfigOptions
     bool writeSupportClaims = false;
     std::optional<BenchmarkSettings> benchmark;
     std::optional<CaptureSettings> graphCapture;
+    bool benchmarkReference = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -238,6 +239,7 @@ public:
         instance._writeSupportClaims = opts.writeSupportClaims;
         instance._benchmark = opts.benchmark;
         instance._graphCapture = opts.graphCapture;
+        instance._benchmarkReference = opts.benchmarkReference;
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
@@ -500,6 +502,11 @@ public:
     }
 
     /// Set by --benchmark: how to time each verified graph. Empty when off.
+    bool benchmarkReference() const
+    {
+        return _benchmarkReference;
+    }
+
     const std::optional<BenchmarkSettings>& benchmarkSettings() const
     {
         throwIfNotInitialized();
@@ -534,6 +541,7 @@ private:
     std::optional<std::filesystem::path> _captureDir;
     std::optional<BenchmarkSettings> _benchmark;
     std::optional<CaptureSettings> _graphCapture;
+    bool _benchmarkReference = false;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

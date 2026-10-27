@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -18,10 +19,86 @@
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 
+#include "harness/Benchmark.hpp"
 #include "harness/CurrentTestName.hpp"
 
 namespace hipdnn_integration_tests
 {
+
+class ReferenceBenchmarkSummary : public ::testing::EmptyTestEventListener
+{
+public:
+    struct Total
+    {
+        std::size_t count = 0;
+        double milliseconds = 0.0;
+    };
+
+    static std::map<std::string, Total>& totals()
+    {
+        static std::map<std::string, Total> s_values;
+        return s_values;
+    }
+
+    void OnTestIterationStart(const ::testing::UnitTest& unitTest, int iteration) override
+    {
+        static_cast<void>(unitTest);
+        static_cast<void>(iteration);
+        totals().clear();
+    }
+
+    void OnTestIterationEnd(const ::testing::UnitTest& unitTest, int iteration) override
+    {
+        static_cast<void>(unitTest);
+        static_cast<void>(iteration);
+        if(totals().empty())
+        {
+            std::cout << "[ REFERENCE BENCHMARK SUMMARY ] measured=0\n";
+        }
+        for(const auto& [reference, total] : totals())
+        {
+            std::cout << "[ REFERENCE BENCHMARK SUMMARY ] reference=" << reference
+                      << " measured=" << total.count << " total_ms=" << total.milliseconds << '\n';
+        }
+    }
+};
+
+inline void reportReferenceBenchmark(const ReferenceBenchmarkResult& result)
+{
+    const auto format = [](double value) {
+        std::ostringstream out;
+        out << std::fixed << std::setprecision(6) << value;
+        return out.str();
+    };
+    const std::string prefix = "reference_benchmark_" + result.reference + "_";
+    ::testing::Test::RecordProperty(prefix + "status", result.status);
+    ::testing::Test::RecordProperty(prefix + "validator", result.validator);
+    if(result.status == "verified" || result.status == "mismatch")
+    {
+        ::testing::Test::RecordProperty(prefix + "samples", 1);
+        ::testing::Test::RecordProperty(prefix + "prepare_ms", format(result.prepareMs));
+        ::testing::Test::RecordProperty(prefix + "execute_ms", format(result.executeMs));
+        ::testing::Test::RecordProperty(prefix + "materialize_ms", format(result.materializeMs));
+        ::testing::Test::RecordProperty(prefix + "total_ms", format(result.totalMs()));
+    }
+    if(result.status == "verified")
+    {
+        auto& total = ReferenceBenchmarkSummary::totals()[result.reference];
+        ++total.count;
+        total.milliseconds += result.totalMs();
+    }
+    std::cout << "[ REFERENCE BENCHMARK ] " << currentTestName()
+              << " reference=" << result.reference << " status=" << result.status
+              << " validator=" << result.validator;
+    if(result.status == "verified" || result.status == "mismatch")
+    {
+        std::cout << " samples=1 prepare_ms=" << format(result.prepareMs)
+                  << " execute_ms=" << format(result.executeMs)
+                  << " materialize_ms=" << format(result.materializeMs)
+                  << " total_ms=" << format(result.totalMs());
+    }
+    std::cout << '\n';
+}
 
 inline const char* toString(hipdnn_frontend::TimingQuality quality)
 {
