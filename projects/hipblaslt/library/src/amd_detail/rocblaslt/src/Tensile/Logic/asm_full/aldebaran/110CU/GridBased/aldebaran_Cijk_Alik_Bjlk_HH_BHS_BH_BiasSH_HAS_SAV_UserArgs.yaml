@@ -248,6 +248,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2vpdbY86F
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -375,6 +376,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 1
+  SolutionUID: 0uR2vpdbNZip
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -500,6 +502,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 2
+  SolutionUID: 0uR2vpdbwfCf
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -625,6 +628,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 1
 - SolutionIndex: 3
+  SolutionUID: 0uR2vpdbr0GI
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -750,6 +754,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 1
 - SolutionIndex: 4
+  SolutionUID: 0uR2vpdc54Sp
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -875,6 +880,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 1
 - SolutionIndex: 5
+  SolutionUID: 0uR2vpdbNkoW
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -1002,6 +1008,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 6
+  SolutionUID: 0uR2vpdc2Ciu
   KernelNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Alik_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true

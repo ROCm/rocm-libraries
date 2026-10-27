@@ -94,9 +94,17 @@
 // straight to the sub-library) and so carry no collision risk.
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+#include <hipblaslt/hipblaslt.h>
+
+#include <cstdint>
+#include <vector>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/CachingLibrary.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 using namespace TensileLite;
@@ -335,4 +343,418 @@ TEST(CachingLibraryCollision, smoke_FindTopSolutionsGroupedGemmDistinguishesColl
         << "ROCM-25647 (preventive): CachingLibrary::findTopSolutionsGroupedGemm returned the "
            "wrong, hash-colliding problem group's cached solutions. The grouped-GEMM cache must "
            "stay keyed on the full std::vector<MyProblem>, not a lossy hash.";
+}
+
+// The tests below use the real ContractionProblemGemm key. Two problems that the key treats as
+// equal share one cache entry, so a field that a shipped solution predicate reads must be in the
+// key if hipBLASLt problems can differ in it alone: otherwise a problem that the predicate rejects
+// is served the solutions cached for one it accepted, and hipblasLtMatmul runs a kernel that
+// cannot handle it.
+namespace
+{
+    using ProblemPredicate = std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>>;
+
+    // One real solution that, like SingleSolutionLibrary, is returned only for problems its
+    // problem predicate accepts.
+    struct PredicateSubLibrary : public SolutionLibrary<ContractionProblemGemm>
+    {
+        explicit PredicateSubLibrary(ProblemPredicate predicate)
+            : solution(std::make_shared<ContractionSolution>())
+        {
+            solution->problemPredicate = std::move(predicate);
+        }
+
+        std::shared_ptr<ContractionSolution> solution;
+        mutable int                          findTopCalls = 0;
+
+        bool accepts(ContractionProblemGemm const& problem) const
+        {
+            return (*solution->problemPredicate)(problem);
+        }
+
+        std::shared_ptr<ContractionSolution> getSolutionByIndex(ContractionProblemGemm const&,
+                                                                Hardware const&,
+                                                                const int) const override
+        {
+            return nullptr;
+        }
+
+        std::shared_ptr<ContractionSolution> findBestSolution(ContractionProblemGemm const& problem,
+                                                              Hardware const&,
+                                                              double*) const override
+        {
+            return accepts(problem) ? solution : nullptr;
+        }
+
+        SolutionSet<ContractionSolution> findAllSolutions(ContractionProblemGemm const&,
+                                                          Hardware const&,
+                                                          SolutionLibrarySearchType) const override
+        {
+            return {};
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType) const override
+        {
+            return {};
+        }
+
+        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const& problem,
+                                                             Hardware const&,
+                                                             int) const override
+        {
+            ++findTopCalls;
+            if(!accepts(problem))
+                return {};
+            return {solution};
+        }
+
+        SolutionVector<ContractionSolution>
+            findTopSolutionsGroupedGemm(std::vector<ContractionProblemGemm> const& problems,
+                                        Hardware const&,
+                                        int) const override
+        {
+            for(auto const& problem : problems)
+                if(!accepts(problem))
+                    return {};
+            return {solution};
+        }
+
+        std::string type() const override
+        {
+            return "PredicateSubLibrary";
+        }
+        std::string description() const override
+        {
+            return "PredicateSubLibrary";
+        }
+    };
+
+    template <typename P, typename V>
+    ProblemPredicate makePredicate(V const& value)
+    {
+        auto predicate   = std::make_shared<P>();
+        predicate->value = value;
+        return predicate;
+    }
+
+    constexpr size_t kM = 128;
+    constexpr size_t kN = 256;
+
+    ContractionProblemGemm makeProblem(double beta = 1.0, size_t ldc = kM)
+    {
+        auto problem
+            = ContractionProblemGemm::GEMM(false, false, kM, kN, 64, kM, 64, ldc, beta, false, 1);
+        // The factory leaves these uninitialized and the key compares them; hipBLASLt sets them.
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setF32XdlMathOp(rocisa::DataType::Float);
+        return problem;
+    }
+
+    ContractionProblemGemm makeBiasProblem(rocisa::DataType type)
+    {
+        auto problem = makeProblem();
+        problem.setUseBias(1);
+        problem.setBias(type, kM, 0);
+        return problem;
+    }
+
+    // Caches the solution for `accepted`, then looks up `rejected`, which differs only in a
+    // field that `predicate` reads. Every cached lookup must come back empty for `rejected`.
+    void expectRejectedProblemIsNotServedFromCache(ProblemPredicate const&       predicate,
+                                                   ContractionProblemGemm const& accepted,
+                                                   ContractionProblemGemm const& rejected)
+    {
+        ASSERT_TRUE((*predicate)(accepted));
+        ASSERT_FALSE((*predicate)(rejected));
+
+        auto sub = std::make_shared<PredicateSubLibrary>(predicate);
+        CachingLibrary<ContractionProblemGemm> library(sub);
+        auto                                   gpu = makeGpu();
+
+        EXPECT_TRUE(library.findBestSolution(accepted, gpu) != nullptr);
+        EXPECT_TRUE(library.findBestSolution(rejected, gpu) == nullptr)
+            << "findBestSolution served a solution cached for a problem the predicate accepts";
+
+        EXPECT_EQ(library.findTopSolutions(accepted, gpu, 1).size(), 1u);
+        EXPECT_TRUE(library.findTopSolutions(rejected, gpu, 1).empty())
+            << "findTopSolutions served solutions cached for a problem the predicate accepts";
+
+        EXPECT_EQ(library.findTopSolutionsGroupedGemm({accepted}, gpu, 1).size(), 1u);
+        EXPECT_TRUE(library.findTopSolutionsGroupedGemm({rejected}, gpu, 1).empty())
+            << "findTopSolutionsGroupedGemm served solutions cached for a group the predicate "
+               "accepts";
+    }
+}
+
+TEST(CachingLibraryCollision, smoke_BiasDataTypeIsPartOfKey)
+{
+    using Predicates::Contraction::BiasDataTypeWhiteList;
+    expectRejectedProblemIsNotServedFromCache(
+        makePredicate<BiasDataTypeWhiteList>(
+            std::vector<rocisa::DataType>{rocisa::DataType::Float, rocisa::DataType::Half}),
+        makeBiasProblem(rocisa::DataType::Half),
+        makeBiasProblem(rocisa::DataType::BFloat16));
+}
+
+TEST(CachingLibraryCollision, smoke_ActivationEnumIsPartOfKey)
+{
+    using Predicates::Contraction::ActivationEnumWhiteList;
+    auto withActivation = [](ActivationType activation) {
+        auto problem = makeProblem();
+        problem.setActivationType(ActivationType::All);
+        problem.setParams().setActivationEnum(activation);
+        return problem;
+    };
+    expectRejectedProblemIsNotServedFromCache(
+        makePredicate<ActivationEnumWhiteList>(std::vector<ActivationType>{ActivationType::Relu}),
+        withActivation(ActivationType::Relu),
+        withActivation(ActivationType::Gelu));
+}
+
+// With a C stride of 2^23 elements, BufferLoadOffsetLimitCheck_Beta accepts only beta == 0.
+TEST(CachingLibraryCollision, smoke_BetaZeroIsPartOfKey)
+{
+    constexpr size_t ldc = size_t(1) << 23;
+    expectRejectedProblemIsNotServedFromCache(
+        makePredicate<Predicates::Contraction::BufferLoadOffsetLimitCheck_Beta>(kN),
+        makeProblem(0.0, ldc),
+        makeProblem(1.0, ldc));
+}
+
+// The key holds only whether beta is 0, so every non-zero beta shares one cache entry.
+TEST(CachingLibraryCollision, smoke_NonZeroBetaValuesShareCacheEntry)
+{
+    auto sub = std::make_shared<PredicateSubLibrary>(
+        std::make_shared<Predicates::True<ContractionProblemGemm>>());
+    CachingLibrary<ContractionProblemGemm> library(sub);
+    auto                                   gpu = makeGpu();
+
+    for(double beta : {0.5, 2.0, 1.0})
+        EXPECT_EQ(library.findTopSolutions(makeProblem(beta), gpu, 1).size(), 1u);
+    EXPECT_EQ(sub->findTopCalls, 1);
+}
+
+TEST(CachingLibraryCollision, smoke_GlobalSplitUIsPartOfKey)
+{
+    auto withGsu = [](int16_t gsu) {
+        auto problem = makeProblem();
+        problem.setOutputAmaxD(true);
+        problem.setParams().setGSU(gsu);
+        return problem;
+    };
+    expectRejectedProblemIsNotServedFromCache(
+        makePredicate<Predicates::Contraction::AmaxDCheck>(true), withGsu(1), withGsu(4));
+}
+
+TEST(CachingLibraryCollision, smoke_FallbackStatusIsPartOfKey)
+{
+    using Predicates::Contraction::WorkgroupMappingXCCCheck;
+    auto withFallback = [](bool fallback) {
+        auto problem = makeProblem();
+        problem.setParams().setFallbackStatus(fallback);
+        return problem;
+    };
+    // An XCC of 3 is rejected unless the solution runs as a CU fallback, which forces XCC 1.
+    expectRejectedProblemIsNotServedFromCache(
+        std::make_shared<WorkgroupMappingXCCCheck>(std::array<int, 2>{3, 8}, 64),
+        withFallback(true),
+        withFallback(false));
+}
+
+// The added key fields must still compare equal for identical problems, or every lookup misses.
+TEST(CachingLibraryCollision, smoke_IdenticalProblemIsServedFromCache)
+{
+    auto makeKeyedProblem = []() {
+        auto problem = makeBiasProblem(rocisa::DataType::Half);
+        problem.setActivationType(ActivationType::All);
+        problem.setParams().setActivationEnum(ActivationType::Relu);
+        problem.setParams().setGSU(2);
+        return problem;
+    };
+
+    auto sub = std::make_shared<PredicateSubLibrary>(
+        std::make_shared<Predicates::True<ContractionProblemGemm>>());
+    CachingLibrary<ContractionProblemGemm> library(sub);
+    auto                                   gpu = makeGpu();
+
+    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
+    EXPECT_EQ(library.findTopSolutions(makeKeyedProblem(), gpu, 1).size(), 1u);
+    EXPECT_EQ(sub->findTopCalls, 1);
+}
+
+// The same collision through the public API and the shipped libraries. Every f16 GEMM shares the
+// one CachingLibrary at the root of the master library, and its kernels' BiasDataTypeWhiteList is
+// a solution predicate below that cache, not a library split.
+namespace
+{
+    // f16 D = A * B + bias with A = B = 0 and beta = 0, so every element of D must equal the bias.
+    struct F16BiasGemm
+    {
+        static constexpr int64_t m = 1024;
+        static constexpr int64_t n = 512;
+        static constexpr int64_t k = 1024;
+
+        hipblasLtHandle_t                  handle = nullptr;
+        hipblasLtMatrixLayout_t            layA = nullptr, layB = nullptr, layD = nullptr;
+        hipblasLtMatmulPreference_t        pref = nullptr;
+        std::vector<hipblasLtMatmulDesc_t> descs;
+        void *dA = nullptr, *dB = nullptr, *dD = nullptr, *dBias = nullptr, *dWorkspace = nullptr;
+        size_t workspaceBytes = size_t{32} << 20;
+        float  alpha = 1.0f, beta = 0.0f;
+
+        ~F16BiasGemm()
+        {
+            for(auto desc : descs)
+                hipblasLtMatmulDescDestroy(desc);
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            for(auto layout : {layA, layB, layD})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(handle)
+                hipblasLtDestroy(handle);
+            for(auto buffer : {dA, dB, dD, dBias, dWorkspace})
+                if(buffer)
+                    static_cast<void>(hipFree(buffer));
+        }
+
+        void create()
+        {
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layA, HIP_R_16F, m, k, m), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layB, HIP_R_16F, k, n, k), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layD, HIP_R_16F, m, n, m), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                            &workspaceBytes,
+                                                            sizeof(workspaceBytes)),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipMalloc(&dA, m * k * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dB, k * n * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dD, m * n * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dBias, m * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&dWorkspace, workspaceBytes), hipSuccess);
+            ASSERT_EQ(hipMemset(dA, 0, m * k * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMemset(dB, 0, k * n * sizeof(uint16_t)), hipSuccess);
+        }
+
+        hipblasLtMatmulDesc_t desc(hipDataType biasType)
+        {
+            hipblasLtMatmulDesc_t desc = nullptr;
+            EXPECT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            descs.push_back(desc);
+            hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &dBias, sizeof(dBias)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &biasType, sizeof(biasType)),
+                      HIPBLAS_STATUS_SUCCESS);
+            return desc;
+        }
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(hipblasLtMatmulDesc_t desc)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results(4);
+            int                                           returned = 0;
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc,
+                                                      layA,
+                                                      layB,
+                                                      layD,
+                                                      layD,
+                                                      pref,
+                                                      static_cast<int>(results.size()),
+                                                      results.data(),
+                                                      &returned),
+                      HIPBLAS_STATUS_SUCCESS);
+            results.resize(returned);
+            return results;
+        }
+
+        bool supports(hipblasLtMatmulDesc_t desc, hipblasLtMatmulAlgo_t algo)
+        {
+            size_t workspace = 0;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                       handle, desc, &alpha, layA, layB, &beta, layD, layD, algo, workspace)
+                   == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        // Runs `algo` with a bias of 1.0 stored as `biasType` and counts the elements of D that
+        // are not f16 1.0.
+        size_t wrongElements(hipblasLtMatmulDesc_t        desc,
+                             hipDataType                  biasType,
+                             hipblasLtMatmulAlgo_t const& algo)
+        {
+            std::vector<uint16_t> bias(m, biasType == HIP_R_16BF ? 0x3F80 : 0x3C00);
+            EXPECT_EQ(
+                hipMemcpy(dBias, bias.data(), bias.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+                hipSuccess);
+            EXPECT_EQ(hipMemset(dD, 0xFF, m * n * sizeof(uint16_t)), hipSuccess);
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      dA,
+                                      layA,
+                                      dB,
+                                      layB,
+                                      &beta,
+                                      dD,
+                                      layD,
+                                      dD,
+                                      layD,
+                                      &algo,
+                                      dWorkspace,
+                                      workspaceBytes,
+                                      nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint16_t> d(m * n);
+            EXPECT_EQ(hipMemcpy(d.data(), dD, d.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            size_t wrong = 0;
+            for(auto value : d)
+                wrong += value != 0x3C00;
+            return wrong;
+        }
+    };
+}
+
+// The shipped f16 GEMM kernels read an f16 or f32 bias and none reads bf16, so a bf16-bias query
+// must not be served the solutions an f16-bias query of the same shape cached.
+TEST(CachingLibraryCollision, smoke_Bf16BiasHeuristicIsNotServedF16BiasSolutions)
+{
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess || devices == 0)
+        GTEST_SKIP() << "No GPU available";
+
+    F16BiasGemm gemm;
+    ASSERT_NO_FATAL_FAILURE(gemm.create());
+
+    auto f16Desc      = gemm.desc(HIP_R_16F);
+    auto f16Solutions = gemm.heuristic(f16Desc);
+    if(f16Solutions.empty())
+        GTEST_SKIP() << "No f16-bias solution for this shape on this device";
+    ASSERT_EQ(gemm.wrongElements(f16Desc, HIP_R_16F, f16Solutions[0].algo), 0u)
+        << "an f16-bias solution does not compute D = bias";
+
+    auto bf16Desc = gemm.desc(HIP_R_16BF);
+    for(auto const& result : gemm.heuristic(bf16Desc))
+    {
+        int const index = *reinterpret_cast<int const*>(result.algo.data);
+        EXPECT_TRUE(gemm.supports(bf16Desc, result.algo))
+            << "the bf16-bias heuristic returned solution " << index
+            << ", which matmulIsAlgoSupported rejects for a bf16 bias";
+        EXPECT_EQ(gemm.wrongElements(bf16Desc, HIP_R_16BF, result.algo), 0u)
+            << "solution " << index << " ran with a bf16 bias of 1.0 and left D elements not 1.0";
+    }
 }

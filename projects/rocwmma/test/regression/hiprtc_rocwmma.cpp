@@ -557,16 +557,17 @@ TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
             = rocwmma::compareEqualLaunchKernel<OutputT, OutputT, row_major, row_major>(
                             (OutputT*)d_d, (OutputT*)d_d_ref, m, n, errorTolerance);
 
-    ASSERT_EQ(result, true) << "Result: " << result << "(expecting 1); Error: " << error << " (expecting ~0)\n";
-
     // Release device memory
     CHECK_HIP_ERROR(hipFree(d_a));
     CHECK_HIP_ERROR(hipFree(d_b));
     CHECK_HIP_ERROR(hipFree(d_c));
     CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIP_ERROR(hipFree(d_d_ref));
 
     CHECK_HIP_ERROR(hipModuleUnload(module));
     ASSERT_HIPRTC_SUCCESS(hiprtcDestroyProgram(&prog));
+
+    ASSERT_EQ(result, true) << "Result: " << result << "(expecting 1); Error: " << error << " (expecting ~0)\n";
 }
 
 int main(int argc, char **argv) {

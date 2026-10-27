@@ -16,9 +16,11 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -922,13 +924,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// arrives.
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::KPACK;
 
-/// A pack or kernel naming no architecture inherits/wildcards; one that names
-/// architectures must name the requested one, or this is the wrong shard.
-bool coversArch(const std::vector<std::string>& declared, const std::string& arch)
-{
-    return declared.empty() || std::find(declared.begin(), declared.end(), arch) != declared.end();
-}
-
 class TestGfx950AttentionDensePacks : public ::testing::Test
 {
 protected:
@@ -956,13 +951,14 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
-            return set.engine.name == "hipkernel:Gfx950AttentionDense";
+            return set.engine.name == GFX950_ATTENTION_DENSE_ENGINE_NAME;
         });
         ASSERT_NE(match, sets.end())
-            << "descriptor set 'hipkernel:Gfx950AttentionDense' did not load. Either its "
-               "descriptors were never installed under the tree this binary reads, or "
-               "its pack failed to register its native symbols and every descriptor "
-               "naming one of them was dropped.";
+            << "descriptor set '" << GFX950_ATTENTION_DENSE_ENGINE_NAME
+            << "' did not load. Either its descriptors were never installed under the tree "
+               "this binary reads, its UED declares a different engine name than "
+               "GFX950_ATTENTION_DENSE_ENGINE_NAME, or its pack failed to register its "
+               "native symbols and every descriptor naming one of them was dropped.";
         _set = &*match;
     }
 
@@ -999,12 +995,12 @@ TEST_F(TestGfx950AttentionDensePacks, EveryLoadedDescriptorCoversTheRequestedArc
 {
     for(const auto& pack : _set->packs)
     {
-        EXPECT_TRUE(coversArch(pack.arch, _arch))
+        EXPECT_TRUE(ingestor::archSupports(pack.arch, _arch))
             << "pack '" << pack.name << "' does not cover '" << _arch
             << "', so this is not that architecture's shard";
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_TRUE(coversArch(kernel.arch, _arch))
+            EXPECT_TRUE(ingestor::archSupports(kernel.arch, _arch))
                 << "kernel '" << kernel.name << "' does not cover '" << _arch << "'";
         }
     }
@@ -1043,7 +1039,7 @@ TEST_F(TestGfx950AttentionDensePacks, ExposesTheConfiguredKnobs)
 TEST_F(TestGfx950AttentionDensePacks, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "hipkernel.gfx950_attention_dense.score");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "hipkernel.gfx950_attention_dense.score");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_attention_dense.score"));
 }
 

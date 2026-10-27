@@ -18,7 +18,7 @@ the perf harness for the optimization phases.
 IT MEASURES THE SHIPPED KERNEL
 ------------------------------
 The spec under test is **resolved through the dispatch factory**
-(``dispatch.attention.gfx942.dense_spec_for_request``), not hand-built from CLI
+(the ``gfx942_dense`` candidate via ``dispatch.attention.attention_tuning_spec``), not hand-built from CLI
 defaults. That is the difference between a gate and a decoration: the tuning that
 ships (per-config ``waves_per_eu``, the 304-CTA persistent grid and its auto-on
 rule, the ragged path) lives in dispatch, so a hardcoded CLI default here would
@@ -35,7 +35,9 @@ Concretely: at the default ``--dtype bf16 --d 64`` the shipped ``waves_per_eu`` 
 
 Scope: dense self-attention (uniform batch via the ``[B, S, H, d]`` grid), causal +
 full + sliding-window (``--mode swa``), bf16/fp16, D64/D128, MHA + GQA (incl.
-non-pow-2), default AND persistent grid. varlen is still a follow-up: its ``--mode``
+non-pow-2), default AND persistent grid. ``--use-sinks`` adds attention sinks to
+any mode and checks against a manual sink reference instead of SDPA. varlen is
+still a follow-up: its ``--mode``
 value exits with the distinct skip code 3 (never 0 — a gate must not report success
 for no work).
 
@@ -78,6 +80,7 @@ from kernels.gfx942.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
     attention_dense_signature,
     build_attention_dense,
     gfx942_kernel_name,
@@ -145,14 +148,17 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    # batch-unique (the kernel bakes batch into the buffer extents)
+    # The name is unique per binary and omits the shape and head counts: one binary
+    # serves them all, read from kernargs. That makes supports a per-shape check, so
+    # it runs before the cache lookup -- a hit for one shape says nothing about
+    # another (e.g. the sliding-window zero-trip guard).
+    ok, why = supports_attention_dense(spec, arch=_ARCH)
+    if not ok:
+        raise ValueError(f"unsupported spec: {why}")
     key = gfx942_kernel_name(spec)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
-    ok, why = supports_attention_dense(spec, arch=_ARCH)
-    if not ok:
-        raise ValueError(f"unsupported spec: {why}")
     art = compile_kernel(
         build_attention_dense(spec, arch=_ARCH),
         arch=_ARCH,
@@ -179,6 +185,12 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     """
     import torch
 
+    # Imported here, not at module scope, because it imports torch.
+    from builders.gfx942.attention.prefill.attention_dense_prefill import (
+        dense_reference,
+        make_sinks,
+    )
+
     dev = "cuda"
     dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[spec.dtype]
     B, S = spec.batch, spec.seqlen_q
@@ -192,6 +204,7 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     k = (torch.randn(B, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     v = (torch.randn(B, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     out = torch.zeros(B, S, Hq, D, dtype=dt, device=dev)
+    sinks = make_sinks(spec, dev)
 
     lch = _dense_launcher(spec)
     cfg = LaunchConfig(
@@ -200,13 +213,11 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
         stream=stream,
     )
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if spec.runtime_shape:
-        # Mirrors the three i32 params attention_dense_signature declares after
-        # scale on the runtime-shape path; omitting them under-fills the kernarg
-        # buffer for a kernel that reads them.
-        vals["batch"] = int(spec.batch)
-        vals["seqlen_q"] = int(spec.seqlen_q)
-        vals["seqlen_kv"] = int(spec.seqlen_kv)
+    # The runtime i32 shape params attention_dense_signature declares after scale
+    # (empty on the baked paths); omitting them under-fills the kernarg buffer.
+    vals.update(attention_dense_runtime_args(spec))
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
 
     def call():
         lch(vals, config=cfg)
@@ -214,24 +225,9 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     call()
     torch.cuda.synchronize()
 
-    # correctness vs SDPA (batched, causal/full/SWA, GQA repeat).
+    # correctness vs the fp32 reference (SDPA, or the manual sink softmax).
     W = spec.sliding_window
-    rep = Hq // Hkv
-    qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-    if W and W > 0:
-        # banded causal: key j allowed for query i iff i-W < j <= i.
-        qi = torch.arange(S, device=dev).view(-1, 1)
-        ki = torch.arange(S, device=dev).view(1, -1)
-        m = (ki <= qi) & (ki > qi - W)
-        ref = torch.nn.functional.scaled_dot_product_attention(
-            qh, kh, vh, attn_mask=m
-        ).transpose(1, 2)
-    else:
-        ref = torch.nn.functional.scaled_dot_product_attention(
-            qh, kh, vh, is_causal=causal
-        ).transpose(1, 2)
+    ref = dense_reference(q, k, v, spec, scale=scale, sinks=sinks)
     max_err = (out.float() - ref).abs().max().item()
 
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
@@ -278,7 +274,7 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
                 cfgs.append(("swa", "gqa_swa", f"S={S} {tag}", S, 1, Hq, Hkv, True, W))
     if mode == "persistent":
         # The causal cohort with the persistent grid FORCED on (main() pins
-        # dense_persistent="on" unless the user said otherwise). Under "all" the
+        # the persistent knob on unless the user said otherwise). Under "all" the
         # same shapes already run persistent via dispatch's auto rule; this mode
         # exists so the grid can be measured deliberately, incl. the small-work
         # shapes auto would leave on the default grid.
@@ -313,6 +309,7 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
         "D": D,
         "causal": causal,
         "sliding_window": None if spec is None else spec.sliding_window,
+        "use_sinks": None if spec is None else spec.use_sinks,
         # The tuning actually built, so a report can never be read as if it
         # described a different config than the one that was timed.
         "block_n": None if spec is None else spec.block_n,
@@ -451,7 +448,8 @@ def main() -> int:
     )
     ap.add_argument("--output-csv", type=str, default=None)
     # --bn / --wpe / --persistent / --np / --persist-decode / --interleave /
-    # --kpad / --sw, all defaulting to None = "whatever dispatch ships".
+    # --kpad / --sw, all defaulting to None = "whatever dispatch ships", plus the
+    # --use-sinks request flag (off by default).
     add_dense_tuning_args(ap)
     args = ap.parse_args()
 
@@ -481,7 +479,7 @@ def main() -> int:
         f"warmup={args.warmup} iters={args.iterations}"
     )
     print(
-        "spec source: dispatch.attention.gfx942.dense_spec_for_request"
+        "spec source: dispatch.attention.attention_tuning_spec(spec_id=gfx942_dense)"
         + (
             f"  (+ explicit overrides: {overrides})"
             if overrides

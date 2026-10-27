@@ -298,12 +298,13 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitValidKernels(
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
-    const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const auto dev_name  = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11  = StartsWith(dev_name, "gfx110") || StartsWith(dev_name, "gfx115");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12");
 
     auto* ranked_p = &ranked_gemm_grp_fwd;
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
         ranked_p = &ranked_gemm_grp_fwd_navi;
 
     const auto ranked_1st_applicable = *ranked_p;
@@ -386,20 +387,13 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
-        if(!loader.IsLoaded())
-            return false;
-
-        auto data_type = problem.GetInDataType();
-        use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
-
-        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKSolverType::GrpConvFwd, problem, data_type, use_tf32);
-
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
+        InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-
-        assert(!valid_kernels.empty());
         return true;
     }
     if((index + 1) < valid_kernels.size())

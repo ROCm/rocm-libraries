@@ -34,18 +34,18 @@
 #endif // no system header
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
+#include <thrust/iterator/iterator_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-// clang-format off
 #  include _THRUST_STD_INCLUDE(__fwd/pair.h)
 #  include _THRUST_STD_INCLUDE(__fwd/tuple.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
-// clang-format on
 #endif
 
-#include <type_traits>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
 #  include <tuple>
 #  include <utility>
 #endif
@@ -90,7 +90,6 @@ struct is_trivially_relocatable_impl;
 template <typename T>
 using is_trivially_relocatable = detail::is_trivially_relocatable_impl<T>;
 
-#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
  *  aka can be bitwise copied with a facility like
@@ -105,7 +104,6 @@ using is_trivially_relocatable = detail::is_trivially_relocatable_impl<T>;
  */
 template <typename T>
 constexpr bool is_trivially_relocatable_v = is_trivially_relocatable<T>::value;
-#endif
 
 /*! \brief <a href="https://en.cppreference.com/w/cpp/named_req/BinaryTypeTrait"><i>BinaryTypeTrait</i></a>
  *  that returns \c true_type if \c From is
@@ -124,7 +122,6 @@ template <typename From, typename To>
 using is_trivially_relocatable_to =
   integral_constant<bool, _THRUST_STD::is_same<From, To>::value && is_trivially_relocatable<To>::value>;
 
-#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c From is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
  *  to \c To, aka can be bitwise copied with a facility like
@@ -139,7 +136,6 @@ using is_trivially_relocatable_to =
  */
 template <typename From, typename To>
 constexpr bool is_trivially_relocatable_to_v = is_trivially_relocatable_to<From, To>::value;
-#endif
 
 /*! \brief <a href="https://en.cppreference.com/w/cpp/named_req/BinaryTypeTrait"><i>BinaryTypeTrait</i></a>
  *  that returns \c true_type if the element type of \c FromIterator is
@@ -156,13 +152,11 @@ constexpr bool is_trivially_relocatable_to_v = is_trivially_relocatable_to<From,
  * \see THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE
  */
 template <typename FromIterator, typename ToIterator>
-using is_indirectly_trivially_relocatable_to =
-  integral_constant<bool,
-                    is_contiguous_iterator<FromIterator>::value && is_contiguous_iterator<ToIterator>::value
-                      && is_trivially_relocatable_to<typename thrust::iterator_traits<FromIterator>::value_type,
-                                                     typename thrust::iterator_traits<ToIterator>::value_type>::value>;
+using is_indirectly_trivially_relocatable_to = integral_constant<
+  bool,
+  is_contiguous_iterator<FromIterator>::value && is_contiguous_iterator<ToIterator>::value
+    && is_trivially_relocatable_to<detail::it_value_t<FromIterator>, detail::it_value_t<ToIterator>>::value>;
 
-#if THRUST_CPP_DIALECT >= 2017
 /*! \brief <tt>constexpr bool</tt> that is \c true if the element type of
  *  \c FromIterator is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
@@ -180,7 +174,6 @@ using is_indirectly_trivially_relocatable_to =
 template <typename FromIterator, typename ToIterator>
 constexpr bool is_indirectly_trivially_relocate_to_v =
   is_indirectly_trivially_relocatable_to<FromIterator, ToIterator>::value;
-#endif
 
 /*! \brief <a href="http://eel.is/c++draft/namespace.std#def:customization_point"><i>customization point</i></a>
  *  that can be specialized customized to indicate that a type \c T is
@@ -230,7 +223,7 @@ struct is_trivially_relocatable_impl
     : integral_constant<bool, _THRUST_STD::is_trivially_copyable<T>::value || proclaim_trivially_relocatable<T>::value>
 {};
 
-template <typename T, std::size_t N>
+template <typename T, _THRUST_STD::size_t N>
 struct is_trivially_relocatable_impl<T[N]> : is_trivially_relocatable_impl<T>
 {};
 
@@ -267,19 +260,43 @@ THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uint4)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long3)
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long4)
+THRUST_SUPPRESS_DEPRECATED_POP
+#  if THRUST_CTK_AT_LEAST(13, 0)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long4_16a)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long4_32a)
+#  endif // THRUST_CTK_AT_LEAST(13, 0)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong3)
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong4)
+THRUST_SUPPRESS_DEPRECATED_POP
+#  if THRUST_CTK_AT_LEAST(13, 0)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong4_16a)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong4_32a)
+#  endif // THRUST_CTK_AT_LEAST(13, 0)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong3)
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong4)
+THRUST_SUPPRESS_DEPRECATED_POP
+#  if THRUST_CTK_AT_LEAST(13, 0)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong4_16a)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong4_32a)
+#  endif // THRUST_CTK_AT_LEAST(13, 0)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong3)
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong4)
+THRUST_SUPPRESS_DEPRECATED_POP
+#  if THRUST_CTK_AT_LEAST(13, 0)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong4_16a)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong4_32a)
+#  endif // THRUST_CTK_AT_LEAST(13, 0)
 
 struct __half;
 struct __half2;
@@ -294,7 +311,13 @@ THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(float4)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double3)
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4)
+THRUST_SUPPRESS_DEPRECATED_POP
+#  if THRUST_CTK_AT_LEAST(13, 0)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4_16a)
+THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4_32a)
+#  endif // THRUST_CTK_AT_LEAST(13, 0)
 #endif
 
 THRUST_NAMESPACE_BEGIN

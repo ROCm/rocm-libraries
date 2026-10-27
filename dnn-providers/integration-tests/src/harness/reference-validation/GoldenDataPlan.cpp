@@ -149,7 +149,7 @@ GoldenDataPlan planGoldenDataValidation(const std::vector<detail::LoadedBundle>&
     for(size_t index = 0; index < bundles.size(); ++index)
     {
         const auto& bundle = bundles[index];
-        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
+        const std::string bundleId = bundle.fullName();
 
         bool accounted = false;
         std::array<LaneVerdict, 2> verdictByReference{LaneVerdict::NO_GOLDEN_OUTPUTS,

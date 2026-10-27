@@ -1,7 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstring>
+
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -470,3 +473,67 @@ TEST(TestFillTensorWithRandomValues, TensorSizeNotMultipleOfBlockSize)
     EXPECT_NEAR(mean, 6.5, 1.0e-02);
     EXPECT_NEAR(variance, 4.083333, 1.0e-01);
 }
+
+#if defined(USE_ROCRAND)
+// A caller that fills many tensors passes one generator to every fill, so a fill must
+// not depend on what the one before it drew: setting the seed again has to restart the
+// sequence.
+TEST(TestFillTensorWithRandomValues, ReseedingASharedGeneratorRestartsTheSequence)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr size_t TENSOR_SIZE = 4099;
+    Tensor<float> first({1, 1, 1, TENSOR_SIZE});
+    Tensor<float> other({1, 1, 1, TENSOR_SIZE});
+    Tensor<float> again({1, 1, 1, TENSOR_SIZE});
+
+    const hipdnn_gpu_ref::common::RocRandGenerator generator(ROCRAND_RNG_PSEUDO_DEFAULT);
+    gpu_fp_reference_tensor::gpuFillWithRandomValues(
+        first, 0.0f, 100.0f, 42, generator, /*synchronize=*/true);
+    gpu_fp_reference_tensor::gpuFillWithRandomValues(
+        other, 0.0f, 100.0f, 7, generator, /*synchronize=*/true);
+    gpu_fp_reference_tensor::gpuFillWithRandomValues(
+        again, 0.0f, 100.0f, 42, generator, /*synchronize=*/true);
+
+    const auto bytes = first.elementSpace() * first.elementSize();
+    EXPECT_EQ(std::memcmp(first.rawHostData(), again.rawHostData(), bytes), 0);
+    EXPECT_NE(std::memcmp(first.rawHostData(), other.rawHostData(), bytes), 0);
+}
+
+// A caller filling several tensors waits once afterwards, so every fill must be in
+// flight and correct by then, not just the last one.
+TEST(TestFillTensorWithRandomValues, DeferredSynchronizationFillsEveryTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    constexpr size_t TENSOR_SIZE = 1 << 20;
+    Tensor<float> low({1, 1, 1, TENSOR_SIZE});
+    Tensor<HalfType> high({1, 1, 1, TENSOR_SIZE});
+
+    const hipdnn_gpu_ref::common::RocRandGenerator generator(ROCRAND_RNG_PSEUDO_DEFAULT);
+    gpu_fp_reference_tensor::gpuFillWithRandomValues(
+        low, 1.0f, 2.0f, 1, generator, /*synchronize=*/false);
+    gpu_fp_reference_tensor::gpuFillWithRandomValues<HalfType>(high,
+                                                               static_cast<HalfType>(3.0f),
+                                                               static_cast<HalfType>(4.0f),
+                                                               2,
+                                                               generator,
+                                                               /*synchronize=*/false);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    const auto* lowData = static_cast<const float*>(low.rawHostData());
+    for(size_t i = 0; i < low.elementSpace(); ++i)
+    {
+        ASSERT_GE(lowData[i], 1.0f) << "index " << i;
+        ASSERT_LE(lowData[i], 2.0f) << "index " << i;
+    }
+
+    const auto* highData = static_cast<const HalfType*>(high.rawHostData());
+    for(size_t i = 0; i < high.elementSpace(); ++i)
+    {
+        const auto value = static_cast<float>(highData[i]);
+        ASSERT_GE(value, 3.0f) << "index " << i;
+        ASSERT_LE(value, 4.0f) << "index " << i;
+    }
+}
+#endif // USE_ROCRAND

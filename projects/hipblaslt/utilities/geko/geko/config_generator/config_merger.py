@@ -91,6 +91,19 @@ def _count_kernels_without_mi(params: Dict[str, ForkParameter]) -> int:
 # Merging primitives
 # =====================================================================
 
+def _freeze(value: Any) -> Any:
+    """Recursively convert lists (and nested lists) into hashable tuples.
+
+    Some group entries carry nested-list values (e.g. gfx1250's
+    ``ClusterDim: [[1, 1]]``), unlike flat MI/WorkGroup lists. A shallow
+    ``tuple(values)`` leaves inner lists unhashed, which breaks set
+    membership in ``_merge_groups``.
+    """
+    if isinstance(value, list):
+        return tuple(_freeze(v) for v in value)
+    return value
+
+
 def _group_entry_key(entry: Dict[str, ForkParameter]) -> tuple:
     """Build a hashable key for a group entry dict.
 
@@ -98,7 +111,7 @@ def _group_entry_key(entry: Dict[str, ForkParameter]) -> tuple:
     collisions when values from different keys happen to concatenate
     identically.
     """
-    return tuple((k, tuple(entry[k].values)) for k in sorted(entry))
+    return tuple((k, _freeze(entry[k].values)) for k in sorted(entry))
 
 
 def _merge_simple_param(base_fp: ForkParameter, other_fp: ForkParameter) -> None:

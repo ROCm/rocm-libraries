@@ -27,9 +27,11 @@
 #pragma once
 
 #include "auxiliary.hpp"
-#include "hipblaslt_scaling_format.hpp"
 #include "hipblaslt_ostream.hpp"
+#include "hipblaslt_scaling_format.hpp"
+#include <cassert>
 #include <hipblaslt/hipblaslt.h>
+#include <optional>
 #include <string>
 
 enum class hipblaslt_initialization
@@ -91,6 +93,56 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     }
 }
 
+// w4a16 group scaling. Not part of isBlockScaling(), which selects the MX generator and layouts.
+
+// K-group size of a w4a16 scale mode, or 0 when `s` is not one.
+inline int w4a16GroupSize(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_BF16:
+    case hipblaslt_scaling_format::Block_32_BF16_ZP:
+    case hipblaslt_scaling_format::Block_32_F16:
+    case hipblaslt_scaling_format::Block_32_F16_ZP:
+        return 32;
+    case hipblaslt_scaling_format::Block_64_BF16:
+    case hipblaslt_scaling_format::Block_64_BF16_ZP:
+    case hipblaslt_scaling_format::Block_64_F16:
+    case hipblaslt_scaling_format::Block_64_F16_ZP:
+        return 64;
+    case hipblaslt_scaling_format::Block_128_BF16:
+    case hipblaslt_scaling_format::Block_128_BF16_ZP:
+    case hipblaslt_scaling_format::Block_128_F16:
+    case hipblaslt_scaling_format::Block_128_F16_ZP:
+        return 128;
+    default:
+        return 0;
+    }
+}
+
+inline bool isW4A16Scaling(hipblaslt_scaling_format s)
+{
+    return w4a16GroupSize(s) != 0;
+}
+
+// True for the asymmetric modes, whose scale allocation carries a packed int4
+// zero-point region after the scales.
+inline bool isW4A16ZeroPoint(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_BF16_ZP:
+    case hipblaslt_scaling_format::Block_64_BF16_ZP:
+    case hipblaslt_scaling_format::Block_128_BF16_ZP:
+    case hipblaslt_scaling_format::Block_32_F16_ZP:
+    case hipblaslt_scaling_format::Block_64_F16_ZP:
+    case hipblaslt_scaling_format::Block_128_F16_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
     switch(s)
@@ -141,6 +193,33 @@ inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scalin
     size_t scaleCols = ((dataCol + 31) / 32) * 32;
 
     return scaleRows * scaleCols;
+}
+
+// Scale entries per batch, before multiplying by the batch count. kAlongRows
+// identifies the reduction dimension in the raw matrix (transposed A or normal B).
+// Dimensions must be nonnegative and s must be a block-scaling format. The
+// rocRoller and preswizzled paths require the TN layout: kAlongRows must be true
+// (transA=T or transB=N). The alternate layout supports either orientation.
+// The explicit preswizzled format requires gfx950 padding even without rocRoller.
+inline size_t blockScaleBufferSize(int64_t                  dataRow,
+                                   int64_t                  dataCol,
+                                   hipblaslt_scaling_format s,
+                                   bool                     kAlongRows,
+                                   bool                     mxUseRocroller)
+{
+    if(mxUseRocroller || s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+    {
+        assert(kAlongRows && "rocRoller and preswizzled scales require K along the rows");
+        return scaleBufferSize(dataRow, dataCol, s);
+    }
+
+    size_t const bs        = blockSize(s);
+    size_t const dimk      = 128 / bs;
+    size_t const kDim      = (kAlongRows ? dataRow : dataCol) / bs;
+    size_t const mnDim     = kAlongRows ? dataCol : dataRow;
+    size_t const padDim    = kAlongRows ? kDim : mnDim;
+    size_t const paddedDim = (padDim + dimk - 1) / dimk * dimk;
+    return kAlongRows ? mnDim * paddedDim : kDim * paddedDim;
 }
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
@@ -232,7 +311,12 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
 }
 
 // clang-format off
-inline hipblaslt_initialization string2hipblaslt_initialization(const std::string& value)
+// Returns std::nullopt for an unrecognized string rather than a silent invalid
+// enum value, so callers must handle the bad-input case explicitly. Non-throwing
+// (only string comparisons), hence noexcept. See PR #6514 review observation #3
+// (davidd-amd) / AIHPBLAS-3551.
+inline std::optional<hipblaslt_initialization>
+    string2hipblaslt_initialization(const std::string& value) noexcept
 {
     return
         value == "rand_int"   ? hipblaslt_initialization::rand_int   :
@@ -250,7 +334,7 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "nan"        ? hipblaslt_initialization::nan        :
         value == "norm_dist_one_special" ? hipblaslt_initialization::norm_dist_one_special :
         value == "uniform_low_precision" ? hipblaslt_initialization::uniform_low_precision :
-        static_cast<hipblaslt_initialization>(0);
+        std::optional<hipblaslt_initialization>{};
 }
 // clang-format on
 inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const std::string& value)

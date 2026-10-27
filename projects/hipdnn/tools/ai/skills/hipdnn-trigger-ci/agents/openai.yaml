@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Trigger CI"
+  short_description: "Dispatch and watch TheRock CI runs"
+  default_prompt: "Use $hipdnn-trigger-ci to dispatch TheRock Multi-Arch CI on this branch with chosen GPU families and test labels, dry-running first."

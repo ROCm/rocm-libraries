@@ -48,11 +48,11 @@
 template<class KeyType,
          class ValueType          = size_t,
          bool Descending          = false,
-         class Decomposer         = rocprim::identity_decomposer,
-         class Config             = rocprim::default_config,
+         bool Stable              = false,
          bool Ordered             = false,
          bool Deterministic       = false,
-         bool Stable              = false,
+         class Decomposer         = rocprim::identity_decomposer,
+         class Config             = rocprim::default_config,
          bool UseGraphs           = false,
          bool UseIndirectIterator = false>
 struct DeviceTopkParams
@@ -282,53 +282,53 @@ public:
     using key_type                              = typename Params::key_type;
     using value_type                            = typename Params::value_type;
     static constexpr bool descending            = Params::descending;
-    using decomposer_t                          = typename Params::decomposer_t;
-    using config                                = typename Params::config;
+    static constexpr bool stable                = Params::stable;
     static constexpr bool ordered               = Params::ordered;
     static constexpr bool deterministic         = Params::deterministic;
-    static constexpr bool stable                = Params::stable;
+    using decomposer_t                          = typename Params::decomposer_t;
+    using config                                = typename Params::config;
     const bool            debug_synchronous     = false;
     static constexpr bool use_graphs            = Params::use_graphs;
     static constexpr bool use_indirect_iterator = Params::use_indirect_iterator;
 };
 
-template<class T>
-using grouped_params = ::testing::Types<
-    // Non-ordered, non-deterministic, non-stable
-    // Ascending
-    DeviceTopkParams<T, size_t, false>,
-    // Descending
-    DeviceTopkParams<T, size_t, true>,
-
-    // Non-ordered, non-deterministic, stable
-    // Ascending
-    DeviceTopkParams<T,
-                     size_t,
-                     false,
-                     rocprim::identity_decomposer,
-                     rocprim::default_config,
-                     false,
-                     false,
-                     true>,
-    // Descending
-    DeviceTopkParams<T,
-                     size_t,
-                     true,
-                     rocprim::identity_decomposer,
-                     rocprim::default_config,
-                     false,
-                     false,
-                     true>>;
-
-using RocprimDeviceTopkTestsParams =
-    typename test_utils::merge_sequence<grouped_params<int8_t>,
-                                        grouped_params<short>,
-                                        grouped_params<int>,
-                                        grouped_params<rocprim::uint128_t>,
-                                        grouped_params<long long>,
-                                        grouped_params<rocprim::half>,
-                                        grouped_params<float>,
-                                        grouped_params<double>>::type;
+using RocprimDeviceTopkTestsParams
+    = ::testing::Types<DeviceTopkParams<int8_t, size_t, true>,
+                       DeviceTopkParams<int8_t,
+                                        size_t,
+                                        true,
+                                        false,
+                                        false,
+                                        false,
+                                        rocprim::identity_decomposer,
+                                        rocprim::default_config,
+                                        true,
+                                        false>, // graphs
+                       DeviceTopkParams<int8_t,
+                                        size_t,
+                                        true,
+                                        false,
+                                        false,
+                                        false,
+                                        rocprim::identity_decomposer,
+                                        rocprim::default_config,
+                                        false,
+                                        true>, // indirect iterator
+                       DeviceTopkParams<short, size_t, false>,
+                       DeviceTopkParams<int, size_t, true>, // non-stable
+                       DeviceTopkParams<int,
+                                        size_t,
+                                        true,
+                                        true>, // stable
+                       DeviceTopkParams<rocprim::uint128_t, size_t, false>,
+                       DeviceTopkParams<long long, size_t, true>,
+                       DeviceTopkParams<rocprim::half, size_t, false>,
+                       DeviceTopkParams<float, size_t, true>, // non-stable
+                       DeviceTopkParams<float,
+                                        size_t,
+                                        true,
+                                        true>, // stable
+                       DeviceTopkParams<double, size_t, false>>;
 
 TYPED_TEST_SUITE(RocprimDeviceTopkTests, RocprimDeviceTopkTestsParams);
 

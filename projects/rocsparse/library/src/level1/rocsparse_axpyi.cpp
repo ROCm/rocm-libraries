@@ -25,6 +25,7 @@
 #include "internal/level1/rocsparse_axpyi.h"
 #include "axpyi_device.h"
 #include "rocsparse_axpyi.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -98,13 +99,11 @@ rocsparse_status rocsparse::axpyi_template(rocsparse_handle     handle,
     hipStream_t stream = handle->stream;
 
 #define AXPYI_DIM 256
-    // Number of blocks needed to cover nnz with one thread per element. Clamp
-    // against the device grid limit; the kernel uses a grid-stride loop so any
-    // remaining elements are still processed when the requested grid is capped.
-    const int64_t num_blocks
-        = rocsparse::min((static_cast<int64_t>(nnz) - 1) / AXPYI_DIM + 1,
-                         static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    dim3 axpyi_blocks(static_cast<uint32_t>(num_blocks));
+    // Clamp to both the device limit and the dispatch packet's work-item limit.
+    // The grid-stride kernel processes elements beyond the clamped grid.
+    const uint32_t num_blocks = rocsparse::get_grid_size_x(
+        handle, (static_cast<int64_t>(nnz) - 1) / AXPYI_DIM + 1, AXPYI_DIM);
+    dim3 axpyi_blocks(num_blocks);
     dim3 axpyi_threads(AXPYI_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::axpyi_kernel<AXPYI_DIM>),

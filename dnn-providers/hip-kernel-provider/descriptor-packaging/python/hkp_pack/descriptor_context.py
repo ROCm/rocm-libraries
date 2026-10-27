@@ -7,7 +7,8 @@ import glob
 import json
 import os
 
-from . import agreement
+from . import agreement, provenance_sidecar
+from . import generic_targets as gtmod
 from .errors import HkpPackError
 
 _DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
@@ -37,9 +38,12 @@ class Index:
 
     Duplicate ids are refused before resolution: picking either document would
     bind a consumer to a schema it may not actually use. No ancestor is searched.
+
+    `provenance_root`, when a packed tree's sidecars live away from its
+    descriptors, mirrors `root` (see provenance_sidecar.attach).
     """
 
-    def __init__(self, root: str):
+    def __init__(self, root: str, *, provenance_root=None):
         self.root = root
         self.documents: list[Document] = []
         self.by_id: dict[str, Document] = {}
@@ -57,6 +61,15 @@ class Index:
                 ) from exc
             if not isinstance(doc, dict):
                 raise DescriptorContextError(f"descriptor {path} is not a JSON object")
+            if dtype in ("kdp", "ukd"):
+                # A packed tree ships each UKD's provenance in a sidecar; put it
+                # back so every reader sees the document the packer digested.
+                try:
+                    provenance_sidecar.attach(
+                        path, doc, provenance_root=provenance_root, descriptor_root=root
+                    )
+                except HkpPackError as exc:
+                    raise DescriptorContextError(str(exc)) from exc
             document = Document(path, doc, dtype)
             self.documents.append(document)
             ident = doc.get("id")
@@ -207,7 +220,19 @@ def declarations(bundles: list[Bundle], schemas: dict) -> dict:
     return found
 
 
-def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
+def archive_arch(entry_arch: list, target: str, generic_targets) -> str:
+    """The arch spelling of the kpack archive for @target (a generic copy is keyed by its generic)."""
+    if target in entry_arch:
+        return target
+    for entry in entry_arch:
+        if gtmod.entry_tier(entry, target, generic_targets) == gtmod.TIER_GENERIC:
+            return entry
+    return target
+
+
+def consumer_records(
+    bundles: list[Bundle], schemas: dict, arch: str, generic_targets
+) -> dict:
     """UKD id -> canonical records over EVERY consumer inside the caller root.
 
     Shared standalone UKDs carry all KDP/engine/KMD bindings, not just the selected
@@ -218,7 +243,12 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
         header = {k: v for k, v in bundle.kdp_doc.items() if k != "kernelDescriptors"}
         header["arch"] = [arch]
         for entry in bundle.entries:
-            if entry.arch and arch not in entry.arch:
+            # Literal test kept: a generic copy's @arch is the generic's own name, no device.
+            if (
+                entry.arch
+                and arch not in entry.arch
+                and not gtmod.admits_target(entry.arch, arch, generic_targets)
+            ):
                 continue
             enclosing = bundle.kdp_doc if entry.inline else None
             if agreement.resolved_contract(entry.ukd, enclosing) is None:

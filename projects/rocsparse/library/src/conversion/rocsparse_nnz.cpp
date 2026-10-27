@@ -24,6 +24,7 @@
 
 #include "internal/conversion/rocsparse_nnz.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_nnz.hpp"
 #include "rocsparse_nnz_impl.hpp"
 #include "rocsparse_utility.hpp"
@@ -48,22 +49,24 @@ namespace rocsparse
 
         static constexpr rocsparse_int NNZ_DIM_X = 64;
         static constexpr rocsparse_int NNZ_DIM_Y = 16;
-        rocsparse_int                  blocks    = (m - 1) / (NNZ_DIM_X * 4) + 1;
-        if(std::is_same<T, rocsparse_double_complex>{})
-            blocks = (m - 1) / (NNZ_DIM_X) + 1;
-        dim3 k_grid(blocks);
-        dim3 k_threads(NNZ_DIM_X, NNZ_DIM_Y);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::nnz_kernel_row<NNZ_DIM_X, NNZ_DIM_Y>),
-                                           k_grid,
-                                           k_threads,
-                                           0,
-                                           stream,
-                                           order,
-                                           m,
-                                           n,
-                                           A,
-                                           ld,
-                                           nnz_per_rows);
+        const int64_t                  blocks = (static_cast<int64_t>(m) - 1) / (NNZ_DIM_X * 4) + 1;
+        dim3                           k_threads(NNZ_DIM_X, NNZ_DIM_Y);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle, blocks, NNZ_DIM_X, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::nnz_kernel_row<NNZ_DIM_X, NNZ_DIM_Y, decltype(grid_stride)::value>),
+                    dim3(grid),
+                    k_threads,
+                    0,
+                    stream,
+                    order,
+                    m,
+                    n,
+                    A,
+                    ld,
+                    nnz_per_rows);
+                return rocsparse_status_success;
+            }));
 
         return rocsparse_status_success;
     }
@@ -82,19 +85,22 @@ namespace rocsparse
         hipStream_t stream = handle->stream;
 
         static constexpr rocsparse_int NB = 256;
-        dim3                           kernel_blocks(n);
-        dim3                           kernel_threads(NB);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::nnz_kernel_col<NB>),
-                                           kernel_blocks,
-                                           kernel_threads,
-                                           0,
-                                           stream,
-                                           order,
-                                           m,
-                                           n,
-                                           A,
-                                           ld,
-                                           nnz_per_columns);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle, n, NB, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::nnz_kernel_col<NB, decltype(grid_stride)::value>),
+                    dim3(grid),
+                    dim3(NB),
+                    0,
+                    stream,
+                    order,
+                    m,
+                    n,
+                    A,
+                    ld,
+                    nnz_per_columns);
+                return rocsparse_status_success;
+            }));
 
         return rocsparse_status_success;
     }

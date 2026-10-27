@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -123,7 +123,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
                 size_t key_count = key_count_dis(gen);
                 current_key += key_delta_dis(gen);
 
-                const size_t end = std::min(size, offset + key_count);
+                const size_t end = _HIPCUB_STD::min(size, offset + key_count);
                 key_count        = end - offset;
                 for(size_t i = offset; i < end; i++)
                 {
@@ -296,7 +296,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
                 }
                 current_key += key_delta_dis(gen);
 
-                const size_t end = std::min(size, offset + key_count);
+                const size_t end = _HIPCUB_STD::min(size, offset + key_count);
                 key_count        = end - offset;
                 for(size_t i = offset; i < end; i++)
                 {
@@ -321,12 +321,12 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             offset_type* d_offsets_output;
             count_type*  d_counts_output;
             count_type*  d_runs_count_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets_output,
-                                                         std::max<size_t>(1, runs_count_expected)
-                                                             * sizeof(offset_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_counts_output,
-                                                         std::max<size_t>(1, runs_count_expected)
-                                                             * sizeof(count_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(
+                &d_offsets_output,
+                _HIPCUB_STD::max<size_t>(1, runs_count_expected) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(
+                &d_counts_output,
+                _HIPCUB_STD::max<size_t>(1, runs_count_expected) * sizeof(count_type)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_runs_count_output, sizeof(count_type)));
 
             size_t temporary_storage_bytes = 0;

@@ -164,9 +164,14 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
         throwIfInvalidDescriptor(executionPlan);
         throwIfInvalidDescriptor(variantPack);
 
-        handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
+        const auto plan = executionPlan->asDescriptor<ExecutionPlanDescriptor>();
+        plan->validateExecutionDevice(*handle);
 
-        LOG_API_SUCCESS(apiName, "executionPlan={}", logPtr(executionPlan));
+        handle->getPluginResourceManager()->executeOpGraph(executionPlan, variantPack);
+        const auto executionCount = plan->recordExecution();
+
+        LOG_API_SUCCESS(
+            apiName, "executionPlan={}, executionCount={}", logPtr(executionPlan), executionCount);
     });
 }
 
@@ -517,6 +522,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
         executionPlanDesc->deserializeBackendPlan(
             handle->getPluginResourceManager(), planData, planDataSize);
+        executionPlanDesc->recordDevice(*handle);
         *descriptor = HipdnnBackendDescriptor::packDescriptor(executionPlanDesc);
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));

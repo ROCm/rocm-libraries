@@ -4,7 +4,8 @@
 """Check the ctypes ABI against installed HIP headers without loading HIP.
 
 Set ROCM_PATH, ROCM_HOME, or HIP_PATH, or put hipcc on PATH. The test skips
-if the headers or a host C++ compiler are unavailable. Layout mismatches and
+if the headers or a host C++ compiler are unavailable, and the launch-config
+check skips on headers that predate cluster launch. Layout mismatches and
 compiler errors fail the test.
 """
 
@@ -22,6 +23,12 @@ from rocke.runtime._hip_device_properties import (
     HipDevicePropR0600,
     _HipDeviceArch,
     _HipUUID,
+)
+from rocke.runtime.hip_module import (
+    _HIP_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION,
+    _HipLaunchAttribute,
+    _HipLaunchAttributeValue,
+    _HipLaunchConfig,
 )
 
 
@@ -59,20 +66,19 @@ def _hip_toolchain() -> tuple[Path, str]:
     return include, compiler
 
 
-def _layout_probe() -> str:
+_HEADER = [
+    "#include <hip/hip_runtime_api.h>",
+    "#include <cstddef>",
+    "#include <cstdio>",
+    "#include <cstring>",
+]
+
+
+def _struct_asserts(structures) -> list[str]:
     # The compiler gets the native layout from HIP headers. ctypes supplies
     # the field names and expected layout, not the native declarations.
-    lines = [
-        "#include <hip/hip_runtime_api.h>",
-        "#include <cstddef>",
-        "#include <cstdio>",
-        "#include <cstring>",
-    ]
-    for name, structure in (
-        ("hipDeviceProp_tR0600", HipDevicePropR0600),
-        ("hipUUID", _HipUUID),
-        ("hipDeviceArch_t", _HipDeviceArch),
-    ):
+    lines = []
+    for name, structure in structures:
         lines.append(
             f'static_assert(sizeof({name}) == {ctypes.sizeof(structure)}, "{name} size");'
         )
@@ -92,6 +98,17 @@ def _layout_probe() -> str:
                 f"static_assert(sizeof((({name}*)nullptr)->{member}) == "
                 f'{ctypes.sizeof(member_type)}, "{name}.{member} size");'
             )
+    return lines
+
+
+def _layout_probe() -> str:
+    lines = _HEADER + _struct_asserts(
+        (
+            ("hipDeviceProp_tR0600", HipDevicePropR0600),
+            ("hipUUID", _HipUUID),
+            ("hipDeviceArch_t", _HipDeviceArch),
+        )
+    )
     lines.append("int main() {")
     for member, _, _ in _HipDeviceArch._fields_:
         expected = _HipDeviceArch()
@@ -112,11 +129,29 @@ def _layout_probe() -> str:
     return "\n".join(lines)
 
 
-def test_hip_device_properties_layout(tmp_path: Path) -> None:
+def _launch_probe() -> str:
+    # The cluster launch path in hip_module.py fills these by hand and passes
+    # them to hipDrvLaunchKernelEx.
+    lines = _HEADER + _struct_asserts(
+        (
+            ("HIP_LAUNCH_CONFIG", _HipLaunchConfig),
+            ("hipLaunchAttribute", _HipLaunchAttribute),
+            ("hipLaunchAttributeValue", _HipLaunchAttributeValue),
+        )
+    )
+    lines.append(
+        "static_assert(hipLaunchAttributeClusterDimension == "
+        f'{_HIP_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION}, "cluster attribute id");'
+    )
+    lines.append("int main() { return 0; }")
+    return "\n".join(lines)
+
+
+def _compile_and_run(tmp_path: Path, probe: str) -> None:
     include, compiler = _hip_toolchain()
     source = tmp_path / "hip_layout.cpp"
     executable = tmp_path / ("hip_layout.exe" if os.name == "nt" else "hip_layout")
-    source.write_text(_layout_probe(), encoding="utf-8")
+    source.write_text(probe, encoding="utf-8")
     # This is a host executable; it neither links libamdhip64 nor needs a GPU.
     built = subprocess.run(
         [
@@ -139,3 +174,17 @@ def test_hip_device_properties_layout(tmp_path: Path) -> None:
         [str(executable)], capture_output=True, text=True, timeout=10
     )
     assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+def test_hip_device_properties_layout(tmp_path: Path) -> None:
+    _compile_and_run(tmp_path, _layout_probe())
+
+
+def test_hip_launch_config_layout(tmp_path: Path) -> None:
+    include, _ = _hip_toolchain()
+    if not any(
+        "hipLaunchAttributeClusterDimension" in header.read_text(errors="ignore")
+        for header in (include / "hip").rglob("*.h")
+    ):
+        pytest.skip(f"HIP headers under {include} predate cluster launch")
+    _compile_and_run(tmp_path, _launch_probe())

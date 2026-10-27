@@ -243,7 +243,7 @@ protected:
                 return false;
 
             // type filters
-            return static_cast<bool>(FILTER<T...>{});
+            return FILTER<T...>::value;
         }
     };
 
@@ -270,6 +270,12 @@ void hipblas_test_sigaction();
 // ----------------------------------------------------------------------------
 struct hipblas_test_valid
 {
+    // Read by type_filter_functor instead of constructing the derived class.
+    // Constructing it would odr-use the vtable and thus instantiate operator()
+    // for type combinations the dispatchers never produce, leaving references
+    // to reference implementations which are not (and cannot be) instantiated.
+    static constexpr bool value = true;
+
     // Return true to indicate the type combination is valid, for filtering
     virtual explicit operator bool() final
     {
@@ -289,6 +295,8 @@ struct hipblas_test_valid
 // ----------------------------------------------------------------------------
 struct hipblas_test_invalid
 {
+    static constexpr bool value = false;
+
     // Return false to indicate the type combination is invalid, for filtering
     virtual explicit operator bool() final
     {

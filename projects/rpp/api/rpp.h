@@ -126,6 +126,9 @@ extern "C" SHARED_PUBLIC rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatc
  * rppHandle_t</tt>. \param [in] backend RPP backend to run augmentations (backend =
  * RppBackend::RPP_HOST_BACKEND / RppBackend::RPP_HIP_BACKEND) \ingroup group_rpp \return A <tt>
  * \ref rppStatus_t</tt> enumeration. \retval rppStatusSuccess \retval rppStatusNotInitialized
+ * \note Allocations are released according to the backend stored in the handle,
+ * even when the supplied backend differs. Pass a valid HOST or HIP backend value.
+ * If a HIP release fails, the handle remains valid for retrying destruction.
  * \retval rppStatusInvalidValue
  * \retval rppStatusBadParm
  * \retval rppStatusAllocFailed

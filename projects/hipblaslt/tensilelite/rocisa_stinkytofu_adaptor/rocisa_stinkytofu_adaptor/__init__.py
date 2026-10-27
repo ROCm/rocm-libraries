@@ -171,6 +171,14 @@ class rocIsa:
     def setVgprMsb(self, msb: int) -> None:
         _base.setVgprMsb(msb)
 
+    # --- gfx1250 low-precision scaled-WMMA workaround toggle. --------------
+
+    def getForceScaledWMMA(self) -> bool:
+        return _base.getForceScaledWMMA()
+
+    def setForceScaledWMMA(self, v: bool) -> None:
+        _base.setForceScaledWMMA(v)
+
     # --- Backwards-compatible private-field shims --------------------------
     #
     # Test harnesses (and possibly external code) historically reached

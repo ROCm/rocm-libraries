@@ -17,9 +17,11 @@ Two strategies are exposed, both with the same authoring surface:
   without a register intermediate. The intrinsic writes
   *lane-contiguous* bytes: lane `i` of a wave deposits its payload at
   `lds_addr + i * size_bytes`. Each call moves `dwords ∈ {1, 3, 4}`
-  dwords per lane (so 4, 12, or 16 bytes per lane). Completion is
-  signalled via the VMEM counter, so consumers must drop an
-  `s_waitcnt(vmcnt=0)` before reading the LDS.
+  dwords per lane (so 4, 12, or 16 bytes per lane), capped per arch by
+  `ArchTarget.async_lds_max_dwords` — only CDNA4 (gfx950) has the 3/4
+  forms, CDNA3 (gfx942) is dword-only. Completion is signalled via the
+  VMEM counter, so consumers must drop an `s_waitcnt(vmcnt=0)` before
+  reading the LDS.
 
 Both loaders share the same authoring contract:
 
@@ -47,7 +49,7 @@ read), not by handing the intrinsic a swizzled destination pointer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ..core.ir import F16, I64, IRBuilder, Type, Value
 
@@ -345,6 +347,96 @@ class CoalescedTileLoader:
         for row, col, v in staged:
             self._store_tile(b, smem_dst, row, col, v)
 
+    # ---- address-prefetch split -------------------------------------------
+    #
+    # ``load`` and ``load_global`` derive every chunk's global address from the
+    # K offset right before its read, so in a K loop the descriptor arithmetic
+    # sits between the loop back-edge and the first ``buffer_load``. The three
+    # methods below split that work so a caller can carry the byte offsets
+    # across iterations instead: decode the per-thread (row, col) slots once
+    # (``plan_slots``), compute the offsets for a K position
+    # (``slot_offsets``), and later issue the reads from those offsets
+    # (``issue_slots``). The emitted per-chunk ops are the ones ``load_global``
+    # emits, just regrouped; nothing here changes an existing caller.
+
+    def plan_slots(self, b: IRBuilder, *, tid: Value) -> List[Tuple[Value, Value]]:
+        """Decode the tile-local ``(row, col)`` of every per-thread chunk.
+
+        The decode depends only on ``tid``, so a K loop can emit it once ahead
+        of the loop and reuse the slots in every iteration.
+        """
+        c_threads = b.const_i32(self.block_size)
+        c_load_vec = b.const_i32(self.load_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
+        slots: List[Tuple[Value, Value]] = []
+        for e in range(self.vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            slots.append(
+                self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+            )
+        return slots
+
+    def slot_offsets(
+        self,
+        b: IRBuilder,
+        *,
+        slots: Sequence[Tuple[Value, Value]],
+        descriptor: DescriptorFn,
+    ) -> List[Value]:
+        """Byte ``voffset`` of each slot, with invalid chunks sent to the sentinel.
+
+        Buffer-resource loads only: the sentinel relies on the resource's range
+        check to turn an out-of-bounds read into zero.
+        """
+        if not self.use_buffer_rsrc:
+            raise ValueError(
+                "CoalescedTileLoader.slot_offsets requires use_buffer_rsrc=True"
+            )
+        elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {self.elem_dtype.name!r}"
+            )
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c_oob = b.const_i32(self.oob_sentinel)
+        offsets: List[Value] = []
+        for row, col in slots:
+            off_elems, valid = descriptor(b, row, col)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
+            offsets.append(
+                off_bytes if valid is None else b.select(valid, off_bytes, c_oob)
+            )
+        return offsets
+
+    def issue_slots(
+        self,
+        b: IRBuilder,
+        *,
+        rsrc: Value,
+        slots: Sequence[Tuple[Value, Value]],
+        offsets: Sequence[Value],
+    ) -> list:
+        """Issue one buffer read per slot from precomputed byte offsets.
+
+        Returns ``(row, col, v)`` triples for :meth:`store_lds`.
+        """
+        if len(slots) != len(offsets):
+            raise ValueError(
+                f"CoalescedTileLoader.issue_slots: {len(slots)} slots but "
+                f"{len(offsets)} offsets"
+            )
+        c0 = b.const_i32(0)
+        staged = []
+        for (row, col), off in zip(slots, offsets):
+            if self.load_vec == 1:
+                v = b.buffer_load(rsrc, off, c0, self.elem_dtype)
+            else:
+                v = b.buffer_load_vN(rsrc, off, c0, self.elem_dtype, self.load_vec)
+            staged.append((row, col, v))
+        return staged
+
     def load(
         self,
         b: IRBuilder,
@@ -576,6 +668,14 @@ class AsyncTileLoader:
         4 for f32/i32).  Each chunk carries ``dwords * 4 // elem_bytes``
         elements; ``tile_cols`` must be a multiple of that count and the
         tile must have at least ``block_size`` chunks.
+
+        ``max_dwords`` is the caller's cap and must not exceed the target's
+        ``ArchTarget.async_lds_max_dwords``: CDNA3 (gfx942) moves only a dword
+        per lane to LDS, the b96/b128 forms (3 and 4) arrived with CDNA4
+        (gfx950). Asking for a wider one than the arch has is not a compile
+        error -- the AMDGPU backend aborts the process with ``LLVM ERROR: Do
+        not know how to expand this operator's operand!``. ``max_dwords=0``
+        (an arch with no DRAM->LDS DMA at all) raises, as no width fits.
         """
         if max_dwords > 4:
             max_dwords = 4

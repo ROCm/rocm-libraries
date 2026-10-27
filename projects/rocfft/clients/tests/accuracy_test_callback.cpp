@@ -40,6 +40,8 @@ std::vector<std::vector<size_t>> callback_sizes = {
     // prime
     {23},
     {29},
+    // multi-kernel Bluestein (PAD_MUL ... RES_MUL)
+    {196597},
 
     // 2D_SINGLE sizes, small and big
     {16, 8},
@@ -116,8 +118,6 @@ const static std::vector<size_t> callback_batch_range = {2};
 auto forward_transform_types
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
-// function pointer callbacks need -fgpu-rdc, but that causes build
-// nondeterminism in kpack
 INSTANTIATE_TEST_SUITE_P(callback,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,

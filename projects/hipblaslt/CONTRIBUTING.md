@@ -126,16 +126,20 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). At test time, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is skipped via `GTEST_SKIP()` and counted in the `[ SKIPPED ]` summary; the test still appears in the test list. Entries with no `known_bug_platforms` are treated as known-bug on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry is left out before registration when the entry applies to the current GPU. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. There are two flavors:
+  - **All platforms:** an entry with no `known_bug_platforms` is tagged `category: known_bug` by `hipblaslt_gentest.py` when `hipblaslt_gtest.data` is built, and the case is left out on every platform.
+  - **Per-GPU:** an entry with `known_bug_platforms` is left out only when the current GPU `gcnArchName` matches one of the listed architectures. On other GPUs the case registers and runs normally.
+
+  Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---
 
 ## TensileLite Python tests (codegen / characterization)
 
-The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/Tensile/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
+The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/tensilelite/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
 
-If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/Tensile/Tests/unit/characterization/README.md`](tensilelite/Tensile/Tests/unit/characterization/README.md).
+If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/tensilelite/Tests/unit/characterization/README.md`](tensilelite/tensilelite/Tests/unit/characterization/README.md).
 
 ---
 
@@ -157,7 +161,7 @@ If your change makes a characterization test fail, do **not** run a blanket `pyt
 | TensileCreateLibrary fails with `ModuleNotFoundError` (e.g. `yaml`, `msgpack`) | Use a Python venv, `pip install -r tensilelite/requirements.txt`, and configure with `-DPython_EXECUTABLE=/path/to/venv/bin/python`. |
 | `hipblaslt_gtest.data` doesn't exist | Build `hipblaslt-test` or `hipblaslt-test-data`. If the generator failed (e.g. missing PyYAML), use the venv and `pip install -r tensilelite/requirements.txt`, then rebuild. |
 | Test can't find test data | Run from `build/clients/` (same directory as the executable and `hipblaslt_gtest.data`). |
-| Test skipped on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. |
+| Test missing from the test list on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. Matching cases are not registered. |
 
 ---
 

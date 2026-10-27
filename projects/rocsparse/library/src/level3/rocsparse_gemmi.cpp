@@ -76,17 +76,24 @@ namespace rocsparse
         // Stream
         hipStream_t stream = handle->stream;
 
+        // The element count of C is a product of two rocsparse_int extents and has to
+        // be formed in 64 bits before it reaches scale_array: computing it in
+        // rocsparse_int overflows at m = n = 46341 and hands the helper an already
+        // truncated length, from which it then sizes a correspondingly wrong grid
+        // (AISPARSE-699). scale_array is instantiated for an int64_t length.
+        const int64_t nelm_C = static_cast<int64_t>(m) * n;
+
         // If k == 0, scale C with beta
         if(k == 0)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m * n, beta, C));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, nelm_C, beta, C));
             return rocsparse_status_success;
         }
 
         const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
         if(on_host && (*alpha == static_cast<T>(0)))
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m * n, beta, C));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, nelm_C, beta, C));
             return rocsparse_status_success;
         }
 

@@ -26,16 +26,45 @@ builds it as an integrated part of the rocBLAS build. No further set-up work is 
 user.  For hermetic builds, the Tensile component can be built from a local path installation (see command line options).
 Note that external facing APIs for Tensile are not provided.
 
-The choice of whether to use the embedded Tensile backend or hipBLASLt is handled automatically based on the architecture and problem.
-For instance, hipBLASLt is used as the default backend for problems on the gfx12 architecture.  Source code GEMMs internal to the rocBLAS library also
+The choice of whether to use the embedded Tensile backend or hipBLASLt is handled automatically based on the architecture,
+the data type, and the problem. The architectures which default to hipBLASLt, and the data types for which they do so, are:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30, 70
+
+    * - **Architecture**
+      - **Data types defaulting to hipBLASLt**
+
+    * - gfx1170, gfx1171, gfx1200, gfx1201, gfx1250
+      - All data types.
+
+    * - gfx950
+      - All data types except a real single-precision input (``f32_r``). This includes ``f16_r``, ``bf16_r``,
+        ``f64_r``, ``f32_c``, ``f64_c``, ``i8_r``, and mixed-precision ``gemm_ex`` forms whose input type is not
+        ``f32_r``. Real single precision defaults to Tensile.
+
+    * - gfx942 (MI300X, 304 CUs)
+      - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
+        default to Tensile.
+
+    * - gfx942 (MI300A, 228 CUs)
+      - ``f16_r``, ``bf16_r``, ``f64_r``, ``f32_r``, ``f32_c``, and ``f64_c``, including their mixed-precision
+        ``gemm_ex`` forms. All other data types default to Tensile.
+
+    * - All others
+      - None. Tensile is always the default.
+
+Where hipBLASLt is the default but provides no solution for a given problem, or reports an error, the backend falls back
+to Tensile. Source code GEMMs internal to the rocBLAS library also
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
-The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are provided to manually control which GEMM backend is used. ``ROCBLAS_USE_HIPBLASLT`` is for non-batched, _strided_batched and _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` only affects _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` is deprecated, should no longer be required, and is planned for removal in a future release. These provide the following settings:
+The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used for non-batched, _strided_batched, and _batched GEMM, including calls made while a stream is capturing.
+Batched GEMM uses the same selection as other GEMM during capture. It provides the following settings:
 
-*  ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are not set: the GEMM backend is automatically selected.
+*  ``ROCBLAS_USE_HIPBLASLT`` is not set: the GEMM backend is automatically selected.
 *  ``ROCBLAS_USE_HIPBLASLT=0``: Tensile is always used as the GEMM backend.
-*  ``ROCBLAS_USE_HIPBLASLT_BATCHED=0``: Tensile is always used as the GEMM _batched backend. This setting is deprecated.
 *  ``ROCBLAS_USE_HIPBLASLT=1``: hipBLASLt is preferred as the GEMM backend, but the backend will fall back to Tensile for problems for which hipBLASLt does not provide a solution or if errors are encountered using the hipBLASLt backend.
 
 .. note::

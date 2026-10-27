@@ -29,6 +29,7 @@ struct WaveTile
     int wave_c16;
     int wave_k16;
     int prefetch_rows;
+    int elem_bytes = 2;
 };
 
 constexpr WaveTile TILE_2X2 = {.kh = 2, .kw = 2, .wave_c16 = 2, .wave_k16 = 2, .prefetch_rows = 3};
@@ -70,6 +71,29 @@ constexpr WaveTile TILE_4X4_GROUP16 = {.kh            = 4,
                                        .wave_c16      = 1,
                                        .wave_k16      = 1,
                                        .prefetch_rows = 3};
+
+// The tiles at tf32, one per filter size.
+//
+// A split operand block is the (big, small) bf16 pair and costs two registers where a 16-bit one
+// costs one, so each filter takes the smallest tile it admits: C(16) x K(16), except 3x1, which
+// keeps the wider C its oblong filter pays for as it does at 16 bits. The wider C(32) x K(16) at
+// 3x3 clears TILE_VGPR_BUDGET and still spills. The measurements are in
+// direct-wgrad-config-table.md.
+constexpr WaveTile TILE_2X2_TF32 =
+    {.kh = 2, .kw = 2, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 3, .elem_bytes = 4};
+constexpr WaveTile TILE_3X3_TF32 =
+    {.kh = 3, .kw = 3, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 2, .elem_bytes = 4};
+constexpr WaveTile TILE_3X1_TF32 =
+    {.kh = 3, .kw = 1, .wave_c16 = 2, .wave_k16 = 1, .prefetch_rows = 2, .elem_bytes = 4};
+// 4x4 keeps the deep ring although it spills: the spill is in the item body, and the shallow ring
+// that spills none drains the row loop instead and measures slower.
+constexpr WaveTile TILE_4X4_TF32 =
+    {.kh = 4, .kw = 4, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 2, .elem_bytes = 4};
+// 5x5 is on the C(16) x K(16) floor already, so it has nothing to give back and spills its row
+// loop at every ring depth. The shallowest ring spills least and measures fastest: it drains
+// every row, but a deeper one stages more rows in registers the loop does not have.
+constexpr WaveTile TILE_5X5_TF32 =
+    {.kh = 5, .kw = 5, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 1, .elem_bytes = 4};
 
 // The tiles at 3x1, the one oblong filter the table serves.
 //
@@ -258,6 +282,57 @@ constexpr auto spreads = std::array{
     // exactly. See direct-wgrad-config-table.md and the grouped section of direct-wgrad.md.
     Spread{TILE_5X5,
            {.waves_c = 1, .waves_k = 1, .waves_q = 4, .waves_g = 2}}, // C(32) K(32), 2 groups
+
+    // ---- the tf32 entries ----
+    //
+    // A separate run rather than blocks interleaved with the 16-bit ones: fits_the_layer
+    // partitions the two widths outright, so no layer ever ranks an entry from both and the
+    // order only has to hold within this run.
+    //
+    // Every filter but 5x5 takes the same three blocks, and any one of them covers every
+    // ungrouped shape -- a layer narrower than a block pads, and the epilogue's bounds drop what
+    // the padding computed. A C(16) x K(16) wave tile caps the widest block eight waves reach at
+    // half a 16-bit one's area, so the list is the three shapes that area admits. Grouped entries
+    // wait on the same budget.
+
+    // ---- 3x3 at tf32, on the C(16) x K(16) wave tile ----
+    Spread{TILE_3X3_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(32) K(64)
+    Spread{TILE_3X3_TF32, {.waves_c = 4, .waves_k = 2, .waves_q = 1}}, // C(64) K(32)
+    Spread{TILE_3X3_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(32) K(32)
+
+    // ---- 2x2 at tf32, on the C(16) x K(16) wave tile ----
+    Spread{TILE_2X2_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(32) K(64)
+    Spread{TILE_2X2_TF32, {.waves_c = 4, .waves_k = 2, .waves_q = 1}}, // C(64) K(32)
+    Spread{TILE_2X2_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(32) K(32)
+
+    // ---- 3x1 at tf32, on the C(32) x K(16) wave tile the oblong filter affords ----
+    Spread{TILE_3X1_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(64)  K(64)
+    Spread{TILE_3X1_TF32, {.waves_c = 4, .waves_k = 2, .waves_q = 1}}, // C(128) K(32)
+    Spread{TILE_3X1_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(64)  K(32)
+
+    // ---- 3x1 at tf32, the same three blocks with the tile's row origin in the base ----
+    //
+    // tf32 needs this more than 16 bits does, not less: window_bytes measures on the operand's
+    // own width, so the same layer reaches the 2 GiB buffer window at half the image, and the
+    // video stack's folded-depth shapes are what 3x1 is here for.
+    //
+    // 6 rather than 18: rows_per_tile has to be a multiple of unroll(), which is 3 here, and a
+    // tf32 row is twice the bytes. 6 is the largest multiple whose window reaches as long a row as
+    // the 16-bit tile18 entry's, so no row width that entry serves is out of this one's reach.
+    Spread{TILE_3X1_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}, 0, 6}, // C(64)  K(64)
+    Spread{TILE_3X1_TF32, {.waves_c = 4, .waves_k = 2, .waves_q = 1}, 0, 6}, // C(128) K(32)
+    Spread{TILE_3X1_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}, 0, 6}, // C(64)  K(32)
+
+    // ---- 4x4 at tf32, on the C(16) x K(16) wave tile ----
+    Spread{TILE_4X4_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(32) K(64)
+    Spread{TILE_4X4_TF32, {.waves_c = 4, .waves_k = 2, .waves_q = 1}}, // C(64) K(32)
+    Spread{TILE_4X4_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(32) K(32)
+
+    // ---- 5x5 at tf32, on the C(16) x K(16) wave tile ----
+    //
+    // Two of the three blocks, as at 16 bits: C(64) x K(32) measured slowest on every layer tried.
+    Spread{TILE_5X5_TF32, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(32) K(64)
+    Spread{TILE_5X5_TF32, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(32) K(32)
 };
 
 // Images packed into one column block of the MFMA reduction, in increasing order.
@@ -295,6 +370,7 @@ constexpr auto make_configs()
                 continue;
             configs[out++] = Config{.kh            = spread.tile.kh,
                                     .kw            = spread.tile.kw,
+                                    .elem_bytes    = spread.tile.elem_bytes,
                                     .wave_c16      = spread.tile.wave_c16,
                                     .wave_k16      = spread.tile.wave_k16,
                                     .waves_c       = spread.waves.waves_c,
@@ -325,6 +401,13 @@ constexpr bool table_is_well_formed()
             return false;
         if(cfg.unfold_n < 1 || MFMA_K % cfg.unfold_n != 0)
             return false;
+        if(cfg.elem_bytes != 2 && cfg.elem_bytes != 4)
+            return false;
+        // The prologue primes the delta register ring from kh - 1 scratch rows, so a 1-row
+        // filter leaves it nothing to declare: ScratchStage, DeltaScratch and prime_delta_ring
+        // all size on kh - 1. A 1xN entry would need the prologue to degenerate, not a guard.
+        if(cfg.kh < 2)
+            return false;
         if(cfg.acc_vgprs() + cfg.operand_vgprs() > TILE_VGPR_BUDGET)
             return false;
         if(cfg.block_c() < MIN_SWIZZLED_CHANS || cfg.block_k() < MIN_SWIZZLED_CHANS)
@@ -332,9 +415,10 @@ constexpr bool table_is_well_formed()
 
         // A grouped entry exists to fill a cache line, so a window under one line defeats it.
         //
-        // 64 channels of fp16 is 128 bytes on each operand. 5x5 is exempt, every window that
-        // would fill the line spilling its row loop.
-        if(cfg.waves_g > 1 && cfg.kh != 5 && (cfg.block_c() < 64 || cfg.block_k() < 64))
+        // 128 bytes on each operand, which is 64 channels of fp16 and 32 of tf32. 5x5 is exempt,
+        // every window that would fill the line spilling its row loop.
+        if(cfg.waves_g > 1 && cfg.kh != 5 &&
+           (cfg.block_c() * cfg.elem_bytes < 128 || cfg.block_k() * cfg.elem_bytes < 128))
             return false;
 
         // A tile has to be a whole number of unrolled blocks, or one would straddle a boundary

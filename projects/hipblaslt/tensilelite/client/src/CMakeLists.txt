@@ -5,7 +5,8 @@ target_sources(tensilelite-client-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AClient.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2ARunner.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
@@ -13,6 +14,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/TimingEvents.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"

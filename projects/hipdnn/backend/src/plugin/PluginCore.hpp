@@ -5,7 +5,6 @@
 
 #include <filesystem>
 #include <functional>
-#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -17,7 +16,6 @@
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "PlatformUtils.hpp"
 #include "logging/Logging.hpp"
-#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 
@@ -52,16 +50,6 @@ public:
     virtual std::string_view version() const;
     virtual std::string_view apiVersion() const;
     virtual hipdnnPluginType_t type() const;
-
-    /**
-     * @brief Returns the plugin's API version parsed into a structured
-     *        `Version` object, or `std::nullopt` if the version string is
-     *        malformed.
-     *
-     * Plugin managers validate this at load time and reject malformed
-     * plugin API versions before dispatch.
-     */
-    std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const;
 
     /**
      * @brief Returns the plugin's name captured during plugin load.

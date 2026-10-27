@@ -93,7 +93,7 @@ private:
 
     bool useDevice() const;
     OutputTensors allocateOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs) const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs);
 
     ReferenceExecutorType _referenceType;
     bool _requiresDevice;
@@ -103,6 +103,9 @@ private:
     std::filesystem::path _bundlePath;
     std::optional<KnownReferenceGap> _expectedGap;
     std::shared_ptr<IntegrationTestBundle> _bundle;
+    /// The bundle's golden inputs and outputs, read when the test body runs and freed
+    /// with the test.
+    TensorMap _tensors;
 };
 
 } // namespace hipdnn_integration_tests::bundle

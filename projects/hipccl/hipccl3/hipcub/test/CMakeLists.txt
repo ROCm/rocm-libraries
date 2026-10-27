@@ -30,6 +30,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 ]=]
 )
 
+# Adds a test target relative to the current directory.
 function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
@@ -95,6 +96,13 @@ set_target_properties(hipcub_generate_resource_spec PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   OUTPUT_NAME "generate_resource_spec"
 )
+
+if(HIP_COMPILER STREQUAL "nvcc")
+    set_source_files_properties(${GEN_RES_SPEC_PATH}
+        PROPERTIES LANGUAGE CUDA)
+endif()
+
+target_compile_options(hipcub_generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 target_link_libraries(hipcub_generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
@@ -110,6 +118,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
     COMMAND ctest --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT ""
   )
 
   find_program(
@@ -136,12 +145,13 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
     COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT ""
   )
 
   add_custom_target(
     coverage
-    DEPENDS coverage_analysis
-    DEPENDS coverage_summary
+    DEPENDS coverage_analysis coverage_summary
+    COMMENT ""
   )
 endif()
 
@@ -197,7 +207,6 @@ else()
         "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
         "skipping hipCUB test category labels")
 endif()
-
 
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"

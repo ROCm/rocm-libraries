@@ -9,6 +9,7 @@ namespace gpu_reduction_ref_test
 {
 
 using hipdnn_data_sdk::utilities::TensorLayout;
+using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 
 struct ReductionTestShape
 {
@@ -20,9 +21,8 @@ struct ReductionTestShape
 // Reduction modes
 // ===========================================================================
 
-inline std::vector<hipdnn_flatbuffers_sdk::data_objects::ReductionMode> getReductionModes()
+inline std::vector<ReductionMode> getReductionModes()
 {
-    using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
     return {ReductionMode::ADD,
             ReductionMode::AVG,
             ReductionMode::AMAX,
@@ -38,15 +38,13 @@ inline std::vector<hipdnn_flatbuffers_sdk::data_objects::ReductionMode> getReduc
 // Layouts
 // ===========================================================================
 
-inline std::vector<hipdnn_data_sdk::utilities::TensorLayout> getReduction4DLayouts()
+inline std::vector<TensorLayout> getReduction4DLayouts()
 {
-    using hipdnn_data_sdk::utilities::TensorLayout;
     return {TensorLayout::NCHW, TensorLayout::NHWC};
 }
 
-inline std::vector<hipdnn_data_sdk::utilities::TensorLayout> getReduction5DLayouts()
+inline std::vector<TensorLayout> getReduction5DLayouts()
 {
-    using hipdnn_data_sdk::utilities::TensorLayout;
     return {TensorLayout::NCDHW, TensorLayout::NDHWC};
 }
 
@@ -158,10 +156,10 @@ inline std::vector<ReductionTestShape> getReductionLarge5DShapes()
 // Cartesian product of shapes, layouts, and modes
 // ==========================================================================
 
-inline std::vector<ReductionTestCase> makeReductionTestCases(
-    const std::vector<ReductionTestShape>& shapes,
-    const std::vector<hipdnn_data_sdk::utilities::TensorLayout>& layouts,
-    const std::vector<hipdnn_flatbuffers_sdk::data_objects::ReductionMode>& modes)
+inline std::vector<ReductionTestCase>
+    makeReductionTestCases(const std::vector<ReductionTestShape>& shapes,
+                           const std::vector<TensorLayout>& layouts,
+                           const std::vector<ReductionMode>& modes)
 {
     std::vector<ReductionTestCase> cases;
     cases.reserve(shapes.size() * layouts.size() * modes.size());

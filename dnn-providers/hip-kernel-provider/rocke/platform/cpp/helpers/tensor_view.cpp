@@ -232,6 +232,8 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
         return rocke_b_global_load_i32(b, v->base, off, 0);
     if(rocke_tv_name_is(dt, "i64"))
         return rocke_b_global_load_i64(b, v->base, off, 0);
+    if(rocke_tv_name_is(dt, "f64"))
+        return rocke_b_global_load_f64(b, v->base, off, 0);
     return rocke_b_global_load(b, v->base, off, dt, 0);
 }
 
@@ -273,6 +275,8 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
         return;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    if(align <= 0 && rocke_tv_name_is(dt, "f64"))
+        align = 8; /* Same 8-byte element alignment as the f64 load_scalar. */
     if(align <= 0)
         rocke_b_global_store(b, v->base, off, value, 0); /* Python: align default 1 */
     else
@@ -311,7 +315,7 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
         return NULL;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
     if(rocke_tv_name_is(dt, "f32"))
     {
@@ -509,6 +513,34 @@ void rocke_tile_window_store_vec(rocke_ir_builder_t* b,
     if(!rocke_tile_window_global_indices(b, w, local_indices, num_indices, gidx))
         return;
     rocke_tensor_view_store_vec(b, w->view, gidx, w->rank, value, n);
+}
+
+void rocke_tile_window_load_vec_scalars(rocke_ir_builder_t* b,
+                                        const rocke_tile_window_t* w,
+                                        rocke_value_t* const* local_indices,
+                                        int num_indices,
+                                        int n,
+                                        rocke_value_t** out)
+{
+    /* Python TileWindow.load_vec_scalars:
+     *   if n == 1:
+     *       return [self.load_scalar(b, *local_indices)]
+     *   v = self.load_vec(b, *local_indices, n=n)
+     *   return [b.vec_extract(v, i) for i in range(n)]
+     */
+    int i;
+    if(b == NULL || w == NULL || w->view == NULL || out == NULL)
+        return;
+    if(n == 1)
+    {
+        out[0] = rocke_tile_window_load_scalar(b, w, local_indices, num_indices);
+        return;
+    }
+    {
+        rocke_value_t* v = rocke_tile_window_load_vec(b, w, local_indices, num_indices, n);
+        for(i = 0; i < n; ++i)
+            out[i] = rocke_b_vec_extract(b, v, i);
+    }
 }
 
 rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,

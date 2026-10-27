@@ -208,12 +208,29 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
            kTwoTowerSolvers.end();
 }
 
+// Solvers held out of the perf-config picker regardless of a shipped model.
+//
+// ConvHipConv's model was trained on an older hipconv config vocabulary and
+// over-selects a slow config, regressing OOTB. hipconv's config descriptors (and
+// kernel set) have since changed and are now version-tagged, so the model must be
+// retrained on current-hipconv data before it can be trusted. Gated here, rather
+// than by dropping the section from lgbm_pcfg.bin, so re-enabling is a one-line
+// revert once a retrained model ships.
+bool HeldOutOfPicker(const std::string& solver_name) { return solver_name == "ConvHipConv"; }
+
 } // namespace
 
 std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
                                     const Handle& handle)
 {
+    if(HeldOutOfPicker(solver_name))
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name
+                                    << " held out of the picker pending a retrained model");
+        return {};
+    }
+
     const LgbmPcfgMetadata* meta_ptr = nullptr;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");

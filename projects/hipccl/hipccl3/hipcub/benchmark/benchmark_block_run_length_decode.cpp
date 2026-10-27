@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,7 +55,7 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
         = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread]
           - d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned i = 0; i < Trials; ++i)
     {
         OffsetT decoded_window_offset = 0;
@@ -165,8 +165,13 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
                     stream,
                     d_run_items,
                     d_run_offsets,
-                    d_output);
+                    d_output,
+                    true);
             });
+
+        HIP_CHECK(hipFree(d_run_items));
+        HIP_CHECK(hipFree(d_run_offsets));
+        HIP_CHECK(hipFree(d_output));
     }
 };
 

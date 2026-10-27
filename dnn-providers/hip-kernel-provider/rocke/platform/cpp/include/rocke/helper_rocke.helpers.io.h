@@ -117,6 +117,25 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
 rocke_value_t* rocke_b_load_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, const char* dtype, int n);
 
+/* C99 port of rocke.helpers.io.load_vec with its keyword options:
+ *
+ *     def load_vec(b, ptr, idx, *, dtype, n,
+ *                  temporal_hint=TemporalHint.DEFAULT) -> Value:
+ *         if n not in (2, 4, 8): raise ValueError(...)
+ *         return b.global_load_vN(ptr, idx, io_ir_type(dtype), n,
+ *                                 temporal_hint=temporal_hint)
+ *
+ * Same checks and results as rocke_b_load_vec, which forwards here with
+ * opts == NULL (all defaults). `opts` follows the rocke_mem_opts_t rules in
+ * ir.h: a new option is a new field there, never a new entry point here.
+ * Returns NULL on bad n / bad dtype / bad opts / errored builder. */
+rocke_value_t* rocke_b_load_vec_ex(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
+                                   const char* dtype,
+                                   int n,
+                                   const rocke_mem_opts_t* opts);
+
 /* C99 port of rocke.helpers.io.load_vec_as_f32:
  *
  *     def load_vec_as_f32(b, ptr, idx, *, dtype, n) -> list[Value]:
@@ -133,6 +152,23 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
                             const char* dtype,
                             int n,
                             rocke_value_t** out);
+
+/* C99 port of rocke.helpers.io.load_vec_as_f32 with its keyword options:
+ *
+ *     def load_vec_as_f32(b, ptr, idx, *, dtype, n,
+ *                         temporal_hint=TemporalHint.DEFAULT) -> list[Value]:
+ *         v = load_vec(b, ptr, idx, dtype=dtype, n=n, temporal_hint=temporal_hint)
+ *         return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
+ *
+ * Same contract as rocke_b_load_vec_as_f32, which forwards here with
+ * opts == NULL; `opts` as for rocke_b_load_vec_ex. */
+int rocke_b_load_vec_as_f32_ex(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               const char* dtype,
+                               int n,
+                               rocke_value_t** out,
+                               const rocke_mem_opts_t* opts);
 
 /* C99 port of rocke.helpers.io.load_lane_slice_f32:
  *
@@ -170,6 +206,22 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
  * errored builder. */
 void rocke_b_store_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int n);
+
+/* C99 port of rocke.helpers.io.store_vec with its keyword options:
+ *
+ *     def store_vec(b, ptr, idx, value, *, n,
+ *                   temporal_hint=TemporalHint.DEFAULT) -> None:
+ *         if n not in (2, 4, 8): raise ValueError(...)
+ *         b.global_store_vN(ptr, idx, value, n, temporal_hint=temporal_hint)
+ *
+ * Same contract as rocke_b_store_vec, which forwards here with opts == NULL;
+ * `opts` as for rocke_b_load_vec_ex. */
+void rocke_b_store_vec_ex(rocke_ir_builder_t* b,
+                          rocke_value_t* ptr,
+                          rocke_value_t* idx,
+                          rocke_value_t* value,
+                          int n,
+                          const rocke_mem_opts_t* opts);
 
 /* C99 port of rocke.helpers.io.pack_f32_to:
  *

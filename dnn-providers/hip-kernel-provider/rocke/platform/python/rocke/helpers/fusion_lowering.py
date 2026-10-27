@@ -218,10 +218,34 @@ class GemmEpilogueLowerer:
     The lowerer reads the region's first op as the matmul (the
     scheduler guarantees this for gemm regions) and the trailing ops
     as the epilogue chain, walking them in topological order.
+
+    Target
+    ------
+    ``arch`` names the target the GEMM is built for (e.g. ``"gfx942"``).
+    ``None`` (the default) targets the active device, which is where a
+    fusion region is launched. Pass a target explicitly to choose
+    candidates and lower them without a GPU (IR-only work). ``build()``
+    loads the kernel on the active device, so a built kernel only runs
+    when the target matches that device.
     """
 
     name = "gemm_epilogue"
     supported_kinds = {"gemm", "gemm_epilogue"}
+
+    def __init__(self, arch: Optional[str] = None) -> None:
+        self.arch = arch
+
+    def _target_arch(self) -> Tuple[str, str]:
+        """Return the target arch and how it was chosen, for error messages."""
+        from ..core.arch import validate_arch
+        from ..runtime.hip_module import get_device_arch
+
+        if self.arch is not None:
+            arch, source = self.arch, "the explicit target"
+        else:
+            arch, source = get_device_arch(), "the active device"
+        validate_arch(arch)
+        return arch, source
 
     # Default sweep tile choices for fp16. bf16 currently only supports
     # 16x16x{16,32} atoms on gfx950 so we fall back to a smaller set.
@@ -347,9 +371,8 @@ class GemmEpilogueLowerer:
         )
         from .fuse import dtype_to_ir
 
-        from ..core.arch import ArchTarget, validate_arch
+        from ..core.arch import ArchTarget
         from ..instances.common.gemm_universal import is_valid_spec
-        from ..runtime.hip_module import get_device_arch
 
         head = graph.ops[region.op_names[0]]
         a_name, b_name = head.inputs
@@ -359,9 +382,9 @@ class GemmEpilogueLowerer:
         epilogue = epilogue.with_dtype(ir_dtype)
         data = DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype, dtype_acc="fp32")
 
-        # Target the device this region will launch on (fall back to gfx950 for
-        # IR-only/no-GPU). The MMA *family* is selected from the target's wave
-        # size: CDNA (wave64) uses MFMA, the RDNA wave32 targets (gfx11xx) use
+        # Target the explicit ``arch`` if one was given, else the device this
+        # region will launch on. The MMA *family* is selected from the target's
+        # wave size: CDNA (wave64) uses MFMA, the RDNA wave32 targets (gfx11xx) use
         # WMMA — exactly as the unified GEMM builder does (``_mma_family``). The
         # warp-tile *K* is then selected from that target's MMA catalog so the
         # fused GEMM uses a legal atom per arch (gfx950: 32x32x16 / 16x16x32;
@@ -369,8 +392,7 @@ class GemmEpilogueLowerer:
         # filtered through the arch-aware ``is_valid_spec`` so configs that don't
         # fit (e.g. an LDS tile too large for gfx942's 64 KB, or a non-WMMA-legal
         # tile/pipeline on gfx1151) are dropped instead of crashing comgr.
-        arch = get_device_arch()
-        validate_arch(arch)
+        arch, _ = self._target_arch()
         target = ArchTarget.from_gfx(arch)
         wmma = target.wave_size == 32
         family = "wmma" if wmma else "mma"
@@ -443,9 +465,8 @@ class GemmEpilogueLowerer:
         return configs
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
-        from ..core.arch import ArchTarget, known_arches, validate_arch
+        from ..core.arch import ArchTarget, known_arches
         from ..instances.common.gemm_universal import build_universal_gemm
-        from ..runtime.hip_module import get_device_arch
         from ..runtime.launcher import KernelLauncher
         from .fuse import dtype_to_ir
 
@@ -454,20 +475,26 @@ class GemmEpilogueLowerer:
         bias_name = getattr(spec, "_bias_arg", None)
         residual_names = getattr(spec, "_residual_args", ())
         ir_dtype = dtype_to_ir(spec.data.dtype_a)
-        # Resolve the target arch the candidate was specialised for. ``spec``
-        # carries the wave size (wave32 -> RDNA/WMMA, wave64 -> CDNA/MFMA); the
-        # GEMM body must be built for an arch whose wave size matches, else
-        # ``build_universal_gemm`` rejects the spec. Prefer the active device
-        # when it matches the spec's wave size (the common case); otherwise fall
-        # back to the first known arch with the matching wave size so a wave32
-        # WMMA candidate still builds on a wave64 host (and vice versa).
-        arch = get_device_arch()
-        validate_arch(arch)
-        if ArchTarget.from_gfx(arch).wave_size != spec.wave_size:
-            for cand in known_arches():
-                if ArchTarget.from_gfx(cand).wave_size == spec.wave_size:
-                    arch = cand
-                    break
+        # ``spec`` carries the wave size of the target ``candidates()`` chose
+        # its MMA family and tiles for. A candidate made for another wave size
+        # cannot run on this target, so it is refused rather than built for
+        # some other target.
+        arch, source = self._target_arch()
+        target_wave_size = ArchTarget.from_gfx(arch).wave_size
+        if target_wave_size != spec.wave_size:
+            matching = ", ".join(
+                a
+                for a in known_arches()
+                if ArchTarget.from_gfx(a).wave_size == spec.wave_size
+            )
+            raise ValueError(
+                f"fused GEMM candidate {spec.name!r} was made for wave size "
+                f"{spec.wave_size}, but {source} {arch} has wave size "
+                f"{target_wave_size}. Build the candidates and the kernel with "
+                f"the same lowerer, or pass a target of wave size "
+                f"{spec.wave_size} explicitly: GemmEpilogueLowerer(arch=...) "
+                f"with one of: {matching}."
+            )
         kernel = build_universal_gemm(spec, arch=arch)
         hsaco = _build_region_hsaco(kernel, explicit_arch=arch)
         ptr_ty = f"ptr<{ir_dtype.name}, global>"
@@ -571,6 +598,9 @@ class ElementwiseLowerer:
         op = graph.ops[region.op_names[0]]
         if op.kind not in (self._UNARY | self._BINARY):
             return LegalResult.failure(f"{self.name}: unsupported op {op.kind!r}")
+        dtype = _dtype_str_for_tensor(graph, op.inputs[0])
+        if dtype not in ("fp16", "bf16"):
+            return LegalResult.failure(f"{self.name}: unsupported dtype {dtype!r}")
         return LegalResult.success()
 
     def candidates(
@@ -672,6 +702,9 @@ class ReductionLowerer:
         in_t = graph.tensors[op.inputs[0]]
         if len(in_t.shape) != 2:
             return LegalResult.failure(f"{self.name}: input must be 2D")
+        dtype = _dtype_str_for_tensor(graph, op.inputs[0])
+        if dtype not in ("fp16", "bf16"):
+            return LegalResult.failure(f"{self.name}: unsupported dtype {dtype!r}")
         return LegalResult.success()
 
     def candidates(

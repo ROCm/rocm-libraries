@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -460,4 +460,84 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex);
-void testing_csrgeam_extra(const Arguments& arg) {}
+void testing_csrgeam_extra(const Arguments& arg)
+{
+    // csrgeam_nnz_multipass_device used to compute
+    //   row = hipBlockIdx_x * BLOCKSIZE / WFSIZE
+    // with a 32-bit unsigned product. BLOCKSIZE is 256, so the product wraps once
+    // hipBlockIdx_x reaches 2^24. The launch now clamps grid.x to
+    // (2^32 - 1) / 256 = 2^24 - 1 blocks and grid-strides over the rows.
+    //
+    // On a wavefront-32 device one pass of that clamped grid covers
+    // (2^24 - 1) * 8 = 2^27 - 8 rows. m = 2^27 + 8 leaves 16 rows that only the
+    // stride loop visits. A wavefront-64 device covers fewer rows per block, so the
+    // same m is further past its one-pass coverage.
+    //
+    // A and B are the same matrix: one structural nonzero in column 0 of every row.
+    // The union has one nonzero per row, so C's row pointers are the identity.
+    // csr_row_ptr_C is cleared first; a row the kernel skips stays 0 and the
+    // exclusive scan under-counts nnz_C.
+    if(!arg.unit_check)
+    {
+        return;
+    }
+
+    const rocsparse_int        m    = (static_cast<rocsparse_int>(1) << 27) + 8;
+    const rocsparse_int        n    = 1;
+    const rocsparse_int        nnz  = m;
+    const rocsparse_index_base base = rocsparse_index_base_zero;
+
+    rocsparse_local_handle handle;
+
+    rocsparse_local_mat_descr descrA;
+    rocsparse_local_mat_descr descrB;
+    rocsparse_local_mat_descr descrC;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrA, base));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrB, base));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descrC, base));
+
+    host_vector<rocsparse_int> h_row_ptr(m + 1);
+    for(rocsparse_int i = 0; i <= m; ++i)
+    {
+        h_row_ptr[i] = i;
+    }
+
+    device_vector<rocsparse_int> d_row_ptr(m + 1);
+    device_vector<rocsparse_int> d_col_ind(nnz);
+    device_vector<rocsparse_int> d_row_ptr_C(m + 1);
+
+    d_row_ptr.transfer_from(h_row_ptr);
+    CHECK_HIP_ERROR(hipMemset(d_col_ind, 0, sizeof(rocsparse_int) * static_cast<size_t>(nnz)));
+    CHECK_HIP_ERROR(hipMemset(d_row_ptr_C, 0, sizeof(rocsparse_int) * static_cast<size_t>(m + 1)));
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+    rocsparse_int hnnz_C = -1;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrgeam_nnz(handle,
+                                                m,
+                                                n,
+                                                descrA,
+                                                nnz,
+                                                d_row_ptr,
+                                                d_col_ind,
+                                                descrB,
+                                                nnz,
+                                                d_row_ptr,
+                                                d_col_ind,
+                                                descrC,
+                                                d_row_ptr_C,
+                                                &hnnz_C));
+
+    unit_check_scalar(m, hnnz_C);
+
+    host_vector<rocsparse_int> h_row_ptr_C(m + 1);
+    h_row_ptr_C.transfer_from(d_row_ptr_C);
+
+    // Rows at and above 2^27 - 8 are past the wavefront-32 one-pass coverage.
+    const rocsparse_int first_strided_row = (static_cast<rocsparse_int>(1) << 27) - 8;
+    for(rocsparse_int row = first_strided_row; row <= m; ++row)
+    {
+        unit_check_scalar(row, h_row_ptr_C[row]);
+    }
+}

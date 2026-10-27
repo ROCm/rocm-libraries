@@ -62,6 +62,12 @@ struct DiscoveredBundle
         return sweep.has_value();
     }
 
+    /// "Suite.Test": the name GTest filters on and the registry de-duplicates by.
+    std::string fullName() const
+    {
+        return suiteName + "." + testName;
+    }
+
     std::filesystem::path diagnosticPath() const
     {
         if(!isTemplateSweepCase())
@@ -508,7 +514,7 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
     warnOnEmptyLeafFolders(bundleDir, sweepDirs);
 
     auto registerBundle = [&](DiscoveredBundle bundle) {
-        const auto fullName = bundle.suiteName + "." + bundle.testName;
+        const auto fullName = bundle.fullName();
         const auto diagnosticPath = bundle.diagnosticPath();
         auto it = nameToPath.find(fullName);
         if(it != nameToPath.end())

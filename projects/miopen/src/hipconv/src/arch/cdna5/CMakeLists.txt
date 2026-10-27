@@ -9,6 +9,13 @@ hipconv_autoshard(ARCH         cdna5
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
                   EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
 hipconv_autoshard(ARCH         cdna5
+                  NAMESPACE    direct_wgrad
+                  KERNEL_CLASS Direct_WgradConvKernel
+                  CONFIG_TABLE direct_wgrad/config_table.hpp
+                  KERNEL       direct_wgrad/kernel.hpp
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
+                  EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
+hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    grouped_multi_g
                   KERNEL_CLASS Grouped_MultiG_ConvKernel
                   CONFIG_TABLE grouped/grouped_multi_g/config_table.hpp
@@ -25,4 +32,10 @@ hipconv_autoshard(ARCH         cdna5
                   KERNEL_CLASS Depthwise_1D_Toeplitz_ConvKernel
                   CONFIG_TABLE depthwise/depthwise_1d_toeplitz/config_table.h
                   KERNEL       depthwise/depthwise_1d_toeplitz/kernel.h
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
+hipconv_autoshard(ARCH         cdna5
+                  NAMESPACE    depthwise_wgrad_hankel
+                  KERNEL_CLASS Depthwise_Wgrad_Hankel_ConvKernel
+                  CONFIG_TABLE depthwise/depthwise_wgrad_hankel/config_table.h
+                  KERNEL       depthwise/depthwise_wgrad_hankel/kernel.h
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})

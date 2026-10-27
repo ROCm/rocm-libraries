@@ -36,6 +36,26 @@
 
 namespace rocwmma
 {
+    namespace detail
+    {
+        template <typename LayoutA, typename LayoutB>
+        struct is_mixed_fp8_wmma_layout : false_type
+        {
+        };
+
+        // FP8 and BF8 share the packed input layout but keep distinct types for
+        // instruction selection. All other layout parameters must still match.
+        template <uint32_t MmaDim, typename A, typename B, bool Interleaved,
+                  RegisterLayout::Format Fmt>
+        struct is_mixed_fp8_wmma_layout<RegisterLayout::MmaInput<MmaDim, A, Interleaved, Fmt>,
+                                        RegisterLayout::MmaInput<MmaDim, B, Interleaved, Fmt>>
+            : bool_constant<ROCWMMA_ARCH_GFX12
+                            && ((is_same_v<A, float8_t> && is_same_v<B, bfloat8_t>)
+                                || (is_same_v<A, bfloat8_t> && is_same_v<B, float8_t>))>
+        {
+        };
+    }
+
     template <typename FragT>
     struct GetIOConfig;
 
@@ -108,7 +128,9 @@ namespace rocwmma
 
         // Sanity mma layouts
         static_assert(
-            is_layout_same_v<typename IOLayoutA::MmaLayout, typename IOLayoutB::MmaLayout>,
+            is_layout_same_v<typename IOLayoutA::MmaLayout, typename IOLayoutB::MmaLayout>
+                || detail::is_mixed_fp8_wmma_layout<typename IOLayoutA::MmaLayout,
+                                                     typename IOLayoutB::MmaLayout>::value,
             "Input fragment register layouts do not match");
         static_assert(
             is_layout_same_v<typename IOLayoutC::MmaLayout, typename IOLayoutD::MmaLayout>,

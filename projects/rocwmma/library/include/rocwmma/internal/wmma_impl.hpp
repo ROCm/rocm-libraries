@@ -41,7 +41,7 @@ namespace rocwmma
         template <uint32_t TargetId, uint32_t... TargetIds>
         using enable_target_id_t = enable_if_t<contains_number_v<uint32_t, TargetId, TargetIds...>>;
 
-        // Enabler for all of gfx11
+        // Enabler for the legacy gfx11 WMMA register layout
         template <uint32_t TargetId, bool Cond = true>
         using enable_gfx11_t = enable_if_t<contains_number_v<uint32_t,
                                                              TargetId,
@@ -55,11 +55,13 @@ namespace rocwmma
                                                              Constants::AMDGCN_ARCH_ID_GFX1153>
                                            && Cond>;
 
-        // Enabler for all of gfx12
+        // Enabler for gfx117x and gfx12 WMMA register layouts
         template <uint32_t TargetId, bool Cond = true>
         using enable_gfx12_t
             = enable_if_t<contains_number_v<uint32_t,
                                             TargetId,
+                                            Constants::AMDGCN_ARCH_ID_GFX1170,
+                                            Constants::AMDGCN_ARCH_ID_GFX1171,
                                             Constants::AMDGCN_ARCH_ID_GFX1200,
                                             Constants::AMDGCN_ARCH_ID_GFX1201,
                                             Constants::AMDGCN_ARCH_ID_GFX1250> && Cond>;
@@ -77,6 +79,8 @@ namespace rocwmma
                                             Constants::AMDGCN_ARCH_ID_GFX1151,
                                             Constants::AMDGCN_ARCH_ID_GFX1152,
                                             Constants::AMDGCN_ARCH_ID_GFX1153,
+                                            Constants::AMDGCN_ARCH_ID_GFX1170,
+                                            Constants::AMDGCN_ARCH_ID_GFX1171,
                                             Constants::AMDGCN_ARCH_ID_GFX1200,
                                             Constants::AMDGCN_ARCH_ID_GFX1201,
                                             Constants::AMDGCN_ARCH_ID_GFX1250> && Cond>;
@@ -705,6 +709,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -878,6 +884,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -1058,6 +1066,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -1231,6 +1241,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -1455,6 +1467,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -1620,6 +1634,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -1793,6 +1809,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -2165,6 +2183,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -2508,6 +2528,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {
@@ -2850,6 +2872,8 @@ namespace rocwmma
                            16u,
                            GfxTargetId,
                            enable_target_id_t<GfxTargetId,
+                                              Constants::AMDGCN_ARCH_ID_GFX1170,
+                                              Constants::AMDGCN_ARCH_ID_GFX1171,
                                               Constants::AMDGCN_ARCH_ID_GFX1200,
                                               Constants::AMDGCN_ARCH_ID_GFX1201>>
         {

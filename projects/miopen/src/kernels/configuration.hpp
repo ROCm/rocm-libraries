@@ -64,7 +64,7 @@ template <int LayoutNHWC,
           int UseFp32,
           int UseFpmix,
           int UseBfpmix,
-          int UseAMDGCN,
+          int UseGfx9Dpp,
           int NrnOpId>
 struct proto_config
 {
@@ -79,7 +79,7 @@ struct proto_config
     static_assert(UseBfpmix == 0 || UseBfpmix == 1, "UseBfpmix must be 0 or 1");
     static_assert((UseFp16 + UseFp32 + UseFpmix + UseBfpmix) == 1,
                   "only one of these configs can and must be chosen.");
-    static_assert(UseAMDGCN == 0 || UseAMDGCN == 1, "UseAMDGCN must be 0 or 1");
+    static_assert(UseGfx9Dpp == 0 || UseGfx9Dpp == 1, "UseGfx9Dpp must be 0 or 1");
     static_assert(NrnOpId >= 0 && NrnOpId <= 10,
                   "NrnOpId can only be interger between 0-10 (inclusive)");
 
@@ -90,8 +90,8 @@ struct proto_config
         UseFp16 ? type_strategy::fp16
                 : (UseFp32 ? type_strategy::fp32
                            : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
-    static constexpr bool use_amdgcn = UseAMDGCN;
-    static constexpr auto neuron_op  = static_cast<neuron_op_type>(NrnOpId);
+    static constexpr bool use_gfx9_dpp = UseGfx9Dpp;
+    static constexpr auto neuron_op    = static_cast<neuron_op_type>(NrnOpId);
 };
 } // namespace detail
 
@@ -102,7 +102,7 @@ using config = detail::proto_config<MIO_LAYOUT_NHWC,
                                     MIOPEN_USE_FP32,
                                     MIOPEN_USE_FPMIX,
                                     MIOPEN_USE_BFPMIX,
-                                    MIOPEN_USE_AMDGCN,
+                                    MIOPEN_USE_GFX9_DPP,
                                     MIOPEN_NRN_OP_ID>;
 
 } // namespace miopen
@@ -117,6 +117,7 @@ enum class architecture : int
     gfx103x,
     gfx110x,
     gfx115x,
+    gfx117x,
     gfx120x,
     gfx125x,
 };
@@ -146,17 +147,18 @@ struct launch_dimension
     static constexpr unsigned int grp2 = static_cast<unsigned int>(Grp2);
 };
 
-template <int Gfx103x, int Gfx110x, int Gfx115x, int Gfx120x, int Gfx125x>
+template <int Gfx103x, int Gfx110x, int Gfx115x, int Gfx117x, int Gfx120x, int Gfx125x>
 struct architecture_switch
 {
     static_assert(Gfx103x == 0 || Gfx103x == 1, "Gfx103x must be 0 or 1");
     static_assert(Gfx110x == 0 || Gfx110x == 1, "Gfx110x must be 0 or 1");
     static_assert(Gfx115x == 0 || Gfx115x == 1, "Gfx115x must be 0 or 1");
+    static_assert(Gfx117x == 0 || Gfx117x == 1, "Gfx117x must be 0 or 1");
     static_assert(Gfx120x == 0 || Gfx120x == 1, "Gfx120x must be 0 or 1");
     static_assert(Gfx125x == 0 || Gfx125x == 1, "Gfx125x must be 0 or 1");
 
-    static_assert(Gfx103x + Gfx110x + Gfx115x + Gfx120x + Gfx125x == 1 ||
-                      Gfx103x + Gfx110x + Gfx115x + Gfx120x + Gfx125x == 0,
+    static_assert(Gfx103x + Gfx110x + Gfx115x + Gfx117x + Gfx120x + Gfx125x == 1 ||
+                      Gfx103x + Gfx110x + Gfx115x + Gfx117x + Gfx120x + Gfx125x == 0,
                   "only one of these configs can be chosen.");
     static constexpr architecture value =
         static_cast<bool>(Gfx103x)
@@ -165,10 +167,12 @@ struct architecture_switch
                    ? architecture::gfx110x
                    : (static_cast<bool>(Gfx115x)
                           ? architecture::gfx115x
-                          : (static_cast<bool>(Gfx120x)
-                                 ? architecture::gfx120x
-                                 : (static_cast<bool>(Gfx125x) ? architecture::gfx125x
-                                                               : architecture::unknown))));
+                          : (static_cast<bool>(Gfx117x)
+                                 ? architecture::gfx117x
+                                 : (static_cast<bool>(Gfx120x)
+                                        ? architecture::gfx120x
+                                        : (static_cast<bool>(Gfx125x) ? architecture::gfx125x
+                                                                      : architecture::unknown)))));
 };
 
 template <typename MiopenConfig,
@@ -241,16 +245,9 @@ struct proto_config
         input_type_strategy == type_strategy::fpmix ? false : static_cast<bool>(UseNodpp);
     static constexpr int variant      = Variant;
     static constexpr auto target_arch = Architecture::value;
-#ifdef __AMDGCN__
-    static constexpr bool use_amdgcn =
-        MiopenConfig::use_amdgcn &&
-        !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
-          target_arch == architecture::gfx115x || target_arch == architecture::gfx120x ||
-          target_arch == architecture::gfx125x) &&
-        !(use_nodpp && (variant != 0));
-#else
-    static constexpr bool use_amdgcn = false;
-#endif
+    // GFX9-only: gated on __GFX9__ via MIOPEN_USE_GFX9_DPP, so unlisted newer targets are safe.
+    static constexpr bool use_gfx9_dpp =
+        MiopenConfig::use_gfx9_dpp && !(use_nodpp && (variant != 0));
     static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;
@@ -296,6 +293,7 @@ using config = miopen::batchnorm::detail::proto_config<
     miopen::batchnorm::detail::architecture_switch<MIO_BN_GFX103X,
                                                    MIO_BN_GFX110X,
                                                    MIO_BN_GFX115X,
+                                                   MIO_BN_GFX117X,
                                                    MIO_BN_GFX120X,
                                                    MIO_BN_GFX125X>,
     MIO_BN_VARIANT,

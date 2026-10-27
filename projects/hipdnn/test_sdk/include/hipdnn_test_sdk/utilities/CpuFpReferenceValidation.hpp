@@ -54,24 +54,43 @@ public:
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
+        const auto raggedLayout = reference.raggedIterationInfo();
         if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+           || reference.dims() != implementation.dims()
+           || raggedLayout != implementation.raggedIterationInfo())
         {
             return false;
         }
+        const bool isRagged = raggedLayout.has_value();
 
         hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
         std::atomic<bool> result(true);
+        std::atomic<size_t> comparedCount(0);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
             using hipdnn_data_sdk::types::signbit;
+            if(isRagged && raggedLayout->isOutOfBlock(indices))
+            {
+                return result.load(std::memory_order_relaxed);
+            }
+
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
+
+            // A ragged reference marks the positions it leaves undefined with NaN (RFC 0014).
+            if(isRagged)
+            {
+                if(isnan(refValue))
+                {
+                    return result.load(std::memory_order_relaxed);
+                }
+                comparedCount.fetch_add(1, std::memory_order_relaxed);
+            }
 
             const bool refIsInf = isinf(refValue);
             const bool implIsInf = isinf(implValue);
@@ -117,6 +136,13 @@ public:
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
+        if(isRagged && reference.elementCount() > 0 && comparedCount.load() == 0)
+        {
+            HIPDNN_SDK_LOG_ERROR("No element of the ragged reference was compared: every "
+                                 "in-block reference value is NaN.");
+            return false;
+        }
+
         return result.load();
     }
 
@@ -137,8 +163,10 @@ public:
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
+        const auto raggedLayout = reference.raggedIterationInfo();
         if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+           || reference.dims() != implementation.dims()
+           || raggedLayout != implementation.raggedIterationInfo())
         {
             return false;
         }
@@ -149,6 +177,11 @@ public:
         std::atomic<bool> result(true);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            if(raggedLayout.has_value() && raggedLayout->isOutOfBlock(indices))
+            {
+                return result.load(std::memory_order_relaxed);
+            }
+
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 

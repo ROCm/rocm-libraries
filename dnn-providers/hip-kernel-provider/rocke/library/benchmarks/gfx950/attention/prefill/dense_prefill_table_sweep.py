@@ -3,6 +3,9 @@
 
 Per published (model, seqlen) shape this walks ``iter_dispatch_attention_all``
 and launches each admitted candidate through ``DispatchResult.bind_torch``.
+``--offset`` / ``--limit`` take a window of each shape's configs, so a long
+run can be split or resumed; with ``--dedupe`` a config whose lowered IR
+matches one already run for the shape is recorded as ``duplicate``.
 
     python -m benchmarks.gfx950.attention.prefill.dense_prefill_table_sweep --list-only
     rocke-dense-prefill-table-sweep --dtype bf16 --output-json results.json
@@ -24,8 +27,11 @@ from dispatch.attention import (
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from benchmarks.common.attention_combo_sweep import (
     _kernel_name,
+    _row_skeleton,
     _run_result,
+    _spec_key,
     init_torch_first,
+    validate_config,
 )
 
 SEQLENS = [512, 1024, 2048, 4096, 8192]
@@ -86,35 +92,58 @@ def _run_args(args) -> SimpleNamespace:
     )
 
 
+def _windowed(items, args):
+    """``(index, item)`` inside this shape's ``--offset`` / ``--limit`` window,
+    or one ``(0, None)`` when nothing admits the shape. Same per-shape
+    semantics as ``attention_combo_sweep.iter_shard``: the index is absolute
+    within the shape, so a resumed run keeps the same numbering."""
+    offered = False
+    for index, item in enumerate(items):
+        offered = True
+        if index < args.offset:
+            continue
+        if args.limit and index >= args.offset + args.limit:
+            break
+        yield index, item
+    if not offered:
+        yield 0, None
+
+
 def list_combos(args) -> int:
     print(f"dtype={args.dtype} algorithm={args.algorithm} (CPU list-only)")
     for label, hq, hkv, d, s in _iter_shapes(args):
         req = _shape_request(
             hq=hq, hkv=hkv, d=d, seqlen=s, dtype=args.dtype, algorithm=args.algorithm
         )
-        combos = tuple(
-            iter_registered_attention_combos(
-                req,
-                candidate_prefix=args.candidate_prefix,
-                tuning_id_prefix=args.tuning_id_prefix,
-                tuning_sample=args.tuning_sample,
-                seed=args.seed,
-                sweep_level=args.sweep_level,
-            )
+        combos = iter_registered_attention_combos(
+            req,
+            candidate_prefix=args.candidate_prefix,
+            tuning_id_prefix=args.tuning_id_prefix,
+            tuning_sample=args.tuning_sample,
+            seed=args.seed,
+            sweep_level=args.sweep_level,
         )
-        print(f"\n{label} S={s} Hq={hq} Hkv={hkv} D={d}  n={len(combos)}")
-        for candidate, spec in combos:
+        print(f"\n{label} S={s} Hq={hq} Hkv={hkv} D={d}")
+        shown = 0
+        for index, combo in _windowed(combos, args):
+            if combo is None:
+                print("  unsupported: no registered combo admits this shape")
+                continue
+            candidate, spec = combo
+            shown += 1
             extra = ""
-            if isinstance(spec, AttentionDenseSpec):
+            kernel_spec = getattr(spec, "kernel_spec", spec)
+            if isinstance(kernel_spec, AttentionDenseSpec):
                 extra = (
-                    f"  bm={getattr(spec, 'block_m', None)} "
-                    f"persist={getattr(spec, 'persistent', None)} "
-                    f"wdma={getattr(spec, 'wide_lds_dma', None)}"
+                    f"  bm={kernel_spec.block_m} bn={kernel_spec.block_n} "
+                    f"persist={kernel_spec.persistent} "
+                    f"wdma={getattr(kernel_spec, 'wide_lds_dma', None)}"
                 )
             print(
-                f"  {candidate.name:<48} {candidate.algorithm:<18} "
+                f"  [{index}] {candidate.name:<48} {candidate.algorithm:<18} "
                 f"{_kernel_name(spec)}{extra}"
             )
+        print(f"  n={shown}")
     return 0
 
 
@@ -138,76 +167,81 @@ def sweep(args) -> list[dict]:
         req = _shape_request(
             hq=hq, hkv=hkv, d=d, seqlen=s, dtype=args.dtype, algorithm=args.algorithm
         )
+        shape = {
+            "model": label,
+            "seqlen": s,
+            "num_query_heads": hq,
+            "num_kv_heads": hkv,
+            "head_size": d,
+            "dtype": args.dtype,
+        }
+        results = iter_dispatch_attention_all(
+            req,
+            candidate_prefix=args.candidate_prefix,
+            tuning_id_prefix=args.tuning_id_prefix,
+            tuning_sample=args.tuning_sample,
+            seed=args.seed,
+            sweep_level=args.sweep_level,
+        )
+        first_by_ir: dict[str, str] = {}
         try:
-            results = tuple(
-                iter_dispatch_attention_all(
-                    req,
-                    candidate_prefix=args.candidate_prefix,
-                    tuning_id_prefix=args.tuning_id_prefix,
-                    tuning_sample=args.tuning_sample,
-                    seed=args.seed,
-                    sweep_level=args.sweep_level,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            rec = {
-                "model": label,
-                "seqlen": s,
-                "num_query_heads": hq,
-                "num_kv_heads": hkv,
-                "head_size": d,
-                "dtype": args.dtype,
-                "status": "error",
-                "reason": f"{type(exc).__name__}: {exc}",
-            }
+            for index, result in _windowed(results, args):
+                if result is None:
+                    rec = dict(
+                        shape,
+                        status="unsupported",
+                        reason="no registered attention combo admits this shape",
+                    )
+                    _store_row(rows, rec, args)
+                    print(f"SKIP {label} S={s}: no registered combo", flush=True)
+                    continue
+                _sweep_one(req, result, index, shape, first_by_ir, rows, run_args, args)
+                torch.cuda.empty_cache()
+        except Exception as exc:  # noqa: BLE001  # registry walk, not one config
+            rec = dict(shape, status="error", reason=f"{type(exc).__name__}: {exc}")
             _store_row(rows, rec, args)
             print(f"ERROR {label} S={s} registry: {exc}", flush=True)
             traceback.print_exc()
-            continue
-        if not results:
-            rec = {
-                "model": label,
-                "seqlen": s,
-                "num_query_heads": hq,
-                "num_kv_heads": hkv,
-                "head_size": d,
-                "dtype": args.dtype,
-                "status": "unsupported",
-                "reason": "no registered attention combo admits this shape",
-            }
-            _store_row(rows, rec, args)
-            print(f"SKIP {label} S={s}: no registered combo", flush=True)
-            continue
-        for index, result in enumerate(results):
-            rec = {
-                "model": label,
-                "seqlen": s,
-                "num_query_heads": hq,
-                "num_kv_heads": hkv,
-                "head_size": d,
-                "dtype": args.dtype,
-                "config": result.candidate.name,
-                "candidate": result.candidate.name,
-                "algorithm": result.candidate.algorithm,
-                "spec_id": result.candidate.spec_id,
-            }
-            try:
-                res = _run_result(req, result, run_args, index)
-                rec.update(res)
-                print(
-                    f"{rec['status'].upper():4} {label} S={s} {result.candidate.name}: "
-                    f"{rec.get('tflops', float('nan')):.1f} TF  "
-                    f"max_abs={rec.get('max_abs', float('nan')):.2e}",
-                    flush=True,
-                )
-            except Exception as exc:  # noqa: BLE001
-                reason = f"{type(exc).__name__}: {exc}"
-                rec.update(status="error", reason=reason)
-                print(f"ERROR {label} S={s} {result.candidate.name}: {exc}", flush=True)
-                traceback.print_exc()
-            _store_row(rows, rec, args)
-            torch.cuda.empty_cache()
     return rows
+
+
+def _sweep_one(req, result, index, shape, first_by_ir, rows, run_args, args):
+    label, s = shape["model"], shape["seqlen"]
+    rec = dict(
+        shape,
+        config=result.candidate.name,
+        candidate=result.candidate.name,
+        algorithm=result.candidate.algorithm,
+        spec_id=result.candidate.spec_id,
+    )
+    if args.dedupe:
+        verdict = validate_config(result)
+        skip = None
+        if verdict.reason:
+            skip = ("invalid", verdict.reason)
+        elif verdict.ir_digest:
+            twin = first_by_ir.setdefault(verdict.ir_digest, _spec_key(result.spec))
+            if twin != _spec_key(result.spec):
+                skip = ("duplicate", f"lowered IR identical to {twin}")
+        if skip is not None:
+            rec.update(_row_skeleton(req, result.candidate, result.spec, index))
+            rec.update(status=skip[0], reason=skip[1])
+            _store_row(rows, rec, args)
+            print(f"{skip[0].upper()} {label} S={s} {result.candidate.name}: {skip[1]}")
+            return
+    try:
+        rec.update(_run_result(req, result, run_args, index))
+        print(
+            f"{rec['status'].upper():4} {label} S={s} {result.candidate.name}: "
+            f"{rec.get('tflops', float('nan')):.1f} TF  "
+            f"max_abs={rec.get('max_abs', float('nan')):.2e}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        rec.update(status="error", reason=f"{type(exc).__name__}: {exc}")
+        print(f"ERROR {label} S={s} {result.candidate.name}: {exc}", flush=True)
+        traceback.print_exc()
+    _store_row(rows, rec, args)
 
 
 def best_table(rows: list[dict]) -> None:
@@ -264,7 +298,8 @@ def best_table(rows: list[dict]) -> None:
 
 
 def _rows_exit_code(rows: list[dict]) -> int:
-    return 1 if any(r.get("status") not in ("ok", "unsupported") for r in rows) else 0
+    ok = ("ok", "unsupported", "duplicate")
+    return 1 if any(r.get("status") not in ok for r in rows) else 0
 
 
 def main() -> int:
@@ -274,7 +309,8 @@ def main() -> int:
         "--algorithm",
         default="auto",
         help="AttentionRequest.algorithm filter; 'auto' enumerates every "
-        "executable registry family that admits the shape.",
+        "executable registry family that admits the shape. The gfx950 dense "
+        "bodies are attention_dense_grid and attention_dense_persist.",
     )
     ap.add_argument("--warmup", type=int, default=15)
     ap.add_argument("--iters", type=int, default=50)
@@ -287,14 +323,35 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks. full samples every kernel knob",
+        help="production walks the curated unified-tuning stacks and sets each "
+        "dense knob to every legal value one at a time from the shipped spec. "
+        "full samples every knob combination",
     )
     ap.add_argument(
         "--tuning-sample",
         type=int,
         default=256,
-        help="with --sweep-level full: random legal specs per tuning candidate, "
-        "seeded by --seed (0 = the full stream). Ignored for production",
+        help="with --sweep-level full: random legal specs per tuning or dense "
+        "candidate, seeded by --seed (0 = the full stream). Ignored for production",
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="configs to take within each shape (0 = all of that shape)",
+    )
+    ap.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="configs to skip within each shape; not a global index across shapes",
+    )
+    ap.add_argument(
+        "--dedupe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="build and lower each config on the host first; skip one whose "
+        "lowered IR matches a config already run for the shape",
     )
     ap.add_argument("--output-json", default="")
     ap.add_argument(

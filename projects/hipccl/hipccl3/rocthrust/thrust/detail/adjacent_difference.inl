@@ -17,42 +17,50 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/generic/select_system.h>
-#include <thrust/system/detail/generic/adjacent_difference.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/detail/adl/adjacent_difference.h>
+#include <thrust/system/detail/generic/adjacent_difference.h>
+#include <thrust/system/detail/generic/select_system.h>
 
 THRUST_NAMESPACE_BEGIN
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
-THRUST_HOST_DEVICE
-OutputIterator adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                   InputIterator first, InputIterator last,
-                                   OutputIterator result)
+THRUST_HOST_DEVICE OutputIterator adjacent_difference(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result)
 {
   using thrust::system::detail::generic::adjacent_difference;
 
   return adjacent_difference(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, result);
 } // end adjacent_difference()
 
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
-THRUST_HOST_DEVICE
-OutputIterator adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                                   InputIterator first, InputIterator last,
-                                   OutputIterator result,
-                                   BinaryFunction binary_op)
+THRUST_HOST_DEVICE OutputIterator adjacent_difference(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  BinaryFunction binary_op)
 {
   using thrust::system::detail::generic::adjacent_difference;
 
-  return adjacent_difference(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, result, binary_op);
+  return adjacent_difference(
+    thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, result, binary_op);
 } // end adjacent_difference()
 
-
 template <typename InputIterator, typename OutputIterator>
-OutputIterator adjacent_difference(InputIterator first, InputIterator last,
-                                   OutputIterator result)
+OutputIterator adjacent_difference(InputIterator first, InputIterator last, OutputIterator result)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -65,11 +73,9 @@ OutputIterator adjacent_difference(InputIterator first, InputIterator last,
   return thrust::adjacent_difference(select_system(system1, system2), first, last, result);
 } // end adjacent_difference()
 
-
 template <typename InputIterator, typename OutputIterator, typename BinaryFunction>
-OutputIterator adjacent_difference(InputIterator first, InputIterator last,
-                                   OutputIterator result,
-                                   BinaryFunction binary_op)
+OutputIterator
+adjacent_difference(InputIterator first, InputIterator last, OutputIterator result, BinaryFunction binary_op)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -81,6 +87,5 @@ OutputIterator adjacent_difference(InputIterator first, InputIterator last,
 
   return thrust::adjacent_difference(select_system(system1, system2), first, last, result, binary_op);
 } // end adjacent_difference()
-
 
 THRUST_NAMESPACE_END

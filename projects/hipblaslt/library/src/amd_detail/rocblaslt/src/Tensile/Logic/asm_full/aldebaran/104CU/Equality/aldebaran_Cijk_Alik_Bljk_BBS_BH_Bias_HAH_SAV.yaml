@@ -230,6 +230,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqGNi1hDG
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x32_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT1_1_PLR3_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -342,6 +343,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 1
+  SolutionUID: 0uTnqGNj423Y
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT192x64x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT3_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -454,6 +456,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 2
+  SolutionUID: 0uTnqGNiXNvj
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_2_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -566,6 +569,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 3
+  SolutionUID: 0uTnqGNi8T8S
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT256x128x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT4_2_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -678,6 +682,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 4
+  SolutionUID: 0uTnqGNiqf3P
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x192x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW2_GSU1_LPA4_LPB4_LRVW4_MIWT1_3_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -790,6 +795,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 5
+  SolutionUID: 0uTnqGNilVvi
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x256x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT3_2_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -902,6 +908,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 6
+  SolutionUID: 0uTnqGNiqZSw
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x256x32_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_4_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -1014,6 +1021,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 7
+  SolutionUID: 0uTnqGNiEFUe
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x128x32_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW4_MIWT2_2_PLR5_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1127,6 +1135,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 8
+  SolutionUID: 0uTnqGNinCcp
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x128x32_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA8_LPB8_LRVW8_MIWT5_1_PLR5_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1240,6 +1249,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 9
+  SolutionUID: 0uTnqGNi3xOK
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT176x128x32_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW2_GSU1_LPA4_LPB4_LRVW4_MIWT11_2_PLR3_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1352,6 +1362,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 10
+  SolutionUID: 0uTnqGNiWVxK
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x208x32_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW2_GSU1_LPA4_LPB4_LRVW4_MIWT2_13_PLR3_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1465,6 +1476,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 11
+  SolutionUID: 0uTnqGNjMI2o
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x256x32_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_4_PLR5_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1578,6 +1590,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 12
+  SolutionUID: 0uTnqGNjLJUc
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x256x32_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA8_LPB8_LRVW8_MIWT5_2_PLR5_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1691,6 +1704,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 13
+  SolutionUID: 0uTnqGNk1X9r
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT256x256x32_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_8_PLR5_WG128_2_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -1804,6 +1818,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 14
+  SolutionUID: 0uTnqGNjisKR
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW2_GSU1_LPA4_LPB4_LRVW4_MIWT1_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -1916,6 +1931,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 15
+  SolutionUID: 0uTnqGNjLBgH
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT1_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2028,6 +2044,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 16
+  SolutionUID: 0uTnqGNk0rUd
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW4_MIWT1_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2140,6 +2157,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 17
+  SolutionUID: 0uTnqGNjcvAe
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2252,6 +2270,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 18
+  SolutionUID: 0uTnqGNjltEj
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x16x64_MI16x16x16x1_SN_1LDSB0_AFC0_GRVW8_GSU2_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2365,6 +2384,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 19
+  SolutionUID: 0uTnqGNjX2bV
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW2_GSU1_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2477,6 +2497,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 20
+  SolutionUID: 0uTnqGNjhQAl
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2589,6 +2610,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 21
+  SolutionUID: 0uTnqGNjJv75
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_AFC0_GRVW4_GSU2_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2702,6 +2724,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 22
+  SolutionUID: 0uTnqGNj6RUd
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x32x64_MI16x16x16x1_SN_1LDSB0_AFC0_GRVW8_GSU2_LPA16_LPB16_LRVW8_MIWT1_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2815,6 +2838,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 23
+  SolutionUID: 0uTnqGNjck7Y
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x32x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -2927,6 +2951,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 24
+  SolutionUID: 0uTnqGNjKZ4b
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x32x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT2_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3039,6 +3064,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 25
+  SolutionUID: 0uTnqGNjaz0C
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x32x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT3_1_PLR5_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3151,6 +3177,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 26
+  SolutionUID: 0uTnqGNk4GHJ
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x32x64_MI32x32x8x1_SN_1LDSB0_AFC0_GRVW8_GSU2_LPA8_LPB8_LRVW8_MIWT1_1_PLR9_WG128_2_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3264,6 +3291,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 27
+  SolutionUID: 0uTnqGNj5oTI
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3375,6 +3403,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 28
+  SolutionUID: 0uTnqGNjyQxA
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT2_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3486,6 +3515,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 29
+  SolutionUID: 0uTnqGNjO8eh
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT48x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA16_LPB16_LRVW8_MIWT3_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3597,6 +3627,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 30
+  SolutionUID: 0uTnqGNjX5Ly
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x64x64_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW2_GSU1_LPA8_LPB8_LRVW8_MIWT1_1_PLR9_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3709,6 +3740,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 31
+  SolutionUID: 0uTnqGNkAWDL
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x64x64_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT1_1_PLR9_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3821,6 +3853,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 32
+  SolutionUID: 0uTnqGNjsJVf
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT80x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT5_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -3932,6 +3965,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 33
+  SolutionUID: 0uTnqGNjerbk
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x64x64_MI16x16x16x1_SN_1LDSB0_AFC0_GRVW8_GSU2_LPA16_LPB16_LRVW8_MIWT6_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4044,6 +4078,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 34
+  SolutionUID: 0uTnqGNjy4MM
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x64x64_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_1_PLR9_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4156,6 +4191,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 35
+  SolutionUID: 0uTnqGNj6u9F
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT10_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4267,6 +4303,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 36
+  SolutionUID: 0uTnqGNjYjvQ
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT176x64x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT11_1_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4378,6 +4415,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 37
+  SolutionUID: 0uTnqGNj9xyH
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x80x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_5_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4490,6 +4528,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 38
+  SolutionUID: 0uTnqGNjpGPz
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x112x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT2_7_PLR5_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4602,6 +4641,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 39
+  SolutionUID: 0uTnqGNk93Sm
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x128x64_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_1_PLR9_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4714,6 +4754,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 40
+  SolutionUID: 0uTnqGNjejbZ
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT80x128x64_MI16x16x16x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT5_2_PLR5_WG16_16_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4825,6 +4866,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 41
+  SolutionUID: 0uTnqGNjNnwV
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x128x64_MI32x32x8x1_SN_1LDSB0_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT3_1_PLR9_WG32_8_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -4937,6 +4979,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 42
+  SolutionUID: 0uTnqGNjTsUa
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x32x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT1_1_PLR9_WG128_2_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5050,6 +5093,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 43
+  SolutionUID: 0uTnqGNjMjEw
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x32x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT5_1_PLR5_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5163,6 +5207,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 44
+  SolutionUID: 0uTnqGNjzE7q
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x64x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_1_PLR9_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5276,6 +5321,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 45
+  SolutionUID: 0uTnqGNjuMQN
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x96x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT2_3_PLR5_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5389,6 +5435,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 46
+  SolutionUID: 0uTnqGNjdao0
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT32x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT1_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5502,6 +5549,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 47
+  SolutionUID: 0uTnqGNkAMdK
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT64x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5615,6 +5663,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 48
+  SolutionUID: 0uTnqGNk92ml
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT80x128x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT5_2_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5727,6 +5776,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 49
+  SolutionUID: 0uTnqGNjYzDN
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT3_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5840,6 +5890,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 50
+  SolutionUID: 0uTnqGNjkynE
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x128x64_MI32x32x8x1_SN_1LDSB1_AFC0_GRVW8_GSU2_LPA8_LPB8_LRVW8_MIWT3_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -5954,6 +6005,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 51
+  SolutionUID: 0uTnqGNjuLoO
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT2_2_PLR9_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6067,6 +6119,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 52
+  SolutionUID: 0uTnqGNjoQdR
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT5_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6180,6 +6233,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 53
+  SolutionUID: 0uTnqGNjk2zo
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT160x128x64_MI32x32x8x1_SN_1LDSB1_AFC0_GRVW8_GSU2_LPA8_LPB8_LRVW8_MIWT5_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6294,6 +6348,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 54
+  SolutionUID: 0uTnqGNjxR4s
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT176x128x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA4_LPB4_LRVW4_MIWT11_2_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6406,6 +6461,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 55
+  SolutionUID: 0uTnqGNjsFbJ
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT176x128x64_MI16x16x16x1_SN_1LDSB1_AFC0_GRVW4_GSU2_LPA4_LPB4_LRVW4_MIWT11_2_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6519,6 +6575,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 56
+  SolutionUID: 0uTnqGNjU3s2
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT224x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT7_1_PLR9_WG32_8_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6632,6 +6689,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 57
+  SolutionUID: 0uTnqGNjns0j
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT256x128x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT4_2_PLR9_WG64_4_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6745,6 +6803,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 58
+  SolutionUID: 0uTnqGNjanEX
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT128x160x64_MI32x32x8x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA8_LPB8_LRVW8_MIWT1_5_PLR9_WG128_2_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6858,6 +6917,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 59
+  SolutionUID: 0uTnqGNjoRRj
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT96x192x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW8_GSU1_LPA16_LPB16_LRVW8_MIWT6_3_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -6970,6 +7030,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 60
+  SolutionUID: 0uTnqGNjZham
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT80x256x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW2_GSU1_LPA4_LPB4_LRVW4_MIWT5_4_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -7082,6 +7143,7 @@ Solutions:
   _staggerStrideShift: 1
   allowLRVWforTLUandMI: false
 - SolutionIndex: 61
+  SolutionUID: 0uTnqGNjUYVK
   SolutionNameMin: Cijk_Alik_Bljk_BBS_BBiasH_HAH_SAV_MT80x256x64_MI16x16x16x1_SN_1LDSB1_AFC1_GRVW4_GSU1_LPA16_LPB16_LRVW8_MIWT5_4_PLR5_WG16_16_1
   1LDSBuffer: 1
   AssignedDerivedParameters: true

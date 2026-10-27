@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/mr/disjoint_pool.h>
 
 #include <mutex>
@@ -42,12 +49,14 @@ namespace mr
  * user \tparam Bookkeeper the type of memory resources that will be used for allocating bookkeeping memory
  */
 template <typename Upstream, typename Bookkeeper>
-class disjoint_synchronized_pool_resource : public memory_resource<typename Upstream::pointer>
+struct disjoint_synchronized_pool_resource : public memory_resource<typename Upstream::pointer>
 {
+#ifndef THRUST_DOXYGEN_INVOKED
   using unsync_pool = disjoint_unsynchronized_pool_resource<Upstream, Bookkeeper>;
   using lock_t      = std::lock_guard<std::mutex>;
 
   using void_ptr = typename Upstream::pointer;
+#endif
 
 public:
   /*! Get the default options for a disjoint pool. These are meant to be a sensible set of values for many use cases,
@@ -93,11 +102,13 @@ public:
     return upstream_pool.do_allocate(bytes, alignment);
   }
 
+#ifndef THRUST_DOXYGEN_INVOKED
   virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     lock_t lock(mtx);
     upstream_pool.do_deallocate(p, n, alignment);
   }
+#endif
 
 private:
   std::mutex mtx;

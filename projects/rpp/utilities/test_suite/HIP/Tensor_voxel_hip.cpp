@@ -616,6 +616,7 @@ int main(int argc, char* argv[]) {
              << minWallTime << "," << avgWallTime;
     }
     rppDestroy(handle, backend);
+    CHECK_RETURN_STATUS(hipStreamDestroy(stream));
 
     // Free memory
     free(niftiDataArray);

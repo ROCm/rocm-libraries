@@ -28,6 +28,7 @@
 #include <sstream>
 #include <string_view>
 
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu {
@@ -109,16 +110,19 @@ static bool canUseLessOperand(const StinkyInstruction* inst) {
     return false;
 }
 
-// Workaround: v_wmma_scale_f32_16x16x128_f8f6f4 has matrix-format-dependent
-// packed source widths. For src0/src1, accept dynamic widths (256/384/512 bits)
-// even though the static format metadata uses a fixed maximum width.
+// Workaround: v_wmma_f32_16x16x128_f8f6f4 and v_wmma_scale_f32_16x16x128_f8f6f4 have
+// matrix-format-dependent packed source widths. For src0/src1, accept dynamic widths
+// (256/384/512 bits) even though the static format metadata uses a fixed maximum width.
 static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
                                           unsigned operandIndex, unsigned expectedWidth,
                                           unsigned actualWidth) {
     if (!hwDesc || !hwDesc->mnemonic || isDest) return false;
     if (operandIndex > 1) return false;  // only src0/src1 are dynamic
     if (expectedWidth != 16) return false;
-    if (std::string_view(hwDesc->mnemonic) != "v_wmma_scale_f32_16x16x128_f8f6f4") return false;
+    std::string_view mnemonic(hwDesc->mnemonic);
+    if (mnemonic != "v_wmma_f32_16x16x128_f8f6f4" &&
+        mnemonic != "v_wmma_scale_f32_16x16x128_f8f6f4")
+        return false;
     return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
 }
 
@@ -218,7 +222,11 @@ static std::string checkReadWriteOperands(const StinkyInstruction* inst) {
     unsigned destIdx = 0, srcIdx = 0;
 
     for (const auto& field : hwDesc->operandFields) {
-        if (!field.isReadWrite) {
+        // A destination is read-write when the opcode always reads it, and also
+        // when this instance's write keeps part of the register.
+        const bool isReadWrite =
+            field.isDest ? readsDestination(*inst, destIdx) : field.isReadWrite;
+        if (!isReadWrite) {
             if (field.isDest)
                 destIdx++;
             else

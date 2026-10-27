@@ -21,7 +21,7 @@ import numpy as np
 from rocke.numeric.references import dense_attention_reference
 
 
-def _independent_attention(Q, K, V, *, causal):
+def _independent_attention(Q, K, V, *, causal, scale=None):
     """Second, independent softmax-attention implementation (fp64, explicit
     loops + np.dot) -- deliberately NOT the einsum, so a transposed index or a
     broken scale/mask in the reference is caught rather than mirrored."""
@@ -29,7 +29,7 @@ def _independent_attention(Q, K, V, *, causal):
     Sk = K.shape[0]
     Qf, Kf, Vf = Q.astype(np.float64), K.astype(np.float64), V.astype(np.float64)
     out = np.zeros((Sq, H, D), dtype=np.float64)
-    scale = 1.0 / math.sqrt(D)
+    scale = 1.0 / math.sqrt(D) if scale is None else scale
     for h in range(H):
         for i in range(Sq):
             scores = np.array(
@@ -74,6 +74,36 @@ class TestDenseAttentionReference(unittest.TestCase):
                 Q[i : i + 1], K[: i + 1], V[: i + 1], causal=False
             )
             np.testing.assert_allclose(causal[i], prefix[0], atol=1e-6, rtol=0)
+
+    def test_arbitrary_scale_matches_independent(self):
+        # hipDNN supplies its own scale rather than assuming 1/sqrt(d); the
+        # reference must apply whatever scale it is given, checked against the
+        # independent fp64 oracle.
+        for scale in (0.123, 1.0, 2.5):
+            for causal in (False, True):
+                Q, K, V = self._qkv()
+                got = dense_attention_reference(Q, K, V, causal=causal, scale=scale)
+                want = _independent_attention(Q, K, V, causal=causal, scale=scale)
+                np.testing.assert_allclose(got, want, atol=1e-4, rtol=0)
+
+    def test_scale_is_not_ignored(self):
+        # A non-default scale must change the result -- guards against the arg
+        # being accepted but dropped.
+        Q, K, V = self._qkv()
+        default = dense_attention_reference(Q, K, V, causal=False)
+        scaled = dense_attention_reference(Q, K, V, causal=False, scale=3.0)
+        self.assertFalse(np.allclose(default, scaled))
+
+    def test_scale_none_preserves_default(self):
+        # scale=None must stay equivalent to an explicit 1/sqrt(d), so existing
+        # callers that rely on the implicit default are unaffected.
+        Q, K, V = self._qkv()
+        d = Q.shape[-1]
+        implicit = dense_attention_reference(Q, K, V, causal=True)
+        explicit = dense_attention_reference(
+            Q, K, V, causal=True, scale=1.0 / math.sqrt(d)
+        )
+        np.testing.assert_allclose(implicit, explicit, atol=1e-6, rtol=0)
 
     def test_out_dtype_none_is_fp32_else_casts(self):
         Q, K, V = self._qkv()

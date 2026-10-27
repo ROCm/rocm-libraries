@@ -135,8 +135,8 @@ struct rocsparse_matrix_utils
     // @param[in] that Fill \p that matrix.
     // @param[in] use_exact If \p use_exact is true, the matrix will be initialized with exact values.
     //
-    template <typename T>
-    static void init(host_dense_matrix<T>& that, bool use_exact = false)
+    template <typename T, typename I = rocsparse_int>
+    static void init(host_dense_matrix<T, I>& that, bool use_exact = false)
     {
         switch(that.order)
         {

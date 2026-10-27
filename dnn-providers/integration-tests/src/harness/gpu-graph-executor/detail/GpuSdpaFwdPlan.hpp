@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
@@ -19,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
+#include "GpuScalarOperand.hpp"
 #include "IGpuGraphNodePlanBuilder.hpp"
 #include "IGpuGraphNodePlanExecutor.hpp"
 
@@ -73,7 +75,7 @@ struct GpuSdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-        std::optional<float> attnScaleValue,
+        std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor,
         int64_t leftBound,
         int64_t rightBound,
         bool topLeftAlignment,
@@ -83,7 +85,7 @@ struct GpuSdpaFwdParams
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
         , oTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(oAttributes))
-        , attnScaleValue(attnScaleValue)
+        , scaleTensor(std::move(scaleTensor))
         , leftBound(leftBound)
         , rightBound(rightBound)
         , topLeftAlignment(topLeftAlignment)
@@ -102,7 +104,9 @@ struct GpuSdpaFwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT kTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT vTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT oTensor;
-    std::optional<float> attnScaleValue;
+    // Folded scale operand (scale tensor, else baked attn_scale_value), resolved at execute time.
+    // Absent means 1.0 (no scaling), as in cuDNN.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
@@ -114,7 +118,8 @@ template <typename QDataType,
           typename KDataType,
           typename VDataType,
           typename ODataType,
-          typename ComputeDataType = float>
+          typename ComputeDataType = float,
+          typename MaskDataType = float>
 class GpuSdpaFwdPlan : public IGpuGraphNodePlanExecutor
 {
 public:
@@ -134,7 +139,7 @@ public:
         hipdnn_gpu_ref::ShallowGpuTensor<ODataType> oTensor(
             variantPack.at(_params.oTensor.uid), _params.oTensor.dims, _params.oTensor.strides);
 
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> attnMaskTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<MaskDataType>> attnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
             attnMaskTensor.emplace(variantPack.at(_params.attnMaskTensor->uid),
@@ -155,13 +160,19 @@ public:
                 variantPack.at(_params.lseTensor->uid), squeezedDims, squeezedStrides);
         }
 
+        std::optional<float> attnScale;
+        if(_params.scaleTensor.has_value())
+        {
+            attnScale = resolveScalarOperand(*_params.scaleTensor, variantPack, "SDPA scale");
+        }
+
         hipdnn_gpu_ref::GpuFpReferenceSdpa::
-            fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+            fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
                 qTensor,
                 kTensor,
                 vTensor,
                 oTensor,
-                _params.attnScaleValue,
+                attnScale,
                 attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
                 _params.leftBound,
                 _params.rightBound,
@@ -177,7 +188,9 @@ private:
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
 class GpuSdpaFwdPlanBuilder : public IGpuGraphNodePlanBuilder
 {
 public:
@@ -185,6 +198,8 @@ public:
     using KDataType = hipdnn_test_sdk::utilities::DataTypeToNative<KDataTypeEnum>;
     using VDataType = hipdnn_test_sdk::utilities::DataTypeToNative<VDataTypeEnum>;
     using ODataType = hipdnn_test_sdk::utilities::DataTypeToNative<ODataTypeEnum>;
+    // UNSET (no mask) maps to a placeholder float: the plan then always passes a null mask.
+    using MaskDataType = hipdnn_test_sdk::utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -208,6 +223,29 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
 
+        // The mask dtype is part of the plan: the UNSET builder takes graphs without a mask,
+        // every other builder takes graphs whose mask tensor has exactly that dtype.
+        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+        {
+            if(nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
+        }
+
+        // Ragged tensors need the ragged plan; read as dense they would give wrong results.
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         // Unsupported mask modes
         if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
         {
@@ -230,6 +268,21 @@ public:
            || nodeAttributes->rng_dump_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // The scale may be baked, pass-by-value or device-resident. It must be one element, and a
+        // device scale must be FLOAT since it is read back as one float.
+        if(nodeAttributes->scale_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
+            const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
+            if(elementCount(scale) != 1
+               || (!isHostScalarOperand(scale)
+                   && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
+            {
+                return false;
+            }
         }
 
         // Unsupported: paged KV cache
@@ -278,6 +331,8 @@ public:
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
@@ -293,11 +348,15 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
+        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
+                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
+                                   : nullptr;
         std::optional<float> attnScaleValue;
         if(nodeAttributes->attn_scale_value().has_value())
         {
             attnScaleValue = nodeAttributes->attn_scale_value();
         }
+        auto scaleTensor = hipdnn_test_sdk::detail::foldSdpaScale(scalePtr, attnScaleValue);
 
         const auto* attnMaskPtr = nodeAttributes->attn_mask_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
@@ -307,55 +366,18 @@ public:
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
 
-        int64_t leftBound = (nodeAttributes->left_bound().has_value())
-                                ? nodeAttributes->left_bound().value()
-                                : -1;
-        int64_t rightBound = (nodeAttributes->right_bound().has_value())
-                                 ? nodeAttributes->right_bound().value()
-                                 : -1;
+        const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaFwdPlan");
 
-        if(leftBound < -1 || rightBound < -1)
-        {
-            throw std::invalid_argument("GpuSdpaFwdPlan: left_bound and right_bound must be >= -1 "
-                                        "(got left_bound="
-                                        + std::to_string(leftBound)
-                                        + ", right_bound=" + std::to_string(rightBound) + ")");
-        }
-
-        bool isTopLeft = nodeAttributes->diagonal_alignment()
-                         == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
-
-        // Validate mutually exclusive deprecated attributes
-        if(nodeAttributes->causal_mask() && nodeAttributes->causal_mask_bottom_right())
-        {
-            throw std::invalid_argument("Cannot set both causal_mask and causal_mask_bottom_right. "
-                                        "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
-                                        "left_bound=-1, right_bound=0 instead.");
-        }
-
-        // Check deprecated attributes
-        if(nodeAttributes->causal_mask())
-        {
-            leftBound = -1;
-            rightBound = 0;
-            isTopLeft = true;
-        }
-        if(nodeAttributes->causal_mask_bottom_right())
-        {
-            leftBound = -1;
-            rightBound = 0;
-            isTopLeft = false;
-        }
-
-        return std::make_unique<GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float>>(
+        return std::make_unique<
+            GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float, MaskDataType>>(
             GpuSdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                              *tensorMap.at(nodeAttributes->k_tensor_uid()),
                              *tensorMap.at(nodeAttributes->v_tensor_uid()),
                              *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                             attnScaleValue,
-                             leftBound,
-                             rightBound,
-                             isTopLeft,
+                             std::move(scaleTensor),
+                             band.leftBound,
+                             band.rightBound,
+                             band.topLeftAlignment,
                              attnMaskPtr,
                              lsePtr));
     }

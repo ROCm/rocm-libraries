@@ -75,10 +75,12 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
    | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
    | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
-   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | **Required ON whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON.** The coupling is unconditional: the provider's top-level check inspects no source kind and no descriptor root, so it also fires for HIP-only and embedded-source bundles and when no rocKE KDP exists anywhere. Ingestor ON with this OFF is a fatal configure error, not a degraded build. |
-   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging packages from. Packaging requires at least one non-hidden `*.kdp.json`; with none it is dormant. The default root is also dormant when no KDP declares any selected packaging architecture. Dormancy removes any stale product tree and is not an error. Set but not a directory is fatal. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | Packing any rocKE bundle. With `HIPDNN_ENABLE_KERNEL_INGESTOR` ON and this OFF, the build still configures and packs with the hip producer alone and needs no rocKE wheel, pip or comgr; the `rocKE/` family folder is excluded from every root and any other `rocke` UKD is pruned like an arch-pruned one. With it ON, rocKE is resolved for every descriptor root, so an unresolvable comgr is fatal at configure. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging packages from. Every root, production or test, that is empty or has nothing to pack for the selected architectures under the build's filters is dormant: skipped at pack, its stale output tree removed, not an error. The in-tree root carries the rocKE `gfx950_attention_dense` bundle. Set but not a directory is fatal. |
    | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
    | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+   | `HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES` | OFF | Packaging probes: one automatic probe per architecture explicitly named under the production descriptor root and absent from `GPU_TARGETS`, plus named probes in `descriptor-packaging/probes/probes.cmake` (`hkp_add_packaging_probe(ARCH <gfx> NAME <n> UKDS <ukd-name>...)`); superbuild-only, ON in the superbuild CI lanes; with `HIPKERNELPROVIDER_ENABLE_ROCKE` OFF the rocKE content is neither packed nor expected and the other kinds are probed as usual. Each probe packs its descriptors for `ARCH` (any architecture) independent of `GPU_TARGETS`. When ON, the probe pack targets are part of `all`; `cmake --build <build-dir> --target hkp_packaging_probes` builds them alone. The ctest entries are `hkp-probe-<NAME>` plus `hkp-probe-tools`. |
+   | `ENABLE_CLANG_TIDY` | ON on Linux, OFF on Windows | Applies to every preset, not only the ingestor ones: runs clang-tidy on every C++ compile of each `clang_tidy_check()` target in hipDNN and every provider. `-DENABLE_CLANG_TIDY=OFF` is fine for local iteration (configure then warns that CI requires passing clang-tidy checks); run the `hipdnn-tidy` skill on the changed files before a PR. Its share of build time has not been measured, and full builds also vary several-fold by node, so compare builds on the same node before attributing a slow build to it. |
 
    These flags only do anything on a preset that actually builds hip-kernel-provider. The
    default `hipdnn-providers` preset does **not** include it; the presets that do are
@@ -87,10 +89,11 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
    **There is no per-producer production switch.** Producer selection is per-UKD on
    `kernel_source.kind`, so one source root feeds every producer and the descriptors
-   under the root decide what gets built. rocKE is resolved once for *every* root, test
-   roots included, so an unresolvable comgr is fatal at configure even in a hip-only
-   build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names an explicit `libamd_comgr` where a
-   System32 copy would otherwise shadow the ROCm one.
+   under the root decide what gets built. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, rocKE
+   is resolved once for *every* root, test roots included, so an unresolvable comgr is
+   fatal at configure even in a hip-only build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names
+   an explicit `libamd_comgr` where a System32 copy would otherwise shadow the ROCm one.
+   With it OFF, no root resolves comgr or runs the rocKE producer.
 
    For an ingestor create/extend task,
    [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns the full sequence.

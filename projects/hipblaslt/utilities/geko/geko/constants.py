@@ -8,10 +8,14 @@ Defines constants for:
 - GEMM operation field definitions and categorizations.
 - Log file field specifications.
 - Index type mappings for different data formats.
-- Gfx-style ``ARCH`` strings for YAML / tuning config (``SUPPORTED_ARCH``).
+- Gfx-style ``ARCH`` strings for YAML / tuning config (``SUPPORTED_ARCH``), the
+  retired spellings still accepted for them, and the runtime environment an
+  architecture needs.
 
 These constants ensure consistent data handling across the optimization workflow.
 """
+
+import logging
 
 DTYPE = {
     "bf16_r": "B",
@@ -146,7 +150,29 @@ INDEX_TYPE_MAP = {
     16: "bf8_r",
     17: "f8b8",
     18: "b8f8",
+    19: "f6_r",
+    20: "bf6_r",
+    21: "f4_r",
 }
+
+# hipblaslt_scaling_format values (hipBLASLt clients/common/include/
+# hipblaslt_scaling_format.hpp) for MX block scaling, keyed by (block size,
+# Tensile scale DataType). A block-scaled problem benchmarked without its value
+# resolves to an unscaled kernel, so fp4 finds no solution at all and fp8
+# silently measures the wrong one. 0, 1 and 2 are none, Scalar and Vector.
+MX_SCALING_FORMAT = {
+    (32, "E8"): 3,    # Block_32_UE8M0
+    (16, "E8"): 4,    # Block_16_UE8M0
+    (32, "F8"): 5,    # Block_32_UE4M3
+    (16, "F8"): 6,    # Block_16_UE4M3
+    (32, "E5M3"): 7,  # Block_32_UE5M3
+    (16, "E5M3"): 8,  # Block_16_UE5M3
+}
+# Block_32_UE8M0_32_8_EXT: E8 scales on 32-element blocks, pre-swizzled into
+# 32x8 tiles. hipBLASLt maps it to the same Tensile problem as 3.
+MX_SCALING_FORMAT_PRESWIZZLED = 1001
+# MX scale DataTypes as library logic stores them (Tensile DataTypeEnum values).
+MX_SCALE_DATATYPE_ENUM = {22: "E8", 15: "F8", 23: "E5M3"}
 
 PERF_FIELDS = (
     "hipblaslt-Gflops",
@@ -165,4 +191,58 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx942_20cu",
     "gfx942_228cu",
     "gfx1250",
+    "gfx1250_96cu",
+    "gfx1250_192cu",
+    "gfx1250-strict",
+    "gfx1250-strict_96cu",
+    "gfx1250-strict_192cu",
 )
+
+# Retired ARCH spellings, accepted with a deprecation warning. hipBLASLt rejects
+# ``gfx1250v0`` everywhere a user can name it; the A0 stepping is the
+# ``gfx1250-strict`` compiler target.
+LEGACY_ARCH_ALIASES: dict[str, str] = {
+    "gfx1250v0": "gfx1250-strict",
+    "gfx1250v0_96cu": "gfx1250-strict_96cu",
+    "gfx1250v0_192cu": "gfx1250-strict_192cu",
+}
+
+
+def canonical_arch(arch: str) -> str:
+    """Return the supported spelling of an ``ARCH`` string.
+
+    Args:
+        arch: ARCH as given on the command line or in an input config.
+
+    Returns:
+        ``arch`` itself, or its replacement when it is a retired alias, in which
+        case a deprecation warning is logged.
+    """
+    replacement = LEGACY_ARCH_ALIASES.get(arch)
+    if replacement is None:
+        return arch
+    logging.getLogger("GEKO").warning(
+        f"ARCH '{arch}' is deprecated; using '{replacement}'. Update the input config "
+        f"or command line to '{replacement}'."
+    )
+    return replacement
+
+
+# On gfx1250 A0 the HSA runtime reports the device as gfx1250, and loads only
+# gfx1250 code objects, unless its strict mode is on. Tuning gfx1250-strict
+# kernels therefore needs strict mode for every process that touches the GPU.
+STRICT_RUNTIME_ENV: dict[str, str] = {"HSA_DISABLE_GFX12_STRICT": "0"}
+
+
+def runtime_env(architecture: str | None) -> dict[str, str]:
+    """Environment variables a tuning process needs on a Tensile architecture.
+
+    Args:
+        architecture: The LibraryLogic ``ArchitectureName`` of the configs being
+            tuned (a compiler target such as ``gfx1250-strict``), or None.
+
+    Returns:
+        Variables to add to the process environment; empty when the
+        architecture needs none.
+    """
+    return dict(STRICT_RUNTIME_ENV) if architecture == "gfx1250-strict" else {}

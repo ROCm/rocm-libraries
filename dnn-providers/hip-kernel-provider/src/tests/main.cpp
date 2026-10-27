@@ -4,6 +4,7 @@ SPDX-License-Identifier: MIT
 */
 
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -155,6 +156,23 @@ private:
     bool _completedIteration = false;
 };
 
+// A census must see the whole suite, and the listener refuses sharded-out cases. gtest
+// reads GTEST_TOTAL_SHARDS and GTEST_SHARD_INDEX in RUN_ALL_TESTS(), through the C
+// runtime's getenv(). On Windows that runtime keeps its own copy of the environment, taken
+// at startup, which SetEnvironmentVariable (hipdnn_data_sdk::utilities::unsetEnv) does not
+// update, so the removal goes through _putenv there. It must be a removal: gtest aborts on
+// an empty GTEST_TOTAL_SHARDS.
+void removeGtestSharding()
+{
+#ifdef _WIN32
+    _putenv("GTEST_TOTAL_SHARDS=");
+    _putenv("GTEST_SHARD_INDEX=");
+#else
+    hipdnn_data_sdk::utilities::unsetEnv("GTEST_TOTAL_SHARDS");
+    hipdnn_data_sdk::utilities::unsetEnv("GTEST_SHARD_INDEX");
+#endif
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -170,6 +188,16 @@ int main(int argc, char** argv)
     const auto censusRoot = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
     if(!censusSuite.empty())
     {
+        // First, so every control follows the same rule as the census it controls. The line
+        // must not begin with "Census: ", which the census entry treats as a failure.
+        if(!hipdnn_data_sdk::utilities::getEnv("GTEST_TOTAL_SHARDS").empty()
+           || !hipdnn_data_sdk::utilities::getEnv("GTEST_SHARD_INDEX").empty())
+        {
+            std::cerr << "Census mode ignores GTEST_TOTAL_SHARDS and GTEST_SHARD_INDEX; the "
+                         "whole suite runs on every shard.\n";
+        }
+        removeGtestSharding();
+
         std::error_code error;
         if(censusArch.empty() || censusRoot.empty()
            || !std::filesystem::is_directory(censusRoot, error))

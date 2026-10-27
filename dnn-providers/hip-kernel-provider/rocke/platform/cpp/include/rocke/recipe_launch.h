@@ -164,6 +164,16 @@ bool rocke_launch_plan_geometry(const rocke_launch_plan_t* plan,
                                 rocke_launch_dims_t* out_block,
                                 unsigned* out_lds_bytes);
 
+/* The cluster shape, or false if the kernel has no cluster_dims attr.
+ *
+ * Read off the built kernel (the same attr that lowers to
+ * "amdgpu-cluster-dims"), not from the "launch" block, so it cannot disagree
+ * with the compiled code. When true, launch with hipDrvLaunchKernelEx and a
+ * hipLaunchAttributeClusterDimension attribute of this shape rather than
+ * hipModuleLaunchKernel; planning has already checked that the grid is a whole
+ * number of clusters on every axis. The out-param may be NULL. */
+bool rocke_launch_plan_cluster(const rocke_launch_plan_t* plan, rocke_launch_dims_t* out_cluster);
+
 /* The kernel's arguments, in declaration order. */
 int rocke_launch_plan_num_args(const rocke_launch_plan_t* plan);
 const rocke_arg_desc_t* rocke_launch_plan_arg(const rocke_launch_plan_t* plan, int i);
