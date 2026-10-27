@@ -28,12 +28,8 @@
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
-
-#include <sstream>
-#include <stdexcept>
 
 /*! \brief  local handle which is automatically created and destroyed  */
 class hipsparseLocalHandle_t
@@ -47,8 +43,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreate", status);
         }
     }
     hipsparseLocalHandle_t(const Arguments& arg)
@@ -57,8 +52,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreate", status);
         }
     }
     ~hipsparseLocalHandle_t()
@@ -170,27 +164,18 @@ public:
 private:
     static void throw_on_hip_error(const char* call, hipError_t status)
     {
-        if(status == hipSuccess)
+        if(status != hipSuccess)
         {
-            return;
+            throw_hip_error(call, status);
         }
-
-        std::ostringstream message;
-        message << call << " failed: " << hipGetErrorString(status) << " ("
-                << static_cast<int>(status) << ")";
-        throw std::runtime_error(message.str());
     }
 
     static void throw_on_hipsparse_error(const char* call, hipsparseStatus_t status)
     {
-        if(status == HIPSPARSE_STATUS_SUCCESS)
+        if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            return;
+            throw_hipsparse_error(call, status);
         }
-
-        std::ostringstream message;
-        message << call << " failed: " << hipsparseStatusToString(status);
-        throw std::runtime_error(message.str());
     }
 
     // Drop any graph left by a failed begin or end capture, restore the previous

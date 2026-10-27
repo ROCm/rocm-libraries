@@ -47,9 +47,4 @@ void verify_hipsparse_status_not_supported(hipsparseStatus_t status, const char*
 
 void verify_hipsparse_status_success(hipsparseStatus_t status, const char* message);
 
-// Record a failure without throwing, so these are safe in a destructor.
-void log_hip_error(const char* call, hipError_t status);
-
-void log_hipsparse_error(const char* call, hipsparseStatus_t status);
-
 #endif // ARG_CHECK_HPP

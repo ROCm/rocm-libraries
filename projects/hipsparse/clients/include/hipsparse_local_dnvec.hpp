@@ -27,7 +27,7 @@
 
 #include <hipsparse/hipsparse.h>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  Dense vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnVec
@@ -40,9 +40,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreateDnVec(&descr, size, values, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::cerr << "hipsparseCreateDnVec failed: " << hipsparseGetErrorName(status)
-                      << std::endl;
-            throw(status);
+            throw_hipsparse_error("hipsparseCreateDnVec", status);
         }
     }
 
