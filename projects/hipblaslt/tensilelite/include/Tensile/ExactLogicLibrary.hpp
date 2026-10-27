@@ -770,7 +770,13 @@ namespace TensileLite
                 if(order != nullptr && !selects && order->steps() == steps
                    && (order->stopped() || !order->keep(this, i, !solutions.empty())))
                     return true;
-                rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
+                // The first row that returns solutions hands its vector over
+                // instead of copying it (`solutions` is assigned again before
+                // it is read).
+                if(rv.empty())
+                    rv = std::move(solutions);
+                else
+                    rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
                 return rv.size() == numSolutions || (order != nullptr && order->stopped());
             };
 

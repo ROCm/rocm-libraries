@@ -229,7 +229,8 @@ namespace TensileLite
             if(library == nullptr)
                 return SolutionVector<MySolution>();
 
-            const auto& rv = library->findTopSolutions(problem, hardware, numSolutions);
+            // A value, not a const reference: returning it moves instead of copying.
+            auto rv           = library->findTopSolutions(problem, hardware, numSolutions);
             lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
 
             return rv;

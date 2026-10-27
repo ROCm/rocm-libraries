@@ -8,6 +8,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -727,4 +728,219 @@ TEST(CachingLibraryTest, FindTopSolutionsLruIsThreadSafe)
     for(size_t i = 0; i < 4; ++i)
         caching->findTopSolutions(problemAt(i), device, 1);
     EXPECT_EQ(sub->topCalls.load(), calls);
+}
+
+namespace
+{
+    // A problem whose cache key is the device's followed by its text, so that a
+    // test chooses the length of the key.
+    struct TextProblem
+    {
+        std::string text;
+
+        bool operator==(TextProblem const& other) const
+        {
+            return text == other.text;
+        }
+    };
+} // namespace
+
+namespace std
+{
+    template <>
+    struct hash<TextProblem>
+    {
+        size_t operator()(TextProblem const& problem) const noexcept
+        {
+            return std::hash<std::string>{}(problem.text);
+        }
+    };
+
+    template <>
+    struct hash<std::vector<TextProblem>>
+    {
+        size_t operator()(std::vector<TextProblem> const& problems) const noexcept
+        {
+            size_t h = 0;
+            for(auto const& problem : problems)
+                h = h * 31 + std::hash<std::string>{}(problem.text);
+            return h;
+        }
+    };
+} // namespace std
+
+namespace TensileLite
+{
+    template <>
+    struct CacheKey<TextProblem>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        static void append(std::string& key, TextProblem const& problem)
+        {
+            key.append(problem.text);
+        }
+    };
+} // namespace TensileLite
+
+namespace
+{
+    // findTopSolutions returns a new solution on every call and counts the calls.
+    class TextSubLibrary : public SolutionLibrary<TextProblem, ContractionSolution>
+    {
+    public:
+        mutable int topCalls = 0;
+
+        std::shared_ptr<ContractionSolution>
+            getSolutionByIndex(TextProblem const&, Hardware const&, int) const override
+        {
+            return {};
+        }
+
+        std::shared_ptr<ContractionSolution>
+            findBestSolution(TextProblem const&, Hardware const&, double* = nullptr) const override
+        {
+            return {};
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutions(TextProblem const&,
+                             Hardware const&,
+                             SolutionLibrarySearchType
+                             = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+
+        SolutionSet<ContractionSolution>
+            findAllSolutionsGroupedGemm(std::vector<TextProblem> const&,
+                                        Hardware const&,
+                                        SolutionLibrarySearchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return {};
+        }
+
+        std::string type() const override
+        {
+            return "TextSub";
+        }
+
+        std::string description() const override
+        {
+            return "TextSub";
+        }
+
+        SolutionVector<ContractionSolution>
+            findTopSolutions(TextProblem const&, Hardware const&, int) const override
+        {
+            ++topCalls;
+            return {makeSolution("top_" + std::to_string(topCalls), topCalls)};
+        }
+
+        bool lastFindTopAlreadyRetAll() const override
+        {
+            return true;
+        }
+    };
+
+    using TextCaching = CachingLibrary<TextProblem, ContractionSolution>;
+
+    // A problem whose whole cache key is `bytes` long, `first` and `last` its
+    // first and last bytes after the device's.
+    TextProblem textProblem(AMDGPU const& device, size_t bytes, char first, char last)
+    {
+        std::string text(bytes - keyOf(device).size(), 'k');
+        text.front() = first;
+        text.back()  = last;
+        return {text};
+    }
+} // namespace
+
+// Keys of any length are stored and served, those longer than the 512 bytes an
+// entry holds inline as well as shorter ones, and keys that differ only in
+// their first or last byte stay apart.
+TEST(CachingLibraryTest, FindTopSolutionsServesKeysOfAnyLength)
+{
+    auto         sub     = std::make_shared<TextSubLibrary>();
+    auto         caching = std::make_shared<TextCaching>(sub);
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    size_t const prefix  = keyOf(device).size();
+    ASSERT_LT(prefix + 64, size_t(500));
+
+    std::vector<TextProblem> problems;
+    for(size_t bytes : {prefix + 2,
+                        prefix + 64,
+                        size_t(511),
+                        size_t(512),
+                        size_t(513),
+                        size_t(4096),
+                        size_t(1) << 16})
+        for(char first : {'a', 'b'})
+            for(char last : {'y', 'z'})
+                problems.push_back(textProblem(device, bytes, first, last));
+
+    std::vector<SolutionVector<ContractionSolution>> first;
+    for(auto const& problem : problems)
+        first.push_back(caching->findTopSolutions(problem, device, 1));
+    ASSERT_EQ(sub->topCalls, static_cast<int>(problems.size()));
+    for(size_t i = 0; i < problems.size(); ++i)
+    {
+        SCOPED_TRACE(problems[i].text.size());
+        ASSERT_EQ(first[i].size(), 1u);
+        EXPECT_EQ(caching->findTopSolutions(problems[i], device, 1), first[i]);
+    }
+    EXPECT_EQ(sub->topCalls, static_cast<int>(problems.size()));
+}
+
+// At capacity, a long key replaces the least recently used short one and a
+// short key a long one, and every problem is served its own solutions.
+TEST(CachingLibraryTest, FindTopSolutionsEvictsLongAndShortKeysAlike)
+{
+    auto         sub     = std::make_shared<TextSubLibrary>();
+    auto         caching = std::make_shared<TextCaching>(sub);
+    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    size_t const cap     = TextCaching::TopSolutionsCapacity;
+
+    // Problem i has a short key when i is even and a long one when it is odd.
+    auto problem = [](size_t i) {
+        std::string text = std::to_string(i) + "|";
+        if(i % 2 == 1)
+            text.resize(1024, 'x');
+        return TextProblem{text};
+    };
+    // What each problem was given when the sub-library last answered it.
+    std::map<std::string, SolutionVector<ContractionSolution>> given;
+    // Asks for problem i; true when the sub-library answered it (a miss).
+    auto ask = [&](size_t i) {
+        auto const p      = problem(i);
+        int const  before = sub->topCalls;
+        auto const top    = caching->findTopSolutions(p, device, 1);
+        bool const miss   = sub->topCalls != before;
+        if(miss)
+            given[p.text] = top;
+        else
+            EXPECT_EQ(top, given[p.text]) << "problem " << i;
+        return miss;
+    };
+
+    for(size_t i = 0; i < cap; ++i)
+        ASSERT_TRUE(ask(i));
+    // Problem 0 (short) leaves for a long key, then problem 1 (long) for a
+    // short one.
+    EXPECT_TRUE(ask(cap + 1));
+    EXPECT_TRUE(ask(cap + 2));
+    for(size_t i : {size_t(2), size_t(3), cap - 1, cap + 1, cap + 2})
+        EXPECT_FALSE(ask(i)) << "problem " << i;
+    // Problems 4 (short) and 5 (long) are now the least recently used.
+    EXPECT_TRUE(ask(1));
+    EXPECT_TRUE(ask(0));
+    for(size_t i : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(6), size_t(7)})
+        EXPECT_FALSE(ask(i)) << "problem " << i;
+    EXPECT_TRUE(ask(4));
+    EXPECT_TRUE(ask(5));
+    EXPECT_EQ(static_cast<size_t>(sub->topCalls), cap + 6);
 }

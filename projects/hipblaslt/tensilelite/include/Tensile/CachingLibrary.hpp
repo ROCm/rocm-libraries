@@ -29,6 +29,7 @@
 #include <atomic>
 #include <iterator>
 #include <list>
+#include <memory_resource>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -348,13 +349,81 @@ namespace TensileLite
             bool                       returnedAll = false;
         };
 
+        // The bytes of a cache key: inline up to InlineBytes, so that neither
+        // a stored entry nor the copy a lookup keeps allocates for them; on
+        // the heap beyond. Setting bytes that fit inline allocates nothing and
+        // cannot throw. The heap copy of longer bytes, the only step of
+        // setting a key that can throw, is made out of line (cold), off the
+        // path of the keys that fit.
+        class TopKey
+        {
+        public:
+            static constexpr size_t InlineBytes = 512;
+
+            static bool fitsInline(std::string_view bytes) noexcept
+            {
+                return bytes.size() <= InlineBytes;
+            }
+
+            explicit TopKey(std::string_view bytes)
+            {
+                if(fitsInline(bytes))
+                    assignInline(bytes);
+                else
+                    assignHeap(bytes);
+            }
+            TopKey(TopKey const&)            = delete;
+            TopKey& operator=(TopKey const&) = delete;
+
+            /// Sets the bytes to `bytes`, which fit inline.
+            void assignInline(std::string_view bytes) noexcept
+            {
+                m_size = bytes.size();
+                std::char_traits<char>::copy(m_inline, bytes.data(), m_size);
+            }
+
+            /// Sets the bytes to those of `spilled`, a heap copy of bytes that
+            /// do not fit inline, and takes its buffer.
+            __attribute__((cold, noinline)) void adopt(std::string&& spilled) noexcept
+            {
+                m_heap = std::move(spilled);
+                m_size = m_heap.size();
+            }
+
+            std::string_view view() const
+            {
+                return m_size <= InlineBytes ? std::string_view(m_inline, m_size)
+                                             : std::string_view(m_heap);
+            }
+
+        private:
+            /// Sets the bytes to `bytes`, which do not fit inline, by copying
+            /// them to the heap.
+            __attribute__((cold, noinline)) void assignHeap(std::string_view bytes)
+            {
+                m_heap.assign(bytes.data(), bytes.size());
+                m_size = bytes.size();
+            }
+
+            size_t      m_size = 0;
+            std::string m_heap;
+            char        m_inline[InlineBytes];
+        };
+
         struct TopEntry
         {
-            std::string  key;
+            TopEntry(std::string_view keyBytes, size_t keyHash, TopSolutions&& solutions)
+                : key(keyBytes)
+                , hash(keyHash)
+                , value(std::move(solutions))
+            {
+            }
+
+            TopKey       key;
             size_t       hash; // std::hash<std::string_view> of key
             TopSolutions value;
         };
-        using TopList = std::list<TopEntry>;
+        using TopList = std::pmr::list<TopEntry>;
 
         // A key of m_top: a view of a cache key with its std::hash<std::string_view>
         // value, so that a lookup hashes the key once however many map operations
@@ -379,7 +448,7 @@ namespace TensileLite
                 return a.hash == b.hash && a.text == b.text;
             }
         };
-        using TopMap = std::
+        using TopMap = std::pmr::
             unordered_map<TopMapKey, typename TopList::iterator, TopMapKeyHash, TopMapKeyEqual>;
 
         SolutionVector<MySolution> findTopSolutionsByKey(MyProblem const& problem,
@@ -410,13 +479,13 @@ namespace TensileLite
 
             // The sub-library can reach another CachingLibrary on this thread,
             // which reuses `key`.
-            std::string ownKey = key;
-            solutions          = m_subLibrary->findTopSolutions(problem, amdgpu, numSolutions);
+            TopKey const ownKey(key);
+            solutions = m_subLibrary->findTopSolutions(problem, amdgpu, numSolutions);
             if(solutions.size() != 0)
             {
                 TopSolutions entry{solutions, m_subLibrary->lastFindTopAlreadyRetAll()};
                 std::lock_guard<std::mutex> lock(m_topMutex);
-                storeTopSolutions(std::move(ownKey), keyHash, std::move(entry));
+                storeTopSolutions(ownKey.view(), keyHash, std::move(entry));
             }
 
             // can't reach the requested number, means findTop already done its best
@@ -425,7 +494,9 @@ namespace TensileLite
         }
 
         // Called with m_topMutex held; keyHash is std::hash<std::string_view> of key.
-        void storeTopSolutions(std::string&& key, size_t keyHash, TopSolutions&& entry) const
+        // When it throws (std::bad_alloc), the cache is as it was: m_topOrder
+        // and m_top still hold the same entries (strong guarantee).
+        void storeTopSolutions(std::string_view key, size_t keyHash, TopSolutions&& entry) const
         {
             auto it = m_top.find(TopMapKey{key, keyHash});
             if(it != m_top.end())
@@ -434,25 +505,74 @@ namespace TensileLite
                 m_topOrder.splice(m_topOrder.begin(), m_topOrder, it->second);
                 return;
             }
-            // Reserving the full capacity up front means the map never rehashes.
+            // Reserving the full capacity up front means the map never rehashes,
+            // so that inserting allocates its node and nothing else.
             if(m_top.empty())
                 m_top.reserve(TopSolutionsCapacity);
             if(m_top.size() < TopSolutionsCapacity)
             {
-                m_topOrder.push_front(TopEntry{std::move(key), keyHash, std::move(entry)});
-                m_top.emplace(TopMapKey{m_topOrder.front().key, keyHash}, m_topOrder.begin());
+                m_topOrder.emplace_front(key, keyHash, std::move(entry));
+                try
+                {
+                    m_top.emplace(TopMapKey{m_topOrder.front().key.view(), keyHash},
+                                  m_topOrder.begin());
+                }
+                catch(...)
+                {
+                    // No entry of the list without its key in the map.
+                    dropNewest();
+                    throw;
+                }
                 return;
             }
-            // The map keys view the list's strings: drop the evicted key from the
-            // map before its string is overwritten, then reuse both nodes.
-            auto oldest   = std::prev(m_topOrder.end());
-            auto node     = m_top.extract(TopMapKey{oldest->key, oldest->hash});
-            oldest->key   = std::move(key);
+            // A key that does not fit inline needs a heap copy, the only step
+            // of an eviction that can throw: it is made first, out of line.
+            if(TopKey::fitsInline(key))
+                evictOldest(key, keyHash, std::move(entry), nullptr);
+            else
+                spillAndEvictOldest(key, keyHash, std::move(entry));
+        }
+
+        // Called with m_topMutex held, at capacity: the least recently used
+        // entry and both its nodes take `key`. The map keys view the list's
+        // keys, so the evicted key leaves the map before its bytes are
+        // overwritten. Nothing here can throw: extracting and inserting a node
+        // allocate nothing, the map does not rehash at its reserved capacity,
+        // and a key that does not fit inline comes with its heap copy,
+        // `spilled`, made before.
+        void evictOldest(std::string_view key,
+                         size_t           keyHash,
+                         TopSolutions&&   entry,
+                         std::string*     spilled) const noexcept
+        {
+            auto oldest = std::prev(m_topOrder.end());
+            auto node   = m_top.extract(TopMapKey{oldest->key.view(), oldest->hash});
+            if(spilled == nullptr)
+                oldest->key.assignInline(key);
+            else
+                oldest->key.adopt(std::move(*spilled));
             oldest->hash  = keyHash;
             oldest->value = std::move(entry);
             m_topOrder.splice(m_topOrder.begin(), m_topOrder, oldest);
-            node.key() = TopMapKey{oldest->key, keyHash};
+            node.key() = TopMapKey{oldest->key.view(), keyHash};
             m_top.insert(std::move(node));
+        }
+
+        // evictOldest() for a key that does not fit inline, out of line (cold):
+        // its heap copy, which can throw, is made before anything changes.
+        __attribute__((cold, noinline)) void
+            spillAndEvictOldest(std::string_view key, size_t keyHash, TopSolutions&& entry) const
+        {
+            std::string spilled(key);
+            evictOldest(key, keyHash, std::move(entry), &spilled);
+        }
+
+        // Out of line (cold): after the map failed to take the key of the
+        // entry a store has just added to the front of m_topOrder, that entry
+        // leaves the list.
+        __attribute__((cold, noinline)) void dropNewest() const noexcept
+        {
+            m_topOrder.pop_front();
         }
 
         std::shared_ptr<Library>  m_subLibrary;
@@ -463,9 +583,18 @@ namespace TensileLite
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
         mutable std::mutex m_topMutex;
+        // The nodes of m_topOrder and m_top, used under m_topMutex: carved from
+        // buffers that grow geometrically and are freed with the library, so
+        // storing an entry allocates neither node. No node is freed before
+        // that: entries are only added, eviction reuses both nodes, and the
+        // node of a store that failed stays in its buffer. The buffers come
+        // from operator new, whatever default resource the process installs.
+        static constexpr size_t                     TopNodesInitialBytes = size_t(64) << 10;
+        mutable std::pmr::monotonic_buffer_resource m_topNodes{TopNodesInitialBytes,
+                                                               std::pmr::new_delete_resource()};
         // Most recently used first.
-        mutable TopList m_topOrder;
-        mutable TopMap  m_top;
+        mutable TopList m_topOrder{&m_topNodes};
+        mutable TopMap  m_top{&m_topNodes};
     };
 
     /// `library` without the CachingLibrary that wraps it, if any.
