@@ -4,8 +4,9 @@
 """Packaging adapter for the gfx950 implicit-GEMM forward convolution.
 
 The descriptor spec is flat, while the original builder takes nested problem
-and data specs plus optional fusion callbacks. This adapter resolves dispatcher
-defaults before packaging and calls the original builder without callbacks.
+and data specs plus optional fusion callbacks. This adapter resolves the
+exact-shape engine's fixed defaults (:data:`EXACT_SHAPE_DEFAULTS`) before
+packaging and calls the original builder without callbacks.
 It does not change the kernel body or introduce a runtime Python dependency.
 
 The initial contract is 2D cross-correlation, dense NHWC input, KYXC filter,
@@ -46,19 +47,44 @@ can break.
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import hashlib
 import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, fields, replace
 
-from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
-from rocke.core.ir import KernelDef
+from dispatch.grouped_convolution import (
+    ConvGroupedRequest,
+    ConvInstanceSpec,
+    launch_plan_for,
+)
+
+# The dispatcher's admission rule for one AOT identity (``_admits``) has no
+# public per-identity entry point; it is imported so that "serves" here is the
+# dispatcher's own verdict rather than a copy of it.
+from dispatch.grouped_convolution import _admits as _dispatcher_admits
 from kernels.common import conv_direct_grouped as _direct
 from kernels.common import conv_direct_nongrouped as _nongrouped
 from kernels.common import conv_implicit_gemm as _conv
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from kernels.common.conv_args import MUL24_REDUCTION_LIMIT, ConvArgs
+from kernels.conv.aot_jobs import _probe_problem as _aot_probe_problem
+from kernels.conv.aot_jobs import job_for_identity
+from kernels.conv.direct_aot_jobs import DirectCaps, direct_job_for_identity
+from kernels.conv.direct_aot_jobs import probe_problem as _direct_probe_problem
+from kernels.conv.direct_variants import (
+    DIRECT_GROUPED_HALO,
+    DIRECT_SPLIT_REDUCE,
+    make_direct_spec,
+    select_direct_kernel_builder,
+    validate_direct_spec,
+)
+from kernels.conv.kernel_identity import KernelIdentity
+from rocke.core.arch import ArchTarget
+from rocke.core.ir import KernelDef
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 _ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1
@@ -106,14 +132,42 @@ _FAMILY_DEFAULTS = {
 #: :func:`gfx950_conv_fwd_direct_spec_for_request`).
 DEFAULT_DIRECT_BLOCK_W = 4
 DEFAULT_DIRECT_BLOCK_WAVES = 1
+#: The implicit-GEMM tuning every exact-shape request resolves to (see
+#: :func:`gfx950_conv_fwd_spec_for_request`). It is the gfx950 forward
+#: candidate rocKE's grouped-convolution dispatcher resolved when the
+#: exact-shape catalog was first packaged. rocKE's dispatcher now selects among
+#: registered AOT instances (``hipkernel:Gfx950ConvFwdAot`` packages those), so
+#: the exact-shape engine keeps this configuration itself: its shipped kernels
+#: and symbols stay what they were. The epilogue is not fixed; see
+#: :func:`exact_shape_epilogue`.
+EXACT_SHAPE_DEFAULTS = {
+    "tile_m": 64,
+    "tile_n": 64,
+    "tile_k": 64,
+    "warp_m": 2,
+    "warp_n": 2,
+    "warp_tile_m": 32,
+    "warp_tile_n": 32,
+    "warp_tile_k": 16,
+    "pipeline": "mem",
+}
+
+
+def exact_shape_epilogue(C: int, K: int, dtype: str) -> str:
+    """The exact-shape engine's epilogue for a request: ``cshuffle`` where the
+    store width rocKE's builder picks for ``(C, K)`` is wider than one element,
+    else the scalar ``default`` one. The full channel counts are used, as when
+    the catalog was first packaged."""
+    _, _, store = _conv.ImplicitGemmConvSpec.default_vector_sizes(C, K, dtype)
+    return "cshuffle" if store > 1 else "default"
 
 
 @dataclass(frozen=True)
 class Gfx950ConvFwdSpec:
     """Serializable problem and resolved tuning values for one packaged kernel.
 
-    Use :func:`gfx950_conv_fwd_spec_for_request` to obtain the dispatcher's
-    current defaults, or :func:`gfx950_conv_fwd_direct_spec_for_request` for a
+    Use :func:`gfx950_conv_fwd_spec_for_request` to obtain the exact-shape
+    engine's defaults (:data:`EXACT_SHAPE_DEFAULTS`), or :func:`gfx950_conv_fwd_direct_spec_for_request` for a
     direct depthwise kernel. Direct construction is useful for descriptor
     hydration; :func:`supports_gfx950_conv_fwd` and the builder validate it
     before emission. The geometry is the build problem; the kernel takes the
@@ -550,29 +604,25 @@ def supports_gfx950_conv_fwd(
 def gfx950_conv_fwd_spec_for_request(
     request: ConvGroupedRequest, *, tile_k: int | None = None
 ) -> Gfx950ConvFwdSpec:
-    """Resolve the existing dispatcher's defaults and optionally override tile_k.
+    """Resolve the exact-shape engine's defaults and optionally override tile_k.
 
-    The request interface also describes 3D/backward convolution. Those
-    requests, and grouped pointwise, are rejected here as integration gaps, even
-    when another rocKE dispatcher candidate can serve them. Grouped 2D forward
-    (``G > 1``, including depthwise) is accepted.
+    The tuning is :data:`EXACT_SHAPE_DEFAULTS` with the arch's wave size and
+    the epilogue of :func:`exact_shape_epilogue`; rocKE's builder validators
+    then decide (:func:`supports_gfx950_conv_fwd`). The request interface also
+    describes 3D/backward convolution. Those requests, and grouped pointwise,
+    are rejected here as integration gaps, even when a rocKE dispatcher
+    instance can serve them. Grouped 2D forward (``G > 1``, including
+    depthwise) is accepted.
     """
     base = _base_spec_for_request(request)
-    selected = dispatch_conv_grouped(request).spec
     spec = replace(
         base,
-        tile_m=selected.tile_m,
-        tile_n=selected.tile_n,
-        tile_k=selected.tile_k if tile_k is None else tile_k,
-        warp_m=selected.warp_m,
-        warp_n=selected.warp_n,
-        warp_tile_m=selected.warp_tile_mn,
-        warp_tile_n=selected.warp_tile_mn,
-        warp_tile_k=selected.warp_tile_k,
-        wave_size=selected.to_fwd_spec(base.to_problem()).wave_size,
-        pipeline=selected.pipeline,
-        epilogue=selected.epilogue,
+        **EXACT_SHAPE_DEFAULTS,
+        wave_size=ArchTarget.from_gfx(request.arch).wave_size,
+        epilogue=exact_shape_epilogue(base.C, base.K, base.dtype),
     )
+    if tile_k is not None:
+        spec = replace(spec, tile_k=tile_k)
     ok, reason = supports_gfx950_conv_fwd(spec, arch=request.arch)
     if not ok:
         raise ValueError(reason)
@@ -585,7 +635,7 @@ def gfx950_conv_fwd_direct_spec_for_request(
     block_w: int | None = None,
     block_waves: int | None = None,
 ) -> Gfx950ConvFwdSpec:
-    """A direct depthwise spec for ``request``; rocKE has no dispatcher for it.
+    """A direct depthwise spec for ``request``; the engine picks the arm itself.
 
     ``block_w`` selects the variant: ``None`` applies the default policy,
     ``0`` selects the spatial kernel (which derives its own block width) and a
@@ -634,8 +684,6 @@ def _base_spec_for_request(
         )
     ):
         raise ValueError("the packaged forward contract supports 2D convolution only")
-    if request.vec_size_c is not None:
-        raise ValueError("the packaged contract uses the dispatcher's vector defaults")
     base = Gfx950ConvFwdSpec(
         N=request.N,
         Hi=request.Hi,
@@ -846,14 +894,22 @@ class _ProblemFields:
 #
 # rocKE's AOT conv kernels take the problem as kernel arguments, so one binary
 # serves every problem its build-time capabilities admit. An instance is one
-# forward rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
+# forward rocKE ``KernelIdentity`` (``kernels/conv/kernel_identity.py``):
 # tuning and capability fields, no problem extents. Two families are packaged:
-# the implicit-GEMM identities of the AOT sweep (``kernel_sweep.py``) and the
-# forward identities of the direct sweep (``direct_kernel_sweep.py``), one
-# direct variant per direct algorithm (``AOT_DIRECT_ALGORITHMS``).
-# ``instance_id`` is the identity's ``stable_hash()``; this layer cannot import
-# ``benchmarks``, so the catalog tool computes it and ``library/tests`` checks
-# the correspondence.
+# the implicit-GEMM identities of the AOT sweep (``kernels/conv/aot_jobs.py``)
+# and the forward identities of the direct sweep
+# (``kernels/conv/direct_aot_jobs.py``), one direct variant per direct
+# algorithm (``AOT_DIRECT_ALGORITHMS``). ``instance_id`` is the identity's
+# ``stable_hash()``.
+#
+# Everything rocKE decides is delegated to rocKE: an instance is built from the
+# job the sweep builds its identity from (``job_for_identity``,
+# ``direct_job_for_identity``), it serves what the grouped-convolution
+# dispatcher admits for that identity, and it launches with the dispatcher's
+# launch plan. This module adds only the packaged contract: which identities
+# the native launch models (:func:`gfx950_conv_fwd_aot_spec_for_identity`
+# refuses the others with a reason) and the launch bounds the native pack
+# enforces on top of rocKE's.
 
 #: Vector widths rocKE's AOT sweep builds (``CACHE_VECS``).
 _AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
@@ -861,8 +917,11 @@ _AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
 _AOT_PIPELINES = _PACKAGED_PIPELINES
 #: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
 _AOT_INSTANCE_ID_LENGTH = 40
+#: The flavor an instance's identity is spelled with when no LLVM flavor
+#: reproduces its ``instance_id`` (the flavor rocKE's dispatcher lists use).
+_AOT_DEFAULT_LLVM_FLAVOR = "llvm22"
 #: The implicit-GEMM fields of a direct instance hold exactly what the direct
-#: sweep writes into a direct identity (``direct_kernel_sweep._identity``).
+#: sweep writes into a direct identity (``direct_aot_jobs._identity``).
 _AOT_DIRECT_PLACEHOLDERS = {
     "tile_m": 0,
     "tile_n": 0,
@@ -892,10 +951,15 @@ DIRECT_VARIANT_TILED = "tiled"
 DIRECT_VARIANT_COL = "col"
 #: DirectConvSpec: cpg == kpg in {4, 8, 16, 32}, one wave per group.
 DIRECT_VARIANT_GROUPED = "grouped"
-#: DirectNongroupedConvSpec: groups == 1, C and K runtime.
+#: DirectNongroupedConvSpec: groups == 1, C and K runtime. With ``split_c`` > 1
+#: it writes fp32 partial sums into a workspace and ``direct_split_reduce`` folds
+#: them into the output (two launches).
 DIRECT_VARIANT_NONGROUPED = "nongrouped"
-#: Each forward algorithm of ``direct_kernel_sweep.DIRECT_CAPABILITIES`` and the
-#: ``direct_variant`` an instance of it carries.
+#: DirectNongroupedConvSpec with ``grouped=True``: groups > 1, the per-group
+#: channel counts runtime, ``group_merge`` groups per workgroup.
+DIRECT_VARIANT_GROUPED_HALO = "grouped_halo"
+#: Each forward algorithm of ``direct_aot_jobs.DIRECT_CAPABILITIES`` the packaged
+#: launch runs, and the ``direct_variant`` an instance of it carries.
 AOT_DIRECT_ALGORITHMS = {
     "direct_depthwise": DIRECT_VARIANT_STD,
     "direct_depthwise_spatial": DIRECT_VARIANT_SPATIAL,
@@ -903,14 +967,22 @@ AOT_DIRECT_ALGORITHMS = {
     "direct_depthwise_col": DIRECT_VARIANT_COL,
     "direct_grouped": DIRECT_VARIANT_GROUPED,
     "direct_nongrouped": DIRECT_VARIANT_NONGROUPED,
+    DIRECT_GROUPED_HALO: DIRECT_VARIANT_GROUPED_HALO,
 }
+#: The variants built from DirectNongroupedConvSpec: C and K (per group) are
+#: runtime, so they bake no channel counts and compute dilated problems.
+_AOT_HALO_VARIANTS = (DIRECT_VARIANT_NONGROUPED, DIRECT_VARIANT_GROUPED_HALO)
 _AOT_DIRECT_VARIANTS = tuple(AOT_DIRECT_ALGORITHMS.values())
+_AOT_ALGORITHM_OF_VARIANT = {v: a for a, v in AOT_DIRECT_ALGORITHMS.items()}
 #: The block knobs after ``block_w``/``block_waves`` and the value each holds
 #: where its variant does not use it (the KMD default). ``cpg``/``kpg`` are the
 #: grouped kernel's compiled channel counts, ``block_h`` also its row tile;
 #: ``tile_k_out`` is DirectNongroupedConvSpec.tile_k (output channels per
 #: block), renamed so it cannot be the implicit-GEMM ``tile_k``. ``iglp`` -1
-#: and ``waves_per_eu`` 0 stand for rocKE's ``None``.
+#: and ``waves_per_eu`` 0 stand for rocKE's ``None``. ``group_merge`` is the
+#: grouped LDS-halo kernel's groups per workgroup (an implicit-GEMM instance
+#: carries its own merge degree in the same field), ``split_c`` the non-grouped
+#: kernel's channel split.
 _AOT_DIRECT_KNOB_DEFAULTS = {
     "block_h": 0,
     "unroll_rows": 0,
@@ -929,6 +1001,8 @@ _AOT_DIRECT_KNOB_DEFAULTS = {
     "swizzle_wgm": 0,
     "iglp": -1,
     "waves_per_eu": 0,
+    "group_merge": 1,
+    "split_c": 1,
 }
 #: Per variant, the direct identity's knob keys (``KernelIdentity.knobs``) and
 #: the instance field each one is carried in.
@@ -963,11 +1037,35 @@ AOT_DIRECT_KNOBS = {
         "iglp": "iglp",
         "waves_per_eu": "waves_per_eu",
     },
+    DIRECT_VARIANT_GROUPED_HALO: {
+        "tile_h": "tile_h",
+        "tile_w": "tile_w",
+        "tile_k": "tile_k_out",
+        "ck": "ck",
+        "waves_m": "waves_m",
+        "waves_n": "waves_n",
+        "atom": "atom",
+        "swizzle_wgm": "swizzle_wgm",
+        "iglp": "iglp",
+        "waves_per_eu": "waves_per_eu",
+        "group_merge": "group_merge",
+    },
 }
+#: Knobs a variant's identity always spells with one value, which no field
+#: carries: the grouped LDS-halo kernel is DirectNongroupedConvSpec(grouped=True).
+_AOT_DIRECT_CONSTANT_KNOBS = {DIRECT_VARIANT_GROUPED_HALO: {"grouped": True}}
+#: Knobs a variant's identity spells only off their default, the field that
+#: carries each and that default: the direct sweep writes ``split_c`` into a
+#: non-grouped identity only for a split-C kernel.
+_AOT_DIRECT_OPTIONAL_KNOBS = {DIRECT_VARIANT_NONGROUPED: {"split_c": ("split_c", 1)}}
 #: Fields a variant states beyond its knobs: the grouped kernel's compiled
 #: channel counts and its row tile, which the direct sweep leaves at
-#: DirectConvSpec's default (see :func:`aot_direct_grouped_block_h`).
-_AOT_DIRECT_EXTRA_FIELDS = {DIRECT_VARIANT_GROUPED: ("cpg", "kpg", "block_h")}
+#: DirectConvSpec's default (see :func:`aot_direct_grouped_block_h`), and the
+#: non-grouped kernel's split degree.
+_AOT_DIRECT_EXTRA_FIELDS = {
+    DIRECT_VARIANT_GROUPED: ("cpg", "kpg", "block_h"),
+    DIRECT_VARIANT_NONGROUPED: ("split_c",),
+}
 #: Knobs rocKE spells as a bool, and as None: the descriptor holds an int.
 _AOT_DIRECT_BOOL_KNOBS = ("unroll_rows", "double_buffer")
 _AOT_DIRECT_NONE_KNOBS = {"iglp": -1, "waves_per_eu": 0}
@@ -997,6 +1095,54 @@ _AOT_FAMILY_DEFAULTS = {
 _AOT_NONGROUPED_MAX_GRID_X = _INT32_MAX
 _AOT_MAX_DISPATCH_ITEMS = (1 << 32) - 1
 
+#: Implicit-GEMM identity fields an instance carries (the identity's own value).
+#: Every other field of a forward implicit-GEMM identity must hold its
+#: ``KernelIdentity`` default: it selects code the packaged launch does not model.
+AOT_IMPLICIT_GEMM_CARRIED = (
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "wave_size",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "unroll_k",
+    "async_dma",
+    "async_chunk_a",
+    "async_chunk_b",
+    "grouped",
+)
+#: Identity fields every instance states but no instance field carries.
+_AOT_IDENTITY_KEYS = (
+    "arch",
+    "direction",
+    "algorithm",
+    "dtype_a",
+    "dtype_b",
+    "dtype_d",
+    "llvm_flavor",
+)
+#: ``KernelIdentity`` fields with a plain default and that default.
+_IDENTITY_DEFAULTS = {
+    f.name: f.default
+    for f in dataclasses.fields(KernelIdentity)
+    if f.default is not dataclasses.MISSING
+}
+
+#: The split-C fold (``direction`` ``direct_fwd_helper``) is not an instance:
+#: it ships as the second launch of each split-C non-grouped instance.
+AOT_REFUSED_SPLIT_REDUCE = (
+    "'direct_split_reduce' is not packaged as an instance: it is the second "
+    "launch of a split-C non-grouped instance, not a convolution"
+)
+
 
 def aot_direct_grouped_block_h() -> int:
     """The row tile a grouped direct instance compiles: DirectConvSpec's default,
@@ -1007,11 +1153,21 @@ def aot_direct_grouped_block_h() -> int:
 def aot_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
     """The instance fields a direct identity's ``knobs`` of ``variant`` set.
 
-    Raises ``ValueError`` when the keys are not exactly the variant's.
+    Raises ``ValueError`` when the keys are not exactly the variant's (its
+    optional knobs may be absent), or a constant knob holds another value.
     """
     mapping = AOT_DIRECT_KNOBS[variant]
-    if set(knobs) != set(mapping):
-        raise ValueError(f"knobs {sorted(knobs)} are not {sorted(mapping)}")
+    constants = _AOT_DIRECT_CONSTANT_KNOBS.get(variant, {})
+    optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(variant, {})
+    keys = set(knobs) - set(optional)
+    if keys != set(mapping) | set(constants):
+        raise ValueError(
+            f"knobs {sorted(knobs)} are not {sorted(set(mapping) | set(constants))}"
+            + (f" (optional: {sorted(optional)})" if optional else "")
+        )
+    for key, value in constants.items():
+        if knobs[key] != value or type(knobs[key]) is not type(value):
+            raise ValueError(f"knob {key} must be {value!r}, got {knobs[key]!r}")
     values = {}
     for key, field_name in mapping.items():
         value = knobs[key]
@@ -1022,18 +1178,19 @@ def aot_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
                 raise ValueError(f"knob {key} must be a bool, got {value!r}")
             value = int(value)
         values[field_name] = value
+    for key, (field_name, default) in optional.items():
+        values[field_name] = knobs.get(key, default)
     return values
 
 
-def aot_direct_instance_fields(identity) -> dict:
+def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
     """The direct fields of the instance packaged from a forward direct identity.
 
-    ``identity`` is read duck-typed (a ``KernelIdentity``, which this layer cannot
-    import): its ``algorithm``, compiled filter, stride, padding, dilation and
-    channel counts, and ``knobs`` JSON. Raises ``ValueError`` for an algorithm
-    without a packaged launch or knobs that are not exactly its variant's. The
-    caller states the placeholders (``_AOT_DIRECT_PLACEHOLDERS``) and checks the
-    result with :func:`supports_gfx950_conv_fwd_aot`.
+    Reads the identity's ``algorithm``, compiled filter, stride, padding,
+    dilation and channel counts, and ``knobs`` JSON. Raises ``ValueError`` for
+    an algorithm without a packaged launch or knobs that are not exactly its
+    variant's. The caller states the placeholders (``_AOT_DIRECT_PLACEHOLDERS``)
+    and checks the result with :func:`supports_gfx950_conv_fwd_aot`.
     """
     variant = AOT_DIRECT_ALGORITHMS.get(identity.algorithm)
     if variant is None:
@@ -1041,6 +1198,7 @@ def aot_direct_instance_fields(identity) -> dict:
             f"direct algorithm {identity.algorithm!r} has no packaged launch "
             f"(supported: {sorted(AOT_DIRECT_ALGORITHMS)})"
         )
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
     fields_ = {
         "kernel_family": KERNEL_FAMILY_DIRECT_DEPTHWISE,
         "direct_variant": variant,
@@ -1053,11 +1211,7 @@ def aot_direct_instance_fields(identity) -> dict:
         "dilation_h": identity.dilation_h,
         "dilation_w": identity.dilation_w,
     }
-    fields_.update(
-        aot_direct_fields_from_knobs(
-            variant, json.loads(identity.knobs) if identity.knobs else {}
-        )
-    )
+    fields_.update(aot_direct_fields_from_knobs(variant, knobs))
     if variant == DIRECT_VARIANT_GROUPED:
         fields_.update(
             cpg=identity.cpg, kpg=identity.kpg, block_h=aot_direct_grouped_block_h()
@@ -1080,7 +1234,13 @@ class Gfx950ConvFwdAotSpec:
     from the runtime group count). Its implicit-GEMM fields hold
     ``_AOT_DIRECT_PLACEHOLDERS``, and the knobs of other variants their
     ``_AOT_FAMILY_DEFAULTS``. An implicit-GEMM instance leaves every trailing
-    field at ``_AOT_FAMILY_DEFAULTS``.
+    field at ``_AOT_FAMILY_DEFAULTS``, except ``group_merge``: an implicit-GEMM
+    instance with ``group_merge`` > 1 is a depthwise kernel in which one
+    workgroup owns that many groups, and records its builder-derived vector
+    widths as 0, as rocKE's sweep does.
+
+    :meth:`identity` is the rocKE ``KernelIdentity`` the fields spell; a
+    packageable instance's ``instance_id`` is its ``stable_hash()``.
     """
 
     dtype: str
@@ -1134,77 +1294,88 @@ class Gfx950ConvFwdAotSpec:
     swizzle_wgm: int = 0
     iglp: int = -1
     waves_per_eu: int = 0
+    group_merge: int = 1
+    split_c: int = 1
 
     @property
     def is_direct(self) -> bool:
         return self.kernel_family == KERNEL_FAMILY_DIRECT_DEPTHWISE
 
+    @property
+    def is_merged(self) -> bool:
+        """A group-merged depthwise implicit-GEMM instance: one workgroup owns
+        ``group_merge`` groups, and the builder derives its vector widths from
+        the merged problem (recorded as 0)."""
+        return not self.is_direct and self.group_merge > 1
+
+    @property
+    def is_split_c(self) -> bool:
+        """A split-C non-grouped direct instance: two launches, the conv pass
+        into an fp32 workspace and ``direct_split_reduce``."""
+        return self.is_direct and self.split_c > 1
+
+    @property
+    def algorithm(self) -> str:
+        """rocKE's ``KernelIdentity.algorithm`` of this instance."""
+        if not self.is_direct:
+            return "implicit_gemm"
+        return _AOT_ALGORITHM_OF_VARIANT[self.direct_variant]
+
+    def identity(self) -> KernelIdentity:
+        """The rocKE identity these fields spell.
+
+        Its ``llvm_flavor`` is the one whose ``stable_hash()`` is ``instance_id``;
+        when none is, the dispatcher lists' flavor. The fields must already be
+        consistent (:func:`supports_gfx950_conv_fwd_aot` checks them first).
+        """
+        return _aot_identity(self)
+
     def _direct_caps(self) -> tuple[int, int]:
         """``(cpg, kpg)`` the direct kernel compiles: 1 for the depthwise variants,
-        the recorded counts for grouped, 0 (runtime) for non-grouped."""
-        if self.direct_variant == DIRECT_VARIANT_NONGROUPED:
+        the recorded counts for grouped, 0 (runtime) for non-grouped and
+        grouped-halo."""
+        if self.direct_variant in _AOT_HALO_VARIANTS:
             return 0, 0
         if self.direct_variant == DIRECT_VARIANT_GROUPED:
             return self.cpg, self.kpg
         return 1, 1
 
+    def _direct_rocke_caps(self) -> DirectCaps:
+        cpg, kpg = self._direct_caps()
+        return DirectCaps(
+            KH=self.filter_h,
+            PAD=self.pad_h,
+            stride=self.stride_h,
+            cpg=cpg,
+            kpg=kpg,
+            dil_h=self.dilation_h,
+            dil_w=self.dilation_w,
+        )
+
     def probe_problem(self) -> _conv.ConvProblem | _direct.DirectConvProblem:
         """The problem rocKE's sweep builds this instance against.
 
-        Implicit GEMM mirrors ``_probe_problem("fwd", caps)`` in
-        ``benchmarks/common/kernel_sweep.py``; a direct instance mirrors
-        ``probe_problem(caps, dtype, variant)`` in
-        ``benchmarks/common/direct_kernel_sweep.py``. The emitted code does not
-        depend on the probe's extents, only on its capability axes, so this is
-        what makes the packaged binary the one the sweep benchmarked.
+        rocKE's own probe: ``_probe_problem("fwd", caps)`` of
+        ``kernels/conv/aot_jobs.py`` for implicit GEMM, ``probe_problem(caps,
+        dtype, variant, knobs)`` of ``kernels/conv/direct_aot_jobs.py`` for a
+        direct instance. The emitted code does not depend on the probe's
+        extents, only on its capability axes.
         """
         if self.is_direct:
-            cpg, kpg = self._direct_caps()
-            if cpg == 0:
-                # Runtime channel counts: one group of 256.
-                groups, cpg, kpg = 1, 256, 256
-            elif self.direct_variant == DIRECT_VARIANT_SPATIAL:
-                # The spatial variant takes fewer groups than a wave.
-                groups = 8
-            else:
-                groups = 256 if cpg == 1 else 64
-            return _direct.DirectConvProblem(
-                N=1,
-                H=64,
-                W=64,
-                groups=groups,
-                cpg=cpg,
-                kpg=kpg,
-                KH=self.filter_h,
-                KW=self.filter_w,
-                PAD=self.pad_h,
-                stride=self.stride_h,
-                dtype=self.dtype,
-                dil_h=self.dilation_h,
-                dil_w=self.dilation_w,
+            return _direct_probe_problem(
+                self._direct_rocke_caps(),
+                self.dtype,
+                self.algorithm,
+                self.direct_knobs(),
             )
-        groups = 2 if self.grouped else 1
-        return _conv.ConvProblem(
-            N=1,
-            Hi=16,
-            Wi=16,
-            C=64 * groups,
-            K=64 * groups,
-            Y=3,
-            X=3,
-            sH=1,
-            sW=1,
-            dH=1,
-            dW=1,
-            pH=1,
-            pW=1,
-            groups=groups,
-        )
+        caps = {"grouped": bool(self.grouped)}
+        if self.is_merged:
+            caps["group_merge"] = self.group_merge
+        return _aot_probe_problem("fwd", caps)
 
-    def to_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
-        """The rocKE builder spec, as ``kernel_sweep.build_kernel`` makes it."""
-        if self.is_direct:
-            raise ValueError("a direct instance has no implicit-GEMM spec")
+    def _field_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
+        """The rocKE builder spec these fields spell, without the sweep lookup
+        (to report rocKE's own reason for a spec the sweep does not build)."""
         return _conv.ImplicitGemmConvSpec(
             problem=self.probe_problem(),
             name=self.kernel_symbol_prefix(),
@@ -1222,11 +1393,31 @@ class Gfx950ConvFwdAotSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             wave_size=self.wave_size,
-            vector_size_a=self.vector_size_a,
-            vector_size_b=self.vector_size_b,
-            vector_size_c=self.vector_size_c,
+            # A recorded 0 is a width the builder derives (a merged instance's),
+            # passed as None, as the sweep's job does.
+            vector_size_a=self.vector_size_a or None,
+            vector_size_b=self.vector_size_b or None,
+            vector_size_c=self.vector_size_c or None,
             unroll_k=bool(self.unroll_k),
             async_dma=bool(self.async_dma),
+            group_merge=self.group_merge,
+        )
+
+    def to_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
+        """The rocKE builder spec ``aot_jobs.kernel_for_job`` builds this
+        instance's sweep job with: the job's spec kwargs on the job's probe.
+        Only the name differs. Raises ``ValueError`` for an instance the sweep
+        does not build."""
+        if self.is_direct:
+            raise ValueError("a direct instance has no implicit-GEMM spec")
+        job = _aot_sweep_job(self)
+        return _conv.ImplicitGemmConvSpec(
+            problem=_aot_probe_problem(job.direction, job.caps),
+            data=_conv.ConvDataSpec(
+                dtype_a=self.dtype, dtype_b=self.dtype, dtype_d=self.dtype
+            ),
+            name=self.kernel_symbol_prefix(),
+            **job.spec_kwargs,
         )
 
     def direct_knobs(self) -> dict:
@@ -1246,46 +1437,34 @@ class Gfx950ConvFwdAotSpec:
             ):
                 value = None
             knobs[key] = value
+        knobs.update(_AOT_DIRECT_CONSTANT_KNOBS.get(self.direct_variant, {}))
+        optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(self.direct_variant, {})
+        for key, (field_name, default) in optional.items():
+            if getattr(self, field_name) != default:
+                knobs[key] = getattr(self, field_name)
         return knobs
 
     def rocke_direct_spec(self, problem: _direct.DirectConvProblem):
         """The rocKE kernel spec of this direct instance on ``problem``, as
-        ``direct_kernel_sweep.make_spec`` makes it; only the name differs."""
+        ``direct_variants.make_direct_spec`` makes it; only the name differs."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct spec")
-        name = self.kernel_symbol_prefix()
-        knobs = self.direct_knobs()
-        variant = self.direct_variant
-        if variant == DIRECT_VARIANT_SPATIAL:
-            return _direct.DirectDepthwiseSpatialSpec(
-                problem=problem, name=name, wave_size=self.wave_size, **knobs
-            )
-        if variant == DIRECT_VARIANT_STD:
-            return _direct.DirectDepthwiseSpec(
-                problem=problem, name=name, wave_size=self.wave_size, **knobs
-            )
-        if variant == DIRECT_VARIANT_TILED:
-            return _direct.DirectDepthwiseTiledSpec(problem=problem, name=name, **knobs)
-        if variant == DIRECT_VARIANT_COL:
-            return _direct.DirectDepthwiseColSpec(
-                problem=problem, name=name, dtype=problem.dtype, **knobs
-            )
-        if variant == DIRECT_VARIANT_GROUPED:
-            return _direct.DirectConvSpec(
-                problem=problem, name=name, block_h=self.block_h, **knobs
-            )
-        if variant == DIRECT_VARIANT_NONGROUPED:
-            return _nongrouped.DirectNongroupedConvSpec(
-                problem=problem, name=name, **knobs
-            )
-        raise ValueError(f"unknown direct variant {variant!r}")
+        spec = make_direct_spec(self.algorithm, problem, self.direct_knobs())
+        return replace(spec, name=self.kernel_symbol_prefix())
 
     def to_direct_spec(self):
-        """The rocKE builder spec, as ``direct_kernel_sweep.make_spec`` makes it
-        for the sweep's probe problem."""
+        """The rocKE builder spec ``direct_aot_jobs.direct_kernel_for_job``
+        builds this instance's sweep job with: the job's knobs on the job's
+        probe. Only the name differs. Raises ``ValueError`` for an instance the
+        sweep does not build."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct spec")
-        return self.rocke_direct_spec(self.probe_problem())
+        job = _aot_sweep_job(self)
+        probe = _direct_probe_problem(
+            DirectCaps(**job.caps), self.dtype, self.algorithm, job.spec_kwargs
+        )
+        spec = make_direct_spec(self.algorithm, probe, job.spec_kwargs)
+        return replace(spec, name=self.kernel_symbol_prefix())
 
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this; the instance id
@@ -1303,10 +1482,10 @@ class Gfx950ConvFwdAotSpec:
         """The exact-shape direct spec of a std or spatial instance on
         ``problem``'s geometry.
 
-        The exact-shape direct guard, grid and launch values read only the
-        problem plus ``direct_variant``/``block_w``/``block_waves``, so a std or
-        spatial instance reuses them unchanged through this. The other direct
-        variants have no exact-shape spec; see :meth:`runtime_direct_spec`.
+        The exact-shape direct guard reads only the problem plus
+        ``direct_variant``/``block_w``/``block_waves``, so a std or spatial
+        instance reuses it unchanged through this. The other direct variants
+        have no exact-shape spec; see :meth:`runtime_direct_spec`.
         """
         if not self.is_direct or self.direct_variant not in _DIRECT_VARIANTS:
             raise ValueError("only a std or spatial direct instance has a runtime spec")
@@ -1321,33 +1500,110 @@ class Gfx950ConvFwdAotSpec:
 
     def runtime_direct_spec(self, problem: Gfx950ConvFwdSpec):
         """rocKE's kernel spec of this direct instance on ``problem``: what
-        ``direct_kernel_sweep.plan_for`` re-validates and launches."""
+        ``direct_variants.direct_spec_for_problem`` re-validates and launches."""
         return self.rocke_direct_spec(aot_direct_problem(problem))
 
     def block(self) -> tuple[int, int, int]:
+        """Workgroup size; a function of the tuning alone, never of the shape."""
         if self.is_direct:
-            if self.direct_variant in _DIRECT_VARIANTS:
-                return self.block_waves * self.wave_size, 1, 1
-            return self.to_direct_spec().threads_per_block, 1, 1
+            spec = self.rocke_direct_spec(self.probe_problem())
+            return spec.threads_per_block, 1, 1
         return self.warp_m * self.warp_n * self.wave_size, 1, 1
 
-    def grid(self, problem: Gfx950ConvFwdSpec) -> tuple[int, int, int]:
-        """``(K/groups tiles, N*Ho*Wo tiles, groups)`` for ``problem``; a std or
-        spatial instance takes :meth:`Gfx950ConvFwdSpec.grid`'s direct grid, any
-        other direct instance rocKE's own launch geometry."""
-        if self.is_direct:
-            if self.direct_variant in _DIRECT_VARIANTS:
-                return self.runtime_spec(problem).grid()
-            return _aot_direct_grid(self.runtime_direct_spec(problem))
-        args = self._conv_args(problem)
-        return args.num_pid_n, args.num_pid_m, problem.groups
-
-    def _conv_args(self, problem: Gfx950ConvFwdSpec) -> ConvArgs:
-        if self.is_direct:
-            return ConvArgs.from_problem(aot_direct_problem(problem))
-        return ConvArgs.from_problem(
-            problem.to_problem(), tile_m=self.tile_m, tile_n=self.tile_n
+    def request(self, problem: Gfx950ConvFwdSpec) -> ConvGroupedRequest:
+        """``problem`` as a request to rocKE's grouped-convolution dispatcher, for
+        this instance's LLVM flavor."""
+        return ConvGroupedRequest(
+            N=problem.N,
+            C=problem.C,
+            K=problem.K,
+            Hi=problem.Hi,
+            Wi=problem.Wi,
+            Y=problem.Y,
+            X=problem.X,
+            arch=_ARCH,
+            G=problem.groups,
+            stride_h=problem.sH,
+            stride_w=problem.sW,
+            pad_h=problem.pH,
+            pad_w=problem.pW,
+            dilation_h=problem.dH,
+            dilation_w=problem.dW,
+            dtype=problem.dtype,
+            layout=problem.layout,
+            direction="fwd",
+            llvm_flavor=self.identity().llvm_flavor,
         )
+
+    def launch_step(self, problem: Gfx950ConvFwdSpec):
+        """The dispatcher's launch (``launch_plan_for``) of this instance's own
+        kernel on ``problem``, which it must serve.
+
+        A merged instance tiles the merged GEMM N, ``K/groups * group_merge``,
+        and launches ``groups / group_merge`` z slices
+        (``implicit_gemm_conv_grid``), with the true problem's kernel
+        arguments; the dispatcher's plan does not merge, so the grid is
+        replaced here. A split-C instance's step is its conv pass, whose D is
+        the fp32 workspace (``ws_split``) that :meth:`split_reduce_step` folds.
+        """
+        plan = launch_plan_for(self.request(problem), _aot_instance(self))
+        if len(plan.steps) != 1 or plan.workspaces or plan.num_sub_gemms:
+            raise ValueError("the packaged launch runs one kernel and no workspace")
+        step = plan.steps[0]
+        if self.is_merged:
+            merged_n = (problem.K // problem.groups) * self.group_merge
+            step = replace(
+                step,
+                grid=(
+                    -(-merged_n // self.tile_n),
+                    step.grid[1],
+                    problem.groups // self.group_merge,
+                ),
+            )
+        if self.is_split_c:
+            step = replace(step, buffers=(step.buffers[0], step.buffers[1], "ws_split"))
+        return step
+
+    def split_reduce_spec(self):
+        """The ``direct_split_reduce`` spec a split-C instance launches second:
+        rocKE's fold of ``split_c`` fp32 slabs, as the direct sweep builds it for
+        this dtype (``_split_reduce_job``); only the name differs."""
+        if not self.is_split_c:
+            raise ValueError("only a split-C instance has a split reduction")
+        spec = make_direct_spec(
+            DIRECT_SPLIT_REDUCE,
+            self.probe_problem(),
+            {"split_c": self.split_c},
+        )
+        return replace(spec, name=f"hkp_conv_fwd_sr_aot_gfx950_{self.instance_id[:24]}")
+
+    def split_workspace_bytes(self, problem: Gfx950ConvFwdSpec) -> int:
+        """Bytes of the fp32 ``[split_c, N, Ho, Wo, K]`` workspace a split-C
+        instance's conv pass writes on ``problem``; 0 for any other instance."""
+        if not self.is_split_c:
+            return 0
+        return self.runtime_direct_spec(problem).workspace_bytes
+
+    def split_reduce_step(self, problem: Gfx950ConvFwdSpec):
+        """The second launch of a split-C instance on ``problem``: the fold reads
+        the workspace (A), ignores B and writes the output (D), with the
+        forward direct-conv arguments of the conv pass, as rocKE's direct sweep
+        runs it (``direct_kernel_sweep.plan_for``)."""
+        conv = self.launch_step(problem)
+        reduce_spec = self.split_reduce_spec()
+        return replace(
+            conv,
+            grid=reduce_spec.grid(aot_direct_problem(problem)),
+            block=(reduce_spec.threads, 1, 1),
+            buffers=("ws_split", conv.buffers[1], "y"),
+        )
+
+    def grid(self, problem: Gfx950ConvFwdSpec) -> tuple[int, int, int]:
+        """The launch grid of this instance's own kernel for ``problem``:
+        ``(K/groups tiles, N*Ho*Wo tiles, groups)`` for implicit GEMM (over the
+        merged GEMM N and ``groups / group_merge`` for a merged instance),
+        rocKE's direct launch geometry for a direct instance."""
+        return tuple(self.launch_step(problem).grid)
 
     def launch_signature(self) -> list[dict]:
         if self.is_direct:
@@ -1364,10 +1620,85 @@ class Gfx950ConvFwdAotSpec:
         b_bytes: int,
         d_bytes: int,
     ) -> dict[str, int]:
-        """Every kernel argument for ``problem``, from rocKE's ``ConvArgs``."""
-        return self._conv_args(problem).to_launch_values(
+        """Every kernel argument for ``problem``: the dispatcher's launch plan,
+        computed by rocKE's ``ConvArgs``."""
+        step = self.launch_step(problem)
+        return step.args.to_launch_values(
             a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes
         )
+
+
+def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
+    """The ``KernelIdentity`` fields ``spec`` spells, all but ``llvm_flavor``."""
+    values = dict(
+        arch=_ARCH,
+        dtype_a=spec.dtype,
+        dtype_b=spec.dtype,
+        dtype_d=spec.dtype,
+        **{name: getattr(spec, name) for name in AOT_IMPLICIT_GEMM_CARRIED},
+    )
+    for name in ("unroll_k", "async_dma", "grouped"):
+        values[name] = bool(values[name])
+    if not spec.is_direct:
+        # A direct kernel's merge degree is a knob (``group_merge`` in its
+        # knobs JSON); only implicit GEMM carries it as the identity field.
+        return dict(
+            values,
+            direction="fwd",
+            algorithm="implicit_gemm",
+            group_merge=spec.group_merge,
+        )
+    cpg, kpg = spec._direct_caps()
+    return dict(
+        values,
+        direction="direct_fwd",
+        algorithm=spec.algorithm,
+        filter_h=spec.filter_h,
+        filter_w=spec.filter_w,
+        stride_h=spec.stride_h,
+        stride_w=spec.stride_w,
+        pad_h=spec.pad_h,
+        pad_w=spec.pad_w,
+        dilation_h=spec.dilation_h,
+        dilation_w=spec.dilation_w,
+        cpg=cpg,
+        kpg=kpg,
+        knobs=json.dumps(spec.direct_knobs(), sort_keys=True),
+    )
+
+
+@functools.lru_cache(maxsize=1 << 18)
+def _aot_identity(spec: Gfx950ConvFwdAotSpec) -> KernelIdentity:
+    values = _aot_identity_fields(spec)
+    for flavor in LLVM_FLAVORS:
+        identity = KernelIdentity(**values, llvm_flavor=flavor)
+        if identity.stable_hash() == spec.instance_id:
+            return identity
+    return KernelIdentity(**values, llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR)
+
+
+@functools.lru_cache(maxsize=1 << 14)
+def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
+    """The job rocKE's sweep builds ``spec``'s identity from; ``ValueError`` when
+    the sweep does not build it."""
+    identity = spec.identity()
+    try:
+        if spec.is_direct:
+            return direct_job_for_identity(identity)
+        return job_for_identity(identity)
+    except LookupError as exc:
+        raise ValueError(
+            f"not an identity of rocKE's {_ARCH} forward AOT sweep: {exc}"
+        ) from None
+
+
+@functools.lru_cache(maxsize=1 << 14)
+def _aot_instance(spec: Gfx950ConvFwdAotSpec) -> ConvInstanceSpec:
+    """``spec`` as the dispatcher's instance, for its launch plan."""
+    identity = spec.identity()
+    return ConvInstanceSpec(
+        name=identity.label(), identity=identity, block=spec.block()
+    )
 
 
 def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
@@ -1388,42 +1719,6 @@ def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
         dil_h=problem.dH,
         dil_w=problem.dW,
     )
-
-
-def _aot_direct_grid(rocke_spec) -> tuple[int, int, int]:
-    """rocKE's launch grid for a direct kernel spec (``plan_for``'s ``_conv_step``)."""
-    if isinstance(rocke_spec, _nongrouped.DirectNongroupedConvSpec):
-        return rocke_spec.grid()
-    return _direct.direct_launch_geometry(rocke_spec)[0]
-
-
-def _aot_direct_validate(variant: str, rocke_spec, arch: str) -> tuple[bool, str]:
-    """rocKE's validator for ``rocke_spec``, as ``direct_kernel_sweep.validate_spec``
-    runs it."""
-    try:
-        if variant == DIRECT_VARIANT_NONGROUPED:
-            return _nongrouped.is_valid_nongrouped_spec(rocke_spec, arch=arch)
-        if variant == DIRECT_VARIANT_GROUPED:
-            rocke_spec.validate()
-            return _direct.is_valid_spec(rocke_spec, arch=arch)
-        if variant == DIRECT_VARIANT_STD:
-            return _direct.is_valid_depthwise_spec(rocke_spec, arch=arch)
-        if variant == DIRECT_VARIANT_SPATIAL:
-            return _direct.is_valid_depthwise_spatial_spec(rocke_spec, arch=arch)
-        if variant == DIRECT_VARIANT_TILED:
-            return _direct.is_valid_depthwise_tiled_spec(rocke_spec, arch=arch)
-        if variant == DIRECT_VARIANT_COL:
-            rocke_spec.validate()
-            return _direct.is_valid_depthwise_col_spec(rocke_spec, arch=arch)
-    except (TypeError, ValueError, ZeroDivisionError) as exc:
-        return False, str(exc)
-    return False, f"unknown direct variant {variant!r}"
-
-
-def _aot_async_chunks(spec: Gfx950ConvFwdAotSpec) -> tuple[int, int]:
-    """The chunk widths the builder picks for ``spec``'s async loaders."""
-    a_loader, b_loader = _conv.async_tile_loaders(spec.to_instance_spec())
-    return a_loader.elems_per_chunk, b_loader.elems_per_chunk
 
 
 def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
@@ -1483,7 +1778,7 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
     rocKE's direct kernels compile one stride and one padding (they read
     neither ``sW`` nor ``pW``), and the direct sweep builds square filters
     only; the per-axis fields state that without a convention. Only the
-    non-grouped kernel computes a dilated convolution.
+    non-grouped and grouped-halo kernels compute a dilated convolution.
     """
     for name, value in _AOT_DIRECT_PLACEHOLDERS.items():
         actual = getattr(spec, name)
@@ -1511,7 +1806,7 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
         value = getattr(spec, name)
         if type(value) is not int or not 0 <= value <= _INT32_MAX:
             return f"{name} must be a nonnegative signed 32-bit integer"
-    if spec.direct_variant != DIRECT_VARIANT_NONGROUPED and (
+    if spec.direct_variant not in _AOT_HALO_VARIANTS and (
         spec.dilation_h != 1 or spec.dilation_w != 1
     ):
         return "the direct depthwise kernels have no dilation (dilation_h == dilation_w == 1)"
@@ -1541,10 +1836,30 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
     return ""
 
 
+def _aot_sweep_error(spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
+    """``spec`` must be an identity of rocKE's sweep, and ``instance_id`` its hash."""
+    try:
+        _aot_sweep_job(spec)
+    except ValueError as exc:
+        return False, str(exc)
+    if spec.identity().stable_hash() != spec.instance_id:
+        return False, (
+            f"instance_id {spec.instance_id} is not the stable_hash() of the "
+            f"identity the instance's fields spell ({spec.identity().label()})"
+        )
+    return True, "ok"
+
+
 def supports_gfx950_conv_fwd_aot(
     spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
-    """Whether ``spec`` is a packageable instance; rocKE's validators decide last."""
+    """Whether ``spec`` is a packageable instance.
+
+    The packaged contract's field checks, then rocKE's validators on the
+    sweep's probe, then rocKE's sweep itself: the fields must spell an identity
+    the sweep builds (``job_for_identity`` / ``direct_job_for_identity``), whose
+    ``stable_hash()`` is ``instance_id``.
+    """
     if arch != _ARCH:
         return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
     if not isinstance(spec, Gfx950ConvFwdAotSpec):
@@ -1573,13 +1888,20 @@ def supports_gfx950_conv_fwd_aot(
         if error:
             return False, error
         try:
-            return _aot_direct_validate(
-                spec.direct_variant, spec.to_direct_spec(), arch
+            ok, why = validate_direct_spec(
+                spec.algorithm, spec.rocke_direct_spec(spec.probe_problem()), arch
             )
         except (TypeError, ValueError, ZeroDivisionError) as exc:
             return False, str(exc)
+        if not ok:
+            return False, why
+        return _aot_sweep_error(spec)
     for name, default in _AOT_FAMILY_DEFAULTS.items():
         value = getattr(spec, name)
+        if name == "group_merge":
+            if type(value) is not int or not 1 <= value <= _MAX_GRID_DIM:
+                return False, "group_merge must be a positive integer"
+            continue
         if value != default or type(value) is not type(default):
             return False, (
                 f"an implicit-GEMM instance must leave {name} at {default!r}, "
@@ -1607,17 +1929,28 @@ def supports_gfx950_conv_fwd_aot(
         )
     if spec.epilogue not in ("default", "cshuffle"):
         return False, "epilogue must be 'default' or 'cshuffle'"
-    for name in ("vector_size_a", "vector_size_b", "vector_size_c"):
-        if getattr(spec, name) not in _AOT_VECTOR_WIDTHS:
-            return False, f"{name} must be one of {_AOT_VECTOR_WIDTHS}"
+    widths = (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c)
+    if spec.is_merged:
+        # The builder derives a merged instance's widths from the merged problem.
+        if widths != (0, 0, 0) or spec.grouped != 1:
+            return False, (
+                "a merged instance records derived vector widths (0, 0, 0) and is "
+                "built on the grouped code path"
+            )
+    else:
+        for name in ("vector_size_a", "vector_size_b", "vector_size_c"):
+            if getattr(spec, name) not in _AOT_VECTOR_WIDTHS:
+                return False, f"{name} must be one of {_AOT_VECTOR_WIDTHS}"
     for name in ("unroll_k", "async_dma", "grouped"):
         value = getattr(spec, name)
         if type(value) is not int or value not in (0, 1):
             return False, f"{name} must be 0 or 1"
     if spec.unroll_k and spec.async_dma:
         return False, "unroll_k and async_dma are separate K-loop drivers"
+    if not spec.async_dma and (spec.async_chunk_a or spec.async_chunk_b):
+        return False, "async_chunk_a/async_chunk_b are 0 without async_dma"
     try:
-        instance = spec.to_instance_spec()
+        instance = spec._field_instance_spec()
         instance.validate()
         ok, reason = _conv.is_valid_spec_for_problem(
             instance, instance.problem, arch=arch
@@ -1625,17 +1958,94 @@ def supports_gfx950_conv_fwd_aot(
         if not ok:
             return False, reason
         if spec.async_dma:
-            chunks = _aot_async_chunks(spec)
+            a_loader, b_loader = _conv.async_tile_loaders(instance, arch)
+            chunks = (a_loader.elems_per_chunk, b_loader.elems_per_chunk)
             if chunks != (spec.async_chunk_a, spec.async_chunk_b):
                 return False, (
                     f"async chunk widths {chunks} differ from the recorded "
                     f"({spec.async_chunk_a}, {spec.async_chunk_b})"
                 )
-        elif spec.async_chunk_a or spec.async_chunk_b:
-            return False, "async_chunk_a/async_chunk_b are 0 without async_dma"
     except (TypeError, ValueError, ZeroDivisionError) as exc:
         return False, str(exc)
-    return True, "ok"
+    return _aot_sweep_error(spec)
+
+
+def gfx950_conv_fwd_aot_spec_for_identity(
+    identity: KernelIdentity,
+) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
+    """``(instance, "")`` for a packageable rocKE identity, else ``(None, reason)``.
+
+    Packageable: a gfx950 forward identity in fp16 or bf16 of rocKE's sweeps,
+    with no feature the packaged launch does not model. Refused, each with its
+    reason:
+
+    * implicit GEMM with any identity field off its ``KernelIdentity`` default
+      that the instance does not carry (``AOT_IMPLICIT_GEMM_CARRIED`` and
+      ``group_merge``);
+    * the direct algorithms without a packaged launch: any one outside
+      ``AOT_DIRECT_ALGORITHMS``, and ``direct_split_reduce``, which ships as the
+      second launch of each split-C instance (``AOT_REFUSED_SPLIT_REDUCE``);
+    * anything :func:`supports_gfx950_conv_fwd_aot` declines.
+    """
+    if not isinstance(identity, KernelIdentity):
+        return None, "expected a KernelIdentity"
+    kind = f"({identity.arch}, {identity.direction}, {identity.algorithm})"
+    if identity.arch != _ARCH:
+        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
+        return None, "mixed operand dtypes are not packaged"
+    if identity.direction == "direct_fwd_helper":
+        if identity.algorithm == DIRECT_SPLIT_REDUCE:
+            return None, AOT_REFUSED_SPLIT_REDUCE
+        return None, f"forward helper {identity.algorithm!r} is not packaged"
+    if identity.direction == "direct_fwd":
+        # The packaged variant and knobs first, then the direct sweep's own
+        # round trip: every other field must be what the grid writes for these
+        # capabilities and knobs, and the kernel's validator must take them.
+        try:
+            fields_ = aot_direct_instance_fields(identity)
+            direct_job_for_identity(identity)
+        except (KeyError, LookupError, TypeError, ValueError) as exc:
+            return None, str(exc)
+        spec = Gfx950ConvFwdAotSpec(
+            dtype=identity.dtype_a,
+            wave_size=identity.wave_size,
+            instance_id=identity.stable_hash(),
+            **_AOT_DIRECT_PLACEHOLDERS,
+            **fields_,
+        )
+    elif (identity.direction, identity.algorithm) == ("fwd", "implicit_gemm"):
+        for name, default in _IDENTITY_DEFAULTS.items():
+            if (
+                name in AOT_IMPLICIT_GEMM_CARRIED
+                or name in _AOT_IDENTITY_KEYS
+                or name == "group_merge"
+            ):
+                continue
+            if getattr(identity, name) != default:
+                return None, (
+                    f"{name}={getattr(identity, name)!r} is not packaged (only "
+                    f"{default!r}): it selects code the packaged launch does not model"
+                )
+        values = {name: getattr(identity, name) for name in AOT_IMPLICIT_GEMM_CARRIED}
+        for name in ("unroll_k", "async_dma", "grouped"):
+            values[name] = int(values[name])
+        spec = Gfx950ConvFwdAotSpec(
+            dtype=identity.dtype_a,
+            instance_id=identity.stable_hash(),
+            group_merge=identity.group_merge,
+            **values,
+        )
+    else:
+        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+    if not ok:
+        return None, reason
+    if spec.identity() != identity:
+        return None, (
+            f"the instance spells {spec.identity().label()}, not {identity.label()}"
+        )
+    return spec, ""
 
 
 def gfx950_conv_fwd_aot_capabilities(
@@ -1654,6 +2064,12 @@ def gfx950_conv_fwd_aot_capabilities(
             stride_hw=(spec.stride_h, spec.stride_w),
             pad_hw=(spec.pad_h, spec.pad_w),
         )
+    if spec.is_merged:
+        # Derived by the builder on the merged channel run, which every problem a
+        # merged instance serves shares (cpg = kpg = 1): 1 divides every run.
+        return Gfx950ConvFwdCapabilities(
+            load_width=1, store_width=1, pointwise=False, grouped=True
+        )
     return Gfx950ConvFwdCapabilities(
         load_width=math.lcm(spec.vector_size_a, spec.vector_size_b),
         store_width=spec.vector_size_c,
@@ -1662,19 +2078,29 @@ def gfx950_conv_fwd_aot_capabilities(
     )
 
 
+def _aot_admits(
+    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """rocKE's grouped-convolution dispatcher's admission of ``spec``'s identity
+    for ``problem``: ``identity_supports_problem``, and for a direct identity the
+    per-shape re-validation of its knobs (``direct_spec_for_problem``)."""
+    ok, why = _dispatcher_admits(spec.identity(), spec.request(problem))
+    return (True, "ok") if ok else (False, why)
+
+
 def _aot_direct_serves(
     spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
     """Whether a direct instance other than std or spatial computes ``problem``,
     which already passed the problem checks.
 
-    rocKE's own offer, ``KernelCache.supports_problem`` then ``plan_for``: the
-    compiled filter, stride, padding, dilation and channel counts are the
-    problem's, and the kernel's validator accepts the spec rebuilt on the real
-    problem (for non-grouped, also only the tile widths a sweep of its Wo would
-    try). The kernels compile one stride and one padding, so both axes must
-    agree. Then the launch has to fit: every grid axis 65535, the non-grouped
-    kernel's flat grid a 32-bit dispatch.
+    rocKE's dispatcher admission (:func:`_aot_admits`), after naming the first
+    compiled capability the problem does not have; the kernels compile one
+    stride and one padding, so both axes must agree. The non-grouped kernel
+    serves groups == 1 only and the grouped-halo kernel groups > 1 only, as
+    rocKE's ``direct_plans`` offers them. Then the launch has to fit: every grid
+    axis 65535, the flat grid of the non-grouped and grouped-halo kernels (and
+    of a split-C instance's fold) a 32-bit dispatch.
     """
     variant = spec.direct_variant
     if problem.sH != problem.sW or problem.pH != problem.pW:
@@ -1694,35 +2120,58 @@ def _aot_direct_serves(
     if variant == DIRECT_VARIANT_NONGROUPED:
         if problem.groups != 1:
             return False, "the non-grouped direct kernel serves groups == 1 only"
+    elif variant == DIRECT_VARIANT_GROUPED_HALO:
+        if problem.groups == 1:
+            return False, "the grouped-halo direct kernel serves groups > 1 only"
     elif (cpg, kpg) != spec._direct_caps():
         return False, (
             f"direct kernel compiled for cpg, kpg = {spec._direct_caps()}, "
             f"problem has {(cpg, kpg)}"
         )
-    rocke_spec = spec.runtime_direct_spec(problem)
-    ok, why = _aot_direct_validate(variant, rocke_spec, _ARCH)
+    ok, why = _aot_admits(spec, problem)
     if not ok:
         return False, why
-    grid = _aot_direct_grid(rocke_spec)
-    if variant == DIRECT_VARIANT_NONGROUPED:
-        widths = _nongrouped.tile_w_candidates(
-            rocke_spec.problem.Wo, rocke_spec.atom_tile
-        )
-        if spec.tile_w not in widths:
-            return False, (
-                f"tile_w={spec.tile_w} does not fit Wo={rocke_spec.problem.Wo} "
-                f"(widths tried for it: {widths})"
-            )
-        if (
-            grid[0] > _AOT_NONGROUPED_MAX_GRID_X
-            or grid[0] * rocke_spec.threads_per_block > _AOT_MAX_DISPATCH_ITEMS
-        ):
-            return False, f"flat direct grid {grid[0]} does not fit one dispatch"
+    steps = [spec.launch_step(problem)]
+    if spec.is_split_c:
+        steps.append(spec.split_reduce_step(problem))
+    if variant in _AOT_HALO_VARIANTS:
+        for step in steps:
+            grid = step.grid
+            if (
+                grid[0] > _AOT_NONGROUPED_MAX_GRID_X
+                or grid[0] * step.block[0] > _AOT_MAX_DISPATCH_ITEMS
+            ):
+                return False, f"flat direct grid {grid[0]} does not fit one dispatch"
         return True, "ok"
+    grid = steps[0].grid
     for axis, extent in zip("xyz", grid):
         if extent > _MAX_GRID_DIM:
             return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
     return True, "ok"
+
+
+def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
+    """Images per launch of a non-grouped or grouped-halo kernel on ``problem``, or
+    None when one launch serves it: rocKE's ``direct_kernel_sweep._batch_chunks``.
+
+    Those kernels address every operand through one 32-bit buffer resource and
+    redirect masked accesses past ``_OOB_BASE``, so no operand may reach it. The
+    images are independent, so a batch whose activation or output does is split
+    into launches whose windows each fit, balanced rather than greedy. None too
+    when not even one image fits. The native pack's ``conv::nongroupedBatchChunks``
+    is the same rule.
+    """
+    runtime = problem.to_problem()
+    if runtime.Ho <= 0 or runtime.Wo <= 0:
+        return None
+    in_img = 2 * problem.Hi * problem.Wi * problem.C
+    out_img = 2 * runtime.Ho * runtime.Wo * problem.K
+    per_launch = _nongrouped._OOB_BASE // max(in_img, out_img)
+    if problem.N <= per_launch or per_launch < 1:
+        return None
+    n_steps = -(-problem.N // per_launch)
+    base, extra = divmod(problem.N, n_steps)
+    return [base + (i < extra) for i in range(n_steps)]
 
 
 def gfx950_conv_fwd_aot_serves(
@@ -1730,35 +2179,54 @@ def gfx950_conv_fwd_aot_serves(
 ) -> tuple[bool, str]:
     """Whether instance ``spec`` computes ``problem`` (only its problem fields).
 
-    Implicit GEMM: the forward subset of ``KernelCache.supports_problem`` plus
-    the launch bounds ``ConvArgs`` enforces: the vector widths and async chunks
-    divide the contiguous per-group runs (A and B along C/groups, D along
-    K/groups), a grouped problem needs a grouped binary, every grid axis fits
-    65535, and the reduction extent fits the kernel's 24-bit products. A grouped
-    binary was not built as pointwise, so grouped pointwise problems are served.
+    Implicit GEMM: rocKE's dispatcher admission of the identity
+    (``identity_supports_problem``: the vector widths and async chunks divide
+    the contiguous per-group runs, a grouped problem needs a grouped binary,
+    every grid axis fits 65535), plus the reduction extent the kernel's 24-bit
+    products bound. A grouped binary was not built as pointwise, so grouped
+    pointwise problems are served.
 
     Direct std and spatial: the exact-shape engine's direct rule
     (:func:`_direct_serves`) on the instance's compiled filter, stride and
-    padding. The other direct variants: rocKE's own offer
-    (:func:`_aot_direct_serves`). Batch, image and group count are kernel
-    arguments, and for non-grouped the channel counts too.
+    padding, which the native pack shares with the exact-shape engine. The
+    other direct variants: rocKE's dispatcher admission plus the packaged
+    launch bounds (:func:`_aot_direct_serves`). Batch, image and group count
+    are kernel arguments, and for non-grouped the channel counts too.
+
+    A non-grouped or grouped-halo instance runs a batch rocKE splits in pieces
+    (:func:`gfx950_conv_fwd_aot_batch_chunks`) one launch per chunk, as
+    ``direct_kernel_sweep._batch_split_plan`` does: it serves when it serves each
+    chunk as a problem of its own, and a split-C one, whose workspace would span
+    the whole batch, never does. Every other instance needs the whole problem in
+    one launch.
     """
+    if (
+        spec.is_direct
+        and spec.direct_variant in _AOT_HALO_VARIANTS
+        and problem.dtype == spec.dtype
+    ):
+        chunks = gfx950_conv_fwd_aot_batch_chunks(problem)
+        if chunks is not None:
+            if spec.is_split_c:
+                return False, "a batch-split launch does not take split-C kernels"
+            for images in sorted(set(chunks)):
+                ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, N=images))
+                if not ok:
+                    return False, f"batch chunk of {images} image(s): {why}"
+            return True, "ok"
     error = _problem_error(problem, decline_grouped_pointwise=False)
     if error:
         return False, error
     if problem.dtype != spec.dtype:
         return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
-    caps = gfx950_conv_fwd_aot_capabilities(spec)
     if spec.is_direct:
         if spec.direct_variant in _DIRECT_VARIANTS:
+            caps = gfx950_conv_fwd_aot_capabilities(spec)
             return _direct_serves(caps, spec.runtime_spec(problem))
         return _aot_direct_serves(spec, problem)
-    cpg = problem.C // problem.groups
-    if spec.async_dma:
-        for chunk in (spec.async_chunk_a, spec.async_chunk_b):
-            if cpg % chunk:
-                return False, f"async chunk {chunk} does not divide cpg={cpg}"
-    return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
+    if problem.Y * problem.X * (problem.C // problem.groups) >= MUL24_REDUCTION_LIMIT:
+        return False, "the reduction extent Y*X*C/groups must stay below 2**23"
+    return _aot_admits(spec, problem)
 
 
 def gfx950_conv_fwd_aot_runtime_candidates(
@@ -1777,8 +2245,10 @@ def gfx950_conv_fwd_aot_runtime_candidates(
     (``_widest_vector_sizes``). The shipped catalog builds only some combinations,
     so when none serving bakes the problem's widest, every serving instance runs.
     rocKE's direct benchmark runs every direct kernel that serves, so direct
-    instances are all kept. The native pack's ``conv::widestVectorSelection`` is the
-    same policy; the result keeps the order of ``specs``.
+    instances are all kept, and so are group-merged ones: they record derived
+    widths (0), so no width comparison applies to them. The native pack's
+    ``conv::widestVectorSelection`` is the same policy; the result keeps the order
+    of ``specs``.
     """
     serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
     load = _widest_vector_width(problem.C // problem.groups)
@@ -1787,13 +2257,18 @@ def gfx950_conv_fwd_aot_runtime_candidates(
         spec
         for spec in serving
         if not spec.is_direct
+        and not spec.is_merged
         and (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c)
         == (load, load, store)
     ]
     if not widest:
         return serving
     selected = {id(spec) for spec in widest}
-    return [spec for spec in serving if spec.is_direct or id(spec) in selected]
+    return [
+        spec
+        for spec in serving
+        if spec.is_direct or spec.is_merged or id(spec) in selected
+    ]
 
 
 def _widest_vector_width(channels: int) -> int:
@@ -1801,32 +2276,52 @@ def _widest_vector_width(channels: int) -> int:
     return next(width for width in (8, 4, 2, 1) if channels % width == 0)
 
 
-_AOT_DIRECT_BUILDERS = {
-    DIRECT_VARIANT_STD: _direct.build_direct_depthwise,
-    DIRECT_VARIANT_SPATIAL: _direct.build_direct_depthwise_spatial,
-    DIRECT_VARIANT_TILED: _direct.build_direct_depthwise_tiled,
-    DIRECT_VARIANT_COL: _direct.build_direct_depthwise_col,
-    DIRECT_VARIANT_GROUPED: _direct.build_direct_conv,
-    DIRECT_VARIANT_NONGROUPED: _nongrouped.build_direct_conv_nongrouped,
-}
-
-
 def build_gfx950_conv_fwd_aot(
     spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> KernelDef:
     """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance.
 
-    Dispatches on ``kernel_family`` and the direct variant, as
-    ``direct_kernel_sweep._build_kernel`` does.
+    Builds what rocKE's AOT build builds for the identity: ``kernel_for_job`` of
+    its sweep job for implicit GEMM, ``direct_kernel_for_job`` (the variant's
+    builder, ``select_direct_kernel_builder``) for a direct one. Only the kernel
+    symbol differs.
     """
     ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
     if spec.is_direct:
-        return _AOT_DIRECT_BUILDERS[spec.direct_variant](
-            spec.to_direct_spec(), arch=arch
-        )
+        return select_direct_kernel_builder(spec.algorithm, spec.to_direct_spec(), arch)
     return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
+
+
+def supports_gfx950_conv_fwd_aot_split_reduce(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+) -> tuple[bool, str]:
+    """hkp_pack's predicate for :func:`build_gfx950_conv_fwd_aot_split_reduce`: a
+    packageable split-C instance."""
+    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    if not ok:
+        return False, reason
+    if not spec.is_split_c:
+        return False, "only a split-C instance has a split reduction"
+    return True, "ok"
+
+
+def build_gfx950_conv_fwd_aot_split_reduce(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+) -> KernelDef:
+    """The second launch of a split-C instance, the ``reduce`` entry of its
+    descriptor's ``sources``: rocKE's ``direct_split_reduce`` fold for the
+    instance's dtype and ``split_c`` (:meth:`Gfx950ConvFwdAotSpec.split_reduce_spec`).
+    """
+    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    if not spec.is_split_c:
+        raise ValueError("only a split-C instance has a split reduction")
+    return select_direct_kernel_builder(
+        DIRECT_SPLIT_REDUCE, spec.split_reduce_spec(), arch
+    )
 
 
 def gfx950_conv_fwd_aot_problem_for_request(

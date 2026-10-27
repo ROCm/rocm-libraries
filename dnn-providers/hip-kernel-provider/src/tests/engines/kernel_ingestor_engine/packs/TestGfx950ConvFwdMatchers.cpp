@@ -1441,7 +1441,9 @@ KernelDefinition aotKernel(AotWidths widths = {},
                        {"atom", std::string("none")},
                        {"swizzle_wgm", int64_t{0}},
                        {"iglp", int64_t{-1}},
-                       {"waves_per_eu", int64_t{0}}};
+                       {"waves_per_eu", int64_t{0}},
+                       {"group_merge", int64_t{1}},
+                       {"split_c", int64_t{1}}};
     return kernel;
 }
 
@@ -1999,6 +2001,45 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachDirectVariantServesItsOwnProbl
     }
 }
 
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, BatchesPastTheMaskedAccessOffsetRunInPieces)
+{
+    // An image is 2 * 1024 * 96 * 256 bytes in and out, so 42 fit below the masked-access
+    // offset and 85 run as 29, 28 and 28: whole, the activation passes the i32 ABI.
+    auto big = denseShape(256, 256, 1024, 96);
+    big.n = 85;
+    const GraphFixture fixture(buildGraph(convSpec(big)), gfx950Properties());
+    const auto bound = matchesGraph(GFX950_CONV_FWD_AOT, fixture.context());
+    ASSERT_TRUE(bound);
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotNongroupedKernel()));
+    // Only a non-grouped or grouped-halo kernel launches per chunk, and not split-C, whose
+    // workspace would span the whole batch; the exact-shape engine launches once.
+    auto split = aotNongroupedKernel();
+    split.metadata["split_c"] = int64_t{2};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), split));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel()));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), aotNongroupedKernel()));
+    // 42 images launch once, and so does implicit GEMM.
+    auto one = big;
+    one.n = 42;
+    const GraphFixture single(buildGraph(convSpec(one)), gfx950Properties());
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, single.context(), aotNongroupedKernel()));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, single.context(), aotKernel()));
+
+    const auto& handler = dispatchHandler(GFX950_CONV_FWD_AOT);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, aotNongroupedKernel()), 0U);
+    try
+    {
+        // The descriptor names no archive, so loading is the first step that can fail.
+        handler.prepare(fixture.context(), *bound, aotNongroupedKernel());
+        FAIL() << "Preparation loaded a kernel from an empty archive path";
+    }
+    catch(const std::exception& error)
+    {
+        const std::string message = error.what();
+        EXPECT_EQ(message.find("convolution contract"), std::string::npos) << message;
+    }
+}
+
 TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
 {
     // Every block knob, its KMD default and a value no variant here holds.
@@ -2021,7 +2062,9 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
         {"atom", std::string("none"), std::string("16x16x32")},
         {"swizzle_wgm", int64_t{0}, int64_t{4}},
         {"iglp", int64_t{-1}, int64_t{1}},
-        {"waves_per_eu", int64_t{0}, int64_t{3}}};
+        {"waves_per_eu", int64_t{0}, int64_t{3}},
+        {"group_merge", int64_t{1}, int64_t{2}},
+        {"split_c", int64_t{1}, int64_t{2}}};
     // Each variant's own knobs: AOT_DIRECT_KNOBS in convolution_forward.py.
     const std::vector<std::tuple<ConvShape, KernelDefinition, std::vector<std::string>>> cases{
         {depthwiseShape(32, 14, 14, 3, 1, 1),
@@ -2044,7 +2087,8 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
           "atom",
           "swizzle_wgm",
           "iglp",
-          "waves_per_eu"}},
+          "waves_per_eu",
+          "split_c"}},
     };
     for(const auto& [shape, base, own] : cases)
     {

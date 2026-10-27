@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -910,22 +911,13 @@ TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsLaunchWhereAndHowTheAdapterDoes
 TEST(TestGfx950ConvFwdGeometry, NongroupedTileWidthsAreTheOnesASweepOfWoTries)
 {
     // tile_w_candidates in conv_direct_nongrouped.py: the exact divisors of Wo among one
-    // to six atoms, else the first width with the least waste.
+    // to six atoms, else every width with the least waste.
     for(const auto [tileW, wo, atom, fits] : std::vector<std::tuple<int, int, int, bool>>{
-            {32, 96, 32, true},
-            {96, 96, 32, true},
-            {64, 96, 32, false},
-            {48, 96, 16, true},
-            {80, 96, 16, false},
-            {32, 93, 32, true},
-            {64, 93, 32, false},
-            {16, 7, 16, true},
-            {32, 7, 16, false},
-            {16, 48, 16, true},
-            {32, 48, 16, false},
-            {32, 48, 32, true},
-            {192, 192, 32, true},
-            {224, 224, 32, false},
+            {32, 96, 32, true},  {96, 96, 32, true},  {64, 96, 32, false},  {48, 96, 16, true},
+            {80, 96, 16, false}, {32, 93, 32, true},  {96, 93, 32, true},   {64, 93, 32, false},
+            {16, 7, 16, true},   {32, 7, 16, false},  {16, 17, 16, true},   {32, 17, 16, true},
+            {48, 17, 16, false}, {16, 48, 16, true},  {32, 48, 16, false},  {32, 48, 32, true},
+            {64, 48, 32, true},  {96, 48, 32, false}, {192, 192, 32, true}, {224, 224, 32, false},
         })
     {
         SCOPED_TRACE(std::to_string(tileW) + " " + std::to_string(wo));
@@ -1003,6 +995,153 @@ TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsRefuseWhatRockesValidatorsRefus
     ASSERT_TRUE(hugeGeometry);
     EXPECT_GT(hugeGeometry->tensorBytes[0], NONGROUPED_OOB_BASE);
     EXPECT_FALSE(directInstanceLaunch(huge, *hugeGeometry, nongrouped));
+}
+
+/// One launch, or std::nullopt where the instance declines the problem.
+std::optional<std::tuple<unsigned int, unsigned int, unsigned int, unsigned int>>
+    launchOf(const Problem& problem, const DirectInstance& instance)
+{
+    const auto geometry = deriveGeometry(problem);
+    const auto launch
+        = geometry ? directInstanceLaunch(problem, *geometry, instance) : std::nullopt;
+    if(!launch)
+    {
+        return std::nullopt;
+    }
+    return std::make_tuple(launch->gridX, launch->gridY, launch->gridZ, launch->blockX);
+}
+
+// Expected values are the adapter's (Gfx950ConvFwdAotSpec.grid, block, split_workspace_bytes
+// and split_reduce_step in convolution_forward.py) for shipped instances.
+TEST(TestGfx950ConvFwdGeometry, GroupedHaloLaunchesOverItsMergedGroups)
+{
+    // fwd-direct_grouped_halo f3x3 p1 s1, 16x16x32 atom, ck 32, tile 16x16x32, 1x4 waves.
+    DirectInstance halo{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::GROUPED_HALO, 0, 0};
+    halo.tileH = 16;
+    halo.tileW = 16;
+    halo.tileKOut = 32;
+    halo.ck = 32;
+    halo.wavesM = 1;
+    halo.wavesN = 4;
+    halo.atomTile = 16;
+    halo.atomFragment = 8;
+    halo.groupMerge = 4;
+    EXPECT_EQ(launchOf({2, 256, 256, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 32}, halo),
+              std::make_tuple(64U, 1U, 1U, 256U));
+    EXPECT_EQ(launchOf({4, 512, 512, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, halo),
+              std::make_tuple(64U, 1U, 1U, 256U));
+    auto halfRows = halo;
+    halfRows.tileH = 8;
+    halfRows.groupMerge = 2;
+    EXPECT_EQ(launchOf({4, 512, 512, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, halfRows),
+              std::make_tuple(128U, 1U, 1U, 256U));
+    // Unmerged, C/groups 8 is not a whole ck chunk; one group is the non-grouped kernel's;
+    // the merge degree must divide the group count.
+    auto unmerged = halo;
+    unmerged.groupMerge = 1;
+    EXPECT_FALSE(launchOf({2, 256, 256, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 32}, unmerged));
+    EXPECT_FALSE(launchOf({2, 256, 256, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 1}, halo));
+    EXPECT_FALSE(launchOf({2, 192, 192, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 6}, halo));
+    // Without the atom's fragment the unmerged weight load is unknown.
+    auto noFragment = unmerged;
+    noFragment.atomFragment = 0;
+    EXPECT_FALSE(launchOf({2, 1024, 1024, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 32}, noFragment));
+}
+
+TEST(TestGfx950ConvFwdGeometry, SplitCLaunchesItsConvPassAndFoldOverAWorkspace)
+{
+    // fwd-direct_nongrouped f3x3 p1 s1 split_c=16, 16x16x32 atom, ck 32, tile 12x16x32.
+    DirectInstance split{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::NONGROUPED, 0, 0};
+    split.tileH = 12;
+    split.tileW = 16;
+    split.tileKOut = 32;
+    split.ck = 32;
+    split.wavesM = 1;
+    split.wavesN = 4;
+    split.atomTile = 16;
+    split.atomFragment = 8;
+    split.splitC = 16;
+    for(const auto& [problem, grid, workspace, reduce] :
+        std::vector<std::tuple<Problem, unsigned int, int64_t, unsigned int>>{
+            {{1, 512, 512, 7, 7, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 256U, 1605632, 13U},
+            {{2, 1024, 1024, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 2048U, 25690112, 196U},
+            {{8, 2048, 512, 7, 7, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 2048U, 12845056, 98U}})
+    {
+        const auto geometry = deriveGeometry(problem);
+        ASSERT_TRUE(geometry);
+        EXPECT_EQ(launchOf(problem, split), std::make_tuple(grid, 1U, 1U, 256U));
+        EXPECT_EQ(splitWorkspaceBytes(problem, *geometry, split), workspace);
+        const auto fold = splitReduceLaunch(problem, *geometry);
+        EXPECT_EQ(std::make_tuple(fold.gridX, fold.gridY, fold.gridZ, fold.blockX),
+                  std::make_tuple(reduce, 1U, 1U, 256U));
+    }
+    // A split-C kernel is non-grouped, needs split_c whole ck chunks, and has no workspace
+    // without a split.
+    EXPECT_FALSE(launchOf({2, 256, 256, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 32}, split));
+    EXPECT_FALSE(launchOf({1, 256, 256, 7, 7, 3, 3, 1, 1, 1, 1, 1, 1, 1}, split));
+    auto unsplit = split;
+    unsplit.splitC = 1;
+    const Problem dense{1, 512, 512, 7, 7, 3, 3, 1, 1, 1, 1, 1, 1, 1};
+    EXPECT_EQ(launchOf(dense, unsplit), std::make_tuple(16U, 1U, 1U, 256U));
+    EXPECT_EQ(splitWorkspaceBytes(dense, *deriveGeometry(dense), unsplit), 0);
+}
+
+TEST(TestGfx950ConvFwdGeometry, NongroupedBatchChunksAreRockesBatchSplit)
+{
+    // direct_kernel_sweep._batch_chunks: as many images per launch as keep the activation
+    // and the output below the masked-access offset, the launches balanced.
+    for(const auto& [problem, chunks] : std::vector<std::pair<Problem, std::vector<int64_t>>>{
+            {{4, 256, 128, 1024, 1024, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {2, 2}},
+            {{4, 256, 256, 1024, 1024, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {2, 2}},
+            {{8, 256, 128, 768, 768, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {4, 4}},
+            {{8, 256, 256, 768, 768, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {4, 4}},
+            {{17, 256, 256, 768, 768, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {6, 6, 5}},
+            // The output decides: K four times C, stride 1.
+            {{5, 64, 256, 1024, 1024, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {3, 2}},
+            // One launch serves it, or not even one image fits below the offset.
+            {{7, 256, 256, 768, 768, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {}},
+            {SMOKE, {}},
+            {{2, 2048, 64, 2048, 2048, 3, 3, 1, 1, 1, 1, 1, 1, 1}, {}}})
+    {
+        EXPECT_EQ(nongroupedBatchChunks(problem), chunks) << problem.n << " " << problem.hi;
+    }
+    // The whole tensors a split batch covers pass the i32 ABI, so they compare in i64.
+    constexpr int64_t TWO_GIB = int64_t{1} << 31;
+    EXPECT_TRUE(wholeRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 33},
+                                        {TWO_GIB, 4608, TWO_GIB}));
+    EXPECT_FALSE(wholeRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 30},
+                                         {TWO_GIB, 4608, TWO_GIB}));
+}
+
+TEST(TestGfx950ConvFwdGeometry, GroupMergedInstanceLaunchesGroupsOverMerge)
+{
+    // fwd-implicit_gemm t128x16, 1x1 warps, group_merge 16; widths derived (recorded 0).
+    const AotInstance merged{128, 16, 1, 1, 0, 0, 0, false, 0, 0, true, 16};
+    const auto aot = [&](const Problem& problem)
+        -> std::optional<std::tuple<unsigned int, unsigned int, unsigned int, unsigned int>> {
+        const auto geometry = deriveGeometry(problem);
+        const auto launch = geometry ? aotInstanceLaunch(problem, *geometry, merged) : std::nullopt;
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        return std::make_tuple(launch->gridX, launch->gridY, launch->gridZ, launch->blockX);
+    };
+    EXPECT_EQ(aot({2, 96, 96, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 96}),
+              std::make_tuple(1U, 4U, 6U, 64U));
+    EXPECT_EQ(aot({1, 256, 256, 28, 28, 7, 7, 1, 1, 3, 3, 1, 1, 256}),
+              std::make_tuple(1U, 7U, 16U, 64U));
+    EXPECT_EQ(aot({4, 64, 64, 56, 56, 3, 3, 2, 2, 1, 1, 1, 1, 64}),
+              std::make_tuple(1U, 25U, 4U, 64U));
+    // Depthwise only, the merge degree must divide the groups, and recorded widths are 0.
+    EXPECT_FALSE(aot({2, 256, 256, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1, 32}));
+    EXPECT_FALSE(aot({2, 40, 40, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 40}));
+    auto withWidths = merged;
+    withWidths.vectorC = 1;
+    const auto geometry = deriveGeometry({2, 96, 96, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 96});
+    ASSERT_TRUE(geometry);
+    EXPECT_FALSE(
+        aotInstanceLaunch({2, 96, 96, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 96}, *geometry, withWidths));
 }
 
 TEST(TestGfx950ConvFwdGeometry, DefaultDirectArmFollowsTheGroupCount)

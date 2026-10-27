@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -34,6 +35,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
 
@@ -70,18 +72,41 @@ struct MatchedProblem
 {
     Binding binding;
     conv::Problem problem;
+    /// The whole problem's geometry, or, when a tensor's byte count passes the i32
+    /// launch ABI, the geometry of its largest batch chunk (wholeGeometry false).
     conv::Geometry geometry;
     data_objects::DataType dtype;
+    /// conv::nongroupedBatchChunks of the problem: empty when one launch serves it.
+    std::vector<int64_t> batchChunks;
+    /// Whether geometry is the whole problem's, so a single-launch kernel can run it.
+    bool wholeGeometry = true;
 };
 
 /// The AOT problem block of one family's ABI, the arguments after the leading six.
 using ConvKernargs = std::variant<conv::ImplicitGemmKernargs, conv::DirectKernargs>;
 
-/// Everything a kernel needs at launch beyond the bound device pointers.
+/// One launch of a batch-split kernel: the images it computes, after those of the
+/// launches before it, as a problem of its own.
+struct BatchChunkLaunch
+{
+    int64_t images;
+    conv::LaunchGeometry geometry;
+    ConvKernargs kernargs;
+    std::array<int32_t, 3> tensorBytes;
+};
+
+/// Everything a kernel needs at launch beyond the bound device pointers. A split-C
+/// direct kernel launches twice: its conv pass writes fp32 partial sums into a workspace
+/// of workspaceBytes, and the fold (reduce, same kernargs) sums them into the output.
+/// A batch-split kernel launches once per entry of batchChunks, each on a window of the
+/// activation and output; geometry and kernargs are then the first chunk's.
 struct ConvLaunch
 {
     conv::LaunchGeometry geometry;
     ConvKernargs kernargs;
+    std::optional<conv::LaunchGeometry> reduce = std::nullopt;
+    int64_t workspaceBytes = 0;
+    std::vector<BatchChunkLaunch> batchChunks = {};
 };
 
 const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
@@ -110,12 +135,19 @@ bool hasPackedNhwcStrides(const data_objects::TensorAttributes* tensor)
     }
     const auto* dims = tensor->dims();
     const std::array<int64_t, 4> extents{dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3)};
-    if(!conv::tensorByteSize(extents))
+    // Bound the byte count in i64, not the launch ABI's i32: a batch rocKE runs in pieces
+    // (conv::nongroupedBatchChunks) holds more, and matchedOf decides what launches it.
+    int64_t bytes = 2;
+    for(const auto extent : extents)
     {
-        return false;
+        if(extent <= 0 || extent > std::numeric_limits<int64_t>::max() / 2 / bytes)
+        {
+            return false;
+        }
+        bytes *= extent;
     }
     // hipDNN [N,C,H,W] -> NHWC; filter [K,C,Y,X] -> KYXC; output [N,K,Ho,Wo] -> NHWK.
-    // The byte-size guard above bounds every multiplication here.
+    // The byte-count guard above bounds every multiplication here.
     const std::array<int64_t, 4> expected{
         extents[1] * extents[2] * extents[3], 1, extents[1] * extents[3], extents[1]};
     for(flatbuffers::uoffset_t axis = 0; axis < 4; ++axis)
@@ -132,6 +164,31 @@ bool hasPackedNhwcStrides(const data_objects::TensorAttributes* tensor)
 bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
 {
     return values != nullptr && values->size() == 2;
+}
+
+/// The match of @p problem: its whole geometry, or, for a batch rocKE runs in pieces
+/// (conv::nongroupedBatchChunks) whose tensors pass the i32 launch ABI, its largest
+/// chunk's, which only a batch-split launch reads.
+std::optional<MatchedProblem>
+    matchedOf(const Binding& binding, const conv::Problem& problem, data_objects::DataType dtype)
+{
+    auto chunks = conv::nongroupedBatchChunks(problem);
+    if(const auto geometry = conv::deriveGeometry(problem))
+    {
+        return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), true};
+    }
+    if(chunks.empty())
+    {
+        return std::nullopt;
+    }
+    auto largest = problem;
+    largest.n = chunks.front();
+    const auto geometry = conv::deriveGeometry(largest);
+    if(!geometry)
+    {
+        return std::nullopt;
+    }
+    return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), false};
 }
 
 std::optional<MatchedProblem> matchProblem(const MatchContext& context)
@@ -212,12 +269,7 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     // but no packaged pointwise binary is grouped (the adapter refuses to build one) and
     // conv::implicitGemmServes gives a grouped graph only grouped binaries, which index
     // through their descriptors.
-    const auto geometry = conv::deriveGeometry(problem);
-    if(!geometry)
-    {
-        return std::nullopt;
-    }
-    return MatchedProblem{binding, problem, *geometry, x->data_type()};
+    return matchedOf(binding, problem, x->data_type());
 }
 
 /// PROBLEM_TOKEN's value: the binding, the problem in conv::Problem's field order, then
@@ -262,13 +314,8 @@ std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
     const auto& v = *values;
     const conv::Problem problem{
         v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15], v[16]};
-    const auto geometry = conv::deriveGeometry(problem);
-    if(!geometry)
-    {
-        return std::nullopt;
-    }
-    return MatchedProblem{
-        Binding{v[0], v[1], v[2]}, problem, *geometry, static_cast<data_objects::DataType>(v[17])};
+    return matchedOf(
+        Binding{v[0], v[1], v[2]}, problem, static_cast<data_objects::DataType>(v[17]));
 }
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
@@ -457,7 +504,8 @@ std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
 /// capabilities admit, not only the shape it was compiled for.
 std::optional<ConvLaunch> kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
 {
-    if(kernel.source.kind != KernelSourceKind::KPACK)
+    // This engine launches once per graph, so only a problem whose tensors fit its ABI.
+    if(kernel.source.kind != KernelSourceKind::KPACK || !matched.wholeGeometry)
     {
         return std::nullopt;
     }
@@ -603,6 +651,12 @@ constexpr std::string_view AOT_GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd
 constexpr std::string_view AOT_KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.kernel_match";
 constexpr std::string_view AOT_SCORE_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.score";
 constexpr std::string_view AOT_DISPATCH_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.dispatch";
+/// The packs of split-C kernels (make_conv_aot_config.SPLIT_C_DISPATCH): two launches.
+constexpr std::string_view AOT_SPLIT_C_DISPATCH_SYMBOL
+    = "hipkernel.gfx950_conv_fwd_aot.split_c_dispatch";
+/// The launches of a split-C kernel's `sources` (make_conv_aot_config.SPLIT_C_LAUNCHES).
+constexpr const char* SPLIT_C_CONV_LAUNCH = "conv";
+constexpr const char* SPLIT_C_REDUCE_LAUNCH = "reduce";
 
 /// Integer instance fields; supports_gfx950_conv_fwd_aot validated every one at build.
 constexpr std::array<const char*, 13> AOT_INT_FIELDS{"tile_m",
@@ -626,7 +680,7 @@ constexpr std::array<const char*, 8> AOT_DIRECT_FIELDS{
 /// The block knobs after block_w and block_waves, with the KMD default each holds where
 /// its variant does not use it (_AOT_DIRECT_KNOB_DEFAULTS in convolution_forward.py, less
 /// the string "atom"). iglp -1 and waves_per_eu 0 stand for rocKE's None.
-constexpr std::array<std::pair<const char*, int64_t>, 16> AOT_DIRECT_KNOB_DEFAULTS{{
+constexpr std::array<std::pair<const char*, int64_t>, 18> AOT_DIRECT_KNOB_DEFAULTS{{
     {"block_h", 0},
     {"unroll_rows", 0},
     {"block_q", 0},
@@ -643,6 +697,8 @@ constexpr std::array<std::pair<const char*, int64_t>, 16> AOT_DIRECT_KNOB_DEFAUL
     {"swizzle_wgm", 0},
     {"iglp", -1},
     {"waves_per_eu", 0},
+    {"group_merge", 1},
+    {"split_c", 1},
 }};
 
 /// The fields of block_w, block_waves, AOT_DIRECT_KNOB_DEFAULTS and "atom" that
@@ -675,7 +731,20 @@ bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
                       "atom",
                       "swizzle_wgm",
                       "iglp",
-                      "waves_per_eu"});
+                      "waves_per_eu",
+                      "split_c"});
+    case conv::DirectVariant::GROUPED_HALO:
+        return among({"tile_h",
+                      "tile_w",
+                      "tile_k_out",
+                      "ck",
+                      "waves_m",
+                      "waves_n",
+                      "atom",
+                      "swizzle_wgm",
+                      "iglp",
+                      "waves_per_eu",
+                      "group_merge"});
     case conv::DirectVariant::NONE:
     default:
         return false;
@@ -688,9 +757,15 @@ using AotKernel = std::variant<conv::AotInstance, conv::DirectInstance>;
 /// The implicit-GEMM instance @p kernel describes: a reviewed pipeline (unroll_k and
 /// async_dma change only the K loop), a default or cshuffle epilogue, and positive
 /// tuning. Unlike the exact-shape engine, the store width is the identity's
-/// vector_size_c, not derived.
-std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition& kernel)
+/// vector_size_c, not derived; a group-merged instance (@p groupMerge > 1) records its
+/// builder-derived widths as 0, which conv::mergedInstanceLaunch requires.
+std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition& kernel,
+                                                         int64_t groupMerge)
 {
+    if(groupMerge < 1)
+    {
+        return std::nullopt;
+    }
     if(!hasReviewedPipeline(kernel)
        || (!metadataEquals(kernel, "epilogue", std::string("default"))
            && !metadataEquals(kernel, "epilogue", std::string("cshuffle"))))
@@ -701,8 +776,10 @@ std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition&
     for(size_t i = 0; i < AOT_INT_FIELDS.size(); ++i)
     {
         const auto value = intMetadata(kernel, AOT_INT_FIELDS[i]);
-        // Every field but the async chunk widths is positive; those are 0 without async.
-        if(!value || *value < (i >= 11 ? 0 : 1))
+        // Every field but the async chunk widths is positive; those are 0 without async,
+        // and a merged instance's vector widths (8 to 10) are 0.
+        const bool mayBeZero = i >= 11 || (groupMerge > 1 && i >= 8);
+        if(!value || *value < (mayBeZero ? 0 : 1))
         {
             return std::nullopt;
         }
@@ -728,7 +805,8 @@ std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition&
                              flags[1],
                              values[11],
                              values[12],
-                             flags[2]};
+                             flags[2],
+                             groupMerge};
 }
 
 /// The direct instance @p kernel describes. Its implicit-GEMM fields hold the values
@@ -809,14 +887,17 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
         return std::nullopt;
     }
     int64_t atomTile = 0;
+    int64_t atomFragment = 0;
     if(aotDirectVariantUses(variant, "atom"))
     {
         const auto tile = conv::nongroupedAtomTile(*atom);
-        if(!tile || knob("swizzle_wgm") < 1)
+        const auto fragment = conv::nongroupedAtomFragment(*atom);
+        if(!tile || !fragment || knob("swizzle_wgm") < 1)
         {
             return std::nullopt;
         }
         atomTile = *tile;
+        atomFragment = *fragment;
     }
     else if(*atom != "none")
     {
@@ -845,6 +926,9 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
     instance.wavesM = knob("waves_m");
     instance.wavesN = knob("waves_n");
     instance.atomTile = atomTile;
+    instance.atomFragment = atomFragment;
+    instance.groupMerge = knob("group_merge");
+    instance.splitC = knob("split_c");
     return instance;
 }
 
@@ -855,8 +939,13 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
 /// is malformed metadata.
 std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
 {
-    if(kernel.source.kind != KernelSourceKind::KPACK
-       || !metadataEquals(kernel, "layout", std::string("NHWC"))
+    // A multi-launch (split-C) kernel ships its code in `sources`, one entry per launch.
+    const auto isKpack
+        = [](const auto& launch) { return launch.second.kind == KernelSourceKind::KPACK; };
+    const bool prebuilt = kernel.sources.empty()
+                              ? kernel.source.kind == KernelSourceKind::KPACK
+                              : std::all_of(kernel.sources.begin(), kernel.sources.end(), isKpack);
+    if(!prebuilt || !metadataEquals(kernel, "layout", std::string("NHWC"))
        || !metadataEquals(kernel, "wave_size", int64_t{64}))
     {
         return std::nullopt;
@@ -882,18 +971,23 @@ std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(!std::all_of(AOT_DIRECT_FIELDS.begin(),
-                    AOT_DIRECT_FIELDS.end(),
-                    [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); })
-       || !std::all_of(
-           AOT_DIRECT_KNOB_DEFAULTS.begin(),
-           AOT_DIRECT_KNOB_DEFAULTS.end(),
-           [&](const auto& knob) { return metadataEquals(kernel, knob.first, knob.second); })
+    // group_merge is the one shared field an implicit-GEMM instance carries itself.
+    const auto groupMerge = intMetadata(kernel, "group_merge");
+    if(!groupMerge
+       || !std::all_of(AOT_DIRECT_FIELDS.begin(),
+                       AOT_DIRECT_FIELDS.end(),
+                       [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); })
+       || !std::all_of(AOT_DIRECT_KNOB_DEFAULTS.begin(),
+                       AOT_DIRECT_KNOB_DEFAULTS.end(),
+                       [&](const auto& knob) {
+                           return std::string_view(knob.first) == "group_merge"
+                                  || metadataEquals(kernel, knob.first, knob.second);
+                       })
        || !metadataEquals(kernel, "atom", std::string("none")))
     {
         return std::nullopt;
     }
-    return aotImplicitGemmInstance(kernel);
+    return aotImplicitGemmInstance(kernel, *groupMerge);
 }
 
 /// What hipkernel:Gfx950ConvFwdAot reads of one kernel on every graph, decoded from its
@@ -935,19 +1029,42 @@ const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scrat
     return scratch;
 }
 
+std::optional<ConvLaunch> batchSplitLaunch(const MatchedProblem& matched,
+                                           const conv::DirectInstance& direct);
+
 /// The launch of @p instance on @p matched, through the family's own capability check
-/// and ABI (conv::aotInstanceLaunch or conv::directInstanceLaunch).
+/// and ABI (conv::aotInstanceLaunch or conv::directInstanceLaunch). A non-grouped or
+/// grouped-halo kernel runs a batch rocKE splits in pieces (batchSplitLaunch); every
+/// other kernel needs the whole problem in one launch.
 std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
                                             const AotKernel& instance)
 {
-    if(const auto* direct = std::get_if<conv::DirectInstance>(&instance))
+    const auto* direct = std::get_if<conv::DirectInstance>(&instance);
+    if(direct != nullptr && !matched.batchChunks.empty()
+       && (direct->variant == conv::DirectVariant::NONGROUPED
+           || direct->variant == conv::DirectVariant::GROUPED_HALO))
+    {
+        return batchSplitLaunch(matched, *direct);
+    }
+    if(!matched.wholeGeometry)
+    {
+        return std::nullopt;
+    }
+    if(direct != nullptr)
     {
         const auto launch = conv::directInstanceLaunch(matched.problem, matched.geometry, *direct);
         if(!launch)
         {
             return std::nullopt;
         }
-        return ConvLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
+        ConvLaunch convLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
+        if(direct->splitC > 1)
+        {
+            convLaunch.reduce = conv::splitReduceLaunch(matched.problem, matched.geometry);
+            convLaunch.workspaceBytes
+                = conv::splitWorkspaceBytes(matched.problem, matched.geometry, *direct);
+        }
+        return convLaunch;
     }
     const auto launch = conv::aotInstanceLaunch(
         matched.problem, matched.geometry, std::get<conv::AotInstance>(instance));
@@ -959,6 +1076,37 @@ std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
         return std::nullopt;
     }
     return ConvLaunch{*launch, *kernargs};
+}
+
+/// One launch per batch chunk, each its images as a problem of its own, as rocKE's
+/// direct_kernel_sweep._batch_split_plan runs it: every chunk must launch, and a split-C
+/// kernel, whose workspace would span the whole batch, is refused.
+std::optional<ConvLaunch> batchSplitLaunch(const MatchedProblem& matched,
+                                           const conv::DirectInstance& direct)
+{
+    if(direct.splitC != 1)
+    {
+        return std::nullopt;
+    }
+    std::vector<BatchChunkLaunch> chunks;
+    chunks.reserve(matched.batchChunks.size());
+    for(const auto images : matched.batchChunks)
+    {
+        auto sub = matched.problem;
+        sub.n = images;
+        const auto geometry = conv::deriveGeometry(sub);
+        const auto launch
+            = geometry ? conv::directInstanceLaunch(sub, *geometry, direct) : std::nullopt;
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        chunks.push_back(
+            {images, *launch, conv::directKernargs(sub, *geometry), geometry->tensorBytes});
+    }
+    ConvLaunch launch{chunks.front().geometry, chunks.front().kernargs};
+    launch.batchChunks = std::move(chunks);
+    return launch;
 }
 
 std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
@@ -1028,7 +1176,7 @@ double
 /// Among implicit-GEMM instances it keeps the problem's widest vector widths, or every
 /// serving instance when none bakes them (conv::widestVectorSelection); "serves" is the
 /// capability, this is the policy. rocKE's direct benchmark runs every direct kernel that
-/// serves, so direct instances all stay.
+/// serves, so direct instances all stay, and so do group-merged ones.
 std::vector<bool> aotCandidateFilter(const MatchContext& context,
                                      const BoundTokens& /*bound*/,
                                      const std::vector<const KernelDefinition*>& candidates)
@@ -1042,7 +1190,9 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
         const auto& prepared = preparedOf(*candidates[i], scratch);
         const auto* gemm
             = prepared.instance ? std::get_if<conv::AotInstance>(&*prepared.instance) : nullptr;
-        if(gemm != nullptr && prepared.epilogue)
+        // A merged instance records derived widths (0), so no width comparison applies
+        // to it: like a direct one, it stays.
+        if(gemm != nullptr && gemm->groupMerge == 1 && prepared.epilogue)
         {
             implicitGemm.push_back(i);
             keys.push_back({*prepared.epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
@@ -1138,17 +1288,32 @@ const std::vector<KernelArgument>& kernelSignature(const ConvKernargs& kernargs)
     return std::holds_alternative<conv::DirectKernargs>(kernargs) ? s_direct : s_implicitGemm;
 }
 
+/// One launch of a batch-split kernel, ready to run: its code with this chunk's grid,
+/// and the byte offsets of its activation and output windows.
+struct PreparedBatchChunk
+{
+    IngestorKernelCode code;
+    int64_t activationOffset;
+    int64_t outputOffset;
+    std::array<int32_t, 3> bytes;
+    ConvKernargs kernargs;
+};
+
 class PreparedConvFwd : public PreparedDispatch
 {
 public:
     PreparedConvFwd(IngestorKernelCode code,
+                    std::optional<IngestorKernelCode> reduceCode,
                     Binding binding,
                     std::array<int32_t, 3> bytes,
-                    ConvKernargs kernargs)
+                    ConvKernargs kernargs,
+                    int64_t workspaceBytes)
         : _code(std::move(code))
+        , _reduceCode(std::move(reduceCode))
         , _binding(binding)
         , _bytes(bytes)
         , _kernargs(kernargs)
+        , _workspaceBytes(workspaceBytes)
     {
     }
 
@@ -1157,6 +1322,11 @@ public:
     compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
         return _code.kernelForStream(stream);
+    }
+    /// The fold of a split-C kernel, launched after it; null for every other kernel.
+    compilation::IRunnableKernel* reduceKernelForStream(hipStream_t stream) const
+    {
+        return _reduceCode ? &_reduceCode->kernelForStream(stream) : nullptr;
     }
     const Binding& binding() const
     {
@@ -1170,31 +1340,99 @@ public:
     {
         return _kernargs;
     }
+    int64_t workspaceBytes() const
+    {
+        return _workspaceBytes;
+    }
+    /// The launches of a batch-split kernel, in batch order; empty for every other kernel.
+    const std::vector<PreparedBatchChunk>& batchChunks() const
+    {
+        return _batchChunks;
+    }
+    /// The whole tensors' byte counts a batch-split kernel's chunks cover.
+    const std::array<int64_t, 3>& wholeBytes() const
+    {
+        return _wholeBytes;
+    }
+    void setBatchChunks(std::vector<PreparedBatchChunk> chunks, std::array<int64_t, 3> wholeBytes)
+    {
+        _batchChunks = std::move(chunks);
+        _wholeBytes = wholeBytes;
+    }
 
 private:
     // Holds both the program/module and its kernel view; owns no MatchContext data.
     IngestorKernelCode _code;
+    std::optional<IngestorKernelCode> _reduceCode;
     Binding _binding;
     std::array<int32_t, 3> _bytes;
     ConvKernargs _kernargs;
+    int64_t _workspaceBytes;
+    std::vector<PreparedBatchChunk> _batchChunks;
+    std::array<int64_t, 3> _wholeBytes{};
 };
 
+/// One launch of @p kernel: A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32, then the
+/// family's AOT problem block in kernelSignature's order. The byte counts are storage
+/// sizes, not element counts.
+void launchConvKernel(compilation::IRunnableKernel& kernel,
+                      hipStream_t stream,
+                      const std::array<void*, 3>& pointers,
+                      const std::array<int32_t, 3>& bytes,
+                      const ConvKernargs& kernargs)
+{
+    std::visit(
+        [&](const auto& values) {
+            std::apply(
+                [&](const auto&... args) {
+                    kernel.launch(stream,
+                                  pointers[0],
+                                  pointers[1],
+                                  pointers[2],
+                                  bytes[0],
+                                  bytes[1],
+                                  bytes[2],
+                                  args...);
+                },
+                values);
+        },
+        kernargs);
+}
+
+/// The dispatch handler of one engine's packs. A single-launch handler (no @p
+/// launchNames) runs each kernel's `kernel_source`; the split-C handler declares the
+/// launches "conv" and "reduce" of its kernels' `sources` and runs both, the conv pass
+/// into the workspace and the fold from it into the output, in that order on one stream.
 class ConvFwdDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader, KernelFits fits)
+    ConvFwdDispatchHandler(const compilation::KpackKernelLoader& loader,
+                           KernelFits fits,
+                           std::set<std::string> launchNames = {})
         : _loader(loader)
         , _fits(fits)
+        , _launchNames(std::move(launchNames))
     {
     }
 
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+    std::set<std::string> launchNames() const override
     {
-        // Implicit GEMM uses registers and statically allocated LDS only; the direct
-        // depthwise kernels use no LDS at all.
-        return 0;
+        return _launchNames;
+    }
+
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        // Implicit GEMM uses registers and statically allocated LDS only, the direct
+        // kernels at most static LDS; only a split-C kernel's partial sums need scratch.
+        if(_launchNames.empty())
+        {
+            return 0;
+        }
+        const auto matched = matchProblem(context);
+        const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
+        return launch ? static_cast<size_t>(launch->workspaceBytes) : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1203,7 +1441,9 @@ public:
     {
         const auto matched = matchProblem(context);
         const auto launch = matched ? _fits(*matched, kernel) : std::nullopt;
-        if(!launch)
+        // A split-C kernel launches through this pack's two-launch handler only, and
+        // every kernel of that pack is split-C.
+        if(!launch || launch->reduce.has_value() != !_launchNames.empty())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1215,22 +1455,46 @@ public:
 
         // This pack ships prebuilt code objects only; _fits already refused every
         // other source kind. Each family has its own ABI, so the signature follows it.
-        auto code
-            = buildIngestorKernelCode(_loader, context, kernel, kernelSignature(launch->kernargs));
-        // _fits computed this kernel's launch for this graph's geometry before
-        // loading the archive. No kernel of this pack uses dynamic LDS.
-        code.setBlockSize(launch->geometry.blockX, 1, 1);
-        code.setGridSize(launch->geometry.gridX, launch->geometry.gridY, launch->geometry.gridZ);
-        code.setSharedMemBytes(0);
-        return std::make_unique<PreparedConvFwd>(
-            std::move(code), matched->binding, matched->geometry.tensorBytes, launch->kernargs);
+        // No kernel of this pack uses dynamic LDS.
+        const auto& signature = kernelSignature(launch->kernargs);
+        const auto load
+            = [&](const KernelDefinition& definition, const conv::LaunchGeometry& geometry) {
+                  auto code = buildIngestorKernelCode(_loader, context, definition, signature);
+                  code.setBlockSize(geometry.blockX, 1, 1);
+                  code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+                  code.setSharedMemBytes(0);
+                  return code;
+              };
+        if(!launch->batchChunks.empty())
+        {
+            return prepareBatchSplit(*matched, *launch, load, kernel);
+        }
+        if(!launch->reduce)
+        {
+            return std::make_unique<PreparedConvFwd>(load(kernel, launch->geometry),
+                                                     std::nullopt,
+                                                     matched->binding,
+                                                     matched->geometry.tensorBytes,
+                                                     launch->kernargs,
+                                                     0);
+        }
+        // The fold takes the forward direct-conv arguments of the conv pass (rocKE runs
+        // both with one ConvArgs), so one kernarg block serves both launches.
+        auto conv = load(launchKernelDefinition(kernel, SPLIT_C_CONV_LAUNCH), launch->geometry);
+        auto reduce = load(launchKernelDefinition(kernel, SPLIT_C_REDUCE_LAUNCH), *launch->reduce);
+        return std::make_unique<PreparedConvFwd>(std::move(conv),
+                                                 std::move(reduce),
+                                                 matched->binding,
+                                                 matched->geometry.tensorBytes,
+                                                 launch->kernargs,
+                                                 launch->workspaceBytes);
     }
 
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                 uint32_t numDeviceBuffers,
-                void* /*workspace*/) const override
+                void* workspace) const override
     {
         const auto& convPrepared = dynamic_cast<const PreparedConvFwd&>(prepared);
         if(deviceBuffers == nullptr)
@@ -1254,6 +1518,12 @@ public:
                     "gfx950_conv_fwd requires non-null device pointers aligned to 16 bytes");
             }
         }
+        const auto stream = handle.getStream();
+        if(!convPrepared.batchChunks().empty())
+        {
+            launchBatchSplit(convPrepared, stream, {a.ptr, b.ptr, d.ptr});
+            return;
+        }
         const auto& bytes = convPrepared.bytes();
         if(!conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(a.ptr),
                                             reinterpret_cast<uintptr_t>(b.ptr),
@@ -1264,31 +1534,118 @@ public:
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
         }
-        // A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32, then the family's AOT problem
-        // block in kernelSignature's order. The byte counts are storage sizes, not element
-        // counts.
-        const auto& kernel = convPrepared.kernelForStream(handle.getStream());
-        std::visit(
-            [&](const auto& kernargs) {
-                std::apply(
-                    [&](const auto&... values) {
-                        kernel.launch(handle.getStream(),
-                                      a.ptr,
-                                      b.ptr,
-                                      d.ptr,
-                                      bytes[0],
-                                      bytes[1],
-                                      bytes[2],
-                                      values...);
-                    },
-                    kernargs);
-            },
-            convPrepared.kernargs());
+        auto* reduce = convPrepared.reduceKernelForStream(stream);
+        if(reduce == nullptr)
+        {
+            launchConvKernel(convPrepared.kernelForStream(stream),
+                             stream,
+                             {a.ptr, b.ptr, d.ptr},
+                             bytes,
+                             convPrepared.kernargs());
+            return;
+        }
+
+        // Split-C: the conv pass writes the fp32 [split_c, N, Ho, Wo, K] partial sums
+        // through D into the workspace, which nongroupedDirectLaunch kept below the
+        // masked-access offset (so its byte count is an i32); the fold reads them through
+        // A and writes the output through D. B is unused by the fold.
+        const auto workspaceBytes = static_cast<int32_t>(convPrepared.workspaceBytes());
+        if(workspace == nullptr || reinterpret_cast<uintptr_t>(workspace) % 16 != 0
+           || !conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(a.ptr),
+                                               reinterpret_cast<uintptr_t>(b.ptr),
+                                               reinterpret_cast<uintptr_t>(workspace)},
+                                              {bytes[0], bytes[1], workspaceBytes})
+           || !conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(workspace),
+                                               reinterpret_cast<uintptr_t>(b.ptr),
+                                               reinterpret_cast<uintptr_t>(d.ptr)},
+                                              {workspaceBytes, bytes[1], bytes[2]}))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950_conv_fwd split-C requires a 16-byte aligned workspace of the "
+                "requested size that overlaps no tensor");
+        }
+        launchConvKernel(convPrepared.kernelForStream(stream),
+                         stream,
+                         {a.ptr, b.ptr, workspace},
+                         {bytes[0], bytes[1], workspaceBytes},
+                         convPrepared.kernargs());
+        launchConvKernel(*reduce,
+                         stream,
+                         {workspace, b.ptr, d.ptr},
+                         {workspaceBytes, bytes[1], bytes[2]},
+                         convPrepared.kernargs());
     }
 
 private:
+    /// A batch-split kernel: one code object per chunk, each with its own grid, over
+    /// consecutive windows of the activation and output; the filter is whole in each.
+    template <typename Load>
+    static std::unique_ptr<PreparedDispatch> prepareBatchSplit(const MatchedProblem& matched,
+                                                               const ConvLaunch& launch,
+                                                               const Load& load,
+                                                               const KernelDefinition& kernel)
+    {
+        const auto& problem = matched.problem;
+        const auto& geometry = matched.geometry;
+        // Bytes of one image of the activation and of the output; matchedOf bounded both.
+        const int64_t activationImage = 2 * problem.hi * problem.wi * problem.c;
+        const int64_t outputImage = 2 * geometry.ho * geometry.wo * problem.k;
+        std::vector<PreparedBatchChunk> chunks;
+        chunks.reserve(launch.batchChunks.size());
+        int64_t done = 0;
+        for(const auto& chunk : launch.batchChunks)
+        {
+            chunks.push_back({load(kernel, chunk.geometry),
+                              done * activationImage,
+                              done * outputImage,
+                              chunk.tensorBytes,
+                              chunk.kernargs});
+            done += chunk.images;
+        }
+        // The dispatch's own code is the first chunk's; only the chunks launch.
+        auto prepared = std::make_unique<PreparedConvFwd>(load(kernel, launch.geometry),
+                                                          std::nullopt,
+                                                          matched.binding,
+                                                          launch.batchChunks.front().tensorBytes,
+                                                          launch.kernargs,
+                                                          0);
+        prepared->setBatchChunks(
+            std::move(chunks),
+            {done * activationImage, int64_t{geometry.tensorBytes[1]}, done * outputImage});
+        return prepared;
+    }
+
+    /// Each chunk of a batch-split kernel in order on one stream, after checking the whole
+    /// tensors do not overlap: each chunk sees only its own windows.
+    static void launchBatchSplit(const PreparedConvFwd& prepared,
+                                 hipStream_t stream,
+                                 const std::array<void*, 3>& pointers)
+    {
+        if(!conv::wholeRangesDoNotOverlap({reinterpret_cast<uintptr_t>(pointers[0]),
+                                           reinterpret_cast<uintptr_t>(pointers[1]),
+                                           reinterpret_cast<uintptr_t>(pointers[2])},
+                                          prepared.wholeBytes()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
+        }
+        for(const auto& chunk : prepared.batchChunks())
+        {
+            launchConvKernel(chunk.code.kernelForStream(stream),
+                             stream,
+                             {static_cast<char*>(pointers[0]) + chunk.activationOffset,
+                              pointers[1],
+                              static_cast<char*>(pointers[2]) + chunk.outputOffset},
+                             chunk.bytes,
+                             chunk.kernargs);
+        }
+    }
+
     const compilation::KpackKernelLoader& _loader;
     KernelFits _fits;
+    std::set<std::string> _launchNames;
 };
 
 const ConvFwdDispatchHandler& dispatchHandler()
@@ -1300,10 +1657,23 @@ const ConvFwdDispatchHandler& dispatchHandler()
     return s_handler;
 }
 
-const ConvFwdDispatchHandler& aotDispatchHandler()
+const compilation::KpackKernelLoader& aotKpackLoader()
 {
     static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdAotKpackModuleCache());
-    static const ConvFwdDispatchHandler s_handler(s_loader, &aotKernelFits);
+    return s_loader;
+}
+
+const ConvFwdDispatchHandler& aotDispatchHandler()
+{
+    static const ConvFwdDispatchHandler s_handler(aotKpackLoader(), &aotKernelFits);
+    return s_handler;
+}
+
+/// The handler of the split-C packs: the same admission, two launches per kernel.
+const ConvFwdDispatchHandler& aotSplitCDispatchHandler()
+{
+    static const ConvFwdDispatchHandler s_handler(
+        aotKpackLoader(), &aotKernelFits, {SPLIT_C_CONV_LAUNCH, SPLIT_C_REDUCE_LAUNCH});
     return s_handler;
 }
 
@@ -1343,6 +1713,7 @@ void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotPrepare);
     scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
     scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
+    scope.add(std::string(AOT_SPLIT_C_DISPATCH_SYMBOL), &aotSplitCDispatchHandler());
 }
 
 void resetGfx950ConvFwdAotModuleCache()

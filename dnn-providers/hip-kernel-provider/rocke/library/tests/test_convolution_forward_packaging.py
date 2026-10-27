@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from builders.common.convolution_forward import (
+    EXACT_SHAPE_DEFAULTS,
     gfx950_conv_fwd_capabilities,
     gfx950_conv_fwd_serves,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
@@ -28,7 +29,7 @@ from builders.common.convolution_forward import (
     gfx950_conv_fwd_spec_for_request,
     supports_gfx950_conv_fwd,
 )
-from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
+from dispatch.grouped_convolution import ConvGroupedRequest
 from rocke.core.ir import BF16, F16, I32, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from kernels.common.conv_abi import (
@@ -45,8 +46,11 @@ from kernels.common.conv_direct_grouped import (
     build_direct_depthwise_spatial,
 )
 from kernels.common.conv_implicit_gemm import (
+    ConvDataSpec,
     ConvProblem,
+    ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
+    implicit_gemm_conv_grid,
 )
 
 
@@ -108,13 +112,53 @@ def _original_problem(request: ConvGroupedRequest) -> ConvProblem:
     )
 
 
+def _original_spec(request: ConvGroupedRequest) -> ImplicitGemmConvSpec:
+    """rocKE's builder spec of the exact-shape engine's configuration for ``request``:
+    the gfx950 forward configuration rocKE's grouped-convolution dispatcher resolved
+    when the exact-shape catalog was first packaged (64x64x64 tile, 2x2 warps,
+    32x32x16 atom, mem pipeline; cshuffle where the store width rocKE's builder picks
+    for (C, K) is wider than one element). The dispatcher now selects registered AOT
+    instances, so the engine keeps this configuration itself."""
+    dtype = request.dtype
+    _, _, store = ImplicitGemmConvSpec.default_vector_sizes(request.C, request.K, dtype)
+    return ImplicitGemmConvSpec(
+        problem=_original_problem(request),
+        name="implicit_gemm_conv",
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+        wave_size=64,
+        pipeline="mem",
+        epilogue="cshuffle" if store > 1 else "default",
+        groups=request.G,
+    )
+
+
+def test_exact_shape_defaults_are_the_first_packaged_configuration():
+    assert EXACT_SHAPE_DEFAULTS == {
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 64,
+        "warp_m": 2,
+        "warp_n": 2,
+        "warp_tile_m": 32,
+        "warp_tile_n": 32,
+        "warp_tile_k": 16,
+        "pipeline": "mem",
+    }
+
+
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_factory_preserves_dispatcher_defaults(dtype):
+def test_factory_resolves_the_exact_shape_defaults(dtype):
     request = _request(dtype=dtype)
     packaged = gfx950_conv_fwd_spec_for_request(request)
-    original = dispatch_conv_grouped(request).spec.to_fwd_spec(
-        _original_problem(request)
-    )
+    original = _original_spec(request)
     actual = packaged.to_instance_spec()
     assert replace(actual, name=original.name) == original
     assert packaged.epilogue == "cshuffle"
@@ -129,11 +173,8 @@ def test_factory_preserves_dispatcher_defaults(dtype):
 def test_adapter_emits_original_llvm_and_aot_abi(dtype, tile_k, llvm_flavor):
     request = _request(dtype=dtype)
     spec = gfx950_conv_fwd_spec_for_request(request, tile_k=tile_k)
-    original_spec = dispatch_conv_grouped(request).spec.to_fwd_spec(
-        _original_problem(request)
-    )
     original_spec = replace(
-        original_spec, tile_k=tile_k, name=spec.to_instance_spec().name
+        _original_spec(request), tile_k=tile_k, name=spec.to_instance_spec().name
     )
     packaged = build_gfx950_conv_fwd(spec, arch="gfx950")
     original = build_implicit_gemm_conv(original_spec, arch="gfx950")
@@ -159,7 +200,7 @@ def test_geometry_round_trip_for_extended_2d_matrix(overrides):
     spec = gfx950_conv_fwd_spec_for_request(request)
     assert supports_gfx950_conv_fwd(spec) == (True, "ok")
     assert spec.to_problem() == _original_problem(request)
-    assert spec.grid() == dispatch_conv_grouped(request).grid
+    assert spec.grid() == implicit_gemm_conv_grid(_original_spec(request))
 
 
 def test_serialized_spec_and_typed_builder_are_packager_compatible():
@@ -174,7 +215,7 @@ def test_serialized_spec_and_typed_builder_are_packager_compatible():
 
 
 @pytest.mark.parametrize("pipeline", ["compv3", "compv4", "basic"])
-def test_swept_pipelines_package_with_the_dispatchers_launch(pipeline):
+def test_swept_pipelines_package_with_the_packaged_launch(pipeline):
     # Only the schedule differs: block and grid are what the native pack computes.
     spec = replace(gfx950_conv_fwd_spec_for_request(_request()), pipeline=pipeline)
     assert supports_gfx950_conv_fwd(spec) == (True, "ok")
@@ -267,7 +308,6 @@ def test_invalid_specs_decline_before_emission(override, reason):
         ({"layout": "NCHW"}, "NHWC"),
         ({"arch": "gfx942"}, "gfx950"),
         ({"Di": 4, "Z": 1, "stride_d": 1, "pad_d": 0, "dilation_d": 1}, "2D"),
-        ({"vec_size_c": 1}, "vector defaults"),
         ({"stride_w": 0}, "sW must be"),
     ],
 )
@@ -283,7 +323,7 @@ def test_arch_is_checked_at_build_time():
         build_gfx950_conv_fwd(spec, arch="gfx942")
 
 
-def test_odd_output_channels_obtain_dispatcher_scalar_epilogue():
+def test_odd_output_channels_obtain_the_scalar_epilogue():
     spec = gfx950_conv_fwd_spec_for_request(_request(K=31))
     assert spec.epilogue == "default"
     assert supports_gfx950_conv_fwd(spec) == (True, "ok")
@@ -308,7 +348,7 @@ def test_grouped_requests_are_accepted_with_group_on_grid_z(overrides):
     assert spec.groups == request.G
     assert supports_gfx950_conv_fwd(spec) == (True, "ok")
     assert spec.to_problem() == _original_problem(request)
-    assert spec.grid() == dispatch_conv_grouped(request).grid
+    assert spec.grid() == implicit_gemm_conv_grid(_original_spec(request))
     problem = spec.to_problem()
     assert spec.grid() == (
         -(-problem.kpg // spec.tile_n),
@@ -322,11 +362,8 @@ def test_grouped_requests_are_accepted_with_group_on_grid_z(overrides):
 def test_depthwise_spec_emits_original_kernel(dtype, tile_k):
     request = _request(dtype=dtype, G=32)
     spec = gfx950_conv_fwd_spec_for_request(request, tile_k=tile_k)
-    original_spec = dispatch_conv_grouped(request).spec.to_fwd_spec(
-        _original_problem(request)
-    )
     original_spec = replace(
-        original_spec,
+        _original_spec(request),
         tile_k=spec.tile_k,
         name=spec.to_instance_spec().name,
     )

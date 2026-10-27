@@ -18,10 +18,10 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvFwdNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvFwdNative.cpp
 )
 
 # serialization/ingestor_plan_generated.h is committed, and the build compiles against it.

@@ -4,11 +4,13 @@
 """CPU tests for the shape-generic AOT forward instances (hipkernel:Gfx950ConvFwdAot).
 
 An instance is packaged from a rocKE ``KernelIdentity``; these tests hold the adapter to
-the sweep it comes from. Implicit GEMM: the same kernel IR as ``kernel_sweep.build_kernel``
-and the same served-problem predicate as ``KernelCache.supports_problem``. Direct, every
-forward algorithm of the direct sweep: the same probe and IR as
-``direct_kernel_sweep.build_direct_job``, the served problems of ``supports_problem`` plus
-the per-shape re-validation ``plan_for`` runs, and ``plan_for``'s launch.
+the sweep it comes from. Implicit GEMM: the same kernel IR as ``kernel_for_job`` and the
+same served-problem predicate as ``KernelCache.supports_problem``. Direct, every
+forward algorithm of the direct sweep the packaged launch runs: the same probe and IR as
+``direct_kernel_for_job``, the served problems of ``supports_problem`` plus the
+per-shape re-validation ``plan_for`` runs, and ``plan_for``'s launch (both launches
+of a split-C kernel). Group-merged implicit GEMM launches over its merged grid. Identity
+features the packaged launch does not model are refused with their reason.
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ from benchmarks.common import direct_kernel_sweep, kernel_sweep
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
     AOT_DIRECT_ALGORITHMS,
+    AOT_REFUSED_SPLIT_REDUCE,
     DIRECT_VARIANT_GROUPED,
+    DIRECT_VARIANT_GROUPED_HALO,
     DIRECT_VARIANT_NONGROUPED,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
@@ -33,16 +37,20 @@ from builders.common.convolution_forward import (
     aot_direct_fields_from_knobs,
     aot_direct_instance_fields,
     build_gfx950_conv_fwd_aot,
+    build_gfx950_conv_fwd_aot_split_reduce,
+    gfx950_conv_fwd_aot_batch_chunks,
     gfx950_conv_fwd_aot_problem_for_request,
     gfx950_conv_fwd_aot_runtime_candidates,
     gfx950_conv_fwd_aot_serves,
+    gfx950_conv_fwd_aot_spec_for_identity,
     supports_gfx950_conv_fwd_aot,
     supports_gfx950_conv_fwd_aot_problem,
 )
-from dispatch.grouped_convolution import ConvGroupedRequest
+from dispatch.grouped_convolution import ConvGroupedRequest, _admits
 from kernels.common.conv_abi import conv_direct_args_signature
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.common.conv_direct_nongrouped import _OOB_BASE
 from rocke.core.arch import ArchTarget
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -50,7 +58,25 @@ _SEED = 2026
 _SAMPLE_PER_K_LOOP = 3
 
 
+def _packaged(identity: KernelIdentity) -> bool:
+    """Whether the packaged launch models ``identity``'s features: every forward
+    implicit-GEMM identity of the sweep and every direct one but the split-C fold,
+    which ships as the second launch of a split-C instance."""
+    if identity.is_direct:
+        return identity.algorithm in AOT_DIRECT_ALGORITHMS
+    return True
+
+
+def _unmerged(identity: KernelIdentity) -> bool:
+    """A packaged implicit-GEMM identity whose widths are its own (no group merge):
+    the width classes and rocKE's width selection below are about these."""
+    return _packaged(identity) and identity.group_merge == 1
+
+
 def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
+    """The implicit-GEMM instance of ``identity``, without the adapter's checks (the
+    whole sweep is converted below); :func:`test_the_adapter_converts_identities_as_the_tests_do`
+    holds it to ``gfx950_conv_fwd_aot_spec_for_identity``."""
     return Gfx950ConvFwdAotSpec(
         dtype=identity.dtype_a,
         tile_m=identity.tile_m,
@@ -73,6 +99,7 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
         async_chunk_b=identity.async_chunk_b,
         grouped=int(identity.grouped),
         instance_id=identity.stable_hash(),
+        group_merge=identity.group_merge,
     )
 
 
@@ -85,7 +112,7 @@ def sweep_jobs():
     for dtype in ("fp16", "bf16"):
         jobs = kernel_sweep._direction_jobs("fwd", "gfx950", dtype, target, (2,), 64)
         by_loop: dict = {}
-        for job in jobs:
+        for job in filter(lambda j: _unmerged(j.identity), jobs):
             key = (job.identity.unroll_k, job.identity.async_dma)
             by_loop.setdefault(key, []).append(job)
         for key in sorted(by_loop):
@@ -140,7 +167,9 @@ def knob_class_jobs():
         for job in kernel_sweep._direction_jobs(
             "fwd", "gfx950", dtype, target, (2,), 64
         ):
-            if kernel_sweep._spec_is_valid(job, "gfx950", dtype):
+            if _unmerged(job.identity) and kernel_sweep._spec_is_valid(
+                job, "gfx950", dtype
+            ):
                 by_class.setdefault(_knob_class(job.identity), []).append(job)
         for key in sorted(by_class, key=repr):
             sample.append((dtype, rng.choice(by_class[key])))
@@ -165,7 +194,7 @@ def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
         spec = _spec(job.identity)
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = kernel_sweep.build_kernel(job, "gfx950", dtype)
+        theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         ours_ir = _lower_kernel_to_llvm_python(
             ours, arch="gfx950", llvm_flavor="llvm22"
         )
@@ -182,11 +211,144 @@ def test_every_sampled_sweep_identity_is_packageable(sweep_jobs):
         assert supports_gfx950_conv_fwd_aot(_spec(job.identity)) == (True, "ok")
 
 
+def test_the_adapter_converts_identities_as_the_tests_do(sweep_jobs):
+    for _, job in sweep_jobs:
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
+        assert (spec, reason) == (_spec(job.identity), ""), job.identity.label()
+        assert spec.identity() == job.identity
+
+
+@pytest.fixture(scope="module")
+def merged_jobs():
+    """One valid group-merged job per (dtype, merge degree, K loop), drawn by a seeded
+    shuffle of the sweep's group-merged depthwise kernels."""
+    target = ArchTarget.from_gfx("gfx950")
+    rng = random.Random(_SEED + 3)
+    sample = []
+    for dtype in ("fp16", "bf16"):
+        by_class: dict = {}
+        for job in kernel_sweep._direction_jobs(
+            "fwd", "gfx950", dtype, target, (2,), 64
+        ):
+            if job.identity.group_merge > 1 and kernel_sweep._spec_is_valid(
+                job, "gfx950", dtype
+            ):
+                key = (job.identity.group_merge, job.identity.unroll_k)
+                by_class.setdefault(key, []).append(job)
+        assert len(by_class) > 1, dtype
+        for key in sorted(by_class):
+            sample.append((dtype, rng.choice(by_class[key])))
+    return sample
+
+
+def test_group_merged_identities_are_packaged_with_the_sweeps_ir(merged_jobs):
+    """A group-merged depthwise kernel records its builder-derived widths as 0 and is
+    built on the merged probe, as the sweep builds it, byte for byte up to its symbol.
+    """
+    for dtype, job in merged_jobs:
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
+        assert (spec, reason) == (_spec(job.identity), ""), job.identity.label()
+        assert spec.is_merged and spec.identity() == job.identity
+        assert (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c) == (0, 0, 0)
+        ours = build_gfx950_conv_fwd_aot(spec)
+        theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
+        ours_ir = _lower_kernel_to_llvm_python(
+            ours, arch="gfx950", llvm_flavor="llvm22"
+        )
+        theirs_ir = _lower_kernel_to_llvm_python(
+            theirs, arch="gfx950", llvm_flavor="llvm22"
+        )
+        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
+            theirs.name, "@K"
+        ), job.identity.label()
+
+
+def test_group_merged_serves_agree_with_kernel_cache_and_launch_merged(merged_jobs):
+    """A merged instance serves what the AOT cache admits for its identity (depthwise,
+    the merge degree dividing the group count, the merged GEMM N within one tile), and
+    launches groups / group_merge z slices over the merged GEMM N with the true
+    problem's kernel arguments (implicit_gemm_conv_grid)."""
+    cache = KernelCache.__new__(KernelCache)
+    rng = random.Random(_SEED + 4)
+    compared = served = 0
+    for dtype, job in merged_jobs:
+        identity = replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor())
+        spec = _spec(job.identity)
+        problems = [
+            Gfx950ConvFwdSpec(
+                N=rng.choice([1, 2, 4]),
+                Hi=rng.choice([7, 14, 28]),
+                Wi=rng.choice([7, 14, 28]),
+                C=groups * cpg,
+                K=groups * cpg,
+                Y=filt,
+                X=filt,
+                sH=stride,
+                sW=stride,
+                pH=filt // 2,
+                pW=filt // 2,
+                groups=groups,
+                dtype=dtype,
+            )
+            for groups in (4, 6, 8, 16, 32, 48, 64, 96, 128)
+            for cpg in (1, 2)
+            for filt, stride in ((3, 1), (5, 2), (7, 1))
+        ]
+        for problem in problems:
+            ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
+            theirs, why = cache.supports_problem(identity, problem.to_problem())
+            assert ours == theirs, (job.identity.label(), problem, reason, why)
+            compared += 1
+            served += ours
+            if not ours:
+                continue
+            args = ConvArgs.from_problem(
+                problem.to_problem(), tile_m=spec.tile_m, tile_n=spec.tile_n
+            )
+            kpg = problem.K // problem.groups
+            assert spec.grid(problem) == (
+                -(-(kpg * spec.group_merge) // spec.tile_n),
+                args.grid()[1],
+                problem.groups // spec.group_merge,
+            )
+            assert spec.launch_values(problem, 0, 0, 0, 1, 2, 3) == (
+                args.to_launch_values(0, 0, 0, 1, 2, 3)
+            )
+    assert compared > 100 and 0 < served < compared
+
+
+def test_identities_off_the_sweep_or_with_unmodeled_fields_are_refused(sweep_jobs):
+    identity = next(
+        job.identity
+        for _, job in sweep_jobs
+        if not (job.identity.unroll_k or job.identity.async_dma)
+    )
+    for change, reason in (
+        ({"split_k": 2}, "split_k=2 is not packaged"),
+        ({"chiplet_swizzle": True}, "chiplet_swizzle=True is not packaged"),
+        ({"is_3d": True}, "is_3d=True is not packaged"),
+        ({"streamk": "dp_sk"}, "streamk='dp_sk' is not packaged"),
+        ({"direction": "dgrad"}, "not a gfx950 forward"),
+        ({"arch": "gfx942"}, "not a gfx950 forward"),
+        ({"dtype_b": "bf16"}, "mixed operand dtypes"),
+        # Valid for the builder, but the AOT sweep never builds it: "basic" emits
+        # the code of "mem".
+        ({"pipeline": "basic"}, "not an identity of rocKE's gfx950 forward AOT sweep"),
+    ):
+        spec, why = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, **change))
+        assert spec is None and reason in why, (change, why)
+    # The instance_id must be the hash of the identity the fields spell.
+    spec = _spec(identity)
+    other = _spec(replace(identity, epilogue="default", vector_size_c=1))
+    ok, why = supports_gfx950_conv_fwd_aot(replace(spec, instance_id=other.instance_id))
+    assert not ok and "is not the stable_hash()" in why, why
+
+
 def test_packaged_ir_is_the_sweep_kernel_up_to_its_symbol(sweep_jobs):
     for dtype, job in sweep_jobs:
         spec = _spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = kernel_sweep.build_kernel(job, "gfx950", dtype)
+        theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         ours_ir = _lower_kernel_to_llvm_python(
             ours, arch="gfx950", llvm_flavor="llvm22"
@@ -370,7 +532,8 @@ _SELECTION_GRID = (
 
 @pytest.fixture(scope="module")
 def full_sweep():
-    """Every valid gfx950 forward identity of the AOT sweep, per dtype, in rocKE's order."""
+    """Every valid gfx950 forward identity of the AOT sweep the packaged launch models,
+    per dtype, in rocKE's order: the sweep without its group-merged kernels."""
     target = ArchTarget.from_gfx("gfx950")
     jobs = max(1, min(os.cpu_count() or 1, 32))
     return {
@@ -383,15 +546,17 @@ def full_sweep():
                 directions=("fwd",),
                 jobs=jobs,
             )
+            if _unmerged(job.identity)
         ]
         for dtype in ("fp16", "bf16")
     }
 
 
 def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
-    """Over the whole sweep, the instances selected for a problem are exactly the ones
-    rocKE's --run-from-cache benchmark runs by default: KernelCache.compatible, then
-    _widest_vector_sizes. Both functions are rocKE's own, called on the identities."""
+    """Over the whole packaged sweep, the instances selected for a problem are exactly
+    the ones rocKE's --run-from-cache benchmark runs by default from a cache holding
+    them: KernelCache.compatible, then _widest_vector_sizes. Both functions are rocKE's
+    own, called on the identities."""
     from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
 
     narrowed = kept_default = 0
@@ -457,12 +622,19 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
 
 #: Direct identities per (dtype, algorithm) in the sweep's forward grid.
 _DIRECT_COUNTS = {
-    "direct_depthwise": 54,
-    "direct_depthwise_spatial": 30,
+    "direct_depthwise": 57,
+    "direct_depthwise_spatial": 36,
     "direct_depthwise_tiled": 1536,
-    "direct_depthwise_col": 540,
+    "direct_depthwise_col": 594,
     "direct_grouped": 80,
-    "direct_nongrouped": 3058,
+    # 3058 unsplit and 1816 split-C kernels.
+    "direct_nongrouped": 4874,
+    "direct_grouped_halo": 2850,
+}
+#: Forward direct identities per dtype the packaged launch refuses as an instance: the
+#: split-C fold, the second launch of each split-C instance.
+_REFUSED_DIRECT_COUNTS = {
+    "direct_split_reduce": 4,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -475,10 +647,37 @@ def _direct_spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
     return replace(_spec(identity), **aot_direct_instance_fields(identity))
 
 
+def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
+    """The split-C fold is the second launch of a split-C instance, not an instance of
+    its own, so the adapter refuses it with its reason."""
+    refused: dict = {}
+    for dtype, job in all_direct_jobs:
+        if _packaged(job.identity):
+            continue
+        key = job.identity.algorithm
+        refused[dtype, key] = refused.get((dtype, key), 0) + 1
+        if refused[dtype, key] > 40:
+            continue
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
+        assert spec is None, job.identity.label()
+        assert reason == AOT_REFUSED_SPLIT_REDUCE
+    assert refused == {
+        (dtype, algorithm): count
+        for dtype in ("fp16", "bf16")
+        for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+    }
+
+
 @pytest.fixture(scope="module")
-def direct_jobs():
+def direct_jobs(all_direct_jobs):
     """Every forward job of the direct sweep that the AOT engine packages, both
     dtypes, in the sweep's order."""
+    return [(dtype, job) for dtype, job in all_direct_jobs if _packaged(job.identity)]
+
+
+@pytest.fixture(scope="module")
+def all_direct_jobs():
+    """Every forward job of the direct sweep, both dtypes, in the sweep's order."""
     target = ArchTarget.from_gfx("gfx950")
     return [
         (dtype, job)
@@ -486,17 +685,18 @@ def direct_jobs():
         for job in direct_kernel_sweep.enumerate_direct_jobs(
             arch="gfx950", target=target, directions=("fwd",), dtype=dtype
         )
-        if job.identity.algorithm in AOT_DIRECT_ALGORITHMS
     ]
 
 
 def _sampled(direct_jobs, count: int = _DIRECT_SAMPLE):
-    """Whole std and spatial; ``count`` evenly spread jobs of every other algorithm."""
+    """Whole std and spatial; ``count`` evenly spread jobs of every other algorithm,
+    split-C non-grouped kernels apart from the unsplit ones."""
     by_cell: dict = {}
     for dtype, job in direct_jobs:
-        by_cell.setdefault((dtype, job.identity.algorithm), []).append(job)
+        split = "split_c" in json.loads(job.identity.knobs or "{}")
+        by_cell.setdefault((dtype, job.identity.algorithm, split), []).append(job)
     picked = []
-    for (dtype, algorithm), jobs in by_cell.items():
+    for (dtype, algorithm, _), jobs in by_cell.items():
         if algorithm in ("direct_depthwise", "direct_depthwise_spatial"):
             picked += [(dtype, job) for job in jobs]
         else:
@@ -512,11 +712,12 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
             counts.get((dtype, job.identity.algorithm), 0) + 1
         )
         spec = _direct_spec(job.identity)
-        assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
+        assert gfx950_conv_fwd_aot_spec_for_identity(job.identity) == (spec, "")
+        assert spec.identity() == job.identity
         assert spec.direct_variant == AOT_DIRECT_ALGORITHMS[job.identity.algorithm]
         caps = direct_kernel_sweep.DirectCaps(**job.caps)
         assert spec.probe_problem() == direct_kernel_sweep.probe_problem(
-            caps, dtype, job.identity.algorithm
+            caps, dtype, job.identity.algorithm, json.loads(job.identity.knobs)
         )
         assert spec.direct_knobs() == json.loads(job.identity.knobs)
     assert counts == {
@@ -532,7 +733,7 @@ def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
     for dtype, job in sample:
         spec = _direct_spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
-        theirs, _ = direct_kernel_sweep.build_direct_job(job, "gfx950", dtype)
+        theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         assert ours.name == spec.kernel_name()
         ours_ir = _lower_kernel_to_llvm_python(
@@ -611,6 +812,15 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
             c, k = c * groups, k * groups
             hi = rng.choice([3, 8, 13, 17, 28, 33])
             wi = rng.choice([14, 16, 28, 30, 32, 48, 56, 64, 96, 100, 192])
+        elif variant == DIRECT_VARIANT_GROUPED_HALO:
+            # Grouped, per-group channels a multiple of the weight load and of the
+            # atom once merged; one group in a share, which it declines.
+            groups = rng.choice([1] + [2, 4, 8, 12, 16, 32] * 2)
+            cpg = rng.choice([4, 8, 16, 24, 32, 64])
+            kpg = rng.choice([cpg, cpg, 16, 32, 64])
+            c, k = groups * cpg, groups * kpg
+            hi = rng.choice([3, 8, 13, 17, 28])
+            wi = rng.choice([14, 16, 28, 30, 32, 48, 56, 64, 96, 128])
         else:
             if variant == DIRECT_VARIANT_GROUPED:
                 cpg, kpg = rng.choice(
@@ -646,6 +856,20 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
     return problems
 
 
+class _PlanCache(KernelCache):
+    """A cache holding every helper ``plan_for`` asks for (the split-C fold), so a
+    plan is built without a cache on disk."""
+
+    def __init__(self):  # pylint: disable=super-init-not-called
+        pass
+
+    def get(self, identity):
+        return Path("unused.hsaco"), {"kernel_name": "fold"}
+
+    def hsaco_path(self, identity):
+        return Path("unused.hsaco")
+
+
 def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
     """What rocKE's direct benchmark offers ``identity`` for (``direct_plans``): the
     cache's capability match, the non-grouped family only for one group, then
@@ -667,12 +891,14 @@ def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
         dil_h=problem.dH,
         dil_w=problem.dW,
     )
-    cache = KernelCache.__new__(KernelCache)
+    cache = _PlanCache()
     ok, why = cache.supports_problem(identity, direct)
     if not ok:
         return False, why
     if identity.algorithm == "direct_nongrouped" and direct.groups != 1:
         return False, "direct_plans offers the non-grouped family one group only"
+    if identity.algorithm == "direct_grouped_halo" and direct.groups == 1:
+        return False, "direct_plans offers the grouped-halo kernel groups > 1 only"
     plan, why = direct_kernel_sweep.plan_for(
         cache, identity, Path("unused.hsaco"), {"kernel_name": "k"}, direct, "gfx950"
     )
@@ -706,6 +932,20 @@ def test_direct_served_problems_agree_with_the_direct_benchmarks_offer(direct_jo
         for problem in problems:
             ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
             theirs, why = _rocke_direct_serves(identity, problem)
+            # rocKE's dispatcher admits exactly what its AOT benchmark runs, but for
+            # one rule only direct_plans applies: the grouped-halo kernel is offered
+            # for groups > 1 (on one group it is the non-grouped kernel).
+            halo_on_one_group = (
+                spec.direct_variant == DIRECT_VARIANT_GROUPED_HALO
+                and problem.groups == 1
+            )
+            if (
+                problem.sH == problem.sW
+                and problem.pH == problem.pW
+                and not halo_on_one_group
+            ):
+                admitted, _ = _admits(identity, spec.request(problem))
+                assert admitted == theirs, (job.identity.label(), problem, why)
             if _known_difference(spec, problem, ours, reason, theirs):
                 continue
             assert ours == theirs, (job.identity.label(), problem, reason, why)
@@ -744,7 +984,7 @@ def test_direct_launch_is_rockes_for_the_runtime_problem(direct_jobs):
                 dil_w=problem.dW,
             )
             plan, why = direct_kernel_sweep.plan_for(
-                KernelCache.__new__(KernelCache),
+                _PlanCache(),
                 replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor()),
                 Path("unused.hsaco"),
                 {"kernel_name": "k"},
@@ -752,11 +992,86 @@ def test_direct_launch_is_rockes_for_the_runtime_problem(direct_jobs):
                 "gfx950",
             )
             assert plan is not None, why
-            (step,) = plan.steps
+            step, *fold = plan.steps
             assert (spec.grid(problem), spec.block()) == (step.grid, step.block)
             assert spec.launch_values(
                 problem, 0, 0, 0, 1, 2, 3
             ) == step.conv_args.to_launch_values(0, 0, 0, 1, 2, 3)
+            # A split-C kernel's conv pass writes the workspace its fold reads.
+            assert len(fold) == int(spec.is_split_c), job.identity.label()
+            if spec.is_split_c:
+                ours = spec.split_reduce_step(problem)
+                assert (ours.grid, ours.block) == (fold[0].grid, fold[0].block)
+                assert (
+                    spec.split_workspace_bytes(problem) == plan.workspaces["ws_split"]
+                )
+                assert spec.launch_step(problem).buffers[2] == "ws_split"
+                assert ours.buffers[0] == "ws_split" and ours.buffers[2] == "y"
+
+
+def test_batch_split_serving_is_the_direct_benchmarks_batch_split_plan(direct_jobs):
+    """A batch whose activation or output passes the masked-access offset runs as
+    rocKE's direct benchmark runs it: a non-grouped or grouped-halo kernel one launch
+    per chunk of images (``_batch_chunks``), never a split-C one. Each chunk must be
+    served as a problem of its own, which is stricter than ``_batch_split_plan``: that
+    re-validates a chunk's spec but not ``direct_spec_for_problem``'s rules (a
+    grouped-halo tile_k past the merged K), so whatever is served here rocKE runs too,
+    with as many launches. The batch is the smallest one past a single launch, twice."""
+    compared = served = 0
+    for _, job in _sampled(direct_jobs, 4):
+        if job.identity.algorithm not in ("direct_nongrouped", "direct_grouped_halo"):
+            continue
+        spec = _direct_spec(job.identity)
+        identity = replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor())
+        for problem in _instance_problems(spec, 12):
+            if problem.sH != problem.sW or problem.pH != problem.pW:
+                # rocKE's direct problem has one stride and one padding.
+                continue
+            runtime = problem.to_problem()
+            image = max(
+                2 * problem.Hi * problem.Wi * problem.C,
+                2 * runtime.Ho * runtime.Wo * problem.K,
+            )
+            big = replace(problem, N=2 * (_OOB_BASE // image) + 1)
+            direct = DirectConvProblem(
+                N=big.N,
+                H=big.Hi,
+                W=big.Wi,
+                groups=big.groups,
+                cpg=big.C // big.groups,
+                kpg=big.K // big.groups,
+                KH=big.Y,
+                KW=big.X,
+                PAD=big.pH,
+                stride=big.sH,
+                dtype=big.dtype,
+                dil_h=big.dH,
+                dil_w=big.dW,
+            )
+            chunks = gfx950_conv_fwd_aot_batch_chunks(big)
+            assert chunks is not None and sum(chunks) == big.N, big
+            assert chunks == direct_kernel_sweep._batch_chunks(direct)
+            assert gfx950_conv_fwd_aot_batch_chunks(problem) is None, problem
+            ours, reason = gfx950_conv_fwd_aot_serves(spec, big)
+            each = not spec.is_split_c and all(
+                _rocke_direct_serves(identity, replace(big, N=n))[0]
+                for n in set(chunks)
+            )
+            assert ours == each, (job.identity.label(), big, reason)
+            if ours:
+                plan, why = direct_kernel_sweep.plan_for(
+                    _PlanCache(),
+                    identity,
+                    Path("unused.hsaco"),
+                    {"kernel_name": "k"},
+                    direct,
+                    "gfx950",
+                )
+                assert plan is not None, (job.identity.label(), why)
+                assert len(plan.steps) == len(chunks)
+            compared += 1
+            served += ours
+    assert compared > 20 and 0 < served < compared, (compared, served)
 
 
 def test_one_direct_instance_serves_other_images_batches_and_group_counts(direct_jobs):
@@ -1014,7 +1329,24 @@ def test_direct_knobs_round_trip_rockes_spelling():
         "swizzle_wgm": 8,
         "iglp": -1,
         "waves_per_eu": 0,
+        # Spelled only off its default, by a split-C kernel.
+        "split_c": 1,
     }
+    unsplit = {
+        "tile_h": 8, "tile_w": 32, "tile_k": 64, "ck": 16, "waves_m": 2,
+        "waves_n": 2, "atom": "32x32x16", "swizzle_wgm": 8, "iglp": None,
+        "waves_per_eu": None,
+    }  # fmt: skip
+    assert (
+        aot_direct_fields_from_knobs("nongrouped", {**unsplit, "split_c": 4})["split_c"]
+        == 4
+    )
+    # The grouped-halo kernel is always grouped; the flag is spelled, not carried.
+    halo = {**unsplit, "group_merge": 2, "grouped": True}
+    fields_ = aot_direct_fields_from_knobs("grouped_halo", halo)
+    assert fields_["group_merge"] == 2 and "grouped" not in fields_
+    with pytest.raises(ValueError, match="knob grouped must be True"):
+        aot_direct_fields_from_knobs("grouped_halo", {**halo, "grouped": False})
 
 
 @pytest.mark.parametrize(

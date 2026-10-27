@@ -11,6 +11,7 @@
 #include <numeric>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
 {
@@ -51,10 +52,11 @@ struct LaunchGeometry
     unsigned int blockX;
 };
 
-/// The compiled pointer arguments are noalias. Check complete storage ranges,
-/// including partially overlapping views, before passing them to the kernel.
-inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
-                                     const std::array<int32_t, 3>& bytes)
+namespace detail
+{
+template <typename Bytes>
+inline bool rangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
+                               const std::array<Bytes, 3>& bytes)
 {
     for(size_t i = 0; i < addresses.size(); ++i)
     {
@@ -76,6 +78,23 @@ inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
         }
     }
     return true;
+}
+} // namespace detail
+
+/// The compiled pointer arguments are noalias. Check complete storage ranges,
+/// including partially overlapping views, before passing them to the kernel.
+inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
+                                     const std::array<int32_t, 3>& bytes)
+{
+    return detail::rangesDoNotOverlap(addresses, bytes);
+}
+
+/// bufferRangesDoNotOverlap for the whole tensors a batch-split launch covers, whose
+/// byte counts may pass the launch ABI's i32.
+inline bool wholeRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
+                                    const std::array<int64_t, 3>& bytes)
+{
+    return detail::rangesDoNotOverlap(addresses, bytes);
 }
 
 /// The builder's A_bytes/B_bytes/D_bytes arguments and indexing use signed i32.
@@ -492,7 +511,44 @@ struct AotInstance
     int64_t asyncChunkA; ///< Elements per async A chunk; 0 without asyncDma.
     int64_t asyncChunkB;
     bool grouped; ///< Built with the grouped code path, which also serves groups == 1.
+    /// Conv groups one workgroup owns: > 1 for a group-merged depthwise kernel, whose
+    /// widths the builder derives and the identity records as 0.
+    int64_t groupMerge = 1;
 };
+
+/// The launch of a group-merged @p instance on @p problem. Mirrors the merged rules of
+/// rocKE's identity_supports_problem (_group_merge_fits and _grid_fits in
+/// kernels/conv/kernel_identity.py), which gfx950_conv_fwd_aot_serves applies: a
+/// depthwise problem (cpg = kpg = 1), a merge degree that divides the group count, and a
+/// merged GEMM N (kpg * groupMerge) that fits one tile. The grid tiles that merged GEMM N
+/// and launches groups / groupMerge z slices (implicit_gemm_conv_grid); the kernel
+/// arguments stay the true problem's, as rocKE launches it, and their p_num_pid_n,
+/// ceil(kpg / tileN), is the grid's x extent, 1, under that tile bound.
+inline std::optional<LaunchGeometry> mergedInstanceLaunch(const Problem& problem,
+                                                          const Geometry& geometry,
+                                                          const AotInstance& instance)
+{
+    const auto gm = instance.groupMerge;
+    if(!instance.grouped || instance.asyncDma || instance.vectorA != 0 || instance.vectorB != 0
+       || instance.vectorC != 0 || problem.groups <= 0 || problem.c != problem.groups
+       || problem.k != problem.groups || problem.groups % gm != 0 || gm > instance.tileN
+       || instance.tileM <= 0 || instance.warpM <= 0 || instance.warpN <= 0
+       || instance.warpM > 1024 / 64 || instance.warpN > 1024 / (64 * instance.warpM)
+       || geometry.gemmM <= 0)
+    {
+        return std::nullopt;
+    }
+    const auto gridY = 1 + (geometry.gemmM - 1) / instance.tileM;
+    const auto gridZ = problem.groups / gm;
+    if(gridY > 65535 || gridZ > 65535)
+    {
+        return std::nullopt;
+    }
+    return LaunchGeometry{1u,
+                          static_cast<unsigned int>(gridY),
+                          static_cast<unsigned int>(gridZ),
+                          static_cast<unsigned int>(instance.warpM * instance.warpN * 64)};
+}
 
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot
 /// compute it. Mirrors gfx950_conv_fwd_aot_serves in convolution_forward.py, the forward
@@ -504,7 +560,12 @@ struct AotInstance
 inline std::optional<LaunchGeometry>
     aotInstanceLaunch(const Problem& problem, const Geometry& geometry, const AotInstance& instance)
 {
-    if(instance.vectorA <= 0 || instance.vectorB <= 0 || instance.vectorC <= 0)
+    if(instance.groupMerge > 1)
+    {
+        return mergedInstanceLaunch(problem, geometry, instance);
+    }
+    if(instance.groupMerge != 1 || instance.vectorA <= 0 || instance.vectorB <= 0
+       || instance.vectorC <= 0)
     {
         return std::nullopt;
     }
@@ -536,10 +597,13 @@ inline double aotInstanceScore(const Problem& problem,
                                const LaunchGeometry& launch)
 {
     constexpr double CU_COUNT = 256.0;
+    // Over every z slice: a merged instance's slice covers groupMerge groups.
     const auto kpg = static_cast<double>(problem.k / problem.groups);
-    const auto useful = static_cast<double>(geometry.gemmM) * kpg;
+    const auto useful
+        = static_cast<double>(geometry.gemmM) * kpg * static_cast<double>(problem.groups);
     const auto launched = static_cast<double>(launch.gridY) * static_cast<double>(instance.tileM)
-                          * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN);
+                          * static_cast<double>(launch.gridX) * static_cast<double>(instance.tileN)
+                          * static_cast<double>(launch.gridZ);
     const auto tiles = static_cast<double>(launch.gridX) * static_cast<double>(launch.gridY)
                        * static_cast<double>(launch.gridZ);
     const auto fill = tiles >= CU_COUNT ? 1.0 : tiles / CU_COUNT;
@@ -569,6 +633,7 @@ enum class DirectVariant
     COL, ///< "col": DirectDepthwiseColSpec.
     GROUPED, ///< "grouped": DirectConvSpec.
     NONGROUPED, ///< "nongrouped": DirectNongroupedConvSpec.
+    GROUPED_HALO, ///< "grouped_halo": DirectNongroupedConvSpec with grouped=True.
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -615,6 +680,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "nongrouped")
     {
         return DirectVariant::NONGROUPED;
+    }
+    if(value == "grouped_halo")
+    {
+        return DirectVariant::GROUPED_HALO;
     }
     return std::nullopt;
 }
@@ -797,7 +866,29 @@ struct DirectInstance
     int64_t wavesM = 0;
     int64_t wavesN = 0;
     int64_t atomTile = 0;
+    /// The MFMA atom's channels per lane fragment (_ATOMS in conv_direct_nongrouped.py);
+    /// grouped_halo's weight load when it does not merge.
+    int64_t atomFragment = 0;
+    /// grouped_halo: groups per workgroup. nongrouped: the channel split (> 1 writes fp32
+    /// partial sums that direct_split_reduce folds; see splitReduceLaunch).
+    int64_t groupMerge = 1;
+    int64_t splitC = 1;
 };
+
+/// The channels per lane fragment of DirectNongroupedConvSpec's MFMA atom (_ATOMS in
+/// rocke/library/kernels/common/conv_direct_nongrouped.py); std::nullopt for any other.
+inline std::optional<int64_t> nongroupedAtomFragment(std::string_view atom)
+{
+    if(atom == "32x32x16" || atom == "16x16x32")
+    {
+        return 8;
+    }
+    if(atom == "32x32x8" || atom == "16x16x16")
+    {
+        return 4;
+    }
+    return std::nullopt;
+}
 
 /// The output tile of DirectNongroupedConvSpec's MFMA atom (_ATOMS in
 /// rocke/library/kernels/common/conv_direct_nongrouped.py); std::nullopt for any other.
@@ -922,15 +1013,16 @@ inline std::optional<LaunchGeometry> groupedDirectLaunch(const Problem& problem,
 }
 
 /// tile_w_candidates in conv_direct_nongrouped.py: the multiples of @p atomTile up to six
-/// atoms that tile @p wo exactly, or if none does, the one that wastes the fewest columns
-/// (the first of them). rocKE's direct_plans offers a non-grouped binary only when its
-/// tile width is one of these for the problem's Wo.
+/// atoms that tile @p wo exactly, or if none does, every one that wastes the fewest
+/// columns (at Wo = 56 a 16-, a 32- and a 64-wide tile all compute 64 columns). rocKE's
+/// dispatcher and direct_plans offer a non-grouped binary only when its tile width is one
+/// of these for the problem's Wo.
 inline bool nongroupedTileWidthFits(int64_t tileW, int64_t wo, int64_t atomTile)
 {
     constexpr int64_t MAX_MULTIPLE = 6;
     bool anyExact = false;
-    int64_t leastWaste = 0;
-    int64_t leastWasteWidth = 0;
+    int64_t leastCovered = 0;
+    int64_t tileWCovered = -1;
     for(int64_t multiple = 1; multiple <= MAX_MULTIPLE; ++multiple)
     {
         const auto width = atomTile * multiple;
@@ -943,13 +1035,16 @@ inline bool nongroupedTileWidthFits(int64_t tileW, int64_t wo, int64_t atomTile)
             }
         }
         const auto covered = ceilDiv(wo, width) * width;
-        if(multiple == 1 || covered < leastWaste)
+        if(multiple == 1 || covered < leastCovered)
         {
-            leastWaste = covered;
-            leastWasteWidth = width;
+            leastCovered = covered;
+        }
+        if(width == tileW)
+        {
+            tileWCovered = covered;
         }
     }
-    return !anyExact && tileW == leastWasteWidth;
+    return !anyExact && tileWCovered == leastCovered;
 }
 
 /// The byte offset every masked-out access of the non-grouped kernel is redirected to
@@ -958,26 +1053,52 @@ constexpr int64_t NONGROUPED_OOB_BASE = 0x7F000000;
 /// The non-grouped kernel's input loads are dwordx4 of 8 halves (_X_LOAD_VEC).
 constexpr int64_t NONGROUPED_LOAD_VECTOR = 8;
 
-/// The non-grouped direct kernel (groups == 1, C and K kernel arguments):
-/// DirectNongroupedConvSpec.validate and is_valid_nongrouped_spec in
-/// conv_direct_nongrouped.py on the runtime problem (C a multiple of ck and of 8, K a
-/// multiple of the atom tile, every tensor below the masked-access offset, stride 1 or
-/// 2), the tile widths direct_plans tries for Wo (nongroupedTileWidthFits), then its
-/// flat grid of n_w_tiles * n_h_tiles * N * n_k_tiles blocks of waves_m * waves_n * 64
-/// threads. The block id is decoded in i32 and a dispatch's x extent in work-items is
-/// 32-bit, so both bound the grid.
+/// The non-grouped direct kernel and its grouped LDS-halo form, both
+/// DirectNongroupedConvSpec (C and K, per group, are kernel arguments):
+/// DirectNongroupedConvSpec.validate, is_valid_nongrouped_spec and
+/// direct_spec_for_problem in rocKE on the runtime problem, as direct_plans offers them.
+///   nongrouped:   groups == 1, merged channels C and K;
+///   grouped_halo: groups > 1, group_merge groups per workgroup run as one problem of
+///                 cpg * group_merge input and kpg * group_merge output channels, cpg a
+///                 multiple of the weight load (4 channels when merged, else the atom's
+///                 fragment), and no output-channel tile wider than the merged K.
+/// Both: merged C a multiple of ck and of 8, merged K a multiple of the atom tile, every
+/// tensor below the masked-access offset, stride 1 or 2, the tile widths direct_plans
+/// tries for Wo (nongroupedTileWidthFits). A split-C kernel (split_c > 1, non-grouped
+/// only) also needs split_c whole ck chunks and its fp32 workspace below that offset.
+/// The flat grid is n_w_tiles * n_h_tiles * N * groups / group_merge * n_k_tiles *
+/// split_c blocks of waves_m * waves_n * 64 threads; the block id is decoded in i32 and a
+/// dispatch's x extent in work-items is 32-bit, so both bound it.
 inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& problem,
                                                             const Geometry& geometry,
                                                             const DirectInstance& instance)
 {
     const auto& compiled = instance.compiled;
-    if(problem.groups != 1 || !directCompiledMatches(compiled, problem) || compiled.dilationH < 1
+    const bool halo = instance.variant == DirectVariant::GROUPED_HALO;
+    if(problem.groups <= 0 || problem.c % problem.groups != 0 || problem.k % problem.groups != 0
+       || (halo ? problem.groups == 1 || instance.groupMerge < 1
+                      || problem.groups % instance.groupMerge != 0 || instance.splitC != 1
+                : problem.groups != 1 || instance.groupMerge != 1 || instance.splitC < 1)
+       || !directCompiledMatches(compiled, problem) || compiled.dilationH < 1
        || compiled.dilationW < 1 || (compiled.strideH != 1 && compiled.strideH != 2)
        || instance.tileH < 1 || instance.tileW < 1 || instance.tileKOut < 1 || instance.ck < 1
        || instance.wavesM < 1 || instance.wavesN < 1 || instance.atomTile < 1
-       || instance.wavesM * instance.wavesN > 1024 / DIRECT_WAVE_SIZE || problem.c <= 0
-       || problem.k <= 0 || problem.c % instance.ck != 0 || problem.c % NONGROUPED_LOAD_VECTOR != 0
-       || problem.k % instance.atomTile != 0 || geometry.ho < 1 || geometry.wo < 1)
+       || (halo && instance.atomFragment < 1)
+       || instance.wavesM * instance.wavesN > 1024 / DIRECT_WAVE_SIZE || geometry.ho < 1
+       || geometry.wo < 1)
+    {
+        return std::nullopt;
+    }
+    const auto cpg = problem.c / problem.groups;
+    const auto kpg = problem.k / problem.groups;
+    const auto merge = halo ? instance.groupMerge : 1;
+    // The channel counts are bounded by the tensors' byte counts, so these cannot overflow.
+    const auto mergedC = cpg * merge;
+    const auto mergedK = kpg * merge;
+    const auto weightLoad = halo && merge > 1 ? 4 : instance.atomFragment;
+    if(mergedC % instance.ck != 0 || mergedC % NONGROUPED_LOAD_VECTOR != 0
+       || mergedK % instance.atomTile != 0 || (halo && cpg % weightLoad != 0)
+       || (halo && instance.tileKOut > mergedK) || mergedC / instance.ck < instance.splitC)
     {
         return std::nullopt;
     }
@@ -995,16 +1116,113 @@ inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& probl
     {
         return std::nullopt;
     }
+    if(instance.splitC > 1)
+    {
+        // D's byte count bounds N * Ho * Wo * K, so only the split factor can overflow.
+        const auto outputs = problem.n * geometry.ho * geometry.wo * problem.k;
+        if(instance.splitC > NONGROUPED_OOB_BASE / (4 * outputs))
+        {
+            return std::nullopt;
+        }
+    }
     // D's byte count bounds N * Ho * Wo * K, and so this product of tile counts.
     const auto blocks = ceilDiv(geometry.wo, instance.tileW) * ceilDiv(geometry.ho, instance.tileH)
-                        * problem.n * ceilDiv(problem.k, instance.tileKOut);
+                        * problem.n * (problem.groups / merge)
+                        * ceilDiv(mergedK, instance.tileKOut);
     const auto threads = instance.wavesM * instance.wavesN * DIRECT_WAVE_SIZE;
-    if(blocks > I32_MAX || blocks * threads > int64_t{std::numeric_limits<uint32_t>::max()})
+    if(blocks > I32_MAX / instance.splitC
+       || blocks * instance.splitC * threads > int64_t{std::numeric_limits<uint32_t>::max()})
     {
         return std::nullopt;
     }
+    return LaunchGeometry{static_cast<unsigned int>(blocks * instance.splitC),
+                          1,
+                          1,
+                          static_cast<unsigned int>(threads)};
+}
+
+/// Images per launch of a non-grouped or grouped-halo kernel on @p problem, or an empty
+/// list when one launch serves it (rocKE's direct_kernel_sweep._batch_chunks). Those
+/// kernels redirect masked accesses to NONGROUPED_OOB_BASE through one 32-bit buffer
+/// resource per operand, so no operand may reach it; the images are independent, so a
+/// batch whose activation or output does is split into launches whose windows each fit,
+/// balanced rather than greedy. Empty too when not even one image fits.
+inline std::vector<int64_t> nongroupedBatchChunks(const Problem& problem)
+{
+    const auto ho
+        = outputExtent(problem.hi, problem.y, problem.strideH, problem.padH, problem.dilationH);
+    const auto wo
+        = outputExtent(problem.wi, problem.x, problem.strideW, problem.padW, problem.dilationW);
+    if(!ho || !wo || problem.n <= 0)
+    {
+        return {};
+    }
+    // Bytes of one image, or 0 once it alone passes the offset (and so cannot overflow).
+    const auto imageBytes = [](const std::array<int64_t, 3>& dims) -> int64_t {
+        int64_t bytes = 2;
+        for(const auto extent : dims)
+        {
+            if(extent <= 0 || extent > NONGROUPED_OOB_BASE / bytes)
+            {
+                return 0;
+            }
+            bytes *= extent;
+        }
+        return bytes;
+    };
+    const auto input = imageBytes({problem.hi, problem.wi, problem.c});
+    const auto output = imageBytes({*ho, *wo, problem.k});
+    if(input == 0 || output == 0)
+    {
+        return {};
+    }
+    const auto perLaunch = NONGROUPED_OOB_BASE / std::max(input, output);
+    if(problem.n <= perLaunch)
+    {
+        return {};
+    }
+    const auto steps = ceilDiv(problem.n, perLaunch);
+    const auto base = problem.n / steps;
+    const auto extra = problem.n % steps;
+    std::vector<int64_t> chunks;
+    chunks.reserve(static_cast<size_t>(steps));
+    for(int64_t i = 0; i < steps; ++i)
+    {
+        chunks.push_back(base + (i < extra ? 1 : 0));
+    }
+    return chunks;
+}
+
+/// Bytes of the fp32 [split_c, N, Ho, Wo, K] workspace a split-C kernel's conv pass
+/// writes (DirectNongroupedConvSpec.workspace_bytes); 0 without a split.
+/// nongroupedDirectLaunch has bounded it below the masked-access offset.
+inline int64_t splitWorkspaceBytes(const Problem& problem,
+                                   const Geometry& geometry,
+                                   const DirectInstance& instance)
+{
+    if(instance.splitC <= 1)
+    {
+        return 0;
+    }
+    return 4 * instance.splitC * problem.n * geometry.ho * geometry.wo * problem.k;
+}
+
+/// The threads per block and elements per thread of rocKE's direct_split_reduce
+/// (DirectSplitReduceSpec.threads, _REDUCE_VEC in conv_direct_nongrouped.py).
+constexpr int64_t SPLIT_REDUCE_THREADS = 256;
+constexpr int64_t SPLIT_REDUCE_VECTOR = 8;
+
+/// The second launch of a split-C kernel, direct_split_reduce: one flat grid over the
+/// N * Ho * Wo * K outputs, SPLIT_REDUCE_VECTOR per thread (DirectSplitReduceSpec.grid).
+/// Its eight elements stay in one pixel because K is a multiple of the atom tile.
+inline LaunchGeometry splitReduceLaunch(const Problem& problem, const Geometry& geometry)
+{
+    const auto outputs = problem.n * geometry.ho * geometry.wo * problem.k;
     return LaunchGeometry{
-        static_cast<unsigned int>(blocks), 1, 1, static_cast<unsigned int>(threads)};
+        static_cast<unsigned int>(ceilDiv(outputs, SPLIT_REDUCE_THREADS * SPLIT_REDUCE_VECTOR)),
+        1,
+        1,
+        static_cast<unsigned int>(SPLIT_REDUCE_THREADS)};
 }
 
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot compute
@@ -1037,6 +1255,7 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
     case DirectVariant::GROUPED:
         return groupedDirectLaunch(problem, geometry, instance);
     case DirectVariant::NONGROUPED:
+    case DirectVariant::GROUPED_HALO:
         return nongroupedDirectLaunch(problem, geometry, instance);
     case DirectVariant::NONE:
     default:

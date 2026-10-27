@@ -16,8 +16,10 @@ namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
 struct AotSelectionKey
 {
     /// The kind. rocKE's kind is (direction, epilogue, split_k, two_stage, group_merge);
-    /// every packaged instance is forward with the default split-K, two-stage and group
-    /// merge (make_conv_aot_config.py refuses any other), so only the epilogue varies.
+    /// every packaged instance is forward with the default split-K and two-stage
+    /// (make_conv_aot_config.py refuses any other), and a group-merged instance records
+    /// derived widths (0) and is never compared (aotCandidateFilter keeps it), so only
+    /// the epilogue varies.
     std::string epilogue;
     int64_t vectorA;
     int64_t vectorB;
