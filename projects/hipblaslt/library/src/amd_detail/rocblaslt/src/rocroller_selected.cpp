@@ -17,10 +17,10 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         return rocblaslt_status_invalid_value;
 
     const KernelType kernelType = genKernelType(prob);
-    const auto       scaleType  = hipDataType_to_rocRoller_type(prob.scale_type);
-    if(scaleType != rocRoller::DataType::None && scaleType != rocRoller::DataType::Float)
+    const auto       scaleType  = normalizeOperandType(prob.scale_type);
+    if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
         return rocblaslt_status_invalid_value;
-    if(kernelType.typeAcc != rocRoller::DataType::Float)
+    if(kernelType.typeAcc != HIP_R_32F)
         return rocblaslt_status_invalid_value;
 
     const auto ranked = chooseSolutionIndexParameters(kernelType, prob, -1);
