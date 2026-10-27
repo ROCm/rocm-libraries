@@ -140,7 +140,6 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_traits.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_binary_float.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_codec.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_storage.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_type.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/index_range.hpp"
@@ -149,7 +148,6 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/shape_access.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/prime.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/tensor.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/tensor_transformations.hpp"
 )
 set_target_properties(hostnumerics-core
     PROPERTIES
