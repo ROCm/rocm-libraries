@@ -347,9 +347,8 @@ class Parser:
             if self.tok.kind == TokKind.CARET:
                 bb = self._parse_block_header()
                 continue
-            if self.tok.kind == TokKind.IDENT and self._peek_label():
-                self._eat(TokKind.IDENT)
-                self._eat(TokKind.COLON)
+            if self._peek_label():
+                self._skip_label()
                 continue
             if self.tok.kind == TokKind.STRING or (
                 self.tok.kind == TokKind.IDENT and self._peek_assign()
@@ -362,13 +361,28 @@ class Parser:
         return func
 
     def _peek_label(self) -> bool:
-        if self.tok.kind != TokKind.IDENT:
+        """True at a label line: `name:` or `"name":`."""
+        if self.tok.kind not in (TokKind.IDENT, TokKind.STRING):
             return False
-        saved = self.tok
-        self.tok = self.lexer.next_token()
-        is_label = self.tok.kind == TokKind.COLON
-        self.tok = saved
-        return is_label
+        saved = self._save_lexer_state()
+        try:
+            self._eat()
+            return self.tok.kind == TokKind.COLON
+        finally:
+            self._restore_lexer_state(saved)
+
+    def _skip_attributes(self) -> None:
+        """Skip the `{ ... }` after a block header or a label line."""
+        if self.tok.kind != TokKind.LBRACE:
+            return
+        while self.tok.kind not in (TokKind.RBRACE, TokKind.EOF):
+            self._eat()
+        self._match(TokKind.RBRACE)
+
+    def _skip_label(self) -> None:
+        self._eat()
+        self._eat(TokKind.COLON)
+        self._skip_attributes()
 
     def _save_lexer_state(self) -> Tuple[Token, int, int, int]:
         return (self.tok, self.lexer.pos, self.lexer.line, self.lexer.col)
@@ -394,10 +408,13 @@ class Parser:
         self._eat(TokKind.CARET)
         name = self._eat(TokKind.IDENT).value
         self._eat(TokKind.COLON)
+        self._skip_attributes()
         bb = BasicBlock(name=name, line=self.tok.line)
         while self.tok.kind not in (TokKind.CARET, TokKind.RBRACE, TokKind.EOF):
             if self.tok.kind == TokKind.IDENT and self.tok.value == "Successors":
                 self._parse_successors(bb)
+            elif self._peek_label():
+                self._skip_label()
             elif self.tok.kind == TokKind.STRING or (
                 self.tok.kind == TokKind.IDENT and self._peek_assign()
             ):

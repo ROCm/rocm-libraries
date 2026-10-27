@@ -116,7 +116,7 @@ The text after `=` is split on commas, the same way `stinkytofu-opt --Pass=...` 
 
 `load_stir` reads bare `st.func` text, or the `st.module @name { ... }` that `serialize()` prints, and keeps the module name.
 
-`load_asm` keeps the kernel header (`.amdhsa_*` and the code object metadata) for `emit_asm`. A mnemonic the arch does not know stays in the module as text, with a warning. Its keyword options match `stinkytofu-opt` flags:
+`load_asm` keeps the kernel header (`.amdhsa_*` and the code object metadata) for `emit_asm`. A branch can name any label, such as `label_loop` or `.LBB0_1`. A line stays in the module as text, with a warning, when the arch does not know its mnemonic or the parser cannot read its operands; `emit_asm` writes it back unchanged. Lines inside a `.macro` body are text without a warning. Its keyword options match `stinkytofu-opt` flags:
 
 | Option | Meaning |
 | --- | --- |
@@ -174,9 +174,9 @@ A call that raises returns no records.
 
 ### Print and emit
 
-`serialize()` prints physical STIR, as `st.module @name { ... }`. That text round-trips through `load_stir` for a module loaded from STIR.
+`serialize()` prints physical STIR, as `st.module @name { ... }`. That text round-trips through `load_stir`, whether the module was loaded from STIR or from `.s`: labels, alignment, and directive text all print, so `load_stir(module.serialize()).emit_asm()` matches `module.emit_asm(signature=False)`. STIR carries no kernel header, and it drops source comments. The label syntax is in [Architecture](architecture.md).
 
-A module loaded with `load_asm` is one flat block. `serialize()` does not print its labels or the text of its directives, so edit it as assembler source instead: `emit_asm`, change the text, `load_asm`.
+A block that an instruction names gets its label back on load, so hand-written STIR that branches to `^loop` emits `loop:`.
 
 `serialize(ssa=True)` prints attached SSA for diagnosis. `load_stir` refuses that text. To see the values the allocator uses, load physical STIR, run `LiftAsmRegistersToSSAPass`, and read `defs` and `uses`.
 
@@ -189,7 +189,7 @@ A module loaded with `load_asm` is one flat block. `serialize()` does not print 
 | `symbolic_names` | false | Symbolic register names that the load kept |
 | `signature` | true | The kernel header `load_asm` kept. A STIR module has none |
 
-`assemble()` feeds `emit_asm()` to `amd_comgr`. It returns `None` when the text assembles, and the assembler's messages when it does not. A build without `amd_comgr` raises `RuntimeError`.
+`assemble()` feeds `emit_asm()` to `amd_comgr`. It returns `None` when the text assembles, and the assembler's messages when it does not. Those include errors comgr prints to stderr instead of its log, such as `undefined label`. A build without `amd_comgr` raises `RuntimeError`.
 
 ```python
 module = stinkytofu.load_asm_file("kernel.s")

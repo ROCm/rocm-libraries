@@ -8,14 +8,16 @@
 # to the wrong block and corrupts the CFG. The pass must give the tail a unique
 # name (^label_TDMInitA_1_1) and keep the fall-through chain correct:
 #   ^label_TDMInitA -> ^label_TDMInitA_1_1 -> ^label_TDMInitA_1 -> ^label_end
+# A block that starts with a real label prints { label }; the invented tail
+# has no label, so its header stays bare.
 #
-# CHECK-LABEL: ^label_TDMInitA:{{$}}
+# CHECK-LABEL: ^label_TDMInitA: { label }{{$}}
 # CHECK: Successors: ^label_end, ^label_TDMInitA_1_1{{$}}
 # CHECK-LABEL: ^label_TDMInitA_1_1:{{$}}
 # CHECK: Successors: ^label_TDMInitA_1{{$}}
-# CHECK-LABEL: ^label_TDMInitA_1:{{$}}
+# CHECK-LABEL: ^label_TDMInitA_1: { label }{{$}}
 # CHECK: Successors: ^label_end{{$}}
-# CHECK-LABEL: ^label_end:{{$}}
+# CHECK-LABEL: ^label_end: { label }{{$}}
 # CHECK: s_endpgm
 
 label_TDMInitA:

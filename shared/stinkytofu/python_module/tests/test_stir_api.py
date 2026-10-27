@@ -313,10 +313,80 @@ def test_assemble_returns_the_assembler_log():
     assert "invalid instruction" in stinkytofu.load_asm("s_bogus_op 0\n").assemble()
 
 
+@pytest.mark.skipif(not stinkytofu.hasComgrSupport(), reason="built without amd_comgr")
+def test_assemble_reports_an_undefined_label():
+    # comgr prints this one to stderr instead of its log.
+    log = stinkytofu.load_asm("s_branch label_nowhere\ns_endpgm\n").assemble()
+    assert "undefined label 'label_nowhere'" in log
+
+
 @pytest.mark.skipif(stinkytofu.hasComgrSupport(), reason="built with amd_comgr")
 def test_assemble_needs_comgr():
     with pytest.raises(RuntimeError, match="no amd_comgr"):
         stinkytofu.load_asm("s_nop 0\n").assemble()
+
+
+@pytest.mark.parametrize("build_cfg", [False, True])
+def test_asm_load_survives_stir(build_cfg):
+    module = stinkytofu.load_asm_file(ROUNDTRIP_KERNEL)
+    if build_cfg:
+        module.run_passes(["CFGBuilderPass"])
+    printed = module.serialize()
+    reloaded = stinkytofu.load_stir(printed)
+    assert reloaded.load_warnings() == []
+    assert reloaded.serialize() == printed
+    # STIR carries no kernel header; every label and directive comes back.
+    assert reloaded.emit_asm() == module.emit_asm(signature=False)
+
+
+STIR_LOOP = """\
+st.func @k() {
+^entry:
+  s0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 2 }
+  Successors: ^loop
+^loop:
+  s0 = "st.s_add_u32"(s0, 1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cmp_lt_u32"(s0, 4) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"(loop) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+
+def test_a_branch_target_block_gets_its_label():
+    module = stinkytofu.load_stir(STIR_LOOP)
+    assert "\nloop:\ns_add_u32" in module.emit_asm()
+    assert "^loop: { label }\n" in module.serialize()
+    assert "^exit:\n" in module.serialize()
+
+
+@pytest.mark.skipif(not stinkytofu.hasComgrSupport(), reason="built without amd_comgr")
+def test_a_stir_loop_assembles():
+    assert stinkytofu.load_stir(STIR_LOOP).assemble() is None
+
+
+def test_a_branch_to_any_label_is_an_instruction():
+    module = stinkytofu.load_asm(
+        "s_cbranch_scc1 .LBB0_1\ns_nop 0\n.LBB0_1:\ns_endpgm\n"
+    )
+    assert module.load_warnings() == []
+    first = module.functions()[0].blocks()[0].instructions()[0]
+    assert first.opcode == "st.s_cbranch_scc1"
+    assert first.uses == [".LBB0_1"]
+    module.run_passes(["CFGBuilderPass"])
+    assert ".LBB0_1" in module.functions()[0].blocks()[0].successors()
+    assert stinkytofu.load_stir(module.serialize()).emit_asm() == module.emit_asm()
+
+
+def test_a_known_mnemonic_kept_as_text_warns():
+    text = "tensor_load_to_lds s[12:15], s[16:23] th:TH_LOAD_NT\ns_endpgm\n"
+    module = stinkytofu.load_asm(text)
+    assert module.load_warnings() == [
+        "1:1: warning: Could not read the operands of 'tensor_load_to_lds'; storing as text"
+    ]
+    assert module.emit_asm() == text
 
 
 # Same stream as tests/filecheck/tdm_load_wave_sync_single_wave.stir: one

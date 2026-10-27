@@ -103,6 +103,51 @@ inline bool isHexSuffixIdentifier(std::string_view id) {
     return true;
 }
 
+/// The text of a quoted-string token, with the escapes quoteStirString writes
+/// decoded. Any other backslash pair is kept as written.
+std::string unquote(std::string_view token) {
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"')
+        token = token.substr(1, token.size() - 2);
+    std::string out;
+    out.reserve(token.size());
+    for (size_t i = 0; i < token.size(); ++i) {
+        if (token[i] != '\\' || i + 1 == token.size()) {
+            out += token[i];
+            continue;
+        }
+        switch (token[++i]) {
+            case '\\':
+                out += '\\';
+                break;
+            case '"':
+                out += '"';
+                break;
+            case 'n':
+                out += '\n';
+                break;
+            case 't':
+                out += '\t';
+                break;
+            case 'r':
+                out += '\r';
+                break;
+            default:
+                out += '\\';
+                out += token[i];
+                break;
+        }
+    }
+    return out;
+}
+
+/// A block header: `^name:`, with `{ label, alignment = N }` when the block
+/// starts with a LABEL of its own name.
+struct BlockHeader {
+    std::string id;
+    bool isLabel = false;
+    uint16_t alignment = 1;
+};
+
 //----------------------------------------------------------------------
 // IRParser declaration
 //----------------------------------------------------------------------
@@ -138,6 +183,11 @@ class IRParser {
     /// Sets \p moduleName from the wrapper and leaves it alone otherwise.
     std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions(std::string& moduleName);
 
+    /// Parse one operand, as an operand list would.
+    std::optional<StinkyRegister> parseOperand() {
+        return parseRegister();
+    }
+
    private:
     //------------------------------------------------------------------
     // Parsing methods
@@ -147,9 +197,19 @@ class IRParser {
     /// Format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
     std::unique_ptr<ParsedInstruction> parseInstruction();
 
-    /// Parse label (identifier followed by colon).
-    /// Format: label_name:
+    /// Parse label (identifier or quoted name followed by colon).
+    /// Format: label_name: or "name":, then an optional { alignment = N }
     std::unique_ptr<ParsedInstruction> parseLabel();
+
+    /// True when the next tokens start a label line.
+    bool atLabel() const {
+        return (check(TokenKind::Identifier) || check(TokenKind::QuotedString)) &&
+               lexer.peekAhead(1).kind == TokenKind::Colon;
+    }
+
+    /// Parse the optional `{ ... }` after a block header or a label line. Only a
+    /// \p header may say `label`; both may give `alignment = N`.
+    bool parseLabelAttributes(bool header, bool& isLabel, uint16_t& alignment);
 
     /// Parse hierarchical format: st.func @name() { ^block: ... }
     std::unique_ptr<ParsedFunction> parseFunction();
@@ -160,8 +220,8 @@ class IRParser {
     /// Parse Successors: ^id, ^id, ...
     bool parseSuccessorsLine(ParsedBlock& block);
 
-    /// Parse block label: ^blockId:
-    std::optional<std::string> parseBlockLabel();
+    /// Parse block label: ^blockId: [{ label, alignment = N }]
+    std::optional<BlockHeader> parseBlockLabel();
 
     /// Parse destination registers (comma-separated).
     /// Format: v[14:17], s[0]
@@ -223,6 +283,9 @@ class IRParser {
     /// Skip newlines.
     void skipNewlines();
 
+    /// Skip to the end of the current line, after a line that did not parse.
+    void skipRestOfLine();
+
     /// Emit an error diagnostic.
     void emitError(const std::string& message, unsigned line, unsigned column);
 
@@ -264,33 +327,28 @@ std::unique_ptr<ParsedFunction> IRParser::parse() {
         // Check for block label ^blockId: (hierarchical style in flat context)
         auto blockLabel = parseBlockLabel();
         if (blockLabel) {
-            auto label = std::make_unique<ParsedInstruction>(*blockLabel, true);
+            auto label = std::make_unique<ParsedInstruction>(blockLabel->id, true);
+            label->alignment = blockLabel->alignment;
             block->instructions.push_back(std::move(label));
             skipNewlines();
             continue;
         }
 
-        // Check if this is a label (identifier followed by colon)
-        if (peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon) {
+        if (atLabel()) {
             auto label = parseLabel();
-            if (label) {
+            if (label)
                 block->instructions.push_back(std::move(label));
-                skipNewlines();
-                continue;
-            }
+            else
+                skipRestOfLine();
+            skipNewlines();
+            continue;
         }
 
         auto inst = parseInstruction();
         if (inst) {
             block->instructions.push_back(std::move(inst));
         } else {
-            while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof &&
-                   peek().kind != TokenKind::Newline) {
-                consume();
-            }
-            if (peek().kind == TokenKind::Newline) {
-                consume();
-            }
+            skipRestOfLine();
         }
 
         skipNewlines();
@@ -317,6 +375,11 @@ std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
         // We need to look for '=' before '('
         // Simple approach: parse dest registers if we see identifier/bracket patterns
         hasDest = true;  // Tentatively
+    } else if (peek().kind == TokenKind::QuotedString &&
+               (lexer.peekAhead(1).kind == TokenKind::Equal ||
+                lexer.peekAhead(1).kind == TokenKind::Comma)) {
+        // A destination that does not read back bare is printed quoted.
+        hasDest = true;
     }
 
     if (hasDest) {
@@ -351,9 +414,9 @@ std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
         // Operands are optional, continue
     }
 
-    // Parse attributes in braces: { issueCycles = 4, latencyCycles = 56 }
-    if (!parseAttributes(*inst)) {
-        // Attributes are optional, but emit warning if missing
+    // Parse attributes in braces: { issueCycles = 4, latencyCycles = 56 }. A
+    // directive issues nothing, so it has no cycles to give.
+    if (!parseAttributes(*inst) && inst->opcodeStr != "asm_directive") {
         emitWarning("Instruction missing attributes (issueCycles, latencyCycles)", peek().line,
                     peek().column);
     }
@@ -362,26 +425,74 @@ std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
 }
 
 std::unique_ptr<ParsedInstruction> IRParser::parseLabel() {
-    // Format: label_name:
-    // Should only be called after verifying the pattern in parse()
-    if (peek().kind != TokenKind::Identifier) {
-        return nullptr;
-    }
+    // Format: label_name: or "name":, then an optional { alignment = N }.
+    // Callers check atLabel() first.
+    if (!atLabel()) return nullptr;
 
     const Token& labelTok = consume();
-
-    // Must be followed by colon (should always be true if called correctly)
-    if (peek().kind != TokenKind::Colon) {
-        // This should not happen if parse() verified the pattern correctly
-        return nullptr;
-    }
-
     consume();  // consume the colon
 
-    // Create a special ParsedInstruction to represent a label
-    // Store label name without the colon, set isLabel flag to true
-    auto inst = std::make_unique<ParsedInstruction>(std::string(labelTok.text), true);
+    std::string name = labelTok.kind == TokenKind::QuotedString ? unquote(labelTok.text)
+                                                                : std::string(labelTok.text);
+    auto inst = std::make_unique<ParsedInstruction>(std::move(name), true);
+    inst->line = labelTok.line;
+    inst->column = labelTok.column;
+    bool labelFlag = false;
+    if (!parseLabelAttributes(/*header=*/false, labelFlag, inst->alignment)) return nullptr;
     return inst;
+}
+
+bool IRParser::parseLabelAttributes(bool header, bool& isLabel, uint16_t& alignment) {
+    if (!check(TokenKind::LeftBrace)) return true;
+    const Token& open = consume();
+    bool sawAlignment = false;
+
+    while (!lexer.isAtEnd() && !check(TokenKind::Eof)) {
+        if (check(TokenKind::RightBrace)) {
+            consume();
+            if (header && sawAlignment && !isLabel) {
+                emitError("A block header's 'alignment' needs 'label'", open.line, open.column);
+                return false;
+            }
+            return true;
+        }
+        if (!check(TokenKind::Identifier)) {
+            emitError("Expected label attribute name");
+            return false;
+        }
+        const Token& name = consume();
+        if (header && name.text == "label" && !check(TokenKind::Equal)) {
+            isLabel = true;
+        } else if (name.text == "alignment") {
+            if (!expect(TokenKind::Equal, "Expected '=' after 'alignment'")) return false;
+            if (!check(TokenKind::IntegerLiteral)) {
+                emitError("Expected integer label alignment");
+                return false;
+            }
+            const Token& valueTok = consume();
+            const std::optional<int> value = safeStoi(std::string(valueTok.text));
+            if (!value || *value < 1 || *value > UINT16_MAX) {
+                emitError("Label alignment out of range: " + std::string(valueTok.text),
+                          valueTok.line, valueTok.column);
+                return false;
+            }
+            alignment = static_cast<uint16_t>(*value);
+            sawAlignment = true;
+        } else {
+            emitWarning("Unknown label attribute: " + std::string(name.text), name.line,
+                        name.column);
+            if (match(TokenKind::Equal) && !parseAttributeValue()) return false;
+        }
+
+        if (match(TokenKind::Comma)) continue;
+        if (!check(TokenKind::RightBrace)) {
+            emitError("Expected ',' or '}' after label attribute");
+            return false;
+        }
+    }
+
+    emitError("Unexpected end of file in label attributes");
+    return false;
 }
 
 std::unique_ptr<ParsedFunction> IRParser::parseFunction() {
@@ -480,14 +591,17 @@ std::vector<std::unique_ptr<ParsedFunction>> IRParser::parseAllFunctions(std::st
 }
 
 std::unique_ptr<ParsedBlock> IRParser::parseBlock() {
-    auto blockId = parseBlockLabel();
-    if (!blockId) {
-        emitError("Expected block label (^blockId:)");
+    const size_t diagnosticsBefore = diagnostics.size();
+    auto header = parseBlockLabel();
+    if (!header) {
+        if (diagnostics.size() == diagnosticsBefore) emitError("Expected block label (^blockId:)");
         return nullptr;
     }
 
     auto block = std::make_unique<ParsedBlock>();
-    block->blockId = *blockId;
+    block->blockId = std::move(header->id);
+    block->isLabel = header->isLabel;
+    block->labelAlignment = header->alignment;
     skipNewlines();
 
     while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
@@ -507,24 +621,21 @@ std::unique_ptr<ParsedBlock> IRParser::parseBlock() {
 
         // Try label syntax first: parseInstruction eats `ident:` as a broken destReg and can't
         // backtrack.
-        if (peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon) {
+        if (atLabel()) {
             auto label = parseLabel();
-            if (label) {
+            if (label)
                 block->instructions.push_back(std::move(label));
-                skipNewlines();
-                continue;
-            }
+            else
+                skipRestOfLine();
+            skipNewlines();
+            continue;
         }
 
         auto inst = parseInstruction();
         if (inst) {
             block->instructions.push_back(std::move(inst));
         } else {
-            // Error recovery
-            while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof &&
-                   peek().kind != TokenKind::Newline) {
-                consume();
-            }
+            skipRestOfLine();
         }
         skipNewlines();
     }
@@ -567,8 +678,8 @@ bool IRParser::parseSuccessorsLine(ParsedBlock& block) {
     return true;
 }
 
-std::optional<std::string> IRParser::parseBlockLabel() {
-    // Format: ^blockId:  (blockId stored without ^ for BasicBlock::label)
+std::optional<BlockHeader> IRParser::parseBlockLabel() {
+    // Format: ^blockId: [{ label, alignment = N }]  (blockId stored without ^)
     if (peek().kind != TokenKind::Identifier || peek().text.empty() || peek().text[0] != '^') {
         return std::nullopt;
     }
@@ -580,8 +691,11 @@ std::optional<std::string> IRParser::parseBlockLabel() {
     }
     consume();  // :
 
-    if (blockId.size() > 1) blockId = blockId.substr(1);  // strip ^
-    return blockId;
+    BlockHeader header;
+    header.id = blockId.size() > 1 ? blockId.substr(1) : blockId;  // strip ^
+    if (!parseLabelAttributes(/*header=*/true, header.isLabel, header.alignment))
+        return std::nullopt;
+    return header;
 }
 
 bool IRParser::parseDestRegisters(ParsedInstruction& inst) {
@@ -625,12 +739,7 @@ std::optional<std::string> IRParser::parseOperation() {
     }
 
     const Token& tok = consume();
-    std::string opStr(tok.text);
-
-    // Remove quotes from the string
-    if (opStr.length() >= 2 && opStr.front() == '"' && opStr.back() == '"') {
-        opStr = opStr.substr(1, opStr.length() - 2);
-    }
+    std::string opStr = unquote(tok.text);
 
     // Split by dot '.' if present: "ir_namespace.ds_load_b128" -> namespace="ir_namespace",
     // opStr="ds_load_b128"
@@ -844,10 +953,7 @@ std::optional<std::string> IRParser::parseAttributeValue() {
         return std::string(tok.text);
     }
     if (peek().kind == TokenKind::QuotedString) {
-        const Token& tok = consume();
-        std::string s(tok.text);
-        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
-        return s;
+        return unquote(consume().text);
     }
     if (peek().kind == TokenKind::KW_true) {
         consume();
@@ -918,10 +1024,7 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
 
     // Handle quoted string literals (e.g. directive operands)
     if (kind == TokenKind::QuotedString) {
-        const Token& tok = consume();
-        std::string s(tok.text);
-        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
-        return StinkyRegister(s);
+        return StinkyRegister(unquote(consume().text));
     }
 
     // Handle integer literals
@@ -1140,6 +1243,12 @@ void IRParser::skipNewlines() {
     }
 }
 
+void IRParser::skipRestOfLine() {
+    while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof && peek().kind != TokenKind::Newline) {
+        consume();
+    }
+}
+
 void IRParser::emitError(const std::string& message, unsigned line, unsigned column) {
     diagnostics.emplace_back(Diagnostic::Level::Error, message, line, column);
     hadError = true;
@@ -1181,6 +1290,55 @@ MultiParseResult parseAllSourceStringsWithDiagnostics(const std::string& sourceS
     result.diagnostics = parser.getDiagnostics();
 
     return result;
+}
+
+std::string quoteStirString(std::string_view text) {
+    std::string out;
+    out.reserve(text.size() + 2);
+    out += '"';
+    for (char c : text) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            default:
+                out += c;
+                break;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+bool readsBackBare(std::string_view text, bool asLabel) {
+    if (text.empty()) return false;
+    const std::string source(text);
+    IRLexer lexer(source);
+    lexer.lex();
+    const std::vector<Token>& tokens = lexer.getAllTokens();
+    if (tokens.size() != 2 || tokens[0].text != text) return false;
+    if (asLabel) {
+        // `^name:` would start a block, and `Successors:` the successor line.
+        return tokens[0].kind == TokenKind::Identifier && text.front() != '^' &&
+               text != "Successors";
+    }
+    IRParser parser(lexer);
+    const std::optional<StinkyRegister> operand = parser.parseOperand();
+    return operand && !parser.hasErrors() &&
+           operand->dataType == StinkyRegister::Type::LiteralString &&
+           operand->literalValue == text;
 }
 
 std::vector<ParsedInstruction> ParseResult::getInstructions() const {

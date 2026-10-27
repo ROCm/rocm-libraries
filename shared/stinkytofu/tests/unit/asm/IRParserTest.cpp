@@ -723,6 +723,89 @@ st.func @stray() {
     EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected end of input after the module");
 }
 
+TEST_F(IRParserTest, ReadsLabelAttributesAndQuotedLabels) {
+    const std::string input = R"(st.func @k() {
+^entry:
+  "st.s_branch"(label_loop) { issueCycles = 1, latencyCycles = 1 }
+^label_loop: { label, alignment = 16 }
+  label_mid: { alignment = 8 }
+  ".LBB0_1":
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_TRUE(result.diagnostics.empty());
+    const auto& blocks = result.functions.at(0)->blocks;
+    ASSERT_EQ(blocks.size(), 2u);
+    EXPECT_FALSE(blocks[0]->isLabel);
+    EXPECT_TRUE(blocks[1]->isLabel);
+    EXPECT_EQ(blocks[1]->labelAlignment, 16);
+    const auto& body = blocks[1]->instructions;
+    ASSERT_EQ(body.size(), 3u);
+    EXPECT_TRUE(body[0]->isLabel);
+    EXPECT_EQ(body[0]->opcodeStr, "label_mid");
+    EXPECT_EQ(body[0]->alignment, 8);
+    EXPECT_TRUE(body[1]->isLabel);
+    EXPECT_EQ(body[1]->opcodeStr, ".LBB0_1");
+    EXPECT_EQ(body[1]->alignment, 1);
+}
+
+TEST_F(IRParserTest, RejectsHeaderAlignmentWithoutLabel) {
+    MultiParseResult result =
+        parseAllSourceStringsWithDiagnostics("st.func @k() {\n^b: { alignment = 4 }\n}\n");
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(),
+              "A block header's 'alignment' needs 'label'");
+    EXPECT_EQ(result.diagnostics.size(), 1u);
+}
+
+TEST_F(IRParserTest, WarnsOnUnknownLabelAttribute) {
+    MultiParseResult result =
+        parseAllSourceStringsWithDiagnostics("st.func @k() {\n^b: { label, colour = 3 }\n}\n");
+
+    ASSERT_FALSE(result.hasErrors());
+    ASSERT_EQ(result.diagnostics.size(), 1u);
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Unknown label attribute: colour");
+    EXPECT_TRUE(result.functions.at(0)->blocks.at(0)->isLabel);
+}
+
+TEST_F(IRParserTest, DecodesEscapesInQuotedStrings) {
+    const std::string input = R"stir(st.func @k() {
+^entry:
+  "st.asm_directive"("TEXTBLOCK", ".amdgcn_target \"gfx\"\n\\x\t")
+}
+)stir";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    // A directive line needs no cycle attributes, so nothing warns.
+    EXPECT_TRUE(result.diagnostics.empty());
+    const auto& inst = result.functions.at(0)->blocks.at(0)->instructions.at(0);
+    ASSERT_EQ(inst->srcRegs.size(), 2u);
+    EXPECT_EQ(inst->srcRegs[1].literalValue, ".amdgcn_target \"gfx\"\n\\x\t");
+}
+
+TEST_F(IRParserTest, QuotesOnlyTextThatDoesNotReadBackBare) {
+    EXPECT_TRUE(readsBackBare("label_loop"));
+    EXPECT_TRUE(readsBackBare("MT1"));
+    EXPECT_TRUE(readsBackBare("vgprBase+0"));
+    EXPECT_TRUE(readsBackBare("0xffff0000"));
+    EXPECT_FALSE(readsBackBare("v0"));
+    EXPECT_FALSE(readsBackBare(".LBB0_1"));
+    EXPECT_FALSE(readsBackBare("v[vgprX+1]"));
+    EXPECT_FALSE(readsBackBare("two words"));
+    EXPECT_FALSE(readsBackBare("true"));
+    EXPECT_TRUE(readsBackBare("label_loop", /*asLabel=*/true));
+    EXPECT_FALSE(readsBackBare("Successors", /*asLabel=*/true));
+    EXPECT_FALSE(readsBackBare("^entry", /*asLabel=*/true));
+    EXPECT_EQ(quoteStirString("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"");
+}
+
 TEST_F(IRParserTest, ParsesBlockLabelWithCaret) {
     // Flat format with ^blockId: style label
     const std::string input = R"(^entry:

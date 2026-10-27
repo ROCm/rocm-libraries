@@ -23,7 +23,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
+#include "DirectiveTags.hpp"
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
@@ -42,7 +44,7 @@ static bool convertInstruction(AsmIRBuilder& irBuilder,
                                const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch,
                                std::vector<Diagnostic>& diagnostics) {
     if (inst->isLabel) {
-        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr);
+        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr, inst->alignment);
         if (labelInst && !inst->comment.empty())
             labelInst->addModifier<CommentData>(CommentData{inst->comment});
         return true;
@@ -63,12 +65,13 @@ static bool convertInstruction(AsmIRBuilder& irBuilder,
         const bool hasPayload = inst->srcRegs.size() > 1 &&
                                 inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
 
-        // RawAsmParser::makeTextBlock encodes pass-through text as
-        //   srcRegs[0] = "TEXTBLOCK", srcRegs[1] = raw text (with trailing '\n').
-        // The "TEXTBLOCK" sentinel is not part of the directive name; route the
-        // raw text into AsmDirective::value so the emitter prints it verbatim.
-        if (hasName && inst->srcRegs[0].literalValue == "TEXTBLOCK") {
-            d->kind = AsmDirectiveKind::TEXTBLOCK;
+        // RawAsmParser::makeTextBlock and the printer encode a directive the
+        // emitter writes as its text as srcRegs[0] = tag, srcRegs[1] = that text
+        // (a TEXTBLOCK's keeps its trailing '\n'). The tag is not a directive
+        // name; the text goes to AsmDirective::value so it emits verbatim.
+        for (const auto& [kind, tag] : kTextDirectiveTags) {
+            if (!hasName || inst->srcRegs[0].literalValue != tag) continue;
+            d->kind = kind;
             if (hasPayload) d->value = inst->srcRegs[1].literalValue;
             return true;
         }
@@ -148,6 +151,26 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string&
     return code;
 }
 
+/// Names an instruction refers to: literal operands, and the `mod.label` target
+/// a long branch carries. Directive text and labels are not references.
+static std::unordered_set<std::string> referencedNames(const ParsedFunction& parsedFunc) {
+    std::unordered_set<std::string> names;
+    for (const auto& block : parsedFunc.blocks) {
+        for (const auto& inst : block->instructions) {
+            if (inst->isLabel || inst->opcodeStr == "asm_directive") continue;
+            for (const StinkyRegister& reg : inst->srcRegs) {
+                if (reg.dataType == StinkyRegister::Type::LiteralString)
+                    names.insert(reg.literalValue);
+            }
+            auto label = inst->modifiers.find("mod.label");
+            if (label == inst->modifiers.end()) continue;
+            auto target = label->second.find("label");
+            if (target != label->second.end()) names.insert(target->second);
+        }
+    }
+    return names;
+}
+
 StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
     ParsedFunction& parsedFunc, Function& func, GfxArchID arch,
     std::vector<Diagnostic>& diagnostics) {
@@ -158,13 +181,21 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
 
     bool lost = false;
     std::unordered_map<std::string, BasicBlock*> blockMap;
+    const std::unordered_set<std::string> referenced = referencedNames(parsedFunc);
 
     for (auto& parsedBlock : parsedFunc.blocks) {
         BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
         blockMap[parsedBlock->blockId] = bb;
 
         AsmIRBuilder irBuilder(*bb, arch);
-        for (auto& inst : parsedBlock->instructions) {
+        // A block is a label when its header says so or an instruction names it,
+        // as in LLVM, where every block a branch reaches carries a label.
+        const auto& body = parsedBlock->instructions;
+        const bool spelledOut = !body.empty() && body.front()->isLabel &&
+                                body.front()->opcodeStr == parsedBlock->blockId;
+        if (!spelledOut && (parsedBlock->isLabel || referenced.count(parsedBlock->blockId) != 0))
+            irBuilder.createLabel(parsedBlock->blockId, parsedBlock->labelAlignment);
+        for (auto& inst : body) {
             if (!convertInstruction(irBuilder, inst, arch, diagnostics)) lost = true;
         }
     }

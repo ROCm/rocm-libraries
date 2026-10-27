@@ -82,6 +82,9 @@ class STINKYTOFU_EXPORT AsmPrinter {
     void printIR(const IRBase& ir, int baseIndent);
     void printRegister(const StinkyRegister& reg);
     void printInstruction(const StinkyInstruction& inst, int baseIndent);
+    /// `name:` with `{ alignment = N }` above 1; a name that does not read back
+    /// bare is quoted.
+    void printLabel(const StinkyInstruction& label, int baseIndent);
     void printDirective(const AsmDirective& directive, int baseIndent);
     void printSuccessorsLine(const BasicBlock& bb, int baseIndent);
 

@@ -7,7 +7,14 @@
 #ifdef STINKYTOFU_HAS_COMGR
 #include <amd_comgr/amd_comgr.h>
 
+#include <cstdio>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -142,6 +149,91 @@ std::string readLog(amd_comgr_data_set_t set) {
     return text;
 }
 
+int duplicateFd(int fd) {
+#ifdef _WIN32
+    return _dup(fd);
+#else
+    return dup(fd);
+#endif
+}
+
+int replaceFd(int from, int to) {
+#ifdef _WIN32
+    return _dup2(from, to);
+#else
+    return dup2(from, to);
+#endif
+}
+
+void closeFd(int fd) {
+#ifdef _WIN32
+    _close(fd);
+#else
+    close(fd);
+#endif
+}
+
+int fileFd(std::FILE* file) {
+#ifdef _WIN32
+    return _fileno(file);
+#else
+    return fileno(file);
+#endif
+}
+
+/// While active, points stderr (file descriptor 2) at a temporary file.
+/// comgr prints some assembler errors, such as an undefined label, there
+/// instead of in the action log. stderr belongs to the whole process, so
+/// another thread's output during the capture lands in it too.
+class StderrCapture {
+   public:
+    explicit StderrCapture(bool active) {
+        if (!active) return;
+        std::fflush(stderr);
+        file_ = std::tmpfile();
+        if (file_ == nullptr) return;
+        saved_ = duplicateFd(2);
+        if (saved_ >= 0 && replaceFd(fileFd(file_), 2) >= 0) return;
+        if (saved_ >= 0) closeFd(saved_);
+        saved_ = -1;
+        std::fclose(file_);
+        file_ = nullptr;
+    }
+
+    ~StderrCapture() {
+        restore();
+        if (file_ != nullptr) std::fclose(file_);
+    }
+
+    StderrCapture(const StderrCapture&) = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+
+    /// Put stderr back and return what was written to it.
+    std::string finish() {
+        restore();
+        if (file_ == nullptr) return {};
+        std::string text;
+        std::rewind(file_);
+        char buffer[4096];
+        size_t count = 0;
+        while ((count = std::fread(buffer, 1, sizeof(buffer), file_)) > 0)
+            text.append(buffer, count);
+        return text;
+    }
+
+   private:
+    void restore() {
+        if (saved_ < 0) return;
+        std::fflush(stderr);
+        replaceFd(saved_, 2);
+        closeFd(saved_);
+        saved_ = -1;
+    }
+
+    std::FILE* file_ = nullptr;
+    int saved_ = -1;
+};
+
 /// Logging is off when \p log is null; the toolchain probes run many of these.
 bool assemble(const std::string& asmString, const std::string& isaName, uint32_t wavefrontSize,
               std::string* log) {
@@ -183,9 +275,11 @@ bool assemble(const std::string& asmString, const std::string& isaName, uint32_t
             return false;
     }
 
+    StderrCapture capture(log != nullptr);
     auto status = amd_comgr_do_action(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
                                       actionInfo.handle, inputSet.handle, outputSet.handle);
-    if (log != nullptr) *log = readLog(outputSet.handle);
+    const std::string printed = capture.finish();
+    if (log != nullptr) *log = readLog(outputSet.handle) + printed;
     return status == AMD_COMGR_STATUS_SUCCESS;
 }
 

@@ -132,6 +132,9 @@ class CFGBuilderPassImpl : public Pass {
                 auto labelData = inst->getModifier<LabelData>();
                 labelName = labelData ? labelData->label : "";
                 count = 0;
+                // A block that starts with its own label already is that block;
+                // splitting there would make a second block of the same name.
+                if (splitPos == flatBB->begin() && labelName == flatBB->getLabel()) continue;
                 bbName = labelName;
             } else {
                 // Split piece: build "<base>_<N>", uniquify, and carry the

@@ -22,8 +22,10 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -109,6 +111,8 @@ struct ParsedInstruction {
     /// Source position, for a diagnostic raised after parsing. 0 when unknown.
     unsigned line = 0;
     unsigned column = 0;
+    /// A label's `{ alignment = N }`; 1 when it has none.
+    uint16_t alignment = 1;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}
@@ -125,6 +129,9 @@ struct ParsedBlock {
     /// Position of the `Successors:` line. 0 when the block has none.
     unsigned successorsLine = 0;
     unsigned successorsColumn = 0;
+    /// `^name: { label, alignment = N }`: the block starts with a LABEL of its own name.
+    bool isLabel = false;
+    uint16_t labelAlignment = 1;
 };
 
 /// Parsed function: name + blocks (Function -> BasicBlock -> IRBase hierarchy)
@@ -190,5 +197,13 @@ struct MultiParseResult {
 /// which reads the flat form.
 STINKYTOFU_EXPORT MultiParseResult
 parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
+
+/// \p text as a STIR quoted string, with `\\`, `\"`, `\n`, `\t` and `\r` escaped.
+STINKYTOFU_EXPORT std::string quoteStirString(std::string_view text);
+
+/// Whether \p text, printed without quotes, parses back as that same literal: as
+/// an operand, or with \p asLabel as a label name. The printer quotes any text
+/// for which it does not.
+STINKYTOFU_EXPORT bool readsBackBare(std::string_view text, bool asLabel = false);
 
 }  // namespace stinkytofu
