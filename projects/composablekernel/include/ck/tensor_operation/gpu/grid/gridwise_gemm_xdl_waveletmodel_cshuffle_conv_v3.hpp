@@ -251,7 +251,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     };
 
-    using NamedBarrier = NamedBarrier<TileMathThreadGroup, UseNamedBarrier>;
+    using NamedBarrierType = NamedBarrier<TileMathThreadGroup, UseNamedBarrier>;
 
     using CShuffleBlockTransferThreadGroup = ThisThreadBlock<TileMathThreadGroupSize>;
 
@@ -917,7 +917,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                 const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                 const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                     c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                const NamedBarrier& barrier)
+                                const NamedBarrierType& barrier)
     {
         barrier.Init();
 
@@ -1169,8 +1169,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     {
         if constexpr(UseNamedBarrier)
         {
-            __shared__ typename NamedBarrier::barrier_t barrier_lds;
-            NamedBarrier barrier(&barrier_lds);
+            __shared__ typename NamedBarrierType::barrier_t barrier_lds;
+            NamedBarrierType barrier(&barrier_lds);
 
             Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 p_a_grid,
@@ -1186,7 +1186,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
         else
         {
-            NamedBarrier barrier(nullptr);
+            NamedBarrierType barrier(nullptr);
             Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 p_a_grid,
                 p_b_grid,
