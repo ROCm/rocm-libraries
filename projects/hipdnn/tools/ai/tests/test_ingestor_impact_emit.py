@@ -81,6 +81,40 @@ def builder_src(params=(), body="v1"):
     )
 
 
+# rocke.helpers.KernelModule in miniature: a primary kernel plus role-keyed companions.
+KERNEL_MODULE = """
+class KernelModule:
+    def __init__(self, primary, companions):
+        self.primary, self.companions = primary, dict(companions)
+    @property
+    def kernels(self):
+        return (self.primary, *self.companions.values())
+"""
+
+
+def module_builder_src(reduce_params=(), reduce_body="r1"):
+    """A builder returning a two-launch KernelModule: the primary, then a `reduce` companion."""
+    ps = "".join(f', ("{n}", "{t}")' for n, t in reduce_params)
+    return (
+        "import dataclasses\n"
+        "from rocke.helpers import KernelModule\n"
+        "@dataclasses.dataclass\n"
+        "class Spec:\n    n: int = 1\n    boom: bool = False\n\n"
+        "def build_fake(spec, arch):\n"
+        '    p = [("q", "ptr addrspace(1)"), ("n", "i32")]\n'
+        f'    r = [("out", "ptr addrspace(1)"){ps}]\n'
+        '    return KernelModule({"params": p, "body": "v1"},\n'
+        f'                        {{"reduce": {{"params": r, "body": "{reduce_body}"}}}})\n'
+    )
+
+
+def module_files(**kw):
+    files = tree_files()
+    files[f"{PROVIDER}/rocke/platform/python/rocke/helpers/__init__.py"] = KERNEL_MODULE
+    files[BUILDER] = module_builder_src(**kw)
+    return files
+
+
 KDP_VARIANTS = ({"name": "v_a", "spec": {"n": 1}}, {"name": "v_b", "spec": {"n": 2}})
 
 
@@ -209,6 +243,9 @@ def scenarios():
     s["cpp_pin"][
         f"{PROVIDER}/descriptor-packaging/python/hkp_pack/rocke_compile.py"
     ] = (HELPERS + '_BACKEND = "cpp"\n')
+    s["module"] = module_files()
+    s["module_wide"] = module_files(reduce_params=[("lse", "ptr addrspace(1)")])
+    s["module_body"] = module_files(reduce_body="r2")
     return s
 
 
@@ -322,7 +359,7 @@ def test_extra_param_lists_every_variant_and_shows_head_list(emit, repo, tmp_pat
 def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
     rc, doc = run(emit, repo, "base", "body", tmp_path)
     assert rc == 0
-    assert doc["schema"] == 3
+    assert doc["schema"] == 4
     # the recorded ids are the real tree ids, and differ when the sides differ
     assert doc["base_tree"] == git_out(repo, "rev-parse", "base^{tree}")
     assert doc["head_tree"] == git_out(repo, "rev-parse", "body^{tree}")
@@ -330,6 +367,28 @@ def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
     f = only_family(doc)
     assert f["params_changed"] == []
     assert f["ir_changed"] == ["v_a", "v_b"]
+
+
+@pytest.mark.parametrize(
+    "head, params_changed, ir_changed",
+    [("module_wide", ["v_a", "v_b"], ["v_a", "v_b"]), ("module_body", [], ["v_a", "v_b"])],
+    ids=["companion-gains-a-param", "companion-body-only"],
+)  # fmt: skip
+def test_kernel_module_builder_records_and_compares_every_launch(
+    emit, repo, tmp_path, head, params_changed, ir_changed
+):
+    # catches: a KernelModule passed whole to the single-kernel lowering (every variant fails),
+    # or only its primary lowered, so a companion launch's kernargs or body change reads equal
+    _, doc = run(emit, repo, "module", head, tmp_path)
+    f = only_family(doc)
+    assert f["failures"] == {"base": {}, "head": {}}
+    assert f["params"]["head"] == [["q", "ptr addrspace(1)"], ["n", "i32"]]
+    reduce = [["out", "ptr addrspace(1)"]] + (
+        [["lse", "ptr addrspace(1)"]] if head == "module_wide" else []
+    )
+    assert f["companions"]["head"] == {"reduce": reduce}
+    assert f["params_changed"] == params_changed
+    assert f["ir_changed"] == ir_changed
 
 
 def test_removed_variant_is_only_in_base_and_unchanged_one_is_not_flagged(

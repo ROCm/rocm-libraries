@@ -10,9 +10,11 @@ only read) and a child interpreter with an allow-listed environment builds every
 variant there, lowers it to LLVM IR with the Python backend (no GPU, comgr or network),
 and records the kernarg list parsed from the IR `define` line, the SHA-256 of the IR
 text, and the COMGR inputs the packer adds to that text (ISA name, codegen options,
-fresh-process compile): a code object can change while its IR does not. A packer that
-pins another lowering backend fails every variant. This EXECUTES rocKE code from the
-reviewed revisions, like building the head does.
+fresh-process compile): a code object can change while its IR does not. A builder that
+returns a `KernelModule` is lowered kernel by kernel, as the packer does: `params` is the
+primary's list, `companions` each companion launch's list by role, and the digest covers
+every kernel. A packer that pins another lowering backend fails every variant. This
+EXECUTES rocKE code from the reviewed revisions, like building the head does.
 
 Variants come from every `*.kdp.json` under the shipped descriptor root whose
 `kernelDescriptors[].kernel_source` names a rocKE `source` + `builder`. A KDP held by
@@ -447,6 +449,13 @@ class _Helpers:
         self.lower = need["_lower_llvm_via_backend"]
         self.rcompile = rcompile
         self.compile_arch = getattr(rc, "rocke_compile_arch", None)
+        # A builder may return a KernelModule (a primary plus role-keyed companions) that the
+        # packer links into one code object; a revision without the type has no such builder.
+        try:
+            from rocke.helpers import KernelModule
+        except ImportError:
+            KernelModule = None
+        self.kernel_module = KernelModule
         self.require_arch_sig = getattr(rc, "_require_spec_arch_signature", None)
         self.check_predicate = getattr(rc, "_check_support_predicate", None)
         # The packer's lowering backend; a tree without the pin is taken as Python.
@@ -502,12 +511,29 @@ def _build_one(h, v, arch):
     if callable(h.check_predicate):
         h.check_predicate(module, v["builder"], obj, arch)
     kd = fn(obj, arch=arch)
-    text = h.lower(kd, arch=arch, backend="python", spec=None)
-    return {
-        "params": parse_kernargs(text),
-        "ir": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    # A KernelModule is lowered kernel by kernel, as the packer's `compile_module` does; each
+    # companion is its own launch with its own kernarg list.
+    is_module = h.kernel_module is not None and isinstance(kd, h.kernel_module)
+    launches = [("", kd.primary), *kd.companions.items()] if is_module else [("", kd)]
+    texts = [h.lower(k, arch=arch, backend="python", spec=None) for _, k in launches]
+    digest = hashlib.sha256()
+    for (role, _), text in zip(launches, texts):
+        digest.update(f"{role}\0{len(text)}\0".encode("utf-8") + text.encode("utf-8"))
+    built = {
+        "params": parse_kernargs(texts[0]),
+        "ir": (
+            digest.hexdigest()
+            if is_module
+            else hashlib.sha256(texts[0].encode()).hexdigest()
+        ),
         "comgr": _comgr_inputs(h.rcompile, kd, arch),
     }
+    if is_module:
+        built["companions"] = {
+            role: parse_kernargs(text)
+            for (role, _), text in zip(launches[1:], texts[1:])
+        }
+    return built
 
 
 def child_main(root, out):
@@ -685,6 +711,11 @@ def run_side(repo, rev, tree, flavor, timeout, label):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _launch_params(built):
+    """The kernarg lists of one built variant: the primary's, then each companion's by role."""
+    return built["params"], built.get("companions")
+
+
 def compare(base_side, head_side):
     def by_key(side):
         return {(f["arch"], f["source"], f["builder"]): f for f in side["families"]}
@@ -699,7 +730,9 @@ def compare(base_side, head_side):
         built_h = fh["built"] if fh else {}
         common = [n for n in names_h if n in built_h and n in built_b]
         params_changed = [
-            n for n in common if built_b[n]["params"] != built_h[n]["params"]
+            n
+            for n in common
+            if _launch_params(built_b[n]) != _launch_params(built_h[n])
         ]
         ir_changed = [n for n in common if built_b[n]["ir"] != built_h[n]["ir"]]
         # A side that cannot tell its COMGR inputs (None) differs from one that can.
@@ -733,6 +766,15 @@ def compare(base_side, head_side):
                     "base": built_b[shown]["params"] if shown in built_b else None,
                     "head": built_h[shown]["params"] if shown in built_h else None,
                 },
+                # role -> kernarg list of each companion launch of a KernelModule builder
+                "companions": {
+                    "base": (
+                        built_b[shown].get("companions") if shown in built_b else None
+                    ),
+                    "head": (
+                        built_h[shown].get("companions") if shown in built_h else None
+                    ),
+                },
                 "failures": {
                     "base": dict(fb["failures"]) if fb else {},
                     "head": dict(fh["failures"]) if fh else {},
@@ -763,7 +805,7 @@ def cmd_run(a):
     ]
     seconds = round(time.time() - t0, 1)
     doc = {
-        "schema": 3,
+        "schema": 4,
         "tool": "impact_emit",
         "flavor": flavor,
         "base": a.base,

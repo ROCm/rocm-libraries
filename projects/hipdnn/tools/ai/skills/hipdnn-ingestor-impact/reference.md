@@ -25,6 +25,21 @@ Test code, CMake, CI test-category lists and `requirements*.txt` are not judged 
 `outside` for status, but tests are still searched as copies and readers, so a stale pin or a stale
 import is reported.
 
+How the copies are paired:
+
+- A `launch_surface` entry's `python_source` symbol resolves as `launch_surface.py --check`
+  resolves it: any function of that name in the module, a method or nested function included. It
+  is reported missing only when no function of that name exists.
+- A declared `kernargs` pair compares each static C++ list in its `cpp_mirror` with the builder
+  whose `b.param` list it matches, searched in the surface's module and the manifest's own
+  `source` module, the declared function first. A multi-launch pack holds one list per launch (a
+  segment and a reduce kernel), and a declared function may be a `SignatureBuilder` factory with no
+  `b.param` list; the row then names the builder it was paired with. A list that matches no
+  builder is compared with the builder it shares most names with, and is a `mismatch`.
+- A copy that holds the old list is `changed`, not `mismatch`, when it still matches the new
+  list with the new conditional parameters left out: variants that do not enable them pass that
+  list. The variants that do enable them are what the emitter or a device run settles.
+
 ## The scripts
 
 - `scripts/impact.py` reads git objects only (`cat-file`, `diff`, `ls-tree`, `grep`,
@@ -69,8 +84,10 @@ left to other checks: `BUILD` is CMake and CI test-category lists, `DEPS` is `re
 Run it when any rocKE or `hkp_pack` Python file changed in code, including rows the report calls
 `inert`: the static reachability it uses (a module counts as shipped when a shipped builder imports
 it) misses a call through a dynamic lookup. It records each variant's argument list, IR digest and
-COMGR inputs (ISA name, codegen options, fresh-process compile); `impact.py report --emit` folds the
-result into the rows.
+COMGR inputs (ISA name, codegen options, fresh-process compile); a builder that returns a
+`KernelModule` is lowered kernel by kernel, as the packer does, and each companion launch's
+argument list is recorded and compared too. `impact.py report --emit` folds the result into the
+rows.
 
 - The emitter exiting 1 (it could not run, or a side timed out) leaves no proof. Never fold an emit
   file from an earlier run. `impact.py` refuses an emit file made for another base or head, or one
@@ -119,3 +136,12 @@ a flags-ON build when one exists), the architecture, and the flags.
 - A rocKE C++ engine source (`rocke/platform/cpp/`) reads `inert` only while no provider build file
   outside rocKE links the engine and the packer pins the Python backend; the row says so, so check
   that both still hold for the change.
+- A static list is paired with the builder its names match. A C++ list that by mistake matches a
+  different builder of the same modules exactly is compared with that one, not the launch it is
+  used for; the row names the pairing, so check it.
+- The emitter compares emitted arguments with the static C++ lists only for variants whose
+  arguments changed between base and head. The variants of a new engine have no base side, so
+  their lists are checked statically only.
+- Only `std::vector<KernelArgument>` functions are read as C++ argument lists. A list built by
+  helper calls instead (`gfx942Pointer("query_ptr", ...)`) is not parsed: its declared pair reads
+  `changed` with `cannot compare`, so compare it with the builder by hand.

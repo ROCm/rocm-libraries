@@ -508,7 +508,8 @@ def family(**fields) -> dict:
     fam = dict(arch="gfx950", source="kernels/gfx950/attn.py", builder="build_attn", kdp=KDP,
                spec_origin="kdp-in-git", variants={"base": 1, "head": 1}, only_in_base=[],
                only_in_head=[], params_changed=[], ir_changed=[], comgr_changed=[],
-               params={"base": None, "head": None}, failures={"base": {}, "head": {}})  # fmt: skip
+               params={"base": None, "head": None}, companions={"base": None, "head": None},
+               failures={"base": {}, "head": {}})  # fmt: skip
     fam.update(fields)
     return fam
 
@@ -516,7 +517,7 @@ def family(**fields) -> dict:
 def write_emit(path, repo, base, head, families=None, **fields):
     """An impact_emit document made for base..head, holding `families` (default: one family
     built from `fields`)."""
-    doc = {"schema": 3, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
+    doc = {"schema": 4, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
            "base_tree": tree_of(repo, base), "head_tree": tree_of(repo, head),
            "families": [family(**fields)] if families is None else families,
            "not_inspected": [], "seconds": 1.0}  # fmt: skip
@@ -658,18 +659,24 @@ def test_emit_made_for_another_base_or_head_is_refused(mod, capsys, tmp_path):
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda d: d.update(schema=2),
+        lambda d: d.update(schema=3),
         lambda d: d.update(not_inspected={}),
         lambda d: d["families"][0].update(failures=[]),
         lambda d: d["families"][0].pop("variants"),
         lambda d: d["families"][0].update(params={"base": None, "head": "q_ptr"}),
+        lambda d: d["families"][0].pop("companions"),
+        lambda d: d["families"][0].update(
+            companions={"base": None, "head": {"reduce": None}}
+        ),
     ],
     ids=[
-        "schema-2-without-comgr-inputs",
+        "schema-3-without-companions",
         "not-inspected-dict",
         "failures-list",
         "no-variants",
         "params-str",
+        "no-companions",
+        "companion-without-params",
     ],
 )
 def test_malformed_emit_exits_one_instead_of_folding_or_crashing(
@@ -809,6 +816,175 @@ def test_declared_mirror_with_no_comparable_list_stays_visible(mod, capsys, tmp_
     head = commit(repo, {BUILDER: BODY_EDIT})
     rows = [r for r in rows_of(report(mod, capsys, repo, base, head), "kernargs") if r["path"] == PACK]  # fmt: skip
     assert [r["status"] for r in rows] == ["changed"]
+
+
+def manifest(*surfaces, source=None) -> str:
+    """An engine manifest with `(name, python_source, cpp_mirror)` surfaces and, when given, the
+    `(source, builder)` the packer compiles."""
+    lines = ["arch: gfx950", f"provider_root: {HKP.rstrip('/')}"]
+    if source:
+        lines += [f"source: {source[0]}", f"builder: {source[1]}"]
+    lines.append("launch_surface:")
+    for name, locator, mirror in surfaces:
+        lines += [f"  - name: {name}", f"    python_source: {locator}", f"    cpp_mirror: {mirror}",
+                  "    kmd_fields: []", "    guard: none", "    test: none"]  # fmt: skip
+    return "\n".join(lines) + "\n"
+
+
+def ptr_sig(name, names):
+    """A static `KernelArgument` list function holding `names`, all pointers."""
+    items = ",\n            ".join(f'KernelArgument{{"global_buffer", PTR, {8 * i}, "{n}"}}' for i, n in enumerate(names))  # fmt: skip
+    return f"std::vector<KernelArgument> {name}()\n{{\n    return {{{items}}};\n}}\n"
+
+
+GEOM = HKP + "src/engines/kernel_ingestor_engine/packs/Gfx950Geometry.hpp"
+WITH_METHOD = (
+    BUILD
+    + "\n\nclass Tuning:\n    def launch_block(self):\n        return (64, 1, 1)\n"
+)
+
+
+@pytest.mark.parametrize(
+    "after, status",
+    [(WITH_METHOD.replace("(64, 1, 1)", "(128, 1, 1)"), "changed"),
+     (WITH_METHOD.replace("def launch_block", "def launch_blk"), "mismatch")],
+    ids=["method-edited", "method-renamed"],
+)  # fmt: skip
+def test_launch_surface_naming_a_method_resolves_like_launch_surface_check(
+    mod, capsys, tmp_path, after, status
+):
+    # catches: a python_source symbol looked up only at module level, so every method-defined
+    # surface reads "missing"; or a renamed method no longer reported missing
+    block = manifest(("block", "kernels/gfx950/attn.py:launch_block", GEOM))
+    repo, base = make_repo(
+        tmp_path, {BUILDER: WITH_METHOD, GEOM: "int block();\n", MANIFEST: block}
+    )
+    head = commit(repo, {BUILDER: after})
+    rows = rows_of(report(mod, capsys, repo, base, head), "surfaces")
+    assert [(r["name"], r["status"]) for r in rows] == [("block:launch_block", status)]
+
+
+SIG_FACTORY = HKP + "rocke/library/kernels/common/sig.py"
+FACTORY = 'def attn_signature(dtype):\n    return SignatureBuilder().ptr("q_ptr", dtype).build()\n'
+FACTORY_MANIFEST = manifest(
+    ("kernargs", "kernels/common/sig.py:attn_signature", PACK),
+    source=("kernels/gfx950/attn.py", "build_attn"),
+)
+
+
+@pytest.mark.parametrize(
+    "edit, status, says",
+    [({PACK: PACK_STATIC + "int unrelated = 1;\n"}, "changed", "the manifest declares attn_signature"),
+     ({PACK: PACK_STATIC.replace('"q_ptr"', "@@").replace('"k_ptr"', '"q_ptr"').replace("@@", '"k_ptr"')},
+      "mismatch", "disagrees with builder build_attn"),
+     ({SIG_FACTORY: FACTORY.replace("def attn_signature", "def attn_sig")},
+      "mismatch", "function attn_signature")],
+    ids=["mirror-edited", "mirror-reordered", "factory-renamed"],
+)  # fmt: skip
+def test_kernargs_pair_declaring_a_signature_factory_compares_the_manifest_builder(
+    mod, capsys, tmp_path, edit, status, says
+):
+    # catches: a declared function with no `b.param` list reported as a missing builder, so a
+    # SignatureBuilder factory reads BREAKS; or the fallback hiding a real disagreement
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, SIG_FACTORY: FACTORY, PACK: PACK_STATIC,
+                                      MANIFEST: FACTORY_MANIFEST})  # fmt: skip
+    head = commit(repo, edit)
+    rows = [r for r in rows_of(report(mod, capsys, repo, base, head), "kernargs") if r["path"] == PACK]  # fmt: skip
+    assert [r["status"] for r in rows] == [status]
+    assert says in rows[0]["reason"]
+
+
+TWO_LAUNCHES = """\
+def build_seg(b, spec):
+    b.param("part_ptr", PTR)
+    b.param("q_ptr", PTR)
+    b.param("lens_ptr", PTR)
+    b.param("scale", F32)
+    return b
+
+
+def build_reduce(b, spec):
+    b.param("out_ptr", PTR)
+    b.param("part_ptr", PTR)
+    b.param("lens_ptr", PTR)
+    return b
+"""
+SEG_SIG = ptr_sig("segSignature", ["part_ptr", "q_ptr", "lens_ptr"]).replace(
+    '"lens_ptr"}',
+    '"lens_ptr"},\n            KernelArgument{"by_value", F32, 24, "scale"}',
+)
+
+
+@pytest.mark.parametrize(
+    "reduce_names, status",
+    [(["out_ptr", "part_ptr", "lens_ptr"], "changed"), (["out_ptr", "lens_ptr"], "mismatch")],
+    ids=["reduce-list-agrees", "reduce-list-drops-a-param"],
+)  # fmt: skip
+def test_multi_launch_pack_compares_each_list_with_its_own_builder(
+    mod, capsys, tmp_path, reduce_names, status
+):
+    # catches: every static list of a multi-launch pack compared with the one declared builder,
+    # so the reduce list reads as disagreeing with the segment builder; or a stale reduce list
+    # no longer caught
+    seg = manifest(("kernargs", "kernels/gfx950/attn.py:build_seg", PACK))
+    pack = SEG_SIG + "\n" + ptr_sig("reduceSignature", reduce_names)
+    repo, base = make_repo(tmp_path, {BUILDER: TWO_LAUNCHES, PACK: pack, MANIFEST: seg})
+    head = commit(
+        repo, {BUILDER: TWO_LAUNCHES.replace("return b", "x = 1\n    return b")}
+    )
+    rows = rows_of(report(mod, capsys, repo, base, head), "kernargs")
+    by_func = {r["name"]: r for r in rows if r["path"] == PACK}
+    assert by_func["declared:segSignature"]["status"] == "changed"
+    reduce = by_func["declared:reduceSignature"]
+    assert reduce["status"] == status and "build_reduce" in reduce["reason"]
+
+
+@pytest.mark.parametrize(
+    "added, status",
+    [('    if spec.lse:\n        b.param("lse_ptr", PTR)\n', "changed"),
+     ('    b.param("lse_ptr", PTR)\n', "mismatch")],
+    ids=["conditional-param-added", "unconditional-param-added"],
+)  # fmt: skip
+def test_copy_without_a_newly_added_conditional_param_is_not_a_mismatch(
+    mod, capsys, tmp_path, added, status
+):
+    # catches: a copy of the list without an optional param, which variants that do not enable
+    # it still pass, read as a break; or a copy missing a required new param read as fine
+    repo, base = abi_repo(tmp_path)
+    head = commit(
+        repo, {BUILDER: BUILD.replace("    return b", added + "    return b")}
+    )
+    (row,) = rows_of(report(mod, capsys, repo, base, head), "kernargs")
+    assert row["status"] == status and row["counterparts"][0]["path"] == PIN
+
+
+@pytest.mark.parametrize(
+    "reduce_params, status",
+    [([["out_ptr", "ptr"], ["part_ptr", "ptr"], ["lens_ptr", "ptr"]], None),
+     ([["out_ptr", "ptr"], ["part_ptr", "ptr"], ["lens_ptr", "ptr"], ["lse_ptr", "ptr"]], "mismatch")],
+    ids=["companion-agrees", "companion-gains-a-param"],
+)  # fmt: skip
+def test_emit_fold_compares_each_companion_launch_with_its_static_list(
+    mod, capsys, tmp_path, reduce_params, status
+):
+    # catches: only a KernelModule's primary launch compared with the pack, so a companion's
+    # changed kernargs read as consistent
+    pack = (
+        PACK_STATIC
+        + "\n"
+        + ptr_sig("reduceSignature", ["out_ptr", "part_ptr", "lens_ptr"])
+    )
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, PACK: pack})
+    head = commit(repo, {BUILDER: BODY_EDIT})
+    primary = [["q_ptr", "ptr"], ["k_ptr", "ptr"], ["scale", "float"]]
+    emit = write_emit(tmp_path / "m.json", repo, base, head, params_changed=["v"],
+                      params={"base": None, "head": primary},
+                      companions={"base": None, "head": {"reduce": reduce_params}})  # fmt: skip
+    data = report(mod, capsys, repo, base, head, "--emit", emit)
+    bad = rows_of(data, "kernargs", "mismatch")
+    assert [r["status"] for r in bad] == ([status] if status else [])
+    if status:
+        assert "build_attn[reduce]" in bad[0]["reason"] and bad[0]["path"] == PACK
 
 
 @pytest.mark.parametrize(

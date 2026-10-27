@@ -35,8 +35,9 @@ Rollup (last line of `report`):
   Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected[; not judged here: ...])
                   | N/A (no surface file[; not judged here: ...])
 
-`report --emit FILE.json` folds in impact_emit.py output (schema 3), which must have been made for
-the same base and head trees: changed params vs a static C++ list is a mismatch; changed IR or
+`report --emit FILE.json` folds in impact_emit.py output (schema 4), which must have been made for
+the same base and head trees: changed params of any launch (a KernelModule builder's companions
+included) vs the static C++ list that mirrors that launch is a mismatch; changed IR or
 COMGR inputs are `changed` for that arch; when every family is equal (nothing changed, nothing
 failed, nothing not inspected) the rows that were `changed` only because a shipped module changed
 become `inert`, but only on modules a family with built variants imports, and never on code that
@@ -943,6 +944,16 @@ def function_nodes(tree) -> dict:
     return found
 
 
+def defs_named(tree, name) -> list:
+    """[(qualname, FunctionDef)] of every def called `name`, methods and nested ones included,
+    in source order: how `launch_surface.py --check` resolves a `python_source` symbol.
+    """
+    if tree is None or not name:
+        return []
+    found = [(q, n) for q, n in function_nodes(tree).items() if n.name == name]
+    return sorted(found, key=lambda item: item[1].lineno)
+
+
 def string_lists(path: str, text: str, tree=None) -> list:
     """Ordered string-literal lists of 2+ items: [(names, start, end, function)]. Python by AST;
     other text by quoted runs inside `{...}` or `[...]`."""
@@ -1219,10 +1230,26 @@ class Surface:
     manifest: str
     name: str
     module: str
-    function: str
+    #: The symbol `python_source` names, or None when its locator is prose.
+    function: str | None
     cpp_mirror: str
     test: str
     arch: str | None
+    #: The manifest's own `source` module and `builder`: what the packer compiles.
+    builder_module: str | None = None
+    builder: str | None = None
+
+
+#: `launch_surface.py`'s locator symbol: an identifier, or `Class::method` for C++.
+_LEADING_SYMBOL = re.compile(r"[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*")
+
+
+def leading_symbol(locator: str):
+    """The symbol a `python_source` locator names, by `launch_surface.py`'s rule: the first
+    word after the path when it is an identifier, else None (the locator is prose)."""
+    rest = locator.split(":", 1)[1].strip() if ":" in locator else locator.strip()
+    token = rest.split(None, 1)[0] if rest.split() else ""
+    return token if _LEADING_SYMBOL.fullmatch(token) else None
 
 
 def load_surfaces(tree: Tree) -> list:
@@ -1244,21 +1271,26 @@ def load_surfaces(tree: Tree) -> list:
             manifest.get("launch_surface"), list
         ):
             continue
-        root = str(manifest.get("provider_root") or HKP).rstrip("/") + "/"
+        library = (
+            str(manifest.get("provider_root") or HKP).rstrip("/") + "/rocke/library/"
+        )
+        source, builder = manifest.get("source"), manifest.get("builder")
+        own = isinstance(source, str) and isinstance(builder, str)
         for entry in manifest["launch_surface"]:
-            source = entry.get("python_source") if isinstance(entry, dict) else None
-            if not isinstance(source, str) or ":" not in source:
+            locator = entry.get("python_source") if isinstance(entry, dict) else None
+            if not isinstance(locator, str) or ":" not in locator:
                 continue
-            module, function = source.rsplit(":", 1)
             out.append(
                 Surface(
                     path,
                     str(entry.get("name")),
-                    root + "rocke/library/" + module.strip(),
-                    function.strip(),
+                    library + locator.split(":", 1)[0].strip(),
+                    leading_symbol(locator),
                     str(entry.get("cpp_mirror") or "").split(":", 1)[0].strip(),
                     str(entry.get("test") or "").split(":", 1)[0].strip(),
                     str(manifest.get("arch") or "") or None,
+                    library + source.strip() if own else None,
+                    builder.strip() if own else None,
                 )
             )
     return out
@@ -1862,18 +1894,20 @@ class Work:
     line: int
 
 
-def find_copies(ctx: Ctx, work: list) -> dict:
-    """(path, qual) -> counterparts holding the old kernarg list, searched in both trees by the
-    ordered-name sequence. A copy still holding the old list after is unmoved; one that held it
-    before and no longer does moved with the producer."""
+def find_copies(ctx: Ctx, work: list) -> tuple:
+    """((path, qual) -> counterparts holding the old kernarg list, (path, line, moved) -> the
+    names that counterpart holds), searched in both trees by the ordered-name sequence. A copy
+    still holding the old list after is unmoved; one that held it before and no longer does moved
+    with the producer."""
     targets = {}
     for w in work:
         for names in (w.old.names, w.old.unconditional):
             if len(names) > 1:
                 targets.setdefault(tuple(names), set()).add((w.change.path, w.qual))
     copies = {(w.change.path, w.qual): [] for w in work}
+    held_names = {}
     if not targets:
-        return copies
+        return copies, held_names
     patterns = [f'"{n}"' for n in sorted({names[0] for names in targets})]
     hits = grep_trees([ctx.before, ctx.after], patterns, ["-F", "-l"])
     candidates = {
@@ -1898,7 +1932,8 @@ def find_copies(ctx: Ctx, work: list) -> dict:
                     entry = cp(path, before[0], True)
                 if entry and entry not in copies[target]:
                     copies[target].append(entry)
-    return copies
+                    held_names[(path, entry["line"], entry["moved"])] = list(names)
+    return copies, held_names
 
 
 def kernarg_rows(ctx: Ctx) -> list:
@@ -1945,10 +1980,17 @@ def kernarg_rows(ctx: Ctx) -> list:
                     "; a type or attribute change moves the kernarg layout",
                     arch=arch, foldable=True))  # fmt: skip
     if work:
-        copies = find_copies(ctx, work)
+        copies, held_names = find_copies(ctx, work)
         for w in work:
             found = copies[(w.change.path, w.qual)]
             unmoved = [c for c in found if not c["moved"]]
+            # A copy without params the new list adds only conditionally is still one of its
+            # forms: only the variants that enable them disagree, which the emitter settles.
+            stale = [
+                c for c in unmoved
+                if w.new is None
+                or not compatible(held_names[(c["path"], c["line"], False)], w.new)
+            ]  # fmt: skip
             if w.new is None:
                 change = "absent after (deleted or renamed)"
             else:
@@ -1959,54 +2001,93 @@ def kernarg_rows(ctx: Ctx) -> list:
                 if found
                 else "no copy found"
             )
+            if unmoved and not stale:
+                where += (
+                    "; each still matches the new list without its conditional params, so "
+                    "only variants that enable them can disagree"
+                )
             rows.append(make_row("kernargs", w.change.path, w.line, w.qual,
-                "mismatch" if unmoved else "changed",
+                "mismatch" if stale else "changed",
                 f"b.param list of {w.qual} changed ({change}); {where}",
-                found, arch=arch_of(w.change.path), foldable=not unmoved))  # fmt: skip
+                found, arch=arch_of(w.change.path), foldable=not stale))  # fmt: skip
     rows += declared_kernarg_rows(ctx, seen_lists)
     return rows
 
 
+def builder_candidates(ctx: Ctx, surface: Surface) -> list:
+    """[(module, qual, ParamList, tree)] of the `b.param` builders a declared pair's static lists
+    can be compared with, best first: the declared function, the manifest's `builder`, then every
+    other builder of the surface's module and of the manifest's `source` module. A multi-launch
+    pack holds one list per launch, and a declared function may be a signature factory with no
+    `b.param` list of its own."""
+    found = []
+    for module in dict.fromkeys(
+        m for m in (surface.module, surface.builder_module) if m
+    ):
+        tree = ctx.after.ast(module)
+        if tree is not None:
+            found += [(module, q, pl, tree) for q, pl in param_lists(tree).items()]
+
+    def rank(cand):
+        bare = cand[1].rsplit(".", 1)[-1]
+        if cand[0] == surface.module and bare == surface.function:
+            return 0
+        return 1 if cand[0] == surface.builder_module and bare == surface.builder else 2
+
+    return sorted(found, key=rank)
+
+
+def pair_builder(names: list, cands: list):
+    """(candidate, matches) for one static list: the best-ranked candidate whose params it
+    matches; else the related candidate sharing most names, which it disagrees with; else
+    (None, False)."""
+
+    def shared(cand):
+        return len(set(names) & set(cand[2].names))
+
+    for pool, matches in (
+        ([c for c in cands if compatible(names, c[2])], True),
+        ([c for c in cands if related(names, c[2].names)], False),
+    ):
+        if pool:
+            return max(pool, key=shared), matches  # max keeps the first of equals
+    return None, False
+
+
 def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
-    """Compare each declared `kernargs` pair's static C++ lists with its builder, after."""
+    """Compare each declared `kernargs` pair's static C++ lists with the builders they mirror,
+    after: each list with the builder whose `b.param` list it matches (see builder_candidates).
+    """
     rows = []
     for surface in ctx.surfaces("after"):
         if surface.name != "kernargs" or not surface.cpp_mirror:
             continue
-        producer, mirror = ctx.changes.get(surface.module), ctx.changes.get(
-            surface.cpp_mirror
-        )
-        if producer is None and mirror is None:
+        paths = (surface.module, surface.builder_module, surface.cpp_mirror)
+        sides = [ctx.changes.get(p) for p in dict.fromkeys(p for p in paths if p)]
+        if not any(sides):
             continue
+        moved = any(c is not None and c.cls in MOVING for c in sides)
+        mirror = ctx.changes.get(surface.cpp_mirror)
+        declared = surface.function or PurePosixPath(surface.module).name
         tree = ctx.after.ast(surface.module)
-        lists = param_lists(tree) if tree is not None else {}
-        pl = lists.get(surface.function)
         text = ctx.after.text(surface.cpp_mirror)
-        if pl is None or text is None:
-            what = "builder" if pl is None else "C++ mirror"
-            rows.append(make_row("kernargs", surface.cpp_mirror, 0, f"declared:{surface.function}",
-                "mismatch", f"declared kernargs pair is broken at the after side: {what} of "
-                f"{surface.module}:{surface.function} is missing", arch=surface.arch))  # fmt: skip
+        missing = (
+            f"python module {surface.module}" if tree is None
+            else f"function {surface.function} of {surface.module}"
+            if surface.function and not defs_named(tree, surface.function)
+            else f"C++ mirror {surface.cpp_mirror}" if text is None else None
+        )  # fmt: skip
+        if missing:
+            rows.append(make_row("kernargs", surface.cpp_mirror, 0, f"declared:{declared}", "mismatch",
+                f"declared kernargs pair is broken at the after side: {missing} is missing",
+                arch=surface.arch))  # fmt: skip
             continue
-        counter = [
-            cp(
-                surface.module,
-                pl.lineno,
-                producer is not None and producer.cls in MOVING,
-            )
-        ]
-        moved = (producer is not None and producer.cls in MOVING) or (
-            mirror is not None and mirror.cls in MOVING
-        )
-        sizes = dict(
-            zip(
-                pl.names,
-                map(decl_size, resolved_decls(tree, surface.function, pl.decls)),
-            )
-        )
+        cands = builder_candidates(ctx, surface)
+        fallback = [cp(surface.module, 0, ctx.moved(surface.module))]
         compared, closest = False, 0
         arch = surface.arch or arch_of(surface.cpp_mirror)
-        for entry in cpp_kernel_lists(text):
+        lists = cpp_kernel_lists(text)
+        for entry in lists:
             key = (surface.cpp_mirror, entry["line"])
             if key in reported:
                 compared = True
@@ -2017,20 +2098,31 @@ def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
                     kind = "dynamic" if entry["dynamic"] else "static but unnamed"
                     rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
                         "changed", f"{entry['func']}() is a {kind} kernarg signature: it cannot be "
-                        f"compared with {surface.function} statically", counter, arch=arch))  # fmt: skip
+                        f"compared with {declared} statically", fallback, arch=arch))  # fmt: skip
                 continue
-            if not related(entry["names"], pl.names) and not compatible(
-                entry["names"], pl
-            ):
-                closest = max(closest, len(set(entry["names"]) & set(pl.names)))
+            cand, matches = pair_builder(entry["names"], cands)
+            if cand is None:
+                for c in cands:
+                    closest = max(closest, len(set(entry["names"]) & set(c[2].names)))
                 continue
             compared = True
-            if not compatible(entry["names"], pl):
+            module, qual, pl, ptree = cand
+            counter = [cp(module, pl.lineno, ctx.moved(module))]
+            if module == surface.module and qual.rsplit(".", 1)[-1] == surface.function:
+                paired = qual
+            else:
+                paired = (
+                    f"{qual} (paired by its names; the manifest declares {declared})"
+                )
+            if not matches:
                 rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
-                    "mismatch", f"static list {entry['func']}() disagrees with builder {surface.function} "
+                    "mismatch", f"static list {entry['func']}() disagrees with builder {paired} "
                     f"({list_diff(entry['names'], pl.names)}): {entry['names']} vs {pl.marked()}",
                     counter, arch=arch))  # fmt: skip
                 continue
+            sizes = dict(
+                zip(pl.names, map(decl_size, resolved_decls(ptree, qual, pl.decls)))
+            )
             differ, unknown = [], []
             for name, size in zip(entry["names"], entry["sizes"]):
                 want = sizes.get(name)
@@ -2042,7 +2134,7 @@ def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
                     )
             if differ:
                 rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
-                    "mismatch", f"static list {entry['func']}() names agree with builder {surface.function} "
+                    "mismatch", f"static list {entry['func']}() names agree with builder {paired} "
                     f"but types do not: {'; '.join(differ[:4])}", counter, arch=arch))  # fmt: skip
             elif moved:
                 if not unknown:
@@ -2052,11 +2144,22 @@ def declared_kernarg_rows(ctx: Ctx, reported: set) -> list:
                 else:
                     note = f"names agree; types not compared for {', '.join(unknown)}"
                 rows.append(make_row("kernargs", surface.cpp_mirror, entry["line"], f"declared:{entry['func']}",
-                    "changed", f"{entry['func']}() vs {surface.function}: {note}", counter, arch=arch))  # fmt: skip
+                    "changed", f"{entry['func']}() vs {paired}: {note}", counter, arch=arch))  # fmt: skip
         if not compared and moved:
-            rows.append(make_row("kernargs", surface.cpp_mirror, 0, f"declared:{surface.function}",
-                "changed", f"no static list in the C++ mirror shares two names with {surface.function} "
-                f"(closest shares {closest}): cannot compare", counter, arch=arch))  # fmt: skip
+            if not lists:
+                why = (
+                    "the C++ mirror holds no `std::vector<KernelArgument>` function (its list is "
+                    "built another way)"
+                )
+            elif cands:
+                why = (
+                    "no static list in the C++ mirror shares two names with any `b.param` builder "
+                    f"of {', '.join(dict.fromkeys(c[0] for c in cands))} (closest shares {closest})"
+                )
+            else:
+                why = f"{declared} declares no `b.param` list and no other builder was found"
+            rows.append(make_row("kernargs", surface.cpp_mirror, 0, f"declared:{declared}",
+                "changed", f"{why}: cannot compare", fallback, arch=arch))  # fmt: skip
     return rows
 
 
@@ -2654,19 +2757,24 @@ def surfaces_rows(ctx: Ctx) -> list:
         if key in seen:
             continue
         seen.add(key)
-        py_changed = False
-        line = 0
+        dumps, line = {}, 0
         for side in ("before", "after"):
             tree = ctx.tree_of(side).ast(surface.module)
-            node = (
-                function_nodes(tree).get(surface.function) if tree is not None else None
+            if surface.function is None:
+                # a prose locator names no symbol, so the module is the python side
+                dumps[side] = None if tree is None else surface.module
+                continue
+            nodes = [n for _, n in defs_named(tree, surface.function)]
+            if nodes and side == "after":
+                line = nodes[0].lineno
+            dumps[side] = (
+                [ast.dump(without_docstrings(n)) for n in nodes] if nodes else None
             )
-            if node is not None and side == "after":
-                line = node.lineno
-            dump = None if node is None else ast.dump(without_docstrings(node))
-            if side == "before":
-                before_dump = dump
-        py_changed = before_dump != dump
+        dump = dumps["after"]
+        if surface.function is None:
+            py_changed = ctx.moved(surface.module)
+        else:
+            py_changed = dumps["before"] != dump
         cpp_changed = ctx.moved(surface.cpp_mirror) if surface.cpp_mirror else False
         test_changed = ctx.moved(surface.test) if surface.test else False
         manifest_changed = ctx.moved(surface.manifest)
@@ -2674,7 +2782,9 @@ def surfaces_rows(ctx: Ctx) -> list:
         if surface.test:
             counter.append(cp(surface.test, 0, test_changed))
         arch = surface.arch or arch_of(surface.module, surface.cpp_mirror)
-        name = f"{surface.name}:{surface.function}"
+        name = (
+            f"{surface.name}:{surface.function or PurePosixPath(surface.module).name}"
+        )
         broken = [
             what
             for what, path in (
@@ -2871,8 +2981,9 @@ def merge_views(per_view: list) -> list:
 # -- emit fold ---------------------------------------------------------------------------------------
 
 EMIT_SIZES = {"i8": 1, "i16": 2, "i32": 4, "float": 4, "half": 2, "i64": 8, "double": 8}
-#: The impact_emit.py output this script reads; 3 added `comgr_changed`.
-EMIT_SCHEMA = 3
+#: The impact_emit.py output this script reads; 3 added `comgr_changed`, 4 `companions` (the
+#: kernarg list of each companion launch of a KernelModule builder).
+EMIT_SCHEMA = 4
 
 
 def load_emit(path) -> dict:
@@ -2956,6 +3067,22 @@ def emit_shape_problem(data: dict):
             and all(params(built.get(s)) for s in ("base", "head"))
         ):
             return f"family {n}: `params` is not base and head [name, type] lists"
+        companions = fam.get("companions")
+        if not (
+            isinstance(companions, dict)
+            and all(
+                companions.get(s) is None
+                or (
+                    isinstance(companions[s], dict)
+                    and all(
+                        isinstance(r, str) and p is not None and params(p)
+                        for r, p in companions[s].items()
+                    )
+                )
+                for s in ("base", "head")
+            )
+        ):
+            return f"family {n}: `companions` is not base and head role -> [name, type] lists"
         if not isinstance(fam.get("kdp", ""), str) or not isinstance(
             fam.get("spec_origin", ""), str
         ):
@@ -3019,13 +3146,20 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
             for side in ("before", "after"):
                 covered |= ctx.closure(side).reach(source)
         if fam.get("params_changed") and params:
+            # one kernarg list per launch: the builder's primary, then each companion by role
+            launches = [(builder, params)] + [
+                (f"{builder}[{role}]", p)
+                for role, p in sorted((fam["companions"]["head"] or {}).items())
+            ]
             entries = []
             for s in surfaces:
                 if (
                     s.name == "kernargs"
-                    and s.module == source
-                    and s.function == builder
                     and s.cpp_mirror
+                    and (
+                        (s.module == source and s.function == builder)
+                        or (s.builder_module == source and s.builder == builder)
+                    )
                 ):
                     entries += [
                         (s.cpp_mirror, e)
@@ -3042,17 +3176,30 @@ def fold_emit(ctx: Ctx, rows: list, emit: dict) -> list:
                         entries += [
                             (p, e) for e in cpp_kernel_lists(ctx.after.text(p) or "")
                         ]
-            names = [p[0] for p in params]
-            entries = [
-                (p, e) for p, e in entries if e["names"] and related(e["names"], names)
-            ]
-            bad = [(p, e, emit_agrees(params, e)) for p, e in entries]
-            bad = [b for b in bad if b[2]]
+            paired = []
+            for p, e in entries:
+                near = [
+                    launch
+                    for launch in launches
+                    if e["names"] and related(e["names"], [n for n, _ in launch[1]])
+                ]
+                if near:
+                    # the launch the list names exactly, else the one sharing most names
+                    label, lp = max(
+                        near,
+                        key=lambda launch: (
+                            [n for n, _ in launch[1]] == e["names"],
+                            len(set(e["names"]) & {n for n, _ in launch[1]}),
+                        ),
+                    )
+                    paired.append((p, e, label, emit_agrees(lp, e)))
+            entries = paired
+            bad = [b for b in paired if b[3]]
             counter = [cp(source, 0, True)]
             if bad:
-                p, e, why = bad[0]
+                p, e, label, why = bad[0]
                 out.append(make_row("kernargs", p, e["line"], f"emit:{arch}:{builder}", "mismatch",
-                    f"emitted params of {builder} ({arch}) disagree with static list {e['func']}(): {why}",
+                    f"emitted params of {label} ({arch}) disagree with static list {e['func']}(): {why}",
                     counter, arch=arch))  # fmt: skip
             else:
                 note = (
