@@ -11,23 +11,31 @@ then proves the C++ emits the same IR as the Python on every parity config.
 What the translator writes is a first draft. Its first lines say so
 (`first draft from library/kernels/common/<module>.py:<sha> by tr/translate.py;
 hand-maintained from here`). Once a file is in the tree it is ordinary hand
-code: edit it like any other twin. `tr.regen` never writes over an existing
-file unless it is given `--overwrite`.
+code: edit it by hand or with an agent like any other twin. `tr.regen` never
+writes over an existing file unless it is given `--overwrite`, and nothing
+checks that a file still matches the translator's output. The byte-identity
+gate is the correctness guard, as for every twin.
+
+The translator is an experimental porting assistant. It owns no file outside
+this directory, and nothing in the build or CI runs it: it can be ignored or
+removed with no effect on the tree. What a first port adds to the tree is
+listed in the RFC
+(`platform/dsl_docs/architecture/python_cpp_translator_rfc.md`, section 4.8).
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `tr/` | The translator. `tr/regen.py` is the one command. |
-| `tr/prelude/rocke_py.hpp` | The prelude: C++ helpers (Python semantics) every generated source includes as `"rocke_py.hpp"`. Master copy. `tr.regen` copies it into `platform/cpp/instances/common/` when a written source needs it and never over an existing copy; that copy is private (not installed, not API) and is maintained there by hand. |
+| `tr/prelude/rocke_py.hpp` | The prelude: C++ helpers (Python semantics) every translated source includes as `"rocke_py.hpp"`. Master copy. `tr.regen` copies it into `platform/cpp/instances/common/` when a written source needs it and never over an existing copy; that copy is private (not installed, not API) and is maintained there by hand. |
 | `tr/packages/<package>/` | A package's support headers, such as `attention_bwd/rocke_py_adapters.hpp`: adapters between Python helper shapes and their C twins (listed in `tr/adapters.py`). A generated source includes it only when it uses one; `tr.regen` copies it like the prelude. |
 | `tools/` | `cscan.py` (C/C++ declaration scanner), `rsrc.py` and `mine_maps.py` (mine the code maps from the tree). |
 | `designs/generated_abi.md` | The rules that turn a Python module into its C header. |
 | `designs/tagged_values.md` | A value that can be one of several classes becomes one tagged C struct with generated dispatch. |
 | `designs/host_clones.md` | Code that runs on host ints and on IR values is generated once per value kind. |
-| `data/facts/<module>.json` | Types recorded from the parity configs (`tr.record`), keyed by function qualname. Added with each generated module. |
-| `data/abi/<module>.names.json` | Generated names that keep an existing spelling. Added with each generated module. |
-| `holes/<module>/` | Hand fills (`<function>.cpp`) and C-only struct fields (`<Class>.fields`). Added with each generated module. |
+| `data/facts/<module>.json` | Types recorded from the parity configs (`tr.record`), keyed by function qualname. Added with each translated module. |
+| `data/abi/<module>.names.json` | Generated names that keep an existing spelling. Added with each translated module. |
+| `holes/<module>/` | Hand fills (`<function>.cpp`) and C-only struct fields (`<Class>.fields`). Added with each translated module. |
 | `tests/` | The self-test (pytest) and its fixture root: pinned modules, their data and the goldens. |
 
 ## Setup
@@ -70,8 +78,11 @@ Only files that do not exist yet are written. For every source, header or
 support header already in the tree it prints `skip <path> (exists)` and
 leaves the file alone; the exit code stays 0. `--overwrite` writes over
 existing files (review the diff: it drops any hand edit), and `--pretend`
-lists what would be written or skipped and writes nothing. Temporary
-directories (mined maps, headers) are removed on exit.
+lists what would be written or skipped and writes nothing. When every file
+a run would write is already there (each module's source and header, and the
+support headers they include), nothing is translated: a second run of the
+same command lists the skips and exits 0. Temporary directories (mined maps,
+headers) are removed on exit.
 
 - Name every module whose generated header the others use in the same command
   (addr needs valu, counted and aux, as above).
@@ -83,7 +94,10 @@ directories (mined maps, headers) are removed on exit.
   generated (it prints `header ... exists; using its ABI`). This keeps a new
   draft in step with existing callers. `--generated-abi` generates the
   headers anyway; `--hand-abi` forces the tree's headers. When only some of
-  the modules have one, name the ABI with one of the two flags.
+  the modules have one, name the ABI with one of the two flags. If the
+  headers were picked this way and holes are left, the message says so; the
+  tree's headers may be older than the Python, and `--generated-abi` is the
+  usual way out.
 
 ## Steps in a port
 
@@ -153,14 +167,14 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py --only attention
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py --only attention
 ```
 
-The generated modules are shared by every attention backward family, so gate
+The translated modules are shared by every attention backward family, so gate
 all attention families, not only the module's own parity pair. Build the
 engine with gcc and clang as CI does (warnings are errors). A low config count
 means the run stopped early, not that coverage is complete.
 
 ## Limits
 
-No module in this tree is generated yet. The translator was built and checked
+No module in this tree is translated yet. The translator was built and checked
 on the attention backward port: its `valu`, `counted`, `aux` and `addr`
 modules regenerate byte-identical to the Python on every attention parity
 config (31 families, 3,083 configs per LLVM flavor, gcc and clang). Over the

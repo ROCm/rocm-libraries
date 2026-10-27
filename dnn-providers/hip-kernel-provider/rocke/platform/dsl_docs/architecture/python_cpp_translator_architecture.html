@@ -89,7 +89,7 @@ footer span:last-child{margin-left:auto}
 <header>
   <div>
     <h1>rocKE Python &rarr; C++ translator</h1>
-    <div class="lede">Writes the C++ twin of a Python kernel builder from the Python itself. Fixed rules or a hand fill, never a guess. The byte-identity gate is the only judge.</div>
+    <div class="lede">Writes a first draft of the C++ twin of a Python kernel builder from the Python itself; from then on the C++ is hand code. Fixed rules or a hand fill, never a guess. The byte-identity gate is the only judge.</div>
   </div>
   <div class="kpis">
     <div class="kpi"><b>77.0%</b><span>of Python lines translate mechanically</span></div>
@@ -105,7 +105,7 @@ footer span:last-child{margin-left:auto}
       <div class="legend">
         <span><i style="background:#9aa3b2"></i>input</span>
         <span><i style="background:var(--accent2)"></i>mechanical</span>
-        <span><i style="background:var(--warn)"></i>person, once</span>
+        <span><i style="background:var(--warn)"></i>person</span>
         <span><i style="background:var(--ok)"></i>proof</span>
       </div>
       <button class="btn primary" id="play" aria-label="Play the flow">&#9654; Play</button>
@@ -140,7 +140,7 @@ footer span:last-child{margin-left:auto}
 
 <script>
 const C={blue:"#1f5fbf",warn:"#b26a00",ok:"#1b8a4b",gray:"#9aa3b2"};
-const KIND={input:["INPUT","#eef1f6","#5d6678",C.gray],mech:["MECHANICAL","#eef4fd","#1f5fbf",C.blue],person:["PERSON, ONCE","#fff8ec","#b26a00",C.warn],proof:["PROOF","#ecf7f0","#1b8a4b",C.ok]};
+const KIND={input:["INPUT","#eef1f6","#5d6678",C.gray],mech:["MECHANICAL","#eef4fd","#1f5fbf",C.blue],person:["PERSON","#fff8ec","#b26a00",C.warn],proof:["PROOF","#ecf7f0","#1b8a4b",C.ok]};
 const N=[
  {id:"py",x:20,y:30,t:"Python module",f:"library/kernels/common/",k:"input",
   h:"The authoring surface",d:"The Python kernel builder stays the source of truth. Builders are mostly unannotated and call the IR builder <code>b</code> directly.",
@@ -169,16 +169,17 @@ const N=[
   io:[["Out","<code>holes/&lt;module&gt;/&lt;function&gt;.cpp</code>"]]},
  {id:"emit",x:680,y:150,t:"Emit",f:"tr/translate.py",k:"mech",
   h:"Normal C++ in the tree",d:"Writes internal C++ plus one <code>extern \"C\"</code> entry per export, formatted with clang-format 18.1.4. It includes the prelude <code>rocke_py.hpp</code> (Python semantics: floor division, negative indexing, <code>str</code>, <code>dict</code>, <code>list</code>).",
-  ul:["First line: <code>generated from &lt;py&gt;:&lt;sha&gt; by tr/translate.py</code>","Never edited by hand: change the Python, a fill or a rule, then regenerate"],
+  ul:["First line: <code>first draft from &lt;py&gt;:&lt;sha&gt; by tr/translate.py; hand-maintained from here</code>","Written only where no file exists yet; <code>--overwrite</code> to replace"],
   io:[["Out","<code>instances/common/&lt;module&gt;.cpp</code> + its header"]]},
  {id:"gate",x:890,y:150,t:"Gate",f:"check_byte_identity.py",k:"proof",
   h:"The only acceptance test",d:"Builds the engine and compares the <code>.ll</code> text of Python and C++ on every parity config. The translator never claims a translation is right; the gate does.",
   ul:["Both LLVM flavors: <code>llvm22</code> and <code>llvm20</code>","Engine built by gcc and clang, warnings as errors","Measured: 31 of 31 attention families, 3,083 configs per flavor"],
   io:[["Pass","byte-identical, every config"]]},
- {id:"ci",x:890,y:270,t:"regen --check",f:"CI",k:"proof",
-  h:"Generated files stay current",d:"Regenerates into a temporary tree and compares. Exit 1 lists the stale files. Running <code>tr.regen</code> twice leaves <code>git status</code> clean.",
-  pre:"$ python -m tr.regen --check _attention_bwd_addr \\\n    _attention_bwd_valu _attention_bwd_counted attention_bwd_aux\ncurrent: all 8 generated files",
-  io:[["When","every change to a Python module, a fill or a rule"]]}
+ {id:"ci",x:890,y:270,t:"Hand code",f:"after the first commit",k:"person",
+  h:"The draft becomes an ordinary twin",d:"Checked-in C++ is edited by hand or by agents like every twin. <code>tr.regen</code> never writes over an existing file, and nothing checks that a file still matches the translator. The gate guards every edit.",
+  ul:["The translator owns no file outside <code>tools/translator/</code>","Nothing in the build or CI runs it"],
+  pre:"$ python -m tr.regen _attention_bwd_valu _attention_bwd_counted\nskip .../_attention_bwd_valu.cpp (exists)\n...",
+  io:[["Guard","the byte-identity gate, as for every twin"]]}
 ];
 const E=[
  ["py","rec","",""],["cfg","rec","configs",""],["rec","low","types",""],["py","low","AST","top"],["hdr","low","sigmap",""],
