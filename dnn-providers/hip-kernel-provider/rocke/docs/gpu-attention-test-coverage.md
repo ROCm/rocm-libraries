@@ -49,7 +49,7 @@ listed separately in the inventory, not added to the workload rows.
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
-| gfx942 paged decode with i64 K/V addressing | 2 | No: different path | Skipped |
+| gfx942 paged decode with i64 K/V addressing | 4 | No: different path | Skipped |
 | gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
 | gfx1151 standalone WMMA attention | Pinned cohort | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed validation passed | Device-gated on gfx942; local artifact routing checked |
 | gfx1200 standalone WMMA attention compiled for gfx12-generic | Adapter cohort | Pending GPU qualification; host selection, ABI, and contract tests only | No installed pinned CTest |
@@ -130,7 +130,7 @@ The historical source inventory below is unchanged by this new cohort.
 | Forced exp2 variants | BF16 D128 Hq16/Hkv4 B1/S512, default/persistent | The reference does not force fast and plain paths and compare them bitwise |
 | Paged D128 ring regression | FP16/BF16 × Hq/Hkv=(32,8)/(16,16) × S=512/1024/4096, B1 | Unified/paged builder and cache layout differ from dense SDPA |
 | Paged head-fold | BF16 D128, Hq32/Hkv8, `(S,W)=(2048,512),(8192,4096)` × page size16/32, B1 | No head-fold kernel, paging, long sequence, or clipped window in reference cohort |
-| Paged i64 K/V addressing | BF16 D128 decode, B8, Sk1024, Hq/Hkv=(32,8),(64,4), page size 16, `num_kv_blocks` overstated to force i64 | No reference case pages the cache or uses i64 K/V addressing |
+| Paged i64 K/V addressing | BF16 D128 decode, page size 16: B8 Sk1024 Hq/Hkv=(32,8),(64,4) and B8 ragged Sk≤1000 with a block-table tail (`num_kv_blocks` overstated to force i64); B4 Sk1024 Hq/Hkv=(32,8) on a cache just over 2 GiB with pages straddling 2^31 bytes | No reference case pages the cache or uses i64 K/V addressing |
 | Seeds/distributions | One fixed normally distributed recipe per configuration in required suite | Multiple runs test repeatability, not additional input coverage |
 | Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | The selected rows are not a Cartesian-product sweep |
 | Unequal query/KV lengths, bottom-right masks | Existing detailed numeric cohort is gfx950: see 11 rows in shape table | All required Sq=Sk=512; no bottom-right or ragged reference |
@@ -194,7 +194,7 @@ See [the SDPA guide](../library/tests/sdpa_reference/docs/sdpa-test-reference.md
 | [test_gdn_decode_gfx950_numeric.py](../library/tests/test_gdn_decode_gfx950_numeric.py) | 13 | Selected by library CTest file list |
 | [test_gfx1250_attention.py](../library/tests/test_gfx1250_attention.py) | 2 | Selected by library CTest file list |
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) | 1 | Selected by library CTest file list |
-| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) | 1 | Selected by library CTest file list |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) | 3 | Selected by library CTest file list |
 | [test_kda_chunkwise_gfx942_numeric.py](../library/tests/test_kda_chunkwise_gfx942_numeric.py) | 6 | Selected by library CTest file list |
 | [test_kda_chunkwise_gfx950_numeric.py](../library/tests/test_kda_chunkwise_gfx950_numeric.py) | 14 | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) | 8 | Selected by library CTest file list |
@@ -298,6 +298,8 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_gfx942_gqa_head_fold_numeric.py](../library/tests/test_gfx942_gqa_head_fold_numeric.py) :: test_fold_numeric_vs_fp32_windowed_oracle | gfx942 | bf16 | 1 | 8192 | 8192 | 32 | 8 | 128 | paged head-fold; window=4096; page size=32 | Missing |
 | [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_matches_reference | gfx942 | bf16 | 8 | 1 | 1024 | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); page size=16 | Missing |
 | [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_matches_reference | gfx942 | bf16 | 8 | 1 | 1024 | 64 | 4 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); page size=16 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_ragged_lengths_and_block_table_tail | gfx942 | bf16 | 8 | 1 | 17-1000 (ragged) | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing (num_kv_blocks overstated); last tile past the block table; page size=16 | Missing |
+| [test_attention_gfx942_kv_pages.py](../library/tests/test_attention_gfx942_kv_pages.py) :: test_i64_decode_reads_past_2gib | gfx942 | bf16 | 4 | 1 | 1024 | 32 | 8 | 128 | paged tiled 2D; i64 K/V addressing; cache just over 2 GiB, pages straddle 2^31 bytes; skips under ~5 GiB free; page size=16 | Missing |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Required GPU |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Required GPU |
 | [test_sdpa_pinned_reference.py](../library/tests/test_sdpa_pinned_reference.py) :: test_sdpa_correctness_against_qualified_rocke | gfx942 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Required GPU |
