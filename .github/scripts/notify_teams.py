@@ -532,6 +532,12 @@ THEROCK_JOB_PREFIXES = ("Linux::", "Windows::")
 XFAIL_JOB_MARKER = "(xfail)"
 GITHUB_ERROR_MARKER = "##[error]"
 JOBS_PER_PAGE = 100
+# gh >= 2.97.0 refuses to print API responses containing terminal escape
+# sequences (GHSA-3m3g-3wcr-px46) unless this flag is passed, and job logs
+# carry ANSI colors. Older gh neither knows nor needs the flag.
+GH_ALLOW_ESCAPES_FLAG = "--allow-escape-sequences"
+# ANSI CSI sequences (e.g. colors "\x1b[38;2;255;61;61m") and two-byte escapes.
+TERMINAL_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])")
 
 
 def select_failed_jobs(jobs: List[dict]) -> List[dict]:
@@ -567,15 +573,31 @@ def truncate_at_first_error(log: str) -> str:
     return log if line_end == -1 else log[: line_end + 1]
 
 
-def gh_api(endpoint: str) -> str:
+def strip_terminal_escapes(log: str) -> str:
+    """Remove ANSI escape sequences so they never reach a Teams message."""
+    return TERMINAL_ESCAPE_PATTERN.sub("", log)
+
+
+def gh_api(endpoint: str, *flags: str) -> str:
     """GET a GitHub REST endpoint through the gh CLI (authenticated via GH_TOKEN)."""
     return subprocess.run(
-        ["gh", "api", endpoint],
+        ["gh", "api", *flags, endpoint],
         check=True,
         capture_output=True,
         encoding="utf-8",
         errors="replace",
     ).stdout
+
+
+def gh_api_allowing_escapes(endpoint: str) -> str:
+    """gh_api for responses that may contain terminal escape sequences."""
+    try:
+        return gh_api(endpoint, GH_ALLOW_ESCAPES_FLAG)
+    except subprocess.CalledProcessError as e:
+        if f"unknown flag: {GH_ALLOW_ESCAPES_FLAG}" not in e.stderr:
+            raise
+        # gh < 2.97.0 prints escape sequences without the flag.
+        return gh_api(endpoint)
 
 
 def list_run_jobs(repository: str, run_id: str, run_attempt: str) -> List[dict]:
@@ -596,13 +618,14 @@ def list_run_jobs(repository: str, run_id: str, run_attempt: str) -> List[dict]:
 
 
 def fetch_job_log(repository: str, job_id: int) -> str:
-    """Download a job log; an unavailable log yields an empty string so the
-    failure is still reported."""
+    """Download a job log without terminal escape sequences; an unavailable
+    log yields an empty string so the failure is still reported."""
     try:
-        return gh_api(f"repos/{repository}/actions/jobs/{job_id}/logs")
+        log = gh_api_allowing_escapes(f"repos/{repository}/actions/jobs/{job_id}/logs")
     except subprocess.CalledProcessError as e:
         logger.warning(f"Could not download log of job {job_id}: {e.stderr.strip()}")
         return ""
+    return strip_terminal_escapes(log)
 
 
 def notify_failure(

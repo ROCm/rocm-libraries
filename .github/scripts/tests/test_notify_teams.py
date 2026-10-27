@@ -29,25 +29,43 @@ def job(job_id, name, conclusion="failure"):
 
 
 class FakeGitHub:
-    """Serves `gh api` endpoints from in-memory jobs pages and logs."""
+    """Serves `gh api` endpoints from in-memory jobs pages and logs.
 
-    def __init__(self, job_pages, logs, failing_endpoints=()):
+    Mirrors gh's escape-sequence handling: gh >= 2.97.0 refuses responses
+    with terminal escape sequences unless --allow-escape-sequences is passed;
+    older gh rejects that flag as unknown.
+    """
+
+    def __init__(self, job_pages, logs, failing_endpoints=(), gh_before_2_97=False):
         self.job_pages = job_pages
         self.logs = logs
         self.failing_endpoints = failing_endpoints
+        self.gh_before_2_97 = gh_before_2_97
 
-    def __call__(self, endpoint):
-        if any(part in endpoint for part in self.failing_endpoints):
+    def __call__(self, endpoint, *flags):
+        argv = ["gh", "api", *flags, endpoint]
+        allow_escapes = notify_teams.GH_ALLOW_ESCAPES_FLAG in flags
+        if allow_escapes and self.gh_before_2_97:
             raise subprocess.CalledProcessError(
-                1, ["gh", "api", endpoint], stderr="HTTP 404: Not Found\n"
+                1, argv, stderr="unknown flag: --allow-escape-sequences\n"
             )
+        if any(part in endpoint for part in self.failing_endpoints):
+            raise subprocess.CalledProcessError(1, argv, stderr="HTTP 404: Not Found\n")
         if "/jobs?" in endpoint:
             page = int(endpoint.rsplit("page=", 1)[1])
             total = sum(len(p) for p in self.job_pages)
             jobs = self.job_pages[page - 1] if page <= len(self.job_pages) else []
             return json.dumps({"total_count": total, "jobs": jobs})
         job_id = int(endpoint.split("/jobs/")[1].split("/")[0])
-        return self.logs[job_id]
+        body = self.logs[job_id]
+        if "\x1b" in body and not allow_escapes and not self.gh_before_2_97:
+            raise subprocess.CalledProcessError(
+                1,
+                argv,
+                stderr="the response contains terminal escape sequences; "
+                "pass --allow-escape-sequences to output it anyway\n",
+            )
+        return body
 
 
 class SelectFailedJobsTest(unittest.TestCase):
@@ -164,6 +182,26 @@ class NotifyFailedJobsFromRunTest(unittest.TestCase):
         self.assertIn("undefined reference to foo", sent[0]["error_context"])
         self.assertIn("[  FAILED  ] Suite.Case", sent[1]["error_context"])
         self.assertNotIn("unrelated cleanup failure", sent[1]["error_context"])
+
+    def test_colored_job_log_is_reported_without_escape_sequences(self):
+        colored_log = (
+            "\x1b[36;1mctest --output-on-failure\x1b[0m\n"
+            "\x1b[38;2;255;61;61m[  FAILED  ] Suite.Case\x1b[0m\n"
+            "##[error]Process completed with exit code 8.\n"
+        )
+        for gh_before_2_97 in (False, True):
+            with self.subTest(gh_before_2_97=gh_before_2_97):
+                fake_github = FakeGitHub(
+                    job_pages=[[job(3, LINUX_TEST_HIPDNN)]],
+                    logs={3: colored_log},
+                    gh_before_2_97=gh_before_2_97,
+                )
+
+                _, sent = self.run_notifier(fake_github)
+
+                context = sent[0]["error_context"]
+                self.assertIn("[  FAILED  ] Suite.Case", context)
+                self.assertNotIn("\x1b", context)
 
     def test_pr_title_tag_overrides_job_component(self):
         fake_github = FakeGitHub(
