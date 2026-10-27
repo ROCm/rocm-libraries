@@ -375,11 +375,11 @@ TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
 }
 
-// The TensileLite benchmark client no longer allocates a padded scale buffer for
-// an externally captured kernel: ClientProblemFactory builds the descriptor with
-// MXScalePadding::Packed and says so with setCustomKernelMXScalesArePacked, so the
-// buffer, the descriptor and the stride all describe the same ceil(K/mxBlock)
-// bytes per row that a hipBLASLt caller hands over.
+// For an externally captured kernel, ClientProblemFactory builds the scale
+// descriptor with MXScalePadding::Packed and records that with
+// setCustomKernelMXScalesArePacked. The buffer, the descriptor, and the stride
+// then all describe ceil(K/mxBlock) bytes per row, which is what a hipBLASLt
+// caller allocates.
 //
 // This guards both halves at once. Revert the client to padding every scale
 // buffer and the descriptor expectations below fail; keep the packed buffer but
