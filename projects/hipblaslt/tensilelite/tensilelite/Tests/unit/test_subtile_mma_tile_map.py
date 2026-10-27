@@ -17,7 +17,7 @@ from dataclasses import replace
 
 import pytest
 
-from Tensile.Components.Subtile.Kernel import AB_B16
+from tensilelite.Components.Subtile.Kernel import AB_B16
 
 pytestmark = pytest.mark.unit
 

@@ -105,7 +105,7 @@ Tests:
   use_ext_setproblem: true
   algo_method: 1
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
 
 # Preserve conjugation independently for A and B during extension setup.
 - name: matmul_ext_complex_support_smoke
@@ -474,7 +474,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '9(0a|4[0-2])'
+  gpu_arch: '9(0a|4[0-2])|1250'
 
 - name: matmul_gemm_i8_dst_i32_smoke
   category: smoke

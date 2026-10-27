@@ -65,10 +65,39 @@
 #define TENSILELITE_TO_STR(x) #x
 #define TENSILELITE_ENUMSTR(x) x, TENSILELITE_TO_STR(x)
 
+#define HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE 70353390
+
 namespace TensileLite
 {
     namespace
     {
+        size_t checkedAdd(size_t a, size_t b)
+        {
+            if(b > std::numeric_limits<size_t>::max() - a)
+                throw std::overflow_error("Spatial cluster workspace exceeds size_t");
+            return a + b;
+        }
+
+        size_t checkedMultiply(size_t a, size_t b)
+        {
+            if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
+                throw std::overflow_error("Spatial cluster product exceeds size_t");
+            return a * b;
+        }
+
+        size_t divideUp(size_t a, size_t b)
+        {
+            if(b == 0)
+                throw std::runtime_error("Spatial cluster has a zero tile dimension");
+            return a / b + (a % b != 0);
+        }
+
+        void checkPersistentArgument(size_t value)
+        {
+            if(value > std::numeric_limits<uint32_t>::max())
+                throw std::overflow_error("StreamK cluster schedule exceeds its 32-bit ABI");
+        }
+
         // Batch stride for pre-swizzled gfx950 MX scales. The padding rule lives in
         // mxDataGenerator, which is an optional dependency (see tensilelite/CMakeLists.txt),
         // so fail loudly rather than silently substituting an unpadded stride that would
@@ -1092,6 +1121,19 @@ namespace TensileLite
                                              size_t resolvedGlobalAccumulation) const
     {
         validatePersistentLoopArgsVersion();
+        if(usesStreamKSpatialCluster())
+        {
+            if(!launch.clusterSchedule.enabled || launch.argsVersion != 2
+               || (launch.reduction == origami::reduction_t::parallel
+                   && (handwrittenCustomKernel() || problemType.sparse
+                       || problemType.useGradient || sizeMapping.useSubtileImpl)))
+                throw std::runtime_error("Invalid resolved StreamK cluster schedule");
+            // In-kernel fixup and whole-block fallbacks require a flag buffer.
+            if(launch.reduction == origami::reduction_t::tree && inputs.Synchronizer == nullptr)
+                throw std::runtime_error("StreamK cluster multicast requires a non-null flag buffer");
+            if(launch.workspaceBytes != 0 && inputs.ws == nullptr)
+                throw std::runtime_error("StreamK cluster multicast requires its resolved partial workspace");
+        }
         if(debugKernel)
         {
             args.template appendUnbound<unsigned int*>("debugBuffer");
@@ -1345,7 +1387,7 @@ namespace TensileLite
                        || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
                 {
                     int32_t esmRuntimeSupported = 0;
-#if HIP_VERSION >= 70353390
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
                     HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
                                                         hipDeviceAttributeExpertSchedMode,
                                                         hipAMDGPU->deviceId));
@@ -1527,7 +1569,9 @@ namespace TensileLite
             }
             else
             {
-                auto tiles = problem.getNumTiles(sizeMapping, 1);
+                auto tiles = usesStreamKSpatialCluster()
+                                 ? launch.clusterSchedule.blocks
+                                 : problem.getNumTiles(sizeMapping, 1);
 
                 // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
                 // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
@@ -1541,7 +1585,7 @@ namespace TensileLite
                 // MagicShiftItersPerTile wire format:
                 //   31    = magicNumberAlg2's "add" indicator (abit)
                 //   30    = SK5 hybrid mode bit (SK5 path only)
-                //   29    = uniform summation order (this bit)
+                //   29    = distribute extra K iterations within each tile
                 //   28..6 = zero
                 //   5..0  = shift amount
                 // magicNumberAlg2 returns p - 32 with p <= 64 (the loop's post
@@ -1585,11 +1629,10 @@ namespace TensileLite
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
                     const StreamKStaticSplit split
-                        = streamKStaticSplit(tiles,
-                                             itersPerTile,
-                                             launch.grid,
-                                             pAMDGPU->skFullTiles,
-                                             false);
+                        = usesStreamKSpatialCluster()
+                              ? launch.clusterSchedule.split
+                              : streamKStaticSplit(tiles, itersPerTile, launch.grid,
+                                                   pAMDGPU->skFullTiles, false);
 
                     args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
                     args.template append<uint32_t>("skGrid", launch.grid);
@@ -1726,7 +1769,7 @@ namespace TensileLite
                        || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
                 {
                     int32_t esmRuntimeSupported = 0;
-#if HIP_VERSION >= 70353390
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
                     HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
                                                         hipDeviceAttributeExpertSchedMode,
                                                         hipAMDGPU->deviceId));
@@ -1939,6 +1982,8 @@ namespace TensileLite
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
+        if(usesStreamKSpatialCluster())
+            return std::make_tuple(1, size_t{1}, size_t{0}, size_t{0});
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
@@ -2069,6 +2114,8 @@ namespace TensileLite
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
         Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
     {
+        if(usesStreamKSpatialCluster())
+            return std::make_tuple(size_t{0}, size_t{0}, size_t{0});
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
@@ -2590,8 +2637,9 @@ namespace TensileLite
                                             dim3&                               numWorkGroups,
                                             ContractionSolution::Problem const& problem) const
     {
-        workGroupSize.x = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
-                          * sizeMapping.workGroupSize.z;
+        workGroupSize.x = checkedMultiply(checkedMultiply(sizeMapping.workGroupSize.x,
+                                                         sizeMapping.workGroupSize.y),
+                                          sizeMapping.workGroupSize.z);
         workGroupSize.y = 1;
         workGroupSize.z = 1;
 
@@ -2600,29 +2648,64 @@ namespace TensileLite
 
         for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
         {
-            numWorkGroups.x *= problem.freeSizeA(i);
+            numWorkGroups.x = checkedMultiply(numWorkGroups.x, problem.freeSizeA(i));
         }
         for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
         {
-            numWorkGroups.y *= problem.freeSizeB(i);
+            numWorkGroups.y = checkedMultiply(numWorkGroups.y, problem.freeSizeB(i));
         }
 
         numWorkGroups.z = 1;
         for(size_t i = 0; i < problem.batchIndices().size(); i++)
         {
             if(sizeMapping.packBatchDims & 0x1)
-                numWorkGroups.x *= problem.batchSize(i);
+                numWorkGroups.x = checkedMultiply(numWorkGroups.x, problem.batchSize(i));
             if(sizeMapping.packBatchDims & 0x2)
-                numWorkGroups.y *= problem.batchSize(i);
+                numWorkGroups.y = checkedMultiply(numWorkGroups.y, problem.batchSize(i));
             if(!sizeMapping.packBatchDims)
-                numWorkGroups.z *= problem.batchSize(i);
+                numWorkGroups.z = checkedMultiply(numWorkGroups.z, problem.batchSize(i));
         }
 
         if(problem.transposeC01())
             std::swap(numWorkGroups.x, numWorkGroups.y);
 
-        numWorkGroups.x = CeilDivide(numWorkGroups.x, sizeMapping.macroTile.x);
-        numWorkGroups.y = CeilDivide(numWorkGroups.y, sizeMapping.macroTile.y);
+        if(usesStreamKSpatialCluster())
+        {
+            checkPersistentArgument(numWorkGroups.x);
+            checkPersistentArgument(numWorkGroups.y);
+            checkPersistentArgument(numWorkGroups.z);
+        }
+        numWorkGroups.x = divideUp(numWorkGroups.x, sizeMapping.macroTile.x);
+        numWorkGroups.y = divideUp(numWorkGroups.y, sizeMapping.macroTile.y);
+    }
+
+    namespace
+    {
+        struct SpatialClusterGeometry
+        {
+            dim3 tiles, blocks;
+            size_t totalTiles, totalBlocks, clusterSize;
+        };
+
+        SpatialClusterGeometry spatialClusterGeometry(ContractionSolution const& solution,
+                                                       ContractionProblemGemm const& problem)
+        {
+            dim3 workGroupSize, tiles;
+            solution.calculateGrid(workGroupSize, tiles, problem);
+            const auto& c = solution.sizeMapping.clusterDim;
+            const dim3 blocks{divideUp(tiles.x, c.x), divideUp(tiles.y, c.y), tiles.z};
+            return {tiles, blocks,
+                    checkedMultiply(checkedMultiply(tiles.x, tiles.y), tiles.z),
+                    checkedMultiply(checkedMultiply(blocks.x, blocks.y), blocks.z),
+                    checkedMultiply(c.x, c.y)};
+        }
+
+        // The caller converts its scheduling grid to logical clusters first:
+        // DataParallel stores physical peers; StreamK ABI2 stores clusters.
+        dim3 spatialClusterLaunch(size_t clusters, dim3 const& clusterDim)
+        {
+            return {checkedMultiply(clusters, clusterDim.x), clusterDim.y, 1};
+        }
     }
 
     // Temporary: restored from develop. Builds the kernarg buffer via the
@@ -2660,15 +2743,15 @@ namespace TensileLite
 
         if(sizeMapping.isPersistent())
         {
-            if(sizeMapping.isPersistentDataParallel()
-               && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1))
+            if(usesStreamKSpatialCluster()
+               || (sizeMapping.isPersistentDataParallel()
+                   && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1)))
             {
-                // DataParallel cluster multicast [Cs, Ck]: launch.grid is a whole
-                // number of clusters, laid out (Cs * clusters, Ck, 1) so the kernel
-                // folds each hardware cluster into one persistent cluster rank.
-                rv.numWorkGroups.x = launch.grid / sizeMapping.clusterDim.y;
-                rv.numWorkGroups.y = sizeMapping.clusterDim.y;
-                rv.numWorkGroups.z = 1;
+                if(usesStreamKSpatialCluster() && !launch.clusterSchedule.enabled)
+                    throw std::runtime_error("Missing resolved StreamK cluster schedule");
+                const size_t clusters = usesStreamKSpatialCluster() ? launch.grid
+                    : launch.grid / checkedMultiply(sizeMapping.clusterDim.x, sizeMapping.clusterDim.y);
+                rv.numWorkGroups = spatialClusterLaunch(clusters, sizeMapping.clusterDim);
             }
             else
             {
@@ -2741,7 +2824,9 @@ namespace TensileLite
                 kernelArgs<T_Debug, false>( 1,
                                             3,
                                             rv.args,
-                                            getNumWorkGroups(rv),
+                                            usesStreamKSpatialCluster()
+                                                ? launch.clusterSchedule.physicalGrid
+                                                : getNumWorkGroups(rv),
                                             &hardware,
                                             problem.getParams(),
                                             autoWGM,
@@ -2759,7 +2844,9 @@ namespace TensileLite
                 kernelArgs<T_Debug, false>( 1,
                                             0,
                                             rv.args,
-                                            getNumWorkGroups(rv),
+                                            usesStreamKSpatialCluster()
+                                                ? launch.clusterSchedule.physicalGrid
+                                                : getNumWorkGroups(rv),
                                             &hardware,
                                             problem.getParams(),
                                             autoWGM,
@@ -2835,6 +2922,8 @@ namespace TensileLite
                                                 PersistentLaunchSettings const&              launch) const
     {
         validatePersistentLoopArgsVersion();
+        if(usesStreamKSpatialCluster())
+            throw std::runtime_error("StreamK scheduling ABI 2 requires generated argument packing");
         KernelInvocation rv;
         rv.isSingleCall = true;
         rv.args = KernelArguments(T_Debug);
@@ -3023,9 +3112,9 @@ namespace TensileLite
         {
             // DataParallel version-1 cluster kernels fold hardware clusters into
             // cluster ranks. Match the generated-kernel launch.
-            rv.numWorkGroups.x = launch.grid / sizeMapping.clusterDim.y;
-            rv.numWorkGroups.y = sizeMapping.clusterDim.y;
-            rv.numWorkGroups.z = 1;
+            const size_t clusters = launch.grid
+                / checkedMultiply(sizeMapping.clusterDim.x, sizeMapping.clusterDim.y);
+            rv.numWorkGroups = spatialClusterLaunch(clusters, sizeMapping.clusterDim);
         }
         bool hasNumWorkGroupsArg = std::any_of(
             customKernel.args.begin(), customKernel.args.end(),
@@ -3638,6 +3727,24 @@ namespace TensileLite
                 case CustomArgSemantic::GSUSync:
                     rv.args.template append<uint32_t>("GSUSync", 0);
                     break;
+                case CustomArgSemantic::ESMRuntimeSupported:
+                {
+                    int32_t esmRuntimeSupported = 0;
+                    
+                    hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                    if(hipAMDGPU
+                       && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                           || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+                    {
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
+                        HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                            hipDeviceAttributeExpertSchedMode,
+                                                            hipAMDGPU->deviceId));
+#endif
+                    }
+                    rv.args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+                    break;
+                }
                 case CustomArgSemantic::BatchOffsetD:
                     rv.args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
                     break;
@@ -4335,8 +4442,10 @@ namespace TensileLite
         if(sizeMapping.isStreamK())
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
-            if(tiles > 0)
+            // Cluster grids count logical workers, each producing several tiles.
+            if(usesStreamKSpatialCluster())
+                gsu = sk.clusterSchedule.parallelSplits;
+            else if(tiles > 0)
                 gsu = sk.grid / tiles;
         }
 
@@ -4420,7 +4529,8 @@ namespace TensileLite
             // If using post kernel with stream-k then it is doing parallel reduciton
             // Calculate the splitting factor
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            gsu = usesStreamKSpatialCluster() ? sk.clusterSchedule.parallelSplits
+                                             : sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
         int additionalPaddingPerBatchGeneralBatch = 0;
@@ -5034,6 +5144,21 @@ namespace TensileLite
                 return origami::reduction_t::tree;
             return reductionStrat;
         }
+
+        // Whether a Stream-K workgroup can stop part-way through a tile, which
+        // is the only thing the partial-tile workspace ever holds.
+        //
+        // itersPerTile must be the same value makeArgs() packs into the
+        // ItersPerTile kernarg -- getItersPerTile() clamped to at least 1 --
+        // or host and device disagree about which branch the kernel takes.
+        //
+        // This covers tile straddling only. Parallel reduction writes partials
+        // unconditionally through its own path at any itersPerTile, so every
+        // caller keeps that as a separate check.
+        inline bool streamKStraddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
+        {
+            return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
+        }
     }
 
     void ContractionSolution::validatePersistentLoopArgsVersion() const
@@ -5043,16 +5168,42 @@ namespace TensileLite
         const int outerVersion = internalArgsSupport.version;
         if(outerVersion < 0 || outerVersion > 3)
             throw std::runtime_error("Unsupported kernel argument protocol version");
-        if(version < 0 || version > 1 || (version == 1 && !sizeMapping.isPersistentDataParallel()))
+        if(version < 0 || version > 2 || (version == 1 && !sizeMapping.isPersistentDataParallel())
+           || (version == 2 && !sizeMapping.isStreamK()))
             throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
         if(version == 1 && outerVersion != 3)
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
+        if(version == 2 && outerVersion != 3)
+            throw std::runtime_error("StreamK cluster argument layout version 2 requires KernArgsVersion=3");
+    }
+
+    void ContractionSolution::validateStreamKClusterDescriptor() const
+    {
+        if(handwrittenCustomKernel())
+            throw std::runtime_error("External custom kernels do not support StreamK scheduling ABI 2");
     }
 
     void ContractionSolution::validatePersistentLoopArgs() const
     {
         validatePersistentLoopArgsVersion();
         const int version = internalArgsSupport.persistentLoopArgsVersion;
+        if(usesStreamKSpatialCluster())
+        {
+            const auto& c = sizeMapping.clusterDim;
+            const bool supportedShape = c.z == 1 && c.x > 0 && c.x < 16
+                && c.y > 0 && c.y <= 8 && (c.x & (c.x - 1)) == 0
+                && (c.y & (c.y - 1)) == 0 && c.x * c.y >= 2 && c.x * c.y <= 16;
+            if(!sizeMapping.isStreamK() || !sizeMapping.hasStaticAssignment()
+               || sizeMapping.streamKAtomic || sizeMapping.prefetchAcrossPersistent
+               || !supportedShape)
+                throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling, a supported spatial cluster, and PAP off");
+            if(problemType.outputAmaxD)
+                throw std::runtime_error("StreamK cluster multicast does not support amax reductions");
+            if(problemType.useGradient && problemType.useBias)
+                throw std::runtime_error("StreamK cluster multicast does not support bias-gradient reductions");
+            validateStreamKClusterDescriptor();
+            return;
+        }
         if(customKernel.name.empty())
             return;
 
@@ -5114,6 +5265,8 @@ namespace TensileLite
         launch.argsVersion = internalArgsSupport.persistentLoopArgsVersion;
         if(!sizeMapping.isPersistent())
             return launch;
+        // Retain the legacy DP tile count used by prediction and diagnostics;
+        // its spatial block cap below uses calculateGrid's output-index ordering.
         launch.totalTiles = problem.getNumTiles(sizeMapping, 1);
         if(sizeMapping.isPersistentDataParallel())
             launch.grid = getPersistentGridImpl(*this, problem, hardware, launch.totalTiles,
@@ -5311,7 +5464,10 @@ namespace TensileLite
             //
             // Deliberate behavior change: tiles == 0 throws here instead of
             // dividing by zero (grouped-GEMM callers report 0 tiles).
-            if(launch.reduction == origami::reduction_t::parallel && (tiles == 0 || launch.grid / tiles < 2))
+            const size_t reductionTiles = usesStreamKSpatialCluster()
+                ? launch.clusterSchedule.blocks : tiles;
+            if(launch.reduction == origami::reduction_t::parallel
+               && (reductionTiles == 0 || launch.grid / reductionTiles < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
@@ -5755,6 +5911,8 @@ namespace TensileLite
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
+        if(usesStreamKSpatialCluster())
+            return resolveClusteredStreamKSettings(problem, hardware).workspaceBytes;
         if(sizeMapping.isPersistentDataParallel())
             return 0;
         size_t size = 0;
@@ -5841,6 +5999,10 @@ namespace TensileLite
                 // resolveStreamKSettings() uses, on the same triple, so the
                 // size reported here is the size the launch actually needs.
                 reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
+                // Same clamped value makeArgs() packs and the reserve-or-not
+                // rule keys on.
+                const size_t itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -5852,7 +6014,8 @@ namespace TensileLite
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
+                else if(streamKStraddlesTiles(itersPerTile, skGrid, tiles) && !streamKDP
+                        && !forceDPOnly)
                 {
                     // The workspace holds the partial tiles only. The per-XCD
                     // work-queue counters live at the base of the flag buffer
@@ -6013,8 +6176,7 @@ namespace TensileLite
         // whether parallel remains eligible under uniform summation order, and
         // wants only the yes/no, so obstacleToken defaults to unrequested.
         std::string streamKUniformSummationOrderObstacle(
-            SizeMapping const&                      sizeMapping,
-            ContractionSolution::ProblemType const& problemType,
+            ContractionSolution const&              solution,
             ContractionSolution::Problem const&     problem,
             char const**                            obstacleToken = nullptr);
     } // namespace
@@ -6022,6 +6184,12 @@ namespace TensileLite
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
+        if(usesStreamKSpatialCluster()
+           && (handwrittenCustomKernel()
+               || problemType.sparse || problemType.useGradient || sizeMapping.useSubtileImpl
+               || problemType.useInitialStridesCD
+               || problem.batchMode() != ContractionProblemGemm::BATCHMODE::STRIDED))
+            return origami::reduction_t::tree;
         if(sizeMapping.isPersistentDataParallel())
             return origami::reduction_t::none;
         auto reductionStrat = origami::reduction_t::tree;
@@ -6108,7 +6276,7 @@ namespace TensileLite
                     = reductionStrat == origami::reduction_t::parallel
                       && sizeMapping.streamKAtomic == 0
                       && streamKUniformSummationOrderObstacle(
-                             sizeMapping, problemType, problem)
+                             *this, problem)
                              .empty();
                 if(!keepParallel)
                     reductionStrat = origami::reduction_t::tree;
@@ -6265,10 +6433,267 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    double ContractionSolution::streamKClusterUtilization(Problem const& problem) const
+    {
+        if(!usesStreamKSpatialCluster())
+            return 1.0;
+        const auto geometry = spatialClusterGeometry(*this, problem);
+        if(geometry.totalBlocks == 0)
+            return 1.0;
+        return static_cast<double>(geometry.totalTiles)
+               / (static_cast<double>(geometry.totalBlocks) * geometry.clusterSize);
+    }
+
+    StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
+        Problem const& problem, Hardware const& hardware) const
+    {
+        validatePersistentLoopArgs();
+        if(problem.groupedGemm())
+            throw std::runtime_error("StreamK cluster multicast does not support grouped GEMM");
+        auto const* gpu = dynamic_cast<AMDGPU const*>(&hardware);
+        if(gpu == nullptr || gpu->computeUnitCount == 0)
+            throw std::runtime_error("StreamK cluster multicast requires AMDGPU hardware");
+
+        StreamKSettings launch;
+        launch.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        launch.workAssignment = WorkAssignment::StaticGrid;
+        launch.effectiveWorkAssignment = WorkAssignment::StaticGrid;
+        launch.argsVersion = 2;
+        launch.reduction = getSKReduction(problem, hardware);
+        launch.smCountTarget = problem.getParams().smCountTarget();
+        auto& cluster = launch.clusterSchedule;
+        cluster.enabled = true;
+        const auto geometry = spatialClusterGeometry(*this, problem);
+        launch.totalTiles = geometry.totalTiles;
+        checkPersistentArgument(launch.totalTiles);
+        cluster.clusterSize = geometry.clusterSize;
+        cluster.blocksM = geometry.blocks.x;
+        cluster.blocksN = geometry.blocks.y;
+        cluster.blocks = geometry.totalBlocks;
+        size_t k = 1;
+        for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+            k = checkedMultiply(k, problem.boundSize(i));
+        checkPersistentArgument(k);
+        const size_t iters = std::max(size_t{1}, divideUp(k, sizeMapping.depthU));
+        checkPersistentArgument(iters);
+        cluster.itersPerTile = static_cast<uint32_t>(iters);
+        const size_t totalIters = checkedMultiply(cluster.blocks, iters);
+        checkPersistentArgument(totalIters);
+        if(cluster.blocks == 0)
+        {
+            launch.reduction = origami::reduction_t::tree;
+            cluster.wholeBlocksOnly = true;
+            cluster.fallbackReason = "empty-output";
+            return launch;
+        }
+
+        // The existing predictor consumes physical tiles/CUs and returns a
+        // physical workgroup budget. Convert once, before partitioning blocks.
+        launch.selectedGrid = getPersistentGridImpl(*this, problem, hardware,
+            launch.totalTiles, launch.reduction, nullptr,
+            &cluster.fixedGridUsed, nullptr, nullptr, nullptr);
+        // A whole-tile grid has no inter-cluster reduction dependencies. Keep
+        // that decision before applying residency limits for cooperative splits,
+        // padding boundary blocks so every cluster has all of its peers.
+        const bool wholeTileGrid = launch.selectedGrid == launch.totalTiles;
+        size_t physicalBudget = wholeTileGrid
+            ? checkedMultiply(cluster.blocks, cluster.clusterSize) : launch.selectedGrid;
+        if(!cluster.fixedGridUsed && launch.reduction == origami::reduction_t::parallel
+           && launch.selectedGrid > launch.totalTiles)
+        {
+            // The predictor's uniform split count applies to real tiles. Pad
+            // each split to complete spatial blocks so out-of-bounds peers do
+            // not consume the useful K parallelism it selected. Physical grid
+            // and workspace limits below still bound the padded launch.
+            const size_t splits = std::min(launch.selectedGrid / launch.totalTiles, iters);
+            physicalBudget = checkedMultiply(
+                checkedMultiply(cluster.blocks, cluster.clusterSize), splits);
+        }
+        else if(!cluster.fixedGridUsed && launch.selectedGrid > launch.totalTiles)
+        {
+            // A tree predictor asking for K splits already has enough useful
+            // workers for every real tile. Padding must not serialize whole
+            // spatial blocks; preserve at least that independent parallelism.
+            physicalBudget = std::max(physicalBudget,
+                checkedMultiply(cluster.blocks, cluster.clusterSize));
+        }
+        const size_t threads = checkedMultiply(
+            checkedMultiply(sizeMapping.workGroupSize.x, sizeMapping.workGroupSize.y),
+            sizeMapping.workGroupSize.z);
+        if(threads == 0)
+            throw std::runtime_error("StreamK cluster multicast has an empty workgroup");
+        const size_t residentBudget = checkedMultiply(
+            static_cast<size_t>(gpu->computeUnitCount),
+            static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1)));
+        const size_t launchLimit = std::numeric_limits<uint32_t>::max() / threads;
+        // Whole blocks neither publish partials nor use synchronizer entries.
+        const size_t maxPhysical = wholeTileGrid ? launchLimit
+            : std::min({launchLimit, size_t{StreamKFlagElements}, residentBudget});
+        if(maxPhysical < cluster.clusterSize)
+            throw std::runtime_error("StreamK cluster cannot fit the physical grid limits");
+        physicalBudget = std::max(physicalBudget, cluster.clusterSize);
+        launch.grid = std::min({physicalBudget / cluster.clusterSize,
+                                maxPhysical / cluster.clusterSize, totalIters});
+        cluster.gridBeforeFallback = launch.grid;
+        launch.clusterGridClamp = checkedMultiply(launch.grid, cluster.clusterSize) != launch.selectedGrid;
+
+        auto wholeBlocks = [&](char const* reason) {
+            launch.reduction = origami::reduction_t::tree;
+            cluster.wholeBlocksOnly = true;
+            cluster.fallbackReason = reason;
+            // Whole-block persistent scheduling needs no more workers than blocks.
+            launch.grid = std::min(launch.grid, cluster.blocks);
+            cluster.split = {};
+        };
+        // The tile predictor does not price spatial block padding or clustered
+        // tree fixup. Compare its resolved physical grid with a whole-block
+        // candidate, in units of DepthU iterations on the busiest CU. Count
+        // physical waves (including padded peers), not just logical workers.
+        // The fixup allowance is calibrated for gfx1250 dense clustered tree
+        // kernels at a full physical wave, scaled by the block footprint so
+        // underfilled waves still favor K parallelism. Keep small grids (<1/4
+        // CU coverage), other
+        // architectures and parallel reduction on their existing policies.
+        if(!cluster.fixedGridUsed && !wholeTileGrid && cluster.blocks % launch.grid != 0
+           && gpu->processor == AMDGPU::Processor::gfx1250
+           && gpu->persistentDynamicGrid == static_cast<int>(origami::grid_selection_t::k_split_aware)
+           && launch.reduction == origami::reduction_t::tree
+           && !handwrittenCustomKernel() && !sizeMapping.useSubtileImpl
+           && !problemType.useGradient && !problemType.sparse && k != 0)
+        {
+            size_t cuBudget = gpu->computeUnitCount;
+            if(gpu->persistentMaxCUs > 0)
+                cuBudget = std::min(cuBudget, static_cast<size_t>(gpu->persistentMaxCUs));
+            if(launch.smCountTarget > 0)
+                cuBudget = std::min(cuBudget, static_cast<size_t>(launch.smCountTarget));
+            const size_t clustersPerWave = std::max(size_t{1}, cuBudget / cluster.clusterSize);
+            const size_t wholeWaves = divideUp(cluster.blocks, clustersPerWave);
+            const size_t splitWaves = divideUp(launch.grid, clustersPerWave);
+            const size_t wholeWork = checkedMultiply(wholeWaves, iters);
+            const size_t splitWork = checkedMultiply(splitWaves, divideUp(totalIters, launch.grid));
+            constexpr size_t TreeFixupItersPerWave = 48;
+            const size_t fixupWork = checkedMultiply(
+                checkedMultiply(splitWaves, TreeFixupItersPerWave),
+                std::min(cluster.blocks, clustersPerWave)) / clustersPerWave;
+            const size_t splitCost = checkedAdd(splitWork, fixupWork);
+            if(cluster.blocks >= divideUp(clustersPerWave, size_t{4}) && wholeWork <= splitCost)
+            {
+                launch.grid = std::min(cluster.blocks, launchLimit / cluster.clusterSize);
+                // Respect a caller's CU cap even though whole blocks do not
+                // need the cooperative residency/flag limit.
+                if(cuBudget < static_cast<size_t>(gpu->computeUnitCount))
+                    launch.grid = std::min(launch.grid, checkedMultiply(clustersPerWave,
+                        static_cast<size_t>(std::max(sizeMapping.CUOccupancy, 1))));
+                wholeBlocks("whole-block-cost");
+                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
+                return launch;
+            }
+        }
+        // One logical worker owns one K interval of one spatial block. All
+        // peers use the same split index and store at their real output
+        // coordinates in [split][batch][N][M], as the conversion kernel expects.
+        if(launch.reduction == origami::reduction_t::parallel && k != 0
+           && !Debug::Instance().useStreamKDataParrallel())
+        {
+            const size_t factor = std::min(launch.grid / cluster.blocks, iters);
+            if(factor >= 2)
+            {
+                launch.grid = checkedMultiply(cluster.blocks, factor);
+                const size_t outputBytes = checkedMultiply(
+                    problem.d().totalLogicalElements(), problem.computeTypeElementSize());
+                cluster.idealWorkspaceBytes = checkedMultiply(outputBytes, factor);
+                if(cluster.idealWorkspaceBytes <= problem.workspaceSize())
+                {
+                    cluster.parallelSplits = static_cast<uint32_t>(factor);
+                    cluster.partialSlots = checkedMultiply(launch.totalTiles, factor);
+                    launch.workspaceBytes = cluster.idealWorkspaceBytes;
+                    cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                    return launch;
+                }
+                cluster.workspaceFallback = true;
+                wholeBlocks("insufficient-workspace");
+                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                return launch;
+            }
+            // No uniform split fits: use the existing clustered tree schedule.
+            launch.reduction = origami::reduction_t::tree;
+        }
+        if(k == 0)
+            wholeBlocks("zero-k");
+        else if(Debug::Instance().useStreamKDataParrallel())
+            wholeBlocks("debug-data-parallel");
+        else if(wholeTileGrid)
+            wholeBlocks("whole-blocks");
+        else
+        {
+            // Saturate the debug full-tile multiplier before the legacy helper's
+            // uint32_t narrowing; values above this already select all blocks.
+            const int fullTiles = static_cast<int>(std::min(
+                static_cast<size_t>(std::max(gpu->skFullTiles, 0)), cluster.blocks / launch.grid));
+            cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid,
+                                                fullTiles, false);
+            if(problem.getParams().uniformSummationOrder()
+               && !streamKStaticSplitRowUniform(cluster.split, cluster.blocks, iters,
+                                                launch.grid, internalArgsSupport.perTileExtraIters, true))
+            {
+                // Scheduling and fixup retain ABI2's global first-E mapping.
+                // Equal chunks of every spatial block have the same reduction
+                // order for every real peer, including ragged boundary blocks.
+                size_t factor = launch.grid / cluster.blocks;
+                while(factor >= 2 && (iters % factor != 0 || iters / factor < 8))
+                    --factor;
+                if(factor >= 2)
+                {
+                    launch.grid = checkedMultiply(cluster.blocks, factor);
+                    cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid, 0, false);
+                }
+                else
+                    wholeBlocks("uniform-whole-blocks");
+            }
+            const bool hasPartials = cluster.split.extraIters != 0
+                                    || cluster.split.skItersPerWG % iters != 0;
+            if(!hasPartials)
+                wholeBlocks("whole-blocks");
+            else if(iters >= (size_t{1} << 16)
+                    || cluster.split.skItersPerWG >= (size_t{1} << 16)
+                    || totalIters >= (size_t{1} << 24))
+            {
+                cluster.treeBoundsFallback = true;
+                wholeBlocks("tree-arithmetic-bounds");
+            }
+            else
+            {
+                const size_t slots = checkedMultiply(launch.grid, cluster.clusterSize);
+                const size_t tileBytes = checkedMultiply(
+                    checkedMultiply(sizeMapping.macroTile.x, sizeMapping.macroTile.y),
+                    sizeMapping.workspaceSizePerElemC);
+                if(tileBytes == 0)
+                    throw std::runtime_error("StreamK cluster partials require workspace element bytes");
+                cluster.idealWorkspaceBytes = checkedMultiply(slots, tileBytes);
+                if(cluster.idealWorkspaceBytes > problem.workspaceSize())
+                {
+                    cluster.workspaceFallback = true;
+                    wholeBlocks("insufficient-workspace");
+                }
+                else
+                {
+                    cluster.partialSlots = slots;
+                    cluster.flagEntries = slots;
+                    launch.workspaceBytes = cluster.idealWorkspaceBytes;
+                }
+            }
+        }
+        cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+        return launch;
+    }
+
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,
                                                                 Hardware const& hardware,
                                                                 bool const* effectiveDynamicHint) const
     {
+        if(usesStreamKSpatialCluster())
+            return resolveClusteredStreamKSettings(problem, hardware);
         StreamKSettings sk;
         const bool customStreamK
             = customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -6332,9 +6757,12 @@ namespace TensileLite
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
+        const size_t itersPerTile
+            = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
-               || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
+               || (streamKStraddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP
+                   && !forceDPOnly)))
         {
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
@@ -6362,7 +6790,7 @@ namespace TensileLite
         {
             if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
                 sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);
-            else if(tiles % sk.grid != 0 && !streamKDP)
+            else if(streamKStraddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP)
                 sk.workspaceBytes = partialTileSize(sk.grid);
         }
         return sk;
@@ -6445,11 +6873,12 @@ namespace TensileLite
         // fence configurations that are expressible but were never audited for
         // this guarantee.
         std::string streamKUniformSummationOrderObstacle(
-            SizeMapping const&                        sizeMapping,
-            ContractionSolution::ProblemType const&   problemType,
+            ContractionSolution const&                solution,
             ContractionSolution::Problem const&       problem,
             char const**                              obstacleToken)
         {
+            const auto& sizeMapping = solution.sizeMapping;
+            const auto& problemType = solution.problemType;
             auto refuse = [&](char const* token, std::string detail) -> std::string {
                 if(obstacleToken != nullptr)
                     *obstacleToken = token;
@@ -6672,7 +7101,7 @@ namespace TensileLite
             // That helper tags itself, so the token is already set when it
             // objects.
             const std::string obstacle = streamKUniformSummationOrderObstacle(
-                sizeMapping, problemType, problem, obstacleToken);
+                *this, problem, obstacleToken);
             if(!obstacle.empty())
                 return obstacle;
 
@@ -6694,7 +7123,8 @@ namespace TensileLite
 
             // Batch-inclusive tile count, matching the value the StreamK
             // resolution and the kernel-arg packing both use.
-            const size_t tiles = problem.getNumTiles(sizeMapping, 1);
+            const size_t tiles = usesStreamKSpatialCluster()
+                ? launch.clusterSchedule.blocks : problem.getNumTiles(sizeMapping, 1);
 
             if(launch.reduction == origami::reduction_t::parallel)
             {
@@ -6727,11 +7157,10 @@ namespace TensileLite
                     // The same helper generateSingleCall() packs from, so the gate
                     // reasons about the split the kernel actually performs.
                     const StreamKStaticSplit split
-                        = streamKStaticSplit(tiles,
-                                             itersPerTile,
-                                             launch.grid,
-                                             pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                             sizeMapping.isPersistentDataParallel());
+                        = usesStreamKSpatialCluster() ? launch.clusterSchedule.split
+                          : streamKStaticSplit(tiles, itersPerTile, launch.grid,
+                                               pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
+                                               sizeMapping.isPersistentDataParallel());
 
                     // Capability AND the mode bit: the packer only sets
                     // MagicShiftItersPerTile bit 29 -- the bit the kernel
@@ -7068,27 +7497,24 @@ namespace TensileLite
                 grid = cuCount;
             }
 
+            if(self.usesStreamKSpatialCluster())
+            {
+                if(outSelectedGrid) *outSelectedGrid = grid;
+                return grid;
+            }
+
             if(self.sizeMapping.isPersistentDataParallel())
             {
                 if(outSelectedGrid) *outSelectedGrid = grid;
-                const size_t clusterSize
-                    = self.sizeMapping.clusterDim.x * self.sizeMapping.clusterDim.y;
-                if(clusterSize > 1)
+                if(self.sizeMapping.clusterDim.x > 1 || self.sizeMapping.clusterDim.y > 1)
                 {
-                    // Each cluster walks whole Cs x Ck tile blocks, so the grid is a
-                    // whole number of clusters and at most one cluster per block.
-                    dim3 workGroupSize, tileGrid;
-                    self.calculateGrid(workGroupSize, tileGrid, problem);
-                    const size_t blocks
-                        = size_t{CeilDivide(tileGrid.x, self.sizeMapping.clusterDim.x)}
-                          * CeilDivide(tileGrid.y, self.sizeMapping.clusterDim.y) * tileGrid.z;
-                    // The kernel's tile bound includes padded peers and is held in a
-                    // 32-bit SGPR. Checking only the unpadded tile count misses overflow
-                    // at cluster boundaries and would make the kernel skip output tiles.
-                    if(blocks > std::numeric_limits<uint32_t>::max() / clusterSize)
+                    const auto geometry = spatialClusterGeometry(self, problem);
+                    const size_t blocks = geometry.totalBlocks;
+                    // The kernel includes padded peers in its 32-bit scheduling bound.
+                    if(blocks > std::numeric_limits<uint32_t>::max() / geometry.clusterSize)
                         throw std::runtime_error(
                             "DataParallel cluster padded tile count exceeds the 32-bit scheduling limit");
-                    size_t clusters = std::max(grid / clusterSize, size_t{1});
+                    size_t clusters = std::max(grid / geometry.clusterSize, size_t{1});
                     // PrefetchAcrossPersistent issues the next tile's multicast loads
                     // while partners may still read LDS, so it keeps one block per cluster.
                     if(self.sizeMapping.prefetchAcrossPersistent)
@@ -7096,7 +7522,8 @@ namespace TensileLite
                         clusters = blocks;
                         if(outClusterDPGridClamp) *outClusterDPGridClamp = true;
                     }
-                    grid = std::max(std::min(clusters, blocks), size_t{1}) * clusterSize;
+                    grid = checkedMultiply(std::max(std::min(clusters, blocks), size_t{1}),
+                                           geometry.clusterSize);
                 }
                 else
                 {
@@ -7312,11 +7739,14 @@ namespace TensileLite
             //   - parallel reduction is passed Flags == nullptr, and the kernel
             //     branches on that to skip the flag protocol
             //   - tiles % grid == 0 spreads the tiles evenly over the
-            //     workgroups, so no partial tiles exist to fix up. This is the
-            //     same test the workspace sizing uses to decide whether partials
-            //     exist, and it is what excludes every data-parallel path: they
-            //     all arrive at grid == tiles, whether from K == 0, from the
-            //     tree-fixup bound above, or from the data-parallel debug knob.
+            //     workgroups, so no partial tiles exist to fix up. It is what
+            //     excludes every data-parallel path: they all arrive at grid ==
+            //     tiles, whether from K == 0, from the tree-fixup bound above,
+            //     or from the data-parallel debug knob. The workspace sizing
+            //     additionally skips itersPerTile == 1 (streamKStraddlesTiles),
+            //     which this clamp does not: clamping a grid whose flags are
+            //     never written is only conservative, and widening the grid
+            //     here would be a grid decision, not an allocation one.
             //
             // Clamping outside those cases would shrink a grid that has no flag
             // region to overrun, and against the data-parallel fallbacks it
@@ -7375,6 +7805,8 @@ namespace TensileLite
                                           size_t               tiles,
                                           origami::reduction_t reductionStrat) const
     {
+        if(usesStreamKSpatialCluster())
+            return resolveClusteredStreamKSettings(problem, hardware).grid;
         return getPersistentGridImpl(*this, problem, hardware, tiles, reductionStrat, nullptr);
     }
 
@@ -7404,8 +7836,9 @@ namespace TensileLite
     //     allocates from;
     //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
     //
-    // The partials-workspace guard reserves iff (reduction==parallel || tiles%grid!=0),
-    // sized as partialTileSize(grid); the reservation does not depend on
+    // The partials-workspace guard reserves iff (reduction==parallel ||
+    // streamKStraddlesTiles(itersPerTile, grid, tiles)), sized as
+    // partialTileSize(grid); the reservation does not depend on
     // dynamicPartialsSlots. The
     // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
     // locally) purely for reporting.
@@ -7416,6 +7849,33 @@ namespace TensileLite
         StreamKDecisions d;
         if(!sizeMapping.isStreamK())
             return d;
+
+        if(usesStreamKSpatialCluster())
+        {
+            const auto launch = resolveClusteredStreamKSettings(problem, hardware);
+            d.clusterSchedule = launch.clusterSchedule;
+            const auto& cluster = d.clusterSchedule;
+            d.reduction = launch.reduction;
+            d.tiles = launch.totalTiles;
+            d.selectedGrid = launch.selectedGrid;
+            d.skGridPreFallback = cluster.gridBeforeFallback;
+            d.skGrid = d.finalGrid = launch.grid;
+            d.skTiles = cluster.split.skTiles;
+            d.skSplit = cluster.parallelSplits;
+            d.totalItems = cluster.blocks;
+            d.dpOnly = cluster.wholeBlocksOnly;
+            d.streamKDP = Debug::Instance().useStreamKDataParrallel();
+            d.partialsPresent = cluster.partialSlots != 0;
+            d.workspaceAllocated = launch.workspaceBytes != 0;
+            d.requiredWorkspaceBytes = launch.workspaceBytes;
+            d.idealWorkspaceBytes = cluster.idealWorkspaceBytes;
+            d.givenWorkspaceBytes = problem.workspaceSize();
+            d.workspaceDPFallbackFired = cluster.workspaceFallback;
+            d.treeBoundsFallbackFired = cluster.treeBoundsFallback;
+            d.clusterDPGridClamped = launch.clusterGridClamp;
+            d.fixedGridUsed = cluster.fixedGridUsed;
+            return d;
+        }
 
         const size_t tiles = problem.getNumTiles(sizeMapping, 1);
         d.tiles            = tiles;
@@ -7483,15 +7943,20 @@ namespace TensileLite
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
 
+        // Same clamped value makeArgs() packs and the reserve-or-not rule keys
+        // on; also reused by the skTiles / skSplit mirror further down.
+        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
         // Workspace / DP fallback. Reserve iff (reduction==parallel ||
-        // tiles%grid!=0), sized by grid (not by dynamicSlots). This is the same
-        // reserve-or-not rule requiredWorkspaceSize() implements independently, so
-        // the two must be changed together.
+        // the grid can straddle a tile), sized by grid (not by dynamicSlots).
+        // This is the same reserve-or-not rule requiredWorkspaceSize()
+        // implements independently, so the two must be changed together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
         if(grid > 0
            && (reduction == origami::reduction_t::parallel
-               || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
+               || (streamKStraddlesTiles(itersPerTile, grid, tiles) && !streamKDP
+                   && !forceDPOnly)))
         {
             needPartials = true;
             // The workspace holds the partial tiles only. The per-XCD work-queue
@@ -7516,7 +7981,6 @@ namespace TensileLite
 
         // skTiles / skSplit / totalItems -- mirror the kernel-arg packing in
         // makeArgs, using the FINAL (post-fallback) grid and reduction.
-        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(isDynamic)
         {
             AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
@@ -7669,6 +8133,25 @@ namespace TensileLite
         os << "  mode:\n";
         field(9, "reduction", reductionStr(d.reduction));
         field(9, "isDynamic", yn(d.isDynamic));
+
+        if(d.clusterSchedule.enabled)
+        {
+            const auto& cluster = d.clusterSchedule;
+            os << "  spatial cluster (PersistentLoopArgsVersion=2):\n";
+            field(22, "selectedPhysicalWGs", std::to_string(d.selectedGrid));
+            field(22, "physicalWGs", std::to_string(cluster.physicalGrid));
+            field(22, "logicalClusters", std::to_string(d.skGrid));
+            field(22, "spatialBlocks", std::to_string(cluster.blocks));
+            field(22, "realTiles", std::to_string(d.tiles));
+            field(22, "itersPerBlock", std::to_string(cluster.itersPerTile));
+            field(22, "parallelSplits", std::to_string(cluster.parallelSplits));
+            field(22, "skBlocks", std::to_string(cluster.split.skTiles));
+            field(22, "skItersPerCluster", std::to_string(cluster.split.skItersPerWG));
+            field(22, "extraIters", std::to_string(cluster.split.extraIters));
+            field(22, "physicalPartialSlots", std::to_string(cluster.partialSlots));
+            field(22, "flagEntries", std::to_string(cluster.flagEntries));
+            field(22, "fallback", cluster.fallbackReason.empty() ? "none" : cluster.fallbackReason);
+        }
 
         os << "  grid:\n";
         field(11, "selected", std::to_string(d.selectedGrid));
@@ -7868,7 +8351,8 @@ namespace TensileLite
         pp.staticModel = staticPerformanceModel(
             M, N, K, NumBatches, MT0, MT1, NumCUs, pp.granularities.totalGranularity, GlobalSplitU);
 
-        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity;
+        pp.speedGFlops = IdealGranularityPerf * pp.granularities.totalGranularity
+                        * streamKClusterUtilization(problem);
         pp.CUs         = NumCUs;
 
         return pp;

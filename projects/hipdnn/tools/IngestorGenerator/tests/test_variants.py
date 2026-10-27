@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from codegen.config_loader import ConfigError, load_config
+from codegen.models import KernelSource
 
 #: The tri-state's own KMD field. `default_value: -1` because 0 is a value the policy
 #: returns, so a 0 default would alias "policy decided off" onto "explicitly off".
@@ -242,7 +243,7 @@ class TestArchAndTarget:
         )
 
     def test_shipped_wmma_catalog_compiles_only_generic_objects(
-        self, gfx1151_wmma_attention_config
+        self, gfx1151_wmma_attention_config, gfx1151_wmma_attention_decode_config
     ):
         """Gfx1151WmmaAttentionNative's scoreKernel ranks the 32-key single-wave
         transposed geometry above 64-key two-wave unconditionally. That holds for
@@ -250,9 +251,13 @@ class TestArchAndTarget:
         processor-specific gfx1151 objects at long sequences, and the matcher
         cannot see an object's compile target. A native kernel here needs that
         score keyed on the target first."""
-        kernels = [k for p in gfx1151_wmma_attention_config.packs for k in p.kernels]
-        assert kernels
-        assert {k.kernel_source.target for k in kernels} == {"generic"}
+        for config in (
+            gfx1151_wmma_attention_config,
+            gfx1151_wmma_attention_decode_config,
+        ):
+            kernels = [k for p in config.packs for k in p.kernels]
+            assert kernels
+            assert {k.kernel_source.target for k in kernels} == {"generic"}
 
     def test_a_kernel_without_target_emits_none(self, tmp_path):
         kernels = _kernels(tmp_path)
@@ -822,3 +827,503 @@ class TestPackDefaultsComposeBeforeMetadataProjection:
             "value the author left to the kernel and changes the compiled binary"
         )
         assert emitted["metadata"]["use_exp2_fast"] == 1
+
+
+class TestLaunches:
+    """A rocke ``kernel_source.launches`` maps launch names to override mappings,
+    each merged onto the base source and written as the UKD's ``sources`` map;
+    anything else is refused."""
+
+    BASE = {
+        "kind": "rocke",
+        "source": "k.py",
+        "builder": "build_k",
+        "spec": {"block_m": 256, "head_size": 64},
+    }
+
+    @staticmethod
+    def _emitted(tmp_path, raw):
+        from codegen.generator import build_kdp, mint_ids
+
+        raw["specialization"] = {
+            "metadata_fields": ["dtype", "seqlen_q", "block_m", "use_exp2_fast"],
+            "matcher_only_fields": [],
+            "bindings": {
+                "dtype": {"field": "dtype"},
+                "seqlen_q": {"field": "seqlen_q"},
+                "block_m": {"field": "block_m"},
+                "use_exp2_fast": {"method": "effective_use_exp2_fast"},
+            },
+            "vocabulary": {"dtype": {"bf16": "BF16"}},
+        }
+        config = _load(tmp_path, raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        return kdp["kernelDescriptors"]
+
+    @staticmethod
+    def _kernel(name: str, source: dict) -> dict:
+        return {
+            "name": name,
+            "kernel_source": source,
+            "metadata": {
+                "dtype": "BF16",
+                "block_m": 256,
+                "seqlen_q": 1,
+                "use_exp2_fast": 0,
+            },
+        }
+
+    def _hand_authored(self, source: dict, name: str = "k") -> dict:
+        return _config(kernel_defaults={}, kernels=[self._kernel(name, source)])
+
+    def _with_launches(self, launches, **extra) -> dict:
+        return self._hand_authored({**self.BASE, "launches": launches, **extra})
+
+    def test_a_config_without_launches_is_unchanged(self, tmp_path):
+        (entry,) = self._emitted(tmp_path, self._hand_authored(self.BASE))
+        assert list(entry) == [
+            "version",
+            "id",
+            "name",
+            "kernel_source",
+            "metadata",
+            "priority",
+        ]
+        assert entry["version"] == "1.0"
+        assert entry["kernel_source"] == self.BASE
+
+    def test_two_launches_emit_sources_with_the_overrides_merged(self, tmp_path):
+        raw = self._with_launches({"decode": {}, "merge": {"role": "merge"}})
+        (entry,) = self._emitted(tmp_path, raw)
+        assert "kernel_source" not in entry
+        assert entry["version"] == "1.1"
+        assert entry["sources"] == {
+            "decode": self.BASE,
+            "merge": {**self.BASE, "role": "merge"},
+        }
+        # The key order of an entry is part of the descriptor bytes.
+        assert list(entry["sources"]["merge"]) == [
+            "kind",
+            "source",
+            "builder",
+            "spec",
+            "role",
+        ]
+
+    def test_the_version_is_raised_for_that_descriptor_only(self, tmp_path):
+        """One engine names one set of launches, so a launch UKD and a plain one are
+        generated from two configs; each is stamped by its own source."""
+        multi_dir, single_dir = tmp_path / "multi", tmp_path / "single"
+        multi_dir.mkdir()
+        single_dir.mkdir()
+        (multi,) = self._emitted(
+            multi_dir,
+            self._with_launches({"a": {}, "b": {"role": "b"}}),
+        )
+        (single,) = self._emitted(single_dir, self._hand_authored(self.BASE))
+        assert (multi["version"], single["version"]) == ("1.1", "1.0")
+        assert "sources" in multi and "kernel_source" in single
+        assert "sources" not in single and "kernel_source" not in multi
+
+    def test_a_launch_may_override_the_builder_and_the_spec(self, tmp_path):
+        raw = self._with_launches(
+            {
+                "segment": {},
+                "reduce": {
+                    "builder": "build_reduce",
+                    "target": "generic",
+                    "spec": {"num_splits": 4},
+                },
+            }
+        )
+        (entry,) = self._emitted(tmp_path, raw)
+        segment, reduce = entry["sources"]["segment"], entry["sources"]["reduce"]
+        assert segment == self.BASE
+        # The override REPLACES the spec: a different builder's dataclass must not
+        # be handed the base builder's fields.
+        assert reduce == {
+            "kind": "rocke",
+            "source": "k.py",
+            "builder": "build_reduce",
+            "target": "generic",
+            "spec": {"num_splits": 4},
+        }
+
+    def test_launches_from_kernel_defaults_follow_each_variant(self, tmp_path):
+        """A launch with no `spec` override takes each variant's own expanded spec, in
+        the spec_order the variant emits, so a variant set carries launches without
+        the launches knowing which axes vary. A `spec` override does not follow the
+        variants: it replaces the spec and expansion never varies it (see the
+        static-spec tests below)."""
+        raw = _config(variants=[_group(spec_order=["block_m", "seqlen_q", "dtype"])])
+        raw["packs"][0]["kernel_defaults"]["launches"] = {
+            "segment": {},
+            "reduce": {"role": "reduce"},
+        }
+        entries = self._emitted(tmp_path, raw)
+        assert [e["sources"]["segment"]["spec"]["block_m"] for e in entries] == [
+            128,
+            256,
+        ]
+        for entry in entries:
+            assert list(entry["sources"]["segment"]["spec"]) == [
+                "block_m",
+                "seqlen_q",
+                "dtype",
+            ]
+            assert (
+                entry["sources"]["reduce"]["spec"]
+                == entry["sources"]["segment"]["spec"]
+            )
+            assert entry["version"] == "1.1"
+
+    def test_a_launch_spec_stating_a_varied_kmd_field_is_rejected(self, tmp_path):
+        """A launch `spec` override is static, so a kmd field it states is one value
+        for every variant. The variants differing in block_m disagree with it: the
+        error names the first variant that does."""
+        raw = _config(variants=[_group()])
+        raw["packs"][0]["kernel_defaults"]["launches"] = {
+            "segment": {},
+            "reduce": {"spec": {"block_m": 128, "head_size": 64}},
+        }
+        with pytest.raises(
+            ConfigError,
+            match=r"kernel 'attn\.bf16_sq512_bm256_e1'.*launches\['reduce'\]\.spec "
+            r"states \['block_m'\]",
+        ):
+            _load(tmp_path, raw)
+
+    def test_a_launch_spec_stating_a_shape_axis_value_is_rejected(self, tmp_path):
+        """The same through `shape_axes`: the axis varies seqlen_q across kernels, so
+        a launch stating 256 disagrees with the 512 kernel."""
+        group = _group(
+            shape_axes={"seqlen_q": [256, 512]},
+            knob_sets={"one": [{"block_m": 128}]},
+            shapes=[
+                {"dtype": "bf16", "knobs": "one", "resolved": {"use_exp2_fast": 1}}
+            ],
+        )
+        raw = _config(variants=[group])
+        raw["packs"][0]["kernel_defaults"]["launches"] = {
+            "segment": {},
+            "reduce": {"spec": {"seqlen_q": 256, "head_size": 64}},
+        }
+        with pytest.raises(
+            ConfigError,
+            match=r"kernel 'attn\.bf16_sq512_bm128_e1'.*launches\['reduce'\]\.spec "
+            r"states \['seqlen_q'\]",
+        ):
+            _load(tmp_path, raw)
+
+    def test_a_launch_spec_stating_no_varied_field_is_the_same_on_every_variant(
+        self, tmp_path
+    ):
+        raw = _config(variants=[_group()])
+        raw["packs"][0]["kernel_defaults"]["launches"] = {
+            "segment": {},
+            "reduce": {"spec": {"num_splits": 4}},
+        }
+        kernels = _load(tmp_path, raw).packs[0].kernels
+        assert len(kernels) == 2
+        assert [k.kernel_source.launches["reduce"].spec for k in kernels] == [
+            {"num_splits": 4},
+            {"num_splits": 4},
+        ]
+        # The control: the launch with no spec override does follow the variants.
+        assert [
+            k.kernel_source.launches["segment"].spec["block_m"] for k in kernels
+        ] == [
+            128,
+            256,
+        ]
+
+    @pytest.mark.parametrize(
+        "sets",
+        [
+            ({"a": {}, "b": {"role": "b"}}, None),
+            (None, {"a": {}, "b": {"role": "b"}}),
+            ({"a": {}, "b": {"role": "b"}}, {"a": {}, "c": {"role": "c"}}),
+        ],
+        ids=["multi_then_single", "single_then_multi", "different_names"],
+    )
+    def test_kernels_must_name_one_set_of_launches(self, tmp_path, sets):
+        """One engine has one dispatch handler, which declares one set of launch
+        names; a kernel whose set differs would be dropped when the catalog loads."""
+        sources = []
+        for launches in sets:
+            source = dict(self.BASE)
+            if launches is not None:
+                source["launches"] = launches
+            sources.append(source)
+        kernels = [self._kernel("one", sources[0]), self._kernel("two", sources[1])]
+        kernels[1]["metadata"]["seqlen_q"] = 2
+        with pytest.raises(ConfigError, match="names launches"):
+            _load(tmp_path, _config(kernel_defaults={}, kernels=kernels))
+
+    def test_kernels_naming_one_set_of_launches_load(self, tmp_path):
+        launches = {"a": {}, "b": {"role": "b"}}
+        kernels = [
+            self._kernel("one", {**self.BASE, "launches": launches}),
+            self._kernel("two", {**self.BASE, "launches": launches}),
+        ]
+        kernels[1]["metadata"]["seqlen_q"] = 2
+        config = _load(tmp_path, _config(kernel_defaults={}, kernels=kernels))
+        assert config.launch_names == ("a", "b")
+
+    @staticmethod
+    def _launch_config(config, names=("decode", "merge")):
+        """`config` with every kernel declaring a launch per name."""
+        import dataclasses
+
+        for pack in config.packs:
+            for kernel in pack.kernels:
+                source = kernel.kernel_source
+                kernel.kernel_source.launches = {
+                    name: dataclasses.replace(source, role=name) for name in names
+                }
+        return config
+
+    def test_the_native_stub_declares_the_launch_names(
+        self, generator, gfx950_attention_dense_config
+    ):
+        config = self._launch_config(gfx950_attention_dense_config)
+        rendered = generator._render_template("native.cpp.j2", config)
+        assert "#include <set>" in rendered
+        assert "std::set<std::string> launchNames() const override" in rendered
+        assert 'return {"decode", "merge"};' in rendered
+        # The guidance names the per-launch builder, not the multi-launch refusal.
+        assert 'launchKernelDefinition(kernel, "<name>")' in rendered
+        assert "buildIngestorKernelCode(kernel) refuses it" in rendered
+
+    def test_the_native_stub_declares_nothing_without_launches(
+        self, generator, gfx950_attention_dense_config
+    ):
+        """The control: no launches, so the handler stays a single-launch one and
+        the stub is the one it always was."""
+        rendered = generator._render_template(
+            "native.cpp.j2", gfx950_attention_dense_config
+        )
+        for absent in ("launchNames", "#include <set>", "launchKernelDefinition"):
+            assert absent not in rendered, absent
+        assert "buildIngestorKernelCode overload that takes no compiler" in rendered
+
+    def test_the_census_checks_each_launchs_kind_for_a_multi_launch_kernel(
+        self, generator, gfx950_attention_dense_config
+    ):
+        config = self._launch_config(gfx950_attention_dense_config)
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        assert "if(!kernel.sources.empty())" in rendered
+        assert "EXPECT_EQ(source.kind, EXPECTED_SOURCE_KIND)" in rendered
+        assert "for(const auto& [launch, source] : kernel.sources)" in rendered
+        # A single-launch kernel of the same bundle is still checked on `source`.
+        assert "EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)" in rendered
+
+    def test_the_census_reads_only_source_without_launches(
+        self, generator, gfx950_attention_dense_config
+    ):
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", gfx950_attention_dense_config
+        )
+        assert "kernel.sources" not in rendered
+        assert "EXPECT_EQ(kernel.source.kind, EXPECTED_SOURCE_KIND)" in rendered
+
+    def test_a_kernels_own_launches_replace_the_defaults(self, tmp_path):
+        raw = self._hand_authored(
+            {**self.BASE, "launches": {"x": {}, "y": {"role": "y"}}}
+        )
+        raw["packs"][0]["kernel_defaults"] = {
+            "launches": {"p": {}, "q": {"role": "q"}, "r": {"role": "r"}}
+        }
+        (entry,) = self._emitted(tmp_path, raw)
+        assert sorted(entry["sources"]) == ["x", "y"]
+
+    def test_the_authored_document_loads_back_to_the_same_launches(self, tmp_path):
+        raw = self._with_launches(
+            {"a": {}, "b": {"role": "b", "builder": "build_b", "spec": {"n": 1}}}
+        )
+        source = _load(tmp_path, raw).packs[0].kernels[0].kernel_source
+        again = _load(tmp_path, self._hand_authored(source.authored_document()))
+        assert again.packs[0].kernels[0].kernel_source.launches == source.launches
+
+    @pytest.mark.parametrize(
+        "name",
+        ["", "Merge", "2merge", "merge-2", "merge\n", "a b", "_a", 1, None],
+        ids=repr,
+    )
+    def test_a_launch_name_outside_the_identifier_rule_is_rejected(
+        self, tmp_path, name
+    ):
+        raw = self._with_launches({name: {}, "ok": {"role": "ok"}})
+        with pytest.raises(ConfigError, match="not a lowercase identifier"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize(
+        "launches",
+        [{}, {"only": {}}, {"only": {"role": "x"}}],
+        ids=["empty", "one", "one_with_role"],
+    )
+    def test_fewer_than_two_launches_are_rejected(self, tmp_path, launches):
+        with pytest.raises(ConfigError, match="at least 2"):
+            _load(tmp_path, self._with_launches(launches))
+
+    @pytest.mark.parametrize("launches", [None, [], ["a", "b"], "ab", 3])
+    def test_launches_that_are_not_a_mapping_are_rejected(self, tmp_path, launches):
+        with pytest.raises(ConfigError, match=r"launches must be a mapping"):
+            _load(tmp_path, self._with_launches(launches))
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"kind": "hip", "source": "k.hip", "entry": "k"},
+            {"kind": "hsaco", "file": "k.co", "symbol": "k"},
+            {"kind": "embedded_source", "source_file": "k.cpp", "entry_point": "k"},
+        ],
+        ids=["hip", "hsaco", "embedded_source"],
+    )
+    def test_launches_are_rejected_on_every_other_kind(self, tmp_path, source):
+        raw = self._hand_authored({**source, "launches": {"a": {}, "b": {"role": "b"}}})
+        with pytest.raises(ConfigError, match="only valid on a 'rocke'"):
+            _load(tmp_path, raw)
+
+    def test_launches_in_kernel_defaults_are_rejected_for_a_non_rocke_kernel(
+        self, tmp_path
+    ):
+        raw = self._hand_authored({"kind": "hip", "source": "k.hip", "entry": "k"})
+        raw["packs"][0]["kernel_defaults"] = {"launches": {"a": {}, "b": {"role": "b"}}}
+        with pytest.raises(ConfigError, match="only valid on a 'rocke'"):
+            _load(tmp_path, raw)
+
+    @pytest.mark.parametrize(
+        "override, match",
+        [
+            ({"kind": "rocke"}, r"declares \['kind'\]"),
+            ({"launches": {"a": {}}}, r"declares \['launches'\]"),
+            ({"buidler": "x"}, r"declares \['buidler'\]"),
+            ({"builder": 3}, r"builder must be a string"),
+            ({"builder": ""}, r"supplies no 'builder'"),
+            ({"role": 3}, r"role must be a string"),
+            ({"role": "Merge"}, r"role is 'Merge'"),
+            ({"role": "merge\n"}, r"role is 'merge\\n'"),
+            ({"spec": "oops"}, r"spec must be a mapping"),
+            ({"spec": {}}, r"supplies no 'spec'"),
+            ({"target": "gfx942"}, r"target is 'gfx942'"),
+            ("oops", r"must be a mapping"),
+            (None, r"must be a mapping"),
+        ],
+    )
+    def test_a_bad_launch_override_is_rejected(self, tmp_path, override, match):
+        raw = self._with_launches({"a": override, "b": {"role": "b"}})
+        with pytest.raises(ConfigError, match=match):
+            _load(tmp_path, raw)
+
+    def test_a_launch_override_cannot_change_a_matcher_visible_field(self, tmp_path):
+        """One UKD is one selection: its metadata is stated once."""
+        raw = self._with_launches(
+            {"a": {}, "b": {"spec": {"block_m": 128, "head_size": 64}}}
+        )
+        with pytest.raises(ConfigError, match=r"states \['block_m'\]"):
+            _load(tmp_path, raw)
+
+    def test_a_launch_may_restate_a_matcher_visible_field_at_its_value(self, tmp_path):
+        raw = self._with_launches({"a": {}, "b": {"spec": {"block_m": 256, "n": 1}}})
+        (entry,) = self._emitted(tmp_path, raw)
+        assert entry["sources"]["b"]["spec"] == {"block_m": 256, "n": 1}
+
+    def test_two_launch_names_may_name_one_kernel(self, tmp_path):
+        """A pipeline stage may run one kernel twice with different arguments, so
+        equal launches are valid config and emit two entries naming one kernel."""
+        (entry,) = self._emitted(tmp_path, self._with_launches({"a": {}, "b": {}}))
+        assert sorted(entry["sources"]) == ["a", "b"]
+        first, second = entry["sources"]["a"], entry["sources"]["b"]
+        assert first == second
+        assert first["builder"] == "build_k"
+
+    def test_a_role_alone_tells_two_launches_apart(self, tmp_path):
+        (entry,) = self._emitted(
+            tmp_path, self._with_launches({"a": {"role": "a"}, "b": {"role": "b"}})
+        )
+        assert [s["role"] for s in entry["sources"].values()] == ["a", "b"]
+
+    def test_role_is_not_a_key_of_a_plain_kernel_source(self, tmp_path):
+        raw = self._hand_authored({**self.BASE, "role": "merge"})
+        with pytest.raises(ConfigError, match=r"declares \['role'\]"):
+            _load(tmp_path, raw)
+
+    def test_a_multi_launch_source_has_no_single_document(self):
+        ks = KernelSource(
+            kind="rocke",
+            source="k.py",
+            builder="b",
+            spec={"a": 1},
+            launches={
+                "x": KernelSource(
+                    kind="rocke", source="k.py", builder="b", spec={"a": 1}
+                ),
+                "y": KernelSource(
+                    kind="rocke", source="k.py", builder="b", spec={"a": 1}, role="y"
+                ),
+            },
+        )
+        with pytest.raises(ValueError, match="no single kernel_source object"):
+            ks.as_document()
+        assert sorted(ks.descriptor_fields()["sources"]) == ["x", "y"]
+        assert ks.ukd_version == "1.1"
+
+    @staticmethod
+    def _identity_kernel(launches):
+        from tests.helpers import make_kernel
+
+        def source(role=""):
+            return KernelSource(
+                kind="rocke", source="m.py", builder="build_x", spec={"a": 1}, role=role
+            )
+
+        return make_kernel(
+            kernel_source=KernelSource(
+                kind="rocke",
+                source="m.py",
+                builder="build_x",
+                spec={"a": 1},
+                launches={name: source(role) for name, role in launches.items()},
+            )
+        )
+
+    def test_launches_are_part_of_a_candidate_identity(self):
+        from codegen.generator import _candidate_identity
+
+        identity = lambda launches: _candidate_identity(self._identity_kernel(launches))
+        base = {"a": "", "b": "b"}
+        assert identity(base) == identity(dict(base))
+        assert identity(base) != identity({"a": "", "b": "c"})
+        assert identity(base) != identity({"a": "", "c": "b"})
+        assert identity(base) != identity({"a": "", "b": "b", "c": "c"})
+        assert identity(base) != identity({})
+
+    def test_kernels_differing_only_in_launches_are_not_one_candidate(self, tmp_path):
+        """Same metadata tuple and base source, so only the launches tell the two
+        binaries apart: the dedup pass must refuse them rather than coalesce."""
+        raw = _config(
+            kernel_defaults={},
+            kernels=[
+                self._kernel(
+                    "one", {**self.BASE, "launches": {"a": {}, "b": {"role": "b"}}}
+                ),
+                self._kernel(
+                    "two", {**self.BASE, "launches": {"a": {}, "b": {"role": "c"}}}
+                ),
+            ],
+        )
+        with pytest.raises(ValueError, match="not the same candidate"):
+            self._emitted(tmp_path, raw)
+
+    def test_kernels_with_equal_launches_are_one_candidate(self, tmp_path):
+        launches = {"a": {}, "b": {"role": "b"}}
+        raw = _config(
+            kernel_defaults={},
+            kernels=[
+                self._kernel("one", {**self.BASE, "launches": launches}),
+                self._kernel("two", {**self.BASE, "launches": launches}),
+            ],
+        )
+        entries = self._emitted(tmp_path, raw)
+        assert [e["name"] for e in entries] == ["one"]
