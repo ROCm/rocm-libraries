@@ -22,7 +22,7 @@ on:
       strategy:
         type: choice
         description: "Matrix compares worker counts; allocation compares dispatch widths; partition compares shape and benchmark-group jobs"
-        options: [shape, reference, paired, safety, matrix, allocation, partition, gated-allocation, priority]
+        options: [shape, reference, gated-reference, paired, safety, matrix, allocation, partition, gated-allocation, priority]
         default: shape
       dispatch_threads:
         type: string
@@ -42,11 +42,11 @@ on:
         default: "600"
       case_filter:
         type: string
-        description: "Use calibration16 for the frozen 16-YAML workload, or an explicit pytest -k expression"
+        description: "Use full-gfx1250 for all 270 frozen YAMLs at 1024 cubed, calibration16, or an explicit pytest -k expression"
         required: true
       suite_seconds:
         type: string
-        description: "Per-strategy limit; combined trial execution limits must total at most 1500 seconds"
+        description: "Combined limit is 1500 seconds; standalone gated-reference allows up to 5400 seconds"
         default: "1200"
 
 permissions:
@@ -70,4 +70,4 @@ jobs:
       per_job_seconds: ${{ inputs.per_job_seconds }}
       case_filter: ${{ inputs.case_filter }}
       suite_seconds: ${{ inputs.suite_seconds }}
-      job_minutes: 35
+      job_minutes: ${{ inputs.strategy == 'gated-reference' && 120 || 35 }}

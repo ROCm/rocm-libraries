@@ -101,7 +101,7 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
-          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation|partition|gated-allocation|priority)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|gated-reference|paired|safety|matrix|allocation|partition|gated-allocation|priority)$ ]] || { echo "::error::invalid strategy"; exit 1; }
           trials=1
           [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
           [[ "${STRATEGY}" != matrix && "${STRATEGY}" != partition && "${STRATEGY}" != priority ]] || trials=3
@@ -117,7 +117,9 @@ jobs:
               (( count * width <= $(nproc) )) || { echo "::error::allocation exceeds host CPU count"; exit 1; }
             done
           fi
-          (( trials * SUITE_TIMEOUT_SECONDS <= 1500 )) || { echo "::error::trial execution limits must total at most 1500 seconds"; exit 1; }
+          trial_limit=1500
+          [[ "${STRATEGY}" != gated-reference ]] || trial_limit=5400
+          (( trials * SUITE_TIMEOUT_SECONDS <= trial_limit )) || { echo "::error::trial execution limits exceed ${trial_limit} seconds"; exit 1; }
           [[ "${REQUESTED_DISPATCH_THREADS}" =~ ^[124]$ ]] || { echo "::error::dispatch_threads must be 1, 2 or 4"; exit 1; }
 
       - name: Checkout TheRock repository
@@ -308,6 +310,14 @@ jobs:
           print("COHORT_MANIFEST=" + manifest)
           PYTHON
 
+      - name: Resolve frozen full gfx1250 corpus
+        if: ${{ inputs.case_filter == 'full-gfx1250' }}
+        run: |
+          {
+            echo "CASE_FILTER=test_config"
+            echo "COHORT_MANIFEST=${SCRIPTS_DIR}/rocjitsu_full_corpus_1024.json"
+          } >> "${GITHUB_ENV}"
+
       - name: Prepare gated shape queue
         timeout-minutes: 5
         run: |
@@ -327,7 +337,7 @@ jobs:
 
       - name: Run audited scheduling experiment
         id: tests
-        timeout-minutes: 30
+        timeout-minutes: ${{ inputs.strategy == 'gated-reference' && 100 || 30 }}
         run: |
           set -o pipefail
           python "${SCRIPTS_DIR}/rocjitsu_experiment.py" \

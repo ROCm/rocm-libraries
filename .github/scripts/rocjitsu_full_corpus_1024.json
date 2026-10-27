@@ -1,0 +1,1089 @@
+{
+  "schema": 1,
+  "artifact_run_id": "39722400519",
+  "ceiling": 1073741824,
+  "admitted_jobs": 5666,
+  "excluded_jobs": 131,
+  "sources": [
+    {
+      "path": "tensilelite/Tests/common/amaxd/gfx1250/amax_gfx1250.yaml",
+      "sha256": "c53de9f454f6514e58c0269f0c623d78b69767b49ff65549c7bdd14fcdff17ac"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/bbs_tn_dp.yaml",
+      "sha256": "f9b43598a54d82e5f4aebe4681210770ee67350164a1b54edad31fbd95566a66"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/bbs_tn_multi_size_single_kernel.yaml",
+      "sha256": "6e13c9361918a5d99c74aa055012456232a4a3a32139492cce36950860d9c830"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/bbs_tn_streamK.yaml",
+      "sha256": "7ec1f1670612c08a7076d11d03467d7bb9b1eb80ea7884f9e7626ad9c6dc9bd5"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/f32_tt_batched.yaml",
+      "sha256": "31299ee561ba28ae50ca734f094c5f53c1a5a5120bb210bfd95b5e7d456f36af"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/f8_tn_mx.yaml",
+      "sha256": "68c17577e074413a823c7f8c9ebb52bf3b3b76dd7f9f8cb6e60c4abe97345ec2"
+    },
+    {
+      "path": "tensilelite/Tests/common/ductile/gfx1250/hhs_nt_multi_size.yaml",
+      "sha256": "44659c8ad9478bc108a8c458d950939385e1b58f349a3826535d9e4da8c65e95"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/1024_vgpr_gfx1250.yaml",
+      "sha256": "08622f6a736061a7b1827daee949278990df2615d113d6f22eeea35f3e11f225"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/activation_fused.yaml",
+      "sha256": "22bb1e084c84c469927b2fa3ab7540ba85b305f4aff2eaae1cf77eb73ff59d33"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/activation_noguard.yaml",
+      "sha256": "3dca0179d10062c83211e94128cea962de404846726757411f35910ffbde8739"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/adaptive_gemm.yaml",
+      "sha256": "3ef165acaefd112fe5a21a0843c08ef18645c5b65d390476a487d0b297b5fc67"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/advanced_scheduling.yaml",
+      "sha256": "c53e67eab10504623af8cfc7e11a68982aed6091f459a312f63b364524346adf"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/agntab_coverage_gfx1250.yaml",
+      "sha256": "2f0b8b0dea4c2854b84f8fc570082cb1451df6ef4bea767c666fc3754a443853"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/all_transposes.yaml",
+      "sha256": "f2912c5e32abf09f810f5965cf5765b5e2c8b5756029974383149e40c2c6f3ac"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/assert_params.yaml",
+      "sha256": "987b3125bc9aca894591cf81a2b54ff39f5a43d6377e9f8a22590910cd87be95"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/assertions_complete.yaml",
+      "sha256": "4a98e16d01560509cc7494a4a26d287c2f85168bd4a439c7a386b4c748ad6807"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/b6f4ss_gfx1250.yaml",
+      "sha256": "1304a1e347095fecc9f5023a3c626e4a089afe2a1ba8f4f43df4d16deb92c720"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/b8b8s_gfx1250.yaml",
+      "sha256": "8f2ab13d1c9598ec5887b9aef76730398ffe19311c9d592b74886323750e8629"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/batch_offset_logic.yaml",
+      "sha256": "66e22f964126e06c63e553a31994a335eb859ebbd10d4226306cd0525f07d880"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/batched_edge.yaml",
+      "sha256": "e48949d385a722a18cae32c9b5e27757d368be18a2fbf80ae6682cd1520c14b0"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/beta_zero_one.yaml",
+      "sha256": "b295b85976fdaf41225041d6182d13535fdc6405413c165a875ea23907c933f4"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/bf16_CLS_gfx1250.yaml",
+      "sha256": "ca17543ceeab181d4f7d0f75490bd4b7fd4a3221e9d4a5353f77a3cad750e52d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/bf16_gfx1250.yaml",
+      "sha256": "9501875af644b6374982d3871a6d71751a5ec0a2f6ac88127e31e97783b40f78"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/bf6_gfx1250.yaml",
+      "sha256": "3f49220ef6f5c238916a9a3231b0efd4716215e02f2fe09b3da8f57d6d459d69"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/bf6_tdm_gfx1250.yaml",
+      "sha256": "eea6ca47740a8137719c7785508d520a289eedbd72ed9d9295f7ce0a1a93597c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/bias_activation_combo.yaml",
+      "sha256": "64eddfab47c7bd1e13794f4dc7d5fc730529309289b6bbc09598258650fb8129"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/buffer_load_store.yaml",
+      "sha256": "5a25bf8af23aa9980745da06115a25c0ac671a08feda8479c50b28e032275a1a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/cache_hints_gate.yaml",
+      "sha256": "d53f9b93c56340751f5d59ba2243f5773e4daee1c53578e625f3d96fb75ee2ac"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/cgemm_gfx1250.yaml",
+      "sha256": "2b2b0353f04771379d3434cd5881538d5781b3b886978cf0ba5ba89d45c185f4"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/cluster_dim_1_2.yaml",
+      "sha256": "edf109aee844b9b58310407b22e04a17f0ab87390dae9c9cabac0edcd2342ded"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/cluster_features.yaml",
+      "sha256": "22335edd4c15e5579e11fd7bc4e3784e00d26b06af67a5ee12887600e733d315"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/compact_loop_store.yaml",
+      "sha256": "5d958db0a29a9e6fbfc9d5a95a8ba6969756892993fb9e3c5f0617d7a9d34b35"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/compact_preload.yaml",
+      "sha256": "424d4cd553121cc338d482b1ceecb7d6a396df78fbb350cfe3f986a92e39860d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/convert_after_ds.yaml",
+      "sha256": "2e6a178d951241f65266dffb46e84e37d42476b702371c0f959db24fb4a55892"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/custom_kernel_isa.yaml",
+      "sha256": "3dc2bd9a2637a7f118f95fdc67da7d10d879818c69ee4d995dcea4e92c591fcb"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/custom_schedule.yaml",
+      "sha256": "891ca353c0cb7186926631795b658435a42cec79c294a11afb8220eb5cf4070a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/debug_flags.yaml",
+      "sha256": "965cd42b103dfe50a2fb564276e1a6da34157f605b5169417e4660427c1bacd1"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/decouple_pgr_tdm_fuse_gfx1250.yaml",
+      "sha256": "427f519521c225316aa1304cb3f9681136e33f46980f485921f67e1fc7dfcd5f"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/direct_to_lds.yaml",
+      "sha256": "6f02d83380477c94585defd2e2a6fe5c332b81449dbb0b7b02ac4d827fb68984"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/direct_to_vgpr_complete.yaml",
+      "sha256": "1ebe80b8b804a31d1e5fe6e2e17bb5b4e28d24f6f0481e7dcc69b9e73840e331"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/e_tensor_hints.yaml",
+      "sha256": "4269cd0abe73a621ef8569802193ab9f12733f5b5f8137f0e7c36d7f4116de26"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/extra_latency.yaml",
+      "sha256": "cb69263679ce7edc5ff12c74f6a0c66f86df9484b8b39f4750c21f5260632aec"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/extreme_aspect.yaml",
+      "sha256": "4782c3f53c4242275283fd6ef03a25d0528634e0b8a6fe4cb367a669738e59fc"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f32_gfx1250.yaml",
+      "sha256": "024252ce31e13f86de39298c22f276cf18e13f604fbea404d06d0be2daecbb22"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f32_xdl_mathop.yaml",
+      "sha256": "d202752ec1922192ece53e9981812f4a86b829bd0152304b79d1d73a9d6ee3d1"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f4_gfx1250.yaml",
+      "sha256": "44d25dd3086e852c030d0df1cdd1b9fc593f03f17ef851c9627b090368c33f54"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f4b8ss_gfx1250.yaml",
+      "sha256": "9bd88df7dde48fd9cba79b8dea44be2289c222a1a6af86075faccaf47cf22f3b"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f4f6ss_tdm_gfx1250.yaml",
+      "sha256": "5a36a5f364bb4319850f40d9a8b38df20dbf01bd43289fb59d1c1b57d0ff3342"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f64_gfx1250.yaml",
+      "sha256": "ef30861bb0efbe0ae20211b9c3361eb56c63b4dff8c6e3876341b8b2b42532ef"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f6_gfx1250.yaml",
+      "sha256": "38f086d90cf820afb4e110ecdc8e7961668a2ce3c5d4c2791195afe985b0aab0"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f6_tdm_gfx1250.yaml",
+      "sha256": "98ce42f35faa3e69250333e14f92bf4302941b846ae795d8882b013bf104caf1"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f6b6ss_gfx1250.yaml",
+      "sha256": "623502196e033fdbd2831b64545368380cb370432abe6066c0dd0c0f1597dbaa"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f6b8ss_gfx1250.yaml",
+      "sha256": "14cd577cb721e98a408a2763af7a5101fe3d1feb05eb1d30dbfc97150e94a8be"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8b6ss_gfx1250.yaml",
+      "sha256": "f81fbc4c545492e5b3ec038dca62ce2fe661fa1a6355c1bd72e9408393b32b89"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8b8ss_gfx1250.yaml",
+      "sha256": "d6050a377498e9698217b44b0d5bedb5384ea6f9582820474addbd7344b5dbf4"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8f4ss_gfx1250.yaml",
+      "sha256": "83b841750701ba9ceb5b25d8a83de59f05cba867c03aa38caad64473775186a2"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml",
+      "sha256": "67413f69f61c64319c1b2bc0a37a3b99194ed63aa642fde0ac20bf531c7cd01e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8f8s_gfx1250.yaml",
+      "sha256": "e6a8900f2e4c84accaffaa06e5fe5a82087cad6e8afded8fd2474650c77ad485"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8f8s_pk8_gfx1250.yaml",
+      "sha256": "4c74244c9f0123f94c104515a08fb8d441580543cfb5f62aacf14ee605a13664"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/f8f8s_sr_gfx1250.yaml",
+      "sha256": "e311cc1068b2a9229ee140c5f155a175ddbb5033c4e46885d11e1808447ddbc2"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/feature_combinations.yaml",
+      "sha256": "96144a751649b78f883c1aac44159b46480191a61a36434ed6d8d12b63a24f60"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp16_alt_impl.yaml",
+      "sha256": "f9503fc831791865c66bb9176054ef554fafa3cd763e8ff850858fe7673e18f9"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp16_gfx1250.yaml",
+      "sha256": "8af5564ef1b2adee9c50e5f24940db0e99f4648bf29ea08fb5acb79328affbd5"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp16_use_e_gfx1250.yaml",
+      "sha256": "8367276f10cd31f384e4de75f4efc72b905fb0940e8f6b6133a6cce5b3cbbf9b"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp4_support_xfail.yaml",
+      "sha256": "43a90e619de52807ace67c0c4243d8d85a0bde2c7d75834c6c42f881fc90890a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp4_tdm_gfx1250.yaml",
+      "sha256": "7e0f9cd07af2e0b9acf63dc251a7667220991de17af44be6768bbe50f0a80326"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp8_edge_cases.yaml",
+      "sha256": "d737c22a27a83365b8d96e06f0608641e5eac2bf5ca4064f08cc9f2f9fb58865"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fp8_gfx1250.yaml",
+      "sha256": "5c444c66626113508b7235ebb2451eeb790f9c8c8d2ec8acd4c814202c4182cb"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/fully_irregular.yaml",
+      "sha256": "7c9a8f18b52e582e0600eeb7f7fb66e9cb001dc06fbf3249d3d737c34e735881"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/gate_metadata_hints.yaml",
+      "sha256": "ec35f35af16ee1fdc0d8a99737a7c7e529ac2d0944837a90874eae9000c9dd9d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/global_split_u_complete.yaml",
+      "sha256": "0acd1181193030c8fc445177a20253154a94647dd1c5406005cbecaa93e77a16"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/grouped_gemm.yaml",
+      "sha256": "7586196ce18c839739c8a2cd341907cf793b4b5e500874143b5488f99b8ecef3"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/gsu_gfx1250.yaml",
+      "sha256": "1e15971b8f892ea071f86b698e1c5134426c4bb963c4f58a99b84fbb92b4a470"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/gsu_variants.yaml",
+      "sha256": "de9ff3952c2c64586974c36eb0c507cb6d3899e07dc7905a9ebfe5d673202e83"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/gsuaad_gfx1250.yaml",
+      "sha256": "22b0b33c0182a8fa314cbb7da12caa5f41ee9ad4e315c419f9a77fd4ff47090f"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/half_plr.yaml",
+      "sha256": "d5f9861a17768d0a3bb83fa76a890f6a38f77c25b556dbc83e99e6dd0fa272da"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/i8ii_gfx1250.yaml",
+      "sha256": "70a506a47b1963b4040e7f65c54ccf22b65ba60a2654fb66c095a329225ebd23"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/initial_strides_xfail.yaml",
+      "sha256": "fdb095356f828a653c27bf6d7a94f8063267c1fb00a8615f1bf87e12923fbc60"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/interleave_alpha2_group_store_gfx1250.yaml",
+      "sha256": "6e9338409cb9f915e65181bb37b7e185951d6a25fd315cc7ba6966720e3155c0"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/k_heavy.yaml",
+      "sha256": "d3ffe1ac396951190ec4382075ae42672910c6010d6c4ded268eb6c1e1b9b9a6"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/largeLds_gfx1250.yaml",
+      "sha256": "85c9c3a23adb855ed4c81f3201717b22e01de00ed2bdbe93f7876487cf2c31ac"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/lds_pressure.yaml",
+      "sha256": "d2e83f49758649c45d2d94647a12a39916ea90acadf7a9107f82c6f01fdebe0d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/lds_segment_interleave.yaml",
+      "sha256": "73fa40d7433042d801298df4e06c7daa7954dbd543633ee4c684cddc36eb0b0a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/lds_segment_interleave_2.yaml",
+      "sha256": "c05d46dc5db063a8f6edac989236e5f100e21125d169e42869370b085f9e6534"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/lds_segment_interleave_complete.yaml",
+      "sha256": "2ac1b79a0cd1c600950ad8648d88a69511d37018ad98cbc86a0a41c75e3c11a5"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/ldstr_inst.yaml",
+      "sha256": "bc1be1807a632cbd02ba99348ed5f63da1ad060decbe3e364f5520450d1f2951"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/local_read_vector_width.yaml",
+      "sha256": "d8ad288adf42757de45ecf2da2f1e4066972bacf93c34d9eee73062c741b6788"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/magic_div_alg.yaml",
+      "sha256": "e5e5df4119ff398d1c036e444df44d037b636e3a077c3381771aa85d9eb00a71"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/max_lds_occupancy_xfail.yaml",
+      "sha256": "ab04acda481a83e7b7dd418e56f73190c2d9c6e6ef63062b680f492580115796"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/minimal_sizes.yaml",
+      "sha256": "710a2c2399371019c42f5f9da057010e2df181ebc5c1c45dfe03858a80f3447c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/misc_parameters.yaml",
+      "sha256": "7306151bd77f7880f9c20e7c78b5e50d30a1db0ca9486f99017f8bdc4cfb4792"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/misc_params.yaml",
+      "sha256": "5216ed87748d853bd7377107216a960ff2b407751ca743dd010d20591b3a5dc2"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mixed_precision.yaml",
+      "sha256": "0152d2f9ac3027d6ea67eb20807af22f303816b4ffc371990ad68ecb54d72cac"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mx_cache_hints.yaml",
+      "sha256": "3a88da39437bdd046dec10d85f6d1663bbacf8f6156dd1ac25c89df590c2e4a8"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mx_direct_vgpr.yaml",
+      "sha256": "1eb45ff11164b73438b6766374a7f569c5350c603648614fa90029c17dfa56a8"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mx_fp4_edge.yaml",
+      "sha256": "8cfa49fab92d2e6f9c827d432433e5c2de4520da1b604b8194d88c4995cbb3ed"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mx_tdm_scales.yaml",
+      "sha256": "3b1fdb8627f60fc2702b05a57092266febf0d0cf469041fe9ec3ef5219360198"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf4_gfx1250.yaml",
+      "sha256": "989c89f33031d24d9d936c01621a07a01a04171dba52ee84208a684a2c6f4110"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf6_tdm_gfx1250.yaml",
+      "sha256": "12697a31c5bdfee88040bde85c9e4fbd11a18dd1231424a15d8cef269131bbac"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf6f4ss_tdm_gfx1250.yaml",
+      "sha256": "5e19aaee444555345dac0ddf3e2581ac0f67eae562fdac5c0285962a99c5ccd0"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf8_gfx1250.yaml",
+      "sha256": "3e5ecd0f822f20d6226fb5e989acef402089db7f84c2c0465b838b7b227e841b"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/mxf8f4ss_gfx1250.yaml",
+      "sha256": "389d8254a80f3de1801aa3d1a316cc8d3abbdf1ceab15e8a29c6d979830878bb"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_batched_bf16_xfail.yaml",
+      "sha256": "d3d468cb33ffdbc2a419b97a8cf4fb5a459215e41ccce73c18fe1f9136b01c95"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_batched_expanded_xfail.yaml",
+      "sha256": "e66403264dc3123b4fe0b5437e7587df220e13158e5863f880eebbd0d9bd68b7"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_batched_fp16_xfail.yaml",
+      "sha256": "7d203f2291e22b9337f3d28e0946a486c859a90ecdecc5849700ae8c2f86ccf4"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_batched_fp32_xfail.yaml",
+      "sha256": "b0b03895ef60432696870d981412b99081bc6ce2f78245acc44c47872a9c4475"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_batched_transposes_xfail.yaml",
+      "sha256": "8874bee99c4d6e44a46771078f2e4a55dac2a2be769116cad48285dd2b4d738e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_power2_mt.yaml",
+      "sha256": "21b0ecbf2165a3ae32018f5321e910abd3acf2edfc665b2919d5a27bb180eb2a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_temporal.yaml",
+      "sha256": "9d8cace5628ce028c09ac856bb743a56f8f67d3bee3b398ae57d7eb1e106a4e8"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/non_volatile.yaml",
+      "sha256": "af5406c22c6e09984be7d490b5e86ea12d9c71aab2f595074dab0ce85aa134dc"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/nt_th_nv_gfx1250.yaml",
+      "sha256": "e3fd675cfcf7c5c5e5356e5659208802093f9095638799a9404a56646e708b1a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/num_loads_coalesced.yaml",
+      "sha256": "efb45b5e808322f91de566e3e9d8df942137957da13bac030998ef3a8e64f027"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/opt_noloadloop.yaml",
+      "sha256": "cb28e82faa5e5b4917ab3ce02bf6178d8ced30e7277ec6eaa778b90e7f6768ee"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/persistent_advanced.yaml",
+      "sha256": "2abc78f09735705b08a5ab15aa48e1ac6906c7e0e193b073f6c5465b6c0358d2"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/pgl_bound_check.yaml",
+      "sha256": "61367d417ccc52d5abc171507ecdb56acd4bf2b8d763b2603648b3b485cd14b6"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/prefetch_gl2.yaml",
+      "sha256": "f6715ca6de6839fcd048165410e0c9859b0d499e764bcfc169ada38ebad379c5"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/preload_kernargs.yaml",
+      "sha256": "885a24ada855ebebc0cbe1b59163a2881bed28fa245432fb26f9718ed18c17ec"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/rap_gfx1250.yaml",
+      "sha256": "309768adc78f57a7f168e9eeb5ad50adf0ed0ef9d5ebcbec216188bd9d42ac39"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/remaining_misc.yaml",
+      "sha256": "736e11e4bdedefa1bccb27a6dfc60ad964c2b661e93391d89b145c68b2d8bb41"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/scale_alpha_vec.yaml",
+      "sha256": "6da053b3840f1e98fb5825bf11771d0105ffce42f4dfdddb6d23a851e130c971"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/scale_cd.yaml",
+      "sha256": "cfe1fe31f5f1415a112fff2ad98a04cd60db8f4b7b0b312dc5eefb57f915dd90"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/schedule_global_local.yaml",
+      "sha256": "b5e1cedce9128bd616bc5df9c946da375e4a2be86bcb2f4eb3b102a7322a1d9d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/scheduling_opts.yaml",
+      "sha256": "c5e6a8f84bb4bce6a37d69e52232e03ac9f7ba714158af3a2379d56e5afc34bc"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/segment_b_rotate_gfx1250.yaml",
+      "sha256": "b36610550bf42052ab434e2aaafa2e103ac12bd1b55bbcf502292071462f62e8"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/segment_interleave_gfx1250.yaml",
+      "sha256": "6affb7d0a9bd94e53af39e9e424f61eec0d7b1c5fd64078bc92917bfb61f1f0c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/sia4_stinkytofu.yaml",
+      "sha256": "fbab390c5951d3e2550417a5826363759029d167554ba94358756ee876aa1e52"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/space_filling.yaml",
+      "sha256": "6da4edd6d93b1e6091d2eb9ccbd8667047ced2ff992946a6c9d82df9abb89a26"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/sparse_metadata_layouts.yaml",
+      "sha256": "0ef28a3c7b20690781663aaad58114ee1fe3c7ea75cc64a33a4c2a12e2dc100c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/stagger_u.yaml",
+      "sha256": "b73abb1d644b29e38c0bbbf67aae583478e15f490c285059fa550ff753bff7eb"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/stinky_sia4.yaml",
+      "sha256": "5fb0bea51db9a3478d637af41f7898c90e250229c8940932733786881202183e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/store_optimizations.yaml",
+      "sha256": "6ed8f8532b70056975ecf58cdd260d316b4e06b224a22d033a848913dc557885"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/store_sync_opt.yaml",
+      "sha256": "7afdab7348193dd4ea7830940857b31bbcae52ac7114eb583a57b82518167ccb"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_atomic.yaml",
+      "sha256": "f039159f01d42406aad0aa7f5594a6590a694881c17ac3c98ef968bbaae41142"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_hplr_xfail.yaml",
+      "sha256": "6c5fa0cffaa266fa49553fa80b0609f6b0161c35966557aebd0be4db19ab9c30"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_modes.yaml",
+      "sha256": "9feb0888fe303ef8a039c7e276907630d90f0fee446c49790d2c745b85101aff"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_vgpr.yaml",
+      "sha256": "9970fc3ea0ef879cf1cc62e8696b655a63f3f338d8dc09b828b12668a265f043"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/streamk_xcc.yaml",
+      "sha256": "85523bbc5bacafede7a7dc3f16b47e74392ef4950ae498d21d7a10229041ea19"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/stride_assertions.yaml",
+      "sha256": "1a527c44ef83b6ddea93c120b1caafadedda2cd206257ca7d22bc2f9de5ccc02"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/strided_batched.yaml",
+      "sha256": "ab5d28f3288d7eae009e57bcd13c376d87dbb35f7368c7fc3816a9ae290a840d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/strided_batched_xfail.yaml",
+      "sha256": "c19ffc60cfb9e9bba7a1cf474822141aec74eea553af3291886eab7fa7bcef74"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/subtile_bf16_gfx1250.yaml",
+      "sha256": "fadccebb5372b70a4ef9b5b64871607710c10054cb5ddc76fc94817b4bdca9a4"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/subtile_bf16_gfx1250_bench.yaml",
+      "sha256": "27d63ab81b31d9596e97ec0b0ac60278e6ade96fb138a874dcf229bb4ac830f0"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/subtile_bf16_gfx1250_cluster.yaml",
+      "sha256": "af3608f44127735db5cf3d9902cf9ef432f0ce650f1fedd83e1efce0a21250ad"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/subtile_mx_types_xfail.yaml",
+      "sha256": "3128b7c6dddd4c673d94d82d7307d7ebfac1b1ffbdb823c259fed4d71a6b8c0c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/subtile_sizes.yaml",
+      "sha256": "b82312bdc2a8c3a6de1d22273dd8ab798a725d2524bc741f773fdfb201035ba7"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/swap_global_read.yaml",
+      "sha256": "2e209e509de2ee65884da5c69dc216b599adff9f423a9fc992b5b3797de91620"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_advanced.yaml",
+      "sha256": "158cc6328fdbf3da9b848c4f8f3beb0e91a8aa42d1f255f917117a6aecbc5d9e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_enabled.yaml",
+      "sha256": "b741a89d8e1acf96ffecfa47f33b6978e1c3eed7653b9c5d7556ba139b059027"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_general_batched_gfx1250.yaml",
+      "sha256": "7155b14be72f3299d2032991b926796094ed5d75d27e5202e6fe0f1c7e9c8e24"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_gfx1250.yaml",
+      "sha256": "a1e718112814888147539610f756966bf524af2b40eee763f6d2ea3f8e8db7ed"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_iterate_mode.yaml",
+      "sha256": "5c7e3f133a565b733ecdf7d4cb1cad17552a4027ba4f4b4abd99f41e7d7b1c58"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_iterate_mode_2_xfail.yaml",
+      "sha256": "9eae2295c3cb3b4bddf583380cd53bd6a8ab48880714254fe7fa6d939fe6fb1f"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_load_wave_sync_xfail.yaml",
+      "sha256": "c7aad561a498d8b168776772847fc3f11aab372bb83a0a1c130ec1a9e2006b7c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_multicast_gfx1250.yaml",
+      "sha256": "b88b47e90c4804674430ebb4eea44bb1cc1d919475c25ef1675db19f19b3b55f"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_split_gfx1250_xfail.yaml",
+      "sha256": "07d095c6b108aba99a8d36fc04954dc878d0f906d3102ada584da4ddd24139a7"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdm_split_xfail.yaml",
+      "sha256": "61fb497b17429710cdce035e138ddfb427c4ad3c70d0eb1fd535affd6a584251"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tdmpluslds_tdm_gfx1250.yaml",
+      "sha256": "32dc73aee49ec5e303695e314f848a1ad7e6d6b23ecac03c11a767e1d1788bff"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/temporal_hints.yaml",
+      "sha256": "0ae7cb10c990c6ac4ab39b08263c84b2216de24cef98321ef2d8f1111c028fca"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/tile_assignment_xfail.yaml",
+      "sha256": "4ac27438e8d05d36e9354cb66bf89093252b663827f27dcb9ded32d227a21ae6"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/use_e_output.yaml",
+      "sha256": "bc8b97bda221063380a45030ce0a100c02b225fcf4ced57d3a8c9ec7237eb791"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/use_gradient.yaml",
+      "sha256": "b5baa6e0192ccebf4cabff30a93c259bbed93efe7d94a2d854af70e4989f2518"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/use_inst_offset.yaml",
+      "sha256": "55d9575a2503772ac8ab544a69c83e897b592fa41abaae219003819d3c23d95d"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/use_plr_pack.yaml",
+      "sha256": "fd20d33f47a6cf629b42d6de63f0b424994a5047c00824ad5048394b5ecc0b4b"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/vector_store.yaml",
+      "sha256": "928f2bb69de434c5d8a2b8fbc14f2918c5af39cb21833c15f4223057f8e00592"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/vector_width_edge_cases.yaml",
+      "sha256": "afd727c642625cfa147daf9e470ba0e0d32fe7eaa8792095030bf5831f1cae88"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/vgpr_pressure.yaml",
+      "sha256": "d552611f7fa90cf5e59687a9f52c827c84f7ea9b914ffa6766fe85af53c4bba1"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/wave_separate_global_read.yaml",
+      "sha256": "2b8d771925a510a21f29140bb66255b505f92a412c1aaafdb12d20c8a7353e90"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/wave_splitk.yaml",
+      "sha256": "2b6a14f861c70cacf4d6fcd9fc024da7de6eccca6eed875686f264c9943e20a5"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/workgroup_advanced.yaml",
+      "sha256": "d36dc97df49e1e4b38cac2be0fda93a58a45c509d5d2d97b6eb3d422e7bde80a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/workgroup_mapping.yaml",
+      "sha256": "548d25ff87aa18ecce27d6171808823e9ddd0f3277879dea0b4ad09d815cec79"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/workspace_hints.yaml",
+      "sha256": "3484db4e259b9664ac69005e1e346113cc69c590eb16071013577350389c143e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/xfp32_gfx1250.yaml",
+      "sha256": "c24ec8a1eb73b948e8d4f94d0a1736778b19600b2313805215bd5bf64cded9a9"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/xfp32_inf_support_gfx1250.yaml",
+      "sha256": "564fbcc03249266e658469221dc21807c65e4d27f3bb206f43df426767056118"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx12/zgemm_gfx1250.yaml",
+      "sha256": "576002ae0c30e52c93c214066baf03053cc82f2c72334ef57016173c19d15c6e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gemm/gfx1250/cluster_entry_handoff.yaml",
+      "sha256": "4e73d180e285c98883a8526d995133f9b6170f1b3156f4e7f3949c9b1043b809"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/bbs_bgrada_gfx1250.yaml",
+      "sha256": "19f5fe7cf52008c6948d33d60eb254f1e47ada8c737b99162a71380b244d780a"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/bbs_bgradb_gfx1250.yaml",
+      "sha256": "8f62ec20b49d78f0d79372be4d3b54d0efbed378d4ffc25a1782b020979b816e"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/bbs_bgradd_gfx1250.yaml",
+      "sha256": "33123ac3434c14ea01887beb404bb27888fa3a8ba349326b8c697dfb316aea7f"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/bbs_dgelu_gfx1250.yaml",
+      "sha256": "b65e0ac1dfb655447db2a2cccfb2ac6b9bd212c9e66ad8a33689b556a3636951"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/hhs_bgrada_gfx1250.yaml",
+      "sha256": "cdde89147cb47e2793d7d5ab71c25f00f6c506f97f77913b304305eed058b30c"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/hhs_bgradb_gfx1250.yaml",
+      "sha256": "7b47084dd7cd41fe5fcbcf7be006e8f32c5a91f4c8d7027619869aa6b048197b"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/hhs_bgradd_gfx1250.yaml",
+      "sha256": "0335198a2fa0b80e4609e971e591f3ea813e11110d70b1e5df289778dd2d0873"
+    },
+    {
+      "path": "tensilelite/Tests/common/gradient/gfx1250/hhs_dgelu_gfx1250.yaml",
+      "sha256": "e3e876724653226cd8e51f7f913e0f3bfc38c3e844f4545eff7af9a7d0620059"
+    },
+    {
+      "path": "tensilelite/Tests/common/groupedgemm/grouped_gemm_gfx1250.yaml",
+      "sha256": "74359513a6d49f8be7398b3d0698d938de69db54f32e6d81e39d59921147f874"
+    },
+    {
+      "path": "tensilelite/Tests/common/sgemm_streamk_asm.yaml",
+      "sha256": "2bd2163555a1cf34ede880d188536bd885b0fd44ede03196b7728f33b45eeea0"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/bf16_activation.yaml",
+      "sha256": "928a7468713db56e8cf42d3a48551244185e51425cdfbf7f5ca5f1e6d8f46c59"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/f16_activation.yaml",
+      "sha256": "eb1f12ee0305316181f7490852e0d92d48062242f59b06a6439d6b49ea209433"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8.yaml",
+      "sha256": "41e25258296d29dfbc2a6d983c13152d739425f6060aea3494e0cd8ef9fa47d0"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8_sb.yaml",
+      "sha256": "4952457502207bc7fb124011c38b7b899b32b4d21ffafb1385d16c93e7374e8a"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8bs.yaml",
+      "sha256": "c5fb2ed96a761eddb39bc78ead76d4c088eec1506d9e87f48d6f69b0523a11c0"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8bs_sb.yaml",
+      "sha256": "11a6d90551b8fda412face8c594f3d21cec31dc3878c651c9e155dbb6c787d56"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8f8.yaml",
+      "sha256": "c38520c86e1edc8284b1d358ee8c89c2de317be0c841e85f09ba6f08b1b4ebbb"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8f8_sb.yaml",
+      "sha256": "315aa2073fdd29fafe32243e6052d71f9254469b7f60e1b6e9099dc69f4f469f"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8hs.yaml",
+      "sha256": "310319a8e01dec8d92125e8c1b96bd739677586d94736d5a6be17c6e681fd9ff"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_b8hs_sb.yaml",
+      "sha256": "0f577c3dbb05a9a74de3fa57c10a81c32ecd2d80db73ae3ca0a6f6d2a1d00b61"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_bf16.yaml",
+      "sha256": "4f267c6e28501927bf1f12137c3a359752de37bc67abd98eaafea380c0fb5cb3"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_bf16_sb.yaml",
+      "sha256": "d205c7b36de571b292fbe31cf604f48171caeb1c07437af175c76341aabb758f"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f16.yaml",
+      "sha256": "f8db128b7e47ee51d285b942b38431736535dc3327acca13bea19b64ecbeb5f1"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f16_sb.yaml",
+      "sha256": "f95d4022ab85217f0219f77f3b3af6c9101923b104b35609784f75f1857a9b6e"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8.yaml",
+      "sha256": "0cadebf7987c34ae744fd76ff2d4453d29f69434641160f1c84102dc91015974"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8_ml.yaml",
+      "sha256": "93b69acc73e818cfb5853b6e15e82614db2d2b9a7d3a7a757e750c23f0781dd3"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8_sb.yaml",
+      "sha256": "41e966ac4d18764ae3d75e2e8479eb77031704c74c55735f3da850ba28007194"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8b8.yaml",
+      "sha256": "92aca6f4bd83a67a90d268d7eba56a0e78ab0849e15ff2242fd37ba9adec40c1"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8b8_sb.yaml",
+      "sha256": "b2682898b647bb68584615a3bc51f368c390b7b5ec96cb90d568f502e027bc0d"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8bs.yaml",
+      "sha256": "3519d61c973726da86b4a46405e70458d0429be5571393e711177588b6f63a92"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8bs_sb.yaml",
+      "sha256": "7cf6b5a7a5c2f84a1b986ce0b868f61e5a62e7efccb2c8857b2a0ab736ba771e"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8hs.yaml",
+      "sha256": "2798dd3556e6e023e46e9e2ea65af8296418791e111f1fc689cca1fb3350656c"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_f8hs_sb.yaml",
+      "sha256": "d87e2fb5764665181e22e15758eeb695bde3b45d9aee824e3df0602dba2004d0"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_fp16_ml1.yaml",
+      "sha256": "6a17f785865a8a833bd6640c3deebd6d10d9e64a8f503b774183448a9b7f653c"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_gate.yaml",
+      "sha256": "d5c440bb6f67ae0abd7dff8e3028b36d6e7866c066c5cc0d52f979d2022c429d"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8.yaml",
+      "sha256": "f91040bcfa476d1b27f75bba8bff21b7262cdb4343176a537132ed7fa37a8da4"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8_sb.yaml",
+      "sha256": "56ba36632f12c05fc298de90d9a10629197ef36d76ab8d9f2fdea449b28cc8c6"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8bs.yaml",
+      "sha256": "50b80065639936fd20f5a8decf048ebe32beaa7e70fc535af9b43010d0d100c9"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8bs_sb.yaml",
+      "sha256": "2b22f370ea40e8f3adeffb87b0d16886fdfd2890f840ed705b3b796a74fc031b"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8hs.yaml",
+      "sha256": "ca6d32ecfdc2b177f3655b6682f80f62e1aec50796682ec9d854ef0118e16186"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8hs_sb.yaml",
+      "sha256": "42238b92423c8b8cd9dd64c1db3b84ac314362cea551e46d14831eff752ab7fd"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8is.yaml",
+      "sha256": "2f25b6e2d9e896b30efcefbaa534324e44a09beb19c0740590c105e06b5c1330"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_i8is_sb.yaml",
+      "sha256": "4b544584c3265beb5a11664467196b50f84244039051e313440b67c352a95201"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_all.yaml",
+      "sha256": "07d48c435431ca59e3246d8212f37be2420cbd8f342a3faefd01ae3fe5e7f173"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_f16_transposes.yaml",
+      "sha256": "52e965856dbb3445c1c3f7f99f8100916b3e30630a09cbf96420620323f89802"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_gl2prefetch.yaml",
+      "sha256": "968a9d6e0faf252c3b2885825a87e67d0e9b2c25c30d91625fe49e955039ec03"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_iteratemode.yaml",
+      "sha256": "ad6e87dcb8c1ba41a1093d8f8a9b535f78b50050171e10a69bf52afb1b88332d"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_ldspadding.yaml",
+      "sha256": "baa9113526f7176f69b84d66738074d34f4d7f38d88353add26ac785a6d72264"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_multicast.yaml",
+      "sha256": "9758f36bc6563f0a8afb8d9eb702b6f02b94d455d64d4afd98212b24959c96c1"
+    },
+    {
+      "path": "tensilelite/Tests/common/sparse/gfx1250/spmm_tdm_split_xfail.yaml",
+      "sha256": "753343a18ae0bbc949af288d64f9b51014384fd7b26978d07a6397df28a011d3"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/bf16_vector_epilogue_persistent.yaml",
+      "sha256": "06615343db6914179d52f9925684daec9e737c1b624ec8061fa8372092acff99"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf4.yaml",
+      "sha256": "353f2003b96c1da299dfdf672a388b2797419e2eb21cfdba329e21e0de717144"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf4_pap.yaml",
+      "sha256": "4302c83bb1ab45444c9ec91bed62678431b0e8222a145e93c660beeec2fdc725"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf8.yaml",
+      "sha256": "7350553d5bc8471e362e5240cacbd6b4fa28bf947116cbf2d610b6c6b0e0b384"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf8_halfplr_tdm_pap.yaml",
+      "sha256": "c21bba6c8e238e63fd1ed0084b9545a5577441418e16941522226daad76fb3f8"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/data_parallel_static_mxf8_pap.yaml",
+      "sha256": "0abe4bbb6a3a3692db7d4f21aa46ae36c49e50971fbc06e4b642027a7c7eb572"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_bf16gemm_tdm_subtile.yaml",
+      "sha256": "7538a609e196e9e5aaba739f34c3310ef19e1f873eb75fe397a32b0d38128feb"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml",
+      "sha256": "19233cc7872f20c34d125998551aa19f551e447212edc14f76916f9797da64f2"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split_pap.yaml",
+      "sha256": "0e4e71dbfeb4c2136e73b78163a10213641fdc399a8016a3d1448838213932a0"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_dynamic_hgemm_quick.yaml",
+      "sha256": "73c7cecda64521730efc741b113ed4687c5b73f7494744f9c0fcdf9092f1c709"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_dynamic_sgemm_quick.yaml",
+      "sha256": "deff73bc11c5633e26426f1ac89c5bcbed9a9c28a046cad67863e263e80c78e1"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_f8gemm_quick.yaml",
+      "sha256": "4e42f7686cb8a2033ae21ef0cfb066dcf8723f4854562e3e69d06163971902d7"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_halfplr_f8gemm_tdm.yaml",
+      "sha256": "1c051d7494dddfc74af48ffe6cdabd81b7a9f1a1469543763d6918e4cd5bb9d8"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_halfplr_mxf8gemm_tdm.yaml",
+      "sha256": "bccaca84800de65454cb742f28e84da978256fa98169619183739e0f5af8ba12"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_hgemm_quick.yaml",
+      "sha256": "3a764cc1f729f74f8d78401ce0be9fee28d57a4107fbcad4de35e1393bb9d042"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_hybrid_quick.yaml",
+      "sha256": "6bf95a74d0fd5be66baf5eb256395357b0b6dc7ad55ddc1cb989898c67d094d2"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_explicit.yaml",
+      "sha256": "35c61a8aff42c9089a52ef0431e806a5da019e38c50a04b3eadb85a513057417"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml",
+      "sha256": "36d0c969f8b69ff573b120a7b63748f6c82fbc42d0b14cd159d9174ff7777988"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_tdm.yaml",
+      "sha256": "913c94dea0399271afaadbba9c33c6b546ac62f61da90c24391fd8143d501b07"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_tdm_pap.yaml",
+      "sha256": "8ad3d21af7a6944629560104c1fb9dd35ba56bdaf2e19a5f568c7e6d01f76949"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf6b8gemm_tdm.yaml",
+      "sha256": "ea4af7d61a38a311cc2694a3da730166352a26d50354062c2c783fabd473f62d"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf6b8gemm_tdm_pap.yaml",
+      "sha256": "4cde30131b663286bd624c4734c216da5347846f35c685e8e0a2722205883aa1"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8b6gemm_tdm.yaml",
+      "sha256": "c1488d180b1945ed607d7addb8d603d63f3cda463f75b0e9b8ac83e0a20027e0"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8b6gemm_tdm_pap.yaml",
+      "sha256": "d5bea8bd6f7d486244b39e8a74c0fd03936f09aabcd0bd16fd18e31178952ca9"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8f4gemm_tdm.yaml",
+      "sha256": "0cdc5eeeaff1cdd1035a2d50785deed08c8ffe5692580fe337c98225d39d796b"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8f4gemm_tdm_pap.yaml",
+      "sha256": "534bf433760e237e4c52dffcbdcd88f47d732c00a9d71d14d4c57e8f687118ac"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_explicit.yaml",
+      "sha256": "8699ed6e15696aecda5e3e02dfc5b02da1c2d06353219813fd9a49d82ee73dcc"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_pap_prefetchgl2.yaml",
+      "sha256": "52565f3e8521ddf2885f4b2ee13f5a08e7de34715b20cc7482c1d0481822a53b"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm.yaml",
+      "sha256": "c80133204dac15ac68254a7cb31fd8e241ffe05e43adde1fb3c8749a8ae2596b"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_pap.yaml",
+      "sha256": "54622d822956f2935a6862b682ba887a3e4e19189fed39e6ea3c4b7001628b92"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml",
+      "sha256": "96a9de5ce5f24de4b83d06233996620a2e883b643dffdbc9c352417f87b52688"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split_pap.yaml",
+      "sha256": "acf50e5a58f65b63e445b74a5282f3aeda57e1b1d3c765737a3c39e3d90e5c36"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_sgemm_pap.yaml",
+      "sha256": "4892dd26276597cbb1a70960d47fd2b180cee889e77627bbbb1d4fae6b79eb91"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_sgemm_quick.yaml",
+      "sha256": "561ebf411f5f4876999febeae2ea42bae3e3b6624936f804169f108316fda2a7"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_tdm_general_batched.yaml",
+      "sha256": "65bf5de4bb4af4b96eb1e416a37e19040325f2d0dff6ebc70ad7ac9c781f5949"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/core/sk_tdm_subtile_general_batched.yaml",
+      "sha256": "d4466a1e3caae889e81dfe4318e4e34e0b29db19086f4e8df4603d75b61c9fc8"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/data_parallel_cluster_multicast_boundaries.yaml",
+      "sha256": "ffacb4f5e1fac37a35076820c9010241bfc8d3e3b530fc7ecddd32f94254be33"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/data_parallel_static_mxf4_cluster_multicast_ext.yaml",
+      "sha256": "82aeeff69c77b6613186af243a34bd0b2a145916254bacf1157d72fdd6d2344a"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/data_parallel_static_mxf4_pap_cluster_multicast_ext.yaml",
+      "sha256": "5bfdf00999fea3461c5fd6a1768da9ef3b545e3d84723903c62f85dc177e1c9a"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/data_parallel_static_mxf8_cluster_multicast_ext.yaml",
+      "sha256": "15b7fc39ef1e4e54efac6622f7eec8b8f2684b65a14fd8bf41439d3f4ac87121"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/data_parallel_static_mxf8_pap_cluster_multicast_ext.yaml",
+      "sha256": "7c51cd0b467cabb536501b273e9e400f262b84885ef23a3ffc899e037c235181"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/sk_hgemm_debug_modes.yaml",
+      "sha256": "d4b35841d6e564f852f43f71304721121a9209d2796f987659c6a58b8c3b8f34"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/sk_mxf4gemm_tdm_cluster_ext.yaml",
+      "sha256": "9dc28fc531aa629d2b22f0fb1042034bd1f173627b50d4859bb4bef5e7677008"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml",
+      "sha256": "fb2d42ddc89094a2fecdaf99d8bace5f9256bc472331dfbc9c5b9e78436a0f95"
+    },
+    {
+      "path": "tensilelite/Tests/common/streamk/gfx1250/sk_mxf4gemm_tdm_pap_ext.yaml",
+      "sha256": "36c084e6c9e88123087c2a6ef6ad00f9cf9be233379c27782079606432994f2a"
+    }
+  ]
+}

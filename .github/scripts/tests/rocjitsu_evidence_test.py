@@ -19,7 +19,7 @@ class EvidenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             ini = root / "pytest.ini"
-            ini.write_text("[pytest]\n")
+            ini.write_text("[pytest]\nxfail_strict=True\n")
             test = root / "test_example.py"
             test.write_text(
                 """
@@ -38,6 +38,18 @@ def test_roundtrip(name, tmp_path):
     shutil.rmtree(output)
 def test_skip():
     pytest.skip('unsupported mode')
+@pytest.mark.skip(reason='setup policy')
+def test_setup_skip():
+    raise AssertionError('must not run')
+@pytest.mark.xfail(run=False, reason='known setup failure')
+def test_setup_xfail():
+    raise AssertionError('must not run')
+@pytest.mark.xfail(reason='known call failure')
+def test_call_xfail():
+    raise AssertionError('original failure')
+@pytest.mark.xfail(reason='unexpected success')
+def test_excluded_xpass():
+    pass
 """
             )
             scripts = Path(__file__).resolve().parents[1]
@@ -76,10 +88,25 @@ def test_skip():
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             items = list((root / "evidence").glob("*/item.json"))
-            self.assertEqual(len(items), 3)
+            self.assertEqual(len(items), 6)
             passing = []
             for path in items:
                 item = json.loads(path.read_text())
+                if "test_setup_" in item["nodeid"]:
+                    self.assertEqual(item["phases"], [])
+                    self.assertEqual(item["reports"]["setup"]["outcome"], "skipped")
+                    self.assertNotIn("call", item["reports"])
+                    if "xfail" in item["nodeid"]:
+                        self.assertIn(
+                            "known setup failure", item["reports"]["setup"]["wasxfail"]
+                        )
+                    continue
+                if "test_call_xfail" in item["nodeid"]:
+                    self.assertEqual(item["reports"]["call"]["outcome"], "skipped")
+                    self.assertEqual(
+                        item["reports"]["call"]["wasxfail"], "known call failure"
+                    )
+                    continue
                 if "test_skip" in item["nodeid"]:
                     self.assertIn("unsupported mode", item["reports"]["call"]["detail"])
                     continue
@@ -109,9 +136,45 @@ def test_skip():
             self.assertEqual(len(collections), 2)
             self.assertTrue(
                 all(
-                    len(json.loads(p.read_text())["selected"]) == 3 for p in collections
+                    len(json.loads(p.read_text())["selected"]) == 6 for p in collections
                 )
             )
+            command = [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(test),
+                "-c",
+                str(ini),
+                "-p",
+                "rocjitsu_evidence",
+                "--capture=fd",
+                "--rocjitsu-evidence-dir",
+                str(root / "xpass-evidence"),
+                "-k",
+                "excluded",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+            ]
+            xpass = subprocess.run(
+                command,
+                env=os.environ
+                | dict(
+                    PYTHONPATH=str(scripts),
+                    PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
+                    PYTHONDONTWRITEBYTECODE="1",
+                ),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(xpass.returncode, 1, xpass.stdout + xpass.stderr)
+            xpass_item = json.loads(
+                next((root / "xpass-evidence").glob("*/item.json")).read_text()
+            )
+            self.assertEqual(xpass_item["reports"]["call"]["outcome"], "failed")
+            self.assertIn("XPASS(strict)", xpass_item["reports"]["call"]["detail"])
 
     def test_helper_output_survives_killed_pytest_without_a_call_report(self):
         with tempfile.TemporaryDirectory() as temporary:

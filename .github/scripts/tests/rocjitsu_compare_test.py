@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -107,6 +108,99 @@ class CompareTest(unittest.TestCase):
         self.assertNotIn("CpuThreads=1", " ".join(reference))
         self.assertIn("CpuThreads=1", " ".join(candidate))
         self.assertIn("rocjitsu_shape_queue.py", " ".join(reference))
+
+    def test_standalone_whole_budget_and_workflow_validation_agree(self):
+        workflow = yaml.safe_load(
+            (
+                Path(__file__).resolve().parents[2]
+                / "workflows/therock-rocjitsu-tensilelite-linux.yml"
+            ).read_text()
+        )
+        validation = workflow["jobs"]["rocjitsu-tensilelite-linux"]["steps"][0]["run"]
+        for strategy, seconds, accepted in (
+            ("gated-reference", 5400, True),
+            ("gated-reference", 5401, False),
+            ("shape", 1500, True),
+            ("shape", 1501, False),
+            ("priority", 500, True),
+            ("priority", 501, False),
+            ("gated-allocation", 500, True),
+            ("gated-allocation", 501, False),
+        ):
+            with self.subTest(strategy=strategy, seconds=seconds):
+                specs = rocjitsu_experiment.trial_specifications(
+                    strategy, 1, 1, 1, "1:1,1:2"
+                )
+                if accepted:
+                    rocjitsu_experiment.validate_trial_budget(
+                        strategy, seconds, len(specs)
+                    )
+                else:
+                    with self.assertRaises(ValueError):
+                        rocjitsu_experiment.validate_trial_budget(
+                            strategy, seconds, len(specs)
+                        )
+                result = subprocess.run(
+                    ["bash", "-c", validation],
+                    env=os.environ
+                    | dict(
+                        ARTIFACT_RUN_ID="39722400519",
+                        CASE_FILTER="full-gfx1250",
+                        STRATEGY=strategy,
+                        SUITE_TIMEOUT_SECONDS=str(seconds),
+                        MAX_WORK=str(1024**3),
+                        PER_JOB_SECONDS="100",
+                        REQUESTED_DISPATCH_THREADS="1",
+                        REQUESTED_ALLOCATIONS="1:1,1:2",
+                    ),
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertEqual(
+                    result.returncode == 0, accepted, result.stdout + result.stderr
+                )
+        self.assertEqual(
+            rocjitsu_experiment.trial_specifications("gated-reference", 64, 16, 4),
+            [("gated-reference", "gated-reference", 16, 4)],
+        )
+
+    def test_full_corpus_manifest_rejects_changed_or_incomplete_work(self):
+        plan = dict(
+            sources=[
+                dict(path="/artifact/tensilelite/Tests/common/one.yaml", sha256="one")
+            ],
+            jobs=[{}],
+            excluded=[{}],
+            ceiling=1024**3,
+        )
+        cohort = dict(
+            sources=[dict(path="tensilelite/Tests/common/one.yaml", sha256="one")],
+            admitted_jobs=1,
+            excluded_jobs=1,
+            ceiling=1024**3,
+            artifact_run_id="123",
+        )
+        rocjitsu_experiment.verify_cohort(plan, cohort, "123")
+        for field, value in (
+            ("sources", []),
+            ("jobs", []),
+            ("excluded", []),
+            ("ceiling", 4096**3),
+            ("sources", plan["sources"] * 2),
+            ("sources", [plan["sources"][0] | dict(sha256="changed")]),
+        ):
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(ValueError, "frozen workload"):
+                    rocjitsu_experiment.verify_cohort(
+                        plan | {field: value}, cohort, "123"
+                    )
+        with self.assertRaises(ValueError):
+            rocjitsu_experiment.verify_cohort(plan, cohort, "other artifacts")
+        with self.assertRaises(ValueError):
+            rocjitsu_experiment.verify_cohort(
+                plan, cohort | dict(sources=cohort["sources"] * 2), "123"
+            )
 
     def test_priority_uses_unchanged_groups_and_rejects_stale_costs(self):
         self.assertEqual(
@@ -384,6 +478,131 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(
             candidate["client_verdicts"], {"PASSED": 2, "DID_NOT_SATISFY_ASSERTS": 2}
         )
+
+    def test_skip_and_expected_failure_keep_costs_without_numerical_pass_claim(self):
+        for name, phase, wasxfail in (
+            ("skip", "setup", None),
+            ("xfail", "call", "known failure"),
+        ):
+            with self.subTest(name=name):
+                root, _ = self.report(name, False)
+                progress = json.loads((root / "progress.json").read_text())
+                reports = dict(
+                    teardown=dict(outcome="passed", seconds=0.1),
+                    **{
+                        phase: dict(
+                            outcome="skipped",
+                            seconds=2,
+                            wasxfail=wasxfail,
+                            detail="original reason",
+                        )
+                    },
+                )
+                progress["tests"]["whole"] = dict(outcome="skipped", phases=reports)
+                write_json(root / "progress.json", progress)
+                path = root / "evidence/item/item.json"
+                item = json.loads(path.read_text())
+                item["reports"] = reports
+                if phase == "setup":
+                    item["phases"] = []
+                else:
+                    item["phases"][1]["completed"] = False
+                write_json(path, item)
+                result = audit(root)
+                self.assertEqual(result["audit_errors"], [])
+                self.assertFalse(result["numerical_coverage_complete"])
+                self.assertEqual(
+                    result["counts"], {"xfail" if wasxfail else "pytest_skip": 1}
+                )
+                self.assertEqual(result["client_verdicts"], {})
+                self.assertEqual(
+                    result["non_numerical_outcomes"][0]["reason"], "original reason"
+                )
+                with (root / "audit/jobs.csv").open() as stream:
+                    timing = next(csv.DictReader(stream))
+                self.assertEqual(
+                    timing["build_seconds"], "1.0" if phase == "call" else ""
+                )
+                self.assertFalse(compare(result, result)["coverage_equal"])
+                item["reports"][phase]["outcome"] = "passed"
+                write_json(path, item)
+                self.assertTrue(
+                    any(
+                        "skipped outcome differs" in e
+                        for e in audit(root)["audit_errors"]
+                    )
+                )
+
+    def test_adaptive_search_retains_outcome_without_fixed_sweep_coverage(self):
+        self.source.write_text("Backend:\n  Name: Ductile\n")
+        root, _ = self.report("adaptive", True, bundle=True)
+        plan = json.loads((root / "shape-plan.json").read_text())
+        generated = Path(plan["jobs"][0]["yaml"])
+        generated.write_bytes(self.source.read_bytes())
+        plan["jobs"][0]["yaml_sha256"] = digest(generated)
+        plan["jobs"][0]["atomic_reason"] = "Ductile search spans multiple shapes"
+        write_json(root / "shape-plan.json", plan)
+        path = root / "jobs/bundle/evidence/item/item.json"
+        item = json.loads(path.read_text())
+        item["job"] = plan["jobs"][0]
+        item["reports"] = {
+            phase: dict(outcome="passed") for phase in ("setup", "call", "teardown")
+        }
+        write_json(path, item)
+        (path.parent / "call-stderr.log").write_text("")
+        result = audit(root)
+        self.assertEqual(result["audit_errors"], [])
+        self.assertEqual(result["counts"]["adaptive_search"], 1)
+        self.assertFalse(result["numerical_coverage_complete"])
+        self.assertEqual(result["ledger"], [])
+        self.assertEqual(
+            result["non_numerical_outcomes"][0]["pytest_outcome"], "passed"
+        )
+        self.assertEqual(
+            result["non_numerical_outcomes"][0]["log_sha256"]["call-stdout.log"],
+            digest(path.parent / "call-stdout.log"),
+        )
+        self.assertFalse(compare(result, result)["coverage_equal"])
+        retained = item["phases"][1]["files"][0]
+        (path.parent / "run" / retained["path"]).write_text("changed metadata")
+        self.assertTrue(
+            any(
+                "retained metadata hash mismatch" in e
+                for e in audit(root)["audit_errors"]
+            )
+        )
+
+    def test_launch_only_verdicts_do_not_establish_numerical_coverage(self):
+        root, _ = self.report("launch", False)
+        log = root / "evidence/item/call-stdout.log"
+        log.write_text(log.read_text().replace(",PASSED", ",NO_CHECK"))
+        result = audit(root)
+        self.assertEqual(result["audit_errors"], [])
+        self.assertEqual(result["client_verdicts"]["NO_CHECK"], 2)
+        self.assertFalse(result["numerical_coverage_complete"])
+
+    def test_empty_verdict_requires_effective_validation_disabled(self):
+        root = self.root / "empty-verdict"
+        directory, item = self.item(root, "whole", [4], False)
+        log = directory / "call-stdout.log"
+        log.write_text(log.read_text().replace(",PASSED", ","))
+        with self.assertRaisesRegex(ValueError, "empty client verdict"):
+            audit_item(root, directory, item)
+        for phase in item["phases"]:
+            ini = next(
+                e for e in phase["files"] if e["path"].endswith("ClientParameters.ini")
+            )
+            path = directory / phase["name"] / ini["path"]
+            path.write_text(
+                path.read_text().replace(
+                    "num-elements-to-validate=-1", "num-elements-to-validate=0"
+                )
+            )
+            ini["sha256"] = digest(path)
+        _, rows = audit_item(root, directory, item)
+        unchecked = [r for r in rows if r["validation"] == "NO_CHECK"]
+        self.assertEqual(len(unchecked), 1)
+        self.assertFalse(unchecked[0]["validation_reported"])
 
     def test_coverage_counts_partial_files_and_arithmetic_separately(self):
         def job(name, source, work, problems):

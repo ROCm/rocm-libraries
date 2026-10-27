@@ -300,7 +300,7 @@ def client_events(path):
                 if len(values) != len(header):
                     raise ValueError(f"{path}:{number}: malformed client row")
                 row = dict(zip(header, values))
-                if row["validation"] not in VALIDATIONS:
+                if row["validation"] and row["validation"] not in VALIDATIONS:
                     raise ValueError(
                         f"{path}:{number}: unknown validation {row['validation']!r}"
                     )
@@ -334,7 +334,7 @@ def audit(root):
         if shape_mode
         else {s["nodeid"] for s in plan["sources"]}
     )
-    errors, ledger, inventory, timings = [], [], [], []
+    errors, ledger, inventory, timings, outcomes = [], [], [], [], []
     try:
         resource_time = resource_statistics(root, runtime)
     except (ValueError, KeyError, TypeError, OSError) as error:
@@ -490,19 +490,97 @@ def audit(root):
             None,
         ):
             errors.append(f"{nodeid}: source hash differs from plan")
-        if category in ("pytest_skip", "xfail"):
-            continue
         phases = item["phases"]
+        timing.update(
+            build_seconds=(
+                sum(p.get("wall_seconds", 0) for p in phases if p["name"] == "build")
+                if phases
+                else None
+            ),
+            run_seconds=(
+                sum(p.get("wall_seconds", 0) for p in phases if p["name"] == "run")
+                if phases
+                else None
+            ),
+            evidence_seconds=(
+                sum(p.get("evidence_seconds", 0) for p in phases) if phases else None
+            ),
+        )
+        adaptive_search = (
+            item.get("job", {}).get("atomic_reason")
+            == "Ductile search spans multiple shapes"
+        )
+        if category in ("pytest_skip", "xfail") or adaptive_search:
+            try:
+                verify_retained_metadata(path.parent, item)
+            except (ValueError, OSError) as error:
+                errors.append(f"{nodeid}: {error}")
+                continue
+        if category in ("pytest_skip", "xfail"):
+            retained = item.get("reports", {})
+            if not any(p["outcome"] == "skipped" for p in retained.values()) or any(
+                retained.get(phase, {}).get("outcome") != report["outcome"]
+                or retained.get(phase, {}).get("wasxfail") != report.get("wasxfail")
+                for phase, report in reports.items()
+            ):
+                errors.append(
+                    f"{nodeid}: skipped outcome differs from retained pytest reports"
+                )
+            outcomes.append(
+                dict(
+                    nodeid=nodeid,
+                    source=item["source"],
+                    source_sha256=item["source_sha256"],
+                    category=category,
+                    reason=reason,
+                    reports=retained,
+                )
+            )
+            continue
         if [p["name"] for p in phases] != ["build", "run"]:
             errors.append(f"{nodeid}: build/run did not both complete")
             continue
         if not all(p["completed"] for p in phases):
             errors.append(f"{nodeid}: build/run helper failed or was interrupted")
-        timing.update(
-            build_seconds=phases[0].get("wall_seconds"),
-            run_seconds=phases[1].get("wall_seconds"),
-            evidence_seconds=sum(p.get("evidence_seconds", 0) for p in phases),
-        )
+        if adaptive_search:
+            source = root / "shape-yamls" / Path(item["job"]["yaml"]).name
+            try:
+                backend = (
+                    yaml.safe_load(source.read_text()).get("Backend", {}).get("Name")
+                )
+            except (OSError, yaml.YAMLError) as error:
+                errors.append(f"{nodeid}: missing or invalid adaptive input: {error}")
+                continue
+            if backend != "Ductile":
+                errors.append(
+                    f"{nodeid}: adaptive search differs from source configuration"
+                )
+                continue
+            if category == "passed":
+                categories[category] -= 1
+                categories["adaptive_search"] += 1
+                timing["category"] = "adaptive_search"
+            try:
+                logs = {
+                    name: digest(path.parent / name)
+                    for name in ("call-stdout.log", "call-stderr.log")
+                }
+            except OSError as error:
+                errors.append(f"{nodeid}: missing adaptive search log: {error}")
+                continue
+            outcomes.append(
+                dict(
+                    nodeid=nodeid,
+                    source=item["source"],
+                    source_sha256=item["source_sha256"],
+                    category="adaptive_search",
+                    pytest_outcome=category,
+                    reason="Adaptive iterations replace candidate metadata; the fixed-sweep audit does not qualify every evaluated candidate.",
+                    reports=item.get("reports", {}),
+                    log_sha256=logs,
+                )
+            )
+            continue
         try:
             inv, rows = audit_item(root, path.parent, item)
             inventory.extend(inv)
@@ -555,6 +633,18 @@ def audit(root):
         sources=plan["sources"],
         execution=execution,
         counts=categories,
+        non_numerical_outcomes=outcomes,
+        numerical_coverage_complete=not errors
+        and not any(
+            count
+            for category, count in categories.items()
+            if category not in ("passed", "threshold_exclusion")
+        )
+        and not any(
+            count
+            for status, count in verdicts.items()
+            if status not in ("PASSED", "DID_NOT_SATISFY_ASSERTS")
+        ),
         client_verdicts=verdicts,
         unique_mirage_sessions=len(set(sessions)) if shape_mode else None,
         timing_seconds={
@@ -598,6 +688,7 @@ def audit(root):
     for name, entries in (
         ("client-verdicts", ledger),
         ("accepted-solutions", inventory),
+        ("pytest-outcomes", outcomes),
     ):
         (destination / f"{name}.jsonl").write_text(
             "".join(key(e) + "\n" for e in entries)
@@ -605,12 +696,18 @@ def audit(root):
     return summary
 
 
-def audit_item(root, directory, item):
-    phases = {p["name"]: p for p in item["phases"]}
-    for phase in phases.values():
+def verify_retained_metadata(directory, item):
+    for phase in item["phases"]:
+        if "files" not in phase:
+            raise ValueError(f"retained files unavailable for {phase['name']} phase")
         for entry in phase["files"]:
             if digest(directory / phase["name"] / entry["path"]) != entry["sha256"]:
                 raise ValueError(f"retained metadata hash mismatch: {entry['path']}")
+
+
+def audit_item(root, directory, item):
+    verify_retained_metadata(directory, item)
+    phases = {p["name"]: p for p in item["phases"]}
     output = Path(phases["run"]["output_dir"])
     groups, inis, inventory = {}, {}, []
     for entry in phases["run"]["files"]:
@@ -673,6 +770,14 @@ def audit_item(root, directory, item):
         group = Path(event["ini"]).relative_to(output).parts[1]
         indices = original_group(item, group)
         row = event["row"]
+        validation_reported = bool(row["validation"])
+        if not validation_reported:
+            # The client leaves verdict cells empty when validation is disabled.
+            if values["num-elements-to-validate"] != ["0"]:
+                raise ValueError(
+                    "empty client verdict with numerical validation enabled"
+                )
+            row["validation"] = "NO_CHECK"
         solution_index = int(row["solution-progress"].split("/")[0])
         matches = [
             s
@@ -730,6 +835,7 @@ def audit_item(root, directory, item):
                 run=row["run"],
                 variant_index=variant,
                 validation=row["validation"],
+                validation_reported=validation_reported,
                 log_path=str(log.relative_to(root)),
                 log_line=event["line"],
                 log_sha256=log_hash,
@@ -854,6 +960,7 @@ def compare(left, right):
     for field in (
         "pytest_skip",
         "xfail",
+        "adaptive_search",
         "job_timeout",
         "claimed_without_result",
         "unstarted",

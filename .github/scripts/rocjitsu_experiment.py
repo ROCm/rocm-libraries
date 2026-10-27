@@ -41,6 +41,29 @@ COST_RUNTIME_FIELDS = (
 )
 
 
+def validate_trial_budget(strategy, suite_seconds, trial_count):
+    limit = 5400 if strategy == "gated-reference" and trial_count == 1 else 1500
+    if suite_seconds < 1 or suite_seconds * trial_count > limit:
+        raise ValueError(
+            f"combined trial execution limits must total at most {limit} seconds"
+        )
+
+
+def verify_cohort(plan, cohort, artifact_run_id):
+    actual = {source_name(Path(s["path"])): s["sha256"] for s in plan["sources"]}
+    expected = {s["path"]: s["sha256"] for s in cohort["sources"]}
+    if (
+        len(actual) != len(plan["sources"])
+        or len(expected) != len(cohort["sources"])
+        or actual != expected
+        or len(plan["jobs"]) != cohort["admitted_jobs"]
+        or len(plan["excluded"]) != cohort["excluded_jobs"]
+        or plan["ceiling"] != cohort["ceiling"]
+        or artifact_run_id != cohort["artifact_run_id"]
+    ):
+        raise ValueError("frozen workload differs from its manifest")
+
+
 def measured_group_plan(plan, catalogue, runtime):
     if (
         catalogue.get("schema") != 1
@@ -329,6 +352,8 @@ def trial_specifications(
     dispatch_threads=1,
     allocations="48:1,32:2,16:4",
 ):
+    if strategy == "gated-reference":
+        return [(strategy, strategy, reference_workers, dispatch_threads)]
     if strategy == "priority":
         return [
             ("gated-reference", "gated-reference", reference_workers, dispatch_threads),
@@ -436,6 +461,11 @@ def benchmark_report(parent, reports, comparisons):
                 mean_cpu_cores=usage.get("mean_cpu_cores"),
                 cpu_capacity_fraction=usage.get("cpu_capacity_fraction"),
                 numerical_passed=report["client_verdicts"].get("PASSED", 0),
+                numerical_coverage_complete=report["numerical_coverage_complete"],
+                pytest_skipped=report["counts"].get("pytest_skip", 0),
+                expected_failures=report["counts"].get("xfail", 0),
+                adaptive_searches=report["counts"].get("adaptive_search", 0),
+                client_unvalidated=report["client_verdicts"].get("NO_CHECK", 0),
                 applicability_rejections=report["client_verdicts"].get(
                     "DID_NOT_SATISFY_ASSERTS", 0
                 ),
@@ -490,13 +520,15 @@ def benchmark_report(parent, reports, comparisons):
         "Partition mode compares single-shape jobs with admitted shapes bundled by original benchmark group, at the same worker/dispatch allocation. Grouped GEMM and search-dependent configurations remain indivisible. The gate applies before bundling; a bundle's summed work may exceed the per-case ceiling. Queue-job counts describe granularity; requested descriptors, accepted solutions and numerical verdicts must still match.",
         "Gated-allocation mode filters the whole-YAML control to exactly the admitted source cases, preserving original group identities after removal. Its other arms bundle those same cases by benchmark group and vary worker/dispatch allocation. The grouped pair can hold nominal dispatch capacity constant while varying how many independent clients claim work. Setup, references and actual CPU demand can still differ.",
         "Priority mode holds grouped worker and dispatch settings fixed and changes only queue ordering. The cost arm uses previously measured job durations with the same admitted YAML hashes, gate and runtime controls; the work arm orders by declared matrix work. Earlier measurements predict costs, but current audited workload timings determine the result.",
+        "Standalone gated-reference runs the filtered whole-YAML queue without a comparison arm. Pytest skips and expected failures keep their original policy and appear in the outcome ledger; they do not count as numerical passes or establish full admitted numerical coverage.",
+        "Ductile adaptive searches are included in execution time and retain their original pytest outcomes and raw evidence. Their changing candidate inventories require a separate coverage audit. Launch-only client verdicts remain unvalidated. Both are reported separately and prevent a full numerical coverage claim.",
         "",
-        "| Strategy | Queue jobs | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Strategy | Queue jobs | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Unvalidated client entries | Pytest skips/expected failures | Adaptive searches | Timeouts/incomplete | Audit errors |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         text.append(
-            f"| {row['strategy']} | {row['queue_jobs']} | {row['workers']} | {row['dispatch_threads'] or 'auto'} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
+            f"| {row['strategy']} | {row['queue_jobs']} | {row['workers']} | {row['dispatch_threads'] or 'auto'} | {display(row['workload_seconds'])} | {display(row['mean_cpu_cores'])} | {display(row['cpu_capacity_fraction'])} | {row['numerical_passed']} | {row['applicability_rejections']} | {row['client_unvalidated']} | {row['pytest_skipped']}/{row['expected_failures']} | {row['adaptive_searches']} | {row['timeouts']}/{row['incomplete']} | {row['audit_errors']} |"
         )
     text += [
         "",
@@ -514,6 +546,7 @@ def main():
         choices=(
             "shape",
             "reference",
+            "gated-reference",
             "paired",
             "safety",
             "matrix",
@@ -554,23 +587,19 @@ def main():
     for _, strategy, count, width in specifications:
         if count > cores or (strategy == "shape" and count * width > cores):
             parser.error("each allocation must fit within the available CPU count")
-    if args.suite_seconds * len(specifications) > 1500:
-        parser.error("combined trial execution limits must total at most 1500 seconds")
+    try:
+        validate_trial_budget(args.strategy, args.suite_seconds, len(specifications))
+    except ValueError as error:
+        parser.error(str(error))
     parent = args.report_dir.resolve()
     plan = json.loads((parent / "shape-plan.json").read_text())
     manifest = os.environ.get("COHORT_MANIFEST")
     if manifest:
         cohort = json.loads(Path(manifest).read_text())
-        actual = {source_name(Path(s["path"])): s["sha256"] for s in plan["sources"]}
-        expected = {s["path"]: s["sha256"] for s in cohort["sources"]}
-        if (
-            actual != expected
-            or len(plan["jobs"]) != cohort["admitted_jobs"]
-            or len(plan["excluded"]) != cohort["excluded_jobs"]
-            or plan["ceiling"] != cohort["ceiling"]
-            or os.environ["ARTIFACT_RUN_ID"] != cohort["artifact_run_id"]
-        ):
-            parser.error("frozen calibration workload differs from its manifest")
+        try:
+            verify_cohort(plan, cohort, os.environ["ARTIFACT_RUN_ID"])
+        except ValueError as error:
+            parser.error(str(error))
         shutil.copyfile(manifest, parent / "cohort.json")
     if any(s[1] == "reference" for s in specifications) and plan["excluded"]:
         parser.error(
@@ -623,6 +652,9 @@ def main():
             exit_code=int(failed),
             strategies=strategies,
             independent_blocks=1,
+            numerical_coverage_complete=all(
+                r["numerical_coverage_complete"] for r in reports.values()
+            ),
         ),
     )
     return int(failed)
