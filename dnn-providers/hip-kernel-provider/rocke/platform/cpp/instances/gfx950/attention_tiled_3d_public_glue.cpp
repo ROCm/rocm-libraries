@@ -199,6 +199,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
@@ -383,6 +384,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      *   kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+     *   "addb" if use_additive_bias else "",
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
      *   "kvswz" if use_kv_lds_swizzle else "",
@@ -458,6 +460,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+    if(s->use_additive_bias)
+    {
+        parts[np++] = "addb";
     }
     if(s->use_decode_grid)
     {
@@ -715,6 +721,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->USE_SINKS = spec->use_sinks;
     out->USE_ALIBI = spec->use_alibi;
     out->USE_QQ_BIAS = spec->use_qq_bias;
+    out->USE_ADDITIVE_BIAS = spec->use_additive_bias;
     out->KV_FP8 = (spec->kv_storage_dtype != NULL
                    && rocke_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
@@ -1013,6 +1020,11 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_wave_page_id_load)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        if(strided_kv && spec->use_additive_bias)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV does not support use_additive_bias");
             return NULL;
         }
 

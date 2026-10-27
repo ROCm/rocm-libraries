@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import (
-    supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
 )
@@ -31,6 +30,7 @@ from .common import (
     _dense_kernel_module,
     _request_errors,
     _tuning_problem,
+    _unified_path_coverage,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -57,7 +57,7 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
 
     def precheck(req):
         problem = _tuning_problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=variant.arch)
+        ok, why = _unified_path_coverage(req, problem, variant.path, variant.arch)
         if ok and problem.emit_lse:
             return path_gate(problem, arch=variant.arch)
         return ok, why
@@ -65,7 +65,13 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
     return precheck
 
 
-def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
+def make_tuning_candidate(
+    variant: AttentionGeometryVariant, extra_features: frozenset = frozenset()
+) -> KernelCandidate:
+    """One unified tuning candidate. ``extra_features`` are request features the
+    arch module declares for this variant's geometry on top of the common ones
+    (e.g. ``attn_bias``)."""
+
     def build(spec, arch):
         from .tuning_specs import validate_explicit_fp8_encoding
 
@@ -79,14 +85,19 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
     def signature(spec):
         from kernels.common.attention_unified import _3d_signature, _attn_signature
 
+        # Only the gfx950 specs declare the field.
+        bias = bool(getattr(spec.kernel_spec, "use_additive_bias", False))
         if spec.path == "3d":
             return _3d_signature(
-                spec.kernel_spec.dtype, kv_dtype=spec.kernel_spec.kv_storage_dtype
+                spec.kernel_spec.dtype,
+                kv_dtype=spec.kernel_spec.kv_storage_dtype,
+                include_additive_bias=bias,
             )
         return _attn_signature(
             spec.kernel_spec.dtype,
             include_bt_stride=True,
             include_qq_bias_stride=True,
+            include_additive_bias=bias,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
         )
 
@@ -117,7 +128,8 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ATTENTION_FEATURES | {"lse"}
                 if variant.path == "3d"
                 else ATTENTION_FEATURES
-            ),
+            )
+            | frozenset(extra_features),
         ),
         space=unified_space(variant),
         base=_tuning_problem,

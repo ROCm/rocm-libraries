@@ -90,6 +90,7 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
         sp->use_sinks = p->use_sinks;
         sp->use_alibi = p->use_alibi;
         sp->use_qq_bias = p->use_qq_bias;
+        sp->use_additive_bias = p->use_additive_bias;
         sp->use_fp8 = p->use_fp8;
         sp->num_cus = p->num_cus;
         sp->num_kv_blocks = p->num_kv_blocks;

@@ -127,6 +127,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
@@ -153,6 +154,12 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
     if(s == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_3d spec is NULL");
+        return false;
+    }
+    /* The gfx942 Python spec has no additive-bias field. */
+    if(s->use_additive_bias)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
         return false;
     }
     if(s->kv_storage_dtype != NULL && !rocke_attn3d_streq(s->kv_storage_dtype, "fp8e4m3"))

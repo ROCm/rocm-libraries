@@ -210,5 +210,11 @@ stride must be in `[0, 2**31)` and the largest index a launch can read
 `NotImplementedError` instead of wrapping into an out-of-bounds read.
 Broadcasting a dimension (stride 0) shrinks the index; i64 bias addressing is a
 follow-up.  That same index must also lie inside the tensor's storage (past its
-storage offset), so strides that do not match the tensor raise `ValueError`.  Python engine only for now (no C engine mirror yet).  Numeric coverage:
+storage offset), so strides that do not match the tensor raise `ValueError`.
+The C++ engine mirrors it byte-for-byte (selectors, spec validation and
+emission).  From the dispatcher, a gfx950 `AttentionRequest(use_attn_bias=True)`
+(`attn_bias_dtype="f32"` only) sets `problem.use_additive_bias`; the explicit
+tuning bindings take the bias as `tensors["attn_bias"]`
+(`[B|1, H|1, Sq|1, Sk]`, unit key stride) and derive the three strides from it
+(0 on a size-1 dimension).  Numeric coverage:
 [test_attention_additive_bias_gfx950_numeric.py](../../tests/test_attention_additive_bias_gfx950_numeric.py).

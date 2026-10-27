@@ -1637,6 +1637,7 @@ def problems_gfx950_attention_tiled_2d():
         use_sinks=False,
         use_alibi=False,
         use_qq_bias=False,
+        use_additive_bias=False,
         use_fp8=False,
         num_kv_blocks=0,
     ):
@@ -1655,6 +1656,7 @@ def problems_gfx950_attention_tiled_2d():
             use_sinks=use_sinks,
             use_alibi=use_alibi,
             use_qq_bias=use_qq_bias,
+            use_additive_bias=use_additive_bias,
             use_fp8=use_fp8,
             num_kv_blocks=num_kv_blocks,
         )
@@ -1709,6 +1711,15 @@ def problems_gfx950_attention_tiled_2d():
         # ---- misc flag combinations ----
         p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
+        # ---- additive bias (gfx950): Python and C++ must agree on every path ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_additive_bias=True),  # combo
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_additive_bias=True),  # single-batch
+        p(512, 4, 32, 32, 128, 32, 512, 4096, use_additive_bias=True),  # multi-batch
+        p(64, 64, 32, 32, 64, 32, 64, 4096, use_additive_bias=True),  # short q
+        p(512, 2, 16, 4, 128, 16, 512, 4096, use_additive_bias=True),  # 16x16 GQA
+        p(512, 2, 32, 32, 64, 32, 512, 4096, dtype="fp16", use_additive_bias=True),
+        p(4096, 1, 16, 2, 256, 16, 4096, 4096, use_additive_bias=True),  # not D256
+        p(512, 2, 64, 8, 64, 32, 512, 4096, sliding_window=512, use_additive_bias=True),
     ]
 
 
@@ -1751,6 +1762,7 @@ def _selector_parity_row(problem_dict, arch):
             use_sinks=bool(problem_dict.get("use_sinks", False)),
             use_alibi=bool(problem_dict.get("use_alibi", False)),
             use_qq_bias=bool(problem_dict.get("use_qq_bias", False)),
+            use_additive_bias=bool(problem_dict.get("use_additive_bias", False)),
             use_fp8=bool(problem_dict.get("use_fp8", False)),
             num_kv_blocks=problem_dict.get("num_kv_blocks", 0),
         )
@@ -1779,6 +1791,7 @@ def _selector_parity_row(problem_dict, arch):
                 "has_softcap",
                 "use_alibi",
                 "use_qq_bias",
+                "use_additive_bias",
                 "num_seqs",
                 "num_warps",
                 "waves_per_eu",

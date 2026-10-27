@@ -447,10 +447,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 if(cfg->USE_QQ_BIAS)
                 {
                     rocke_value_t* krp = rocke_b_sub(b, col_abs, ctx->context_len);
-                    rocke_value_t* krp_ok
-                        = rocke_b_land(b,
-                                       rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0)),
-                                       rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    /* Python emits cmp_ge before cmp_lt; bind in order so C's
+                     * argument evaluation order cannot swap the two. */
+                    rocke_value_t* krp_ge = rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0));
+                    rocke_value_t* krp_lt = rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    rocke_value_t* krp_ok = rocke_b_land(b, krp_ge, krp_lt);
                     rocke_value_t* qq_ok = rocke_b_land(b, ctx->row_ok, krp_ok);
                     rocke_value_t* qp_safe
                         = rocke_b_select(b, ctx->row_ok, ctx->row_qp, rocke_b_const_i32(b, 0));
@@ -459,6 +460,18 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                     rocke_value_t* qq_v = rocke_b_masked_global_load(
                         b, ctx->qq_bias_ptr, qq_idx, qq_ok, rocke_b_const_f32(b, 0.0), f32, 4);
                     s_scaled = rocke_b_fadd(b, s_scaled, rocke_b_fmul(b, qq_v, ctx->rcp_ln2));
+                }
+                if(cfg->USE_ADDITIVE_BIAS)
+                {
+                    s_scaled = rocke_add_additive_bias(b,
+                                                       s_scaled,
+                                                       &ctx->additive_bias,
+                                                       ctx->seq_idx,
+                                                       ctx->row_qh,
+                                                       ctx->row_qp,
+                                                       col_abs,
+                                                       m_ok,
+                                                       ctx->rcp_ln2);
                 }
                 masked[n * 4 + reg] = rocke_b_select(b, m_ok, s_scaled, ctx->neg_inf);
             }

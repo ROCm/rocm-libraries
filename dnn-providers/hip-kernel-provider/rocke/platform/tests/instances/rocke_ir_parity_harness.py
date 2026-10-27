@@ -3260,6 +3260,65 @@ def cases():
             num_segments=4,
         ),
     )
+    # Additive bias: the 16x16 path, the transposed 32x32 combo the selector
+    # builds for a biased d64/b32/GQA-8 problem (mask-once / mask-limit off),
+    # and the 3D split-KV segment kernel.
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d128_b64_addb",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_addb",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            use_additive_bias=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d64_b32_gqa8_addb_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_d64_addb_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_additive_bias=True,
+            num_seqs=2,
+            num_warps=4,
+            block_m_per_warp=32,
+            tile_size=64,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_transposed_scalar_state=True,
+            use_transposed_half_local_pv=True,
+            use_mfma32_skip_legacy_qreg=True,
+            use_fast_paged_kv_desc=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/3d_bf16_d128_b64_addb",
+        "gfx950",
+        build_attention_3d(
+            "irhash_attn_950_3d_bf16_addb",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            use_additive_bias=True,
+        ),
+    )
     add(
         "attention",
         "attention/gfx950/reduce_fp16_d128",

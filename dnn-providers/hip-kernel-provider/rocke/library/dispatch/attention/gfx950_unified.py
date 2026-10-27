@@ -91,6 +91,12 @@ def _variants():
 GFX950_TUNING_VARIANTS = tuple(_variants())
 
 
+def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
+    """Additive bias is emitted on the 16x16, transposed 32x32 and split-KV
+    score paths; the non-transposed 32x32 (wide32) spec rejects it."""
+    return frozenset() if variant.codepath == "wide32" else frozenset({"attn_bias"})
+
+
 def _make_gfx950_d256_candidate() -> KernelCandidate:
     """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
     with FA3-style softmax<->MFMA interleave (mode2/g4) + slab-padded K_lds.
@@ -183,6 +189,6 @@ def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     """The D256 fast path routes only; each tuning geometry goes on both."""
     route.register(_make_gfx950_d256_candidate())
     for variant in GFX950_TUNING_VARIANTS:
-        candidate = make_tuning_candidate(variant)
+        candidate = make_tuning_candidate(variant, _variant_features(variant))
         route.register(candidate)
         execution.register(candidate)
