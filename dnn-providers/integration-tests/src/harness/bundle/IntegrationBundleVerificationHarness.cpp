@@ -879,8 +879,7 @@ detail::PlacedVariantPack IntegrationBundleVerificationHarness::placeEngineRun(
         HIPDNN_PLUGIN_LOG_INFO("placement \"" << toString(placement) << "\" leaves " << note
                                               << " where it is (" << _bundlePath << ")");
     }
-    return detail::PlacedVariantPack(
-        variantPack, plan.candidates, placement, _bundle->metadata.placementUid);
+    return {variantPack, plan.candidates, placement, _bundle->metadata.placementUid};
 }
 
 IntegrationBundleVerificationHarness::EngineRunResult

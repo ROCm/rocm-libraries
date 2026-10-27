@@ -167,7 +167,7 @@ public:
     PlacedVariantPack(const PlacedVariantPack&) = delete;
     PlacedVariantPack& operator=(const PlacedVariantPack&) = delete;
     PlacedVariantPack(PlacedVariantPack&&) noexcept = default;
-    PlacedVariantPack& operator=(PlacedVariantPack&&) noexcept;
+    PlacedVariantPack& operator=(PlacedVariantPack&& other) noexcept;
 
     /// Waits for the engine, copies every output shadow over its original buffer, and waits
     /// again. Throws PlacementError on a device failure.

@@ -27,6 +27,14 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #endif
 
+// The sub-byte packed tensors are only tested for here (dynamic_cast), never built. Naming a
+// class template that way instantiates its declarations but not its virtual members, nor those
+// of the MigratableMemory<uint8_t> it holds, which portability-template-virtual-member-function
+// rejects. Explicitly instantiating them defines every member. Valid at global scope only.
+template class hipdnn_data_sdk::utilities::PackedSubByteTensor<hipdnn_data_sdk::types::fp4_e2m1, 4>;
+template class hipdnn_data_sdk::utilities::PackedSubByteTensor<hipdnn_data_sdk::types::fp6_e2m3, 6>;
+template class hipdnn_data_sdk::utilities::PackedSubByteTensor<hipdnn_data_sdk::types::fp6_e3m2, 6>;
+
 namespace hipdnn_integration_tests
 {
 namespace
@@ -275,6 +283,8 @@ std::optional<T> nonFiniteValue(FillRecipe::SpecialValue special)
                 return fromDouble<T>(-std::numeric_limits<double>::infinity());
             }
             return std::nullopt;
+        default:
+            break;
         }
         return std::nullopt;
     }
@@ -313,9 +323,9 @@ FillResult fillTyped(const FillRecipe& recipe,
 {
     // Some of these are read only by the floating-point or only by the integer instantiation.
     using Real [[maybe_unused]] = DrawType<T>;
-    constexpr bool isInteger = std::is_integral_v<T>;
-    [[maybe_unused]] constexpr bool isSigned = std::numeric_limits<T>::is_signed;
-    constexpr const char* typeName = dataTypeName<T>();
+    const bool isInteger = std::is_integral_v<T>;
+    [[maybe_unused]] const bool isSigned = std::numeric_limits<T>::is_signed;
+    const char* const typeName = dataTypeName<T>();
 
     std::mt19937 rng(seed);
 
@@ -362,9 +372,9 @@ FillResult fillTyped(const FillRecipe& recipe,
         }
         else
         {
-            const double farthest
+            const float farthest
                 = std::fabs(recipe.lo) >= std::fabs(recipe.hi) ? recipe.lo : recipe.hi;
-            const T fallback = fromDouble<T>(farthest);
+            const auto fallback = fromDouble<T>(static_cast<double>(farthest));
             if(isZeroElement(fallback))
             {
                 return unsupportedKind(
@@ -375,7 +385,7 @@ FillResult fillTyped(const FillRecipe& recipe,
             auto gen = [&]() -> T {
                 for(int attempt = 0; attempt < K_MAX_NONZERO_DRAWS; ++attempt)
                 {
-                    const T drawn = fromDouble<T>(static_cast<double>(dist(rng)));
+                    const auto drawn = fromDouble<T>(static_cast<double>(dist(rng)));
                     if(!isZeroElement(drawn))
                     {
                         return drawn;
@@ -389,7 +399,7 @@ FillResult fillTyped(const FillRecipe& recipe,
     }
     case FillRecipe::Kind::LARGE:
     {
-        if(!(std::isfinite(recipe.scale) && recipe.scale > 0.0f))
+        if(!std::isfinite(recipe.scale) || recipe.scale <= 0.0f)
         {
             return unsupportedKind(recipe, typeName, "needs a finite scale > 0");
         }
@@ -439,7 +449,7 @@ FillResult fillTyped(const FillRecipe& recipe,
             // drawing k draws a subnormal exactly, with no rounding to push it across.
             const double smallest = toDouble(std::numeric_limits<T>::denorm_min());
             const double smallestNormal = toDouble(std::numeric_limits<T>::min());
-            if(!(smallest > 0.0) || !(smallest < smallestNormal))
+            if(smallest <= 0.0 || smallest >= smallestNormal)
             {
                 return unsupportedKind(recipe, typeName, "the data type has no subnormal values");
             }
@@ -456,7 +466,7 @@ FillResult fillTyped(const FillRecipe& recipe,
     }
     case FillRecipe::Kind::SPECIAL:
     {
-        if(!(recipe.fraction >= 0.0f && recipe.fraction <= 1.0f))
+        if(!std::isfinite(recipe.fraction) || recipe.fraction < 0.0f || recipe.fraction > 1.0f)
         {
             return unsupportedKind(recipe, typeName, "needs fraction in [0, 1]");
         }
@@ -509,6 +519,7 @@ FillResult fillTyped(const FillRecipe& recipe,
     }
     case FillRecipe::Kind::FREE:
     case FillRecipe::Kind::FIXED:
+    default:
         break;
     }
     return unsupportedKind(recipe, typeName, "not a kind with a typed host generator");
@@ -534,8 +545,8 @@ template <typename T, typename Gen>
 void storePacked(ITensor& tensor, Gen& gen)
 {
     using Traits = hipdnn_data_sdk::utilities::PackedElementTraits<T>;
-    constexpr std::size_t bitsPerElement = Traits::BITS_PER_ELEMENT;
-    constexpr std::size_t bitsPerByte = 8;
+    const std::size_t bitsPerElement = Traits::BITS_PER_ELEMENT;
+    const std::size_t bitsPerByte = 8;
 
     const auto& dims = tensor.dims();
     const auto& strides = tensor.strides();
@@ -785,14 +796,14 @@ float recipeMagnitude(const FillRecipe& recipe)
         return std::fabs(recipe.value);
     case FillRecipe::Kind::LARGE:
         return recipe.scale;
-    case FillRecipe::Kind::ZEROS:
-        return 0.0f;
     case FillRecipe::Kind::FREE:
     case FillRecipe::Kind::NONZERO:
     case FillRecipe::Kind::SPECIAL:
         return std::max(std::fabs(recipe.lo), std::fabs(recipe.hi));
+    case FillRecipe::Kind::ZEROS:
     case FillRecipe::Kind::SUBNORMAL:
-        // Below every normal value: smaller than any amax that matters to a scale.
+    default:
+        // Zero, or below every normal value: smaller than any amax that matters to a scale.
         return 0.0f;
     }
     return 0.0f;

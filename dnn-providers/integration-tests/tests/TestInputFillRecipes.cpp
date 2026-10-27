@@ -430,10 +430,16 @@ TEST(TestInputFillRecipes, UnknownKindIsAnErrorNamingTheUidAndTheKind)
     for(const std::string name : {"constant", "non_zero", "Free", "", "nan"})
     {
         SCOPED_TRACE(name);
-        const auto message = loadError(R"({"kind":")" + name + R"("})");
+        std::string spec = R"({"kind":")";
+        spec += name;
+        spec += R"("})";
+        const auto message = loadError(spec);
         EXPECT_TRUE(contains(message, "uid 7")) << message;
         EXPECT_TRUE(contains(message, "case X")) << message;
-        EXPECT_TRUE(contains(message, "unknown fill kind \"" + name + "\"")) << message;
+        std::string expected = "unknown fill kind \"";
+        expected += name;
+        expected += '"';
+        EXPECT_TRUE(contains(message, expected)) << message;
     }
     EXPECT_TRUE(contains(loadError(R"({"kind":"constant"})"), "\"fixed\""));
 }
@@ -542,8 +548,11 @@ TEST(TestInputFillRecipes, SpecialFieldsAreValidated)
     {
         for(const char* fraction : {"0", "1"})
         {
-            const auto spec = std::string(R"({"kind":"special","special":")") + special
-                              + R"(","fraction":)" + fraction + "}";
+            std::string spec = R"({"kind":"special","special":")";
+            spec += special;
+            spec += R"(","fraction":)";
+            spec += fraction;
+            spec += "}";
             EXPECT_EQ(loadError(spec), "") << spec;
         }
     }

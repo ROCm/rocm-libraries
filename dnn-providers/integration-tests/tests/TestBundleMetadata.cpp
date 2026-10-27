@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "harness/BundleMetadata.hpp"
 
@@ -861,7 +862,7 @@ TEST(TestParseBundleMetadataJson, RejectsMalformedInputRecipesNamingUidAndField)
         const char* uid;
         const char* field;
     };
-    const Case cases[] = {
+    const std::vector<Case> cases = {
         {R"({"3": {"kind": "constant"}})", "uid 3", "\"kind\""},
         {R"({"3": {"kind": "non_zero"}})", "uid 3", "non_zero"},
         {R"({"3": {"kind": 4}})", "uid 3", "\"kind\""},

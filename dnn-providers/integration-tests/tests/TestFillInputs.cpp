@@ -870,7 +870,11 @@ void expectPackedMatchesUnpacked(const FillRecipe& recipe, std::size_t bitsPerEl
     const std::vector<std::vector<int64_t>> layouts = {{8, 1}, {1, 4}};
     for(const auto& strides : layouts)
     {
-        SCOPED_TRACE("strides " + std::to_string(strides[0]) + "," + std::to_string(strides[1]));
+        std::string layoutName = "strides ";
+        layoutName += std::to_string(strides[0]);
+        layoutName += ',';
+        layoutName += std::to_string(strides[1]);
+        SCOPED_TRACE(layoutName);
         const auto gr = buildMatmulGraph(dataTypeOf<T>(), dims, strides);
         const std::vector<int64_t> ownedUids = {1};
 

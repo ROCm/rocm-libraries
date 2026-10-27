@@ -469,7 +469,7 @@ private:
             {
                 throw FillRecipeError(at + R"(: kind "large" requires "scale")");
             }
-            if(!(f.scale > 0.0f))
+            if(f.scale <= 0.0f)
             {
                 throw FillRecipeError(at + ": \"scale\" must be > 0, got "
                                       + std::to_string(f.scale));

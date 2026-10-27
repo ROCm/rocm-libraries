@@ -257,9 +257,9 @@ struct VerificationOutcome
         return std::move(*this);
     }
 
-    VerificationOutcome expecting(std::string status) &&
+    VerificationOutcome expecting(std::string expected) &&
     {
-        expectedStatus = std::move(status);
+        expectedStatus = std::move(expected);
         return std::move(*this);
     }
 
