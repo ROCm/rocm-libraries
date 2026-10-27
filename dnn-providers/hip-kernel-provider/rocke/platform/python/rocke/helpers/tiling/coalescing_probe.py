@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 
+from ...core.dtypes import dtype_info
 from .analysis.coalescing import analyze_coalescing, assert_asm_backed
 
 __all__ = [
@@ -75,19 +76,6 @@ _WIDTH_BYTES = {
 _MNEMONIC_RE = re.compile(
     r"\b((?:global|buffer|flat)_(?:load|store)|ds_(?:read|write))_([a-z0-9]+)\b"
 )
-
-
-def _dtype_bits(name: str) -> int:
-    n = name.lower()
-    if "16" in n:
-        return 16
-    if "32" in n:
-        return 32
-    if "64" in n:
-        return 64
-    if "8" in n:
-        return 8
-    raise ValueError(f"cannot infer dtype bits from {name!r}")
 
 
 def achieved_widths(objdump_text, *, direction, space, dtype_bits):
@@ -172,7 +160,7 @@ def report_for_transaction(txn, *, arch, dims=None, pipeline=None, n_lanes=64):
         fwd,
         dims,
         strides,
-        _dtype_bits(txn.dtype_name),
+        dtype_info(txn.dtype_name).encoded_bits,
         direction=txn.kind,
         line_bytes=line_bytes_for(arch),
     )

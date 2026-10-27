@@ -4,7 +4,7 @@
 ################################################################################
 # Unit tests for the ClusterLoad (TDM multicast) component.
 #
-# Covers Tensile/Components/ClusterLoad.py: capability-based selection, the
+# Covers tensilelite/Components/ClusterLoad.py: capability-based selection, the
 # topology decision (usesCombinedMask / maskSgprName), the SGPR
 # declare/undeclare, and the emitted assembly of computeMasks /
 # applyToDescriptor. These emit no GPU work themselves, so the asm string is the
@@ -20,7 +20,7 @@ import sys
 import pytest
 from contextlib import contextmanager
 from types import SimpleNamespace
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +29,7 @@ WAVESIZE_32 = 32
 
 def _init_rocisa_gfx1250():
     from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
     isa = gfxToIsa("gfx1250")
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
@@ -47,7 +47,7 @@ def _rocisa_gfx1250():
 
 
 def _c():
-    from Tensile.Components.ClusterLoad import ClusterLoadTDM
+    from tensilelite.Components.ClusterLoad import ClusterLoadTDM
     return ClusterLoadTDM()
 
 
@@ -115,16 +115,16 @@ class TestFind:
     # Mirrors the production call sites, which resolve the component via the
     # concrete ClusterLoadTDM.find(writer) (capability-gated selection).
     def test_find_returns_tdm_impl_on_gfx1250(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         comp = ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=3))
         assert isinstance(comp, ClusterLoadTDM)
 
     def test_find_returns_none_without_tdm(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=False, tdm_inst=0)) is None
 
     def test_find_returns_none_when_tdm_inst_not_3(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        from tensilelite.Components.ClusterLoad import ClusterLoadTDM
         assert ClusterLoadTDM.find(_StubWriter(has_tdm=True, tdm_inst=0)) is None
 
 
@@ -204,14 +204,17 @@ class TestDeclareUndeclare:
         assert w.undefined == ["MulticastMaskA", "MulticastMaskB", "MulticastMaskMetadata"]
 
     @pytest.mark.parametrize("sparse", [1, 2])
-    @pytest.mark.parametrize("cluster_dim", [(4, 1), (2, 2)])
-    def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim):
+    @pytest.mark.parametrize("strategy,cluster_dim", [
+        ("DataParallel", (4, 1)), ("DataParallel", (2, 2)), ("DataParallel", (1, 4)),
+        ("StreamK", (4, 1)), ("StreamK", (2, 2)), ("StreamK", (1, 4))])
+    def test_persistent_metadata_mask_survives_descriptor_refresh(self, sparse, cluster_dim, strategy):
         # Sparse metadata descriptors are rebuilt for each persistent tile just
         # like A/B descriptors. A freed mask can be overwritten by store scratch
         # before the next tile uses it, corrupting multicast destinations.
         w = _StubWriter()
         kernel = _kernel(streamKMulticast=True, clusterDim=cluster_dim,
                          sparse=sparse, tdmMeta=True)
+        kernel["StreamKForceDPOnly"] = int(strategy == "DataParallel")
         component = _c()
         component.declareSgprs(w, kernel)
         component.undeclareSgprs(w, kernel)
@@ -226,31 +229,35 @@ class TestDeclareUndeclare:
         assert w.undefined == []
 
     def test_undeclare_keeps_maskB_live_frees_selfonly_maskA_under_pap(self):
-        # The broadcast mask (MulticastMaskB) is re-applied on every
-        # persistent-loop TDM refresh, so it must stay live past the prologue;
-        # freeing it makes those reuses reference an undeclared SGPR (assembly
-        # failure). With Ck == 1 the A mask is self-only and is still freed so the
-        # kernel stays within the 106-SGPR budget (at 107 SGPRs the kernel is
-        # replaced by an s_endpgm stub and the output is left unwritten).
+        # Keep B live for descriptor refresh; free self-only A to stay within
+        # the SGPR budget and avoid replacement by an s_endpgm stub.
         w = _StubWriter()
         _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA"]
 
-    def test_undeclare_keeps_both_live_under_pap_2d_cluster(self):
+    @pytest.mark.parametrize("cluster", [(2, 2), (1, 4)])
+    def test_undeclare_keeps_both_live_under_pap_with_n_peers(self, cluster):
         # With Ck > 1 the Ck peers reuse A on N-adjacent tiles, so A is a REAL
         # multicast rather than self-only. Both masks must stay live across the
         # PAP refresh (neither freed).
         w = _StubWriter()
         _c().undeclareSgprs(
-            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=cluster))
         assert w.undefined == []
 
-    def test_undeclare_keeps_maskB_live_without_pap(self):
-        # PAP off: every persistent tile still re-emits the TDM descriptor setup,
-        # so the broadcast mask stays live and only the self-only A mask is freed.
-        w = _StubWriter()
-        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)))
-        assert w.undefined == ["MulticastMaskA"]
+    @pytest.mark.parametrize("cluster", [(2, 1), (1, 4)])
+    def test_streamk_refresh_uses_live_axis_masks(self, cluster):
+        w, component = _StubWriter(), _c()
+        kernel = _kernel(streamKMulticast=True, clusterDim=cluster, mx=True)
+        kernel["StreamKForceDPOnly"] = 0
+        component.declareSgprs(w, kernel)
+        component.undeclareSgprs(w, kernel)
+        expected = {"MulticastMaskB"} | ({"MulticastMaskA"} if cluster[1] > 1 else set())
+        assert {name for name, _ in w.defined} - set(w.undefined) == expected
+        for tc in ("A", "B", "MXSA", "MXSB"):
+            refresh = str(component.applyToDescriptor(w, kernel, f"tdm{tc}Group1", tc))
+            assert ("s[sgprMulticastMaskB]" in refresh) == tc.endswith("B")
+            assert ("s[sgprMulticastMaskA]" in refresh) == (cluster[1] > 1 and tc.endswith("A"))
 
 
 # --- computeMasks emitted asm ----------------------------------------------
@@ -365,7 +372,7 @@ class TestMaskAxisPerGrouping:
     @pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
     def test_every_wave_uses_its_tensors_axis(self, tdmFuse, clusterDim):
         comp = _c()
-        from Tensile.Components.TDMFuse import tdmWavePartition
+        from tensilelite.Components.TDMFuse import tdmWavePartition
         k = _kernel(clusterDim=clusterDim, tdmFuse=tdmFuse, mx=True)
         for tc in _TENSORS:
             name = comp.maskSgprName(k, tc, waveSeparated=True)

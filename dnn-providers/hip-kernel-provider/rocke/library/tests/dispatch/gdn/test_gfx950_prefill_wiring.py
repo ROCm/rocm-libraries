@@ -11,6 +11,7 @@ GPU here -- this asserts the request maps onto the right spec, tile and grid.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from dispatch.gdn import (
@@ -86,9 +87,22 @@ def test_dispatched_prep_matches_the_builder_prep_spec():
         expected = dataclasses.replace(
             prep_spec_of(scan, raw=True),
             gate_kind="gdn",
-            kv_group=int(req.kv_group),
+            kv_group=req.kv_group,
         )
         assert _prep_spec(req) == expected, f"prep drift at kv_group={req.kv_group}"
+
+
+def test_scan_state_flags_reach_the_spec():
+    """Valid non-default state flags must pass through unchanged."""
+    spec = dispatch_gdn_prefill(
+        _req(
+            algorithm="chunk_scan",
+            has_initial_state=True,
+            store_final_state=False,
+        )
+    ).spec
+    assert spec.has_initial_state is True
+    assert spec.store_final_state is False
 
 
 @pytest.mark.parametrize(
@@ -212,6 +226,38 @@ def test_float_batch_is_rejected():
         dispatch_gdn_prefill(_req(batch=3.9, algorithm="chunk_prep"))
 
 
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["head_k_dim", "head_v_dim"])
+@pytest.mark.parametrize("bad", [128.0, 128.5, True, "128"])
+def test_non_int_head_dim_is_rejected(algorithm, field, bad):
+    """``int(128.5)`` used to build a D128 kernel the caller never asked for."""
+    with pytest.raises(ValueError, match=f"{field} must be an int"):
+        dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
+
+
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["has_initial_state", "store_final_state"])
+@pytest.mark.parametrize("bad", ["false", 1, 0, None])
+def test_non_bool_state_flag_is_rejected(algorithm, field, bad):
+    """``bool("false")`` used to select the kernel that reads h0."""
+    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+        dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
+
+
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize("field", ["seqlen", "chunk_size"])
+@pytest.mark.parametrize("bad", [None, "32", "1024", 32.0, True, [32]])
+def test_non_int_seqlen_and_chunk_are_rejected_by_name(algorithm, field, bad):
+    """``num_chunks`` divides ``seqlen`` by the chunk, and the capability
+    prefilter reads it through ``dims()`` before any request check runs, so a
+    non-int ``seqlen`` / ``chunk_size`` raised a bare ``TypeError`` from the
+    arithmetic (``None % 32``, ``"1024" % 32``) instead of the named error."""
+    if field == "chunk_size" and bad is None:
+        pytest.skip("chunk_size=None means the tuned default")
+    with pytest.raises(ValueError, match=f"{field} must be an int"):
+        dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
+
+
 def test_retuning_onto_an_unlisted_split_fails_by_name():
     """A band selecting a split with no tile entry must say what to do.
 
@@ -254,3 +300,38 @@ def test_split_tile_agrees_with_the_builder_it_mirrors():
             f"value_splits={vs}: dispatch says scan_atom_m={want_atom}, "
             f"builder says {scan.tile.scan_atom_m}"
         )
+
+
+@pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "batch",
+        "seqlen",
+        "num_k_heads",
+        "num_v_heads",
+        "head_k_dim",
+        "head_v_dim",
+        "chunk_size",
+    ],
+)
+@pytest.mark.parametrize("npint", [np.int32, np.int64], ids=["int32", "int64"])
+def test_numpy_integral_fields_dispatch(algorithm, field, npint):
+    """A numpy integer is an integer: every int field must dispatch end to end
+    (the spec identity is JSON-hashed, so a raw np scalar would raise
+    ``TypeError`` there) and give the same identity as a plain ``int``."""
+    defaults = dict(
+        batch=8,
+        seqlen=1024,
+        num_k_heads=8,
+        num_v_heads=8,
+        head_k_dim=128,
+        head_v_dim=128,
+        chunk_size=32,
+    )
+    plain = dict(defaults, algorithm=algorithm, arch=ARCH)
+    req = _req(algorithm=algorithm, **{field: npint(defaults[field])})
+    got = dispatch_gdn_prefill(req)
+    ref = dispatch_gdn_prefill(_req(**plain))
+    assert got.kernel_id.request_hash == ref.kernel_id.request_hash
+    assert got.kernel_id.spec_hash == ref.kernel_id.spec_hash

@@ -567,8 +567,8 @@ def _mfma_b_32x32x4_xf32(builder, lane, slot):
     return k, axis
 
 
-def _mfma_a_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
+def _mfma_a_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 A operand: each lane holds one scalar.
 
     row = lane % 16, k = lane // 16 (slot is always 0 — a_frag_len == 1).
     Returns ``(row, k)``.
@@ -579,8 +579,8 @@ def _mfma_a_16x16x4_f32(builder, lane, slot):
     return m_in_atom, k
 
 
-def _mfma_b_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 B operand: each lane holds one fp32 scalar.
+def _mfma_b_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 B operand: each lane holds one scalar.
 
     col = lane % 16, k = lane // 16 (slot is always 0 — b_frag_len == 1).
     Returns ``(k, col)``.
@@ -613,6 +613,46 @@ def _mfma_b_32x32x2_f32(builder, lane, slot):
     n_in_atom = builder.mod(lane, c32)
     k = builder.div(lane, c32)
     return k, n_in_atom
+
+
+def _mfma_acc_16x16x4_f64(builder, lane, slot):
+    """MFMA 16x16x4 f64 accumulator: slot ``i`` -> ``(i*4 + lane // 16, lane % 16)``.
+
+    Unlike ``_mfma_acc_16x16``, consecutive slots of a lane are 4 rows apart.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    m_blk = builder.div(lane, c16)
+    row = builder.add(builder.const_i32(slot * 4), m_blk)
+    return row, n_in_atom
+
+
+def _mfma_b_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 B operand (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*k + 4*blk + n`` holds
+    ``(blk*4 + k, n)``. Returns ``(blk*4 + k, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    k = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), k)
+    return row, n_in_blk
+
+
+def _mfma_acc_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 accumulator (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*m + 4*blk + n`` holds
+    ``(blk*4 + m, n)``. Returns ``(blk*4 + m, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    m = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), m)
+    return row, n_in_blk
 
 
 def _mfma_a_32x32x8(builder, lane, slot):
@@ -906,10 +946,21 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
     "mfma_f32_16x16x4_f32": _FragInfo(
-        1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_acc_16x16
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16
     ),
     "mfma_f32_32x32x2_f32": _FragInfo(
         1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_acc_32x32
+    ),
+    # --- MFMA fp64 (wave64) -----------------------------------------------
+    # A/B are scalar double per lane in the same layout as fp32 16x16x4; the
+    # accumulator has its own f64 layout (c_frag_len=4).
+    "mfma_f64_16x16x4_f64": _FragInfo(
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16x4_f64
+    ),
+    # 4x4x4 is four independent 4x4x4 blocks stacked along rows (16x4 A, B and
+    # C/D). A matches the 16x16x4 A map.
+    "mfma_f64_4x4x4_f64": _FragInfo(
+        1, 1, 1, 64, _mfma_a_16x16x4, _mfma_b_4x4x4_f64, _mfma_acc_4x4x4_f64
     ),
     # --- MFMA f16 (wave64) ------------------------------------------------
     "mfma_f32_16x16x16_f16": _FragInfo(
@@ -925,6 +976,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     "mfma_f32_4x4x4_f16": _FragInfo(4, 4, 4, 64),
+    "mfma_f32_4x4x4_bf16": _FragInfo(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
     "mfma_f32_16x16x16_bf16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
@@ -954,8 +1006,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     # --- MFMA MX (wave64), frag lengths only -----------------------------
-    "mfma_f32_16x16x128_fp4": _FragInfo(16, 16, 4, 64),
-    "mfma_f32_16x16x96_fp6": _FragInfo(12, 12, 4, 64),
     # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
     # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
     # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
@@ -964,6 +1014,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
     # instead of hitting the zero-length _frag_info fallback.
     "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
+    "mfma_f32_16x16x128_fp4fp6fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(

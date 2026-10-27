@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "4d11a2ac-dbe5-4f26-9495-6d77ef167151",
+  "name": "Gfx1151WmmaAttentionDecode selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx1151_wmma_attention_decode.score"
+  }
+}

@@ -170,6 +170,78 @@ namespace hipblaslt_bench
         return plan;
     }
 
+    // a * b and a + b of the non-negative sizes below, held at the int64_t
+    // maximum rather than overflowing, so a problem too large to rotate plans a
+    // single block.
+    inline int64_t size_mul(int64_t a, int64_t b)
+    {
+        constexpr int64_t most = std::numeric_limits<int64_t>::max();
+        return (a > 0 && b > most / a) ? most : a * b;
+    }
+
+    inline int64_t size_add(int64_t a, int64_t b)
+    {
+        constexpr int64_t most = std::numeric_limits<int64_t>::max();
+        return (b > 0 && a > most - b) ? most : a + b;
+    }
+
+    // The elements a strided tensor takes in one rotation block: ld * cols for
+    // a single batch, and for several the batch stride per batch, a whole copy
+    // per batch when the stride is zero, or one copy when the stride is shorter
+    // than ld.
+    inline int64_t
+        rotating_tensor_elements(int64_t ld, int64_t cols, int64_t batches, int64_t stride)
+    {
+        if(batches <= 1)
+            return size_mul(ld, cols);
+        if(stride == 0)
+            return size_mul(size_mul(ld, cols), batches);
+        return ld <= stride ? size_mul(stride, batches) : size_mul(ld, cols);
+    }
+
+    // The elements a bias vector of `length` takes in one rotation block: the
+    // bias batch stride per batch when one is set.
+    inline int64_t rotating_bias_elements(int64_t length, int64_t bias_stride, int64_t batches)
+    {
+        return bias_stride > 0 ? size_mul(bias_stride, batches) : length;
+    }
+
+    // One rotation block's tensors in bytes, for rotating_block_bytes.
+    struct RotatingTensors
+    {
+        int64_t a               = 0;
+        int64_t b               = 0;
+        int64_t c               = 0;
+        int64_t d               = 0;
+        int64_t e               = 0;
+        int64_t bias            = 0;
+        int64_t scale_alpha_vec = 0;
+        int64_t scale_a         = 0;
+        int64_t scale_b         = 0;
+
+        // A zero beta leaves C unread.
+        bool reads_c = true;
+
+        // General batched stores each batch apart: a, b, c and d are one
+        // batch's and count num_batches times, and e does not rotate.
+        bool    general_batched = false;
+        int64_t num_batches     = 1;
+    };
+
+    // The bytes one rotation block takes, which compute_rotating_buffer_plan
+    // divides the rotating budget by: every tensor a launch reads or writes,
+    // with C only when it is read.
+    inline int64_t rotating_block_bytes(const RotatingTensors& t)
+    {
+        const int64_t c = t.reads_c ? t.c : 0;
+        const int64_t vectors
+            = size_add(size_add(t.bias, t.scale_alpha_vec), size_add(t.scale_a, t.scale_b));
+        const int64_t matrices = size_add(size_add(t.a, t.b), size_add(c, t.d));
+        if(t.general_batched)
+            return size_add(size_mul(matrices, t.num_batches), vectors);
+        return size_add(size_add(matrices, t.e), vectors);
+    }
+
     // Formats a one-time, human-readable summary of a resolved adaptive-timing configuration,
     // handling each field's "0 => unbounded/disabled" special case (see TimingConfig above).
     // No trailing newline.

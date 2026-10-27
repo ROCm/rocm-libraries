@@ -154,8 +154,8 @@ struct Arguments
 
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
-    char gpu_arch[16];
-    char gpu_arch_exclude[16];
+    char gpu_arch[32];
+    char gpu_arch_exclude[32];
 
     // memory padding for testing write out of bounds
     uint32_t pad;

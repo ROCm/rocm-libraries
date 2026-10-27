@@ -832,7 +832,7 @@ class _Payloads:
     def __init__(self, payload: bytes = _PAYLOAD):
         self.payload = payload
 
-    def read(self, entry, arch):
+    def read(self, entry, arch, launch=None):
         return self.payload
 
 

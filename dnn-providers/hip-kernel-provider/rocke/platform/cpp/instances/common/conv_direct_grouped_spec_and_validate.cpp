@@ -38,6 +38,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str          */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
+#include "rocke/instance_conv_direct_grouped_internal.h" /* ROCKE_DCONV4C_* bounds */
 
 /* ===================================================================== *
  *  DirectConvProblem
@@ -423,13 +424,100 @@ rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void)
     s.block_q = 4;
     s.block_groups = 16;
     s.wave_size = 64;
+    s.dgrad_fused_weights = false;
+    s.dgrad_weights_lds = false;
+    s.stage_rows = false;
+    s.waves_q = 1;
     return s;
 }
 
 int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec)
 {
-    /* (block_groups // 16) * wave_size */
-    return (spec->block_groups / 16) * spec->wave_size;
+    /* (block_groups // 16) * waves_q * wave_size */
+    return (spec->block_groups / 16) * spec->waves_q * spec->wave_size;
+}
+
+/* Python _staged_4c_geometry. */
+void rocke_dconv4c_staged_geometry(const rocke_direct_conv_4c_spec_t* spec,
+                                   rocke_dconv4c_staged_geo_t* geo)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const int threads = rocke_direct_conv_4c_threads_per_block(spec);
+    const int wl_vecs = spec->block_groups * p->cpg * p->KH * p->KW * p->kpg / 8;
+    const int wl_elems = ((wl_vecs + threads - 1) / threads) * threads * 8;
+
+    geo->bc = spec->block_groups * p->cpg;
+    geo->lds_w = spec->block_q + p->KW - 1;
+    geo->vpc = geo->bc / 8;
+    geo->row_stride = geo->bc + 32;
+    geo->nchunk = geo->lds_w * geo->vpc;
+    geo->passes = (geo->nchunk + threads - 1) / threads;
+    geo->row_elems = ((geo->passes * threads + geo->vpc - 1) / geo->vpc) * geo->row_stride;
+    geo->lds_bytes = (2 * geo->row_elems + wl_elems) * 2;
+}
+
+/* Python _stage_rows_reject_reason: true + reason when illegal. */
+bool rocke_dconv4c_stage_rows_reject(const rocke_direct_conv_4c_spec_t* spec,
+                                     char* reason,
+                                     size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    char buf[ROCKE_ERR_MSG_CAP];
+    bool bad = true;
+
+    buf[0] = '\0';
+    if(spec->waves_q < 1)
+    {
+        snprintf(buf, sizeof buf, "waves_q must be >= 1 (got %d)", spec->waves_q);
+    }
+    else if(!spec->stage_rows)
+    {
+        if(spec->waves_q != 1)
+            snprintf(
+                buf, sizeof buf, "waves_q > 1 needs stage_rows (got waves_q=%d)", spec->waves_q);
+        else
+            bad = false;
+    }
+    else if(!(spec->dgrad_fused_weights && spec->dgrad_weights_lds))
+    {
+        snprintf(buf, sizeof buf, "stage_rows needs dgrad_fused_weights and dgrad_weights_lds");
+    }
+    else if(spec->block_q != 4 * spec->waves_q)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs block_q == 4*waves_q (got block_q=%d, waves_q=%d)",
+                 spec->block_q,
+                 spec->waves_q);
+    }
+    else if(p->stride != 1 || p->KH != 2 * p->PAD + 1 || p->KW != 2 * p->PAD + 1)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs stride 1 and 'same' padding (Ho == H, Wo == W: "
+                 "KH == KW == 2*PAD+1; got stride=%d, KH=%d, KW=%d, PAD=%d)",
+                 p->stride,
+                 p->KH,
+                 p->KW,
+                 p->PAD);
+    }
+    else if(rocke_direct_conv_4c_threads_per_block(spec) > ROCKE_DCONV4C_MAX_THREADS)
+    {
+        snprintf(buf,
+                 sizeof buf,
+                 "stage_rows needs threads_per_block <= %d (got %d)",
+                 ROCKE_DCONV4C_MAX_THREADS,
+                 rocke_direct_conv_4c_threads_per_block(spec));
+    }
+    else
+    {
+        bad = false;
+    }
+    if(bad && reason != NULL && reason_cap > 0)
+    {
+        snprintf(reason, reason_cap, "%s", buf);
+    }
+    return bad;
 }
 
 rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
@@ -456,12 +544,28 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
 
-    /* kernel_name_join(name, short, "bq..", "bg..")  -- no flags */
+    /* kernel_name_join(name, short, "bq..", "bg..",
+     *                  flags={"bf16", "fw", "fwl", f"sr{waves_q}"}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
-
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* dt4c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        const char* flag_names4c[4];
+        int flag_on4c[4];
+        char sr_buf[32];
+        snprintf(sr_buf, sizeof(sr_buf), "sr%d", spec->waves_q);
+        flag_names4c[0] = "bf16";
+        flag_names4c[1] = "fw";
+        flag_names4c[2] = "fwl";
+        flag_names4c[3] = sr_buf;
+        flag_on4c[0] = (strcmp(dt4c, "bf16") == 0) ? 1 : 0;
+        flag_on4c[1] = (spec->dgrad_fused_weights && !spec->dgrad_weights_lds) ? 1 : 0;
+        flag_on4c[2] = (spec->dgrad_fused_weights && spec->dgrad_weights_lds) ? 1 : 0;
+        flag_on4c[3] = spec->stage_rows ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names4c, flag_on4c, 4, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
@@ -474,17 +578,14 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
-    /* if p.dtype != "fp16": raise ValueError(...) — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason != NULL && reason_cap > 0)
             {
-                snprintf(reason,
-                         reason_cap,
-                         "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                         "is fp16-only; use fp16 dtype or a different cpg variant");
+                snprintf(reason, reason_cap, "DirectConv4cSpec: unsupported dtype '%s'", dt);
             }
             return ROCKE_ERR_VALUE;
         }
@@ -533,6 +634,29 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         }
         return ROCKE_ERR_VALUE;
     }
+    /* if self.dgrad_weights_lds and not self.dgrad_fused_weights: raise */
+    if(spec->dgrad_weights_lds && !spec->dgrad_fused_weights)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "DirectConv4cSpec dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    /* why = _stage_rows_reject_reason(self); raise ValueError(f"DirectConv4cSpec {why}") */
+    {
+        char why[ROCKE_ERR_MSG_CAP];
+        if(rocke_dconv4c_stage_rows_reject(spec, why, sizeof why))
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv4cSpec %s", why);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     return ROCKE_OK;
 }
 
@@ -573,13 +697,12 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
-    /* if p.dtype != "fp16": return False, ... — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): return False, ... */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 not supported - "
-                              "no mfma_f32_4x4x4_bf16 atom");
+            CK_DCONV4C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
     {
@@ -611,6 +734,62 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     {
         CK_DCONV4C_REJECT(
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+    }
+    /* if p.KH * p.KW > DCONV4C_MAX_TAPS: return False, ... (the builder's
+     * per-tap arrays are sized ROCKE_DCONV4C_MAX_TAPS). */
+    if(p->KH * p->KW > ROCKE_DCONV4C_MAX_TAPS)
+    {
+        CK_DCONV4C_REJECT("DirectConv4cSpec supports KH*KW <= %d (got %d)",
+                          ROCKE_DCONV4C_MAX_TAPS,
+                          p->KH * p->KW);
+    }
+    /* why = _stage_rows_reject_reason(spec); if why: return False, why */
+    if(rocke_dconv4c_stage_rows_reject(spec, reason, reason_cap))
+    {
+        return false;
+    }
+    /* if spec.dgrad_weights_lds: needs fused weights + transpose LDS reads. */
+    if(spec->dgrad_weights_lds)
+    {
+        if(!spec->dgrad_fused_weights)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        if(!target->memory.has_ds_read_tr)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+        }
+        /* wl_passes = ceil(block_groups*cpg*KH*KW*kpg/8 / threads) <= bound */
+        {
+            const int wl_vecs = spec->block_groups * p->cpg * p->KH * p->KW * p->kpg / 8;
+            const int wl_threads = rocke_direct_conv_4c_threads_per_block(spec);
+            const int wl_passes = (wl_vecs + wl_threads - 1) / wl_threads;
+            if(wl_passes > ROCKE_DCONV4C_MAX_WL_PASSES)
+            {
+                CK_DCONV4C_REJECT("dgrad_weights_lds needs %d staging passes (max %d)",
+                                  wl_passes,
+                                  ROCKE_DCONV4C_MAX_WL_PASSES);
+            }
+        }
+    }
+    /* stage_rows: row-staging pass bound and the target's LDS capacity. */
+    if(spec->stage_rows)
+    {
+        rocke_dconv4c_staged_geo_t geo;
+        rocke_dconv4c_staged_geometry(spec, &geo);
+        if(geo.passes > ROCKE_DCONV4C_MAX_ROW_PASSES)
+        {
+            CK_DCONV4C_REJECT("stage_rows needs %d row staging passes (max %d)",
+                              geo.passes,
+                              ROCKE_DCONV4C_MAX_ROW_PASSES);
+        }
+        if(geo.lds_bytes > target->lds_capacity_bytes)
+        {
+            CK_DCONV4C_REJECT("stage_rows needs %d bytes of LDS (more than %d on %s)",
+                              geo.lds_bytes,
+                              target->lds_capacity_bytes,
+                              arch);
+        }
     }
 
     /* The 4x4x4 atom is deliberately NOT gated through has_shape (catalog lists
@@ -2987,6 +3166,30 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
  *  DirectConvSpec (parametric kernel; also the MFMA dgrad compute pass)
  * ===================================================================== */
 
+/* PRELOAD_WEIGHT_VGPR_BUDGET / DGRAD_WEIGHTS_LDS_BUDGET /
+ * XCD_TILES_MIN_ROW_BANDS. */
+#define ROCKE_DCONV_GEN_PRELOAD_VGPR_BUDGET 128
+#define ROCKE_DCONV_GEN_WEIGHTS_LDS_BUDGET (64 * 1024)
+#define ROCKE_DCONV_GEN_XCD_MIN_ROW_BANDS 8
+/* Python's ZeroDivisionError text for an int // or % by zero. */
+#define ROCKE_DCONV_GEN_ZERO_DIV "integer division or modulo by zero"
+#define ROCKE_DCONV_GEN_ZERO_MOD "integer modulo by zero"
+
+/* Python floor division (a // b) for b != 0. */
+static long dconv_gen_floordiv(long a, long b)
+{
+    long q = a / b;
+    if((a % b != 0) && ((a < 0) != (b < 0)))
+        --q;
+    return q;
+}
+
+/* -(-a // b): Python ceil division for b != 0. */
+static long dconv_gen_ceildiv(long a, long b)
+{
+    return -dconv_gen_floordiv(-a, b);
+}
+
 rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void)
 {
     rocke_direct_conv_spec_t s;
@@ -3007,12 +3210,92 @@ rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void)
     s.runtime_channels = false;
     s.k_atoms = 0;
     s.m_tiles = 0;
+    s.preload_weights = false;
+    s.dgrad_fused_weights = false;
+    s.dgrad_weights_lds = false;
+    s.waves_per_eu = 0;
+    s.row_guard = false;
+    s.prefetch_rows = 0;
+    s.lds_only_sync = false;
+    s.waves_m = 1;
+    s.xcd_tiles = false;
+    s.lds_pad = 0;
+    s.stage_out = false;
+    s.row_exit = false;
     return s;
 }
 
 int rocke_direct_conv_threads_per_block(const rocke_direct_conv_spec_t* spec)
 {
-    return spec->block_groups * spec->waves_q * spec->waves_k * spec->wave_size;
+    return (spec->block_groups * spec->waves_q * spec->waves_k * spec->waves_m) * spec->wave_size;
+}
+
+/* The preloads_weights property: every weight fragment is loaded once in the
+ * prologue. */
+static bool dconv_gen_preloads_weights(const rocke_direct_conv_spec_t* spec)
+{
+    return spec->waves_k > 1 || spec->preload_weights || spec->dgrad_fused_weights;
+}
+
+int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const long k_atom = spec->fold_k32 ? 32 : 16;
+    const long n_k_atoms
+        = spec->fold_k32 ? dconv_gen_floordiv(p->cpg, k_atom) : dconv_gen_ceildiv(p->cpg, k_atom);
+    /* Each of the waves_m waves of a group keeps only its own M-tiles. */
+    const long n_m_tiles = dconv_gen_floordiv(dconv_gen_ceildiv(p->kpg, 16), spec->waves_m);
+    return (int)dconv_gen_floordiv(
+        (long)p->KH * p->KW * n_k_atoms * n_m_tiles * dconv_gen_floordiv(k_atom, 4), 2);
+}
+
+/* dgrad_weights_lds_bytes(spec). */
+static long dconv_gen_weights_lds_bytes(const rocke_direct_conv_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    return (long)spec->block_groups * p->cpg * p->KH * p->KW * p->kpg * 2;
+}
+
+/* direct_conv_stage_out_stride(spec). */
+static long dconv_gen_stage_out_stride(const rocke_direct_conv_spec_t* spec)
+{
+    return (long)spec->block_groups * spec->problem.kpg + 8;
+}
+
+long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const long load_vec = spec->fold_k32 ? 8 : 4;
+    const long threads = rocke_direct_conv_threads_per_block(spec);
+    const long lds_w = (long)(spec->block_q - 1) * p->stride + p->KW;
+    const long num_chunks = lds_w * spec->block_groups * dconv_gen_floordiv(p->cpg, load_vec);
+    const long passes = dconv_gen_floordiv(num_chunks + threads - 1, threads);
+    long stage = passes * threads * load_vec * 2;
+    long total;
+    if(spec->lds_pad)
+    {
+        const long cols
+            = dconv_gen_ceildiv(passes * threads,
+                                spec->block_groups * dconv_gen_floordiv(p->cpg, load_vec))
+              + 1;
+        stage += cols * spec->lds_pad * 2;
+    }
+    if(spec->dgrad_weights_lds)
+    {
+        const long wl_vecs = dconv_gen_floordiv(dconv_gen_weights_lds_bytes(spec), 16);
+        const long wl_passes = dconv_gen_floordiv(wl_vecs + threads - 1, threads);
+        const long wl = wl_passes * threads * 16;
+        total = stage > wl ? stage : wl;
+        if(spec->double_buffer)
+            total += stage;
+    }
+    else
+        total = stage * (spec->double_buffer ? 2 : 1);
+    if(spec->waves_k > 1)
+        total += (long)spec->waves_q * spec->waves_k * spec->wave_size * 4 * 4;
+    if(spec->stage_out)
+        total += 2L * spec->block_q * dconv_gen_stage_out_stride(spec) * 2;
+    return total;
 }
 
 rocke_status_t
@@ -3025,7 +3308,11 @@ rocke_status_t
     char wq_buf[32];
     char wk_buf[32];
     char rtc_buf[64];
-    const char* parts[11];
+    char we_buf[32];
+    char pf_buf[32];
+    char wm_buf[32];
+    char lp_buf[32];
+    const char* parts[22];
     const char* dtype;
     rocke_status_t st;
 
@@ -3051,9 +3338,22 @@ rocke_status_t
     rtc_buf[0] = '\0';
     if(spec->runtime_channels)
         snprintf(rtc_buf, sizeof(rtc_buf), "rtc_ka%d_mt%d", spec->k_atoms, spec->m_tiles);
+    we_buf[0] = '\0';
+    if(spec->waves_per_eu > 0)
+        snprintf(we_buf, sizeof(we_buf), "we%d", spec->waves_per_eu);
+    pf_buf[0] = '\0';
+    if(spec->prefetch_rows > 1)
+        snprintf(pf_buf, sizeof(pf_buf), "pf%d", spec->prefetch_rows);
+    wm_buf[0] = '\0';
+    if(spec->waves_m > 1)
+        snprintf(wm_buf, sizeof(wm_buf), "wm%d", spec->waves_m);
+    lp_buf[0] = '\0';
+    if(spec->lds_pad > 0)
+        snprintf(lp_buf, sizeof(lp_buf), "lp%d", spec->lds_pad);
 
     /* kernel_name_join(name, p.short(), bq, bg, db|sb, bh, wq, wk, rk, k32,
-     *                  bf16, rtc) -- empty parts are dropped. */
+     *                  bf16, rtc, pw, fw|fwl, we, pf, lso, wm, xc, lp, so, rg,
+     *                  rx) -- empty parts are dropped. */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
@@ -3065,7 +3365,167 @@ rocke_status_t
     parts[8] = spec->fold_k32 ? "k32" : "";
     parts[9] = (strcmp(dtype, "bf16") == 0) ? "bf16" : "";
     parts[10] = rtc_buf;
-    return rocke_kernel_name_join(spec->name, parts, 11, NULL, NULL, 0, out, out_cap, NULL);
+    parts[11] = (spec->preload_weights && !spec->dgrad_fused_weights) ? "pw" : "";
+    parts[12] = spec->dgrad_fused_weights ? (spec->dgrad_weights_lds ? "fwl" : "fw") : "";
+    parts[13] = we_buf;
+    parts[14] = pf_buf;
+    parts[15] = spec->lds_only_sync ? "lso" : "";
+    parts[16] = wm_buf;
+    parts[17] = spec->xcd_tiles ? "xc" : "";
+    parts[18] = lp_buf;
+    parts[19] = spec->stage_out ? "so" : "";
+    parts[20] = spec->row_guard ? "rg" : "";
+    parts[21] = spec->row_exit ? "rx" : "";
+    return rocke_kernel_name_join(spec->name, parts, 22, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+/* _direct_conv_weight_knobs_reason(spec): 0 when the weight knobs combine, 1
+ * with the reason in `out`, 2 where Python raises ZeroDivisionError (waves_m
+ * == 0 under a weight preload; `out` holds its text, which is not prefixed). */
+static int
+    dconv_gen_weight_knobs_reason(const rocke_direct_conv_spec_t* spec, char* out, size_t cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->preload_weights || spec->dgrad_fused_weights)
+    {
+        if(spec->waves_k != 1 || spec->runtime_k_loop || spec->persistent_grid
+           || spec->runtime_channels)
+        {
+            snprintf(out,
+                     cap,
+                     "preload_weights / dgrad_fused_weights require waves_k=1, "
+                     "runtime_k_loop=False, persistent_grid=False and baked channels");
+            return 1;
+        }
+        if(spec->waves_m == 0)
+        {
+            snprintf(out, cap, ROCKE_DCONV_GEN_ZERO_DIV);
+            return 2;
+        }
+        if(rocke_direct_conv_preload_weight_vgprs(spec) > ROCKE_DCONV_GEN_PRELOAD_VGPR_BUDGET)
+        {
+            snprintf(out,
+                     cap,
+                     "weight preload needs %d VGPRs per lane (budget %d)",
+                     rocke_direct_conv_preload_weight_vgprs(spec),
+                     ROCKE_DCONV_GEN_PRELOAD_VGPR_BUDGET);
+            return 1;
+        }
+    }
+    if(spec->dgrad_weights_lds)
+    {
+        if(!spec->dgrad_fused_weights)
+        {
+            snprintf(out, cap, "dgrad_weights_lds requires dgrad_fused_weights");
+            return 1;
+        }
+        if(p->kpg % 4 != 0)
+        {
+            snprintf(out, cap, "dgrad_weights_lds requires kpg %% 4 == 0 (got %d)", p->kpg);
+            return 1;
+        }
+        if(dconv_gen_weights_lds_bytes(spec) > ROCKE_DCONV_GEN_WEIGHTS_LDS_BUDGET)
+        {
+            snprintf(out,
+                     cap,
+                     "dgrad_weights_lds stages %ld bytes per workgroup (budget %d)",
+                     dconv_gen_weights_lds_bytes(spec),
+                     ROCKE_DCONV_GEN_WEIGHTS_LDS_BUDGET);
+            return 1;
+        }
+    }
+    if(spec->waves_per_eu < 0)
+    {
+        snprintf(out, cap, "waves_per_eu must be >= 0 (got %d)", spec->waves_per_eu);
+        return 1;
+    }
+    if(spec->row_guard && !dconv_gen_preloads_weights(spec))
+    {
+        snprintf(
+            out, cap, "row_guard needs preloaded weights (preload_weights, fused or waves_k > 1)");
+        return 1;
+    }
+    if(spec->row_guard && spec->persistent_grid)
+    {
+        snprintf(out, cap, "row_guard needs persistent_grid=False");
+        return 1;
+    }
+    return 0;
+}
+
+/* _direct_conv_row_stream_reason(spec): true with the reason in `out`. */
+static bool dconv_gen_row_stream_reason(const rocke_direct_conv_spec_t* spec, char* out, size_t cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->waves_m < 1)
+    {
+        snprintf(out, cap, "waves_m must be >= 1 (got %d)", spec->waves_m);
+        return true;
+    }
+    if(!(0 <= spec->prefetch_rows && spec->prefetch_rows <= 3))
+    {
+        snprintf(out, cap, "prefetch_rows must be in 0..3 (got %d)", spec->prefetch_rows);
+        return true;
+    }
+    if(spec->lds_pad < 0 || spec->lds_pad % 8 != 0)
+    {
+        snprintf(out, cap, "lds_pad must be a multiple of 8 >= 0 (got %d)", spec->lds_pad);
+        return true;
+    }
+    if(spec->lds_pad && spec->runtime_channels)
+    {
+        snprintf(out, cap, "lds_pad needs baked channels");
+        return true;
+    }
+    if(spec->stage_out
+       && (p->kpg % 16 != 0 || spec->waves_q != 1 || spec->waves_k != 1 || spec->persistent_grid
+           || spec->runtime_channels))
+    {
+        snprintf(out,
+                 cap,
+                 "stage_out needs kpg %% 16 == 0, waves_q == waves_k == 1, baked channels and "
+                 "no persistent grid");
+        return true;
+    }
+    if(spec->waves_m > 1
+       && (p->kpg % (16 * spec->waves_m) != 0 || spec->waves_q != 1 || spec->waves_k != 1
+           || spec->runtime_k_loop || spec->persistent_grid || spec->runtime_channels
+           || !(spec->preload_weights || spec->dgrad_fused_weights)))
+    {
+        snprintf(out,
+                 cap,
+                 "waves_m > 1 needs kpg %% (16*waves_m) == 0, waves_q == waves_k == 1, "
+                 "preloaded or fused weights, baked channels and no runtime K loop / "
+                 "persistent grid");
+        return true;
+    }
+    if((spec->prefetch_rows > 1 || spec->lds_only_sync)
+       && (!spec->double_buffer || spec->persistent_grid))
+    {
+        snprintf(out,
+                 cap,
+                 "prefetch_rows > 1 / lds_only_sync need double_buffer=True and "
+                 "persistent_grid=False");
+        return true;
+    }
+    if(spec->xcd_tiles && spec->persistent_grid)
+    {
+        snprintf(out, cap, "xcd_tiles needs persistent_grid=False");
+        return true;
+    }
+    if(spec->row_exit && spec->persistent_grid)
+    {
+        snprintf(out, cap, "row_exit needs persistent_grid=False");
+        return true;
+    }
+    return false;
+}
+
+/* The XCD count the xcd_tiles remap is built for (_XCD_TILES_ARCHES); 0 when
+ * the target has none. */
+static int dconv_gen_xcd_tiles_count(const char* arch)
+{
+    return (arch != NULL && strcmp(arch, "gfx950") == 0) ? 8 : 0;
 }
 
 rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
@@ -3073,6 +3533,7 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
                                           size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p;
+    char why[ROCKE_ERR_MSG_CAP];
 #define ROCKE_DCONV_GEN_RAISE(...)                     \
     do                                                 \
     {                                                  \
@@ -3093,7 +3554,9 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
             "DirectConvSpec requires cpg to be a positive multiple of 4 (got cpg=%d)", p->cpg);
     if(p->kpg < 1)
         ROCKE_DCONV_GEN_RAISE("DirectConvSpec requires kpg >= 1 (got %d)", p->kpg);
-    if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)
+    if(spec->block_groups == 0)
+        ROCKE_DCONV_GEN_RAISE(ROCKE_DCONV_GEN_ZERO_MOD);
+    if(spec->block_groups < 0 || p->groups % spec->block_groups != 0)
         ROCKE_DCONV_GEN_RAISE(
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
     if(spec->block_q % 16 != 0)
@@ -3116,8 +3579,8 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
             spec->block_groups,
             spec->waves_k);
     /* Python divides by these below; a zero is a ZeroDivisionError there. */
-    if(spec->waves_k <= 0 || spec->waves_q <= 0)
-        ROCKE_DCONV_GEN_RAISE("DirectConvSpec waves_q and waves_k must be >= 1");
+    if(spec->waves_k == 0)
+        ROCKE_DCONV_GEN_RAISE(ROCKE_DCONV_GEN_ZERO_MOD);
     {
         const int n_k_atoms = (p->cpg + 15) / 16;
         if(n_k_atoms % spec->waves_k != 0)
@@ -3125,11 +3588,39 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
                                   n_k_atoms,
                                   spec->waves_k);
     }
-    if(spec->block_q / spec->waves_q < 16)
-        ROCKE_DCONV_GEN_RAISE("block_q//waves_q must be >= 16 (got %d//%d=%d)",
+    if(spec->waves_q == 0)
+        ROCKE_DCONV_GEN_RAISE(ROCKE_DCONV_GEN_ZERO_DIV);
+    if(dconv_gen_floordiv(spec->block_q, spec->waves_q) < 16)
+        ROCKE_DCONV_GEN_RAISE("block_q//waves_q must be >= 16 (got %d//%d=%ld)",
                               spec->block_q,
                               spec->waves_q,
-                              spec->block_q / spec->waves_q);
+                              dconv_gen_floordiv(spec->block_q, spec->waves_q));
+    /* Not a Python rule: a negative wave count passes the checks above there
+     * and fails later; the C builder sizes arrays from it, so stop here. */
+    if(spec->waves_k < 0 || spec->waves_q < 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec waves_q and waves_k must be >= 1");
+    switch(dconv_gen_weight_knobs_reason(spec, why, sizeof why))
+    {
+    case 1:
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec %s", why);
+    case 2:
+        ROCKE_DCONV_GEN_RAISE("%s", why);
+    default:
+        break;
+    }
+    if(dconv_gen_row_stream_reason(spec, why, sizeof why))
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec %s", why);
+    if(spec->xcd_tiles)
+    {
+        /* The one extent rule of the row-stream knobs (direct_conv_grid()[2]):
+         * it does not change the IR. */
+        const long gz = (long)p->N * dconv_gen_ceildiv(p->H, spec->block_h);
+        if(gz < ROCKE_DCONV_GEN_XCD_MIN_ROW_BANDS)
+            ROCKE_DCONV_GEN_RAISE("DirectConvSpec xcd_tiles needs at least %d image row bands "
+                                  "(got %ld); the remap would be the identity",
+                                  ROCKE_DCONV_GEN_XCD_MIN_ROW_BANDS,
+                                  gz);
+    }
     if(!spec->runtime_channels)
     {
         if(spec->k_atoms != 0 || spec->m_tiles != 0)
@@ -3177,6 +3668,7 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
     const rocke_arch_mma_catalog_t* mma;
     const rocke_direct_conv_problem_t* p;
     const char* ab;
+    char why[ROCKE_ERR_MSG_CAP];
 #define ROCKE_DCONV_GEN_REJECT(...)                    \
     do                                                 \
     {                                                  \
@@ -3200,17 +3692,30 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         ROCKE_DCONV_GEN_REJECT("dtype is not set; expected 'fp16' or 'bf16'");
     if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
         ROCKE_DCONV_GEN_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
-    {
-        char why_[256];
-        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
-            ROCKE_DCONV_GEN_REJECT("%s", why_);
-    }
+    if(rocke_direct_forward_padding_reason(p, why, sizeof why))
+        ROCKE_DCONV_GEN_REJECT("%s", why);
+    if(2 * p->PAD != p->KW - 1)
+        ROCKE_DCONV_GEN_REJECT("needs same padding 2*PAD == KW-1 on the column axis too "
+                               "(got KH=%d, KW=%d, PAD=%d)",
+                               p->KH,
+                               p->KW,
+                               p->PAD);
     if(p->stride != 1)
         ROCKE_DCONV_GEN_REJECT("stride > 1 is not supported (got %d)", p->stride);
     if(p->cpg % 4 != 0 || p->cpg < 4)
         ROCKE_DCONV_GEN_REJECT("cpg must be a positive multiple of 4 (got %d)", p->cpg);
     if(p->kpg < 1)
         ROCKE_DCONV_GEN_REJECT("kpg must be >= 1 (got %d)", p->kpg);
+    if(p->kpg % 4 != 0)
+        ROCKE_DCONV_GEN_REJECT("kpg must be a multiple of 4 (got kpg=%d)", p->kpg);
+    if(dconv_gen_weight_knobs_reason(spec, why, sizeof why) != 0)
+        ROCKE_DCONV_GEN_REJECT("%s", why);
+    if(spec->dgrad_weights_lds && !target->memory.has_ds_read_tr)
+        ROCKE_DCONV_GEN_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+    if(dconv_gen_row_stream_reason(spec, why, sizeof why))
+        ROCKE_DCONV_GEN_REJECT("%s", why);
+    if(spec->xcd_tiles && dconv_gen_xcd_tiles_count(arch) == 0)
+        ROCKE_DCONV_GEN_REJECT("xcd_tiles is built for ['gfx950'] only (got %s)", arch);
     if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)
         ROCKE_DCONV_GEN_REJECT(
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
@@ -3222,6 +3727,42 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         ROCKE_DCONV_GEN_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
     if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
         ROCKE_DCONV_GEN_REJECT("fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
+    {
+        /* LDS budget: the A/B staging ring plus the waves_k > 1 cross-wave
+         * reduction scratch (build_direct_conv's own sizing). */
+        const long load_vec = spec->fold_k32 ? 8 : 4;
+        const long n_vecs = dconv_gen_floordiv(p->cpg, load_vec);
+        const long lds_w = (long)(spec->block_q - 1) * p->stride + p->KW;
+        const long threads = rocke_direct_conv_threads_per_block(spec);
+        const long num_chunks = lds_w * spec->block_groups * n_vecs;
+        const long passes = dconv_gen_floordiv(num_chunks + threads - 1, threads);
+        const long lds_total_fp16 = passes * threads * load_vec;
+        const long ab_bytes = lds_total_fp16 * 2 * (spec->double_buffer ? 2 : 1);
+        const long red_bytes = spec->waves_k > 1
+                                   ? (long)(spec->waves_q * spec->waves_k) * spec->wave_size * 4 * 4
+                                   : 0;
+        const long total = ab_bytes + red_bytes;
+        if(!rocke_archtarget_fits_lds(target, total))
+            ROCKE_DCONV_GEN_REJECT("LDS budget %ld bytes (A/B=%s%ld, red=%ld) > %d cap on %s",
+                                   total,
+                                   spec->double_buffer ? "x2 " : "",
+                                   lds_total_fp16 * 2,
+                                   red_bytes,
+                                   target->lds_capacity_bytes,
+                                   arch);
+    }
+    if(spec->dgrad_weights_lds || spec->lds_pad || spec->stage_out)
+    {
+        /* The staged weight slice shares a pool slot with the first row
+         * buffer; the column pad and the output tiles add to the footprint. */
+        const long lds = rocke_direct_conv_lds_bytes(spec);
+        if(!rocke_archtarget_fits_lds(target, lds))
+            ROCKE_DCONV_GEN_REJECT("LDS footprint %ld B (row buffers, staged weights, output "
+                                   "tiles) exceeds %d cap on %s",
+                                   lds,
+                                   target->lds_capacity_bytes,
+                                   arch);
+    }
     if(reason != NULL && reason_cap > 0)
         snprintf(reason, reason_cap, "ok");
     return true;

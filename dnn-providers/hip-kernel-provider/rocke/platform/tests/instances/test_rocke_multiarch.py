@@ -116,12 +116,17 @@ class TestArchTarget(unittest.TestCase):
         self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
         # supported on it. The fp4/MX MFMA family is the gfx950-only
-        # combo, so use it for the negative case.
+        # combo, so use it for the negative case. The catalog has no
+        # unscaled fp4 row. It lists fp4 in the scaled family only.
         self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
-        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
-        self.assertTrue(
-            ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
+        self.assertFalse(
+            t942.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
         )
+        t950 = ArchTarget.from_gfx("gfx950")
+        self.assertTrue(
+            t950.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
+        )
+        self.assertFalse(t950.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertEqual(t942.max_threads_per_block, 1024)
 
     def test_dtype_normalization(self):

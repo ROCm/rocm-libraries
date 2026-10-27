@@ -8,7 +8,7 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. Modes other than `FALLBACK` log a warning and use hipDNN's default engine selection, so plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` logs a warning and uses hipDNN's default engine selection. Plan choice and performance can differ from cuDNN.
 
 ## Note filters
 
@@ -69,7 +69,7 @@ If no created plan survives, the next plan creation (`create_execution_plans`, `
 
 ## Engine indices
 
-Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's ranking order (not cuDNN's). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
 
 ## Knobs
 

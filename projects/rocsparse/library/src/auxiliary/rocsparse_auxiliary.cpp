@@ -1296,13 +1296,14 @@ try
             dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
-    dest->m           = src->m;
-    dest->n           = src->n;
-    dest->partition   = src->partition;
-    dest->ell_width   = src->ell_width;
-    dest->ell_nnz     = src->ell_nnz;
-    dest->coo_nnz     = src->coo_nnz;
-    dest->data_type_T = src->data_type_T;
+    dest->m              = src->m;
+    dest->n              = src->n;
+    dest->partition      = src->partition;
+    dest->ell_width      = src->ell_width;
+    dest->ell_nnz        = src->ell_nnz;
+    dest->ell_nnz_legacy = src->ell_nnz_legacy;
+    dest->coo_nnz        = src->coo_nnz;
+    dest->data_type_T    = src->data_type_T;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -4908,10 +4909,7 @@ catch(...)
  * scalar, recording whether the scalar lives in host or device memory. It is a
  * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
  * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
- *
- * Gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
  *******************************************************************************/
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
                                                      rocsparse_pointer_mode pointer_mode,
@@ -4949,7 +4947,6 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-#endif /* ROCSPARSE_WITH_SPMAT_SCALE */
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.

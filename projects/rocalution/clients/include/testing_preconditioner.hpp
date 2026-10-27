@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,10 +31,9 @@
 using namespace rocalution;
 
 template <typename T>
-void getTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
+static void getLaplacianTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
 {
-    int         size        = argus.size;
-    std::string matrix_type = argus.matrix_type;
+    int size = argus.size;
 
     // Generate A
     int* csr_ptr = NULL;
@@ -55,7 +54,7 @@ void testing_preconditioner_all(Arguments argus)
     std::string precond = argus.precond;
 
     LocalMatrix<T> matrix;
-    getTestMatrix<T>(argus, matrix);
+    getLaplacianTestMatrix<T>(argus, matrix);
     GMRES<LocalMatrix<T>, LocalVector<T>, T> ls;
 
     std::cout << "Testing preconditioner: " << precond << std::endl;

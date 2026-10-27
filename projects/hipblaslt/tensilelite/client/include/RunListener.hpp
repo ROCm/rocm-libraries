@@ -34,6 +34,7 @@
 #include "TimingEvents.hpp"
 
 #include <cstddef>
+#include <vector>
 
 namespace TensileLite
 {
@@ -109,13 +110,11 @@ namespace TensileLite
             virtual size_t numWarmupRuns()                = 0;
             virtual void   setNumWarmupRuns(size_t count) = 0;
             virtual void   preWarmup()                    = 0;
-            virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream)
+            virtual void postWarmup(TimingEvents const& startEvents, TimingEvents const& stopEvents)
                 = 0;
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents)
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents)
                 = 0;
 
             virtual size_t numSyncs()                = 0;
@@ -125,14 +124,13 @@ namespace TensileLite
 
             virtual size_t numEnqueuesPerSync()                   = 0;
             virtual void   setNumEnqueuesPerSync(size_t count)    = 0;
-            virtual void   preEnqueues(hipStream_t const& stream) = 0;
+            virtual void   preEnqueues()                          = 0;
             virtual void   postEnqueues(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream)
+                                        TimingEvents const& stopEvents)
                 = 0;
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents)
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents)
                 = 0;
 
             /// Called at end of program execution.  Print out a summary of the runs.

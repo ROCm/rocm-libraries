@@ -3,7 +3,7 @@
 
 """YAML config loading and validation for the generic-kernel-ingestor generator.
 
-Every check runs before ``generator.py`` mints a UUID. The five numbered checks
+Every check runs before ``generator.py`` assigns any id. The five numbered checks
 catch failures ``DescriptorLoader.hpp`` either accepts silently or reports only
 after dropping a whole pack or engine.
 """
@@ -41,6 +41,8 @@ from .models import (
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
+    LAUNCH_NAME_PATTERN,
+    MIN_LAUNCHES,
     PATH_STEM_PATTERN,
     ROCKE_TARGETS,
     WORKSPACE_POLICIES,
@@ -169,8 +171,8 @@ def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
     Parses with ``read_yaml``, so its ``yaml.YAMLError`` propagates. Raises
-    ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
-    is minted here.
+    ``ConfigError`` on any structural problem or failed pre-mint check; no id
+    is assigned here.
     """
     raw = read_yaml(path)
 
@@ -285,6 +287,15 @@ def load_config(path: Path) -> IngestorConfig:
                     "kernel_source missing required key 'kind' and the pack declares "
                     "no kernel_defaults.kind."
                 )
+            # A launch is a rocke source: any other kind has no entry to carry
+            # one, so name the key rather than let the closed key set reject it.
+            if "launches" in ks_raw and ks_raw["kind"] != KERNEL_SOURCE_KIND_ROCKE:
+                raise ConfigError(
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}': "
+                    f"'launches' is only valid on a '{KERNEL_SOURCE_KIND_ROCKE}' "
+                    f"kernel_source (or kernel_defaults), but the kind is "
+                    f"{ks_raw['kind']!r}."
+                )
             # The one gate every kernel reaches, hand-authored or expanded.
             # An expanded kernel's `kernel_source` is generated, so it names
             # the authored mapping instead -- see `_AUTHORED_KERNEL_SOURCE`.
@@ -322,22 +333,31 @@ def load_config(path: Path) -> IngestorConfig:
                     f"('native' builds for the shard arch, 'generic' for its LLVM "
                     f"generic processor)."
                 )
+            kernel_source = KernelSource(
+                kind=ks_raw["kind"],
+                source_file=ks_raw.get("source_file", ""),
+                entry_point=ks_raw.get("entry_point", ""),
+                source=ks_raw.get("source", ""),
+                entry=ks_raw.get("entry", ""),
+                build=dict(ks_raw.get("build", {})),
+                builder=ks_raw.get("builder", ""),
+                spec=dict(ks_raw.get("spec", {})),
+                target=ks_raw.get("target", ""),
+                file=ks_raw.get("file", ""),
+                symbol=ks_raw.get("symbol", ""),
+            )
+            if "launches" in ks_raw:
+                kernel_source.launches = _build_launches(
+                    ks_raw["launches"],
+                    kernel_source,
+                    kmd_field_names,
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source",
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
-                    kernel_source=KernelSource(
-                        kind=ks_raw["kind"],
-                        source_file=ks_raw.get("source_file", ""),
-                        entry_point=ks_raw.get("entry_point", ""),
-                        source=ks_raw.get("source", ""),
-                        entry=ks_raw.get("entry", ""),
-                        build=dict(ks_raw.get("build", {})),
-                        builder=ks_raw.get("builder", ""),
-                        spec=dict(ks_raw.get("spec", {})),
-                        target=ks_raw.get("target", ""),
-                        file=ks_raw.get("file", ""),
-                        symbol=ks_raw.get("symbol", ""),
-                    ),
+                    kernel_source=kernel_source,
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
                     arch=_unique_arch(
@@ -1187,7 +1207,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_HIP: ("build",),
-    KERNEL_SOURCE_KIND_ROCKE: ("target",),
+    KERNEL_SOURCE_KIND_ROCKE: ("target", "launches"),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.
@@ -1195,8 +1215,113 @@ _KNOWN_KERNEL_SOURCE_BY_KIND: dict = {
     kind: frozenset({"kind", *required, *_OPTIONAL_KERNEL_SOURCE_FIELDS.get(kind, ())})
     for kind, required in _REQUIRED_KERNEL_SOURCE_FIELDS.items()
 }
+#: The keys a launch's override mapping may state: the ``rocke`` source keys
+#: minus ``kind`` (a launch is a ``rocke`` source by construction) and
+#: ``launches`` (no nesting), plus the authored-only ``role``.
+_KNOWN_LAUNCH_OVERRIDE = _KNOWN_KERNEL_SOURCE_BY_KIND[KERNEL_SOURCE_KIND_ROCKE] - {
+    "kind",
+    "launches",
+} | {"role"}
+
+
+def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -> dict:
+    """The launches a ``rocke`` ``kernel_source`` declares, each the base source
+    with the launch's overrides merged on, keyed by launch name.
+
+    An override replaces the base key it names, ``spec`` included: a launch
+    built by a different builder must not inherit the base builder's spec
+    fields, which ``hkp_pack`` would hydrate into the wrong dataclass.
+
+    A launch with no ``spec`` override takes the kernel's own spec, which for a
+    kernel expanded from ``variants`` or ``axes`` is that variant's. A launch
+    WITH a ``spec`` override carries that mapping unchanged on every kernel the
+    config expands: expansion varies only the kernel's own spec and never
+    writes into an override, so an override is static, never varied per
+    variant. Because the matcher-visible metadata is stated once per kernel, an
+    override may state a kmd field only at the value the kernel's own spec
+    holds; for an expanded set that rules out stating a varied one, which
+    differs on every other variant.
+    """
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"{where}.launches must be a mapping of launch name to an override "
+            f"mapping, got {type(raw).__name__} ({raw!r})."
+        )
+    if len(raw) < MIN_LAUNCHES:
+        raise ConfigError(
+            f"{where}.launches names {len(raw)} launch(es) {sorted(raw)}; a "
+            f"multi-launch kernel needs at least {MIN_LAUNCHES}. A single launch "
+            f"is the plain kernel_source, and two spellings of one fact drift."
+        )
+    launches: dict = {}
+    for name, override in raw.items():
+        launch_where = f"{where}.launches[{name!r}]"
+        if not isinstance(name, str) or not LAUNCH_NAME_PATTERN.fullmatch(name):
+            raise ConfigError(
+                f"{where}.launches names a launch {name!r}, which is not a "
+                f"lowercase identifier ({LAUNCH_NAME_PATTERN.pattern}). It becomes "
+                f"a key of the descriptor's 'sources' map, which the loader "
+                f"refuses unless it is one."
+            )
+        _require_mapping(override, launch_where)
+        unknown = sorted(set(override) - _KNOWN_LAUNCH_OVERRIDE)
+        if unknown:
+            raise ConfigError(
+                f"{launch_where} declares {unknown}, which a launch override does "
+                f"not read. Known keys: {sorted(_KNOWN_LAUNCH_OVERRIDE)}. A launch "
+                f"is always a '{KERNEL_SOURCE_KIND_ROCKE}' source and does not nest."
+            )
+        for key in ("source", "builder", "target", "role"):
+            if key in override and not isinstance(override[key], str):
+                raise ConfigError(
+                    f"{launch_where}.{key} must be a string, got {override[key]!r}."
+                )
+        if "spec" in override:
+            _require_mapping(override["spec"], f"{launch_where}.spec")
+        target = override.get("target", base.target)
+        if target and target not in ROCKE_TARGETS:
+            raise ConfigError(
+                f"{launch_where}.target is {target!r}, which hkp_pack does not "
+                f"compile for. Known targets: {list(ROCKE_TARGETS)}."
+            )
+        role = override.get("role", "")
+        if role and not LAUNCH_NAME_PATTERN.fullmatch(role):
+            raise ConfigError(
+                f"{launch_where}.role is {role!r}, which is not a lowercase "
+                f"identifier ({LAUNCH_NAME_PATTERN.pattern}), the rule a "
+                f"KernelModule role follows."
+            )
+        launch = KernelSource(
+            kind=KERNEL_SOURCE_KIND_ROCKE,
+            source=override.get("source", base.source),
+            builder=override.get("builder", base.builder),
+            spec=dict(override["spec"] if "spec" in override else base.spec),
+            target=target,
+            role=role,
+        )
+        # One UKD is one selection: the metadata is stated once, so a spec value
+        # that decides a matcher-visible field cannot differ between launches.
+        # An override spec is static, so on an expanded set a kmd field it
+        # states disagrees with every variant that varies it.
+        disagree = sorted(
+            field
+            for field, value in launch.spec.items()
+            if field in kmd_field_names and value != base.spec.get(field)
+        )
+        if disagree:
+            raise ConfigError(
+                f"{launch_where}.spec states {disagree}, which are kmd_fields and "
+                f"differ from the kernel's own spec. The descriptor has one "
+                f"metadata tuple for all its launches, so a matcher-visible field "
+                f"cannot take a different value in one launch."
+            )
+        launches[name] = launch
+    return launches
+
+
 #: The top-level ``specialization`` block's own keys. ``engine_id``/``kmd_id``
-#: are absent because ``generator.mint_ids`` stamps them onto the emitted
+#: are absent because ``generator.mint_ids`` assigns them (reused from a prior
+#: bundle, or minted) and stamps them onto the emitted
 #: contract, and so is ``consumers``, which one config contributes exactly one
 #: entry to.
 _KNOWN_SPECIALIZATION = frozenset(
@@ -1879,17 +2004,33 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
     required_by_kind = _REQUIRED_KERNEL_SOURCE_FIELDS
     for pack in config.packs:
         for kernel in pack.kernels:
-            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
-            ks = kernel.kernel_source
-            for attr in required_by_kind.get(ks.kind, ()):
-                if not getattr(ks, attr):
-                    raise ConfigError(
-                        f"{where} is kind '{ks.kind}' but supplies no "
-                        f"'{attr}'. Kind '{ks.kind}' requires "
-                        f"{', '.join(required_by_kind[ks.kind])}."
+            for ks, where in (
+                (
+                    kernel.kernel_source,
+                    f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source",
+                ),
+                *(
+                    (
+                        launch,
+                        f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source."
+                        f"launches['{name}']",
                     )
-            if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
-                raise ConfigError(f"{where}: 'spec' must be a mapping.")
+                    for name, launch in kernel.kernel_source.launches.items()
+                ),
+            ):
+                for attr in required_by_kind.get(ks.kind, ()):
+                    if not getattr(ks, attr):
+                        raise ConfigError(
+                            f"{where} is kind '{ks.kind}' but supplies no "
+                            f"'{attr}'. Kind '{ks.kind}' requires "
+                            f"{', '.join(required_by_kind[ks.kind])}."
+                        )
+                if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(
+                    ks.spec, dict
+                ):
+                    raise ConfigError(f"{where}: 'spec' must be a mapping.")
+            ks = kernel.kernel_source
+            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
             if ks.kind == KERNEL_SOURCE_KIND_HSACO and not (kernel.arch or pack.arch):
                 raise ConfigError(
                     f"{where} is kind 'hsaco' but neither the kernel nor its pack "
@@ -1897,6 +2038,34 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     f"processors, so it must list the arch(es) it runs on (a "
                     f"generic-target object lists every arch it runs on); without "
                     f"one it would enter every arch shard."
+                )
+
+
+def _check_launch_names_agree(config: IngestorConfig) -> None:
+    """Every kernel of the engine names the same set of launches.
+
+    The engine has one dispatch handler, and the handler declares the one set of
+    launch names it launches (``launchNames()``, which the generated native stub
+    emits). The state manager drops a kernel whose set differs from it, so a
+    config mixing single-launch and multi-launch kernels, or two different sets,
+    would generate cleanly and ship kernels that are dropped at load.
+    """
+    expected = None
+    first = ""
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            names = frozenset(kernel.kernel_source.launches)
+            where = f"pack '{pack.name}' kernel '{kernel.name}'"
+            if expected is None:
+                expected, first = names, where
+            elif names != expected:
+                raise ConfigError(
+                    f"{where} names launches {sorted(names) or 'none'}, but "
+                    f"{first} names {sorted(expected) or 'none'}. One engine has "
+                    f"one dispatch handler, which declares one set of launch "
+                    f"names, and a kernel whose set differs is dropped when the "
+                    f"catalog loads. Split the kernels into engines by launch "
+                    f"set."
                 )
 
 
@@ -1923,7 +2092,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization' declares {unknown}, which this loader does not "
             f"read. Known keys: {sorted(_KNOWN_SPECIALIZATION)}. 'engine_id' and "
-            f"'kmd_id' are minted at generation and stamped on automatically; a "
+            f"'kmd_id' are assigned at generation (reused from a prior bundle or minted) and stamped on automatically; a "
             f"'consumers' list belongs to the emitted contract, not to a config, "
             f"which declares exactly one engine and one KMD."
         )
@@ -2014,6 +2183,8 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         kernel.kernel_source.kind for pack in config.packs for kernel in pack.kernels
     }
     if KERNEL_SOURCE_KIND_ROCKE in kinds:
+        # The base spec alone: a launch may state a kmd field only at the value
+        # the base spec holds (`_build_launches`), so no launch adds one.
         specialized = {
             name
             for pack in config.packs
@@ -2262,6 +2433,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
+    _check_launch_names_agree(config)
     # After the kind checks: the declaration's obligations depend on which
     # kinds this config builds, so an unrecognized kind is named as a kind
     # problem rather than a specialization one.

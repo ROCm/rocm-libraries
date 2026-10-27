@@ -31,11 +31,12 @@
 namespace hip_kernel_provider::compilation
 {
 
-/// A staged failure escaping the cache's load(). The message already describes what went
-/// wrong -- but not *who asked*, because the cache is keyed on (archive, tocKey, arch,
-/// ordinal, sha256) and never sees the descriptor or the symbol. KpackKernelLoader catches this and
-/// prefixes both, so every message names the descriptor and the symbol without either
-/// entering the key.
+/// A staged failure escaping the cache's load() or readVerifiedKpackCodeObject(). The
+/// message already describes what went wrong -- but not *who asked*, because the cache is
+/// keyed on (archive, tocKey, arch, ordinal, sha256) and never sees the descriptor or the
+/// symbol. Its callers catch this and prefix both: KpackKernelLoader on the load path, and
+/// IngestorKernelCode::readCodeObject() on the save path. So every message names the
+/// descriptor and the symbol without either entering the key.
 ///
 /// stage() is carried alongside the message so a failure can be told apart by machine
 /// rather than by matching message text; KpackKernelLoader branches on it when choosing
@@ -57,6 +58,33 @@ public:
 private:
     KpackLoadStage _stage;
 };
+
+/// The best-tier entry of @p arches serving @p deviceArch (an explicit entry beats a
+/// generic one containing the device; ties: archive order), or nullptr when none does.
+/// Points into @p arches. Run it before the entry lookup: a bare KERNEL_NOT_FOUND cannot
+/// tell a wrong GPU from a wrong toc_key, and those two send a reader to different places.
+inline const std::string* selectKpackArchiveArch(const std::vector<std::string>& arches,
+                                                 std::string_view deviceArch)
+{
+    const std::string* best = nullptr;
+    std::optional<hipdnn_plugin_sdk::ArchTier> bestTier;
+    for(const auto& candidate : arches)
+    {
+        const auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
+        if(tier && (!bestTier || *tier < *bestTier))
+        {
+            best = &candidate;
+            bestTier = tier;
+        }
+    }
+    if(bestTier == hipdnn_plugin_sdk::ArchTier::GENERIC)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("kpack: device arch '"
+                               << deviceArch << "' is served by generic archive key '" << *best
+                               << "'");
+    }
+    return best;
+}
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
 
@@ -245,6 +273,77 @@ private:
     }
 };
 
+/// Reads the code object stored under @p tocKey for @p deviceArch from the kpack archive at
+/// @p archivePath and checks its digest against @p expectedSha256. Loads no module and
+/// touches no HIP state. Opens the archive through SharedKpackArchives, so while a lease is
+/// held the read uses the handle that an earlier load or read opened.
+///
+/// @param selectedArch Receives the archive arch entry the read selected.
+/// @throws KpackModuleLoadFailure on any stage that fails.
+inline KpackCodeObject readVerifiedKpackCodeObject(const std::string& archivePath,
+                                                   const std::string& tocKey,
+                                                   const std::string& deviceArch,
+                                                   const std::string& expectedSha256,
+                                                   std::string& selectedArch)
+{
+    const auto opened = SharedKpackArchives::open(archivePath);
+    const std::string* matched = selectKpackArchiveArch(opened->arches, deviceArch);
+    if(matched == nullptr)
+    {
+        std::string available;
+        for(const auto& candidate : opened->arches)
+        {
+            available += (available.empty() ? "" : ", ") + candidate;
+        }
+        throw KpackModuleLoadFailure(
+            KpackLoadStage::ARCH_LOOKUP,
+            "kpack archive '" + archivePath + "' holds no binary for device arch '" + deviceArch
+                + "'; the archive provides: " + (available.empty() ? "(none)" : available));
+    }
+
+    KpackError error;
+    KpackCodeObject codeObject;
+    if(!opened->archive.codeObject(tocKey, *matched, codeObject, error))
+    {
+        if(error.stage == KpackLoadStage::ENTRY_LOOKUP)
+        {
+            throw KpackModuleLoadFailure(error.stage,
+                                         "kpack archive '" + archivePath
+                                             + "' has no entry for toc_key '" + tocKey
+                                             + "' at arch '" + *matched + "' (" + error.codeName
+                                             + "); this usually means the packer and the "
+                                               "descriptor disagree");
+        }
+        // The archive failed to yield an entry its TOC lists, so the next read reopens it.
+        // A missing entry or arch keeps the handle: both are answered from the TOC read at
+        // open, and with discovery memoized a reopen would only repeat the miss. Revisit
+        // if discovery ever rescans.
+        SharedKpackArchives::evict(archivePath, opened);
+        throw KpackModuleLoadFailure(error.stage,
+                                     "cannot decompress toc_key '" + tocKey + "' at arch '"
+                                         + *matched + "' from kpack archive '" + archivePath + "' ("
+                                         + error.codeName + ")");
+    }
+
+    // A TOC entry that points at the wrong offset decompresses cleanly and returns another
+    // entry's code object. Only the digest catches that.
+    const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
+    if(actualSha256 != expectedSha256)
+    {
+        SharedKpackArchives::evict(archivePath, opened);
+        throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
+                                     "the code object for toc_key '" + tocKey + "' at arch '"
+                                         + *matched + "' in kpack archive '" + archivePath
+                                         + "' hashes to " + actualSha256
+                                         + ", but the descriptor declares " + expectedSha256
+                                         + "; the archive and the descriptor disagree about "
+                                           "what this entry contains");
+    }
+
+    selectedArch = *matched;
+    return codeObject;
+}
+
 /// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
 /// sha256), loaded lazily and shared.
 ///
@@ -275,8 +374,9 @@ public:
     /// The arch component is feature-stripped: flags like ":sramecc+:xnack-" describe the
     /// device, not the code object, and archMatches already gates on the bare name, so
     /// "gfx90a" and "gfx90a:xnack-" must reach one entry rather than load the same blob
-    /// twice. load() keeps the decorated string -- it feeds selectArch, which ranks
-    /// entries by entryTier, and names the device arch in its diagnostics.
+    /// twice. load() keeps the decorated string -- it feeds the entry selection in
+    /// readVerifiedKpackCodeObject (selectKpackArchiveArch, which ranks entries by
+    /// entryTier), and names the device arch in its diagnostics.
     ///
     /// `expectedSha256` is in the key so that no cache hit can bypass the digest check: a
     /// hit answers from the key alone, so a digest outside it would hand a second
@@ -294,29 +394,11 @@ public:
                + "::" + std::to_string(deviceOrdinal) + "::" + expectedSha256;
     }
 
-    /// The best-tier archive key serving @p deviceArch (ties: archive order), else nullptr.
-    /// Points into @p archiveArches.
+    /// The archive key load() selects for @p deviceArch; see selectKpackArchiveArch.
     static const std::string* selectArch(const std::vector<std::string>& archiveArches,
                                          std::string_view deviceArch)
     {
-        const std::string* best = nullptr;
-        std::optional<hipdnn_plugin_sdk::ArchTier> bestTier;
-        for(const auto& candidate : archiveArches)
-        {
-            const auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
-            if(tier && (!bestTier || *tier < *bestTier))
-            {
-                best = &candidate;
-                bestTier = tier;
-            }
-        }
-        if(bestTier == hipdnn_plugin_sdk::ArchTier::GENERIC)
-        {
-            HIPDNN_PLUGIN_LOG_INFO("kpack: device arch '"
-                                   << deviceArch << "' is served by generic archive key '" << *best
-                                   << "'");
-        }
-        return best;
+        return selectKpackArchiveArch(archiveArches, deviceArch);
     }
 
     /// @throws KpackModuleLoadFailure on any stage that fails. Never returns a null
@@ -328,65 +410,11 @@ public:
                                   int deviceOrdinal,
                                   const std::string& expectedSha256)
     {
-        const auto opened = SharedKpackArchives::open(archivePath);
-        const auto& arches = opened->arches;
-        KpackError error;
-
-        // Deliberate pre-check rather than letting kpack_get_kernel fail: a bare
-        // KERNEL_NOT_FOUND cannot distinguish "wrong GPU" from "wrong toc_key", and
-        // those two send a reader to entirely different places.
-        const std::string* matched = selectArch(arches, deviceArch);
-        if(matched == nullptr)
-        {
-            std::string available;
-            for(const auto& candidate : arches)
-            {
-                available += (available.empty() ? "" : ", ") + candidate;
-            }
-            throw KpackModuleLoadFailure(
-                KpackLoadStage::ARCH_LOOKUP,
-                "kpack archive '" + archivePath + "' holds no binary for device arch '" + deviceArch
-                    + "'; the archive provides: " + (available.empty() ? "(none)" : available));
-        }
-
-        KpackCodeObject codeObject;
-        if(!opened->archive.codeObject(tocKey, *matched, codeObject, error))
-        {
-            if(error.stage == KpackLoadStage::ENTRY_LOOKUP)
-            {
-                throw KpackModuleLoadFailure(error.stage,
-                                             "kpack archive '" + archivePath
-                                                 + "' has no entry for toc_key '" + tocKey
-                                                 + "' at arch '" + *matched + "' (" + error.codeName
-                                                 + "); this usually means the packer and the "
-                                                   "descriptor disagree");
-            }
-            // The archive failed to yield an entry its TOC lists, so the next miss re-reads it.
-            // A missing entry or arch keeps the handle: both are answered from the TOC read at
-            // open, and with discovery memoized a reopen would only repeat the miss. Revisit
-            // if discovery ever rescans.
-            SharedKpackArchives::evict(archivePath, opened);
-            throw KpackModuleLoadFailure(error.stage,
-                                         "cannot decompress toc_key '" + tocKey + "' at arch '"
-                                             + *matched + "' from kpack archive '" + archivePath
-                                             + "' (" + error.codeName + ")");
-        }
-
-        // Before hipModuleLoadData, so bytes that fail never reach the driver. The reader
-        // cannot catch this itself: a TOC entry pointing at the wrong offset decompresses
-        // cleanly and returns another entry's code object rather than an error.
-        const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
-        if(actualSha256 != expectedSha256)
-        {
-            SharedKpackArchives::evict(archivePath, opened);
-            throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
-                                         "the code object for toc_key '" + tocKey + "' at arch '"
-                                             + *matched + "' in kpack archive '" + archivePath
-                                             + "' hashes to " + actualSha256
-                                             + ", but the descriptor declares " + expectedSha256
-                                             + "; the archive and the descriptor disagree about "
-                                               "what this entry contains");
-        }
+        std::string matched;
+        // The digest check comes before hipModuleLoadData, so bytes that fail never reach
+        // the driver.
+        const KpackCodeObject codeObject
+            = readVerifiedKpackCodeObject(archivePath, tocKey, deviceArch, expectedSha256, matched);
 
         // Bound before the load, not after: the device current at hipModuleLoadData is
         // the one the module belongs to for the rest of its life. A refused bind fails
@@ -407,7 +435,7 @@ public:
         {
             throw KpackModuleLoadFailure(KpackLoadStage::MODULE_LOAD,
                                          "hipModuleLoadData rejected the code object for toc_key '"
-                                             + tocKey + "' at arch '" + *matched
+                                             + tocKey + "' at arch '" + matched
                                              + "' from kpack archive '" + archivePath
                                              + "': " + hipGetErrorString(status));
         }

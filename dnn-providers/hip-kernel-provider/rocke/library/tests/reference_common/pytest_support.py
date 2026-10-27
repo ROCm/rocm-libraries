@@ -24,9 +24,11 @@ def architecture_available(
     """
     # TheRock supplies comma-separated artifact targets independently of its
     # broader family name. Exact targets distinguish lanes within one family.
+    # Accept a CMake-style semicolon list too, so a local export cannot turn
+    # matching hardware into a single unknown target and skip the suite.
     exact_targets = {
         target.strip().split(":", 1)[0].lower()
-        for target in targets.split(",")
+        for target in targets.replace(";", ",").split(",")
         if target.strip()
     }
     if exact_targets and architecture not in exact_targets:
@@ -67,18 +69,16 @@ def start_reference_session(config) -> None:
     # Match the processor against artifact targets. get_device_arch() returns
     # a catalog name (e.g. gfx12-generic for gfx1200), losing that identity.
     detected = get_device_processor()
+    targets = os.environ.get("AMDGPU_TARGETS", "")
 
     try:
-        available = architecture_available(
-            architecture,
-            detected,
-            os.environ.get("AMDGPU_TARGETS", ""),
-        )
+        available = architecture_available(architecture, detected, targets)
     except RuntimeError as error:
         raise pytest.UsageError(str(error)) from error
     if not available:
         pytest.exit(
-            f"reference suite requires {architecture}; different GPU lane",
+            f"reference suite requires {architecture}; different GPU lane "
+            f"(detected {detected}, AMDGPU_TARGETS={targets!r})",
             returncode=77,
         )
 

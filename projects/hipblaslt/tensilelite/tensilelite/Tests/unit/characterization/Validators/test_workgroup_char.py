@@ -34,7 +34,7 @@ the accept path (snapshot the True return) and each reject path
 
 import pytest
 
-from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
+from tensilelite.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
 pytestmark = pytest.mark.unit
 

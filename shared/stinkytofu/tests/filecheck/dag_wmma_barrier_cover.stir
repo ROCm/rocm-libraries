@@ -7,11 +7,12 @@
 #   wmma wmma ds ds wmma wmma wmma barrier
 #
 # 24 independent WMMAs are available and the barrier threshold is 18. The barrier issues after 22
-# WMMAs with 37 cycles queued (36 for the second half of the pair), the cover met. The 25th WMMA
-# reads the post-barrier ds_loads, so it cannot be used for cover.
+# WMMAs with 37 cycles queued, the cover met. The wait half of the pair follows its signal at once
+# and the model takes the WMMA queue as empty after it (queuedCover=0). The 25th WMMA reads the
+# post-barrier ds_loads, so it cannot be used for cover.
 #
 # CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=37
-# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=36
+# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=0
 #
 # The barrier pair still precedes the ds_loads that read the data it protects.
 # CHECK-LABEL: @barrier_cover

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -106,10 +105,11 @@ def test_a_kdp_without_kernel_descriptors_fails_instead_of_counting_zero(tmp_pat
 
 
 @pytest.mark.skipif(
-    os.name == "nt"
-    or shutil.which("bash") is None
-    or shutil.which("sha256sum") is None,
+    os.name == "nt",
     reason="the RUNBOOK recipe needs bash with GNU find/sort/sha256sum",
+)
+@pytest.mark.allow_skip(
+    reason="the RUNBOOK recipe needs bash with GNU find/sort/sha256sum, which Windows lacks"
 )
 def test_catalog_digest_matches_the_runbook_recipe(tmp_path):
     bundle = _tree(tmp_path)
@@ -232,3 +232,37 @@ def test_a_failing_validator_fails_the_inventory(tmp_path):
     assert result.returncode == 1
     assert "validator: FAILED" in result.stdout
     assert "expected engines missing" in result.stdout
+
+
+def test_a_multi_launch_kernel_counts_once_as_a_kernel_and_once_per_launch_by_kind(
+    tmp_path,
+):
+    """A `sources` descriptor has no `kernel_source`: reading only that key counts it
+    under kind None, and reading one launch undercounts the rest. Mixed kinds keep
+    either from coinciding with the right answer."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "m.ued.json").write_text(json.dumps({"name": _ENGINE}))
+    multi = {
+        "name": "multi",
+        "sources": {
+            "decode": {"kind": "kpack"},
+            "merge": {"kind": "kpack"},
+            "extra": {"kind": "hsaco"},
+        },
+        "metadata": {"head_size": 64, "num_query_heads": 8},
+    }
+    (bundle / "m.kdp.json").write_text(
+        json.dumps({"kernelDescriptors": [multi, _kernel("single", 64, 8, "kpack")]})
+    )
+    out = tmp_path / "report.json"
+
+    result = _run(str(bundle), "--group-by", "head_size", "--json", str(out))
+
+    assert result.returncode == 0, result.stderr
+    inv = json.loads(out.read_text())["inventory"]
+    assert inv["kernels"] == 2
+    assert inv["kdps"][0]["kernels"] == 2
+    assert inv["kdps"][0]["source_kinds"] == {"kpack": 3, "hsaco": 1}
+    assert inv["source_kinds"] == {"kpack": 3, "hsaco": 1}
+    assert inv["groups"] == [{"values": [64], "kernels": 2}]

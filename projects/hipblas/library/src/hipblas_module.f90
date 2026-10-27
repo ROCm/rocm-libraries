@@ -24201,7 +24201,7 @@ module hipblas
     ! syrkEx
     interface
         function hipblasSyrkEx(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
-                               beta, c, c_type, ldc) &
+                               beta, c, c_type, ldc, compute_type) &
             bind(c, name='hipblasSyrkEx')
             use iso_c_binding
             use hipblas_enums
@@ -24220,6 +24220,7 @@ module hipblas
             type(c_ptr), value :: c
             integer(kind(HIP_R_16F)), value :: c_type
             integer(c_int), value :: ldc
+            integer(kind(HIP_R_16F)), value :: compute_type
         end function hipblasSyrkEx
     end interface
 

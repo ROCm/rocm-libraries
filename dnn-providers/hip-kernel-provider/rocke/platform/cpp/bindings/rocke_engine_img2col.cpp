@@ -146,6 +146,7 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         throw std::runtime_error("rocke_engine.img2col_lower_llvm failed (status="
                                  + std::to_string((int)st)
                                  + "): " + (err[0] ? err : "unknown error"));

@@ -100,7 +100,7 @@ def mfma_f8f6f4_agpr(
     The trailing assembler operand carries the implicit ``cbsz=0/blgp=0``
     (fp8 e4m3 for BOTH A and B) — no ``cbsz:``/``blgp:`` modifiers, no
     ``_scale`` suffix, so the math is identical to the scaled intrinsic
-    with all scales pinned to 0 (factor 1.0). Verified byte-identical to the
+    with both scales at literal 0 (the backend selects this instruction). Verified byte-identical to the
     ``mfma_f32_16x16x128_fp8`` atom (single MFMA and 4-deep chain) in
     ``asm_mfma_parity.py``.
 
