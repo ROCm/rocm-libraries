@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Deep Review"
+  short_description: "Multi-agent PR review with verified findings"
+  default_prompt: "Use $hipdnn-deep-review to review the given hipDNN PR, branch or commit range by following its runbook, and write the report and ledger to the evidence directory."
