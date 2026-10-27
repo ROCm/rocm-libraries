@@ -181,13 +181,10 @@ Tests:
       - asum_strided_batched: *double_precision_complex_real
     pointer_mode_device: false
 
-# nightly
-  # AIROCBLAS-1437. n > INT32_MAX takes the ILP64 pass loop. With batch_count >= 2
-  # the passes are stored pass-major and the final reduction reads them batch-major,
-  # so every batch is wrong. batch_count 1 is the stress asum_ILP64 case and passes.
-  # Stride 0 keeps asum_strided_batched to one vector (~8.6 GiB f32). Nightly only.
+  # AIROCBLAS-1437
+  # Stride 0 keeps asum_strided_batched to one vector (~8.6 GiB f32)
   - name: asum_ILP64_multi_pass_batch
-    category: pre_checkin # stress
+    category: nightly
     pointer_mode_host: false
     initialization: hpl
     arguments:

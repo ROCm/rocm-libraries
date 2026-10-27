@@ -263,13 +263,9 @@ Tests:
       - nrm2_strided_batched_ex: *nrm2_ex_precisions_double
     pointer_mode_device: false
 
-# nightly
-  # AIROCBLAS-1437. Same pass-major / batch-major mixup as asum, on the shared
-  # ILP64 asum/nrm2 launcher. n > INT32_MAX and batch_count >= 2. batch_count 1
-  # is the stress nrm2_ILP64 case and passes. Stride 0 keeps the strided form to
-  # one vector (~8.6 GiB f32). nrm2_ex uses this launcher. Nightly only.
+  # AIROCBLAS-1437. 
   - name: nrm2_ILP64_multi_pass_batch
-    category: pre_checkin # stress
+    category: nightly
     pointer_mode_host: false
     initialization: hpl
     arguments:

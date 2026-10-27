@@ -411,13 +411,9 @@ Tests:
     devices: [0, 2, 4]
 
 # nightly
-  # AIROCBLAS-1437. n > INT32_MAX takes the ILP64 pass loop. With batch_count >= 2
-  # the passes are stored pass-major and the final reduction reads them batch-major,
-  # so every batch is wrong. batch_count 1 is the stress dot_ILP64 case and passes.
-  # Stride 0 keeps dot_strided_batched to one vector per operand (~8.6 GiB f32).
-  # dot_ex uses this launcher. Nightly only.
+  # AIROCBLAS-1437
   - name: dot_ILP64_multi_pass_batch
-    category: pre_checkin # stress
+    category: nightly
     pointer_mode_host: false
     initialization: hpl
     arguments:
