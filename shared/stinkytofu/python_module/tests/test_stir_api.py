@@ -677,6 +677,87 @@ def test_branch_to_a_missing_label_is_reported():
     assert "'nowhere'" in diagnostic.message
 
 
+def test_live_ranges_and_pressure_read_the_lift():
+    module = stinkytofu.load_stir(KERNEL)
+    module.run_passes(["LiftAsmRegistersToSSAPass"])
+    mov, add = module.functions()[0].blocks()[0].instructions()
+    ranges = module.live_ranges("k")
+    by_value = {live.value: live for live in ranges.ranges}
+    assert set(by_value) == {mov.defs[0][0], add.defs[0][0], add.uses[1][0]}
+
+    v0 = by_value[mov.defs[0][0]]
+    assert (v0.reg_class, v0.width, v0.register) == ("v", 1, ("v", 0, 1))
+    assert v0.segments == [(v0.start, v0.end)]
+    assert v0.length == v0.end - v0.start
+    assert str(v0) == f"%{v0.value}:v [3d,5d)"
+    # The mov writes v0, and the add is the last to read it.
+    assert ranges.place(v0.start) == ("entry", 0, "def")
+    assert ranges.place(v0.end - 1) == ("entry", 1, "use")
+    assert ranges.place(0) == ("entry", None, "use")
+    assert ranges.place(ranges.slot_count) is None
+
+    pressure = module.pressure("k")
+    assert (pressure.vgpr, pressure.sgpr) == (2, 0)
+    peak = pressure.peaks["v"]
+    assert (peak.reg_class, peak.dwords, peak.place) == ("v", 2, ("entry", 0, "def"))
+    assert ranges.place(peak.slot) == peak.place
+
+
+@pytest.mark.parametrize("query", ["live_ranges", "pressure"])
+def test_live_ranges_and_pressure_need_a_lift(query):
+    module = stinkytofu.load_stir(KERNEL)
+    with pytest.raises(ValueError, match="run LiftAsmRegistersToSSAPass first"):
+        getattr(module, query)("k")
+    with pytest.raises(ValueError, match="no function 'nowhere'"):
+        getattr(module, query)("nowhere")
+
+
+HAZARD_STREAM = """\
+st.func @k() {
+^entry:
+  s0 = "st.s_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+
+def test_hazards_report_every_pair():
+    [gap] = stinkytofu.load_stir(HAZARD_STREAM).hazards("k")
+    assert (gap.rule, gap.required, gap.gap, gap.ok) == (
+        "SaluSgprToMemAddr",
+        8,
+        0,
+        False,
+    )
+    assert (gap.block, gap.producer, gap.consumer) == ("entry", 0, 1)
+    assert (gap.producer_opcode, gap.consumer_opcode) == (
+        "st.s_mov_b32",
+        "st.tensor_load_to_lds",
+    )
+
+    waited = HAZARD_STREAM.replace(
+        '  "st.tensor',
+        '  "st.s_nop"(7) { issueCycles = 8, latencyCycles = 8 }\n  "st.tensor',
+    )
+    [gap] = stinkytofu.load_stir(waited).hazards("k")
+    assert (gap.gap, gap.ok, gap.consumer) == (8, True, 2)
+    assert stinkytofu.load_stir(KERNEL).hazards("k") == []
+
+
+def test_size_lays_functions_out_in_order():
+    size = stinkytofu.load_stir(KERNEL).size("k")
+    assert (size.start, size.bytes, size.cycles, size.instructions) == (0, 8, 2, 2)
+    assert size.labels == {}
+
+    labelled = MODULE.replace(
+        "@helper() {\n    ^entry:", "@helper() {\n    ^entry: { label }"
+    )
+    module = stinkytofu.load_stir(labelled)
+    main, helper = module.size("main"), module.size("helper")
+    assert helper.start == main.bytes
+    assert helper.labels == {"entry": helper.start}
+
+
 def test_cli_passes(capsys):
     assert main(["passes"]) == 0
     assert "LiftAsmRegistersToSSAPass" in capsys.readouterr().out

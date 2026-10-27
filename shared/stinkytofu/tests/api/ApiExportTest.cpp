@@ -49,15 +49,19 @@
 // --- stinkytofu-opt consumer headers ---
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
+#include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -263,6 +267,38 @@ TEST(ApiExport, ReplaceBlockBody) {
 TEST(ApiExport, VerifyStinkyIR) {
     Function func("f");
     EXPECT_FALSE(verifyStinkyIR(func).empty());
+}
+
+// =============================================================================
+// Analysis queries (Python module stir_api.cpp)
+// =============================================================================
+
+TEST(ApiExport, AnalysisQueries) {
+    Function func("f");
+    BasicBlock* entry = func.createBasicBlock("entry");
+    GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    AsmIRBuilder(*entry, arch).create(getMCIDByUOp(GFX::s_nop, arch));
+
+    const SSALiveIntervals live = computeSSALiveIntervals(func);
+    const LiveRange& range = live.rangeOf(1);
+    EXPECT_TRUE(range.empty());
+    (void)range.start();
+    (void)range.end();
+    (void)range.length();
+    (void)range.toString();
+    EXPECT_EQ(live.classOf(1), RegType::UNKNOWN);
+    (void)live.widthOf(1);
+    (void)live.rangeLine(1);
+    EXPECT_EQ(live.peakPressure(RegType::V), 0u);
+    EXPECT_EQ(live.peakSlot(RegType::V), SSASlotIndexes::kInvalidSlot);
+    EXPECT_EQ(live.slots().placeOf(0).block, nullptr);
+    const StinkySSAValue* value = func.ssaArena().get(1);
+    if (value != nullptr && value->hasPhysicalBinding()) (void)value->physical();
+
+    EXPECT_TRUE(findHazardGaps(func).empty());
+    const std::vector<FunctionSize> sizes = measureFunctionSizes({&func});
+    ASSERT_EQ(sizes.size(), 1u);
+    EXPECT_EQ(sizes.front().instructions, 1);
 }
 
 // =============================================================================

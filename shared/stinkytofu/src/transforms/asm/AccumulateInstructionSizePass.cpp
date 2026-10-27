@@ -77,12 +77,7 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
         }
         count++;
         // TODO: check if the cost cycles is correct
-        int cost;
-        if (isMatrixInstruction(inst)) {
-            cost = inst.latencyCycles;
-        } else {
-            cost = inst.issueCycles;
-        }
+        const int cost = instructionCycles(inst);
         totalCycles += cost;
         int baseSize = getEffectiveBaseSizeInBytes(inst);
         const int64_t pcBefore = baseByteOffset + totalBytes;
@@ -110,6 +105,83 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
     return totalCycles;
 }
 
+namespace {
+/// Where the next byte of the image goes, and the labels and `.set` values the
+/// walk has met so far.
+struct SizeLayout {
+    int64_t offset = 0;
+    std::unordered_map<std::string, int64_t> labelOffsets;
+    std::unordered_map<std::string, int64_t> setSymbols;
+};
+
+/// Measure \p func from \p layout's offset, and advance the offset past it. With
+/// a \p filter, only the blocks it lets through are walked.
+FunctionSize accumulateFunctionSize(Function& func, SizeLayout& layout, const PassContext* filter,
+                                    std::ostream* debugOut) {
+    collectAsmSetSymbolValues(func, layout.setSymbols);
+
+    FunctionSize size;
+    size.function = &func;
+    size.start = layout.offset;
+
+    if (debugOut) {
+        *debugOut << "[AccumulateInstructionSizePass] function \"" << func.getName()
+                  << "\" processAllBlocks=" << (filter == nullptr ? "true" : "false")
+                  << ", function has " << func.size() << " basic block(s)\n";
+        dumpAsmSetSymbolMap(*debugOut, layout.setSymbols);
+        *debugOut << "[AccumulateInstructionSizePass] blocks to process:\n";
+    }
+
+    int blocksProcessed = 0;
+    for (BasicBlock& bb : func) {
+        const bool processThis = filter == nullptr || filter->shouldProcessBasicBlock(bb);
+        if (debugOut) {
+            *debugOut << "  - BasicBlock \"" << bb.getLabel() << "\" "
+                      << (processThis ? "[PROCESSING]" : "[SKIPPED by filter]") << "\n";
+        }
+        if (!processThis) continue;
+        if (debugOut)
+            *debugOut << "[AccumulateInstructionSizePass] BasicBlock: " << bb.getLabel() << "\n";
+        int blockCount = 0;
+        int64_t blockBytes = 0;
+        size.cycles += accumulateInstructionSize(bb, layout.labelOffsets, debugOut, &blockCount,
+                                                 &blockBytes, layout.offset, &layout.setSymbols);
+        size.instructions += blockCount;
+        size.bytes += blockBytes;
+        layout.offset += blockBytes;
+        ++blocksProcessed;
+    }
+
+    if (debugOut) {
+        *debugOut << "[AccumulateInstructionSizePass] processed " << blocksProcessed << " / "
+                  << func.size() << " basic block(s)\n";
+    }
+
+    for (const BasicBlock& bb : func) {
+        for (const IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            const LabelData* label =
+                inst != nullptr && isLabel(*inst) ? inst->getModifier<LabelData>() : nullptr;
+            if (label == nullptr) continue;
+            auto offset = layout.labelOffsets.find(label->label);
+            if (offset != layout.labelOffsets.end())
+                size.labels.emplace_back(label->label, offset->second);
+        }
+    }
+    return size;
+}
+}  // namespace
+
+std::vector<FunctionSize> measureFunctionSizes(const std::vector<Function*>& functions) {
+    SizeLayout layout;
+    std::vector<FunctionSize> sizes;
+    for (Function* function : functions) {
+        if (function != nullptr)
+            sizes.push_back(accumulateFunctionSize(*function, layout, nullptr, nullptr));
+    }
+    return sizes;
+}
+
 }  // namespace stinkytofu
 
 namespace {
@@ -127,32 +199,10 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
         return &AccumulateInstructionSizePass::ID;
     }
 
-    void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx) {
-        int blockCount = 0;
-        int64_t blockBytes = 0;
-        if (m_debug) {
-            *m_debugStream << "[AccumulateInstructionSizePass] BasicBlock: " << bb.getLabel()
-                           << "\n";
-            m_totalCycles +=
-                accumulateInstructionSize(bb, m_labelByteOffset, m_debugStream, &blockCount,
-                                          &blockBytes, m_byteOffsetBase, &m_asmSetSymbols);
-        } else {
-            m_totalCycles +=
-                accumulateInstructionSize(bb, m_labelByteOffset, nullptr, &blockCount, &blockBytes,
-                                          m_byteOffsetBase, &m_asmSetSymbols);
-        }
-        m_totalInstructionCount += blockCount;
-        m_totalBytes += blockBytes;
-        m_byteOffsetBase += blockBytes;
-    }
-
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         m_totalCycles = 0;
         m_totalInstructionCount = 0;
         m_totalBytes = 0;
-        m_labelByteOffset.clear();
-        m_byteOffsetBase = 0;
-        m_asmSetSymbols.clear();
 
         if (m_debug) {
             if (!m_debugOutputPath.empty()) {
@@ -163,19 +213,30 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
             }
         }
 
+        SizeLayout layout;
+        const PassContext* filter = m_processAllBlocks ? nullptr : &passCtx;
+        auto accumulate = [&](Function& f) {
+            const FunctionSize size =
+                accumulateFunctionSize(f, layout, filter, m_debug ? m_debugStream : nullptr);
+            m_totalCycles += size.cycles;
+            m_totalInstructionCount += size.instructions;
+            m_totalBytes += size.bytes;
+        };
+
         // Whole-kernel: callable functions are emitted into the same image after
         // the entry function (see StinkyAsmModule::emitAssembly), so their bytes
-        // must be counted for the .amdhsa_inst_pref_size total. m_byteOffsetBase
-        // carries across functions so label byte offsets stay monotonic in the
-        // linked image. Falls back to the single pipeline Function when the pass
-        // is not bound to a module.
+        // must be counted for the .amdhsa_inst_pref_size total. The layout's
+        // offset carries across functions so label byte offsets stay monotonic in
+        // the linked image. Falls back to the single pipeline Function when the
+        // pass is not bound to a module.
         if (m_moduleForTotalBytes) {
             for (Function* f : m_moduleForTotalBytes->getFunctions()) {
-                if (f) accumulateFunction(*f, passCtx);
+                if (f) accumulate(*f);
             }
         } else {
-            accumulateFunction(func, passCtx);
+            accumulate(func);
         }
+        m_labelByteOffset = std::move(layout.labelOffsets);
 
         if (m_debug) {
             *m_debugStream << "[AccumulateInstructionSizePass] total instruction count = "
@@ -194,41 +255,6 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
 
         if (m_moduleForTotalBytes) m_moduleForTotalBytes->setTotalInstructionBytes(m_totalBytes);
         return PreservedAnalyses::none();
-    }
-
-    /// Accumulate cycles/bytes for one function into the running totals.
-    void accumulateFunction(Function& func, PassContext& passCtx) {
-        collectAsmSetSymbolValues(func, m_asmSetSymbols);
-
-        // Count total basic blocks in the function (for debugging)
-        int totalBlocksInFunction = 0;
-        for ([[maybe_unused]] const BasicBlock& bb : func) totalBlocksInFunction++;
-
-        int blocksProcessed = 0;
-        if (m_debug) {
-            *m_debugStream << "[AccumulateInstructionSizePass] function \"" << func.getName()
-                           << "\" processAllBlocks=" << (m_processAllBlocks ? "true" : "false")
-                           << ", function has " << totalBlocksInFunction << " basic block(s)\n";
-            dumpAsmSetSymbolMap(*m_debugStream, m_asmSetSymbols);
-            *m_debugStream << "[AccumulateInstructionSizePass] blocks to process:\n";
-        }
-
-        for (BasicBlock& bb : func) {
-            bool processThis = m_processAllBlocks || passCtx.shouldProcessBasicBlock(bb);
-            if (m_debug) {
-                *m_debugStream << "  - BasicBlock \"" << bb.getLabel() << "\" "
-                               << (processThis ? "[PROCESSING]" : "[SKIPPED by filter]") << "\n";
-            }
-            if (processThis) {
-                runOnBasicBlock(bb, passCtx);
-                blocksProcessed++;
-            }
-        }
-
-        if (m_debug) {
-            *m_debugStream << "[AccumulateInstructionSizePass] processed " << blocksProcessed
-                           << " / " << totalBlocksInFunction << " basic block(s)\n";
-        }
     }
 
     /// Total accumulated cycles (instruction size) after run().
@@ -290,11 +316,7 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
     int64_t m_totalCycles = 0;
     int m_totalInstructionCount = 0;
     int64_t m_totalBytes = 0;
-    int64_t m_byteOffsetBase = 0;  // running offset for multi-BB label addresses
     std::unordered_map<std::string, int64_t> m_labelByteOffset;
-    /// `.set` symbol -> integer (from AsmDirective SET), for literal encoding
-    /// size.
-    std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;            // print each instruction and cost; set false to disable
     bool m_processAllBlocks = true;  // when true, ignore pipeline BB filter (whole program)
     std::string m_debugOutputPath;   // when non-empty, dump to this file

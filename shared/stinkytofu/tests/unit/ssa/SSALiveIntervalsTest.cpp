@@ -150,6 +150,57 @@ TEST_F(SSALiveIntervalsTest, StraightLineRangesRunFromDefinitionToLastUse) {
     EXPECT_FALSE(live.overlap(liveIn, result));
 }
 
+TEST_F(SSALiveIntervalsTest, SlotPlacesNameTheBlockAndPosition) {
+    BasicBlock* entry = block("entry");
+    BasicBlock* next = block("next");
+    func->addEdge(entry, next);
+    StinkyInstruction* first = createVAddInBlock(entry, kArch, 2, 0, 1);
+    AsmIRBuilder(*next, kArch).createLabel("mid");
+    StinkyInstruction* second = createVAddInBlock(next, kArch, 3, 2, 1);
+
+    const SSASlotIndexes slots = computeSSASlotIndexes(*func);
+
+    const SlotPlace head = slots.placeOf(slots.blockStart(entry));
+    EXPECT_EQ(head.block, entry);
+    EXPECT_EQ(head.index, -1);
+    EXPECT_FALSE(head.def);
+    EXPECT_TRUE(slots.placeOf(slots.blockArgDef(entry)).def);
+
+    const SlotPlace read = slots.placeOf(slots.useSlot(first));
+    EXPECT_EQ(read.block, entry);
+    EXPECT_EQ(read.index, 0);
+    EXPECT_FALSE(read.def);
+    const SlotPlace write = slots.placeOf(slots.defSlot(first));
+    EXPECT_EQ(write.index, 0);
+    EXPECT_TRUE(write.def);
+
+    // The label has slots of its own but is not counted, as instructions() skips it.
+    const SlotPlace label = slots.placeOf(slots.useSlot(second) - 2);
+    EXPECT_EQ(label.block, next);
+    EXPECT_EQ(label.index, -1);
+    EXPECT_EQ(slots.placeOf(slots.useSlot(second)).index, 0);
+
+    EXPECT_EQ(slots.placeOf(slots.slotCount()).block, nullptr);
+    EXPECT_EQ(slots.placeOf(SSASlotIndexes::kInvalidSlot).block, nullptr);
+}
+
+TEST_F(SSALiveIntervalsTest, PeakSlotIsWhereThePeakIsFirstReached) {
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add = createVAddInBlock(entry, kArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    lift();
+
+    const SSALiveIntervals live = intervals();
+    const SSAValueID result = idOf(ssaDefinedValue(*add));
+
+    // Both live-ins arrive as block arguments, so the peak of 2 starts there.
+    EXPECT_EQ(live.peakSlot(RegType::V), live.slots().blockArgDef(entry));
+    EXPECT_EQ(live.peakSlot(RegType::S), SSASlotIndexes::kInvalidSlot);
+    EXPECT_EQ(live.classOf(result), RegType::V);
+    EXPECT_EQ(live.widthOf(result), 1u);
+    EXPECT_NE(live.toString().find(live.rangeLine(result) + "\n"), std::string::npos);
+    EXPECT_EQ(live.rangeLine(result).rfind("%" + std::to_string(result) + ":v [", 0), 0u);
+}
+
 TEST_F(SSALiveIntervalsTest, ReadModifyWriteValuesDoNotOverlap) {
     // v2 = v_add_f32 v2, v1 reads the old v2 and defines a new one. The two
     // values share a physical register in the input program, so their ranges

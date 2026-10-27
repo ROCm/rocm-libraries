@@ -44,6 +44,8 @@
 #include <vector>
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
+#include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -68,6 +70,7 @@
 #include "stinkytofu/support/Diagnostic.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 
 namespace nb = nanobind;
@@ -109,6 +112,57 @@ struct PyPassRecord {
     nb::list remarks;
     std::optional<std::string> before;
     std::optional<std::string> after;
+};
+
+struct PyLiveRange {
+    SSAValueID value = kInvalidSSAValueID;
+    std::string regClass;
+    int width = 1;
+    nb::object reg;
+    nb::list segments;
+    SlotIndex start = 0;
+    SlotIndex end = 0;
+    SlotIndex length = 0;
+    std::string line;
+};
+
+/// One function's live ranges, and the place of every slot they can name.
+struct PyLiveRanges {
+    nb::list ranges;
+    std::vector<nb::object> places;
+};
+
+struct PyPeak {
+    std::string regClass;
+    uint32_t dwords = 0;
+    SlotIndex slot = 0;
+    nb::object place;
+};
+
+struct PyPressure {
+    nb::dict peaks;
+    uint32_t vgpr = 0;
+    uint32_t sgpr = 0;
+};
+
+struct PyHazardGap {
+    std::string rule;
+    int required = 0;
+    int gap = 0;
+    bool ok = false;
+    std::string block;
+    int producer = -1;
+    int consumer = -1;
+    std::string producerOpcode;
+    std::string consumerOpcode;
+};
+
+struct PyFunctionSize {
+    int64_t start = 0;
+    int64_t bytes = 0;
+    int64_t cycles = 0;
+    int instructions = 0;
+    nb::dict labels;
 };
 
 std::string trimCopy(std::string text) {
@@ -529,6 +583,10 @@ std::vector<Function*> selectFunctions(StinkyAsmModule& module,
     return selected;
 }
 
+Function& selectFunction(StinkyAsmModule& module, const std::string& name) {
+    return *selectFunctions(module, name).front();
+}
+
 const char* remarkKind(OptimizationRemark::Kind kind) {
     switch (kind) {
         case OptimizationRemark::Kind::Passed:
@@ -744,7 +802,7 @@ std::vector<Diagnostic> verifyModule(StinkyAsmModule& module,
 
 std::vector<std::string> replaceBlock(StinkyAsmModule& module, const std::string& functionName,
                                       const std::string& blockName, const std::string& body) {
-    BasicBlock& block = selectBlock(*selectFunctions(module, functionName).front(), blockName);
+    BasicBlock& block = selectBlock(selectFunction(module, functionName), blockName);
     if (isSsaForm(body))
         throw std::invalid_argument("SSA form does not round-trip; give the body as physical STIR");
     ParseResult parsed = parseBlockBodyWithDiagnostics(body);
@@ -764,7 +822,7 @@ std::vector<std::string> replaceBlock(StinkyAsmModule& module, const std::string
 void setOperand(StinkyAsmModule& module, const std::string& functionName,
                 const std::string& blockName, int index, const nb::tuple& operand,
                 nb::handle value) {
-    Function& function = *selectFunctions(module, functionName).front();
+    Function& function = selectFunction(module, functionName);
     if (function.hasAttachedSSA())
         throw std::invalid_argument("function '" + functionName +
                                     "' has attached SSA, so functions() lists SSA values, not the "
@@ -796,6 +854,91 @@ void setOperand(StinkyAsmModule& module, const std::string& functionName,
         inst.setDestReg(*slot, replacement);
     else
         inst.setSrcReg(*slot, replacement);
+}
+
+/// (block, index, "use" or "def"), with index None for a block's leading pair
+/// or a label, and None for a slot past the function's last.
+nb::object placeTuple(const SlotPlace& place) {
+    if (place.block == nullptr) return nb::none();
+    nb::object index = place.index < 0 ? nb::none() : nb::cast(place.index);
+    return nb::make_tuple(place.block->getLabel(), index, place.def ? "def" : "use");
+}
+
+Function& liftedFunction(StinkyAsmModule& module, const std::string& name, const char* query) {
+    Function& function = selectFunction(module, name);
+    if (!function.hasAttachedSSA())
+        throw std::invalid_argument(std::string(query) + "() reads attached SSA, and function '" +
+                                    name + "' has none; run LiftAsmRegistersToSSAPass first");
+    return function;
+}
+
+PyLiveRanges liveRanges(StinkyAsmModule& module, const std::string& name) {
+    const Function& function = liftedFunction(module, name, "live_ranges");
+    const SSALiveIntervals live = computeSSALiveIntervals(function);
+    PyLiveRanges out;
+    for (size_t id = 1; id <= live.valueCount(); ++id) {
+        const auto value = static_cast<SSAValueID>(id);
+        const LiveRange& range = live.rangeOf(value);
+        if (range.empty()) continue;
+        PyLiveRange entry;
+        entry.value = value;
+        entry.regClass = regTypeToString(live.classOf(value));
+        entry.width = live.widthOf(value);
+        entry.reg = nb::none();
+        const StinkySSAValue* ssa = function.ssaArena().get(value);
+        if (ssa != nullptr && ssa->hasPhysicalBinding()) {
+            const StinkySSAValue::PhysicalBinding& bound = ssa->physical();
+            entry.reg = physicalOperand(StinkyRegister(bound.type, bound.idx, bound.num));
+        }
+        for (const LiveSegment& segment : range.segments())
+            entry.segments.append(nb::make_tuple(segment.start, segment.end));
+        entry.start = range.start();
+        entry.end = range.end();
+        entry.length = range.length();
+        entry.line = live.rangeLine(value);
+        out.ranges.append(std::move(entry));
+    }
+    const SSASlotIndexes& slots = live.slots();
+    out.places.reserve(slots.slotCount());
+    for (SlotIndex slot = 0; slot < slots.slotCount(); ++slot)
+        out.places.push_back(placeTuple(slots.placeOf(slot)));
+    return out;
+}
+
+PyPressure pressure(StinkyAsmModule& module, const std::string& name) {
+    const SSALiveIntervals live = computeSSALiveIntervals(liftedFunction(module, name, "pressure"));
+    PyPressure out;
+    for (const auto& [regClass, dwords] : live.peakPressure()) {
+        const SlotIndex slot = live.peakSlot(regClass);
+        const std::string className = regTypeToString(regClass);
+        out.peaks[className.c_str()] =
+            nb::cast(PyPeak{className, dwords, slot, placeTuple(live.slots().placeOf(slot))});
+    }
+    out.vgpr = live.peakPressure(RegType::V);
+    out.sgpr = live.peakPressure(RegType::S);
+    return out;
+}
+
+nb::list hazards(StinkyAsmModule& module, const std::string& name) {
+    nb::list out;
+    for (const HazardGap& pair : findHazardGaps(selectFunction(module, name))) {
+        out.append(PyHazardGap{pair.rule, pair.required, pair.gap, pair.ok(),
+                               pair.block->getLabel(), pair.producerIndex, pair.consumerIndex,
+                               opcodeOf(*pair.producer), opcodeOf(*pair.consumer)});
+    }
+    return out;
+}
+
+PyFunctionSize functionSize(StinkyAsmModule& module, const std::string& name) {
+    const Function& function = selectFunction(module, name);
+    for (const FunctionSize& size : measureFunctionSizes(module.getFunctions())) {
+        if (size.function != &function) continue;
+        PyFunctionSize out{size.start, size.bytes, size.cycles, size.instructions, nb::dict()};
+        for (const auto& [label, offset] : size.labels)
+            out.labels[label.c_str()] = nb::cast(offset);
+        return out;
+    }
+    throw std::runtime_error("function '" + name + "' is not laid out in its module");
 }
 
 }  // namespace
@@ -903,6 +1046,97 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             "after", [](const PyPassRecord& record) { return record.after; },
             "The print_after dump, or None");
 
+    nb::class_<PyLiveRange>(m, "LiveRange")
+        .def_prop_ro("value", [](const PyLiveRange& range) { return range.value; })
+        .def_prop_ro("reg_class", [](const PyLiveRange& range) { return range.regClass; })
+        .def_prop_ro(
+            "width", [](const PyLiveRange& range) { return range.width; }, "DWORDs")
+        .def_prop_ro(
+            "register", [](const PyLiveRange& range) { return range.reg; },
+            "The register the lift took the value from, as (class, index, count), or None")
+        .def_prop_ro(
+            "segments", [](const PyLiveRange& range) { return range.segments; },
+            "Half-open (start, end) slot pairs, in order")
+        .def_prop_ro("start", [](const PyLiveRange& range) { return range.start; })
+        .def_prop_ro(
+            "end", [](const PyLiveRange& range) { return range.end; },
+            "One past the last live slot")
+        .def_prop_ro(
+            "length", [](const PyLiveRange& range) { return range.length; }, "Slots covered")
+        .def("__str__", [](const PyLiveRange& range) { return range.line; })
+        .def("__repr__", [](const PyLiveRange& range) { return "<LiveRange " + range.line + ">"; });
+
+    nb::class_<PyLiveRanges>(m, "LiveRanges")
+        .def_prop_ro(
+            "ranges", [](const PyLiveRanges& live) { return live.ranges; },
+            "One LiveRange per live value, by value id")
+        .def_prop_ro("slot_count", [](const PyLiveRanges& live) { return live.places.size(); })
+        .def(
+            "place",
+            [](const PyLiveRanges& live, int64_t slot) -> nb::object {
+                if (slot < 0 || static_cast<size_t>(slot) >= live.places.size()) return nb::none();
+                return live.places[static_cast<size_t>(slot)];
+            },
+            nb::arg("slot"),
+            "(block, index, \"use\" or \"def\") for a slot, index as in instructions() and None "
+            "for a block's leading pair or a label. None past the last slot");
+
+    nb::class_<PyPeak>(m, "PressurePeak")
+        .def_prop_ro("reg_class", [](const PyPeak& peak) { return peak.regClass; })
+        .def_prop_ro(
+            "dwords", [](const PyPeak& peak) { return peak.dwords; },
+            "Most DWORDs of the class live at once")
+        .def_prop_ro(
+            "slot", [](const PyPeak& peak) { return peak.slot; }, "First slot at the peak")
+        .def_prop_ro(
+            "place", [](const PyPeak& peak) { return peak.place; },
+            "Where that slot is, as LiveRanges.place gives it");
+
+    nb::class_<PyPressure>(m, "Pressure")
+        .def_prop_ro(
+            "peaks", [](const PyPressure& pressure) { return pressure.peaks; },
+            "PressurePeak by register class, for each class the lift covered")
+        .def_prop_ro(
+            "vgpr", [](const PyPressure& pressure) { return pressure.vgpr; },
+            "Peak VGPR DWORDs, 0 when none are live")
+        .def_prop_ro(
+            "sgpr", [](const PyPressure& pressure) { return pressure.sgpr; },
+            "Peak SGPR DWORDs, 0 when none are live");
+
+    nb::class_<PyHazardGap>(m, "HazardGap")
+        .def_prop_ro("rule", [](const PyHazardGap& gap) { return gap.rule; })
+        .def_prop_ro(
+            "required", [](const PyHazardGap& gap) { return gap.required; },
+            "Cycles the rule needs")
+        .def_prop_ro(
+            "gap", [](const PyHazardGap& gap) { return gap.gap; },
+            "Cycles of the instructions between producer and consumer")
+        .def_prop_ro(
+            "ok", [](const PyHazardGap& gap) { return gap.ok; }, "gap is at least required")
+        .def_prop_ro("block", [](const PyHazardGap& gap) { return gap.block; })
+        .def_prop_ro(
+            "producer", [](const PyHazardGap& gap) { return gap.producer; },
+            "Position in the block's instructions()")
+        .def_prop_ro(
+            "consumer", [](const PyHazardGap& gap) { return gap.consumer; },
+            "Position in the block's instructions()")
+        .def_prop_ro("producer_opcode", [](const PyHazardGap& gap) { return gap.producerOpcode; })
+        .def_prop_ro("consumer_opcode", [](const PyHazardGap& gap) { return gap.consumerOpcode; });
+
+    nb::class_<PyFunctionSize>(m, "FunctionSize")
+        .def_prop_ro(
+            "start", [](const PyFunctionSize& size) { return size.start; },
+            "Byte offset of the function in the kernel image")
+        .def_prop_ro(
+            "bytes", [](const PyFunctionSize& size) { return size.bytes; }, "Encoded bytes")
+        .def_prop_ro("cycles", [](const PyFunctionSize& size) { return size.cycles; })
+        .def_prop_ro(
+            "instructions", [](const PyFunctionSize& size) { return size.instructions; },
+            "Instructions counted, not labels or directives")
+        .def_prop_ro(
+            "labels", [](const PyFunctionSize& size) { return size.labels; },
+            "Each label's byte offset in the image, in program order");
+
     cls.def("serialize", &serializeModule, nb::arg("ssa") = false,
             "Print this module. ssa=True is a diagnostic view and does not round-trip");
     cls.def("emit_asm", &emitModuleAsm, nb::kw_only(), nb::arg("comments") = false,
@@ -940,6 +1174,14 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             nb::arg("operand"), nb::arg("value"),
             "Set one physical operand: operand is (\"defs\", i) or (\"uses\", i) of the "
             "instruction at index, and value takes a form functions() lists");
+    cls.def("live_ranges", &liveRanges, nb::arg("function"),
+            "Where each SSA value of a lifted function is live, in slots, with a place() lookup");
+    cls.def("pressure", &pressure, nb::arg("function"),
+            "Peak DWORDs live at once in each register class of a lifted function, and where");
+    cls.def("hazards", &hazards, nb::arg("function"),
+            "Every producer -> consumer pair HazardGapAnalysisPass measures, passing or not");
+    cls.def("size", &functionSize, nb::arg("function"),
+            "Encoded bytes and cycles of a function, laid out where the kernel image places it");
 
     m.def("load_stir", &loadStir, nb::arg("text"), nb::arg("arch") = std::array<int, 3>{12, 5, 0},
           "Parse physical STIR into a module that owns its functions");

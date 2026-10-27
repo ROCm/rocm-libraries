@@ -14,7 +14,8 @@ Use it to test a pass on a kernel, and to edit a kernel by hand.
 2. Run catalog passes, in the order you list them, and read the remarks and dumps each one left.
 3. Read each instruction. Registers stay physical until you run `LiftAsmRegistersToSSAPass`. After that pass, operands are SSA value ids.
 4. Check the module with `verify()`, and edit it a block or an operand at a time.
-5. Print the module back to STIR, or emit assembler source and assemble it.
+5. Ask the analyses for live ranges, register pressure, hazard gaps, and size, as objects.
+6. Print the module back to STIR, or emit assembler source and assemble it.
 
 `stinkytofu run` runs only the passes you name. It does not run the optimization pipeline.
 
@@ -307,3 +308,53 @@ These raise, and the module is left as it was:
 | `set_operand` on a function with attached SSA | `ValueError` |
 | A value with no operand form: a bool, an SSA value, an unknown register class, or an int that does not fit 32 bits | `ValueError` |
 | `index`, or the position in `operand`, is out of range | `IndexError` |
+
+### Ask the analyses
+
+Each query takes a function name (`""` is an unnamed entry) and returns objects copied at the call, as `functions()` does. An unknown name raises `ValueError`, listing the names.
+
+```python
+module = stinkytofu.load_stir(text)
+module.run_passes(["LiftAsmRegistersToSSAPass"])
+
+ranges = module.live_ranges("k")
+for live in ranges.ranges:
+    print(live)                       # %1:v [1d,5d), one line per value
+ranges.place(3)                       # ("entry", 0, "def")
+
+pressure = module.pressure("k")
+assert pressure.vgpr <= 256
+pressure.peaks["v"].place             # where the VGPR peak is first reached
+
+for gap in module.hazards("k"):
+    print(gap.rule, gap.gap, gap.required, gap.ok)
+
+module.size("k").bytes                # encoded bytes
+```
+
+`live_ranges` and `pressure` read attached SSA. On a function the lift has not reached, they raise `ValueError` naming `LiftAsmRegistersToSSAPass`. So a value id is always the one `defs` and `uses` show.
+
+**Slots.** A position is a slot. Each instruction has two: a `u` slot where it reads its operands, then a `d` slot where it writes its results. Each block also starts with a pair: a value live into the block starts at its `u` slot, and the block's arguments are defined at its `d` slot. `ranges.place(slot)` returns `(block, index, "use" or "def")`:
+- `index` is the position in `instructions()`, or `None` for a block's leading pair or a label;
+- it returns `None` for a slot past the last.
+
+| `LiveRange` field | Meaning |
+| --- | --- |
+| `value`, `reg_class`, `width` | The SSA value id, its class, and its DWORDs. The lift makes one value per DWORD |
+| `register` | The register the lift took the value from, as `(class, index, count)`, or `None` |
+| `segments` | Half-open `(start, end)` slot pairs: the value is live from `start` up to, not including, `end` |
+| `start`, `end`, `length` | The first live slot, one past the last, and the number of slots covered |
+
+`str(live)` is the line the `ssa_live_intervals` dump prints for the value.
+
+`pressure(function)` returns the most DWORDs of each class that are live at once. `vgpr` and `sgpr` give the two main classes, and are 0 when nothing of that class is live. `peaks` maps each class the lift covered to a `PressurePeak`, with `dwords`, `slot` (the first slot at the peak), and `place`.
+
+`hazards(function)` returns every producer and consumer pair that `HazardGapAnalysisPass` measures, the passing ones included:
+- the fields are `rule`, `required` and `gap` in cycles, `ok`, `block`, `producer` and `consumer` (positions in `instructions()`), `producer_opcode`, and `consumer_opcode`;
+- the pairs are within one block, and the rules are the ones counted in cycles from a write to a later read;
+- it reads physical registers, so it needs no lift. It does not raise for a gap below `required`, where the pass reports an analysis failure.
+
+`size(function)` returns a `FunctionSize`, measured as `AccumulateInstructionSizePass` measures it:
+- the module's functions are laid out in order, entry first, so alignment padding and PC-relative literals are sized where each function sits;
+- the fields are `start` (the byte offset of the function in the image), `bytes`, `cycles`, `instructions` (not counting labels and directives), and `labels`, which maps each label to its byte offset;
+- the kernel's total is the sum of `bytes` over its functions.

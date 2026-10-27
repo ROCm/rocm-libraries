@@ -287,17 +287,34 @@ bool SSALiveIntervals::overlap(SSAValueID a, SSAValueID b) const {
     return rangeOf(a).overlaps(rangeOf(b));
 }
 
+RegType SSALiveIntervals::classOf(SSAValueID id) const {
+    return id < classByValue_.size() ? classByValue_[id] : RegType::UNKNOWN;
+}
+
+uint16_t SSALiveIntervals::widthOf(SSAValueID id) const {
+    return id < widthByValue_.size() ? widthByValue_[id] : 1;
+}
+
+std::string SSALiveIntervals::rangeLine(SSAValueID id) const {
+    return "%" + std::to_string(id) + ":" + regTypeToString(classOf(id)) + " " +
+           rangeOf(id).toString();
+}
+
 uint32_t SSALiveIntervals::peakPressure(RegType regClass) const {
     auto it = peakByClass_.find(regClass);
     return it == peakByClass_.end() ? 0u : it->second;
+}
+
+SlotIndex SSALiveIntervals::peakSlot(RegType regClass) const {
+    auto it = peakSlotByClass_.find(regClass);
+    return it == peakSlotByClass_.end() ? kInvalid : it->second;
 }
 
 std::string SSALiveIntervals::toString() const {
     std::string text = "slots=" + std::to_string(slots_.slotCount()) +
                        " values=" + std::to_string(valueCount()) + "\n";
     for (size_t id = 1; id < byValue_.size(); ++id) {
-        text += "%" + std::to_string(id) + ":" + regTypeToString(classByValue_[id]) + " " +
-                byValue_[id].toString() + "\n";
+        text += rangeLine(static_cast<SSAValueID>(id)) + "\n";
     }
     for (const auto& [regClass, peak] : peakByClass_) {
         text += "peak " + regTypeToString(regClass) + "=" + std::to_string(peak) + "\n";
@@ -493,6 +510,7 @@ SSALiveIntervals SSALiveIntervalsBuilder::build(const Function& function,
 
 void SSALiveIntervals::recomputePeakPressure() {
     peakByClass_.clear();
+    peakSlotByClass_.clear();
     if (slots_.slotCount() == 0) return;
 
     // Peak pressure per class, in DWORDs, from the segments themselves, so no
@@ -501,9 +519,9 @@ void SSALiveIntervals::recomputePeakPressure() {
     for (size_t id = 1; id < byValue_.size(); ++id) {
         const LiveRange& range = byValue_[id];
         if (range.empty()) continue;
-        const RegType regClass = id < classByValue_.size() ? classByValue_[id] : RegType::UNKNOWN;
-        const int32_t width = id < widthByValue_.size() ? widthByValue_[id] : 1;
-        std::vector<int32_t>& delta = deltas[regClass];
+        const auto value = static_cast<SSAValueID>(id);
+        const int32_t width = widthOf(value);
+        std::vector<int32_t>& delta = deltas[classOf(value)];
         if (delta.empty()) delta.assign(slots_.slotCount() + 1, 0);
         for (const LiveSegment& segment : range.segments()) {
             delta[segment.start] += width;
@@ -513,11 +531,16 @@ void SSALiveIntervals::recomputePeakPressure() {
     for (const auto& [regClass, delta] : deltas) {
         int32_t live = 0;
         int32_t peak = 0;
-        for (int32_t step : delta) {
-            live += step;
-            peak = std::max(peak, live);
+        SlotIndex at = kInvalid;
+        for (SlotIndex slot = 0; slot < delta.size(); ++slot) {
+            live += delta[slot];
+            if (live > peak) {
+                peak = live;
+                at = slot;
+            }
         }
         peakByClass_[regClass] = static_cast<uint32_t>(peak);
+        peakSlotByClass_[regClass] = at;
     }
 }
 

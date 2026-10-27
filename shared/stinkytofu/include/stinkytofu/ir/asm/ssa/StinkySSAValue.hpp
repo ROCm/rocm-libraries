@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 
@@ -123,7 +124,7 @@ class StinkySSAValue {
     bool hasPhysicalBinding() const {
         return hasBinding_;
     }
-    const PhysicalBinding& physical() const;
+    STINKYTOFU_EXPORT const PhysicalBinding& physical() const;
     void setPhysicalBinding(const PhysicalBinding& binding);
     void clearPhysicalBinding();
 
@@ -194,7 +195,7 @@ class SSAArena {
         return storage_.size();
     }
 
-    StinkySSAValue* get(SSAValueID valueId) const;
+    STINKYTOFU_EXPORT StinkySSAValue* get(SSAValueID valueId) const;
     std::span<StinkySSAValue* const> values() const;
 
     /// Fingerprint of the function this arena was lifted from, or

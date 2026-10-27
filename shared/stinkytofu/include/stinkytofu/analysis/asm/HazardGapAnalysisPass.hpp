@@ -4,16 +4,43 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 
 namespace stinkytofu {
+class BasicBlock;
+class Function;
+struct StinkyInstruction;
 
-/// Scan each basic block for kCdna5HazardRules producer->consumer pairs and
-/// report the cycle gap between them (using real issueCycles/latencyCycles, not
-/// instruction count). Prints a per-rule summary and, per consumer, the tightest
-/// producer gap. Exits with a non-zero status if any gap is below the rule threshold.
+/// One producer -> consumer pair a kCdna5HazardRules rule measures. Only rules
+/// counted as a write followed by a read, in cycles, are measured.
+struct HazardGap {
+    const char* rule = "";
+    /// Cycles the rule needs between the two.
+    int required = 0;
+    /// Cycles of the instructions strictly between them.
+    int gap = 0;
+    const BasicBlock* block = nullptr;
+    const StinkyInstruction* producer = nullptr;
+    const StinkyInstruction* consumer = nullptr;
+    /// Positions in the block, counted as isIndexedInstruction() does.
+    int producerIndex = -1;
+    int consumerIndex = -1;
+
+    bool ok() const {
+        return gap >= required;
+    }
+};
+
+/// Every measured pair in \p function: block by block, and within a block rule
+/// by rule. Pairs are intra-block, as the scheduler's hazard gate is.
+STINKYTOFU_EXPORT std::vector<HazardGap> findHazardGaps(const Function& function);
+
+/// Report findHazardGaps() for each function on stderr: every pair below its
+/// rule's threshold, then a per-rule summary. Reports an analysis failure if any
+/// gap is below the threshold.
 ///
 /// Usage:  stinkytofu-opt --arch gfx1250 kernel.s --HazardGapAnalysisPass
 ///

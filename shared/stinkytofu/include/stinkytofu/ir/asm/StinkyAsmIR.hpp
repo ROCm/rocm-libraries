@@ -785,6 +785,12 @@ inline bool isMatrixInstruction(const StinkyInstruction& inst) {
     return isMFMA(inst) || isSMFMA(inst) || isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
 }
 
+/// Cycles \p inst occupies in program order: a matrix instruction its latency,
+/// which covers its co-issue window, and any other its issue cycles.
+inline int instructionCycles(const StinkyInstruction& inst) {
+    return isMatrixInstruction(inst) ? inst.latencyCycles : inst.issueCycles;
+}
+
 inline bool isHasSideEffect(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_HasSideEffect);
 }

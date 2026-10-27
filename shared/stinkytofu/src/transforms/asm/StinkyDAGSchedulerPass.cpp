@@ -344,13 +344,12 @@ static void scheduleRegionWithMovableSideEffects(
 
     if (regionSize == 0) return;
 
-    // The region's estimated length in original program order (WMMA -> latencyCycles, its full
-    // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
-    // DAGNode::earliestClock is built from.
+    // The region's estimated length in original program order: where the terminator that follows
+    // it sits, which DAGNode::earliestClock is built from.
     int regionCycles = 0;
     for (unsigned k = 0; k < regionSize; ++k) {
         const StinkyInstruction* inst = dagNodes[k].inst;
-        regionCycles += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
+        regionCycles += instructionCycles(*inst);
     }
 
     if (readyQueue.clusterBarrierEnabled())

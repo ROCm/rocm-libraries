@@ -43,6 +43,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
+
+#include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 
@@ -52,7 +55,16 @@ struct StinkyInstruction;
 
 using SlotIndex = uint32_t;
 
-class SSASlotIndexes {
+/// Where a slot sits. \p index counts the block's instructions as
+/// isIndexedInstruction() does, and is -1 for the block's leading pair and for
+/// a label. \p block is null for a slot past the function's last.
+struct SlotPlace {
+    const BasicBlock* block = nullptr;
+    int index = -1;
+    bool def = false;
+};
+
+class STINKYTOFU_EXPORT SSASlotIndexes {
    public:
     static constexpr SlotIndex kInvalidSlot = ~0u;
 
@@ -70,6 +82,10 @@ class SSASlotIndexes {
 
     /// Where \p instruction writes its results.
     SlotIndex defSlot(const StinkyInstruction* instruction) const;
+
+    /// The block and instruction \p slot belongs to, and whether it is the
+    /// write point.
+    SlotPlace placeOf(SlotIndex slot) const;
 
     /// One past the last index in the function.
     SlotIndex slotCount() const {
@@ -94,6 +110,7 @@ class SSASlotIndexes {
 
     std::unordered_map<const BasicBlock*, BlockRange> byBlock_;
     std::unordered_map<const StinkyInstruction*, SlotIndex> byInstruction_;
+    std::vector<SlotPlace> byPair_;  // one per use/def pair, def left false
     SlotIndex slotCount_ = 0;
 };
 

@@ -4,8 +4,8 @@
 // HazardGapAnalysisPass — scan a post-schedule ASM kernel for CDNA5 hardware hazard
 // violations. For each rule in kCdna5HazardRules, finds every consumer instruction,
 // walks backward to the nearest preceding producer of each source register, sums the
-// real cycle cost (isMatrixInstruction ? latencyCycles : issueCycles) of instructions
-// strictly between them, and flags any gap below the rule's required cycle count.
+// real cycle cost (instructionCycles) of instructions strictly between them, and flags
+// any gap below the rule's required cycle count.
 //
 // Intra-block only: the DAG scheduler's hazard gate is also intra-region, and region
 // boundaries are side-effect cuts that the scheduler cannot reorder across. Cross-region
@@ -29,10 +29,6 @@
 namespace stinkytofu {
 namespace {
 
-int instCycles(const StinkyInstruction& inst) {
-    return isMatrixInstruction(inst) ? inst.latencyCycles : inst.issueCycles;
-}
-
 const char* instMnemonic(const StinkyInstruction& inst) {
     return inst.hwInstDesc && inst.hwInstDesc->mnemonic ? inst.hwInstDesc->mnemonic : "?";
 }
@@ -48,37 +44,27 @@ void collectRegKeys(const std::vector<StinkyRegister>& regs, RegType regType,
     }
 }
 
-struct Violation {
-    std::string ruleName;
-    int required;
-    const char* producerMnemonic;
-    int producerIdx;
-    const char* consumerMnemonic;
-    int consumerIdx;
-    int gap;
-};
-
 struct RuleStat {
     int pairs = 0;
     int violations = 0;
 };
 
-std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
+void analyzeBlock(const BasicBlock& bb, std::vector<HazardGap>& results) {
     struct Entry {
         const StinkyInstruction* inst;
+        int position;  // as isIndexedInstruction() counts, -1 for a label
     };
     std::vector<Entry> instrs;
+    int position = 0;
     for (const IRBase& ir : bb) {
         const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst) instrs.push_back({inst});
+        if (inst) instrs.push_back({inst, isIndexedInstruction(ir) ? position++ : -1});
     }
 
     // Prefix-sum of cycle costs for O(1) range sum.
     std::vector<int> cumCycles(instrs.size() + 1, 0);
     for (int i = 0; i < (int)instrs.size(); ++i)
-        cumCycles[i + 1] = cumCycles[i] + instCycles(*instrs[i].inst);
-
-    std::vector<Violation> results;
+        cumCycles[i + 1] = cumCycles[i] + instructionCycles(*instrs[i].inst);
 
     for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
         const HazardRule& rule = kCdna5HazardRules[ruleIdx];
@@ -125,20 +111,18 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
             if (latestProducer < 0) continue;  // no in-block producer feeds this consumer
 
             // Gap = sum of cycles of instructions strictly between producer and consumer.
-            int gap = cumCycles[ci] - cumCycles[latestProducer + 1];
-
-            Violation v;
-            v.ruleName = rule.name;
-            v.required = rule.distance;
-            v.producerMnemonic = instMnemonic(*instrs[latestProducer].inst);
-            v.producerIdx = latestProducer;
-            v.consumerMnemonic = instMnemonic(inst);
-            v.consumerIdx = ci;
-            v.gap = gap;
-            results.push_back(v);
+            HazardGap pair;
+            pair.rule = rule.name;
+            pair.required = rule.distance;
+            pair.gap = cumCycles[ci] - cumCycles[latestProducer + 1];
+            pair.block = &bb;
+            pair.producer = instrs[latestProducer].inst;
+            pair.consumer = &inst;
+            pair.producerIndex = instrs[latestProducer].position;
+            pair.consumerIndex = instrs[ci].position;
+            results.push_back(pair);
         }
     }
-    return results;
 }
 
 class HazardGapAnalysisPass : public StinkyInstPass {
@@ -159,27 +143,19 @@ class HazardGapAnalysisPass : public StinkyInstPass {
 
         bool anyViolation = false;
 
-        for (const BasicBlock& bb : func) {
-            auto entries = analyzeBlock(bb);
-            for (const auto& v : entries) {
-                stats[v.ruleName].pairs++;
-                bool bad = v.gap < v.required;
-                if (bad) {
-                    stats[v.ruleName].violations++;
-                    anyViolation = true;
-                    std::cerr << "[HazardGapAnalysisPass] VIOLATION" << " rule=" << v.ruleName
-                              << " bb=" << bb.getLabel() << " producer[" << v.producerIdx
-                              << "]=" << v.producerMnemonic << " consumer[" << v.consumerIdx
-                              << "]=" << v.consumerMnemonic << " gap=" << v.gap
-                              << " required>=" << v.required << "\n";
-                } else if (verbose_) {
-                    std::cerr << "[HazardGapAnalysisPass] OK" << " rule=" << v.ruleName
-                              << " bb=" << bb.getLabel() << " producer[" << v.producerIdx
-                              << "]=" << v.producerMnemonic << " consumer[" << v.consumerIdx
-                              << "]=" << v.consumerMnemonic << " gap=" << v.gap
-                              << " required>=" << v.required << "\n";
-                }
+        for (const HazardGap& pair : findHazardGaps(func)) {
+            stats[pair.rule].pairs++;
+            if (!pair.ok()) {
+                stats[pair.rule].violations++;
+                anyViolation = true;
+            } else if (!verbose_) {
+                continue;
             }
+            std::cerr << "[HazardGapAnalysisPass] " << (pair.ok() ? "OK" : "VIOLATION")
+                      << " rule=" << pair.rule << " bb=" << pair.block->getLabel() << " producer["
+                      << pair.producerIndex << "]=" << instMnemonic(*pair.producer) << " consumer["
+                      << pair.consumerIndex << "]=" << instMnemonic(*pair.consumer)
+                      << " gap=" << pair.gap << " required>=" << pair.required << "\n";
         }
 
         std::cerr << "\n[HazardGapAnalysisPass] Summary for " << func.getName() << ":\n";
@@ -203,6 +179,12 @@ class HazardGapAnalysisPass : public StinkyInstPass {
 char HazardGapAnalysisPass::ID = 0;
 
 }  // namespace
+
+std::vector<HazardGap> findHazardGaps(const Function& function) {
+    std::vector<HazardGap> pairs;
+    for (const BasicBlock& bb : function) analyzeBlock(bb, pairs);
+    return pairs;
+}
 
 std::unique_ptr<Pass> createHazardGapAnalysisPass(bool verbose) {
     return std::make_unique<HazardGapAnalysisPass>(verbose);
