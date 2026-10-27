@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,9 @@
  * ************************************************************************ */
 
 #include "arg_check.hpp"
+#include "utility.hpp"
 
+#include <cstdio>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse.h>
 #include <iostream>
@@ -160,5 +162,25 @@ void verify_hipsparse_status_success(hipsparseStatus_t status, const char* messa
         std::cerr << "hipSPARSE TEST ERROR: status != HIPSPARSE_STATUS_SUCCESS, ";
         std::cerr << message << std::endl;
     }
+#endif
+}
+
+void log_hip_error(const char* call, hipError_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
+#endif
+}
+
+void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
+#else
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
 #endif
 }

@@ -60,7 +60,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpVec(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalSpVec destructor");
+                log_hipsparse_error("hipsparseDestroySpVec", status);
             }
         }
     }

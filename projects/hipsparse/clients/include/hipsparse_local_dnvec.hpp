@@ -53,7 +53,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroyDnVec(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnVec destructor");
+                log_hipsparse_error("hipsparseDestroyDnVec", status);
             }
         }
     }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,5 +46,10 @@ void verify_hipsparse_status_internal_error(hipsparseStatus_t status, const char
 void verify_hipsparse_status_not_supported(hipsparseStatus_t status, const char* message);
 
 void verify_hipsparse_status_success(hipsparseStatus_t status, const char* message);
+
+// Record a failure without throwing, so these are safe in a destructor.
+void log_hip_error(const char* call, hipError_t status);
+
+void log_hipsparse_error(const char* call, hipsparseStatus_t status);
 
 #endif // ARG_CHECK_HPP
