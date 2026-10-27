@@ -308,10 +308,9 @@ def published(operation: str | None = None) -> list[dict[str, str]]:
     published variants. Each entry names the variant's lock, DVC pointer, and
     archive, which a source checkout tracks and fetches; an installed tree has
     the locks only. Architectures keep ``registry.json`` order and variants
-    name order. Configuration installs a lock under any listed architecture,
-    so one under an architecture that the registry does not enroll is listed
-    too, after the enrolled ones. ``operation`` restricts the listing to one
-    operation.
+    name order. A lock under an architecture that the registry does not
+    enroll, which configuration rejects, is listed after the enrolled ones
+    rather than hidden. ``operation`` restricts the listing to one operation.
     """
     if operation is not None:
         _check_operation(operation)

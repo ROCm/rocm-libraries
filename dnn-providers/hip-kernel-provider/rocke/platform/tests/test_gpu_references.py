@@ -506,6 +506,30 @@ def test_half_wired_or_pre_variant_references_fail_configuration(
     assert expected in output, output
 
 
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+@pytest.mark.parametrize(
+    "enrolled", [["gfx950"], ["gfx9420", "gfx950"]], ids=["missing", "longer-name"]
+)
+def test_listed_architectures_need_enrollment(project, enrolled, enabled):
+    """A listed architecture that registry.json does not enroll fails every build.
+
+    Its variants would install and its GPU CTest would register, but the test
+    would fail at session start, where the registry rejects the processor.
+    Enrollment matches whole names.
+    """
+    registry = project / "library/tests/conv_reference/architectures/registry.json"
+    registry.write_text(json.dumps(enrolled))
+    result = configure(project, enabled=enabled)
+    assert result.returncode != 0
+    # CMake wraps long messages, and at spaces inside a path.
+    output = " ".join((result.stdout + result.stderr).split())
+    expected = (
+        "ROCKE_PUBLISHED_CONV_ARCHITECTURES in PublishedGpuReferences.cmake lists "
+        f"gfx942, which {registry} does not enroll"
+    )
+    assert " ".join(expected.split()) in output, output
+
+
 @pytest.mark.parametrize("variant", ["gfx942", "gfx_wide", "Wide", "wide-v2", "2wide"])
 def test_invalid_variant_names_fail_configuration(project, variant):
     """A published variant needs a lowercase package name, never a processor's.

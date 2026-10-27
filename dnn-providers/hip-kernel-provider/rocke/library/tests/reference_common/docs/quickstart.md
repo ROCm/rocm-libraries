@@ -259,6 +259,8 @@ shown otherwise:
 
 A listed architecture installs every variant with a committed lock; with
 references installed, configuration fails for one without a published variant.
+Every configuration also fails for a listed architecture that `registry.json`
+does not enroll.
 The `rocke_<operation>_gpu_<arch>_pytest` CTest, the installation paths, and
 the CTest's selection by the provider's category YAML follow automatically. The
 shared host checks cover each variant once its lock exists; a processor that

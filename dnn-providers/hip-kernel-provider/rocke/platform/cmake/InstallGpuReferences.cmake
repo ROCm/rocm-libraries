@@ -22,7 +22,8 @@ list(SORT _ROCKE_REFERENCE_OPERATIONS)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PublishedGpuReferences.cmake")
 # A committed lock publishes its variant together with the variant's adapter,
-# its architecture's list entry and its DVC pointer. Every build checks that
+# its architecture's list entry and its DVC pointer, and a listed architecture
+# must be enrolled in its operation's registry.json. Every build checks that
 # wiring, with references or not, so neither a half-wired variant nor a file
 # that a branch opened before the variant layout restores at its old path can
 # silently drop a qualification.
@@ -30,6 +31,21 @@ set(_bundles "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles")
 foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
   string(TOUPPER "${_operation}" _operation_upper)
   set(_architectures "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures")
+  # A listed architecture's GPU CTest fails at session start unless
+  # registry.json, a flat JSON array of names, enrolls it.
+  file(READ "${_architectures}/registry.json" _registry)
+  string(REGEX MATCHALL "\"[^\"]*\"" _enrolled "${_registry}")
+  string(REPLACE "\"" "" _enrolled "${_enrolled}")
+  foreach(_arch IN LISTS ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES)
+    if(NOT _arch IN_LIST _enrolled)
+      message(FATAL_ERROR
+              "ROCKE_PUBLISHED_${_operation_upper}_ARCHITECTURES in "
+              "PublishedGpuReferences.cmake lists ${_arch}, which "
+              "${_architectures}/registry.json does not enroll, so its GPU "
+              "reference test would fail before running. Enroll ${_arch} there "
+              "or remove it from the list.")
+    endif()
+  endforeach()
   file(GLOB _legacy "${_architectures}/*/baseline_lock.json")
   foreach(_lock IN LISTS _legacy)
     message(FATAL_ERROR

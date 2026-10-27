@@ -319,8 +319,8 @@ def test_published_lists_each_committed_lock_without_site_packages():
 def test_published_lists_locks_in_enrollment_order(tmp_path):
     """A committed lock publishes its variant; an adapter alone does not.
 
-    Configuration installs a lock under any listed architecture, so one under
-    an architecture that the registry does not enroll is listed after the rest.
+    A lock under an architecture that the registry does not enroll, which
+    configuration rejects, is listed after the rest rather than hidden.
     """
     tests = tmp_path / "tests"
     script = tests / "reference_common/artifact.py"
