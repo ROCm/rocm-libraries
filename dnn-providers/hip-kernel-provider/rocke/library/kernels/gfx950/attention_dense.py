@@ -1839,11 +1839,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # tree. Same unbounded-score limitation as the grid body (see _MAX_SCALE).
     # The window phases keep scaling each score before the max.
     FOLD_SCALE = SW == 0
-    # Lanes l and l^32 hold the same query row and share its running max, so the
-    # row sum can stay a per-lane partial through the KV loop and be combined
-    # across the lane pair once after it. Sinks seed l with a per-row term that
-    # must be counted once, so they keep the per-tile combine.
-    LANE_LOCAL_L = not use_sinks
     # Without a window, at D128, the next tile's K load is issued right after
     # this tile's QK reads instead of at the end of the iteration (see
     # emit_loop_body).
@@ -2328,9 +2323,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 [_exp2(exp_arg(s_reg[nsub][i], m_new, neg_m)) for i in range(16)]
                 for nsub in range(N_SUB)
             ]
-            l_tile = row_sum(p)
-            if not LANE_LOCAL_L:
-                l_tile = half_reduce(l_tile, b.fadd)
+            l_tile = half_reduce(row_sum(p), b.fadd)
             if use_sinks:
                 # Rescale l_i by alpha: when m_new > m_i, multiply by alpha to change
                 # the sink's contribution from exp(sink - m_i) to exp(sink - m_new).
@@ -2451,9 +2444,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             for slot in it:
                 nsub, i = slot
                 p_vals[nsub][i] = _exp2(exp_arg(s_reg[nsub][i], m_new, neg_m))
-            l_tile = row_sum(p_vals)
-            if not LANE_LOCAL_L:
-                l_tile = half_reduce(l_tile, b.fadd)
+            l_tile = half_reduce(row_sum(p_vals), b.fadd)
             return out, p_vals, l_tile
 
         _rs_ctr = [0]
@@ -2683,8 +2674,6 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         res = loop.results
         m_i = res[0]
         l_i = res[1]
-        if LANE_LOCAL_L:
-            l_i = half_reduce(l_i, b.fadd)
         o_acc = list(res[2 : 2 + D_TILES])
         p_prev = list(res[2 + D_TILES : 2 + D_TILES + KK_STEPS])
 
