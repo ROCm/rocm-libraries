@@ -235,6 +235,9 @@ namespace
         // InternalArgsSupport.state() names the probe only when it is set.
         if(args.occupancyProbe)
             add("internalArgsSupport.occupancyProbe", jsonBool(args.occupancyProbe));
+        // Likewise the arrival fixup.
+        if(args.arrivalFixup)
+            add("internalArgsSupport.arrivalFixup", jsonBool(args.arrivalFixup));
         add("internalArgsSupport.useUniversalArgs", jsonBool(args.useUniversalArgs));
         add("internalArgsSupport.useSFC", jsonBool(args.useSFC));
 

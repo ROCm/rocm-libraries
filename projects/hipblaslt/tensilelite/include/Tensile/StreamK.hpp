@@ -134,12 +134,12 @@ namespace TensileLite
              * Kernel arguments of a dynamic StreamK launch (DynamicWorkQueue, and
              * Hybrid's dynamic sub-mode): totalItems work items, the whole tiles
              * plus `tiles` tiles cut into `split` parts of itersPerWI iterations;
-             * grid is the launched workgroups. Tiles split only under the debug
-             * overrides (TENSILE_STREAMK_TILES / _SPLIT).
+             * grid is the workgroups the dynamic grid policy launches.
              */
             struct KernelArguments
             {
                 uint32_t totalItems = 0;
+                // SKTiles: tiles cut into `split` parts.
                 uint32_t tiles      = 0;
                 uint32_t split      = 0;
                 uint32_t itersPerWI = 0;
@@ -163,6 +163,10 @@ namespace TensileLite
                 size_t kGranularity = 1;
                 // Workgroups the dynamic grid policy may launch (CUs x occupancy).
                 size_t maxGrid = 0;
+                // CUs the split is sized for: origami's cu_count for the static grid.
+                size_t splitCUs = 0;
+                // False keeps every tile whole unless the debug overrides ask otherwise.
+                bool allowSplit = true;
                 // Flag-region entries left after the per-XCD queue counters.
                 size_t flagSlots = 0;
                 // Workspace the launch is given, and the bytes of one partial tile.
@@ -171,16 +175,34 @@ namespace TensileLite
                 // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
                 int overrideTiles = -1;
                 int overrideSplit = -1;
+                // Uniform summation order: overrides that split only some tiles are
+                // ignored (see isRowUniform).
+                bool uniformSummationOrder = false;
             };
+
+            // Fewest iterations per split part (origami MinItersPerCU, grid_k_split_aware).
+            static constexpr size_t MinItersPerWI = 8;
+
+            // Split factors origami grid_k_split_aware tries for tree reduction, largest first.
+            static constexpr size_t SplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
 
             /**
              * Choose the dynamic StreamK work decomposition.
              *
-             * Every tile is whole (tiles = 0) unless the debug overrides ask for a
-             * split; if the partials they ask for do not fit the workspace or the flag
-             * region the tiles stay whole.
+             * Fewer tiles than splitCUs are each cut into the largest of
+             * SplitFactors parts with tiles*split <= splitCUs, at least
+             * MinItersPerWI iterations per part and partials that fit
+             * flagSlots and the workspace; otherwise every tile is whole. The debug
+             * overrides replace this rule, within the same workspace and flag limits.
              */
             TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
+
+            /**
+             * Whether every tile of a dynamic StreamK decomposition is folded from the
+             * same ordered list of chunk lengths: all whole, or all split alike (one
+             * SKSplit and SKItersPerWI for every tile, summed in part order).
+             */
+            TENSILELITEHOST_EXPORT static bool isRowUniform(KernelArguments const& d, size_t tiles);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its

@@ -309,6 +309,7 @@ namespace
         EXPECT_EQ(ia.wgm, ib.wgm);
         EXPECT_EQ(ia.staggerU, ib.staggerU);
         EXPECT_EQ(ia.perTileExtraIters, ib.perTileExtraIters);
+        EXPECT_EQ(ia.arrivalFixup, ib.arrivalFixup);
         EXPECT_EQ(ia.useUniversalArgs, ib.useUniversalArgs);
         EXPECT_EQ(ia.useSFC, ib.useSFC);
 

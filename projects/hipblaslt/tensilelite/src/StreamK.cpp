@@ -357,12 +357,35 @@ namespace TensileLite
             const size_t skTiles
                 = std::min(in.tiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
             KernelArguments d = decompose(skTiles, in.overrideSplit > -1 ? in.overrideSplit : 2);
-            if(d.tiles > 0 && !fits(d.tiles, d.split))
-                return whole;
-            return d;
+            // Uniform summation order ignores overrides that split only some
+            // tiles, or split where the gate below would not.
+            if(!in.uniformSummationOrder || d.tiles == 0
+               || (isRowUniform(d, in.tiles) && in.allowSplit))
+            {
+                if(d.tiles > 0 && !fits(d.tiles, d.split))
+                    return whole;
+                return d;
+            }
         }
 
+        if(!in.allowSplit || in.tiles == 0 || in.splitCUs == 0 || in.tiles >= in.splitCUs)
+            return whole;
+
+        // Largest factor that fits (origami grid_k_split_aware).
+        for(const size_t split : SplitFactors)
+        {
+            if(in.tiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
+                continue;
+            const KernelArguments d = decompose(in.tiles, split);
+            if(d.split >= 2 && fits(d.tiles, d.split))
+                return d;
+        }
         return whole;
+    }
+
+    bool StreamK::Dynamic::isRowUniform(KernelArguments const& d, size_t tiles)
+    {
+        return d.tiles == 0 || d.tiles == tiles;
     }
 
     bool StreamK::usePerTileSplit(ContractionSolution const&      solution,
