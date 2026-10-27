@@ -3869,6 +3869,17 @@ def cases():
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+        # Paged K/V, the same cohort as the gfx950 case of this name.
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
     ):
         add(
             "attention_dense",
