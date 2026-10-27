@@ -175,7 +175,7 @@ def config_cmd():
         toolchain = os.path.join(src_path, "toolchain-windows.cmake")
     else:
         rocm_path = os.getenv( 'ROCM_PATH', "/opt/rocm")
-        cmake_platform_opts.append( f"-DROCM_DIR:PATH={rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}" )
+        cmake_platform_opts.append( f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}" )
         cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"rocsparse-install\"" )
         toolchain = "toolchain-linux.cmake"
 
@@ -238,6 +238,7 @@ def config_cmd():
             f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
             f'-DPROJECT_BINARY_DIR={matrices_dir}',
             f'-DCMAKE_MATRICES_DIR={matrices_dir}',
+            '-DALLOW_FETCH_DEPS=ON',
             f'-DROCM_PATH={rocm_path}',
             '-DCMAKE_INSTALL_LIBDIR=lib',
             '-P',

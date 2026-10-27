@@ -29,6 +29,7 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -62,12 +63,15 @@ constexpr unsigned int SEED_MASK = 45;
 // the SAME inputs, and assert the outputs match within tolerance.
 //
 // Template params allow distinct Q/K/V/O element types; ComputeDataType is the
-// float compute/mask type shared by both reference implementations.
+// float compute type shared by both reference implementations. MaskT is the dtype of the
+// additive mask, independent of ComputeDataType; the mask parameter is non-deduced, so a
+// non-float mask must name MaskT explicitly.
 template <typename QDataType,
           typename KDataType,
           typename VDataType,
           typename ODataType,
-          typename ComputeDataType = float>
+          typename ComputeDataType = float,
+          typename MaskT = float>
 void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             Tensor<KDataType>& k,
                             Tensor<VDataType>& v,
@@ -75,7 +79,7 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             Tensor<ODataType>& oGpu,
                             float tolerance,
                             std::optional<float> attnScaleValue = std::nullopt,
-                            Tensor<float>* attnMask = nullptr,
+                            Tensor<typename NonDeduced<MaskT>::type>* attnMask = nullptr,
                             int64_t leftBound = -1,
                             int64_t rightBound = -1,
                             bool topLeftAlignment = true)
@@ -89,24 +93,24 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
     k.memory().hostData();
     v.memory().hostData();
 
-    CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+    CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskT>(
         q,
         k,
         v,
         oCpu,
         attnScaleValue,
-        static_cast<const TensorBase<ComputeDataType>*>(attnMask),
+        static_cast<const TensorBase<MaskT>*>(attnMask),
         leftBound,
         rightBound,
         topLeftAlignment);
 
-    GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+    GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskT>(
         q,
         k,
         v,
         oGpu,
         attnScaleValue,
-        static_cast<TensorBase<ComputeDataType>*>(attnMask),
+        static_cast<TensorBase<MaskT>*>(attnMask),
         leftBound,
         rightBound,
         topLeftAlignment);
@@ -651,6 +655,132 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
                                        gpuRefFwdTolerance<T>(),
                                        std::nullopt,
                                        /*attnMask=*/&mask);
+}
+
+// ============================================================================
+// Mask dtype sweep: the additive mask is read with its own dtype (float, half or
+// bfloat16), independent of Q/K/V/O. The mask is non-uniform along Skv with values
+// exactly representable in all three dtypes; a uniform mask would pass by coincidence
+// because softmax is shift-invariant.
+// ============================================================================
+
+namespace
+{
+
+template <typename MaskT>
+void fillExactlyRepresentableMask(Tensor<MaskT>& mask)
+{
+    constexpr std::array<float, 8> VALUES = {-2.0f, -1.0f, -0.5f, -0.25f, 0.0f, 0.25f, 0.5f, 1.0f};
+    auto* data = mask.memory().hostData();
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        data[i] = static_cast<MaskT>(VALUES[(i * 3 + i / 8) % VALUES.size()]);
+    }
+}
+
+} // namespace
+
+template <typename T>
+class TestGpuSdpaFwdMaskDtype : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestGpuSdpaFwdMaskDtype, SdpaFwdTypes, );
+
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, AdditiveMaskRank4)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({1, 2, 8, 16});
+    Tensor<float> k({1, 2, 8, 16});
+    Tensor<float> v({1, 2, 8, 16});
+    Tensor<float> oCpu({1, 2, 8, 16});
+    Tensor<float> oGpu({1, 2, 8, 16});
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<float, float, float, float, float, MaskT>(
+        q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, AdditiveMaskBroadcastRank2)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({2, 4, 8, 16});
+    Tensor<float> k({2, 4, 8, 16});
+    Tensor<float> v({2, 4, 8, 16});
+    Tensor<float> oCpu({2, 4, 8, 16});
+    Tensor<float> oGpu({2, 4, 8, 16});
+    Tensor<MaskT> mask({8, 8}); // [Sq, Skv]
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<float, float, float, float, float, MaskT>(
+        q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+// The mask dtype does not follow the Q/K/V/O dtype.
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, Bfloat16InputsAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<BFloat16Type> q({1, 2, 8, 16});
+    Tensor<BFloat16Type> k({1, 2, 8, 16});
+    Tensor<BFloat16Type> v({1, 2, 8, 16});
+    Tensor<BFloat16Type> oCpu({1, 2, 8, 16});
+    Tensor<BFloat16Type> oGpu({1, 2, 8, 16});
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, BFloat16Type, float, MaskT>(
+        q,
+        k,
+        v,
+        oCpu,
+        oGpu,
+        gpuRefFwdTolerance<BFloat16Type>(),
+        std::nullopt,
+        /*attnMask=*/&mask);
+}
+
+// Same kernel, same inputs, mask values identical after conversion: the output must not
+// depend on the mask storage dtype at all.
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, MatchesFloatMaskBitwise)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({1, 2, 8, 16});
+    Tensor<float> k({1, 2, 8, 16});
+    Tensor<float> v({1, 2, 8, 16});
+    fillWithRandomValues(q, -1.0f, 1.0f, SEED_Q);
+    fillWithRandomValues(k, -1.0f, 1.0f, SEED_K);
+    fillWithRandomValues(v, -1.0f, 1.0f, SEED_V);
+
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+    Tensor<float> floatMask({1, 2, 8, 8});
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        floatMask.memory().hostData()[i] = static_cast<float>(mask.memory().hostData()[i]);
+    }
+
+    Tensor<float> oMask({1, 2, 8, 16});
+    Tensor<float> oFloatMask({1, 2, 8, 16});
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float, MaskT>(
+        q, k, v, oMask, std::nullopt, &mask);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float, float>(
+        q, k, v, oFloatMask, std::nullopt, &floatMask);
+
+    const auto* actual = oMask.memory().hostData();
+    const auto* expected = oFloatMask.memory().hostData();
+    for(size_t i = 0; i < oMask.elementCount(); ++i)
+    {
+        ASSERT_EQ(actual[i], expected[i]) << "at flat index " << i;
+    }
 }
 
 // ============================================================================

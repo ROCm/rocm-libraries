@@ -94,6 +94,8 @@ def apply_print_exception(item, *args):
 def OverwriteGlobalParameters(newGlobalParameters):
     from . import GlobalParameters
 
+    if newGlobalParameters is GlobalParameters.globalParameters:
+        return
     GlobalParameters.globalParameters.clear()
     GlobalParameters.globalParameters.update(newGlobalParameters)
 
@@ -216,20 +218,16 @@ def ParallelMap2(
     threadCount = procs if procs else CPUThreadCount(enable)
 
     threadCount = CPUThreadCount(enable)
+    objects = list(objects)
+    threadCount = min(threadCount, max(len(objects), 1))
 
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
         return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]
 
-    countMessage = ""
-    try:
-        countMessage = " for {} tasks".format(len(objects))
-    except TypeError:
-        pass
-
     if message != "":
         message += ": "
-    print("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
+    print("{0}Launching {1} threads for {2} tasks...".format(message, threadCount, len(objects)))
     sys.stdout.flush()
     currentTime = time.time()
 

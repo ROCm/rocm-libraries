@@ -35,6 +35,9 @@ target_sources(hostnumerics-core
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
             include/roc/hostnumerics/scalar_type.hpp
+            include/roc/hostnumerics/shape.hpp
+            include/roc/hostnumerics/expected.hpp
+            include/roc/hostnumerics/layout.hpp
 )
 
 # hostnumerics will add input generation, reference operations, and comparison.
@@ -45,6 +48,7 @@ add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
 if(HOSTNUMERICS_BUILD_TESTING)
+    list(APPEND CMAKE_MODULE_PATH "${HostNumerics_SOURCE_DIR}/cmake")
     enable_testing()
     add_subdirectory(tests)
 endif()

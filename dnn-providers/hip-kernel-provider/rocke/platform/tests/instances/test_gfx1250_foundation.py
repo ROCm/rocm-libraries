@@ -68,6 +68,7 @@ class TestGfx1250Arch(unittest.TestCase):
         expected = {
             "gfx11-generic": MemoryCapabilities(**none),
             "gfx1151": MemoryCapabilities(**none),
+            "gfx12-generic": MemoryCapabilities(**none),
             "gfx1201": MemoryCapabilities(**none),
             "gfx1250": MemoryCapabilities(
                 **dict(none, has_async_global_lds=True, has_tdm=True),

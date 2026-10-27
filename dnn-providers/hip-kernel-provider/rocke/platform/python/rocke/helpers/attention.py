@@ -418,8 +418,8 @@ def wave64_reduce_sum(b: IRBuilder, v: Value) -> Value:
 #     long-standing CDNA path (``warp_xor_reduce_max/sum`` default stages=4).
 #   * wave32 WMMA 16x16x16 : a C-row spans the 16 lanes of one wave32 half
 #     (``lane // 16`` fixed) -> 4 XOR stages (masks 1,2,4,8) -- the masks
-#     stay inside the 32-lane half and lower to ``ds_swizzle`` (see
-#     ``instances/gfx1151/wmma_fmha_fwd.py::_half_reduce``).
+#     stay inside the 32-lane half and lower to ``ds_swizzle`` (the RDNA
+#     wave32 path of ``rocke.helpers.mfma_attention``).
 #
 # Both reduce one 16-lane row in 4 stages, so the wave32 path is *not* a
 # different algorithm -- only the wave_size context differs. These helpers give
@@ -465,7 +465,7 @@ def wave_reduce_max(
     4-stage XOR sequence (masks 1,2,4,8) of :func:`warp_xor_reduce_max`, so
     the long-standing CDNA path is reproduced byte-for-byte. The wave32 WMMA
     softmax passes ``wave_size=32`` (still ``lanes_per_row=16``) and gets the
-    same 4-stage butterfly, matching the hand-written wave32 ``_half_reduce``.
+    same 4-stage butterfly as the RDNA wave32 path of ``rocke.helpers.mfma_attention``.
 
     The XOR masks (``< lanes_per_row``) always stay inside one wave half on
     wave32, so :meth:`IRBuilder.warp_shuffle_xor` lowers them to the in-half
@@ -681,6 +681,23 @@ def mfma_32x32x16_for_dtype(
 # Binary search on ``cu_q``
 # ---------------------------------------------------------------------------
 
+# Trip count when the batch size is unknown (num_seqs <= 0), as in direct
+# unit-test specs. Enough for any i32 batch count.
+BINARY_SEARCH_FALLBACK_ITERS = 32
+
+
+def binary_search_seq_idx_iters(num_seqs: int, *, floor: int = 1) -> int:
+    """Trip count for :func:`binary_search_seq_idx` over ``num_seqs`` sequences.
+
+    ``ceil(log2(num_seqs + 1))``, at least ``floor``, or
+    :data:`BINARY_SEARCH_FALLBACK_ITERS` when ``num_seqs`` is unknown. Spec
+    classes specialize ``iterations`` with this, and launcher cache keys that
+    skip building the spec key on it, so both share one definition.
+    """
+    if num_seqs <= 0:
+        return BINARY_SEARCH_FALLBACK_ITERS
+    return max(floor, int(math.ceil(math.log2(num_seqs + 1))))
+
 
 def binary_search_seq_idx(
     b: IRBuilder,
@@ -698,8 +715,8 @@ def binary_search_seq_idx(
     ``find_seq_idx``. By default (``per_token=False``) the loop
     invariant is ``cu_q[i] // BLOCK_Q + i <= target`` (i.e. the
     cumulative Q-block count up to sequence ``i``). The caller
-    specializes ``iterations`` from the known problem batch size;
-    32 is a safe fallback for unspecialized tests.
+    specializes ``iterations`` from the known problem batch size with
+    :func:`binary_search_seq_idx_iters`.
 
     P49: ``per_token=True`` switches to per-token mode
     (``cu_q[s] <= q_token < cu_q[s+1]``) used by ``fmha_paged_prefill``,
@@ -828,8 +845,8 @@ def pv32_v_load_paired(
     Reference inlined version at ``instances/attention_tiled_2d.py:
     2610-2666`` (TRANSPOSED_HALF_LOCAL_PV branch). Same lane-layout
     arithmetic, just lifted into a callable so the future P12 / P47
-    swap to ``ds_read_b128_tr_b16`` is a one-line edit at every call
-    site.
+    swap to a wide transpose read would be a one-line edit at every call
+    site (gfx950 has none; gfx1250 has ``ds_load_tr16_b128``).
 
     Inputs:
 

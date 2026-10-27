@@ -1,0 +1,78 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# MAF partial-store regression: multiple vectors share a scalar workspace offset.
+# This shape selects split-K with the fixed-grid schedule below. FP32 output exposes lost
+# contributions that FP8 saturation hid; 257 samples keep the long-K check small.
+TestParameters:
+  streamk_schedules: [{grid: 48, reduction: tree}]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940,
+          skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011,
+          skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102,
+          skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters:
+  Architecture: gfx1250
+  NumElementsToValidate: 257
+  NumElementsToValidateWinner: 257
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  KernelTime: false
+  CpuThreads: 4
+  PrintSolutionRejectionReason: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: S
+    ComputeDataType: S
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+  - BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction: [[16, 16, 128, 1, 1, 8, 8, 2, 2]]
+    - DepthU: [256]
+    - TileProcessingStrategy: [StreamK]
+    - WorkAssignment: [StaticGrid]
+    - StreamKFixupTreeReduction: [1]
+    - ClusterDim: [[1, 1], [4, 4]]
+    - TDMInst: [3]
+    - TDMIterateMode: [-1]
+    - UseSgprForGRO: [0]
+    - InitCIterWmma: [0]
+    - SwInstructionPrefetch: [0]
+    - ClusterAIDMapping: [-2]
+    - HalfPLR: [1]
+    - WavefrontSize: [32]
+    - ScheduleIterAlg: [4]
+    - StaggerU: [0]
+    - WorkGroupMapping: [1]
+    - PrefetchGlobalRead: [2]
+    - PrefetchLocalRead: [1]
+    - ForceDisableShadowInit: [true]
+    - ExpandPointerSwap: [false]
+    - 1LDSBuffer: [0]
+    - SourceSwap: [true]
+    - GlobalSplitU: [1]
+    - StoreRemapVectorWidth: [0]
+    - VectorWidthB: [4]
+    - LDSSegmentInterleave: [1]
+    - LDSSegmentBRotate: [0]
+    - NumElementsPerBatchStore: [16]
+    - GroupLoadStore: [true]
+    - InterleaveAlpha: [2]
+    - CompactLoopStore: [false]
+    - PrefetchGL2: [2]
+    - StinkyTofuParameters: [{DsReadDrainLatency: 64, DsReadPerCap: 2, DsReadThrottleLatency: 96}]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [2048, 4096, 1, 131072]

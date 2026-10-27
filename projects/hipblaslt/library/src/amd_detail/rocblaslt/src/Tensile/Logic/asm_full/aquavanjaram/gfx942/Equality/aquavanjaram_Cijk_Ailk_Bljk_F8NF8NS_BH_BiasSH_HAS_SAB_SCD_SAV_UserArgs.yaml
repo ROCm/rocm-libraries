@@ -252,6 +252,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2vpfnA0pr
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU2_SUM1_SUS64_WGM304_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -394,6 +395,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 1
+  SolutionUID: 0uR2vpfmzvjL
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_4_SU64_SUM1_SUS2048_WGM1_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -540,6 +542,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 2
+  SolutionUID: 0uR2vpfmupc3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM1_SUS64_WGM1_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -688,6 +691,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 3
+  SolutionUID: 0uR2vpfnDCCo
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU0_SUM1_SUS0_WGM76_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -832,6 +836,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 4
+  SolutionUID: 0uR2vpfmFU0g
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM32_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU2_SUM1_SUS128_WGM1_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -980,6 +985,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 5
+  SolutionUID: 0uR2vpfmnDzK
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_LBSPPA1024_LPA64_MIWT4_6_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_LBSPPA1024_LPA64_MIWT4_6_SU2_SUM0_SUS64_WG32_8_1_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -1129,6 +1135,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 6
+  SolutionUID: 0uR2vpfnH9Bw
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT1_3_SU4_SUM1_SUS512_WGM16_WGMXCC16_WGMXCCG304
   1LDSBuffer: 1
@@ -1278,6 +1285,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 7
+  SolutionUID: 0uR2vpfmJUHV
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU4_SUM0_SUS128_WGM19_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -1428,6 +1436,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 8
+  SolutionUID: 0uR2vpfnHuB6
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU4_SUM0_SUS128_WGM8_WGMXCC4_WGMXCCG152
   1LDSBuffer: 1
@@ -1574,6 +1583,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 9
+  SolutionUID: 0uR2vpfn4bsw
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU0_SUM1_SUS0_WGM8_WGMXCC4_WGMXCCG304
   1LDSBuffer: 1
@@ -1724,6 +1734,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 10
+  SolutionUID: 0uR2vpfmVCIq
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x96x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x96x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_6_SU32_SUM1_SUS256_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -1865,6 +1876,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 11
+  SolutionUID: 0uR2vpfmOziz
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU4_SUM1_SUS32_WGM1_WGMXCC1_WGMXCCGn1
   AssignedDerivedParameters: true
@@ -2009,6 +2021,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 12
+  SolutionUID: 0uR2vpfmqsOC
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU0_SUM1_SUS0_WGM8_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -2151,6 +2164,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 13
+  SolutionUID: 0uR2vpfn7VHX
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU0_SUM1_SUS0_WGM8_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -2292,6 +2306,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 14
+  SolutionUID: 0uR2vpfnK2Z8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU8_SUM1_SUS512_WGM152_WGMXCC8_WGMXCCG152
   AssertFree0ElementMultiple: 16
@@ -2443,6 +2458,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 15
+  SolutionUID: 0uR2vpfmHFfT
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM4_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -2586,6 +2602,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 16
+  SolutionUID: 0uR2vpfmqQy3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU16_SUM1_SUS1024_WGM304_WGMXCC4_WGMXCCG304
   1LDSBuffer: 1
@@ -2737,6 +2754,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 17
+  SolutionUID: 0uR2vpfnCPjY
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT2_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_2_SU4_SUM1_SUS256_WGM304_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -2879,6 +2897,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 18
+  SolutionUID: 0uR2vpfnJyRP
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM8_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU2_SUM0_SUS512_WGM1_WGMXCC1_WGMXCCG0
   1LDSBuffer: 1
@@ -3023,6 +3042,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 19
+  SolutionUID: 0uR2vpfms6PJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT1_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_2_SU4_SUM1_SUS256_WGM4_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -3169,6 +3189,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 20
+  SolutionUID: 0uR2vpfnAahO
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS256_WGM1_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -3315,6 +3336,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: true
 - SolutionIndex: 21
+  SolutionUID: 0uR2vpfmaTJi
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU32_SUM0_SUS512_WGM152_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -3463,6 +3485,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 22
+  SolutionUID: 0uR2vpfn3qkV
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM0_SUS128_WGM16_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -3609,6 +3632,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 23
+  SolutionUID: 0uR2vpfnN6UJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM0_SUS256_WGM8_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -3757,6 +3781,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 24
+  SolutionUID: 0uR2vpfmrAyI
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU4_SUM1_SUS2048_WGM1_WGMXCC16_WGMXCCG304
   AssertSummationElementMultiple: 16
@@ -3904,6 +3929,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 25
+  SolutionUID: 0uR2vpfmyxSH
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU4_SUM1_SUS64_WGM1_WGMXCC1_WGMXCCG152
   1LDSBuffer: 1
@@ -4051,6 +4077,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 26
+  SolutionUID: 0uR2vpfmNSNE
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU4_SUM1_SUS64_WGM38_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -4198,6 +4225,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 27
+  SolutionUID: 0uR2vpfmz8Hj
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU8_SUM0_SUS512_WGM16_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -4343,6 +4371,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 28
+  SolutionUID: 0uR2vpfme1JY
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM304_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -4489,6 +4518,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 29
+  SolutionUID: 0uR2vpfmz9zi
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM0_SUS128_WGM16_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -4637,6 +4667,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 30
+  SolutionUID: 0uR2vpfmnL6X
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU8_SUM1_SUS128_WGM76_WGMXCC2_WGMXCCG0
   1LDSBuffer: 1
@@ -4785,6 +4816,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 31
+  SolutionUID: 0uR2vpflZD9C
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_8_SU0_SUM1_SUS0_WGM1_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -4933,6 +4965,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 32
+  SolutionUID: 0uR2vpflgg8l
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU8_SUM1_SUS256_WGM1_WGMXCC16_WGMXCCG304
   1LDSBuffer: 1
@@ -5082,6 +5115,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 33
+  SolutionUID: 0uR2vpflxabl
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_K1_MIWT2_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_1_SU4_SUM1_SUS256_WGM304_WGMXCC4_WGMXCCG304
   1LDSBuffer: 1
@@ -5227,6 +5261,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 34
+  SolutionUID: 0uR2vpflaoAv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU2_SUM0_SUS256_WGM4_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -5372,6 +5407,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 35
+  SolutionUID: 0uR2vpflpyG8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x160x32_MI16x16x1_SN_AFEM8_AFEM16_ASEM16_K1_MIWT4_10
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x160x32_MI16x16x1_SN_AFEM8_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_10_SU2_SUM0_SUS64_WGM152_WGMXCC2_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -5524,6 +5560,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 36
+  SolutionUID: 0uR2vpflrb6L
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU16_SUM1_SUS128_WGM1_WGMXCC16_WGMXCCG0
   AssertFree1ElementMultiple: 16
@@ -5673,6 +5710,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 37
+  SolutionUID: 0uR2vpflSQaR
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU0_SUM1_SUS0_WGM16_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -5813,6 +5851,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 38
+  SolutionUID: 0uR2vpfm6pCS
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU2_SUM4_SUS64_WGM1_WGMXCC2_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -5962,6 +6001,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 39
+  SolutionUID: 0uR2vpflLUMM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU2_SUM0_SUS512_WGM16_WGMXCC8_WGMXCCG152
   1LDSBuffer: 1
@@ -6108,6 +6148,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 40
+  SolutionUID: 0uR2vpflIgMY
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC1_GSUWGMRR0_K1_MIWT8_8_SU16_SUM1_SUS32_WGM19_WGMXCC16_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -6260,6 +6301,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 41
+  SolutionUID: 0uR2vpflVMqZ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM0_SUS256_WGM8_WGMXCC8_WGMXCCG0
   AssertFree1ElementMultiple: 16
@@ -6406,6 +6448,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 42
+  SolutionUID: 0uR2vpflMnrR
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM32_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_8_SU16_SUM1_SUS64_WGM152_WGMXCC4_WGMXCCG76
   1LDSBuffer: 1
@@ -6558,6 +6601,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 43
+  SolutionUID: 0uR2vpflMGqj
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM1_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT2_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC1_GSUWGMRR1_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT2_2_SU4_SUM4_SUS2048_WG64_4_1_WGM1_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -6707,6 +6751,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: false
 - SolutionIndex: 44
+  SolutionUID: 0uR2vpflC8ES
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU8_SUM1_SUS64_WGM19_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -6852,6 +6897,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 45
+  SolutionUID: 0uR2vpflF7lx
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU16_SUM0_SUS256_WGM1_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -6997,6 +7043,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 46
+  SolutionUID: 0uR2vpflQacx
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM1_SUS1024_WGM1_WGMXCC1_WGMXCCGn1
   AssertFree0ElementMultiple: 16
@@ -7139,6 +7186,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 47
+  SolutionUID: 0uR2vpflQ2F4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM4_SUS512_WGM152_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -7283,6 +7331,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 48
+  SolutionUID: 0uR2vpflTYgJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU64_SUM1_SUS64_WGM304_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -7430,6 +7479,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 49
+  SolutionUID: 0uR2vpflWAQP
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM1_SUS1024_WGM38_WGMXCC8_WGMXCCG304
   AssertFree0ElementMultiple: 16
@@ -7574,6 +7624,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 50
+  SolutionUID: 0uR2vpflM0eF
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU32_SUM1_SUS128_WGM1_WGMXCC16_WGMXCCG0
   AssertSummationElementMultiple: 16
@@ -7722,6 +7773,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 51
+  SolutionUID: 0uR2vpfmCCWB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x208x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM32_K1_MIWT4_13
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x208x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_13_SU8_SUM0_SUS256_WGM304_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -7868,6 +7920,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 52
+  SolutionUID: 0uR2vpfl7ors
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU64_SUM1_SUS512_WGM19_WGMXCC1_WGMXCCG0
   AssertSummationElementMultiple: 32
@@ -8013,6 +8066,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 53
+  SolutionUID: 0uR2vpflcQN1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU16_SUM1_SUS64_WGM76_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -8163,6 +8217,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 54
+  SolutionUID: 0uR2vpflCAtI
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_K1_MIWT2_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_6_SU16_SUM0_SUS2048_WGM1_WGMXCC1_WGMXCCG0
   1LDSBuffer: 1
@@ -8311,6 +8366,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: true
 - SolutionIndex: 55
+  SolutionUID: 0uR2vpflx11p
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU8_SUM1_SUS1024_WGM1_WGMXCC1_WGMXCCG2
   AssignedDerivedParameters: true
@@ -8457,6 +8513,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 56
+  SolutionUID: 0uR2vpfm5mQ4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM2_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -8604,6 +8661,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 57
+  SolutionUID: 0uR2vpflRHYJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU16_SUM1_SUS128_WGM16_WGMXCC1_WGMXCCG4
   1LDSBuffer: 1
@@ -8750,6 +8808,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 58
+  SolutionUID: 0uR2vpflbz7N
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM1_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -8897,6 +8956,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 59
+  SolutionUID: 0uR2vpfmBat3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU16_SUM1_SUS512_WGM16_WGMXCC1_WGMXCCG76
   1LDSBuffer: 1
@@ -9044,6 +9104,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 60
+  SolutionUID: 0uR2vpflyLjm
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT8_8_SU64_SUM1_SUS64_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -9188,6 +9249,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 61
+  SolutionUID: 0uR2vpflgCn4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM8_GRVWB16_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_4_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM8_GRVWB16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_4_SU16_SUM0_SUS2048_WG64_4_1_WGM76_WGMXCC8_WGMXCCG16
   1LDSBuffer: 1
@@ -9336,6 +9398,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: false
 - SolutionIndex: 62
+  SolutionUID: 0uR2vpflZgqq
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU32_SUM1_SUS128_WGM8_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -9480,6 +9543,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 63
+  SolutionUID: 0uR2vpfmBvqI
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU8_SUM1_SUS128_WGM19_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -9630,6 +9694,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 64
+  SolutionUID: 0uR2vpfln640
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU0_SUM1_SUS0_WGM38_WGMXCC8_WGMXCCG304
   1LDSBuffer: 1
@@ -9778,6 +9843,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 65
+  SolutionUID: 0uR2vpfkl9nw
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU64_SUM0_SUS128_WGM4_WGMXCC8_WGMXCCG152
   1LDSBuffer: 1
@@ -9926,6 +9992,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 66
+  SolutionUID: 0uR2vpfkgexy
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x192x32_MI32x32x1_SN_AFEM16_AFEM16_ASEM1_GRVWB8_K1_LBSPPA0_LPA0_MIWT4_3_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x192x32_MI32x32x1_SN_AFEM16_AFEM16_ASEM1_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_MIWT4_3_SU8_SUM4_SUS32_WG64_4_1_WGM1_WGMXCC8_WGMXCCG152
   AssertFree0ElementMultiple: 16
@@ -10074,6 +10141,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 67
+  SolutionUID: 0uR2vpfk6WSM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x112x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT4_7
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x112x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_7_SU4_SUM0_SUS128_WGM4_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -10224,6 +10292,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 68
+  SolutionUID: 0uR2vpfkc91s
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT8_8_SU32_SUM1_SUS1024_WGM152_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -10372,6 +10441,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 69
+  SolutionUID: 0uR2vpfkIc7t
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU0_SUM1_SUS0_WGM8_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -10512,6 +10582,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 70
+  SolutionUID: 0uR2vpfkl6zJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_LBSPPA512_LPA16_LPB32_MIWT1_1_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC1_GSUWGMRR1_K1_LBSPPA512_LPA16_LPB32_MIWT1_1_SU4_SUM0_SUS256_WG32_8_1_WGM16_WGMXCC4_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -10658,6 +10729,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 71
+  SolutionUID: 0uR2vpfk4zFo
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU64_SUM1_SUS64_WGM16_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -10804,6 +10876,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 72
+  SolutionUID: 0uR2vpfkxCJA
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU2_SUM4_SUS128_WGM16_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -10956,6 +11029,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 73
+  SolutionUID: 0uR2vpfkSGbp
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM1_SUS1024_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -11103,6 +11177,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: true
 - SolutionIndex: 74
+  SolutionUID: 0uR2vpfk4cAX
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU8_SUM4_SUS1024_WGM19_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -11253,6 +11328,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 75
+  SolutionUID: 0uR2vpfkyZsK
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT8_8_SU8_SUM0_SUS128_WGM16_WGMXCC2_WGMXCCG0
   1LDSBuffer: 1
@@ -11400,6 +11476,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 76
+  SolutionUID: 0uR2vpfl2Vqa
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU4_SUM1_SUS128_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -11545,6 +11622,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 77
+  SolutionUID: 0uR2vpfkjKtp
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU16_SUM0_SUS2048_WGM1_WGMXCC2_WGMXCCG8
   1LDSBuffer: 1
@@ -11689,6 +11767,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: true
 - SolutionIndex: 78
+  SolutionUID: 0uR2vpfkaTVQ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_K1_MIWT4_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_6_SU4_SUM1_SUS256_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -11836,6 +11915,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 79
+  SolutionUID: 0uR2vpfkKy4n
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU32_SUM1_SUS256_WGM16_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -11980,6 +12060,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 80
+  SolutionUID: 0uR2vpfkb8Nm
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x64_MI32x32x1_SN_AFEM8_AFEM1_ASEM1_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT2_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x64_MI32x32x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT2_2_SU16_SUM1_SUS64_WG64_4_1_WGM8_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -12129,6 +12210,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 81
+  SolutionUID: 0uR2vpfkKGck
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT2_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC1_GSUWGMRR1_K1_MIWT2_3_SU2_SUM0_SUS256_WGM16_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -12276,6 +12358,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 82
+  SolutionUID: 0uR2vpfkUZJv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT8_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_4_SU8_SUM1_SUS32_WGM304_WGMXCC2_WGMXCCG16
   AssertFree0ElementMultiple: 16
@@ -12424,6 +12507,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 83
+  SolutionUID: 0uR2vpfk2rZT
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM152_WGMXCC2_WGMXCCG2
   1LDSBuffer: 1
@@ -12574,6 +12658,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 84
+  SolutionUID: 0uR2vpfkTJFU
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU32_SUM0_SUS128_WGM304_WGMXCC1_WGMXCCG2
   1LDSBuffer: 1
@@ -12717,6 +12802,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 85
+  SolutionUID: 0uR2vpfkXYa2
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_4_SU2_SUM1_SUS32_WGM1_WGMXCC1_WGMXCCGn1
   AssertFree0ElementMultiple: 16
@@ -12865,6 +12951,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 86
+  SolutionUID: 0uR2vpfkNlkD
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU4_SUM0_SUS256_WG32_8_1_WGM4_WGMXCC1_WGMXCCG0
   1LDSBuffer: 1
@@ -13013,6 +13100,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 87
+  SolutionUID: 0uR2vpfkXgbQ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM8_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU8_SUM0_SUS1024_WGM19_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -13162,6 +13250,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 88
+  SolutionUID: 0uR2vpfklPMV
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_K1_MIWT2_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT2_2_SU4_SUM0_SUS256_WGM304_WGMXCC4_WGMXCCG8
   1LDSBuffer: 1
@@ -13313,6 +13402,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 89
+  SolutionUID: 0uR2vpfkmXQG
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU4_SUM1_SUS128_WGM1_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -13458,6 +13548,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 90
+  SolutionUID: 0uR2vpfkupAS
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU8_SUM0_SUS32_WGM8_WGMXCC8_WGMXCCGn1
   AssertSummationElementMultiple: 16
@@ -13603,6 +13694,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 91
+  SolutionUID: 0uR2vpfl37he
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM1_AFEM8_ASEM32_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x32_MI16x16x1_SN_AFEM1_AFEM8_ASEM32_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_4_SU2_SUM0_SUS32_WGM304_WGMXCC8_WGMXCCG16
   AssertFree1ElementMultiple: 8
@@ -13754,6 +13846,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 92
+  SolutionUID: 0uR2vpfkdJzp
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_8_SU16_SUM1_SUS256_WGM2_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -13902,6 +13995,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 93
+  SolutionUID: 0uR2vpfkt6jB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU2_SUM0_SUS256_WGM76_WGMXCC8_WGMXCCGn1
   AssertFree0ElementMultiple: 8
@@ -14051,6 +14145,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 94
+  SolutionUID: 0uR2vpfk5ojQ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU16_SUM1_SUS32_WGM4_WGMXCC8_WGMXCCG0
   AssertSummationElementMultiple: 32
@@ -14198,6 +14293,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 95
+  SolutionUID: 0uR2vpfkYEA1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT8_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC1_GSUWGMRR0_K1_MIWT8_6_SU4_SUM1_SUS32_WGM38_WGMXCC8_WGMXCCG0
   AssignedDerivedParameters: true
@@ -14346,6 +14442,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 96
+  SolutionUID: 0uR2vpfkI43V
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU16_SUM0_SUS128_WGM304_WGMXCC1_WGMXCCG0
   1LDSBuffer: 1
@@ -14493,6 +14590,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 97
+  SolutionUID: 0uR2vpfkknSI
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU8_SUM0_SUS128_WGM304_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -14640,6 +14738,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 98
+  SolutionUID: 0uR2vpfk78xb
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU4_SUM0_SUS1024_WGM1_WGMXCC1_WGMXCCG76
   1LDSBuffer: 1
@@ -14785,6 +14884,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 99
+  SolutionUID: 0uR2vpfktH5b
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM0_SUS128_WGM2_WGMXCC16_WGMXCCG304
   1LDSBuffer: 1
@@ -14935,6 +15035,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 100
+  SolutionUID: 0uR2vpfjGJck
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x96x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT2_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x96x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_3_SU2_SUM0_SUS256_WGM1_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -15083,6 +15184,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 101
+  SolutionUID: 0uR2vpfjR52i
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU2_SUM1_SUS512_WGM76_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -15227,6 +15329,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 102
+  SolutionUID: 0uR2vpfj7RPI
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT8_8_SU16_SUM1_SUS64_WGM1_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -15376,6 +15479,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 103
+  SolutionUID: 0uR2vpfjluPO
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU4_SUM0_SUS64_WGM4_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -15520,6 +15624,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 104
+  SolutionUID: 0uR2vpfjp4hz
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM19_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -15669,6 +15774,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 105
+  SolutionUID: 0uR2vpfjcemz
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU4_SUM1_SUS1024_WGM1_WGMXCC1_WGMXCCG8
   1LDSBuffer: 1
@@ -15814,6 +15920,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 106
+  SolutionUID: 0uR2vpfjXS4x
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_AFEM1_AFEM16_ASEM8_K1_LBSPPA0_LPA0_LPB16_MIWT4_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI32x32x1_SN_AFEM1_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_MIWT4_2_SU2_SUM4_SUS1024_WG64_4_1_WGM19_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -15963,6 +16070,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 107
+  SolutionUID: 0uR2vpfjfJB4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT2_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_6_SU8_SUM0_SUS2048_WGM304_WGMXCC8_WGMXCCG152
   1LDSBuffer: 1
@@ -16111,6 +16219,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 108
+  SolutionUID: 0uR2vpfjQivk
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU2_SUM1_SUS128_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -16259,6 +16368,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 109
+  SolutionUID: 0uR2vpfj4HMH
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT4_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_6_SU16_SUM0_SUS512_WGM152_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -16406,6 +16516,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 110
+  SolutionUID: 0uR2vpfisUgl
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU16_SUM0_SUS64_WGM152_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -16553,6 +16664,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 111
+  SolutionUID: 0uR2vpfjMHsw
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU8_SUM1_SUS64_WGM16_WGMXCC1_WGMXCCG8
   1LDSBuffer: 1
@@ -16700,6 +16812,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 112
+  SolutionUID: 0uR2vpfj2LwH
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x256_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_K1_MIWT2_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x256_MI16x16x1_SN_AFEM16_AFEM8_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT2_3_SU2_SUM0_SUS256_WGM76_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -16850,6 +16963,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 113
+  SolutionUID: 0uR2vpfjSacM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC1_GSUWGMRR0_K1_MIWT8_8_SU0_SUM1_SUS0_WGM19_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -16998,6 +17112,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 114
+  SolutionUID: 0uR2vpfj8Yal
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU2_SUM1_SUS256_WGM38_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -17140,6 +17255,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 115
+  SolutionUID: 0uR2vpfis5ps
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU0_SUM1_SUS0_WGM2_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -17290,6 +17406,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 116
+  SolutionUID: 0uR2vpfjPO5n
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU4_SUM1_SUS32_WGM76_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -17436,6 +17553,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 117
+  SolutionUID: 0uR2vpfjOznB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT2_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_3_SU32_SUM0_SUS512_WGM1_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -17584,6 +17702,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 118
+  SolutionUID: 0uR2vpfjmiNF
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU16_SUM1_SUS64_WGM4_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -17735,6 +17854,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 119
+  SolutionUID: 0uR2vpfj3dus
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU8_SUM1_SUS128_WGM1_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -17881,6 +18001,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 120
+  SolutionUID: 0uR2vpfjCFg7
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM8_ASEM1_GRVWB8_K1_LBSPPA0_LPA0_MIWT4_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM8_ASEM1_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_MIWT4_2_SU2_SUM1_SUS32_WG64_4_1_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -18029,6 +18150,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 121
+  SolutionUID: 0uR2vpfiuG53
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU0_SUM1_SUS0_WGM1_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -18175,6 +18297,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 122
+  SolutionUID: 0uR2vpfj9T1M
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_14_SU4_SUM0_SUS1024_WGM2_WGMXCC2_WGMXCCG4
   1LDSBuffer: 1
@@ -18323,6 +18446,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 123
+  SolutionUID: 0uR2vpfit9aQ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU64_SUM1_SUS128_WGM76_WGMXCC2_WGMXCCG0
   1LDSBuffer: 1
@@ -18474,6 +18598,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 124
+  SolutionUID: 0uR2vpfjKcKB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU4_SUM0_SUS2048_WGM16_WGMXCC8_WGMXCCG16
   1LDSBuffer: 1
@@ -18619,6 +18744,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: false
 - SolutionIndex: 125
+  SolutionUID: 0uR2vpfjRLTG
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT2_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT2_6_SU4_SUM0_SUS256_WGM16_WGMXCC8_WGMXCCG304
   1LDSBuffer: 1
@@ -18769,6 +18895,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 126
+  SolutionUID: 0uR2vpfjn5EC
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT2_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x32x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_1_SU2_SUM0_SUS256_WGM2_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -18913,6 +19040,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 127
+  SolutionUID: 0uR2vpfjUys4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU8_SUM0_SUS256_WGM8_WGMXCC4_WGMXCCG76
   1LDSBuffer: 1
@@ -19059,6 +19187,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 128
+  SolutionUID: 0uR2vpfjFReN
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_K1_MIWT2_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x64x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_2_SU2_SUM0_SUS1024_WGM304_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -19208,6 +19337,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 129
+  SolutionUID: 0uR2vpfjQwN8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU8_SUM1_SUS64_WGM304_WGMXCC2_WGMXCCG0
   1LDSBuffer: 1
@@ -19356,6 +19486,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 130
+  SolutionUID: 0uR2vpfj6mAx
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS64_WGM152_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -19502,6 +19633,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 131
+  SolutionUID: 0uR2vpfiztKM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x16x256_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x16x256_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU4_SUM1_SUS256_WGM76_WGMXCC4_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -19648,6 +19780,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 132
+  SolutionUID: 0uR2vpfjSaE8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU2_SUM1_SUS128_WGM16_WGMXCC1_WGMXCCG152
   1LDSBuffer: 1
@@ -19796,6 +19929,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 133
+  SolutionUID: 0uR2vpfjle8s
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_14_SU64_SUM1_SUS128_WGM2_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -19944,6 +20078,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 134
+  SolutionUID: 0uR2vpfjAEfv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU64_SUM1_SUS512_WGM4_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -20091,6 +20226,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 135
+  SolutionUID: 0uR2vpfj2SWB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM32_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU16_SUM4_SUS512_WGM1_WGMXCC1_WGMXCCG19
   AssertFree1ElementMultiple: 8
@@ -20237,6 +20373,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 136
+  SolutionUID: 0uR2vpfi5Qy1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU16_SUM1_SUS512_WGM1_WGMXCC16_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -20388,6 +20525,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 137
+  SolutionUID: 0uR2vpfhnTni
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU8_SUM0_SUS128_WGM16_WGMXCC8_WGMXCCG8
   1LDSBuffer: 1
@@ -20537,6 +20675,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 138
+  SolutionUID: 0uR2vpficeGz
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU16_SUM0_SUS256_WGM152_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -20682,6 +20821,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 139
+  SolutionUID: 0uR2vpfim9k8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU8_SUM1_SUS1024_WG32_8_1_WGM19_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -20829,6 +20969,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 140
+  SolutionUID: 0uR2vpfidXpu
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_K1_MIWT2_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x32x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_GSU1_GSUC1_GSUWGMRR1_K1_MIWT2_2_SU16_SUM1_SUS128_WGM304_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -20975,6 +21116,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 141
+  SolutionUID: 0uR2vpfiUWLk
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU0_SUM1_SUS0_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -21118,6 +21260,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 142
+  SolutionUID: 0uR2vpfi7dAY
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x96x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_K1_LBSPPA1024_LPA32_LPB32_MIWT2_3_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x96x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LPA32_LPB32_MIWT2_3_SU2_SUM0_SUS128_WG32_8_1_WGM8_WGMXCC4_WGMXCCG152
   1LDSBuffer: 1
@@ -21264,6 +21407,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 143
+  SolutionUID: 0uR2vpfi6ZMH
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_K1_MIWT4_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_6_SU2_SUM0_SUS1024_WGM304_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -21412,6 +21556,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 144
+  SolutionUID: 0uR2vpfijZWA
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU4_SUM0_SUS256_WGM8_WGMXCC8_WGMXCCGn1
   AssertFree0ElementMultiple: 16
@@ -21555,6 +21700,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 145
+  SolutionUID: 0uR2vpficct3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM0_SUS128_WGM76_WGMXCC8_WGMXCCGn1
   AssertFree0ElementMultiple: 16
@@ -21698,6 +21844,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 146
+  SolutionUID: 0uR2vpfiLQar
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU2_SUM1_SUS128_WG32_8_1_WGM2_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -21841,6 +21988,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 147
+  SolutionUID: 0uR2vpfhpBVJ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_4_SU8_SUM0_SUS128_WGM304_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -21990,6 +22138,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 148
+  SolutionUID: 0uR2vpfinuWK
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT8_8_SU4_SUM0_SUS64_WGM76_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -22137,6 +22286,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 149
+  SolutionUID: 0uR2vpfi969C
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM8_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU2_SUM1_SUS128_WGM38_WGMXCC4_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -22285,6 +22435,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: true
 - SolutionIndex: 150
+  SolutionUID: 0uR2vpfi5mJr
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT2_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC1_GSUWGMRR1_K1_MIWT2_6_SU4_SUM4_SUS128_WGM4_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -22437,6 +22588,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 151
+  SolutionUID: 0uR2vpfi0KCf
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU32_SUM0_SUS2048_WGM1_WGMXCC1_WGMXCCG2
   1LDSBuffer: 1
@@ -22585,6 +22737,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 152
+  SolutionUID: 0uR2vpfiQ0Ew
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU8_SUM1_SUS1024_WGM16_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -22732,6 +22885,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 153
+  SolutionUID: 0uR2vpfiZBSd
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU8_SUM0_SUS128_WGM16_WGMXCC1_WGMXCCG1
   1LDSBuffer: 1
@@ -22877,6 +23031,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 154
+  SolutionUID: 0uR2vpfiOEyh
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU16_SUM1_SUS512_WGM1_WGMXCC1_WGMXCCG152
   AssertFree1ElementMultiple: 8
@@ -23022,6 +23177,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 155
+  SolutionUID: 0uR2vpfi55rN
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_14_SU2_SUM1_SUS128_WGM8_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -23166,6 +23322,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 156
+  SolutionUID: 0uR2vpfiKvis
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU32_SUM1_SUS256_WGM16_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -23310,6 +23467,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 157
+  SolutionUID: 0uR2vpfipDH1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_4_SU4_SUM1_SUS256_WGM19_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -23458,6 +23616,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 158
+  SolutionUID: 0uR2vpfhmgKa
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU32_SUM1_SUS64_WGM2_WGMXCC2_WGMXCCG4
   1LDSBuffer: 1
@@ -23609,6 +23768,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 159
+  SolutionUID: 0uR2vpfi3Om1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU4_SUM1_SUS64_WGM76_WGMXCC2_WGMXCCG152
   1LDSBuffer: 1
@@ -23757,6 +23917,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 160
+  SolutionUID: 0uR2vpfi06w3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_K1_MIWT1_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_2_SU2_SUM0_SUS256_WGM1_WGMXCC1_WGMXCCG2
   1LDSBuffer: 1
@@ -23903,6 +24064,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 161
+  SolutionUID: 0uR2vpfiMzY8
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x160x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_10
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x160x32_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_10_SU16_SUM0_SUS512_WGM16_WGMXCC8_WGMXCCG304
   AssertFree0ElementMultiple: 16
@@ -24051,6 +24213,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 162
+  SolutionUID: 0uR2vpfhyfoq
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU4_SUM0_SUS128_WGM1_WGMXCC1_WGMXCCGn1
   AssertFree1ElementMultiple: 16
@@ -24193,6 +24356,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 163
+  SolutionUID: 0uR2vpfiNGVe
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU2_SUM0_SUS512_WGM8_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -24338,6 +24502,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 164
+  SolutionUID: 0uR2vpfhmSOp
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU0_SUM1_SUS0_WGM304_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -24483,6 +24648,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 165
+  SolutionUID: 0uR2vpfhrSRV
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU8_SUM0_SUS2048_WGM152_WGMXCC1_WGMXCCG304
   AssertFree1ElementMultiple: 8
@@ -24624,6 +24790,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 166
+  SolutionUID: 0uR2vpfiiO6S
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_LBSPPA512_LPA16_LPB32_MIWT1_1_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT32x32x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LPA16_LPB32_MIWT1_1_SU4_SUM1_SUS256_WG32_8_1_WGM19_WGMXCC4_WGMXCCGn1
   AssertSummationElementMultiple: 16
@@ -24766,6 +24933,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 167
+  SolutionUID: 0uR2vpfiGOI9
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU4_SUM4_SUS256_WGM19_WGMXCC4_WGMXCCG76
   AssertFree0ElementMultiple: 8
@@ -24916,6 +25084,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 168
+  SolutionUID: 0uR2vpfih85m
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU64_SUM0_SUS2048_WGM2_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -25062,6 +25231,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: false
 - SolutionIndex: 169
+  SolutionUID: 0uR2vpfi7rRm
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT1_1_SU16_SUM1_SUS512_WGM8_WGMXCC4_WGMXCCG16
   AssertFree1ElementMultiple: 16
@@ -25209,6 +25379,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 170
+  SolutionUID: 0uR2vpfi9kVM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS1024_WGM1_WGMXCC32_WGMXCCG0
   1LDSBuffer: 1
@@ -25358,6 +25529,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 171
+  SolutionUID: 0uR2vpfhx8CA
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU64_SUM1_SUS128_WGM76_WGMXCC1_WGMXCCG304
   1LDSBuffer: 1
@@ -25507,6 +25679,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 172
+  SolutionUID: 0uR2vpfiilOB
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU32_SUM0_SUS2048_WGM304_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -25654,6 +25827,7 @@ Solutions:
   _staggerStrideShift: 5
   tailLoopOpt: false
 - SolutionIndex: 173
+  SolutionUID: 0uR2vpfhO3xq
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU2_SUM0_SUS1024_WGM152_WGMXCC2_WGMXCCG0
   1LDSBuffer: 1
@@ -25804,6 +25978,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 174
+  SolutionUID: 0uR2vpfhJKuC
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_GSU1_GSUC1_GSUWGMRR0_K1_MIWT8_8_SU8_SUM0_SUS64_WGM38_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -25953,6 +26128,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 175
+  SolutionUID: 0uR2vpfh6w7A
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x192x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_6_SU8_SUM0_SUS256_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -26099,6 +26275,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 176
+  SolutionUID: 0uR2vpfhZQ8v
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU8_SUM0_SUS2048_WGM1_WGMXCC1_WGMXCCGn1
   AssertFree1ElementMultiple: 8
@@ -26242,6 +26419,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 177
+  SolutionUID: 0uR2vpfhAba0
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB8_K1_LBSPPA0_LPA0_MIWT4_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_MIWT4_2_SU4_SUM0_SUS128_WG64_4_1_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -26392,6 +26570,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 178
+  SolutionUID: 0uR2vpfhYWBY
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM8_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_8_SU4_SUM0_SUS256_WGM304_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -26541,6 +26720,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 179
+  SolutionUID: 0uR2vpfhfAor
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU0_SUM1_SUS0_WGM304_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -26689,6 +26869,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 180
+  SolutionUID: 0uR2vpfhELfw
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC1_GSUWGMRR1_K1_MIWT8_8_SU64_SUM1_SUS64_WGM2_WGMXCC32_WGMXCCG0
   1LDSBuffer: 1
@@ -26842,6 +27023,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 181
+  SolutionUID: 0uR2vpfgaKdv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_8_SU0_SUM1_SUS0_WGM76_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -26987,6 +27169,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 182
+  SolutionUID: 0uR2vpfgiOGz
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU0_SUM1_SUS0_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -27130,6 +27313,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 183
+  SolutionUID: 0uR2vpfgoeoN
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB16_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_2_SU64_SUM0_SUS256_WG64_4_1_WGM1_WGMXCC1_WGMXCCG2
   1LDSBuffer: 1
@@ -27276,6 +27460,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 184
+  SolutionUID: 0uR2vpfhaNl1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU4_SUM1_SUS64_WGM304_WGMXCC1_WGMXCCG1
   1LDSBuffer: 1
@@ -27428,6 +27613,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 185
+  SolutionUID: 0uR2vpfh1FvQ
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM32_K1_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x64x128_MI16x16x1_SN_AFEM1_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU64_SUM1_SUS128_WGM38_WGMXCC16_WGMXCCG16
   AssertFree1ElementMultiple: 16
@@ -27577,6 +27763,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 186
+  SolutionUID: 0uR2vpfgsfo4
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB8_K1_LBSPPA0_LPA0_MIWT4_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI32x32x1_SN_AFEM8_AFEM16_ASEM1_GRVWB8_GSU1_GSUC0_GSUWGMRR1_K1_LBSPPA0_LPA0_MIWT4_2_SU4_SUM0_SUS128_WG64_4_1_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 8
@@ -27724,6 +27911,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: true
 - SolutionIndex: 187
+  SolutionUID: 0uR2vpfhJvRD
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT2_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x48x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_3_SU4_SUM1_SUS512_WGM19_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -27869,6 +28057,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 188
+  SolutionUID: 0uR2vpfgpDQv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU16_SUM0_SUS256_WGM8_WGMXCC2_WGMXCCG16
   1LDSBuffer: 1
@@ -28016,6 +28205,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 189
+  SolutionUID: 0uR2vpfgl2mF
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM32_GSU1_GSUC1_GSUWGMRR1_K1_MIWT4_4_SU4_SUM1_SUS256_WGM38_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -28164,6 +28354,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 190
+  SolutionUID: 0uR2vpfhRIPy
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU16_SUM0_SUS256_WGM8_WGMXCC4_WGMXCCG0
   1LDSBuffer: 1
@@ -28312,6 +28503,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 191
+  SolutionUID: 0uR2vpfh6xu5
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_K1_MIWT1_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_2_SU4_SUM1_SUS512_WGM1_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -28460,6 +28652,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 192
+  SolutionUID: 0uR2vpfh8xsC
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT1_3
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT64x48x256_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_3_SU2_SUM0_SUS256_WGM4_WGMXCC8_WGMXCCGn1
   1LDSBuffer: 1
@@ -28601,6 +28794,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 193
+  SolutionUID: 0uR2vpfhGepi
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM16_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM8_AFEM16_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_4_SU2_SUM1_SUS128_WGM8_WGMXCC1_WGMXCCG38
   1LDSBuffer: 1
@@ -28754,6 +28948,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 194
+  SolutionUID: 0uR2vpfhYQqN
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU0_SUM1_SUS0_WGM304_WGMXCC4_WGMXCCGn1
   1LDSBuffer: 1
@@ -28902,6 +29097,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 195
+  SolutionUID: 0uR2vpfhWKtm
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM16_AFEM16_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU2_SUM4_SUS256_WG32_8_1_WGM19_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -29050,6 +29246,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 196
+  SolutionUID: 0uR2vpfgpWEv
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_11_SU4_SUM0_SUS2048_WGM38_WGMXCC32_WGMXCCG0
   1LDSBuffer: 1
@@ -29195,6 +29392,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 197
+  SolutionUID: 0uR2vpfhGzKh
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_K1_MIWT1_2
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT16x128x256_MI16x16x1_SN_AFEM1_AFEM8_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_2_SU32_SUM1_SUS512_WGM304_WGMXCC8_WGMXCCG0
   1LDSBuffer: 1
@@ -29342,6 +29540,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 198
+  SolutionUID: 0uR2vpfgulQL
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_MIWT8_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x32_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_4_SU2_SUM4_SUS512_WGM1_WGMXCC1_WGMXCCGn1
   AssertSummationElementMultiple: 8
@@ -29489,6 +29688,7 @@ Solutions:
   _staggerStrideShift: 4
   tailLoopOpt: false
 - SolutionIndex: 199
+  SolutionUID: 0uR2vpfhSz4D
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM1_AFEM16_ASEM8_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_8_SU2_SUM1_SUS512_WGM19_WGMXCC8_WGMXCCG16
   1LDSBuffer: 1
@@ -29639,6 +29839,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 200
+  SolutionUID: 0uR2vpfgccIr
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU32_SUM0_SUS128_WGM16_WGMXCC2_WGMXCCG304
   1LDSBuffer: 1
@@ -29786,6 +29987,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 201
+  SolutionUID: 0uR2vpfhN1kC
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x208x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_K1_MIWT4_13
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x208x64_MI16x16x1_SN_AFEM8_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_13_SU4_SUM1_SUS64_WGM304_WGMXCC2_WGMXCCGn1
   AssertFree0ElementMultiple: 8
@@ -29929,6 +30131,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 202
+  SolutionUID: 0uR2vpfhI114
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM16_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU64_SUM4_SUS512_WGM304_WGMXCC32_WGMXCCG0
   1LDSBuffer: 1
@@ -30079,6 +30282,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: false
 - SolutionIndex: 203
+  SolutionUID: 0uR2vpfgcI94
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM1_GRVWB16_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_4_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI32x32x1_SN_AFEM1_AFEM1_ASEM1_GRVWB16_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_LRVW16_MIWT4_4_SU32_SUM1_SUS128_WG64_4_1_WGM76_WGMXCC2_WGMXCCGn1
   1LDSBuffer: 1
@@ -30224,6 +30428,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 204
+  SolutionUID: 0uR2vpfgwr89
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU32_SUM0_SUS256_WGM16_WGMXCC1_WGMXCCG304
   1LDSBuffer: 1
@@ -30366,6 +30571,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 205
+  SolutionUID: 0uR2vpfggjQh
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_K1_MIWT4_14
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR0_K1_MIWT4_14_SU8_SUM0_SUS256_WGM16_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -30508,6 +30714,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: false
 - SolutionIndex: 206
+  SolutionUID: 0uR2vpfgiLmK
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM8_ASEM32_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU4_SUM0_SUS2048_WGM152_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -30658,6 +30865,7 @@ Solutions:
   _staggerStrideShift: 6
   tailLoopOpt: false
 - SolutionIndex: 207
+  SolutionUID: 0uR2vpfglIzM
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_K1_MIWT4_11
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_AFEM16_AFEM16_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_11_SU2_SUM1_SUS32_WGM1_WGMXCC8_WGMXCCG0
   AssertFree0ElementMultiple: 16
@@ -30806,6 +31014,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 208
+  SolutionUID: 0uR2vpfharb0
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI32x32x1_SN_AFEM1_AFEM1_ASEM8_K1_LBSPPA0_LPA0_LPB16_MIWT2_2_WG64_4_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x128x128_MI32x32x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA0_LPA0_LPB16_MIWT2_2_SU4_SUM0_SUS128_WG64_4_1_WGM1_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1
@@ -30956,6 +31165,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 209
+  SolutionUID: 0uR2vpfgahJ1
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM8_AFEM8_ASEM16_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU2_SUM1_SUS256_WGM2_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -31106,6 +31316,7 @@ Solutions:
   _staggerStrideShift: 2
   tailLoopOpt: false
 - SolutionIndex: 210
+  SolutionUID: 0uR2vpfhEp9w
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_K1_MIWT4_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM1_GSU1_GSUC0_GSUWGMRR1_K1_MIWT4_8_SU64_SUM1_SUS512_WGM1_WGMXCC16_WGMXCCG0
   1LDSBuffer: 1
@@ -31253,6 +31464,7 @@ Solutions:
   _staggerStrideShift: 3
   tailLoopOpt: true
 - SolutionIndex: 211
+  SolutionUID: 0uR2vpfg8HzF
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU4_SUM1_SUS64_WGM1_WGMXCC32_WGMXCCG0
   1LDSBuffer: 1
@@ -31399,6 +31611,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: true
 - SolutionIndex: 212
+  SolutionUID: 0uR2vpfg9kN3
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_K1_MIWT4_4
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x64x128_MI16x16x1_SN_AFEM1_AFEM8_ASEM16_GSU1_GSUC1_GSUWGMRR0_K1_MIWT4_4_SU64_SUM0_SUS256_WGM16_WGMXCC4_WGMXCCG16
   1LDSBuffer: 1
@@ -31544,6 +31757,7 @@ Solutions:
   _staggerStrideShift: 1
   tailLoopOpt: true
 - SolutionIndex: 213
+  SolutionUID: 0uR2vpffcUfp
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_WG32_8_1
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_AFEM1_AFEM1_ASEM8_GSU1_GSUC0_GSUWGMRR1_K1_LBSPPA2048_LPA64_LPB32_MIWT4_2_SU16_SUM0_SUS128_WG32_8_1_WGM1_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -31693,6 +31907,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 214
+  SolutionUID: 0uR2vpfgXSA6
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_K1_MIWT2_6
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT128x96x128_MI16x16x1_SN_AFEM8_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT2_6_SU0_SUM1_SUS0_WGM38_WGMXCC16_WGMXCCGn1
   1LDSBuffer: 1
@@ -31838,6 +32053,7 @@ Solutions:
   _staggerStrideShift: 0
   tailLoopOpt: false
 - SolutionIndex: 215
+  SolutionUID: 0uR2vpffRLuD
   KernelNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_K1_MIWT8_8
   SolutionNameMin: Cijk_Ailk_Bljk_F8NF8NS_BH_BiasSH_HAS_SAB_SCD_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_AFEM16_AFEM1_ASEM32_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_8_SU4_SUM0_SUS2048_WGM16_WGMXCC1_WGMXCCGn1
   1LDSBuffer: 1

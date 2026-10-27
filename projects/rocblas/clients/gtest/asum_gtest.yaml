@@ -181,7 +181,20 @@ Tests:
       - asum_strided_batched: *double_precision_complex_real
     pointer_mode_device: false
 
-# nightly
+  # AIROCBLAS-1437
+  # Stride 0 keeps asum_strided_batched to one vector (~8.6 GiB f32)
+  - name: asum_ILP64_multi_pass_batch
+    category: nightly
+    pointer_mode_host: false
+    initialization: hpl
+    arguments:
+      - { N: 2147483649, incx: 1, stride_x: 0, batch_count: 2 }
+    api: [ C_64 ]
+    os_flags: [ LINUX ]
+    function:
+      - asum_batched: *single_precision
+      - asum_strided_batched: *single_precision
+
   - name: blas1
     category: nightly
     N: [ 300001 ]

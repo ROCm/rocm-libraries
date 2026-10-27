@@ -234,6 +234,7 @@ typedef hipblasStatus_t (*hipblasLtDeviceCommAllgatherFn)(void*       userData,
 typedef enum {
 	HIPBLASLT_BATCH_MODE_STRIDED = 0,
 	HIPBLASLT_BATCH_MODE_POINTER_ARRAY = 1,
+	HIPBLASLT_BATCH_MODE_GROUPED = 2, /**<Grouped GEMM: each group has its own shape. Set only by ``hipblasLtGroupedMatrixLayoutCreate``. */
 } hipblasLtBatchMode_t;
 
 /*! \ingroup types_module
@@ -300,8 +301,50 @@ typedef enum {
    * Note that for non-batched or Strided Batch GEMM case, we can directly apply
    * the offset value by using the strided-offset value.
    */
-  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8
+  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8,
+
+  /** Grouped layouts only: device array of ``groupCount`` row counts, or NULL to use
+   * ``HIPBLASLT_MATRIX_LAYOUT_ROWS`` for every group.
+   *
+   * ``void*``
+   */
+  HIPBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY = 9,
+
+  /** Grouped layouts only: device array of ``groupCount`` column counts, or NULL to
+   * use ``HIPBLASLT_MATRIX_LAYOUT_COLS`` for every group.
+   *
+   * ``void*``
+   */
+  HIPBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY = 10,
+
+  /** Grouped layouts only: device array of ``groupCount`` leading dimensions, or
+   * NULL to use ``HIPBLASLT_MATRIX_LAYOUT_LD`` for every group.
+   *
+   * ``void*``
+   */
+  HIPBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY = 11,
+
+  /** Width of the integers in the rows and cols arrays. See ``hipblasLtIntegerWidth_t``.
+   *
+   * ``int32_t``, default: ``HIPBLASLT_INTEGER_WIDTH_32``.
+   */
+  HIPBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH = 12,
+
+  /** Width of the integers in the leading-dimension array. See ``hipblasLtIntegerWidth_t``.
+   *
+   * ``int32_t``, default: ``HIPBLASLT_INTEGER_WIDTH_32``.
+   */
+  HIPBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH = 13
 } hipblasLtMatrixLayoutAttribute_t;
+
+/*! \ingroup types_module
+ *  \brief Width of the integers in the dimension arrays of a grouped matrix layout.
+ */
+
+typedef enum {
+  HIPBLASLT_INTEGER_WIDTH_32 = 0, /**<32-bit integers (``int32_t``). */
+  HIPBLASLT_INTEGER_WIDTH_64 = 1, /**<64-bit integers (``int64_t``). */
+} hipblasLtIntegerWidth_t;
 
 /*! \ingroup types_module
  *  \brief Pointer mode to use for alpha.
@@ -327,8 +370,34 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT = 1006, /**<Scaling factors are a dense ``[M][ceil(K/32)]`` tensor that contains a dedicated ``HIP_R_16BF`` scaling factor for each 32-element block in the K dimension of the corresponding data tensor, with the K/32 dimension innermost. Symmetric quantization only (no zero-point). Currently supported for matrix A only, with A of type ``HIP_R_4I``, and the scale type named here must equal the type of matrix B. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT = 1007, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with a block size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT = 1008, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT = 1009, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` plus int4 zero-points (asymmetric quantization). The scale pointer addresses one allocation: the ``[M][ceil(K/32)]`` scales as in ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT``, then, at the next 256-byte boundary, ``ceil(M/8) * ceil(K/32)`` 32-bit words of packed int4 zero-points. Word ``(m/8)*ceil(K/32) + k/32`` holds the zero-point of row ``m`` and K element ``k`` in bits ``4*(m%8)`` to ``4*(m%8)+3``, in the domain selected by ``HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT``. The dequantized weight is ``(q - z) * s``. Currently supported for matrix A only, with A of type ``HIP_R_4I``. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT = 1010, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with a block size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_ZP_EXT = 1011, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT = 1012, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with ``HIP_R_16F`` scales. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT = 1013, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT`` with a block size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT = 1014, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 128. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
+
+/*! \ingroup types_module
+ *  \brief Encoding of the int4 weights in matrix A on the w4a16 path; independent of the
+ *  scale mode.
+ */
+typedef enum
+{
+    /*! Two's-complement int4 in ``[-8, 7]``, nibbles in K order: element ``2n``
+     *  in the low nibble of byte ``n``. Default. */
+    HIPBLASLT_INT4_ENCODING_SIGNED_EXT = 0,
+    /*! Unsigned int4 in ``[0, 15]``, element ``2n`` in the low nibble of byte ``n``; implicit zero-point 8 when no zero-point tensor is supplied. Matches the GPTQ / compressed-tensors ``qweight`` byte layout. */
+    HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT = 1,
+    HIPBLASLT_INT4_ENCODING_END_EXT
+} hipblasLtInt4Encoding_t;
 
 /*! \ingroup types_module
  *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
@@ -356,7 +425,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER = 7,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix C. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER = 8,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix D. Default value: NULL. Data type: ``void*`` / ``const void*``. */
-  HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix AUX. Default value: NULL. Data type: ``void*`` / ``const void*``. */
+  HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Not supported: no kernel applies a scale to the AUX output. Setting a non-NULL pointer returns ``HIPBLAS_STATUS_NOT_SUPPORTED``; setting NULL succeeds. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER = 10,      /**<Epilogue auxiliary buffer pointer in the device memory. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD = 11,           /**<The leading dimension of the epilogue auxiliary buffer pointer in the device memory. Data type: ``int64_t``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE = 12, /**<The batch stride of the epilogue auxiliary buffer pointer in the device memory. Data type: ``int64_t``. */
@@ -367,6 +436,8 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET = 33,                /**<Target the matmul kernel selection and persistent-grid sizing for this many compute units (CUs). Set to ``0`` (the default) to use all CUs the device exposes. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. This is a hint to the library heuristics; the launched grid is not guaranteed to use exactly this many CUs. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE = 34,             /**<Grouped GEMM only. ``0`` (default): one alpha for all groups. ``1``: with ``HIPBLASLT_POINTER_MODE_DEVICE``, ``alpha`` is a device array of ``groupCount`` pointers, one per group. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE = 35,              /**<Grouped GEMM only. Same as ``HIPBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE`` for ``beta``. Data type: ``int64_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
@@ -376,6 +447,7 @@ typedef enum {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
 #endif
+  HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107, /**<Encoding of the int4 weights in matrix A. Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtInt4Encoding_t``, default ``HIPBLASLT_INT4_ENCODING_SIGNED_EXT``; others are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Only used when A is ``HIP_R_4I`` with a w4a16 ``VEC*_16BF``/``VEC*_16F`` scale mode. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -386,7 +458,14 @@ typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Values above ``UINT32_MAX`` (4 GiB - 1), such as ``SIZE_MAX`` for no limit, are clamped to ``UINT32_MAX``, which is the value read back. Data type: ``uint64_t``. */
   HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX = 3
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS = 3,    /**<Grouped GEMM only. Expected average number of rows of D per group. ``0`` (default) means not set. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS = 4,    /**<Grouped GEMM only. Expected average number of columns of D per group. ``0`` (default) means not set. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM = 5,  /**<Grouped GEMM only. Expected average K per group. ``0`` (default) means not set. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT = 100,       /**<Grouped GEMM only. Upper bound on the rows of D in any group. Sizes beyond the bounds are undefined behavior. ``0`` (default) means not set. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT = 101,       /**<Grouped GEMM only. Upper bound on the columns of D in any group. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT = 102, /**<Grouped GEMM only. Upper bound on the sum of the rows of D over all groups. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT = 103, /**<Grouped GEMM only. Upper bound on the sum of the columns of D over all groups. Data type: ``int64_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX
 } hipblasLtMatmulPreferenceAttributes_t;
 
 /*! \ingroup types_module
@@ -845,6 +924,41 @@ hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtMatrixLayoutCreate(
     hipblasLtMatrixLayout_t* matLayout, hipDataType type, uint64_t rows, uint64_t cols, int64_t ld);
+
+/*! \ingroup library_module
+ *  \brief Create a grouped matrix layout descriptor
+ *
+ *  \details
+ *  Creates a layout whose batch mode is ``HIPBLASLT_BATCH_MODE_GROUPED``. Each of the
+ *  ``groupCount`` groups has its own shape, read on the device when ``hipblasLtMatmul`` runs.
+ *  In grouped mode, the matrix arguments of ``hipblasLtMatmul`` are device arrays of
+ *  ``groupCount`` pointers.
+ *
+ *  @param[out]
+ *  matLayout Pointer to the grouped layout descriptor.
+ *  @param[in]
+ *  type Data type of every group's matrix.
+ *  @param[in]
+ *  groupCount Number of groups, on the host.
+ *  @param[in]
+ *  rowsArray Device array of ``groupCount`` row counts, or NULL to use the
+ *  ``HIPBLASLT_MATRIX_LAYOUT_ROWS`` attribute for every group.
+ *  @param[in]
+ *  colsArray Device array of column counts, or NULL to use ``HIPBLASLT_MATRIX_LAYOUT_COLS``.
+ *  @param[in]
+ *  ldArray Device array of leading dimensions, or NULL to use ``HIPBLASLT_MATRIX_LAYOUT_LD``.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the descriptor was created successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If ``groupCount`` is negative.
+ *  \retval HIPBLAS_STATUS_ALLOC_FAILED If the memory could not be allocated.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGroupedMatrixLayoutCreate(hipblasLtMatrixLayout_t* matLayout,
+                                                   hipDataType              type,
+                                                   int                      groupCount,
+                                                   const void*              rowsArray,
+                                                   const void*              colsArray,
+                                                   const void*              ldArray);
 
 /*! \ingroup library_module
  *  \brief Destroy a matrix layout descriptor

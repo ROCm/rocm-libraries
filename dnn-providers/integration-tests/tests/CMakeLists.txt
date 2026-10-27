@@ -50,6 +50,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaFwdPlan.cpp
     TestGpuReductionSignatureKey.cpp
     TestGpuReductionPlan.cpp
+    TestGpuResampleSignatureKey.cpp
+    TestGpuResamplePlan.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
     TestGpuSdpaRaggedFwdSignatureKey.cpp
@@ -63,6 +65,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
+    TestBenchmark.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp
@@ -133,6 +136,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceMatmul.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceReduction.cpp
+    gpu-ref/TestGpuFpReferenceResampleBwd.cpp
     gpu-ref/TestGpuFpReferenceResampleFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp

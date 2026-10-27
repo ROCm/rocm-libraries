@@ -264,9 +264,9 @@ void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
                              rocke_value_t** quot,
                              rocke_value_t** rem)
 {
-    /* do_magic_division_dynamic: umul_hi, add, lshr */
+    /* do_magic_division_dynamic: umul_hi, no-unsigned-wrap add, lshr */
     rocke_value_t* tmp = rocke_b_umul_hi_i32(b, val, mult);
-    rocke_value_t* summed = rocke_b_add(b, tmp, val);
+    rocke_value_t* summed = rocke_b_add_nuw(b, tmp, val);
     rocke_value_t* q = rocke_b_lshr(b, summed, shift);
     rocke_value_t* prod = u24 ? rocke_conv_mul_u24(b, q, dim) : rocke_b_mul(b, q, dim);
     *quot = q;

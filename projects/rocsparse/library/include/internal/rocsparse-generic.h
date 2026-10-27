@@ -44,12 +44,10 @@
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
 #include "generic/rocsparse_spic0.h"
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-#include "generic/rocsparse_spmat_scale.h"
-#endif
 #include "generic/rocsparse_spildlt0.h"
 #include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
+#include "generic/rocsparse_spmat_scale.h"
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"

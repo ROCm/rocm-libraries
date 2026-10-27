@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 
 from config_harness import _isolated_globals_with_isa, _toolchain_for
-from Tensile import LibraryIO
-from Tensile.ExecutionPolicy import (
+from tensilelite import LibraryIO
+from tensilelite.ExecutionPolicy import (
     ALIASES, SELECTORS, normalize_execution_policy, normalize_execution_policy_with_defaults,
 )
-from Tensile.ExperimentalLibrary import _apply_overrides
-from Tensile.SolutionStructs.Naming import getSolutionNameFull
-from Tensile.TensileMergeLibrary import addKernel, reNameSolutions
+from tensilelite.ExperimentalLibrary import _apply_overrides
+from tensilelite.SolutionStructs.Naming import getSolutionNameFull
+from tensilelite.TensileMergeLibrary import addKernel, reNameSolutions
 
 pytestmark = pytest.mark.unit
 
@@ -199,7 +199,7 @@ def test_data_parallel_generated_layout_is_rederived_after_selector_override(
 @pytest.mark.parametrize("selector", ({"TileProcessingStrategy": "StreamK"}, {"StreamKForceDPOnly": 0}))
 @pytest.mark.parametrize("support,reason", (
     ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 1}, "requires DataParallel/StaticGrid"),
-    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}, "Unsupported PersistentLoopArgsVersion"),
+    ({"KernArgsVersion": 3, "PersistentLoopArgsVersion": 3}, "Unsupported PersistentLoopArgsVersion"),
     ({"KernArgsVersion": 4, "PersistentLoopArgsVersion": 0}, "Unsupported KernArgsVersion"),
 ))
 @pytest.mark.parametrize("boundary", ("patch", "defaults"))

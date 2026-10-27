@@ -8,9 +8,10 @@ gfx942:
 python -m rocke.examples.gfx942.tf32_numerics --backend both --shape all --output-dir results
 ```
 
-The example resolves one LLVM flavor from the installed COMGR release for both
-engines and records it in `results.json`. Override with `ROCKE_LLVM_FLAVOR` when
-needed (`llvm20` for ROCm <7.2, `llvm22` for 7.2–7.12, `llvm23` for 7.13+).
+The example resolves one LLVM flavor from the loaded COMGR compiler’s LLVM
+version for both engines and records it in `results.json`.
+`ROCKE_LLVM_FLAVOR` overrides emission, not the compiler; compilation still
+checks compiler evidence.
 The default runs both engines and both native shapes. Missing gfx942 hardware
 or the native extension is an error.
 The [spec-driven probe](../../../instances/gfx942/tf32_mma_probe.py) is also

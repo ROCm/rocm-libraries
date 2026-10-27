@@ -53,49 +53,52 @@ class TestLdsBudgetResolver(unittest.TestCase):
     def test_d256_gfx950_bf16_prefill_shrinks_to_fit(self):
         """D256 bf16 register-PV overflows at the default geometry; the resolver
         must single-buffer K so the resolved spec fits the gfx950 160 KB cap."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-            self.assertTrue(spec.use_register_pv)
-            # The cheapest lever (single-buffer K) was applied ...
-            self.assertTrue(spec.use_k_single_buffer)
-            # ... and the resolved geometry fits the arch cap.
-            self.assertLessEqual(au._lds_bytes_regpv(spec), au._lds_capacity_bytes())
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
+        self.assertTrue(spec.use_register_pv)
+        # The cheapest lever (single-buffer K) was applied ...
+        self.assertTrue(spec.use_k_single_buffer)
+        # ... and the resolved geometry fits the arch cap.
+        self.assertLessEqual(
+            au._lds_bytes_regpv(spec), au._lds_capacity_bytes("gfx950")
+        )
 
     def test_pre_resolve_geometry_actually_overflows(self):
         """Proves the resolver was necessary: the K-double-buffered geometry it
         started from does exceed the cap (so the no-op guard didn't fire)."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-            k_double = replace(spec, use_k_single_buffer=False)
-            self.assertGreater(au._lds_bytes_regpv(k_double), au._lds_capacity_bytes())
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
+        k_double = replace(spec, use_k_single_buffer=False)
+        self.assertGreater(
+            au._lds_bytes_regpv(k_double), au._lds_capacity_bytes("gfx950")
+        )
 
     def test_resolver_is_noop_when_already_fitting(self):
         """A spec that already fits is returned byte-identical (same object)."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            fitted = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-            self.assertLessEqual(au._lds_bytes_regpv(fitted), au._lds_capacity_bytes())
-            self.assertIs(au._resolve_lds_budget(fitted), fitted)
+        fitted = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
+        self.assertLessEqual(
+            au._lds_bytes_regpv(fitted), au._lds_capacity_bytes("gfx950")
+        )
+        self.assertIs(au._resolve_lds_budget(fitted, "gfx950"), fitted)
 
     def test_resolver_arch_agnostic_targets_dynamic_cap(self):
         """Arch-agnostic: the resolver targets whatever LDS cap the arch-target
         API reports -- not a hard-coded gfx950 / 163840 constant. Same D256
         K-double geometry (204800 B): with a larger reported cap it already fits
         and is returned byte-identical; with a tiny cap it engages and raises."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-            k_double = replace(spec, use_k_single_buffer=False)  # 204800 B
-            with mock.patch.object(au, "_lds_capacity_bytes", return_value=262144):
-                self.assertIs(au._resolve_lds_budget(k_double), k_double)
-            with mock.patch.object(au, "_lds_capacity_bytes", return_value=65536):
-                with self.assertRaises(RuntimeError):
-                    au._resolve_lds_budget(replace(spec, use_k_single_buffer=False))
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
+        k_double = replace(spec, use_k_single_buffer=False)  # 204800 B
+        with mock.patch.object(au, "_lds_capacity_bytes", return_value=262144):
+            self.assertIs(au._resolve_lds_budget(k_double, "gfx950"), k_double)
+        with mock.patch.object(au, "_lds_capacity_bytes", return_value=65536):
+            with self.assertRaises(RuntimeError):
+                au._resolve_lds_budget(
+                    replace(spec, use_k_single_buffer=False), "gfx950"
+                )
 
     def test_regpv_footprint_uses_shared_helper(self):
         """W: the register-PV footprint is the shared ``_tiled_2d_lds_bytes`` model
         parameterised for the register-PV layout (Q/P^T dropped) -- a single source
         of truth, so it cannot drift from the gfx942 admission gate."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
         block_m = spec.num_warps * spec.block_m_per_warp
         expected = au._tiled_2d_lds_bytes(
             tile_size=spec.tile_size,
@@ -123,8 +126,7 @@ class TestLdsBudgetResolver(unittest.TestCase):
     def test_ldsfix_levers_report_reasons(self):
         """S: the shrink levers return ``(None, reason)`` when they cannot apply,
         so the resolver surfaces *why* rather than swallowing it."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
         # single-K applies (returns a spec, no reason) ...
         cand, why = au._ldsfix_single_k(replace(spec, use_k_single_buffer=False))
         self.assertIsNotNone(cand)
@@ -141,12 +143,13 @@ class TestLdsBudgetResolver(unittest.TestCase):
     def test_infeasible_budget_raises_with_lever_diagnostics(self):
         """S: when no lever fits, the resolver raises with each attempted lever's
         result -- a diagnostic, not a cryptic downstream comgr abort."""
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-            # Force an impossibly small cap so even single-K + T=64 overflows.
-            with mock.patch.object(au, "_lds_capacity_bytes", return_value=1024):
-                with self.assertRaises(RuntimeError) as ctx:
-                    au._resolve_lds_budget(replace(spec, use_k_single_buffer=False))
+        spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
+        # Force an impossibly small cap so even single-K + T=64 overflows.
+        with mock.patch.object(au, "_lds_capacity_bytes", return_value=1024):
+            with self.assertRaises(RuntimeError) as ctx:
+                au._resolve_lds_budget(
+                    replace(spec, use_k_single_buffer=False), "gfx950"
+                )
         msg = str(ctx.exception)
         self.assertIn("single-K", msg)
         self.assertIn("T=64", msg)
@@ -166,7 +169,7 @@ class TestLdsBudgetResolver(unittest.TestCase):
 
         au._RESOLVED_ATTENTION_ARCH = "gfx942"  # restored by the autouse fixture
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill(), "gfx950")
         self.assertEqual(type(spec).__module__, "kernels.gfx950.attention_tiled_2d")
         self.assertTrue(spec.use_k_single_buffer)
 
@@ -178,24 +181,25 @@ class TestD256ProductionRouting(unittest.TestCase):
     introduces; the resolver becomes a no-op for it (register-PV disabled)."""
 
     def test_d256_gfx950_prefill_routes_to_fast_path(self):
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            problem = _d256_bf16_long_prefill()
-            # The cohort matches the fast-route predicate ...
-            self.assertTrue(au._d256_gfx950_fast(problem))
-            spec = au._tiled_spec_from_problem(problem)
-            # ... so the built spec is the 32x32 interleave fast path, not
-            # register-PV: register-PV is off and the 32x32 stack is on.
-            self.assertFalse(spec.use_register_pv)
-            self.assertTrue(spec.use_mfma_32x32)
-            self.assertTrue(spec.use_transposed_qk_32x32)
-            self.assertTrue(spec.use_softmax_mfma_interleave)
-            self.assertEqual(spec.softmax_interleave_mode, 2)
-            self.assertEqual(spec.softmax_interleave_groups, 4)
-            # The fast route single-buffers K itself, so the spec fits the cap
-            # and the resolver is a strict no-op (register-PV off -> same object).
-            self.assertTrue(spec.use_k_single_buffer)
-            self.assertIs(au._resolve_lds_budget(spec), spec)
-            self.assertLessEqual(au._lds_bytes_regpv(spec), au._lds_capacity_bytes())
+        problem = _d256_bf16_long_prefill()
+        # The cohort matches the fast-route predicate ...
+        self.assertTrue(au._d256_gfx950_fast(problem, "gfx950"))
+        spec = au._tiled_spec_from_problem(problem, "gfx950")
+        # ... so the built spec is the 32x32 interleave fast path, not
+        # register-PV: register-PV is off and the 32x32 stack is on.
+        self.assertFalse(spec.use_register_pv)
+        self.assertTrue(spec.use_mfma_32x32)
+        self.assertTrue(spec.use_transposed_qk_32x32)
+        self.assertTrue(spec.use_softmax_mfma_interleave)
+        self.assertEqual(spec.softmax_interleave_mode, 2)
+        self.assertEqual(spec.softmax_interleave_groups, 4)
+        # The fast route single-buffers K itself, so the spec fits the cap
+        # and the resolver is a strict no-op (register-PV off -> same object).
+        self.assertTrue(spec.use_k_single_buffer)
+        self.assertIs(au._resolve_lds_budget(spec, "gfx950"), spec)
+        self.assertLessEqual(
+            au._lds_bytes_regpv(spec), au._lds_capacity_bytes("gfx950")
+        )
 
 
 if __name__ == "__main__":
