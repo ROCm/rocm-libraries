@@ -63,25 +63,6 @@ static bool isWorkgroupBarrier(const StinkyInstruction& inst) {
     return true;
 }
 
-// LDS tokens describe memory dependencies, not independent hardware barriers. All-wave
-// split barriers share one arrival counter and a completion bit per wave, so a second
-// signal must not overtake the preceding wait. Preserve the workgroup-barrier subsequence
-// of the input, including unpaired halves whose partner is outside this region. Other
-// instructions may still move between a signal and its wait.
-//
-// These are correctness edges, installed before SCC and ready-queue policy constraints.
-// The base register DAG and these edges all point forward in program order, so they
-// cannot introduce a cycle; later heuristic constraints must yield to them.
-static void preserveWorkgroupBarrierOrder(DAGNodeList& dagNodes,
-                                          std::vector<std::unordered_set<unsigned>>& dagGraph) {
-    DAGNode* previous = nullptr;
-    for (DAGNode& node : dagNodes) {
-        if (!isWorkgroupBarrier(*node.inst)) continue;
-        if (previous != nullptr) addEdgeById(previous, &node, dagGraph);
-        previous = &node;
-    }
-}
-
 // SCC is spelled two ways: as a descriptor flag, and as an ordinary operand once
 // legalizeImplicitSpecialRegisters has materialized it. Ask about both, so the answer does
 // not depend on where this pass sits relative to that one.
@@ -146,6 +127,70 @@ static std::vector<HandshakeBarrier> collectHandshakeBarriers(DAGNodeList& dagNo
     }
     if (pendingSignal != nullptr) barriers.push_back({pendingSignal, pendingSignal});
     return barriers;
+}
+
+// Barrier rounds may exchange places, but may not overlap on
+// the one physical workgroup barrier. Determine a serial order from all paths
+// between distinct rounds, without contracting intervening compute instructions.
+static bool orderWorkgroupBarrierRounds(const std::vector<HandshakeBarrier>& rounds,
+                                        const std::vector<std::unordered_set<unsigned>>& graph,
+                                        std::vector<unsigned>& order,
+                                        const ReadyQueue* priority = nullptr) {
+    order.clear();
+    std::vector<std::unordered_set<unsigned>> roundGraph(rounds.size());
+    std::vector<unsigned> degree(rounds.size(), 0);
+    for (unsigned a = 0; a < rounds.size(); ++a) {
+        std::vector<char> reached(graph.size(), false);
+        std::vector<unsigned> stack{rounds[a].signal->id, rounds[a].wait->id};
+        while (!stack.empty()) {
+            unsigned node = stack.back();
+            stack.pop_back();
+            if (reached[node]) continue;
+            reached[node] = true;
+            for (unsigned successor : graph[node]) stack.push_back(successor);
+        }
+        for (unsigned b = 0; b < rounds.size(); ++b) {
+            if (a == b) continue;
+            if (reached[rounds[b].signal->id] || reached[rounds[b].wait->id]) {
+                roundGraph[a].insert(b);
+                ++degree[b];
+            }
+        }
+    }
+    auto key = [&](unsigned i) {
+        const int value = priority ? (priority->workgroupBarrierPriority(rounds[i].signal->inst) +
+                                      priority->workgroupBarrierPriority(rounds[i].wait->inst))
+                                   : 0;
+        return std::make_pair(value, i);
+    };
+    std::set<std::pair<int, unsigned>> ready;
+    for (unsigned i = 0; i < rounds.size(); ++i)
+        if (degree[i] == 0) ready.insert(key(i));
+    while (!ready.empty()) {
+        unsigned current = ready.begin()->second;
+        ready.erase(ready.begin());
+        order.push_back(current);
+        for (unsigned successor : roundGraph[current])
+            if (--degree[successor] == 0) ready.insert(key(successor));
+    }
+    return order.size() == rounds.size();
+}
+
+// A half whose partner lies outside this scheduling region cannot exchange
+// rounds across the region boundary. Complete pairs retain signal -> wait.
+static void constrainWorkgroupBarrierHalves(const std::vector<HandshakeBarrier>& rounds,
+                                            std::vector<std::unordered_set<unsigned>>& graph) {
+    for (const HandshakeBarrier& round : rounds) {
+        if (round.signal != round.wait) {
+            addEdgeById(round.signal, round.wait, graph);
+        } else if (isBarrierWait(*round.wait->inst)) {
+            for (const HandshakeBarrier& other : rounds)
+                addEdgeById(round.wait, other.signal, graph);
+        } else if (isBarrierSignal(*round.signal->inst)) {
+            for (const HandshakeBarrier& other : rounds)
+                addEdgeById(other.wait, round.signal, graph);
+        }
+    }
 }
 
 static std::vector<SccChain> collectSccChains(
@@ -363,7 +408,9 @@ static void scheduleRegionWithMovableSideEffects(
 
     if (regionSize == 0) return;
 
-    preserveWorkgroupBarrierOrder(dagNodes, dagGraph);
+    const auto workgroupRounds = collectHandshakeBarriers(dagNodes);
+    constrainWorkgroupBarrierHalves(workgroupRounds, dagGraph);
+    std::vector<unsigned> workgroupRoundOrder;
 
     // The region's estimated length in original program order (WMMA -> latencyCycles, its full
     // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
@@ -527,11 +574,23 @@ static void scheduleRegionWithMovableSideEffects(
             continue;
         }
         dagGraph[predecessorId].insert(successorId);
+        if (!orderWorkgroupBarrierRounds(workgroupRounds, dagGraph, workgroupRoundOrder)) {
+            dagGraph[predecessorId].erase(successorId);
+            PASS_DEBUG(std::cerr << "[DAG hard constraint] reject overlapping barrier rounds "
+                                 << predecessorId << " -> " << successorId << "\n");
+            continue;
+        }
         ++dagNodes[successorId].inDegree;
         mergedHardConstraintEdges.emplace(predecessorId, successorId);
         PASS_DEBUG(std::cerr << "[DAG hard constraint] add link " << predecessorId << " -> "
                              << successorId << "\n");
     }
+
+    if (!orderWorkgroupBarrierRounds(workgroupRounds, dagGraph, workgroupRoundOrder, &readyQueue))
+        STINKY_UNREACHABLE("Workgroup barrier rounds have cyclic data dependencies");
+    for (unsigned i = 1; i < workgroupRoundOrder.size(); ++i)
+        addEdgeById(workgroupRounds[workgroupRoundOrder[i - 1]].wait,
+                    workgroupRounds[workgroupRoundOrder[i]].signal, dagGraph);
 
     PASS_DEBUG(dag::dumpDAGGraph(regionDag, std::cerr, mergedHardConstraintEdges));
 

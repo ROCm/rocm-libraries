@@ -786,7 +786,7 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
 // The two LDS tokens are different banks, but both rounds use physical barrier -1.
 // Model the rotating pipeline: read the old bank, make the next bank available, then
 // release/refill the old bank. Barrier placement heuristics must never overlap rounds.
-TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundsPreserveOrderAcrossLdsTokens) {
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundsMayReorderWithoutOverlapping) {
     bb->addSuccessor(bb);
     for (int i = 0; i < 8; ++i)
         createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
@@ -799,6 +799,42 @@ TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundsPreserveOrderAcrossLdsTokens)
     auto* refill = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224,
                                            /*ldsToken=*/0);
     createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    runPassWithUnrollGemm();
+
+    std::vector<StinkyInstruction*> actual;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && isBarrier(*inst)) actual.push_back(inst);
+    }
+    const std::vector<StinkyInstruction*> swapped{releaseSignal, releaseWait, readySignal,
+                                                  readyWait};
+    // The placement model prefers releasing the old bank first. Require the
+    // whole-round exchange, so preserving source order cannot hide a regression.
+    EXPECT_EQ(actual, swapped) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, releaseWait), positionOf(*bb, refill)) << scheduleOrder(*bb);
+}
+
+TEST_F(DAGSchedulerPassTest, WorkgroupBarrierRoundCycleRejectsOtherwiseAcyclicPolicyEdges) {
+    bb->addSuccessor(bb);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/0);
+    auto [readySignal, readyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/32, /*addrReg=*/304, /*ldsToken=*/1);
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
+    auto [releaseSignal, releaseWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto* refill = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224,
+                                           /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/400, /*src0Start=*/32);
+
+    // A signal in the first round feeds the second round's wait. Reversing
+    // complete rounds is illegal, but releaseSignal -> readySignal alone
+    // would leave the instruction DAG acyclic. Reject the round-level cycle
+    // before optional placement constraints force overlapping rounds.
+    readySignal->addDestReg(StinkyRegister("s", 310, 1));
+    releaseWait->addSrcReg(StinkyRegister("s", 310, 1));
 
     runPassWithUnrollGemm();
 

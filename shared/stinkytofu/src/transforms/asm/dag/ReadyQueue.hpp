@@ -182,6 +182,10 @@ class ReadyQueue {
     }
 
     virtual ~ReadyQueue() = default;
+    // Preferred placement of a workgroup barrier; lower values are scheduled first.
+    virtual int workgroupBarrierPriority(const StinkyInstruction* inst) const {
+        return 0;
+    }
 
     // Pick one node from the ready queue based on some strategy.
     virtual DAGNode* pickOne() = 0;

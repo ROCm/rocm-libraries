@@ -981,6 +981,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
           pipeOpCount_(hw_.hazards.numRules, 0),
           pipeOpDistance_(hw_.hazards.numRules, 0) {}
 
+    int workgroupBarrierPriority(const StinkyInstruction* inst) const override {
+        auto it = barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(inst));
+        return it == barrierWmmaThresholds_.end() ? 0 : it->second;
+    }
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
     std::vector<Layer2BarrierOverlapCandidate> takeLayer2BarrierOverlapCandidates() override {
